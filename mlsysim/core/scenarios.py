@@ -34,13 +34,13 @@ class Scenario(BaseModel):
         Runs a full multi-level evaluation of the scenario.
         """
         from .engine import Engine
-        from .solver import DistributedSolver, EconomicsSolver
+        from .solver import DistributedModel, EconomicsModel
         
         # 1. Resolve Hardware
         hardware = self.system.node.accelerator if self.is_distributed else self.system
         
         # --- LEVEL 1: FEASIBILITY ---
-        from .solver import DataSolver
+        from .solver import DataModel
         weights = self.workload.size_in_bytes()
         mem_feasible = weights <= hardware.memory.capacity
         
@@ -48,7 +48,7 @@ class Scenario(BaseModel):
         data_status = "PASS"
         data_summary = ""
         if self.workload.data_rate:
-            ds = DataSolver().solve(self.workload.data_rate, hardware)
+            ds = DataModel().solve(self.workload.data_rate, hardware)
             if ds.is_stalled:
                 data_status = "FAIL"
                 data_summary = f" | Data Wall: Pipeline Stalled ({ds.utilization:.1f}x capacity)"
@@ -71,7 +71,7 @@ class Scenario(BaseModel):
 
         # --- LEVEL 2: PERFORMANCE ---
         if self.is_distributed:
-            solver = DistributedSolver()
+            solver = DistributedModel()
             perf = solver.solve(self.workload, self.system, batch_size=batch_size, precision=precision)
             actual_latency = perf.step_latency_total
             throughput = perf.effective_throughput
@@ -82,8 +82,8 @@ class Scenario(BaseModel):
                 "sla_latency": self.sla_latency
             }
         else:
-            from .solver import SingleNodeSolver
-            perf = SingleNodeSolver().solve(self.workload, self.system, batch_size=batch_size, precision=precision)
+            from .solver import SingleNodeModel
+            perf = SingleNodeModel().solve(self.workload, self.system, batch_size=batch_size, precision=precision)
             actual_latency = perf.latency
             throughput = perf.throughput
             perf_metrics = {
@@ -110,9 +110,9 @@ class Scenario(BaseModel):
              dummy_node = Node(name="Standard", accelerator=hardware, accelerators_per_node=1, intra_node_bw="50 GB/s")
              sim_fleet = Fleet(name="SimFleet", node=dummy_node, count=1, fabric=Fabrics.Ethernet_10G)
 
-        # EconomicsSolver internally delegates to SustainabilitySolver and merges
+        # EconomicsModel internally delegates to SustainabilityModel and merges
         # its results, so we only need one call (avoids computing energy twice).
-        econ = EconomicsSolver().solve(sim_fleet, duration_days=365)
+        econ = EconomicsModel().solve(sim_fleet, duration_days=365)
 
         m_summary = f"Annual Carbon: {econ.carbon_footprint_kg:.1f} kg | TCO: ${econ.tco_usd:,.0f}"
         l3 = EvaluationLevel(
@@ -133,7 +133,7 @@ class Scenario(BaseModel):
         """
         Comprehensive validation of the scenario's physical and performance feasibility.
         """
-        from .solver import ServingSolver, DistributedSolver, SingleNodeSolver
+        from .solver import ServingModel, DistributedModel, SingleNodeModel
         
         # 1. Resolve Hardware for memory check
         hardware = self.system.node.accelerator if self.is_distributed else self.system
@@ -156,11 +156,11 @@ class Scenario(BaseModel):
 
         # 3. Performance / SLA Check
         if self.is_distributed:
-            solver = DistributedSolver()
+            solver = DistributedModel()
             perf = solver.solve(self.workload, self.system, batch_size=batch_size, precision=precision)
             actual_latency = perf.step_latency_total
         else:
-            perf = SingleNodeSolver().solve(self.workload, self.system, batch_size=batch_size, precision=precision)
+            perf = SingleNodeModel().solve(self.workload, self.system, batch_size=batch_size, precision=precision)
             actual_latency = perf.latency
 
         if self.sla_latency and actual_latency > self.sla_latency:

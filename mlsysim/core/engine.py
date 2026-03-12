@@ -25,6 +25,9 @@ class PerformanceProfile(BaseModel):
     mfu: float # Model FLOPs Utilization
     hfu: float # Hardware FLOPs Utilization
     feasible: bool
+    # Offload fields — populated when model spills beyond HBM to host memory
+    offload_spill_bytes: Optional[Quantity] = None
+    offload_effective_bw: Optional[Quantity] = None
 
     def summary(self) -> str:
         """Returns a human-readable summary of the performance profile."""
@@ -64,7 +67,7 @@ class Engine:
     Maps a (Workload, HardwareNode) pair to a PerformanceProfile by applying
     the Roofline model: the workload is "lowered" into a hardware-agnostic
     ComputationGraph, then bounded by the hardware's compute ceiling and
-    memory bandwidth ceiling.
+    memory bandwidth ceiling via the SingleNodeModel.
 
     Source: Williams et al. (2009), "Roofline: An Insightful Visual
     Performance Model for Floating-Point Programs and Multicore Architectures."
@@ -145,6 +148,9 @@ class Engine:
 
         # 5. Feasibility check — does the model fit in memory?
         feasible = memory_footprint <= hardware.memory.capacity
+        offload_spill = None
+        offload_bw = None
+
         if not feasible and raise_errors:
             raise OOMError(
                 f"Model '{model.name}' requires {memory_footprint.to('GB'):~P} "
@@ -158,7 +164,19 @@ class Engine:
         # Scale compute by batch_size: processing B samples requires B × ops_per_sample.
         # Note: if is_training, base_ops already represents the full training step cost per sample.
         effective_flops = peak_flops * efficiency
-        effective_bw = hardware.memory.bandwidth
+
+        if not feasible:
+            # Offload path: model spills beyond HBM → bandwidth degrades to PCIe
+            # This is Wall 2 (Memory) in its capacity-exceeded regime.
+            offload_spill = memory_footprint - hardware.memory.capacity
+            pcie_bw = (
+                getattr(hardware.interconnect, 'bandwidth', Q_("64 GB/s"))
+                if hardware.interconnect else Q_("64 GB/s")
+            )
+            effective_bw = min(hardware.memory.bandwidth, pcie_bw)
+            offload_bw = effective_bw
+        else:
+            effective_bw = hardware.memory.bandwidth
         batch_ops = base_ops * batch_size
 
         # Guard against zero ops or zero bandwidth
@@ -217,6 +235,8 @@ class Engine:
             mfu=mfu,
             hfu=hfu,
             feasible=feasible,
+            offload_spill_bytes=offload_spill,
+            offload_effective_bw=offload_bw,
         )
 
     @staticmethod

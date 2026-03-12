@@ -404,18 +404,19 @@ def calc_pipeline_bubble(n_stages, n_microbatches, v_stages=1):
     return (n_stages - 1) / (v_stages * n_microbatches + n_stages - 1)
 
 
-def calc_checkpoint_size(n_params, bytes_per_param=16):
+def calc_checkpoint_size(n_params, bytes_per_param=14):
     """
     Checkpoint size for mixed-precision Adam training.
 
     Size = N × bytes_per_param
 
-    Default 16 bytes/param: 2 (BF16 weights) + 2 (gradients) +
-    12 (FP32 master weights + momentum + variance).
+    Default 14 bytes/param: 2 (FP16 weights) + 4 (FP32 master weights) +
+    4 (FP32 momentum) + 4 (FP32 variance). Gradients are ephemeral
+    and not checkpointed.
 
     Args:
         n_params: Number of model parameters
-        bytes_per_param: Bytes per parameter (default 16 for mixed-precision Adam)
+        bytes_per_param: Bytes per parameter (default 14 for mixed-precision Adam)
 
     Returns:
         Quantity[byte]: Checkpoint size

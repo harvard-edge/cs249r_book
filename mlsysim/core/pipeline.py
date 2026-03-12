@@ -1,18 +1,18 @@
-"""Pipeline composer for chaining mlsysim solvers.
+"""Pipeline composer for chaining mlsysim analytical models and solvers.
 
 Layer C of the composition architecture: a transparent Pipeline that
-chains solvers, validates compatibility, and shows students the full
-Demand → Supply → Consequence data flow.
+chains resolvers (models and solvers), validates compatibility, and 
+shows students the full Demand → Supply → Consequence data flow.
 
 The Pipeline is NOT a black box — it is a pedagogical tool that makes
-the solver DAG visible. Students use `explain()` to see what flows
+the resolver DAG visible. Students use `explain()` to see what flows
 between each stage and `run()` to execute the chain.
 
 Example
 -------
 >>> from mlsysim.core.pipeline import Pipeline
->>> from mlsysim.core.solver import ScalingSolver, DistributedSolver, EconomicsSolver
->>> pipe = Pipeline([ScalingSolver(), DistributedSolver(), EconomicsSolver()])
+>>> from mlsysim.core.solver import ScalingModel, DistributedModel, EconomicsModel
+>>> pipe = Pipeline([ScalingModel(), DistributedModel(), EconomicsModel()])
 >>> pipe.explain()  # Shows the DAG and identifies gaps
 >>> result = pipe.run(compute_budget=Q_("1e21 FLOP"), fleet=cluster)
 """
@@ -20,50 +20,50 @@ Example
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-from .solver import BaseSolver
+from .solver import BaseResolver
 
 
 class CompositionError(Exception):
-    """Raised when two solvers cannot be connected."""
+    """Raised when two resolvers cannot be connected."""
     pass
 
 
 class Pipeline:
-    """A transparent chain of solvers for macro-level analysis.
+    """A transparent chain of models and solvers for macro-level analysis.
 
     Parameters
     ----------
-    solvers : list[BaseSolver]
-        Ordered list of solvers to execute.
+    resolvers : list[BaseResolver]
+        Ordered list of models and solvers to execute.
     name : str, optional
         Human-readable pipeline name.
     """
 
-    def __init__(self, solvers: List[BaseSolver], name: str = "Pipeline"):
-        if not solvers:
-            raise ValueError("Pipeline requires at least one solver.")
-        self.solvers = solvers
+    def __init__(self, resolvers: List[BaseResolver], name: str = "Pipeline"):
+        if not resolvers:
+            raise ValueError("Pipeline requires at least one resolver.")
+        self.resolvers = resolvers
         self.name = name
 
     def explain(self) -> str:
-        """Show the solver DAG: what each stage requires, produces, and where gaps exist.
+        """Show the resolver DAG: what each stage requires, produces, and where gaps exist.
 
         Returns a human-readable string describing the pipeline flow.
         This is the pedagogical entry point — students call this to
-        understand how solvers compose.
+        understand how models and solvers compose.
         """
         lines = [f"═══ {self.name} ═══", ""]
 
-        from .walls import walls_for_solver, Domain
+        from .walls import walls_for_resolver, Domain
 
         # Collect what has been produced so far
         produced_concepts = set()
 
-        for i, solver in enumerate(self.solvers):
-            cls = solver.__class__
+        for i, resolver in enumerate(self.resolvers):
+            cls = resolver.__class__
             # Look up walls from the taxonomy (single source of truth)
-            solver_walls = walls_for_solver(cls.__name__)
-            tag = ", ".join(f"Wall {w.number}: {w.name}" for w in solver_walls) or "?"
+            resolver_walls = walls_for_resolver(cls.__name__)
+            tag = ", ".join(f"Wall {w.number}: {w.name}" for w in resolver_walls) or "?"
             produces_name = cls.produces.__name__ if cls.produces else "Any"
 
             lines.append(f"  Stage {i+1}: {cls.__name__}")
@@ -81,17 +81,17 @@ class Pipeline:
             if cls.produces:
                 produced_concepts.add(produces_name)
 
-            if i < len(self.solvers) - 1:
+            if i < len(self.resolvers) - 1:
                 lines.append(f"    {'│':>4}")
 
         lines.append("")
-        lines.append(f"  Flow: {' → '.join(s.__class__.__name__ for s in self.solvers)}")
+        lines.append(f"  Flow: {' → '.join(s.__class__.__name__ for s in self.resolvers)}")
 
         # Domain coverage summary
         domain_order = list(Domain)
         covered = set()
-        for solver in self.solvers:
-            for w in walls_for_solver(solver.__class__.__name__):
+        for resolver in self.resolvers:
+            for w in walls_for_resolver(resolver.__class__.__name__):
                 covered.add(w.domain)
         covered_names = [d.value for d in domain_order if d in covered]
         lines.append(f"  Domains covered: {', '.join(covered_names)}")
@@ -105,23 +105,23 @@ class Pipeline:
         Parameters
         ----------
         **kwargs
-            All inputs needed by the pipeline. Each solver's `solve()` is
+            All inputs needed by the pipeline. Each resolver's `solve()` is
             called with whatever kwargs match its signature. Results from
             earlier stages are accumulated and available to later stages.
 
         Returns
         -------
         dict
-            Merged results from all stages, keyed by solver name.
+            Merged results from all stages, keyed by resolver name.
         """
         accumulated = dict(kwargs)
         stage_results = {}
 
-        for solver in self.solvers:
-            cls = solver.__class__
+        for resolver in self.resolvers:
+            cls = resolver.__class__
             # Call solve with whatever kwargs match the signature
             import inspect
-            sig = inspect.signature(solver.solve)
+            sig = inspect.signature(resolver.solve)
             valid_kwargs = {}
             for param_name, param in sig.parameters.items():
                 if param_name == "self":
@@ -132,9 +132,9 @@ class Pipeline:
                     # Required parameter not provided — let it fail naturally
                     pass
 
-            result = solver.solve(**valid_kwargs)
+            result = resolver.solve(**valid_kwargs)
 
-            # Store result under solver name
+            # Store result under class name
             stage_results[cls.__name__] = result
 
             # Make result fields available to subsequent stages
@@ -145,8 +145,8 @@ class Pipeline:
         return stage_results
 
     def __repr__(self) -> str:
-        solvers_str = " → ".join(s.__class__.__name__ for s in self.solvers)
-        return f"Pipeline({solvers_str})"
+        resolvers_str = " → ".join(s.__class__.__name__ for s in self.resolvers)
+        return f"Pipeline({resolvers_str})"
 
     def __len__(self) -> int:
-        return len(self.solvers)
+        return len(self.resolvers)

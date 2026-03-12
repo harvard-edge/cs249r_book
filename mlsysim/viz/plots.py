@@ -196,7 +196,7 @@ def plot_roofline(hardware_node, workloads=None):
 
     # Plot workloads
     if workloads:
-        from ..core.solver import SingleNodeSolver
+        from ..core.solver import SingleNodeModel
 
         workload_colors = [
             colors["crimson"],
@@ -205,7 +205,7 @@ def plot_roofline(hardware_node, workloads=None):
             colors["BrownLine"],
         ]
         for i, model in enumerate(workloads):
-            profile = SingleNodeSolver().solve(model, hardware_node, efficiency=1.0)
+            profile = SingleNodeModel().solve(model, hardware_node, efficiency=1.0)
             ai = profile.arithmetic_intensity.magnitude
             perf = min(peak_bw * ai / 1000, peak_flops)
             c = workload_colors[i % len(workload_colors)]

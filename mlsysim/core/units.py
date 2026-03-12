@@ -25,7 +25,7 @@ __all__ = [
     # Data size scalars
     "BITS_PER_BYTE", "KIB_TO_BYTES", "MIB_TO_BYTES", "GIB_TO_BYTES",
     # FLOPs units
-    "flop", "KFLOPs", "MFLOPs", "GFLOP", "GFLOPs", "TFLOP", "TFLOPs", "PFLOPs", "ZFLOPs",
+    "flop", "KFLOPs", "MFLOPs", "GFLOP", "GFLOPs", "TFLOP", "TFLOPs", "PFLOPs", "EFLOP", "EFLOPs", "ZFLOPs",
     # Network
     "Gbps",
     # Currency
@@ -134,6 +134,8 @@ ureg.define('GFLOPs = 1e9 * flop')
 ureg.define('TFLOP = 1e12 * flop')
 ureg.define('TFLOPs = 1e12 * flop')
 ureg.define('PFLOPs = 1e15 * flop')
+ureg.define('EFLOP = 1e18 * flop')
+ureg.define('EFLOPs = 1e18 * flop')
 ureg.define('ZFLOPs = 1e21 * flop')
 
 flop = ureg.flop
@@ -144,6 +146,8 @@ GFLOPs = ureg.GFLOPs
 TFLOP = ureg.TFLOP
 TFLOPs = ureg.TFLOPs
 PFLOPs = ureg.PFLOPs
+EFLOP = ureg.EFLOP
+EFLOPs = ureg.EFLOPs
 ZFLOPs = ureg.ZFLOPs
 
 # --- Network bandwidth unit ---

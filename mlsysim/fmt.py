@@ -14,8 +14,13 @@ def _get_markdown():
     """Lazily import IPython.display.Markdown when first needed."""
     global _Markdown
     if _Markdown is None:
-        from IPython.display import Markdown
-        _Markdown = Markdown
+        from IPython.display import Markdown as IPythonMarkdown
+        
+        class MarkdownStr(IPythonMarkdown):
+            def __str__(self):
+                return str(self.data)
+                
+        _Markdown = MarkdownStr
     return _Markdown
 
 

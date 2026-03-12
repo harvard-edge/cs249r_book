@@ -41,7 +41,7 @@ class Domain(Enum):
     ALGORITHM  = "algorithm"   # Domain 3: Algorithmic and scaling laws
     FLEET      = "fleet"       # Domain 4: Multi-node coordination
     OPERATIONS = "operations"  # Domain 5: Economics, sustainability, and safety
-    ANALYSIS   = "analysis"    # Domain 6: Cross-cutting diagnostic tools
+    ANALYSIS   = "analysis"    # Domain 6: Cross-cutting analysis and synthesis solvers
 
 
 # ── Wall Dataclass ────────────────────────────────────────────────
@@ -58,8 +58,8 @@ class Wall:
         Short human-readable name (e.g., "Compute", "Memory").
     domain : Domain
         Which domain this wall belongs to.
-    solver_name : str
-        The solver class that resolves this wall.
+    resolver_name : str
+        The model or solver class that resolves this wall.
     constraint : str
         One-line description of the physical/logical constraint.
     equation : str
@@ -70,7 +70,7 @@ class Wall:
     number: int
     name: str
     domain: Domain
-    solver_name: str
+    resolver_name: str
     constraint: str
     equation: str
     sources: List[str] = field(default_factory=list)
@@ -84,7 +84,7 @@ COMPUTE = Wall(
     number=1,
     name="Compute",
     domain=Domain.NODE,
-    solver_name="SingleNodeSolver",
+    resolver_name="SingleNodeModel",
     constraint="Peak FLOPS ceiling of a single accelerator.",
     equation="T = OPs / (Peak × η)",
     sources=["Williams et al. (2009), Roofline"],
@@ -94,7 +94,7 @@ MEMORY = Wall(
     number=2,
     name="Memory",
     domain=Domain.NODE,
-    solver_name="SingleNodeSolver",
+    resolver_name="SingleNodeModel",
     constraint="HBM capacity and bandwidth ceilings.",
     equation="T = |W| / BW_HBM",
     sources=["Williams et al. (2009), Roofline"],
@@ -104,7 +104,7 @@ SOFTWARE = Wall(
     number=3,
     name="Software",
     domain=Domain.NODE,
-    solver_name="EfficiencySolver",
+    resolver_name="EfficiencyModel",
     constraint="Gap between peak and achieved FLOPS (kernel fusion, occupancy).",
     equation="η (MFU adjustment factor)",
     sources=[
@@ -117,7 +117,7 @@ SERVING = Wall(
     number=4,
     name="Serving",
     domain=Domain.NODE,
-    solver_name="ServingSolver",
+    resolver_name="ServingModel",
     constraint="LLM inference has two distinct regimes: compute-bound prefill and memory-bound decode.",
     equation="TTFT = OPs_prefill / Peak; ITL = |W| / BW_HBM",
     sources=[
@@ -130,7 +130,7 @@ BATCHING = Wall(
     number=5,
     name="Batching",
     domain=Domain.NODE,
-    solver_name="ContinuousBatchingSolver",
+    resolver_name="ContinuousBatchingModel",
     constraint="Static batching wastes memory through KV-cache fragmentation.",
     equation="KV_paged = 2 × L × H × D × ⌈S/p⌉ × p × B × b",
     sources=["Kwon et al. (2023), vLLM / PagedAttention"],
@@ -140,7 +140,7 @@ STREAMING = Wall(
     number=6,
     name="Streaming",
     domain=Domain.NODE,
-    solver_name="WeightStreamingSolver",
+    resolver_name="WeightStreamingModel",
     constraint="Wafer-scale architectures shift bottleneck from HBM to injection interconnect.",
     equation="T_layer = max(|W|/BW_inject, 2|W|B / (Peak × η))",
     sources=["Cerebras Systems (2024), Weight Streaming"],
@@ -150,7 +150,7 @@ TAIL_LATENCY = Wall(
     number=7,
     name="Tail Latency",
     domain=Domain.NODE,
-    solver_name="TailLatencySolver",
+    resolver_name="TailLatencyModel",
     constraint="P99 tail latency grows non-linearly as utilization approaches 1.",
     equation="Erlang-C M/M/c queueing model",
     sources=["Dean & Barroso (2013), The Tail at Scale"],
@@ -161,7 +161,7 @@ INGESTION = Wall(
     number=8,
     name="Ingestion",
     domain=Domain.DATA,
-    solver_name="DataSolver",
+    resolver_name="DataModel",
     constraint="Storage I/O must supply data at the rate the accelerator consumes it.",
     equation="ρ = BW_demand / BW_supply",
     sources=["Mohan et al. (2022), Data Bottlenecks"],
@@ -171,7 +171,7 @@ TRANSFORMATION = Wall(
     number=9,
     name="Transformation",
     domain=Domain.DATA,
-    solver_name="TransformationSolver",
+    resolver_name="TransformationModel",
     constraint="CPU preprocessing (decode, tokenize, augment) cannot keep pace.",
     equation="T = B · S / C_throughput",
     sources=["Murray et al. (2021), tf.data"],
@@ -181,7 +181,7 @@ LOCALITY = Wall(
     number=10,
     name="Locality",
     domain=Domain.DATA,
-    solver_name="TopologySolver",
+    resolver_name="TopologyModel",
     constraint="Network topology limits bisection bandwidth between nodes.",
     equation="BW_eff = BW_link · β / oversubscription",
     sources=[
@@ -195,7 +195,7 @@ COMPLEXITY = Wall(
     number=11,
     name="Complexity",
     domain=Domain.ALGORITHM,
-    solver_name="ScalingSolver",
+    resolver_name="ScalingModel",
     constraint="Chinchilla scaling laws govern compute-optimal training.",
     equation="C = 6PD; P* = √(C/120)",
     sources=["Hoffmann et al. (2022), Chinchilla"],
@@ -205,7 +205,7 @@ REASONING = Wall(
     number=12,
     name="Reasoning",
     domain=Domain.ALGORITHM,
-    solver_name="InferenceScalingSolver",
+    resolver_name="InferenceScalingModel",
     constraint="Inference-time compute scales with reasoning steps K.",
     equation="T = K × T_step",
     sources=[
@@ -218,7 +218,7 @@ FIDELITY = Wall(
     number=13,
     name="Fidelity",
     domain=Domain.ALGORITHM,
-    solver_name="CompressionSolver",
+    resolver_name="CompressionModel",
     constraint="Compression trades model fidelity for efficiency.",
     equation="r = 32/b (quantization); r = 1/(1-s) (pruning)",
     sources=[
@@ -232,7 +232,7 @@ COMMUNICATION = Wall(
     number=14,
     name="Communication",
     domain=Domain.FLEET,
-    solver_name="DistributedSolver",
+    resolver_name="DistributedModel",
     constraint="Distributed training requires synchronization across N nodes.",
     equation="T = 2(N-1)/N · M/β + 2(N-1)α",
     sources=[
@@ -245,7 +245,7 @@ FRAGILITY = Wall(
     number=15,
     name="Fragility",
     domain=Domain.FLEET,
-    solver_name="ReliabilitySolver",
+    resolver_name="ReliabilityModel",
     constraint="Component failures are inevitable at scale.",
     equation="MTBF_cluster = MTBF_node / N",
     sources=[
@@ -258,7 +258,7 @@ MULTI_TENANT = Wall(
     number=16,
     name="Multi-tenant",
     domain=Domain.FLEET,
-    solver_name="OrchestrationSolver",
+    resolver_name="OrchestrationModel",
     constraint="Shared clusters introduce queueing delays.",
     equation="T_wait = ρ / [2μ(1-ρ)]",
     sources=["Little (1961), L = λW"],
@@ -269,7 +269,7 @@ CAPITAL = Wall(
     number=17,
     name="Capital",
     domain=Domain.OPERATIONS,
-    solver_name="EconomicsSolver",
+    resolver_name="EconomicsModel",
     constraint="Total cost of ownership bounds what is economically feasible.",
     equation="TCO = CapEx + OpEx",
     sources=["Barroso et al. (2018), Datacenter as a Computer"],
@@ -279,7 +279,7 @@ SUSTAINABILITY = Wall(
     number=18,
     name="Sustainability",
     domain=Domain.OPERATIONS,
-    solver_name="SustainabilitySolver",
+    resolver_name="SustainabilityModel",
     constraint="Energy consumption converts to carbon and water footprint.",
     equation="CO₂ = E × PUE × CI",
     sources=["Patterson et al. (2022), Carbon Emissions"],
@@ -289,7 +289,7 @@ CHECKPOINT = Wall(
     number=19,
     name="Checkpoint",
     domain=Domain.OPERATIONS,
-    solver_name="CheckpointSolver",
+    resolver_name="CheckpointModel",
     constraint="Periodic state saves impose I/O burst penalties on training MFU.",
     equation="MFU_penalty = T_write / T_interval",
     sources=["Eisenman et al. (2022), Check-N-Run"],
@@ -299,18 +299,18 @@ SAFETY = Wall(
     number=20,
     name="Safety",
     domain=Domain.OPERATIONS,
-    solver_name="ResponsibleEngineeringSolver",
+    resolver_name="ResponsibleEngineeringModel",
     constraint="Privacy and fairness guarantees impose computational overhead.",
     equation="σ ∝ 1/ε (DP-SGD slowdown)",
     sources=["Abadi et al. (2016), DP-SGD"],
 )
 
-# Domain 6: Analysis — cross-cutting diagnostics
+# Domain 6: Analysis — cross-cutting solvers
 SENSITIVITY = Wall(
     number=21,
     name="Sensitivity",
     domain=Domain.ANALYSIS,
-    solver_name="SensitivitySolver",
+    resolver_name="SensitivitySolver",
     constraint="Identifies the binding constraint via numerical partial derivatives.",
     equation="∂T/∂xᵢ (binding constraint)",
     sources=["Williams et al. (2009), Roofline"],
@@ -320,7 +320,7 @@ SYNTHESIS = Wall(
     number=22,
     name="Synthesis",
     domain=Domain.ANALYSIS,
-    solver_name="SynthesisSolver",
+    resolver_name="SynthesisSolver",
     constraint="Inverse Roofline: derive hardware specs from an SLA target.",
     equation="BW_req = |W| / T_target",
     sources=["Williams et al. (2009), Roofline"],
@@ -344,9 +344,9 @@ ALL_WALLS = [
 # Lookup helpers
 _BY_NUMBER = {w.number: w for w in ALL_WALLS}
 _BY_NAME = {w.name.lower(): w for w in ALL_WALLS}
-_BY_SOLVER = {}
+_BY_RESOLVER = {}
 for w in ALL_WALLS:
-    _BY_SOLVER.setdefault(w.solver_name, []).append(w)
+    _BY_RESOLVER.setdefault(w.resolver_name, []).append(w)
 
 
 def wall(number: int) -> Wall:
@@ -356,9 +356,9 @@ def wall(number: int) -> Wall:
     return _BY_NUMBER[number]
 
 
-def walls_for_solver(solver_name: str) -> List[Wall]:
-    """Return all walls resolved by a given solver class."""
-    return _BY_SOLVER.get(solver_name, [])
+def walls_for_resolver(resolver_name: str) -> List[Wall]:
+    """Return all walls resolved by a given model or solver class."""
+    return _BY_RESOLVER.get(resolver_name, [])
 
 
 def walls_in_domain(domain: Domain) -> List[Wall]:
@@ -382,11 +382,12 @@ def taxonomy() -> str:
             Domain.ALGORITHM:  "Domain 3 — Algorithm (Scaling & Compression)",
             Domain.FLEET:      "Domain 4 — Fleet (Multi-Node Coordination)",
             Domain.OPERATIONS: "Domain 5 — Operations (Economics, Sustainability & Safety)",
-            Domain.ANALYSIS:   "Domain 6 — Analysis (Cross-Cutting Diagnostics)",
+            Domain.ANALYSIS:   "Domain 6 — Analysis (Cross-Cutting Solvers)",
         }[domain]
         lines.append(f"  {label}")
         for w in domain_walls:
-            lines.append(f"    Wall {w.number:2d}: {w.name:<16s} → {w.solver_name}")
+            lines.append(f"    Wall {w.number:2d}: {w.name:<16s} → {w.resolver_name}")
             lines.append(f"             {w.constraint}")
         lines.append("")
     return "\n".join(lines)
+

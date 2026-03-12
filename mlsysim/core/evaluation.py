@@ -13,7 +13,8 @@ class EvaluationLevel(BaseModel):
 class SystemEvaluation(BaseModel):
     """
     The multi-level 'Scorecard' for a System Simulation.
-    Organizes results into the three pedagogical lenses.
+    Organizes results into the three pedagogical lenses by composing 
+    analytical models and analysis solvers.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

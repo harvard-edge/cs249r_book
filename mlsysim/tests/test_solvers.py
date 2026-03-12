@@ -1,11 +1,11 @@
 import pytest
-from mlsysim.core.solver import DistributedSolver, ReliabilitySolver, EconomicsSolver
+from mlsysim.core.solver import DistributedModel, ReliabilityModel, EconomicsModel
 from mlsysim.models import Models
 from mlsysim.systems import Systems
 from mlsysim.infra import Infra
 
 def test_distributed_solver():
-    solver = DistributedSolver()
+    solver = DistributedModel()
     gpt3 = Models.GPT3
     cluster = Systems.Clusters.Research_256
 
@@ -18,7 +18,7 @@ def test_distributed_solver():
     assert result.scaling_efficiency <= 1.0
 
 def test_reliability_solver():
-    solver = ReliabilitySolver()
+    solver = ReliabilityModel()
     cluster = Systems.Clusters.Frontier_8K
 
     result = solver.solve(cluster, job_duration_hours=100.0)
@@ -29,7 +29,7 @@ def test_reliability_solver():
     assert result.failure_probability > 0.0
 
 def test_economics_solver():
-    solver = EconomicsSolver()
+    solver = EconomicsModel()
     cluster = Systems.Clusters.Research_256
     grid = Infra.Quebec
 

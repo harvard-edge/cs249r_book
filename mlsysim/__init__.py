@@ -10,6 +10,7 @@ from . import infra
 from . import systems
 from . import sim
 from . import fmt
+from . import show
 from . import viz
 
 # Explicitly export submodules for documentation and execution
@@ -26,27 +27,30 @@ from .core.scenarios import Scenario, Scenarios, Applications
 from .core.config import SimulationConfig, load_config
 from .core.engine import PerformanceProfile, Engine
 from .core.solver import (
-    SingleNodeSolver,
-    DistributedSolver,
-    ReliabilitySolver,
-    SustainabilitySolver,
-    EconomicsSolver,
-    ServingSolver,
-    ContinuousBatchingSolver,
-    WeightStreamingSolver,
-    TailLatencySolver,
-    CheckpointSolver,
-    DataSolver,
-    ScalingSolver,
-    OrchestrationSolver,
-    CompressionSolver,
-    EfficiencySolver,
-    TransformationSolver,
-    TopologySolver,
-    InferenceScalingSolver,
+    SingleNodeModel,
+    DistributedModel,
+    ReliabilityModel,
+    SustainabilityModel,
+    EconomicsModel,
+    ServingModel,
+    ContinuousBatchingModel,
+    WeightStreamingModel,
+    TailLatencyModel,
+    CheckpointModel,
+    DataModel,
+    ScalingModel,
+    OrchestrationModel,
+    CompressionModel,
+    EfficiencyModel,
+    TransformationModel,
+    TopologyModel,
+    InferenceScalingModel,
     SensitivitySolver,
     SynthesisSolver,
-    ResponsibleEngineeringSolver,
+    ResponsibleEngineeringModel,
+    ParallelismOptimizer,
+    BatchingOptimizer,
+    PlacementOptimizer,
 )
 
 # Export Registries
@@ -63,7 +67,7 @@ from .viz.plots import plot_evaluation_scorecard, plot_roofline
 
 __all__ = [
     # Submodules
-    "core", "hardware", "models", "infra", "systems", "sim", "fmt", "viz",
+    "core", "hardware", "models", "infra", "systems", "sim", "fmt", "show", "viz",
     # Types
     "HardwareNode", "Workload", "TransformerWorkload", "CNNWorkload",
     "Fleet", "Node", "NetworkFabric", "DeploymentTier",
@@ -73,12 +77,14 @@ __all__ = [
     # Engine
     "PerformanceProfile", "Engine",
     # Solvers
-    "SingleNodeSolver", "DistributedSolver", "ReliabilitySolver",
-    "SustainabilitySolver", "EconomicsSolver", "ServingSolver",
-    "DataSolver", "ScalingSolver", "OrchestrationSolver", "CompressionSolver",
-    "EfficiencySolver", "TransformationSolver", "TopologySolver",
-    "InferenceScalingSolver", "SensitivitySolver", "SynthesisSolver",
-    "ResponsibleEngineeringSolver",
+    "SingleNodeModel", "DistributedModel", "ReliabilityModel",
+    "SustainabilityModel", "EconomicsModel", "ServingModel",
+    "ContinuousBatchingModel", "WeightStreamingModel", "TailLatencyModel",
+    "CheckpointModel", "DataModel", "ScalingModel", "OrchestrationModel", 
+    "CompressionModel", "EfficiencyModel", "TransformationModel", "TopologyModel",
+    "InferenceScalingModel", "SensitivitySolver", "SynthesisSolver",
+    "ResponsibleEngineeringModel", "ParallelismOptimizer",
+    "BatchingOptimizer", "PlacementOptimizer",
     # Registries
     "Hardware", "Models", "Infra", "Systems",
     # Units

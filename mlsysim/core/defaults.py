@@ -134,7 +134,7 @@ PRUNING_MILD_DELTA = -0.001          # Accuracy delta below threshold
 PRUNING_STEEP_COEFFICIENT = 0.01     # Coefficient for exponential degradation above threshold
 PRUNING_STEEP_EXPONENT = 2.0         # Exponent for degradation curve
 
-# --- EfficiencySolver MFU adjustment (heuristic calibrations) ---
+# --- EfficiencyModel MFU adjustment (heuristic calibrations) ---
 # These are empirically calibrated caps, NOT derived from first principles.
 # Source: Dao et al. (2022) reports ~2-4x speedup for FlashAttention.
 # Source: Chowdhery et al. (2022) PaLM reports MFU 0.46-0.57 for large Transformers.
@@ -144,16 +144,16 @@ MFU_FFN_CAP = 0.60                   # Practical maximum for FFN (GEMM-dominated
 MFU_CONV_CAP = 0.55                  # Practical maximum for convolution (im2col+GEMM)
 HFU_MFU_RATIO = 1.1                  # HFU ≈ 1.1 × MFU (Chowdhery et al. 2022, PaLM)
 
-# --- InferenceScalingSolver ---
+# --- InferenceScalingModel ---
 # Heuristic: average tokens per CoT reasoning step.
 # Varies widely (10-1000+); 50 is a moderate default.
 TOKENS_PER_REASONING_STEP = 50
 
-# --- ScalingSolver ---
+# --- ScalingModel ---
 # Conservative sustained MFU for GPU-day-to-FLOP conversion.
 REFERENCE_MFU_SUSTAINED = 0.40
 
-# --- ResponsibleEngineeringSolver (heuristic calibration) ---
+# --- ResponsibleEngineeringModel (heuristic calibration) ---
 # DP-SGD slowdown model: slowdown ≈ 1 + k/ε.
 # NOT derived from Abadi et al. (2016) — calibrated to match reported
 # slowdowns: ~3x at ε=1.0, ~1.2x at ε=10.0.

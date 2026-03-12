@@ -13,7 +13,7 @@ from .ledger import SystemLedger, PerformanceMetrics, SustainabilityMetrics, Eco
 from .personas import Persona, Personas
 from ..core.scenarios import Scenario
 from ..core.engine import Engine
-from ..core.solver import SustainabilitySolver, SingleNodeSolver, EconomicsSolver, ReliabilitySolver
+from ..core.solver import SustainabilityModel, SingleNodeModel, EconomicsModel, ReliabilityModel
 from ..hardware.types import HardwareNode
 from ..systems.types import Fleet
 from ..infra.registry import Infra
@@ -87,14 +87,14 @@ class ResourceSimulation(BaseSimulation):
              sim_fleet = Fleet(name="SimFleet", node=dummy_node, count=int(scale), fabric=Fabrics.Ethernet_10G)
 
         # 4. SUSTAINABILITY MATH
-        sust_solver = SustainabilitySolver()
+        sust_solver = SustainabilityModel()
         impact = sust_solver.solve(sim_fleet, duration_days=duration_days, datacenter=grid)
         
-        # 5. ECONOMIC MATH (delegate to EconomicsSolver)
-        econ_result = EconomicsSolver().solve(sim_fleet, duration_days=duration_days, datacenter=grid)
+        # 5. ECONOMIC MATH (delegate to EconomicsModel)
+        econ_result = EconomicsModel().solve(sim_fleet, duration_days=duration_days, datacenter=grid)
 
-        # 6. RELIABILITY MATH (delegate to ReliabilitySolver)
-        rel_result = ReliabilitySolver().solve(sim_fleet, job_duration_hours=duration_days * 24)
+        # 6. RELIABILITY MATH (delegate to ReliabilityModel)
+        rel_result = ReliabilityModel().solve(sim_fleet, job_duration_hours=duration_days * 24)
 
         # 7. ASSEMBLE UNIVERSAL LEDGER
         ledger = SystemLedger(

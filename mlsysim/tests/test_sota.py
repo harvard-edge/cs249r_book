@@ -2,7 +2,7 @@ import pytest
 from mlsysim.models.types import TransformerWorkload
 from mlsysim.hardware.registry import Hardware
 from mlsysim.systems.registry import Systems
-from mlsysim.core.solver import DistributedSolver, ServingSolver
+from mlsysim.core.solver import DistributedModel, ServingModel
 from mlsysim.core.constants import Q_
 
 def test_distributed_zero_lora_overlap():
@@ -17,7 +17,7 @@ def test_distributed_zero_lora_overlap():
     fleet = Systems.Clusters.Frontier_8K
     
     # Baseline
-    solver = DistributedSolver()
+    solver = DistributedModel()
     base_res = solver.solve(model, fleet, batch_size=4096, tp_size=8, pp_size=4, zero_stage=0, is_lora=False, overlap_comm=False)
     
     # With optimizations
@@ -49,7 +49,7 @@ def test_serving_disaggregated_speculative():
     hw_prefill = Hardware.Cloud.H100
     hw_decode = Hardware.Cloud.A100 # Change from L40S to A100 to pass hardware lookup
     
-    solver = ServingSolver()
+    solver = ServingModel()
     
     # Standard single node
     res_base = solver.solve(target, hw_prefill, seq_len=1024, batch_size=1)

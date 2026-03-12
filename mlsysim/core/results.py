@@ -1,27 +1,28 @@
-"""Typed result models for all mlsysim solvers.
+"""Typed result models for all mlsysim models and solvers.
 
-Layer A of the composition architecture: every solver returns a typed
+Layer A of the composition architecture: every resolver returns a typed
 Pydantic model instead of Dict[str, Any].  This gives students
-autocomplete, documentation, and type safety when composing solvers.
+autocomplete, documentation, and type safety when composing analytical 
+models and analysis solvers.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from pydantic import BaseModel, ConfigDict
 from .types import Quantity
 
 
 class SolverResult(BaseModel):
-    """Base class for all solver results."""
+    """Base class for all model and solver results."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 # ── Supply Layer Results ──────────────────────────────────────────
 
 class DistributedResult(SolverResult):
-    """Result from DistributedSolver: fleet-wide training performance."""
-    node_performance: Any  # PerformanceProfile (avoid circular import)
+    """Result from DistributedModel: fleet-wide training performance."""
+    node_profile: Any  # PerformanceProfile (avoid circular import)
     dp_communication_latency: Quantity
     tp_communication_latency: Quantity
     ep_communication_latency: Quantity
@@ -35,7 +36,7 @@ class DistributedResult(SolverResult):
 
 
 class ReliabilityResult(SolverResult):
-    """Result from ReliabilitySolver: failure modeling and checkpointing."""
+    """Result from ReliabilityModel: failure modeling and checkpointing."""
     fleet_mtbf: Quantity
     failure_probability: float
     optimal_checkpoint_interval: Quantity
@@ -43,7 +44,7 @@ class ReliabilityResult(SolverResult):
 
 
 class CheckpointResult(SolverResult):
-    """Result from CheckpointSolver: IOPS and MFU penalty modeling."""
+    """Result from CheckpointModel: IOPS and MFU penalty modeling."""
     checkpoint_size: Quantity
     write_time_seconds: Quantity
     max_bandwidth_required: Quantity
@@ -52,7 +53,7 @@ class CheckpointResult(SolverResult):
 
 
 class SustainabilityResult(SolverResult):
-    """Result from SustainabilitySolver: energy, carbon, and water footprint."""
+    """Result from SustainabilityModel: energy, carbon, and water footprint."""
     it_energy_kwh: Quantity
     total_energy_kwh: Quantity
     carbon_footprint_kg: float
@@ -62,7 +63,7 @@ class SustainabilityResult(SolverResult):
 
 
 class ServingResult(SolverResult):
-    """Result from ServingSolver: LLM two-phase inference performance."""
+    """Result from ServingModel: LLM two-phase inference performance."""
     feasible: bool
     ttft: Quantity
     itl: Quantity
@@ -74,7 +75,7 @@ class ServingResult(SolverResult):
 
 
 class ContinuousBatchingResult(SolverResult):
-    """Result from ContinuousBatchingSolver: production LLM serving with PagedAttention."""
+    """Result from ContinuousBatchingModel: production LLM serving with PagedAttention."""
     feasible: bool
     throughput_tokens_per_sec: float
     max_active_requests: int
@@ -86,7 +87,7 @@ class ContinuousBatchingResult(SolverResult):
 
 
 class WeightStreamingResult(SolverResult):
-    """Result from WeightStreamingSolver: Wafer-scale SRAM batch processing."""
+    """Result from WeightStreamingModel: Wafer-scale SRAM batch processing."""
     feasible: bool
     throughput_tokens_per_sec: float
     bottleneck: str
@@ -97,7 +98,7 @@ class WeightStreamingResult(SolverResult):
 
 
 class TailLatencyResult(SolverResult):
-    """Result from TailLatencySolver: queuing theory limits (M/M/c)."""
+    """Result from TailLatencyModel: queuing theory limits (M/M/c)."""
     p50_latency: Quantity
     p99_latency: Quantity
     queue_utilization: float
@@ -106,10 +107,10 @@ class TailLatencyResult(SolverResult):
 
 
 class EconomicsResult(SolverResult):
-    """Result from EconomicsSolver: TCO breakdown.
+    """Result from EconomicsModel: TCO breakdown.
 
-    Embeds sustainability metrics since EconomicsSolver delegates to
-    SustainabilitySolver internally.
+    Embeds sustainability metrics since EconomicsModel delegates to
+    SustainabilityModel internally.
     """
     capex_usd: float
     opex_energy_usd: float
@@ -126,7 +127,7 @@ class EconomicsResult(SolverResult):
 
 
 class DataResult(SolverResult):
-    """Result from DataSolver: data pipeline feasibility."""
+    """Result from DataModel: data pipeline feasibility."""
     is_stalled: bool
     utilization: float
     demand_bw: Quantity
@@ -135,8 +136,18 @@ class DataResult(SolverResult):
     margin: Quantity
 
 
+class OffloadResult(SolverResult):
+    """Legacy result type. Offload analysis is now folded into SingleNodeModel/PerformanceProfile."""
+    feasible: bool
+    transfer_time: Quantity
+    compute_time: Quantity
+    bottleneck: str
+    effective_bandwidth: Quantity
+    memory_spill_bytes: Quantity
+
+
 class TopologyResult(SolverResult):
-    """Result from TopologySolver: network bisection bandwidth."""
+    """Result from TopologyModel: network bisection bandwidth."""
     effective_bw: Quantity
     bisection_bw: Quantity
     bisection_bw_fraction: float
@@ -146,7 +157,7 @@ class TopologyResult(SolverResult):
 
 
 class EfficiencyResult(SolverResult):
-    """Result from EfficiencySolver: achievable MFU breakdown."""
+    """Result from EfficiencyModel: achievable MFU breakdown."""
     mfu: float
     achievable_flops: Quantity
     peak_flops: Quantity
@@ -156,7 +167,7 @@ class EfficiencyResult(SolverResult):
 
 
 class TransformationResult(SolverResult):
-    """Result from TransformationSolver: CPU preprocessing bottleneck."""
+    """Result from TransformationModel: CPU preprocessing bottleneck."""
     transform_time: Quantity
     accelerator_step_time: Quantity
     is_bottleneck: bool
@@ -167,7 +178,7 @@ class TransformationResult(SolverResult):
 # ── Demand Layer Results ──────────────────────────────────────────
 
 class ScalingResult(SolverResult):
-    """Result from ScalingSolver: Chinchilla-optimal training parameters."""
+    """Result from ScalingModel: Chinchilla-optimal training parameters."""
     optimal_parameters: Quantity
     optimal_tokens: Quantity
     compute_budget_flops: Quantity
@@ -175,7 +186,7 @@ class ScalingResult(SolverResult):
 
 
 class CompressionResult(SolverResult):
-    """Result from CompressionSolver: compression trade-offs."""
+    """Result from CompressionModel: compression trade-offs."""
     original_size_gb: Quantity
     compressed_size_gb: Quantity
     compression_ratio: float
@@ -197,7 +208,7 @@ class SynthesisResult(SolverResult):
 # ── Consequence Layer Results ─────────────────────────────────────
 
 class OrchestrationResult(SolverResult):
-    """Result from OrchestrationSolver: queueing and wait times."""
+    """Result from OrchestrationModel: queueing and wait times."""
     cluster_utilization: float
     avg_wait_time_days: Quantity
     avg_queue_length: float
@@ -205,7 +216,7 @@ class OrchestrationResult(SolverResult):
 
 
 class InferenceScalingResult(SolverResult):
-    """Result from InferenceScalingSolver: CoT reasoning cost."""
+    """Result from InferenceScalingModel: CoT reasoning cost."""
     total_reasoning_time: Quantity
     ttft: Quantity
     itl: Quantity
@@ -226,7 +237,7 @@ class SensitivityResult(SolverResult):
 
 
 class ResponsibleEngineeringResult(SolverResult):
-    """Result from ResponsibleEngineeringSolver: ethics tax quantification."""
+    """Result from ResponsibleEngineeringModel: ethics tax quantification."""
     dp_slowdown_factor: float
     effective_training_time: Quantity
     additional_data_requirement: float
@@ -235,3 +246,40 @@ class ResponsibleEngineeringResult(SolverResult):
     min_subgroup_prevalence: float
     privacy_cost_ratio: float
     fairness_data_ratio: float
+
+
+# ── Search & Optimization Results ─────────────────────────────────
+
+class OptimizerResult(BaseModel):
+    """Base class for all search-based results."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    objective_value: float
+    best_config: Dict[str, Any]
+    total_searched: int
+
+
+class ParallelismOptimizerResult(OptimizerResult):
+    """Result from ParallelismOptimizer: optimal TP/PP/DP split."""
+    best_mfu: float
+    best_throughput: Quantity
+    best_step_time: Quantity
+    search_space_size: int
+    top_candidates: List[Dict[str, Any]]
+
+
+class BatchingOptimizerResult(OptimizerResult):
+    """Result from BatchingOptimizer: optimal batch size for latency SLA."""
+    best_batch_size: int
+    max_throughput: float
+    p99_latency: Quantity
+    slo_violation_probability: float
+    is_feasible: bool
+
+
+class PlacementOptimizerResult(OptimizerResult):
+    """Result from PlacementOptimizer: optimal datacenter region."""
+    best_region: str
+    lowest_tco: float
+    carbon_footprint: float
+    pue: float
+    top_candidates: List[Dict[str, Any]]

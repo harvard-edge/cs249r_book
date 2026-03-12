@@ -28,18 +28,23 @@ Regional grid profiles and datacenter sustainability.
 Fleet configurations, network fabrics, and narrative scenarios.
 *   **Scenarios:** `Applications.Doorbell`, `Applications.AutoDrive`, `Applications.Frontier`.
 
-### Layer E: Execution & Solvers (`mlsysim.core.solver`)
-The physics-grounded solvers that resolve the hierarchy of constraints.
-*   **`SingleNodeSolver`**: Roofline and Iron Law performance.
-*   **`ServingSolver`**: LLM Pre-fill vs. Decoding and KV-Cache growth.
-*   **`DistributedSolver`**: 3D Parallelism (TP/PP/DP) and Network Oversubscription.
-*   **`SustainabilitySolver`**: Carbon Footprint and Water usage.
+### Layer E: Execution & Resolvers (`mlsysim.core.solver`)
+The 3-tier mathematical engine that resolves the hierarchy of constraints.
+*   **Tier 1: Models (`SingleNodeModel`, `DistributedModel`)**: Forward evaluation of physics ($Y = f(X)$).
+*   **Tier 2: Solvers (`SynthesisSolver`, `SensitivitySolver`)**: Algebraic inversion and diagnostics ($X = f^{-1}(Y)$).
+*   **Tier 3: Optimizers (`ParallelismOptimizer`, `BatchingOptimizer`)**: Design space search ($\max f(X)$).
 
 ---
 
-## 🚀 Quick Usage: The System Evaluation
+## 🚀 Quick Usage: The CLI & System Evaluation
 
-The primary way to use `mlsysim` is through the **Hierarchy of Constraints**.
+You can evaluate hardware and workloads directly from your terminal using the built-in CLI:
+
+```bash
+python3 -m mlsysim evaluate --model Llama3_8B --hardware H100 --batch-size 32
+```
+
+In Python, the primary way to use `mlsysim` is through the **Hierarchy of Constraints**:
 
 ```python
 import mlsysim

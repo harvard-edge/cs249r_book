@@ -448,7 +448,7 @@ TPU_POD_MEM = 131 * TB
 TPU_POD_POWER = 3 * ureg.megawatt
 
 # --- Shared Precision Map ---
-# Used by Engine, ServingSolver, SynthesisSolver to map precision strings to byte widths.
+# Used by Engine, ServingModel, SynthesisSolver to map precision strings to byte widths.
 PRECISION_MAP = {
     "fp32": BYTES_FP32,
     "fp16": BYTES_FP16,

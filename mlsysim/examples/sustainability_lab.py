@@ -29,7 +29,7 @@ def main():
     print(f"{'Region':<25} | {'PUE':<6} | {'Energy (MWh)':<12} | {'Carbon (Tonnes)':<12}")
     print("-" * 65)
     
-    solver = mlsysim.SustainabilitySolver()
+    solver = mlsysim.SustainabilityModel()
     
     for exp in experiments:
         # We'll assume a liquid-cooled profile override

@@ -11,6 +11,8 @@ from .results import (
     EfficiencyResult, TransformationResult, ScalingResult,
     CompressionResult, SynthesisResult, OrchestrationResult,
     InferenceScalingResult, SensitivityResult, ResponsibleEngineeringResult,
+    OptimizerResult, ParallelismOptimizerResult,
+    BatchingOptimizerResult, PlacementOptimizerResult
 )
 from .formulas import (
     calc_ring_allreduce_time,
@@ -47,20 +49,11 @@ from ..hardware.types import HardwareNode
 from ..systems.types import Fleet, NetworkFabric
 from ..infra.types import Datacenter, GridProfile
 
-class BaseSolver(ABC):
-    """Base class for all mlsysim solvers.
+class BaseResolver(ABC):
+    """Base class for all mlsysim analytical components (Models, Solvers, Optimizers).
 
-    Each solver declares its input requirements and output type.
-    Taxonomic classification (which walls a solver resolves) lives in
-    ``core/walls.py`` — the single source of truth for the 22-wall
-    framework.  Use ``walls_for_solver(cls.__name__)`` to look up walls.
-
-    Attributes
-    ----------
-    requires : tuple[str, ...]
-        Domain concepts this solver needs (e.g., "workload", "fleet").
-    produces : type[SolverResult] | None
-        The typed result model this solver returns.
+    Each resolver declares its input requirements and output type.
+    Taxonomic classification lives in ``core/walls.py``.
     """
     requires: tuple = ()
     produces: Optional[Type[SolverResult]] = None
@@ -71,24 +64,44 @@ class BaseSolver(ABC):
 
     @classmethod
     def schema(cls) -> dict:
-        """Return a summary of this solver's interface for composition checking."""
-        from .walls import walls_for_solver
+        """Return a summary of this resolver's interface."""
+        from .walls import walls_for_resolver
         wall_info = [
             {"number": w.number, "name": w.name, "domain": w.domain.value}
-            for w in walls_for_solver(cls.__name__)
+            for w in walls_for_resolver(cls.__name__)
         ]
         return {
-            "solver": cls.__name__,
+            "resolver": cls.__name__,
+            "type": cls.resolver_type(),
             "walls": wall_info,
             "requires": cls.requires,
             "produces": cls.produces.__name__ if cls.produces else "Any",
         }
 
-class SingleNodeSolver(BaseSolver):
+    @classmethod
+    def resolver_type(cls) -> str:
+        if issubclass(cls, BaseModel): return "model"
+        if issubclass(cls, BaseSolver): return "solver"
+        if issubclass(cls, BaseOptimizer): return "optimizer"
+        return "unknown"
+
+class BaseModel(BaseResolver):
+    """Forward-evaluating mechanistic engine (Y = f(X))."""
+    pass
+
+class BaseSolver(BaseResolver):
+    """Inverse-design or diagnostic engine (X = f^-1(Y) or grad f)."""
+    pass
+
+class BaseOptimizer(BaseResolver):
+    """Design-space search engine (max f(X) s.t. g(X) < c)."""
+    pass
+
+class SingleNodeModel(BaseModel):
     """
     Resolves single-node hardware Roofline bounds and feasibility.
 
-    This solver handles the 'Iron Law' of machine learning systems,
+    This model handles the 'Iron Law' of machine learning systems,
     calculating whether a model fits in memory and predicting its
     throughput based on arithmetic intensity.
 
@@ -98,17 +111,17 @@ class SingleNodeSolver(BaseSolver):
     requires = ("workload", "hardware")
     produces = PerformanceProfile
 
-    def solve(self, model: Workload, hardware: HardwareNode, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5, raise_errors: bool = False) -> PerformanceProfile:
+    def solve(self, model: Workload, hardware: HardwareNode, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5, raise_errors: bool = False, **kwargs) -> PerformanceProfile:
         """
-        Solves the performance profile for a single hardware node.
+        Calculates the performance profile for a single hardware node.
         """
-        return Engine.solve(model, hardware, batch_size=batch_size, precision=precision, efficiency=efficiency, raise_errors=raise_errors)
+        return Engine.solve(model, hardware, batch_size=batch_size, precision=precision, efficiency=efficiency, raise_errors=raise_errors, **kwargs)
 
-class DistributedSolver(BaseSolver):
+class DistributedModel(BaseModel):
     """
     Resolves fleet-wide communication, synchronization, and pipelining constraints.
     
-    This solver models the constraints of distributed scale for distributed training. It
+    This model simulates the constraints of distributed scale for distributed training. It
     decomposes a workload across a cluster using 3D Parallelism (DP, TP, PP) 
     and calculates the resulting communication overheads and idle times 
     (bubbles) that determine the Model FLOPs Utilization (MFU).
@@ -296,7 +309,7 @@ class DistributedSolver(BaseSolver):
 
         
         return DistributedResult(
-            node_performance=node_perf,
+            node_profile=node_perf,
             dp_communication_latency=t_comm_dp,
             tp_communication_latency=t_comm_tp,
             ep_communication_latency=t_comm_ep,
@@ -309,11 +322,11 @@ class DistributedSolver(BaseSolver):
             parallelism={"dp": dp_size, "tp": tp_size, "pp": pp_size, "ep": ep_size},
         )
 
-class ReliabilitySolver(BaseSolver):
+class ReliabilityModel(BaseModel):
     """
     Calculates Mean Time Between Failures (MTBF) and optimal checkpointing intervals.
     
-    This solver handles the reliability modeling of massive clusters, helping
+    This model handles the reliability modeling of massive clusters, helping
     determine the 'Goodput' of long-running training jobs. It identifies 
     the probability of a job failure before completion and calculates the 
     Young-Daly optimal interval to minimize wasted compute time.
@@ -352,12 +365,12 @@ class ReliabilitySolver(BaseSolver):
             expected_failures=(job_dur_q / fleet_mtbf).magnitude,
         )
 
-class CheckpointSolver(BaseSolver):
+class CheckpointModel(BaseModel):
     """
     Analyzes the storage constraints and I/O burst penalties of saving model states.
     
     Training massive models requires saving hundreds of gigabytes (Weights + 
-    Optimizer States) to persistent storage. This solver calculates the time 
+    Optimizer States) to persistent storage. This model calculates the time 
     spent blocked on I/O, subtracting from the cluster's Model FLOPs Utilization.
 
     Literature Source:
@@ -372,9 +385,10 @@ class CheckpointSolver(BaseSolver):
         from .formulas import calc_checkpoint_size
         
         # Calculate size based on optimizer states
-        # Default Adam: 16 bytes per parameter (master weights + momentum + variance + gradients + fp16 weights)
+        # Mixed-precision Adam: 14 bytes/param (FP32 master + FP32 momentum + FP32 variance + FP16 weights)
+        # Gradients are ephemeral and not checkpointed.
         if optimizer.lower() == "adam":
-            bytes_per_param = 16
+            bytes_per_param = 14
         else:
             bytes_per_param = 4  # e.g., SGD
             
@@ -402,13 +416,13 @@ class CheckpointSolver(BaseSolver):
             mfu_penalty_pct=penalty_pct
         )
 
-class SustainabilitySolver(BaseSolver):
+class SustainabilityModel(BaseModel):
     """
     Calculates Datacenter-scale Sustainability metrics.
     
     Handles Power Usage Effectiveness (PUE), Carbon Intensity, 
     and Water Usage Effectiveness (WUE) across different regional grids.
-    This solver models the 'Infrastructure Tax' — the energy spent on 
+    This model simulates the 'Infrastructure Tax' — the energy spent on 
     cooling and power delivery rather than on neural computation.
 
     Literature Source:
@@ -478,7 +492,7 @@ class SustainabilitySolver(BaseSolver):
             region_name=region.name,
         )
 
-class ServingSolver(BaseSolver):
+class ServingModel(BaseModel):
     """
     Analyzes the two-phase LLM serving lifecycle: Pre-fill vs. Decoding.
     
@@ -607,12 +621,12 @@ class ServingSolver(BaseSolver):
         )
 
 
-class ContinuousBatchingSolver(BaseSolver):
+class ContinuousBatchingModel(BaseModel):
     """
     Analyzes production LLM serving with Continuous Batching and PagedAttention.
     
     Traditional static batching suffers from severe memory fragmentation and 
-    padding waste. This solver models the throughput improvements achieved by 
+    padding waste. This model simulates the throughput improvements achieved by 
     iteration-level scheduling and non-contiguous KV cache allocation.
 
     Literature Source:
@@ -625,7 +639,7 @@ class ContinuousBatchingSolver(BaseSolver):
     produces = ContinuousBatchingResult
 
     def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, max_batch_size: int = 1, page_size: int = 16, precision: str = "fp16", efficiency: float = 0.5) -> ContinuousBatchingResult:
-        """Solves for continuous batching throughput and PagedAttention memory."""
+        """Calculates continuous batching throughput and PagedAttention memory."""
         prec_map = PRECISION_MAP
         bpp = prec_map.get(precision, BYTES_FP16)
         peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
@@ -689,7 +703,7 @@ class ContinuousBatchingSolver(BaseSolver):
         )
 
 
-class WeightStreamingSolver(BaseSolver):
+class WeightStreamingModel(BaseModel):
     """
     Analyzes Wafer-Scale inference (e.g., Cerebras CS-3) using Weight Streaming.
     
@@ -707,7 +721,7 @@ class WeightStreamingSolver(BaseSolver):
     produces = WeightStreamingResult
 
     def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5) -> WeightStreamingResult:
-        """Solves for continuous batching throughput under Weight Streaming physics."""
+        """Simulates Weight Streaming throughput and SRAM feasibility."""
         bpp = PRECISION_MAP.get(precision, BYTES_FP16)
         peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
         
@@ -776,7 +790,7 @@ class WeightStreamingSolver(BaseSolver):
             wafer_memory_utilization=min(utilization, 1.0) if feasible else utilization,
         )
 
-class TailLatencySolver(BaseSolver):
+class TailLatencyModel(BaseModel):
     """
     Analyzes queueing delays and P99 tail latency for deployed inference models.
     
@@ -816,7 +830,7 @@ class TailLatencySolver(BaseSolver):
             slo_violation_probability=violation_prob
         )
 
-class EconomicsSolver(BaseSolver):
+class EconomicsModel(BaseModel):
     """
     Calculates Total Cost of Ownership (TCO) including Capex and Opex.
     
@@ -856,8 +870,8 @@ class EconomicsSolver(BaseSolver):
         Dict[str, Any]
             Financial metrics including CapEx, OpEx, and total TCO.
         """
-        sust_solver = SustainabilitySolver()
-        energy_result = sust_solver.solve(fleet, duration_days, datacenter=datacenter or grid, mfu=mfu)
+        sust_model = SustainabilityModel()
+        energy_result = sust_model.solve(fleet, duration_days, datacenter=datacenter or grid, mfu=mfu)
         
         price = kwh_price
         if price is None:
@@ -892,11 +906,11 @@ class EconomicsSolver(BaseSolver):
             region_name=energy_result.region_name,
         )
 
-class DataSolver(BaseSolver):
+class DataModel(BaseModel):
     """
     Analyzes the 'Data Wall' — the throughput bottleneck between storage and compute.
     
-    This solver models the data pipeline constraints, comparing the data demand 
+    This model simulates the data pipeline constraints, comparing the data demand 
     of a workload (e.g., training tokens or high-resolution video frames) 
     against the physical bandwidth of the storage hierarchy and IO interconnects.
 
@@ -944,11 +958,11 @@ class DataSolver(BaseSolver):
             margin=(supply_bw - demand_bw).to("GB/s"),
         )
 
-class ScalingSolver(BaseSolver):
+class ScalingModel(BaseModel):
     """
     Analyzes the 'Scaling Physics' of model training (Chinchilla Laws).
     
-    This solver determines the optimal model size (P) and dataset size (D) 
+    This model determines the optimal model size (P) and dataset size (D) 
     given a compute budget (C), following the compute-optimal training 
     regime where D ≈ 20P.
 
@@ -1001,11 +1015,11 @@ class ScalingSolver(BaseSolver):
             tokens_per_parameter=d_opt / p_opt if p_opt > 0 else 0,
         )
 
-class OrchestrationSolver(BaseSolver):
+class OrchestrationModel(BaseModel):
     """
     Analyzes Cluster Orchestration and Queueing (Little's Law).
     
-    This solver models the 'Wait Wall' in shared research clusters, 
+    This model simulates the 'Wait Wall' in shared research clusters, 
     calculating job completion times and researcher wait times based on 
     cluster utilization and arrival rates.
 
@@ -1057,11 +1071,11 @@ class OrchestrationSolver(BaseSolver):
             is_stable=utilization < 1.0,
         )
 
-class CompressionSolver(BaseSolver):
+class CompressionModel(BaseModel):
     """
     Analyzes model compression trade-offs (Accuracy vs. Efficiency).
     
-    This solver models the 'Compression Tax' — the accuracy degradation 
+    This model simulates the 'Compression Tax' — the accuracy degradation 
     that occurs when reducing model size via quantization or pruning, 
     balanced against the gains in memory footprint and inference latency.
 
@@ -1132,11 +1146,11 @@ class CompressionSolver(BaseSolver):
             memory_savings_pct=(1.0 - 1.0/compression_ratio) * 100,
         )
 
-class EfficiencySolver(BaseSolver):
+class EfficiencyModel(BaseModel):
     """
     Models the gap between peak and achieved FLOPS (Wall 3: Software Efficiency).
 
-    This solver quantifies the software efficiency of a workload — the fraction
+    This model quantifies the software efficiency of a workload — the fraction
     of peak hardware FLOPS that the software stack actually converts into useful
     computation. It decomposes Model FLOPs Utilization (MFU) by workload type,
     accounting for kernel fusion efficiency, SM occupancy, and memory access
@@ -1224,11 +1238,11 @@ class EfficiencySolver(BaseSolver):
             },
         )
 
-class TransformationSolver(BaseSolver):
+class TransformationModel(BaseModel):
     """
     Quantifies the CPU preprocessing bottleneck (Wall 9: Transformation).
 
-    This solver models the 'Transformation Wall' — the gap between CPU-bound
+    This model simulates the 'Transformation Wall' — the gap between CPU-bound
     data preprocessing (JPEG decode, tokenization, augmentation) and
     accelerator step time. When preprocessing cannot keep up, the accelerator
     starves and utilization drops.
@@ -1283,11 +1297,11 @@ class TransformationSolver(BaseSolver):
             slowdown_factor=total_step_time / accel_time.magnitude if accel_time.magnitude > 0 else float('inf'),
         )
 
-class TopologySolver(BaseSolver):
+class TopologyModel(BaseModel):
     """
     Models bisection bandwidth for different network topologies (Wall 10).
 
-    This solver calculates the effective bandwidth available to collective
+    This model calculates the effective bandwidth available to collective
     communication operations based on the physical network topology. Different
     topologies trade cost against bisection bandwidth — the minimum bandwidth
     across any cut that divides the network in half.
@@ -1375,11 +1389,11 @@ class TopologySolver(BaseSolver):
             num_nodes=num_nodes,
         )
 
-class InferenceScalingSolver(BaseSolver):
+class InferenceScalingModel(BaseModel):
     """
     Models inference-time compute scaling (Wall 12: Reasoning/CoT Cost).
 
-    This solver quantifies the cost of 'System-2 thinking' — inference-time
+    This model quantifies the cost of 'System-2 thinking' — inference-time
     compute scaling via chain-of-thought (CoT) reasoning, where the model
     generates K intermediate reasoning steps before producing the final answer.
     Each step incurs the full cost of autoregressive decoding.
@@ -1420,8 +1434,8 @@ class InferenceScalingSolver(BaseSolver):
         Dict[str, Any]
             Total reasoning time, cost per query, and token counts.
         """
-        # Use ServingSolver internally to get per-step latency
-        serving = ServingSolver()
+        # Use ServingModel internally to get per-step latency
+        serving = ServingModel()
         serving_result = serving.solve(
             model=model, hardware=hardware, seq_len=context_length,
             batch_size=1, precision=precision, efficiency=efficiency
@@ -1461,16 +1475,12 @@ class SensitivitySolver(BaseSolver):
     """
     Identifies the binding constraint via numerical sensitivity analysis (Wall 21).
 
-    This solver computes numerical partial derivatives of inference latency
-    with respect to each hardware parameter (peak FLOPS, memory bandwidth,
-    memory capacity). The parameter with the largest absolute sensitivity
-    is the 'binding constraint' — the one most worth investing in.
+    This solver computes numerical partial derivatives of performance
+    with respect to hardware parameters to identify the 'binding constraint.'
 
     Literature Source:
-    1. Williams et al. (2009), "Roofline: An Insightful Visual Performance
-       Model for Floating-Point Programs and Multicore Architectures."
-    2. Ofenbeck et al. (2014), "Applying the Roofline Model." (Sensitivity
-       analysis of Roofline parameters.)
+    1. Williams et al. (2009), "Roofline Model."
+    2. Ofenbeck et al. (2014), "Applying the Roofline Model."
     """
     requires = ("workload", "hardware")
     produces = SensitivityResult
@@ -1479,37 +1489,16 @@ class SensitivitySolver(BaseSolver):
               precision: str = "fp16", perturbation_pct: float = 10.0,
               efficiency: float = 0.5) -> SensitivityResult:
         """
-        Computes sensitivities and identifies the binding constraint.
-
-        Parameters
-        ----------
-        model : Workload
-            The model architecture to simulate.
-        hardware : HardwareNode
-            The target hardware node.
-        precision : str
-            Numerical precision.
-        perturbation_pct : float
-            Percentage by which to perturb each parameter (default 10%).
-        efficiency : float
-            Compute efficiency factor (0.0 to 1.0).
-
-        Returns
-        -------
-        Dict[str, Any]
-            Sensitivity values for each parameter and the binding constraint.
+        Solves for sensitivities and identifies the binding constraint.
         """
         from copy import deepcopy
         from ..hardware.types import HardwareNode, ComputeCore, MemoryHierarchy
 
-        # Baseline latency
         baseline = Engine.solve(model, hardware, precision=precision, efficiency=efficiency)
         t_base = baseline.latency.to("ms").magnitude
-
         factor = 1.0 + perturbation_pct / 100.0
         sensitivities = {}
 
-        # 1. Perturb peak_flops
         hw_flops = deepcopy(hardware)
         hw_flops.compute = ComputeCore(
             peak_flops=hardware.compute.peak_flops * factor,
@@ -1518,7 +1507,6 @@ class SensitivitySolver(BaseSolver):
         t_flops = Engine.solve(model, hw_flops, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["peak_flops"] = (t_flops - t_base) / t_base if t_base > 0 else 0.0
 
-        # 2. Perturb memory_bandwidth
         hw_bw = deepcopy(hardware)
         hw_bw.memory = MemoryHierarchy(
             capacity=hardware.memory.capacity,
@@ -1527,7 +1515,6 @@ class SensitivitySolver(BaseSolver):
         t_bw = Engine.solve(model, hw_bw, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["memory_bandwidth"] = (t_bw - t_base) / t_base if t_base > 0 else 0.0
 
-        # 3. Perturb memory_capacity (affects feasibility, not latency directly)
         hw_mem = deepcopy(hardware)
         hw_mem.memory = MemoryHierarchy(
             capacity=hardware.memory.capacity * factor,
@@ -1536,7 +1523,6 @@ class SensitivitySolver(BaseSolver):
         t_mem = Engine.solve(model, hw_mem, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["memory_capacity"] = (t_mem - t_base) / t_base if t_base > 0 else 0.0
 
-        # Binding constraint = parameter with largest |sensitivity|
         binding = max(sensitivities, key=lambda k: abs(sensitivities[k]))
 
         return SensitivityResult(
@@ -1550,17 +1536,12 @@ class SynthesisSolver(BaseSolver):
     """
     Given an SLA, synthesizes the required hardware specs (Wall 22: Inverse Solve).
 
-    This solver inverts the Roofline model: instead of predicting latency from
-    hardware specs, it starts from a target latency SLA and works backward to
-    determine the minimum hardware specifications (bandwidth, FLOPS, memory)
-    required to meet the target.
+    This solver inverts the Roofline model to derive minimum hardware 
+    specifications required to meet a target latency SLA.
 
     Literature Source:
-    1. Williams et al. (2009), "Roofline: An Insightful Visual Performance
-       Model for Floating-Point Programs and Multicore Architectures."
-       (Inverse application of the Roofline model.)
-    2. Jouppi et al. (2017), "In-Datacenter Performance Analysis of a Tensor
-       Processing Unit." (Hardware specification from workload requirements.)
+    1. Williams et al. (2009), "Roofline Model."
+    2. Jouppi et al. (2017), "In-Datacenter Performance Analysis of a TPU."
     """
     requires = ("workload", "target_latency")
     produces = SynthesisResult
@@ -1569,45 +1550,17 @@ class SynthesisSolver(BaseSolver):
               precision: str = "fp16", efficiency: float = 0.5) -> SynthesisResult:
         """
         Synthesizes hardware requirements from an SLA target.
-
-        Parameters
-        ----------
-        model : Workload
-            The model to be served.
-        target_latency : Quantity
-            Target latency SLA (e.g., Q_("10 ms")).
-        precision : str
-            Numerical precision.
-        efficiency : float
-            Expected compute efficiency η (0.0 to 1.0).
-
-        Returns
-        -------
-        Dict[str, Any]
-            Required bandwidth, FLOPS, memory, and compute-memory ratio.
         """
         prec_map = PRECISION_MAP
         bpp = prec_map.get(precision, BYTES_FP16)
-
-        # Model weight size
         weight_bytes = model.size_in_bytes(bpp)
-
-        # Model operations (inference)
         graph = model.lower(bpp)
         total_ops = graph.total_ops
-
         t_target = target_latency.to("s")
 
-        # BW_required = |W| / T_target (must stream all weights within latency)
         required_bw = (weight_bytes / t_target).to("GB/s")
-
-        # FLOPS_required = OPs / (T_target × η)
         required_flops = (total_ops / (t_target * efficiency)).to("TFLOP/s")
-
-        # Memory must hold at least the model weights
         required_memory = weight_bytes.to("GB")
-
-        # Compute-to-memory ratio (operational intensity requirement)
         compute_memory_ratio = (required_flops / required_bw).to("flop/byte")
 
         return SynthesisResult(
@@ -1620,23 +1573,16 @@ class SynthesisSolver(BaseSolver):
             total_ops=total_ops,
         )
 
-class ResponsibleEngineeringSolver(BaseSolver):
+class ResponsibleEngineeringModel(BaseModel):
     """
     Models the computational cost of responsible AI practices (Wall 20: Safety).
 
-    This solver quantifies the 'Safety Tax' — the additional compute, data,
-    and time required when training with differential privacy (DP-SGD) or
-    fairness constraints. These are not optional overheads but engineering
-    requirements that must be budgeted into system design.
+    This model quantifies the 'Safety Tax' — the additional compute and data
+    required for differential privacy or fairness guarantees.
 
     Literature Source:
     1. Abadi et al. (2016), "Deep Learning with Differential Privacy."
-       (DP-SGD slowdown model: per-sample gradient clipping + noise.)
     2. Anil et al. (2022), "Large-Scale Differentially Private BERT."
-       (Practical DP training at scale.)
-    3. Chen et al. (2018), "My Fair Bandit: Distributed Learning of
-       Max-Min Fairness with Multi-player Bandits."
-       (Fairness constraint data requirements.)
     """
     requires = ("training_time",)
     produces = ResponsibleEngineeringResult
@@ -1645,36 +1591,10 @@ class ResponsibleEngineeringSolver(BaseSolver):
               epsilon: float = 1.0, delta: float = 1e-5,
               min_subgroup_prevalence: float = 0.01) -> ResponsibleEngineeringResult:
         """
-        Solves for the overhead of responsible engineering practices.
-
-        Parameters
-        ----------
-        base_training_time : Quantity
-            Baseline training time without privacy/fairness overhead.
-        epsilon : float
-            Privacy budget ε (lower = more private, more expensive).
-            Default: 1.0 (strong privacy).
-        delta : float
-            Privacy failure probability δ. Default: 1e-5.
-        min_subgroup_prevalence : float
-            Prevalence of the rarest subgroup p_min (0.0 to 1.0).
-            Default: 0.01 (1% of population).
-
-        Returns
-        -------
-        Dict[str, Any]
-            DP slowdown factor, effective training time, and data requirements.
+        Calculates the overhead of responsible engineering practices.
         """
-        # DP-SGD slowdown: heuristic calibration (NOT from Abadi et al. 2016).
-        # Calibrated to match reported slowdowns: ~3x at ε=1.0, ~1.2x at ε=10.0.
         dp_slowdown = 1.0 + (DP_SGD_SLOWDOWN_COEFFICIENT / max(epsilon, 0.01))
-
-        # Fairness constraint: need enough samples from rarest subgroup
-        # Additional data requirement ∝ 1/p_min
-        # At p_min=0.01, need ~100× more data to get statistical significance
         additional_data_factor = 1.0 / max(min_subgroup_prevalence, 1e-6)
-
-        # Combined effective training time
         effective_time = base_training_time * dp_slowdown
 
         return ResponsibleEngineeringResult(
@@ -1687,3 +1607,212 @@ class ResponsibleEngineeringSolver(BaseSolver):
             privacy_cost_ratio=dp_slowdown,
             fairness_data_ratio=additional_data_factor,
         )
+
+class ParallelismOptimizer(BaseOptimizer):
+    """
+    Searches for the optimal 3D/4D parallelism split (DP, TP, PP, EP).
+
+    Given a model architecture and a cluster size, this optimizer sweeps
+    the integer design space of parallelism degrees to find the
+    configuration that maximizes Model FLOPs Utilization (MFU).
+
+    Literature Source:
+    1. Narayanan et al. (2021), "Efficient Large-Scale Language Model 
+       Training on GPU Clusters Using Megatron-LM."
+    """
+    requires = ("workload", "fleet")
+    produces = ParallelismOptimizerResult
+
+    def solve(self, model: Workload, fleet: Fleet, batch_size: int,
+              precision: str = "fp16", efficiency: float = 0.5,
+              max_tp: Optional[int] = None, max_pp: Optional[int] = None,
+              overlap_comm: bool = True) -> ParallelismOptimizerResult:
+        """
+        Searches for the optimal parallelism split.
+        """
+        n_gpus = fleet.total_accelerators
+        gpus_per_node = fleet.node.accelerators_per_node
+        
+        # 1. Generate search space (all valid factorizations of n_gpus)
+        # We simplify to: TP * PP * DP = total_gpus (EP=1 for now)
+        candidates = []
+        
+        # Heuristic constraints
+        limit_tp = max_tp or gpus_per_node
+        limit_pp = max_pp or n_gpus
+        
+        dist_model = DistributedModel()
+        
+        # Discrete search
+        tp_options = [2**i for i in range(10) if 2**i <= limit_tp]
+        pp_options = [2**i for i in range(10) if 2**i <= limit_pp]
+        
+        for tp in tp_options:
+            for pp in pp_options:
+                if (tp * pp) > n_gpus: continue
+                if n_gpus % (tp * pp) != 0: continue
+                
+                dp = n_gpus // (tp * pp)
+                
+                try:
+                    # Evaluate this config
+                    res = dist_model.solve(
+                        model, fleet, batch_size=batch_size,
+                        precision=precision, efficiency=efficiency,
+                        tp_size=tp, pp_size=pp, overlap_comm=overlap_comm
+                    )
+                    
+                    # Store candidate
+                    candidates.append({
+                        "config": {"tp": tp, "pp": pp, "dp": dp},
+                        "mfu": (res.scaling_efficiency * efficiency),
+                        "throughput": res.effective_throughput,
+                        "step_time": res.step_latency_total
+                    })
+                except Exception:
+                    continue
+
+        if not candidates:
+            raise ValueError("No valid parallelism configurations found for this cluster size.")
+
+        # 2. Find best
+        best = max(candidates, key=lambda x: x["mfu"])
+        
+        # Sort candidates for top list
+        top_n = sorted(candidates, key=lambda x: x["mfu"], reverse=True)[:5]
+
+        return ParallelismOptimizerResult(
+            objective_value=best["mfu"],
+            best_config=best["config"],
+            best_mfu=best["mfu"],
+            best_throughput=best["throughput"],
+            best_step_time=best["step_time"],
+            total_searched=len(candidates),
+            search_space_size=len(candidates),
+            top_candidates=top_n
+        )
+
+
+class BatchingOptimizer(BaseOptimizer):
+    """
+    Finds the maximum batch size that satisfies a P99 latency SLA.
+
+    Searches the continuous batching design space using an M/M/c queueing
+    model to find the optimal balance between throughput and tail latency.
+    """
+    requires = ("workload", "hardware", "sla_latency_ms")
+    produces = BatchingOptimizerResult
+
+    def solve(self, model: TransformerWorkload, hardware: HardwareNode, 
+              seq_len: int, sla_latency_ms: float, arrival_rate_qps: float,
+              num_replicas: int = 1, precision: str = "fp16", 
+              efficiency: float = 0.5, max_search_batch: int = 256) -> BatchingOptimizerResult:
+        
+        serving_model = ServingModel()
+        tail_model = TailLatencyModel()
+        
+        best_batch = 0
+        max_tps = 0.0
+        best_p99 = Q_("0 ms")
+        best_viol = 0.0
+        
+        candidates = []
+        
+        for b in range(1, max_search_batch + 1):
+            # 1. Base inference performance
+            res = serving_model.solve(model, hardware, seq_len=seq_len, batch_size=b, precision=precision, efficiency=efficiency)
+            if not res.feasible:
+                break
+                
+            # Service latency for the batch
+            # Note: For continuous batching, service latency is TTFT + (seq_len * ITL)
+            service_latency = res.ttft + (res.itl * seq_len)
+            
+            # 2. Queueing tail latency
+            tail_res = tail_model.solve(arrival_rate_qps, service_latency.m_as("ms"), num_replicas)
+            
+            if not tail_res.is_stable:
+                break
+                
+            p99 = tail_res.p99_latency
+            
+            if p99.m_as("ms") <= sla_latency_ms:
+                # Throughput is bounded by arrival rate (if stable) or max capacity
+                throughput = arrival_rate_qps * seq_len
+                
+                candidates.append({
+                    "batch_size": b,
+                    "throughput": throughput,
+                    "p99": p99,
+                    "viol": tail_res.slo_violation_probability
+                })
+                
+                if throughput > max_tps:
+                    max_tps = throughput
+                    best_batch = b
+                    best_p99 = p99
+                    best_viol = tail_res.slo_violation_probability
+                    
+        return BatchingOptimizerResult(
+            objective_value=max_tps,
+            best_config={"max_batch_size": best_batch},
+            best_batch_size=best_batch,
+            max_throughput=max_tps,
+            p99_latency=best_p99,
+            slo_violation_probability=best_viol,
+            is_feasible=best_batch > 0,
+            total_searched=len(candidates)
+        )
+
+
+class PlacementOptimizer(BaseOptimizer):
+    """
+    Finds the optimal datacenter location to minimize TCO and Carbon.
+    """
+    requires = ("fleet", "duration_days")
+    produces = PlacementOptimizerResult
+
+    def solve(self, fleet: Fleet, duration_days: float, 
+              regions: List[str] = ["US_Avg", "Quebec", "Iowa"], 
+              carbon_tax_per_ton: float = 100.0, mfu: float = 1.0) -> PlacementOptimizerResult:
+        
+        from ..infra.registry import Infra
+        econ_model = EconomicsModel()
+        
+        candidates = []
+        
+        for region_name in regions:
+            grid = getattr(Infra.Grids, region_name, None)
+            if not grid: continue
+                
+            res = econ_model.solve(fleet, duration_days=duration_days, grid=grid, mfu=mfu)
+            
+            # Objective: TCO + Carbon Tax
+            carbon_tons = res.carbon_footprint_kg / 1000.0
+            total_cost = res.tco_usd + (carbon_tons * carbon_tax_per_ton)
+            
+            candidates.append({
+                "region": region_name,
+                "tco": res.tco_usd,
+                "carbon": carbon_tons,
+                "pue": res.pue,
+                "objective": total_cost
+            })
+            
+        if not candidates:
+            raise ValueError("No valid regions found for optimization.")
+            
+        best = min(candidates, key=lambda x: x["objective"])
+        top_n = sorted(candidates, key=lambda x: x["objective"])
+        
+        return PlacementOptimizerResult(
+            objective_value=best["objective"],
+            best_config={"region": best["region"]},
+            best_region=best["region"],
+            lowest_tco=best["tco"],
+            carbon_footprint=best["carbon"],
+            pue=best["pue"],
+            total_searched=len(candidates),
+            top_candidates=top_n
+        )
+
