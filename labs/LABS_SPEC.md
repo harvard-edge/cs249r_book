@@ -337,7 +337,7 @@ Hardware constants for inline use (no pint units — plain floats):
 ```python
 # Cloud
 H100_BW_GBS      = 3350   # GB/s
-H100_TFLOPS_FP16 = 1979   # TFLOPS
+H100_TFLOPS_FP16 = 989    # TFLOPS
 H100_RAM_GB      = 80     # GB HBM
 H100_TDP_W       = 700    # Watts
 
