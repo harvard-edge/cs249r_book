@@ -84,20 +84,24 @@ from mlsysim import Engine
 Let's load both GPUs from the Silicon Zoo and confirm the specs:
 
 ```{python}
+from mlsysim.show import table
+
 a100 = mlsysim.Hardware.Cloud.A100
 h100 = mlsysim.Hardware.Cloud.H100
-
-print(f"{'Spec':<20} {'A100':>12} {'H100':>12} {'Ratio':>8}")
-print("-" * 56)
 
 flops_a = a100.compute.peak_flops.to("TFLOPs/s").magnitude
 flops_h = h100.compute.peak_flops.to("TFLOPs/s").magnitude
 bw_a = a100.memory.bandwidth.to("TB/s").magnitude
 bw_h = h100.memory.bandwidth.to("TB/s").magnitude
 
-print(f"{'Peak FP16 (TFLOP/s)':<20} {flops_a:>12.0f} {flops_h:>12.0f} {flops_h/flops_a:>7.1f}×")
-print(f"{'HBM BW (TB/s)':<20} {bw_a:>12.1f} {bw_h:>12.1f} {bw_h/bw_a:>7.1f}×")
-print(f"{'Ridge (FLOP/byte)':<20} {flops_a*1e12/(bw_a*1e12):>12.0f} {flops_h*1e12/(bw_h*1e12):>12.0f} {'':>8}")
+table(
+    ["Spec", "A100", "H100", "Ratio"],
+    [
+        ["Peak FP16 (TFLOP/s)", flops_a, flops_h, f"{flops_h/flops_a:.1f}x"],
+        ["HBM BW (TB/s)", bw_a, bw_h, f"{bw_h/bw_a:.1f}x"],
+        ["Ridge (FLOP/byte)", flops_a*1e12/(bw_a*1e12), flops_h*1e12/(bw_h*1e12), ""]
+    ]
+)
 ```
 
 The FLOP/s ratio is 3.2× but the bandwidth ratio is only 1.7×. The ridge point also
@@ -122,11 +126,14 @@ lat_a = prof_a100.latency.to("ms").magnitude
 lat_h = prof_h100.latency.to("ms").magnitude
 speedup = lat_a / lat_h
 
-print(f"{'':>12} {'A100':>12} {'H100':>12} {'Speedup':>10}")
-print("-" * 50)
-print(f"{'Bottleneck':<12} {prof_a100.bottleneck:>12} {prof_h100.bottleneck:>12}")
-print(f"{'Latency':<12} {lat_a:>10.2f}ms {lat_h:>10.2f}ms {speedup:>8.1f}×")
-print(f"{'Throughput':<12} {prof_a100.throughput:>10.0f}/s {prof_h100.throughput:>10.0f}/s")
+table(
+    ["", "A100", "H100", "Speedup"],
+    [
+        ["Bottleneck", prof_a100.bottleneck, prof_h100.bottleneck, ""],
+        ["Latency", lat_a * mlsysim.core.constants.ureg.ms, lat_h * mlsysim.core.constants.ureg.ms, f"{speedup:.1f}x"],
+        ["Throughput", prof_a100.throughput, prof_h100.throughput, ""]
+    ]
+)
 ```
 
 Both GPUs report **memory-bound**. The actual speedup is approximately **1.7×** — matching
@@ -146,9 +153,7 @@ The FLOP/s advantage only kicks in when you cross into the compute-bound regime.
 Let's sweep batch size on both GPUs and find the crossover:
 
 ```{python}
-print(f"{'Batch':>6}  {'A100 Bottleneck':<18} {'H100 Bottleneck':<18} {'Speedup':>8}")
-print("-" * 56)
-
+rows = []
 for batch in [1, 4, 16, 32, 64, 128, 256]:
     pa = Engine.solve(model=model, hardware=a100, batch_size=batch, precision="fp16")
     ph = Engine.solve(model=model, hardware=h100, batch_size=batch, precision="fp16")
@@ -157,7 +162,9 @@ for batch in [1, 4, 16, 32, 64, 128, 256]:
     lh = ph.latency.to("ms").magnitude
     sp = la / lh if lh > 0 else 0
 
-    print(f"{batch:>6}  {pa.bottleneck:<18} {ph.bottleneck:<18} {sp:>6.1f}×")
+    rows.append([batch, pa.bottleneck, ph.bottleneck, f"{sp:.1f}x"])
+
+table(["Batch", "A100 Bottleneck", "H100 Bottleneck", "Speedup"], rows)
 ```
 
 ::: {.callout-important}
@@ -184,16 +191,16 @@ gpus = [
     ("H100", mlsysim.Hardware.Cloud.H100),
 ]
 
-print(f"{'GPU':<8} {'TFLOP/s':>10} {'BW (TB/s)':>10} {'Ridge':>8} {'Latency':>10} {'Bottleneck':<14}")
-print("-" * 66)
-
+rows = []
 for name, hw in gpus:
     p = Engine.solve(model=model, hardware=hw, batch_size=1, precision="fp16")
     flops = hw.compute.peak_flops.to("TFLOPs/s").magnitude
     bw = hw.memory.bandwidth.to("TB/s").magnitude
     ridge = flops * 1e12 / (bw * 1e12)
     lat = p.latency.to("ms").magnitude
-    print(f"{name:<8} {flops:>10.0f} {bw:>10.1f} {ridge:>8.0f} {lat:>8.2f}ms {p.bottleneck:<14}")
+    rows.append([name, flops, bw, ridge, p.latency, p.bottleneck])
+
+table(["GPU", "TFLOP/s", "BW (TB/s)", "Ridge", "Latency", "Bottleneck"], rows)
 ```
 
 Across three generations, compute has grown faster than bandwidth. The ridge point keeps
