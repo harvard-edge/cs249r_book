@@ -21,7 +21,7 @@ app = typer.Typer(
 state = {"output_format": "text"}
 
 @app.callback()
-def main(ctx: typer.Context, output: str = typer.Option("text", "--output", "-o", help="Output format (text, json, markdown)")):
+def main(ctx: typer.Context, output: str = typer.Option("text", "--output", "-o", help="Output format (text, json, markdown, html)")):
     """Global configuration for the CLI."""
     state["output_format"] = output.lower()
     ctx.obj = {"output_format": state["output_format"]}
