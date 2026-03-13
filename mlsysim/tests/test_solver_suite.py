@@ -9,6 +9,9 @@ verifies constants module backward compatibility.
 import math
 import pytest
 
+# All tests in this file are solver-level correctness tests
+pytestmark = pytest.mark.solver
+
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
 from mlsysim.systems.registry import Systems
@@ -50,6 +53,7 @@ from mlsysim.core.exceptions import OOMError
 class TestSingleNodeModel:
     """Tests for roofline-based single-node performance modeling."""
 
+    @pytest.mark.smoke
     def test_resnet_high_batch_is_compute_bound(self):
         """ResNet-50 at large batch should be compute-bound (high arithmetic intensity)."""
         resnet = Models.ResNet50
@@ -139,6 +143,7 @@ class TestSingleNodeModel:
 class TestServingModel:
     """Tests for two-phase LLM serving (prefill + decode)."""
 
+    @pytest.mark.smoke
     def test_prefill_is_compute_bound(self):
         """Time-to-first-token (prefill) should be dominated by compute."""
         llama = Models.Llama3_8B
@@ -217,6 +222,7 @@ class TestServingModel:
 class TestSustainabilityModel:
     """Tests for energy, carbon, and water footprint modeling."""
 
+    @pytest.mark.smoke
     def test_pue_multiplier_effect(self):
         """Higher PUE should increase total energy relative to IT energy."""
         fleet = Systems.Clusters.Research_256
@@ -278,6 +284,7 @@ class TestSustainabilityModel:
 class TestDataModel:
     """Tests for data pipeline stall detection."""
 
+    @pytest.mark.smoke
     def test_stall_when_demand_exceeds_supply(self):
         """Pipeline should stall when data demand > hardware supply."""
         h100 = Hardware.H100
@@ -329,6 +336,7 @@ class TestDataModel:
 class TestScalingModel:
     """Tests for Chinchilla scaling law analysis."""
 
+    @pytest.mark.smoke
     def test_chinchilla_optimal_d_approx_20p(self):
         """Chinchilla-optimal training: D ~ 20P (tokens_per_parameter ~ 20)."""
         solver = ScalingModel()
@@ -379,6 +387,7 @@ class TestScalingModel:
 class TestOrchestrationModel:
     """Tests for cluster queueing and wait time modeling."""
 
+    @pytest.mark.smoke
     def test_wait_time_increases_with_utilization(self):
         """Higher arrival rate (higher rho) should increase wait time."""
         fleet = Systems.Clusters.Research_256
@@ -433,6 +442,7 @@ class TestOrchestrationModel:
 class TestCompressionModel:
     """Tests for quantization and pruning trade-off analysis."""
 
+    @pytest.mark.smoke
     def test_int8_compression_ratio_is_4x(self):
         """INT8 quantization from FP32 baseline should yield 4x compression."""
         resnet = Models.ResNet50
@@ -449,14 +459,12 @@ class TestCompressionModel:
         result = solver.solve(resnet, a100, method="quantization", target_bitwidth=4)
         assert result.compression_ratio == pytest.approx(8.0, rel=0.01)
 
-    def test_accuracy_delta_is_negative(self):
+    @pytest.mark.parametrize("bitwidth", [8, 4, 2])
+    def test_accuracy_delta_is_negative(self, bitwidth):
         """Quantization should always degrade accuracy (negative delta)."""
-        resnet = Models.ResNet50
-        a100 = Hardware.A100
         solver = CompressionModel()
-        for bitwidth in [8, 4, 2]:
-            result = solver.solve(resnet, a100, method="quantization", target_bitwidth=bitwidth)
-            assert result.estimated_accuracy_delta < 0
+        result = solver.solve(Models.ResNet50, Hardware.A100, method="quantization", target_bitwidth=bitwidth)
+        assert result.estimated_accuracy_delta < 0
 
     def test_int8_accuracy_drop_small(self):
         """INT8 should have a small accuracy drop (~0.5%)."""
@@ -519,6 +527,7 @@ class TestConstantsImports:
     """Tests that units.py, defaults.py, constants.py all import correctly
     and backward compatibility is maintained."""
 
+    @pytest.mark.smoke
     def test_units_module_imports(self):
         """Core unit definitions should be importable from units.py."""
         from mlsysim.core.units import ureg, Q_, GB, TB, MS, NS, flop, TFLOPs, USD
@@ -579,6 +588,7 @@ class TestConstantsImports:
 class TestEngine:
     """Tests for the core Engine.solve() static method."""
 
+    @pytest.mark.smoke
     def test_engine_returns_performance_profile(self):
         """Engine.solve should return a PerformanceProfile instance."""
         resnet = Models.ResNet50
@@ -633,6 +643,7 @@ class TestEngine:
 class TestDistributedModel:
     """Tests for distributed training performance modeling."""
 
+    @pytest.mark.smoke
     def test_scaling_efficiency_between_0_and_1(self):
         """Scaling efficiency must be in (0, 1]."""
         solver = DistributedModel()
@@ -675,6 +686,7 @@ class TestDistributedModel:
 class TestReliabilityModel:
     """Tests for MTBF and checkpointing analysis."""
 
+    @pytest.mark.smoke
     def test_failure_probability_positive(self):
         """Failure probability should be > 0 for long jobs on large clusters."""
         solver = ReliabilityModel()
@@ -706,6 +718,7 @@ class TestReliabilityModel:
 class TestEconomicsModel:
     """Tests for total cost of ownership analysis."""
 
+    @pytest.mark.smoke
     def test_tco_positive(self):
         """TCO should be positive."""
         solver = EconomicsModel()
@@ -736,6 +749,7 @@ class TestEconomicsModel:
 class TestEfficiencyModel:
     """Tests for MFU estimation by workload type."""
 
+    @pytest.mark.smoke
     def test_ffn_mfu_higher_than_attention(self):
         """FFN layers (compute-dense GEMM) should achieve higher MFU than standard attention."""
         resnet = Models.ResNet50
@@ -754,15 +768,13 @@ class TestEfficiencyModel:
         result_flash = solver.solve(resnet, h100, workload_type="attention", use_flash_attention=True)
         assert result_flash.mfu > result_std.mfu
 
-    def test_mfu_bounded_zero_one(self):
-        """MFU must be clamped to [0, 1] for all workload types."""
-        resnet = Models.ResNet50
-        h100 = Hardware.H100
+    @pytest.mark.parametrize("wtype", ["ffn", "attention", "conv"])
+    @pytest.mark.parametrize("eff", [0.1, 0.5, 1.0, 2.0])
+    def test_mfu_bounded_zero_one(self, wtype, eff):
+        """MFU must be clamped to [0, 1] for all workload types and efficiency levels."""
         solver = EfficiencyModel()
-        for wtype in ["ffn", "attention", "conv"]:
-            for eff in [0.1, 0.5, 1.0, 2.0]:
-                result = solver.solve(resnet, h100, workload_type=wtype, efficiency=eff)
-                assert 0.0 <= result.mfu <= 1.0, f"MFU out of bounds for {wtype}, eff={eff}"
+        result = solver.solve(Models.ResNet50, Hardware.H100, workload_type=wtype, efficiency=eff)
+        assert 0.0 <= result.mfu <= 1.0
 
     def test_achievable_flops_positive(self):
         """Achievable FLOPS should always be positive."""
@@ -790,6 +802,7 @@ class TestEfficiencyModel:
 class TestTransformationModel:
     """Tests for CPU preprocessing bottleneck detection."""
 
+    @pytest.mark.smoke
     def test_cpu_bottleneck_detected(self):
         """When CPU preprocessing is slow, it should be flagged as a bottleneck."""
         solver = TransformationModel()
@@ -856,18 +869,19 @@ class TestTopologyModel:
             oversubscription_ratio=1.0,
         )
 
+    @pytest.mark.smoke
     def test_fat_tree_beta_is_one(self):
         """Fat-tree should have full bisection bandwidth (beta = 1.0)."""
         solver = TopologyModel()
         result = solver.solve(self._make_fabric(), topology="fat_tree", num_nodes=64)
         assert result.bisection_bw_fraction == pytest.approx(1.0)
 
-    def test_ring_beta_is_2_over_n(self):
+    @pytest.mark.parametrize("n", [8, 64, 256])
+    def test_ring_beta_is_2_over_n(self, n):
         """Ring topology beta should be 2/N (dynamic, decreases with N)."""
         solver = TopologyModel()
-        for n in [8, 64, 256]:
-            result = solver.solve(self._make_fabric(), topology="ring", num_nodes=n)
-            assert result.bisection_bw_fraction == pytest.approx(2.0 / n, rel=0.01)
+        result = solver.solve(self._make_fabric(), topology="ring", num_nodes=n)
+        assert result.bisection_bw_fraction == pytest.approx(2.0 / n, rel=0.01)
 
     def test_ring_beta_decreases_with_n(self):
         """Ring bisection bandwidth fraction should decrease as N grows."""
@@ -884,12 +898,12 @@ class TestTopologyModel:
         expected_beta = 2.0 * (64 ** (-1.0 / 3.0))
         assert result.bisection_bw_fraction == pytest.approx(expected_beta, rel=0.01)
 
-    def test_effective_bw_positive(self):
+    @pytest.mark.parametrize("topo", ["fat_tree", "ring", "torus_3d", "dragonfly"])
+    def test_effective_bw_positive(self, topo):
         """Effective bandwidth should always be positive."""
         solver = TopologyModel()
-        for topo in ["fat_tree", "ring", "torus_3d", "dragonfly"]:
-            result = solver.solve(self._make_fabric(), topology=topo, num_nodes=64)
-            assert result.effective_bw.magnitude > 0
+        result = solver.solve(self._make_fabric(), topology=topo, num_nodes=64)
+        assert result.effective_bw.magnitude > 0
 
     def test_oversubscription_reduces_bw(self):
         """Higher oversubscription should reduce effective bandwidth."""
@@ -908,6 +922,7 @@ class TestTopologyModel:
 class TestInferenceScalingModel:
     """Tests for inference-time reasoning cost modeling."""
 
+    @pytest.mark.smoke
     def test_total_time_greater_than_ttft(self):
         """Total reasoning time must exceed TTFT (there is decode work after prefill)."""
         solver = InferenceScalingModel()
@@ -957,6 +972,7 @@ class TestInferenceScalingModel:
 class TestSensitivitySolver:
     """Tests for numerical sensitivity analysis."""
 
+    @pytest.mark.smoke
     def test_binding_constraint_identified(self):
         """Solver should identify a binding constraint from the sensitivity dict."""
         solver = SensitivitySolver()
@@ -1003,6 +1019,7 @@ class TestSensitivitySolver:
 class TestSynthesisSolver:
     """Tests for inverse Roofline hardware synthesis."""
 
+    @pytest.mark.smoke
     def test_required_bw_positive(self):
         """Required bandwidth should always be positive."""
         solver = SynthesisSolver()
@@ -1047,6 +1064,7 @@ class TestSynthesisSolver:
 class TestResponsibleEngineeringModel:
     """Tests for DP-SGD and fairness overhead modeling."""
 
+    @pytest.mark.smoke
     def test_dp_slowdown_greater_than_one(self):
         """DP-SGD should always slow down training (factor > 1)."""
         solver = ResponsibleEngineeringModel()
@@ -1088,6 +1106,7 @@ class TestResponsibleEngineeringModel:
 class TestCheckpointModel:
     """Tests for checkpoint I/O penalty modeling."""
 
+    @pytest.mark.smoke
     def test_checkpoint_size_scales_with_parameters(self):
         """Larger models should produce larger checkpoints."""
         solver = CheckpointModel()
@@ -1142,6 +1161,7 @@ class TestCheckpointModel:
 class TestContinuousBatchingModel:
     """Tests for PagedAttention continuous batching."""
 
+    @pytest.mark.smoke
     def test_feasible_small_model_large_gpu(self):
         """A small LLM on a large GPU should be feasible."""
         solver = ContinuousBatchingModel()
@@ -1207,6 +1227,7 @@ class TestContinuousBatchingModel:
 class TestWeightStreamingModel:
     """Tests for Cerebras-style wafer-scale weight streaming inference."""
 
+    @pytest.mark.smoke
     def test_feasible_small_batch(self):
         """Small batch on Cerebras CS-3 should be feasible."""
         solver = WeightStreamingModel()
@@ -1274,6 +1295,7 @@ class TestWeightStreamingModel:
 class TestTailLatencyModel:
     """Tests for M/M/c queueing tail latency analysis."""
 
+    @pytest.mark.smoke
     def test_p99_exceeds_p50(self):
         """P99 latency must always exceed P50."""
         solver = TailLatencyModel()

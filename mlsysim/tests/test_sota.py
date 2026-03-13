@@ -5,6 +5,10 @@ from mlsysim.systems.registry import Systems
 from mlsysim.core.solver import DistributedModel, ServingModel
 from mlsysim.core.constants import Q_
 
+# Cross-solver integration tests combining multiple features
+pytestmark = pytest.mark.integration
+
+
 def test_distributed_zero_lora_overlap():
     model = TransformerWorkload(
         name="Llama-3-70B",

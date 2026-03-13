@@ -3,6 +3,10 @@ import math
 import mlsysim
 from mlsysim.core.constants import Q_
 
+# All tests in this file validate against published benchmarks
+pytestmark = pytest.mark.empirical
+
+
 def test_mlperf_resnet_a100():
     """
     Empirical Anchor 1: MLPerf Training v4.0 (NVIDIA Closed Division)
