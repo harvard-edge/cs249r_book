@@ -6,7 +6,11 @@ from mlsysim.cli.exceptions import ExitCode, exit_with_code, error_shield
 from mlsysim.cli.renderers import render_optimization
 from mlsysim.core.solver import ParallelismOptimizer, BatchingOptimizer, PlacementOptimizer
 
-optimize_app = typer.Typer(help="[Tier 3] Search the design space for optimal configurations.", no_args_is_help=True)
+optimize_app = typer.Typer(
+    help="[Tier 3] Search the design space for optimal configurations.", 
+    no_args_is_help=True,
+    rich_markup_mode="markdown"
+)
 
 @optimize_app.command("parallelism")
 def optimize_parallelism(

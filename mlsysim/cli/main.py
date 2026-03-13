@@ -7,9 +7,14 @@ from mlsysim.cli.commands.optimize import optimize_app
 
 app = typer.Typer(
     name="mlsysim", 
-    help="The ML Systems Infrastructure Modeling Engine.",
+    help="""
+    **The ML Systems Infrastructure Modeling Engine.**
+    
+    A first-principles analytical framework for predicting performance, cost, and carbon footprint of ML workloads.
+    """,
     no_args_is_help=True,
-    add_completion=True
+    add_completion=True,
+    rich_markup_mode="markdown"
 )
 
 # Global state for machine-readable mode

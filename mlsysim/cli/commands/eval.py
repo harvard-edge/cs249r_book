@@ -9,13 +9,29 @@ from mlsysim.core.evaluation import SystemEvaluator
 
 def evaluate_main(
     ctx: typer.Context,
-    target: str = typer.Argument(..., help="Path to mlsys.yaml OR Model name (e.g. Llama3_8B)"),
-    hardware: Optional[str] = typer.Argument(None, help="Hardware name (e.g. H100) - Required if target is not a YAML file"),
-    batch_size: int = typer.Option(1, "--batch-size", "-b", help="Batch size"),
-    precision: str = typer.Option("fp16", "--precision", "-p", help="Precision (fp16, fp8, etc)"),
-    efficiency: float = typer.Option(0.5, "--efficiency", "-e", help="Target Model FLOPs Utilization (0.0 to 1.0)")
+    target: str = typer.Argument(..., help="Path to `mlsys.yaml` OR Model name (e.g. `Llama3_8B`)"),
+    hardware: Optional[str] = typer.Argument(None, help="Hardware name (e.g. `H100`) - Required if target is not a YAML file"),
+    batch_size: int = typer.Option(1, "--batch-size", "-b", help="Batch size (for single node evaluation)"),
+    precision: str = typer.Option("fp16", "--precision", "-p", help="Numerical precision (`fp32`, `fp16`, `fp8`, `int8`, `int4`)"),
+    efficiency: float = typer.Option(0.5, "--efficiency", "-e", help="Target Model FLOPs Utilization (`0.0` to `1.0`)")
 ):
-    """[Tier 1] Evaluate the analytical physics of an ML system (via YAML or CLI flags)."""
+    """
+    **[Tier 1] Evaluate the analytical physics of an ML system.**
+    
+    This command can evaluate a single node via direct CLI flags, or a massive distributed fleet via a declarative YAML configuration.
+    
+    **Examples:**
+    
+    Quick single node check:
+    ```bash
+    mlsysim eval Llama3_8B H100 --batch-size 32
+    ```
+    
+    Deep cluster simulation:
+    ```bash
+    mlsysim eval my_cluster.yaml
+    ```
+    """
     
     # Context should be initialized by main.py
     output_format = ctx.obj.get("output_format", "text") if ctx.obj else "text"
