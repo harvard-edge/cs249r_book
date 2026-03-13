@@ -8,9 +8,6 @@ from mlsysim.cli.renderers import render_scorecard, print_warning, print_error
 from mlsysim.core.solver import SingleNodeModel, DistributedModel, EconomicsModel
 from mlsysim.core.evaluation import SystemEvaluation, EvaluationLevel
 
-eval_app = typer.Typer(help="[Tier 1] Evaluate the analytical physics of an ML system (via YAML or CLI flags).", no_args_is_help=True)
-
-@eval_app.callback(invoke_without_command=True)
 def evaluate_main(
     ctx: typer.Context,
     target: str = typer.Argument(..., help="Path to mlsys.yaml OR Model name (e.g. Llama3_8B)"),
@@ -55,9 +52,9 @@ def evaluate_main(
                     status="PASS",
                     summary=f"{profile.bottleneck} Bound",
                     metrics={
-                        "latency": f"{profile.latency:~P}",
+                        "latency": f"{profile.latency:~.2f}",
                         "throughput": f"{profile.throughput:~.1f}",
-                        "mfu": profile.mfu
+                        "mfu": round(profile.mfu, 2)
                     }
                 )
                 feasibility_summary = f"{profile.memory_footprint.to('GB'):~.1f} / {schema.hardware_obj.memory.capacity.to('GB'):~.1f} used"
@@ -80,8 +77,8 @@ def evaluate_main(
                     status="PASS",
                     summary=f"Scaling Efficiency: {dist_res.scaling_efficiency:.1%}",
                     metrics={
-                        "step_latency": f"{dist_res.step_latency_total:~P}",
-                        "comm_overhead": f"{dist_res.communication_latency:~P}",
+                        "step_latency": f"{dist_res.step_latency_total:~.2f}",
+                        "comm_overhead": f"{dist_res.communication_latency:~.2f}",
                         "fleet_throughput": f"{dist_res.effective_throughput:~.1f}"
                     }
                 )
@@ -148,12 +145,12 @@ def evaluate_main(
                             assertion_failures.append(f"{assertion.metric} ({metric_val}) is below min ({assertion.min})")
             
             if assertion_failures:
-                render_scorecard(eval_obj, is_json=is_json)
+                render_scorecard(eval_obj, output_format=output_format)
                 msg = "\n".join([f"❌ {f}" for f in assertion_failures])
-                print_error("SLA / Constraint Violation", msg, is_json=is_json)
+                print_error("SLA / Constraint Violation", msg, output_format=output_format)
                 exit_with_code(ExitCode.SLA_FAIL)
             
-            render_scorecard(eval_obj, is_json=is_json)
+            render_scorecard(eval_obj, output_format=output_format)
 
         # Branch 2: Quick Evaluation (CLI Flags)
         else:
@@ -168,7 +165,7 @@ def evaluate_main(
                 efficiency=efficiency
             )
 
-            if not is_json and efficiency > 0.60:
+            if output_format == "text" and efficiency > 0.60:
                 print_warning(f"Efficiency {efficiency:.0%} is extremely high for realistic workloads. Ensure this matches empirical traces.")
 
             solver = SingleNodeModel()
@@ -193,14 +190,14 @@ def evaluate_main(
                     status="PASS",
                     summary=f"{profile.bottleneck} Bound",
                     metrics={
-                        "latency": f"{profile.latency:~P}",
+                        "latency": f"{profile.latency:~.2f}",
                         "throughput": f"{profile.throughput:~.1f}",
-                        "mfu": profile.mfu
+                        "mfu": round(profile.mfu, 2)
                     }
                 ),
                 macro=EvaluationLevel(level_name="Macro", status="SKIPPED", summary="No Ops config provided")
             )
             
-            render_scorecard(eval_obj, is_json=is_json)
+            render_scorecard(eval_obj, output_format=output_format)
             
     exit_with_code(ExitCode.SUCCESS)

@@ -1,8 +1,8 @@
 import typer
 
-from mlsysim.cli.commands.zoo import zoo_app
-from mlsysim.cli.commands.eval import eval_app
-from mlsysim.cli.commands.schema import schema_app
+from mlsysim.cli.commands.zoo import zoo_main
+from mlsysim.cli.commands.eval import evaluate_main
+from mlsysim.cli.commands.schema import schema_main
 from mlsysim.cli.commands.optimize import optimize_app
 
 app = typer.Typer(
@@ -16,14 +16,15 @@ app = typer.Typer(
 state = {"output_format": "text"}
 
 @app.callback()
-def main(output: str = typer.Option("text", "--output", "-o", help="Output format (text, json)")):
+def main(ctx: typer.Context, output: str = typer.Option("text", "--output", "-o", help="Output format (text, json, markdown)")):
     """Global configuration for the CLI."""
     state["output_format"] = output.lower()
+    ctx.obj = {"output_format": state["output_format"]}
 
 # Register modular sub-commands
-app.add_typer(zoo_app, name="zoo")
-app.add_typer(schema_app, name="schema")
-app.add_typer(eval_app, name="eval")
+app.command(name="zoo", help="Explore the built-in registries (The MLSys Zoo).")(zoo_main)
+app.command(name="schema", help="Export the JSON Schema for the mlsys.yaml configuration file (for AI agents & IDEs).")(schema_main)
+app.command(name="eval", help="[Tier 1] Evaluate the analytical physics of an ML system (via YAML or CLI flags).")(evaluate_main)
 app.add_typer(optimize_app, name="optimize")
 
 if __name__ == "__main__":

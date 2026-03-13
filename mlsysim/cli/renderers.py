@@ -7,11 +7,13 @@ from rich.table import Table
 console_err = Console(stderr=True) # All diagnostics, warnings, UI go to stderr
 console_out = Console()            # stdout is reserved for the final payload
 
-def print_error(title: str, message: str, is_json: bool = False):
+def print_error(title: str, message: str, output_format: str = "text"):
     """Renders a semantic error box, or a JSON error."""
-    if is_json:
+    if output_format == "json":
         # If in JSON mode, we still print the error to stdout so the script can parse the failure reason
         print(json.dumps({"status": "error", "title": title, "reason": message}))
+    elif output_format == "markdown":
+        console_err.print(f"**🚨 {title}**\n\n{message}")
     else:
         console_err.print(Panel(message, title=f"[bold red]🚨 {title}[/bold red]", border_style="red"))
 
@@ -19,9 +21,9 @@ def print_warning(message: str):
     """Warnings ALWAYS go to stderr so they don't break JSON pipes."""
     console_err.print(f"[bold yellow]⚠️ WARNING:[/bold yellow] {message}")
 
-def render_zoo_table(registry_name: str, items: list, is_json: bool):
+def render_zoo_table(registry_name: str, items: list, output_format: str):
     """Renders a registry listing (Zoo) as a table or JSON."""
-    if is_json:
+    if output_format == "json":
         # Extract primitive data for JSON dump
         data = []
         for item in items:
@@ -34,6 +36,20 @@ def render_zoo_table(registry_name: str, items: list, is_json: bool):
                 row["layers"] = item.layers
             data.append(row)
         print(json.dumps({registry_name: data}, indent=2))
+        return
+    elif output_format == "markdown":
+        print(f"## The MLSys {registry_name.title()} Zoo\n")
+        if items and hasattr(items[0], "compute"):
+            print("| Hardware Name | Peak FLOP/s | HBM Bandwidth | TDP |")
+            print("|---|---|---|---|")
+            for item in items:
+                tdp_str = str(item.tdp) if item.tdp else "N/A"
+                print(f"| {item.name} | {item.compute.peak_flops:~P} | {item.memory.bandwidth:~P} | {tdp_str} |")
+        elif items and hasattr(items[0], "parameters"):
+            print("| Model Name | Architecture | Parameters | Layers |")
+            print("|---|---|---|---|")
+            for item in items:
+                print(f"| {item.name} | {item.architecture} | {item.parameters:~P} | {item.layers} |")
         return
 
     table = Table(title=f"The MLSys {registry_name.title()} Zoo", box=None, padding=(0, 2))
@@ -57,11 +73,31 @@ def render_zoo_table(registry_name: str, items: list, is_json: bool):
 
     console_out.print(table)
 
-def render_scorecard(eval_obj, is_json: bool):
+def render_scorecard(eval_obj, output_format: str):
     """Renders the unified 3-lens SystemEvaluation scorecard."""
-    if is_json:
+    if output_format == "json":
         # Machine Mode: stdout gets strict JSON
         print(json.dumps(eval_obj.to_dict(), indent=2))
+        return
+    elif output_format == "markdown":
+        print(f"## MLSys·im Plan: {eval_obj.scenario_name}")
+        
+        f_icon = "🟢" if eval_obj.feasibility.status == "PASS" else "🔴"
+        print(f"\n### {f_icon} Feasibility: {eval_obj.feasibility.status}")
+        print(f"{eval_obj.feasibility.summary}")
+        
+        print(f"\n### 🚀 Performance: {eval_obj.performance.status}")
+        print(f"{eval_obj.performance.summary}")
+        for k, v in eval_obj.performance.metrics.items():
+            val = f"{v:.2f}" if isinstance(v, float) else f"{v}"
+            print(f"- **{k.replace('_', ' ').title()}**: {val}")
+            
+        if eval_obj.macro.status != "SKIPPED":
+            print(f"\n### 🌍 Ops & Macro: {eval_obj.macro.status}")
+            print(f"{eval_obj.macro.summary}")
+            for k, v in eval_obj.macro.metrics.items():
+                val = f"{v:,.2f}" if isinstance(v, float) else f"{v}"
+                print(f"- **{k.replace('_', ' ').title()}**: {val}")
         return
 
     # Human Mode: Render the UI Scorecard
@@ -103,10 +139,18 @@ def render_scorecard(eval_obj, is_json: bool):
     console_out.print(panel)
 
 
-def render_optimization(opt_name: str, opt_result, is_json: bool):
+def render_optimization(opt_name: str, opt_result, output_format: str):
     """Renders the output of any OptimizerResult."""
-    if is_json:
+    if output_format == "json":
         print(json.dumps(opt_result.model_dump(mode="json"), indent=2))
+        return
+    elif output_format == "markdown":
+        print(f"## MLSys·im Optimize: {opt_name}")
+        print(f"\n### 🎯 Objective Value: {opt_result.objective_value:,.2f}")
+        print("\n### 🏆 Best Configuration")
+        for k, v in opt_result.best_config.items():
+            print(f"- **{k.replace('_', ' ').title()}**: {v}")
+        print(f"\n*Searched {opt_result.total_searched} configurations.*")
         return
 
     table = Table(show_header=False, box=None, padding=(0, 2))

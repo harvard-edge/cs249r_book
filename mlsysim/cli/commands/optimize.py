@@ -37,8 +37,7 @@ def optimize_parallelism(
             efficiency=schema.hardware.efficiency
         )
         
-        is_json = output_format == "json"
-        render_optimization("3D Parallelism", result, is_json)
+        render_optimization("3D Parallelism", result, output_format)
         
     exit_with_code(ExitCode.SUCCESS)
 
@@ -73,8 +72,7 @@ def optimize_batching(
             efficiency=schema.hardware.efficiency
         )
         
-        is_json = output_format == "json"
-        render_optimization("Batching vs. SLA", result, is_json)
+        render_optimization("Batching vs. SLA", result, output_format)
         
     exit_with_code(ExitCode.SUCCESS)
 
@@ -109,7 +107,6 @@ def optimize_placement(
             mfu=schema.hardware.efficiency
         )
         
-        is_json = output_format == "json"
-        render_optimization(f"Global Placement (Tax: ${carbon_tax}/ton)", result, is_json)
+        render_optimization(f"Global Placement (Tax: ${carbon_tax}/ton)", result, output_format)
         
     exit_with_code(ExitCode.SUCCESS)

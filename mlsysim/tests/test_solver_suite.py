@@ -31,6 +31,10 @@ from mlsysim.core.solver import (
     SensitivitySolver,
     SynthesisSolver,
     ResponsibleEngineeringModel,
+    CheckpointModel,
+    ContinuousBatchingModel,
+    WeightStreamingModel,
+    TailLatencyModel,
 )
 from mlsysim.core.formulas import calc_pipeline_bubble
 from mlsysim.systems.types import NetworkFabric
@@ -1078,7 +1082,244 @@ class TestResponsibleEngineeringModel:
 
 
 # ======================================================================
-# 20. Boundary Condition Tests
+# 20. CheckpointModel
+# ======================================================================
+
+class TestCheckpointModel:
+    """Tests for checkpoint I/O penalty modeling."""
+
+    def test_checkpoint_size_scales_with_parameters(self):
+        """Larger models should produce larger checkpoints."""
+        solver = CheckpointModel()
+        small = Models.Vision.ResNet50
+        large = Models.Language.Llama3_8B
+        res_small = solver.solve(small, Hardware.A100)
+        res_large = solver.solve(large, Hardware.A100)
+        assert res_large.checkpoint_size > res_small.checkpoint_size
+
+    def test_adam_checkpoint_larger_than_sgd(self):
+        """Adam requires 14 bytes/param (master + momentum + variance + weights), SGD requires 4."""
+        solver = CheckpointModel()
+        model = Models.ResNet50
+        hw = Hardware.A100
+        res_adam = solver.solve(model, hw, optimizer="adam")
+        res_sgd = solver.solve(model, hw, optimizer="sgd")
+        assert res_adam.checkpoint_size > res_sgd.checkpoint_size
+
+    def test_write_time_positive(self):
+        """Checkpoint write time must be positive for any non-trivial model."""
+        solver = CheckpointModel()
+        result = solver.solve(Models.GPT3, Hardware.H100)
+        assert result.write_time_seconds.magnitude > 0
+
+    def test_mfu_penalty_bounded(self):
+        """MFU penalty should be between 0 and 1 for reasonable intervals."""
+        solver = CheckpointModel()
+        result = solver.solve(Models.ResNet50, Hardware.A100, checkpoint_interval_hours=4.0)
+        assert 0.0 <= result.mfu_penalty_pct <= 1.0
+
+    def test_shorter_interval_higher_penalty(self):
+        """Checkpointing more frequently should incur a higher MFU penalty."""
+        solver = CheckpointModel()
+        model = Models.GPT3
+        hw = Hardware.H100
+        res_long = solver.solve(model, hw, checkpoint_interval_hours=8.0)
+        res_short = solver.solve(model, hw, checkpoint_interval_hours=1.0)
+        assert res_short.mfu_penalty_pct > res_long.mfu_penalty_pct
+
+    def test_storage_bottleneck_flag(self):
+        """Very large models should trigger the storage bottleneck flag (write > 60s)."""
+        solver = CheckpointModel()
+        result = solver.solve(Models.GPT3, Hardware.H100)
+        # GPT-3 is 175B params * 14 bytes/param = 2.45TB; at 1 GB/s default = ~2450s
+        assert result.storage_bottleneck is True
+
+
+# ======================================================================
+# 21. ContinuousBatchingModel
+# ======================================================================
+
+class TestContinuousBatchingModel:
+    """Tests for PagedAttention continuous batching."""
+
+    def test_feasible_small_model_large_gpu(self):
+        """A small LLM on a large GPU should be feasible."""
+        solver = ContinuousBatchingModel()
+        result = solver.solve(
+            Models.Language.Llama3_8B, Hardware.H100,
+            seq_len=1024, max_batch_size=32, page_size=16,
+        )
+        assert result.feasible is True
+        assert result.throughput_tokens_per_sec > 0
+
+    def test_infeasible_huge_model_tiny_gpu(self):
+        """A model that does not fit in memory should return feasible=False."""
+        solver = ContinuousBatchingModel()
+        result = solver.solve(
+            Models.GPT3, Hardware.Cloud.T4,
+            seq_len=2048, max_batch_size=1, page_size=16,
+        )
+        assert result.feasible is False
+        assert result.throughput_tokens_per_sec == 0.0
+
+    def test_max_active_requests_bounded_by_memory(self):
+        """Active requests cannot exceed what KV cache memory allows."""
+        solver = ContinuousBatchingModel()
+        result = solver.solve(
+            Models.Language.Llama3_8B, Hardware.H100,
+            seq_len=1024, max_batch_size=256, page_size=16,
+        )
+        assert result.max_active_requests <= 256
+        assert result.max_active_requests >= 1
+
+    def test_fragmentation_bounded(self):
+        """Memory fragmentation percentage must be in [0, 100]."""
+        solver = ContinuousBatchingModel()
+        result = solver.solve(
+            Models.Language.Llama3_8B, Hardware.H100,
+            seq_len=512, max_batch_size=16, page_size=16,
+        )
+        assert 0.0 <= result.memory_fragmentation_pct <= 100.0
+
+    def test_speedup_vs_static_at_least_one(self):
+        """Continuous batching should be at least as fast as static batching."""
+        solver = ContinuousBatchingModel()
+        result = solver.solve(
+            Models.Language.Llama3_8B, Hardware.H100,
+            seq_len=1024, max_batch_size=32, page_size=16,
+        )
+        assert result.speedup_vs_static >= 1.0
+
+    def test_smaller_page_size_less_fragmentation(self):
+        """Smaller pages reduce internal fragmentation."""
+        solver = ContinuousBatchingModel()
+        model = Models.Language.Llama3_8B
+        hw = Hardware.H100
+        res_large = solver.solve(model, hw, seq_len=1024, max_batch_size=16, page_size=64)
+        res_small = solver.solve(model, hw, seq_len=1024, max_batch_size=16, page_size=4)
+        assert res_small.memory_fragmentation_pct <= res_large.memory_fragmentation_pct
+
+
+# ======================================================================
+# 22. WeightStreamingModel
+# ======================================================================
+
+class TestWeightStreamingModel:
+    """Tests for Cerebras-style wafer-scale weight streaming inference."""
+
+    def test_feasible_small_batch(self):
+        """Small batch on Cerebras CS-3 should be feasible."""
+        solver = WeightStreamingModel()
+        result = solver.solve(
+            Models.Language.Llama3_8B, Hardware.CerebrasCS3,
+            seq_len=512, batch_size=1,
+        )
+        assert result.feasible is True
+        assert result.throughput_tokens_per_sec > 0
+
+    def test_bottleneck_is_valid_string(self):
+        """Bottleneck must be one of the two known regimes."""
+        solver = WeightStreamingModel()
+        result = solver.solve(
+            Models.Language.Llama3_8B, Hardware.CerebrasCS3,
+            seq_len=512, batch_size=1,
+        )
+        assert result.bottleneck in ("Compute-Bound", "Interconnect-Bandwidth-Bound")
+
+    def test_optimal_batch_size_positive(self):
+        """Optimal batch size must be at least 1."""
+        solver = WeightStreamingModel()
+        result = solver.solve(
+            Models.Language.Llama3_8B, Hardware.CerebrasCS3,
+            seq_len=512, batch_size=1,
+        )
+        assert result.optimal_batch_size >= 1
+
+    def test_memory_utilization_bounded(self):
+        """Wafer memory utilization must be in [0, 1] when feasible."""
+        solver = WeightStreamingModel()
+        result = solver.solve(
+            Models.Language.Llama3_8B, Hardware.CerebrasCS3,
+            seq_len=512, batch_size=1,
+        )
+        assert 0.0 <= result.wafer_memory_utilization <= 1.0
+
+    def test_infeasible_when_sram_overflows(self):
+        """Huge batch * long sequence should overflow 44GB on-wafer SRAM."""
+        solver = WeightStreamingModel()
+        result = solver.solve(
+            Models.Language.Llama3_8B, Hardware.CerebrasCS3,
+            seq_len=8192, batch_size=512,
+        )
+        # With 8192 seq_len * 512 batch * 32 heads * 128 head_dim * 32 layers * 2 (K+V) * 2 bytes
+        # = massive KV cache that should exceed 44GB SRAM
+        assert result.feasible is False
+        assert result.throughput_tokens_per_sec == 0.0
+
+    def test_layer_times_positive(self):
+        """Both layer compute and injection times must be positive."""
+        solver = WeightStreamingModel()
+        result = solver.solve(
+            Models.Language.Llama3_8B, Hardware.CerebrasCS3,
+            seq_len=512, batch_size=1,
+        )
+        assert result.layer_compute_time.magnitude > 0
+        assert result.layer_injection_time.magnitude > 0
+
+
+# ======================================================================
+# 23. TailLatencyModel
+# ======================================================================
+
+class TestTailLatencyModel:
+    """Tests for M/M/c queueing tail latency analysis."""
+
+    def test_p99_exceeds_p50(self):
+        """P99 latency must always exceed P50."""
+        solver = TailLatencyModel()
+        result = solver.solve(arrival_rate_qps=50.0, service_latency_ms=10.0, num_replicas=1)
+        assert result.p99_latency > result.p50_latency
+
+    def test_stable_at_low_utilization(self):
+        """Low arrival rate relative to capacity should be stable (rho < 1)."""
+        solver = TailLatencyModel()
+        result = solver.solve(arrival_rate_qps=10.0, service_latency_ms=10.0, num_replicas=2)
+        # 2 replicas can serve 200 qps; 10 qps is 5% utilization
+        assert result.is_stable is True
+        assert result.queue_utilization < 1.0
+
+    def test_unstable_at_overload(self):
+        """Arrival rate exceeding service capacity should be unstable (rho >= 1)."""
+        solver = TailLatencyModel()
+        # 1 replica serving at 100qps (10ms/req), arrival at 150qps => rho=1.5
+        result = solver.solve(arrival_rate_qps=150.0, service_latency_ms=10.0, num_replicas=1)
+        assert result.is_stable is False
+        assert result.queue_utilization >= 1.0
+
+    def test_more_replicas_lower_latency(self):
+        """Adding replicas should reduce tail latency."""
+        solver = TailLatencyModel()
+        res_1 = solver.solve(arrival_rate_qps=80.0, service_latency_ms=10.0, num_replicas=1)
+        res_4 = solver.solve(arrival_rate_qps=80.0, service_latency_ms=10.0, num_replicas=4)
+        assert res_4.p99_latency < res_1.p99_latency
+
+    def test_slo_violation_probability_bounded(self):
+        """SLO violation probability must be in [0, 1]."""
+        solver = TailLatencyModel()
+        result = solver.solve(arrival_rate_qps=50.0, service_latency_ms=10.0, num_replicas=1)
+        assert 0.0 <= result.slo_violation_probability <= 1.0
+
+    @pytest.mark.parametrize("replicas", [1, 2, 4, 8, 16])
+    def test_utilization_decreases_with_replicas(self, replicas):
+        """Queue utilization should decrease as replicas increase (fixed arrival rate)."""
+        solver = TailLatencyModel()
+        result = solver.solve(arrival_rate_qps=50.0, service_latency_ms=10.0, num_replicas=replicas)
+        expected_rho = 50.0 / (replicas * 100.0)  # service_rate = 1000/10 = 100 qps per replica
+        assert result.queue_utilization == pytest.approx(expected_rho, rel=0.01)
+
+
+# ======================================================================
+# 24. Boundary Condition Tests
 # ======================================================================
 
 class TestBoundaryConditions:
