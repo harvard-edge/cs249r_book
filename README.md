@@ -28,6 +28,7 @@
   **[📘 Volume I](https://mlsysbook.ai/vol1/)** •
   **[📙 Volume II *(Summer 2026)*](https://mlsysbook.ai/vol2/)** •
   **[Tiny🔥Torch](https://mlsysbook.ai/tinytorch/)** •
+  **[🚀 MLSys·im](https://mlsysbook.ai/mlsysim/)** •
   **[🌐 Ecosystem](https://mlsysbook.org)**
 
 </p>
@@ -118,7 +119,7 @@ This repository is the open learning stack for AI systems engineering: textbook 
 
 **DEPLOY** Pick a [hardware kit](https://mlsysbook.ai/kits/) and run the labs on Arduino, Raspberry Pi, and other edge devices.
 
-**SIMULATE** Explore the [mlsysim Developer Guide](mlsysim/docs/_build/index.html) to understand the physics of ML infrastructure through our first-order analytical platform.
+**SIMULATE** Explore the [MLSys·im Engine](mlsysim/README.md) to calculate the physics of ML infrastructure and run declarative IaC configurations from your terminal.
 
 **CONNECT** Say hello in [Discussions](https://github.com/harvard-edge/cs249r_book/discussions). We will do our best to reply.
 

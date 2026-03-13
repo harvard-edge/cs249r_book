@@ -36,38 +36,67 @@ The 3-tier mathematical engine that resolves the hierarchy of constraints.
 
 ---
 
-## 🚀 Quick Usage: The CLI & System Evaluation
+## 🚀 Quick Usage: The Agent-Ready CLI
 
-You can evaluate hardware and workloads directly from your terminal using the built-in CLI:
+`mlsysim` is designed as an **Infrastructure-as-Code (IaC) Compiler** for ML systems. It features a stunning terminal UI for humans and a strict JSON API for CI/CD pipelines and AI agents.
 
+### 1. Explore the Registry (The Zoo)
+Discover built-in hardware, models, and infrastructure without reading source code:
 ```bash
-python3 -m mlsysim evaluate --model Llama3_8B --hardware H100 --batch-size 32
+mlsysim zoo hardware
+mlsysim zoo models
 ```
 
-In Python, the primary way to use `mlsysim` is through the **Hierarchy of Constraints**:
-
-```python
-import mlsysim
-
-# 1. Pick a Lighthouse Scenario
-scenario = mlsysim.Applications.Doorbell
-
-# 2. Run a Multi-Level Evaluation
-evaluation = scenario.evaluate()
-
-# 3. View the Scorecard
-print(evaluation.scorecard())
+### 2. Quick Evaluation (CLI Flags)
+Evaluate the physics of a workload on a specific hardware node instantly:
+```bash
+mlsysim eval Llama3_8B H100 --batch-size 32
 ```
 
-**Example Scorecard Output:**
-```text
-=== SYSTEM EVALUATION: Smart Doorbell ===
-Level 1: Feasibility -> [PASS]
-   Model fits in memory (0.5 MB / 0.5 MB)
-Level 2: Performance -> [PASS]
-   Latency: 105.00 ms (Target: 200 ms)
-Level 3: Macro/Economics -> [PASS]
-   Annual Carbon: 5.1 kg | TCO: $31,501
+### 3. Deep Simulation (Infrastructure as Code)
+Define your entire cluster and SLA constraints in a declarative `mlsys.yaml` file:
+
+```yaml
+# example_cluster.yaml
+version: "1.0"
+workload:
+  name: "Llama3_70B"
+  batch_size: 4096
+hardware:
+  name: "H100"
+  nodes: 64
+ops:
+  region: "Quebec"
+  duration_days: 14.0
+constraints:
+  assert:
+    - metric: "performance.latency"
+      max: 50.0
+```
+
+Then compile and evaluate the 3-lens scorecard (Feasibility, Performance, Macro):
+```bash
+mlsysim eval example_cluster.yaml
+```
+
+### 4. CI/CD & Agentic Automation
+Every command supports strict, schema-validated JSON output. If an `assert` constraint is violated, the CLI returns a semantic `Exit Code 3`.
+```bash
+# Export the JSON Schema for your IDE or AI Agent
+mlsysim schema > schema.json
+
+# Run an evaluation in a CI pipeline
+tco=$(mlsysim --output json eval example_cluster.yaml | jq .macro.metrics.tco_usd)
+```
+
+### 5. Design Space Search (Optimizers)
+Use the Tier 3 Engineering Engine to automatically find the optimal configuration:
+```bash
+# Find the optimal (TP, PP, DP) split
+mlsysim optimize parallelism example_cluster.yaml
+
+# Find the cheapest, greenest datacenter location
+mlsysim optimize placement example_cluster.yaml --carbon-tax 150
 ```
 
 ---

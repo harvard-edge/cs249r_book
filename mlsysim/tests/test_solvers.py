@@ -10,7 +10,7 @@ def test_distributed_solver():
     cluster = Systems.Clusters.Research_256
 
     result = solver.solve(gpt3, cluster, batch_size=32)
-    assert hasattr(result, "node_performance")
+    assert hasattr(result, "node_profile")
     assert hasattr(result, "communication_latency")
     assert hasattr(result, "scaling_efficiency")
 
