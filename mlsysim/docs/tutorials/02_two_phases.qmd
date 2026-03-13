@@ -101,14 +101,16 @@ result = solver.solve(
     precision="fp16"
 )
 
-print(f"── Phase Analysis ─────────────────────────")
-print(f"TTFT (prefill):    {result.ttft.to('ms'):~.1f}")
-print(f"ITL  (per token):  {result.itl.to('ms'):~.2f}")
-print(f"")
-print(f"── Memory Budget ──────────────────────────")
-print(f"Model weights:     {result.model_weights_size:~.2f}")
-print(f"KV-cache:          {result.kv_cache_size:~.3f}")
-print(f"Memory utilization:{result.memory_utilization:>7.1%}")
+from mlsysim.show import table, info
+
+info("Phase Analysis",
+     TTFT_prefill=result.ttft.to('ms'),
+     ITL_per_token=result.itl.to('ms'))
+
+info("Memory Budget",
+     Model_weights=result.model_weights_size,
+     KV_cache=result.kv_cache_size,
+     Memory_utilization=f"{result.memory_utilization:.1%}")
 ```
 
 Two numbers, two different stories:
@@ -136,18 +138,18 @@ gpus = [
     ("H200",  mlsysim.Hardware.Cloud.H200),
 ]
 
-print(f"{'GPU':>8}  {'TFLOP/s':>8}  {'BW TB/s':>8}  {'TTFT (ms)':>10}  {'ITL (ms)':>10}")
-print("-" * 52)
-
+rows = []
 for name, hw in gpus:
     r = solver.solve(model=model, hardware=hw, seq_len=2048, batch_size=1, precision="fp16")
-    flops = hw.compute.peak_flops.to("TFLOPs/s").magnitude
-    bw = hw.memory.bandwidth.to("TB/s").magnitude
-    print(
-        f"{name:>8}  {flops:>8.0f}  {bw:>8.2f}  "
-        f"{r.ttft.to('ms').magnitude:>10.1f}  "
-        f"{r.itl.to('ms').magnitude:>10.3f}"
-    )
+    rows.append([
+        name,
+        hw.compute.peak_flops.to("TFLOPs/s"),
+        hw.memory.bandwidth.to("TB/s"),
+        r.ttft.to('ms'),
+        r.itl.to('ms'),
+    ])
+
+table(["GPU", "TFLOP/s", "BW (TB/s)", "TTFT (ms)", "ITL (ms)"], rows)
 ```
 
 Compare the ratios:
@@ -166,17 +168,12 @@ load all weights from HBM at every step, fewer bytes means faster decode. But pr
 compute-bound — fewer bytes doesn't help if computation is the bottleneck.
 
 ```{python}
-print(f"{'Precision':>10}  {'TTFT (ms)':>10}  {'ITL (ms)':>10}  {'Weights':>10}")
-print("-" * 48)
-
+rows = []
 for prec in ["fp16", "int8", "int4"]:
     r = solver.solve(model=model, hardware=hardware, seq_len=2048, batch_size=1, precision=prec)
-    print(
-        f"{prec:>10}  "
-        f"{r.ttft.to('ms').magnitude:>10.1f}  "
-        f"{r.itl.to('ms').magnitude:>10.3f}  "
-        f"{r.model_weights_size:>10.2f~}"
-    )
+    rows.append([prec, r.ttft.to('ms'), r.itl.to('ms'), r.model_weights_size])
+
+table(["Precision", "TTFT (ms)", "ITL (ms)", "Weights"], rows)
 ```
 
 ::: {.callout-important}
@@ -220,24 +217,23 @@ gpus_all = [
 TTFT_SLA = 200   # ms
 ITL_SLA = 50     # ms
 
-print(f"{'GPU':>8}  {'TTFT':>8}  {'ITL':>8}  {'TTFT OK?':>9}  {'ITL OK?':>8}  {'Verdict':>8}")
-print("-" * 58)
-
+rows = []
 for name, hw in gpus_all:
     r = solver.solve(model=model, hardware=hw, seq_len=4096, batch_size=1, precision="fp16")
     ttft = r.ttft.to("ms").magnitude
     itl = r.itl.to("ms").magnitude
     ttft_ok = ttft <= TTFT_SLA
     itl_ok = itl <= ITL_SLA
+    rows.append([
+        name,
+        f"{ttft:.1f} ms",
+        f"{itl:.2f} ms",
+        "✓" if ttft_ok else "✗",
+        "✓" if itl_ok else "✗",
+        "PASS" if ttft_ok and itl_ok else "FAIL",
+    ])
 
-    print(
-        f"{name:>8}  "
-        f"{ttft:>6.1f}ms  "
-        f"{itl:>6.2f}ms  "
-        f"{'✓' if ttft_ok else '✗':>9}  "
-        f"{'✓' if itl_ok else '✗':>8}  "
-        f"{'PASS' if ttft_ok and itl_ok else 'FAIL':>8}"
-    )
+table(["GPU", "TTFT", "ITL", "TTFT OK?", "ITL OK?", "Verdict"], rows)
 ```
 
 This is the analysis every ML engineer should run before choosing serving infrastructure.
