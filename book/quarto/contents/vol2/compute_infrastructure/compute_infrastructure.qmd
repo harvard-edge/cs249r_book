@@ -101,7 +101,7 @@ from mlsysim.fmt import fmt, sci, check, md, md_math
 # │          InfraSetup.ddr_bw_str, InfraSetup.dominance_str,
 # │          InfraSetup.ib_bw_str, InfraSetup.t_comp_math, InfraSetup.t_mem_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models
+from mlsysim import Hardware, Models, Tiers
 from mlsysim.core.constants import (
     TFLOPs, second, GB, TB, byte, flop, BYTES_FP16, param, BILLION,
     NVLINK_H100_BW, INFINIBAND_NDR_BW, PCIE_GEN5_BW
@@ -391,17 +391,32 @@ ax2.spines["right"].set_color(COLORS["GreenLine"])
 # --- Shade the divergence gap ---
 ax1.fill_between(years_arr, tflops, [e * tflops[0] / eff[0] for e in eff],
 
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+# ┌── 3. RENDER ────────────────────────────────────
                  alpha=0.08, color=COLORS["OrangeLine"])
 
 # --- Label each GPU ---
+offsets = [
+    (8,-15),  # P100
+    (5,-23),  # V100
+    (-20,9),  # A100
+    (-5,-28), # H100
+    (10,-5),  # B100
+    (-10,10)  # B200
+]
+
 for i, g in enumerate(gpus):
-    ax1.annotate(g, (years[i], tflops[i]), textcoords="offset points",
-                 xytext=(10, -5), fontsize=7.5, color=COLORS["BlueLine"])
+    ax1.annotate(
+        g,
+        (years[i], tflops[i]),
+        textcoords="offset points",
+        xytext=offsets[i],
+        fontsize=8.5,
+        color=COLORS["BlueLine"]
+    )
 
 # --- Growth annotations ---
 ax1.annotate("236$\\times$ raw TFLOPS",
-             xy=(2023.2, 3500), fontsize=9, color=COLORS["BlueLine"],
+             xy=(2021.9, 3500), fontsize=9, color=COLORS["BlueLine"],
              fontstyle="italic",
              bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=COLORS["BlueLine"], alpha=0.7))
 ax2.annotate("70$\\times$ efficiency",
@@ -760,19 +775,23 @@ labels = [l.get_label() for l in lines]
 ax1.legend(lines, labels, loc='upper left', frameon=True, framealpha=0.9)
 
 ax1.annotate(
-    '~36x Compute Growth',
-    xy=(2024, 4500), xycoords='data',
-    xytext=(2021.5, 4500), textcoords='data',
+    "~36x Compute Growth",
+    xy=(2023.9, 4500),
+    xytext=(2021.7, 4200),
     arrowprops=dict(arrowstyle="->", color=color_compute, lw=1.5),
-    ha='right', va='center', fontsize=9, color=color_compute, fontweight='bold'
+    ha="right",
+    fontsize=9,
+    color=color_compute
 )
 
 ax2.annotate(
-    '~9x Bandwidth Growth',
-    xy=(2024, 8000), xycoords='data',
-    xytext=(2021.5, 12000), textcoords='data',
+    "~9x Bandwidth Growth",
+    xy=(2024, 7600),
+    xytext=(2023.8, 1900),
     arrowprops=dict(arrowstyle="->", color=color_mem, lw=1.5),
-    ha='right', va='center', fontsize=9, color=color_mem, fontweight='bold'
+    ha="right",
+    fontsize=9,
+    color=color_mem
 )
 
 plt.tight_layout()
@@ -887,25 +906,45 @@ plt.fill_between(x, 0, y, where=(x > RIDGE_POINT),
 
 plt.axvline(x=RIDGE_POINT, color='#666666', linestyle='--', linewidth=1.5, alpha=0.7)
 plt.text(RIDGE_POINT * 1.1, 10, f'Ridge Point\n~{int(RIDGE_POINT)} FLOP/B',
-         color='#666666', verticalalignment='bottom')
+         color='#666666',fontsize=11, verticalalignment='bottom')
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 
+label_offsets = {
+    "LLM Decode\n(Batch=1)":  (10, -20, 'left'),
+    "LLM Decode\n(Batch=32)": (10, -20,  'left'),
+    "CNN Training\n(ResNet-50)": (-28, 12, 'center'),
+    "LLM Prefill": (0, 10, 'right'),
+    "LLM Training\n(175B)": (-5, -26, 'center')
+}
+
 for label, intensity in workloads.items():
+
     perf = min(BW_TBS * intensity, P_PEAK_TFLOPS)
-    if intensity < 10:
-        xytext = (10, -20)
-        ha = 'left'
-    elif intensity > 1000:
-        xytext = (-10, -30)
-        ha = 'right'
-    else:
-        xytext = (0, 15)
-        ha = 'center'
-    plt.scatter(intensity, perf, color='#D62728', s=80, zorder=5, edgecolors='white')
-    plt.annotate(label, (intensity, perf), xytext=xytext, textcoords='offset points',
-                 ha=ha, fontsize=9, fontweight='bold',
-                 bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.8))
+
+    xytext_x, xytext_y, ha = label_offsets[label]
+
+    plt.scatter(intensity, perf,
+                color='#D62728',
+                s=90,
+                zorder=5,
+                edgecolors='white')
+
+    plt.annotate(
+        label,
+        (intensity, perf),
+        xytext=(xytext_x, xytext_y),
+        textcoords='offset points',
+        ha=ha,
+        fontsize=9,
+        fontweight='bold',
+        bbox=dict(
+            boxstyle="round,pad=0.3",
+            fc="white",
+            ec="none",
+            alpha=0.7
+        )
+    )
 
 plt.xscale('log')
 plt.yscale('log')
@@ -915,8 +954,27 @@ plt.xlabel('Arithmetic Intensity (FLOPs / Byte)', fontweight='bold')
 plt.ylabel('Attainable Performance (TFLOPS)', fontweight='bold')
 plt.grid(True, which="both", ls="-", alpha=0.15)
 plt.grid(True, which="major", ls="-", alpha=0.3, color='#999999')
-plt.text(0.6, 2.5, f'Bandwidth Slope\n{BW_TBS:.2f} TB/s', rotation=45, color='#006395', fontsize=10)
-plt.text(3000, P_PEAK_TFLOPS * 1.1, r'$R_{\text{peak}}$' + f'\n{int(P_PEAK_TFLOPS)} TFLOPS', color='#006395', ha='right', fontsize=10)
+
+x_text = 4
+y_text = BW_TBS * 0.88*x_text
+
+plt.text(x_text, y_text,
+         f'Bandwidth Slope\n{BW_TBS:.2f} TB/s',
+         rotation=35,
+         color='#006395',
+         fontsize=10,
+         ha='center',
+         bbox=dict(fc="white", alpha=0.7, ec="none")
+)
+plt.text(
+    2200,
+    P_PEAK_TFLOPS * 1.23,
+    f'R_peak\n{int(P_PEAK_TFLOPS)} TFLOPS',
+    color='#006395',
+    ha='center',
+    fontsize=10,
+    bbox=dict(fc="white", alpha=0.7, ec="none")
+)
 plt.tight_layout()
 plt.show()
 
