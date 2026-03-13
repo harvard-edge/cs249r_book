@@ -4,6 +4,19 @@ This document tracks the systematic build-out of the advanced features for Volum
 
 ---
 
+## 🚀 The "Robust Framework" Roadmap (CLI V3)
+
+To elevate `mlsysim` from an agent-ready tool to a true industry-standard framework (like PyTorch or Terraform), the following architectural features are prioritized:
+
+| Feature | Goal | UX Design |
+| :--- | :--- | :--- |
+| **Implicit Config Discovery** | Make the tool "directory-aware" like `docker-compose`. | `mlsysim eval` automatically finds and runs `./mlsys.yaml`. |
+| **Traceability Engine** | Eliminate the "black box" by logging the exact mathematical sequence. | `mlsysim --debug eval` streams step-by-step solver calculations to `stderr`. |
+| **Plugin Architecture** | Allow companies to model unreleased/proprietary hardware privately. | `mlsysim --include custom_chips.yaml eval` injects external definitions into the Zoo. |
+| **Rich Export Formats** | Embed the tool into the social workflow of engineering (PRs, Design Docs). | `mlsysim eval -o markdown` generates a beautiful Markdown table for GitHub. |
+
+---
+
 ## 📅 Roadmap Overview
 
 | Feature | Status | Priority | Goal |
