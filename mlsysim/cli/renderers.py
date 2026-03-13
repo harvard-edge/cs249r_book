@@ -1,4 +1,5 @@
 import json
+from typing import Any
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -75,6 +76,17 @@ def render_zoo_table(registry_name: str, items: list, output_format: str):
 
 def render_scorecard(eval_obj, output_format: str):
     """Renders the unified 3-lens SystemEvaluation scorecard."""
+    
+    def _format_metric(k: str, v: Any) -> str:
+        if isinstance(v, float):
+            val = f"{v:,.2f}"
+            if "latency" in k.lower(): val += " ms"
+            elif "throughput" in k.lower(): val += " / s"
+            elif "memory" in k.lower() and "gb" in k.lower(): val += " GB"
+            elif "mfu" in k.lower(): val = f"{v:.1%}"
+            return val
+        return f"{v}"
+
     if output_format == "json":
         # Machine Mode: stdout gets strict JSON
         print(json.dumps(eval_obj.to_dict(), indent=2))
@@ -89,15 +101,13 @@ def render_scorecard(eval_obj, output_format: str):
         print(f"\n### 🚀 Performance: {eval_obj.performance.status}")
         print(f"{eval_obj.performance.summary}")
         for k, v in eval_obj.performance.metrics.items():
-            val = f"{v:.2f}" if isinstance(v, float) else f"{v}"
-            print(f"- **{k.replace('_', ' ').title()}**: {val}")
+            print(f"- **{k.replace('_', ' ').title()}**: {_format_metric(k, v)}")
             
         if eval_obj.macro.status != "SKIPPED":
             print(f"\n### 🌍 Ops & Macro: {eval_obj.macro.status}")
             print(f"{eval_obj.macro.summary}")
             for k, v in eval_obj.macro.metrics.items():
-                val = f"{v:,.2f}" if isinstance(v, float) else f"{v}"
-                print(f"- **{k.replace('_', ' ').title()}**: {val}")
+                print(f"- **{k.replace('_', ' ').title()}**: {_format_metric(k, v)}")
         return
 
     # Human Mode: Render the UI Scorecard
@@ -113,10 +123,7 @@ def render_scorecard(eval_obj, output_format: str):
     table.add_row(f"[bold {p_color}]🚀 Performance: {eval_obj.performance.status}[/bold {p_color}]", f"({eval_obj.performance.summary})")
     
     for k, v in eval_obj.performance.metrics.items():
-        if isinstance(v, float):
-            table.add_row(f"  • {k.replace('_', ' ').title()}", f"{v:.2f}")
-        else:
-            table.add_row(f"  • {k.replace('_', ' ').title()}", f"{v}")
+        table.add_row(f"  • {k.replace('_', ' ').title()}", _format_metric(k, v))
             
     # Tier 3: Macro (Optional)
     if eval_obj.macro.status != "SKIPPED":
@@ -124,10 +131,7 @@ def render_scorecard(eval_obj, output_format: str):
         table.add_row("", "")
         table.add_row(f"[bold {m_color}]🌍 Ops & Macro: {eval_obj.macro.status}[/bold {m_color}]", f"({eval_obj.macro.summary})")
         for k, v in eval_obj.macro.metrics.items():
-            if isinstance(v, float):
-                table.add_row(f"  • {k.replace('_', ' ').title()}", f"{v:,.2f}")
-            else:
-                table.add_row(f"  • {k.replace('_', ' ').title()}", f"{v}")
+            table.add_row(f"  • {k.replace('_', ' ').title()}", _format_metric(k, v))
     
     panel = Panel(
         table,
