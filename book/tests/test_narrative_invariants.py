@@ -117,3 +117,99 @@ def test_battery_tax_depletes_phone():
     
     assert runtime < day, "Narrative Violation: Battery now lasts more than a day with continuous ML!"
     assert runtime < (8 * ureg.hour), "Narrative Violation: Battery lasts too long (>8h) for the 'few hours' narrative."
+
+
+# ==============================================================================
+# VOLUME 1: FOUNDATIONS & SINGLE NODE
+# ==============================================================================
+
+def test_inference_memory_wall():
+    '''
+    Narrative: "For batch-1 serving (single user), the H100's bandwidth determines throughput, and the compute units sit almost entirely idle."
+    Invariant: Transformer decoding arithmetic intensity << Ridge Point.
+    '''
+    from mlsysim import Hardware
+    from mlsysim.core.constants import TFLOPs, second, TB
+    
+    h100 = Hardware.Cloud.H100
+    peak_flops = h100.peak_flops.m_as(TFLOPs/second)
+    peak_bw = h100.memory_bw.m_as(TB/second)
+    ridge_point = h100.ridge_point().m_as('flop/byte')
+    
+    # Batch-1 inference intensity is roughly 1 FLOP/byte
+    batch1_intensity = 1.0 
+    
+    assert batch1_intensity < ridge_point, "Narrative Violation: Batch-1 inference is no longer memory-bound!"
+    assert ridge_point / batch1_intensity > 50, "Narrative Violation: The gap between compute-bound and memory-bound is too small."
+
+def test_amdahls_law_limits():
+    '''
+    Narrative: "To see Amdahl's Law in action, suppose 5% of your training step is serial overhead... speedup is capped at 20x."
+    Invariant: 5% serial overhead = Max 20x speedup.
+    '''
+    serial_fraction = 0.05
+    max_speedup = 1.0 / serial_fraction
+    
+    assert max_speedup == 20.0, f"Narrative Violation: 5% serial fraction cap should be exactly 20x, got {max_speedup}x"
+
+def test_quantization_compression_ratios():
+    '''
+    Narrative: "INT8 quantization reduces memory footprint by 4x... versus FP32"
+    Invariant: FP32 bytes / INT8 bytes == 4.0
+    '''
+    from mlsysim.core.constants import BYTES_FP32, BYTES_INT8, ureg
+    
+    fp32_size = BYTES_FP32.m_as(ureg.byte)
+    int8_size = BYTES_INT8.m_as(ureg.byte)
+    
+    ratio = fp32_size / int8_size
+    assert ratio == 4.0, f"Narrative Violation: INT8 compression ratio is no longer exactly 4x! Got {ratio}x"
+
+# ==============================================================================
+# VOLUME 2: DISTRIBUTED SYSTEMS & SCALE
+# ==============================================================================
+
+def test_bandwidth_staircase():
+    '''
+    Narrative: "Moving data across the cluster is 18x slower than moving it within a node."
+    Invariant: Intra-node (NVLink) bandwidth >> Inter-node (InfiniBand) bandwidth.
+    '''
+    from mlsysim.core.constants import NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second
+    
+    nvlink_bw = NVLINK_H100_BW.m_as(GB/second)
+    ib_bw = INFINIBAND_NDR_BW.m_as(GB/second)
+    
+    ratio = nvlink_bw / ib_bw
+    assert ratio > 10, f"Narrative Violation: Bandwidth staircase collapsed! Ratio is only {ratio:.1f}x (needs to be >10x)"
+
+def test_distributed_communication_overhead():
+    '''
+    Narrative: "Using ring-AllReduce over InfiniBand... communication time is approximately 233 seconds."
+    Invariant: A 175B model AllReduce over IB takes multiple seconds.
+    '''
+    from mlsysim.core.constants import param, INFINIBAND_NDR_BW, BYTES_FP16, ureg
+    
+    params = 175e9 # 175B
+    bytes_per_param = BYTES_FP16.m_as(ureg.byte)
+    total_bytes = params * bytes_per_param
+    
+    # Ring-AllReduce moves roughly 2x the data
+    data_moved = 2 * total_bytes
+    
+    ib_bw_bytes = INFINIBAND_NDR_BW.to("byte/second").magnitude
+    time_seconds = data_moved / ib_bw_bytes
+    
+    assert time_seconds > 5.0, f"Narrative Violation: Communication is too fast ({time_seconds:.1f}s)! The 'bottleneck' narrative is broken."
+
+def test_fleet_reliability_mtbf():
+    '''
+    Narrative: "A cluster of 10,000 GPUs will experience hardware failures at least daily."
+    Invariant: 10,000 GPUs with individual MTBF of 3 years yields a cluster MTBF of < 3 hours.
+    '''
+    gpu_count = 10000
+    individual_mtbf_hours = 3 * 365 * 24 # 3 years
+    
+    cluster_mtbf_hours = individual_mtbf_hours / gpu_count
+    
+    assert cluster_mtbf_hours < 24.0, f"Narrative Violation: Cluster MTBF is {cluster_mtbf_hours:.1f} hours. Failures are no longer a daily reality!"
+    assert cluster_mtbf_hours < 5.0, f"Narrative Violation: Cluster MTBF is too high for the 'constant failure' narrative."
