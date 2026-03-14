@@ -18,6 +18,11 @@ from . import hardware as hardware_mod
 from . import models as models_mod
 from . import infra as infra_mod
 from . import systems as systems_mod
+from .core.scenarios import Scenarios, Applications, Archetypes
+
+# backward compatibility
+from .core import constants
+from .systems.registry import Tiers
 
 # Export primary API objects for convenience
 from .hardware.types import HardwareNode
@@ -55,7 +60,7 @@ from .core.solver import (
 
 # Export Registries
 from .hardware.registry import Hardware
-from .models.registry import Models
+from .core.models import Models
 from .infra.registry import Infra
 from .systems.registry import Systems
 
@@ -65,6 +70,7 @@ from .core.constants import ureg
 # Visualization
 from .viz.plots import plot_evaluation_scorecard, plot_roofline
 
+<<<<<<< HEAD
 __all__ = [
     # Submodules
     "core", "hardware", "models", "infra", "systems", "sim", "fmt", "show", "viz",
@@ -92,3 +98,8 @@ __all__ = [
     # Visualization
     "plot_evaluation_scorecard", "plot_roofline",
 ]
+=======
+from .systems.registry import Tiers as _Tiers
+Tiers = _Tiers
+del _Tiers
+>>>>>>> efeda2067 (Add compatibility layer for textbook scenarios)

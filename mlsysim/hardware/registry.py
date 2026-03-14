@@ -103,6 +103,7 @@ class CloudHardware(Registry):
         dispatch_tax=0.03 * ureg.ms
     )
 
+<<<<<<< HEAD
     Cerebras_CS3 = HardwareNode(
         name="Cerebras CS-3 (WSE-3)",
         release_year=2024,
@@ -117,6 +118,10 @@ class CloudHardware(Registry):
         dispatch_tax=0.001 * ureg.ms,
         metadata={"source_url": "https://www.cerebras.net/product-system/"}
     )
+=======
+    # Backward-compatible alias
+    TPUv4 = TPUv5p
+>>>>>>> efeda2067 (Add compatibility layer for textbook scenarios)
 
 class WorkstationHardware(Registry):
     """Personal computing systems used for local development."""
@@ -209,6 +214,9 @@ class EdgeHardware(Registry):
         dispatch_tax=0.1 * ureg.ms
     )
 
+    # Backward-compatible alias
+    Generic_Phone = MobileHardware.iPhone15Pro
+
 class TinyHardware(Registry):
     """Microcontrollers and sub-watt devices."""
     ESP32_S3 = HardwareNode(
@@ -245,6 +253,7 @@ class Hardware(Registry):
     B200 = CloudHardware.B200
     MI300X = CloudHardware.MI300X
     TPUv5p = CloudHardware.TPUv5p
+    TPUv4 = CloudHardware.TPUv5p
     T4 = CloudHardware.T4
     CerebrasCS3 = CloudHardware.Cerebras_CS3
 
@@ -256,3 +265,6 @@ class Hardware(Registry):
     Jetson = EdgeHardware.JetsonOrinNX
     ESP32 = TinyHardware.ESP32_S3
     Himax = TinyHardware.HimaxWE1
+
+from ..systems.registry import Fabrics
+Hardware.Networks = Fabrics
