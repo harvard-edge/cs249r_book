@@ -116,8 +116,8 @@ def _():
     if str(_root) not in sys.path:
         sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
 
     ledger = DesignLedger()
     return COLORS, LAB_CSS, DesignLedger, apply_plotly_theme, ledger, mo

@@ -296,7 +296,7 @@ act2_fig_memory = go.Figure(...)
 ```
 
 ### 4.6 Visual Identity
-Import all components from `labs.core`. Use the canonical color palette:
+Import all components from `mlsysim.labs`. Use the canonical color palette:
 
 | Token | Hex | Use |
 |---|---|---|
@@ -457,17 +457,17 @@ Before submitting a plan for implementation, verify every item:
 
 ## Appendix B: Instrument Library
 
-Available instruments from `labs.core`. Use only what is listed here. Do not invent new component names.
+Available instruments from `mlsysim.labs`. Use only what is listed here. Do not invent new component names.
 
 | Component | Import | Chapter First Available |
 |---|---|---|
-| `LatencyWaterfall` | `labs.core.components` | lab_02 |
-| `MathPeek` | `labs.core.components` | lab_01 |
-| `ComparisonRow` | `labs.core.components` | lab_01 |
-| `MetricRow` | `labs.core.components` | lab_01 |
-| `StakeholderMessage` | `labs.core.components` | lab_03 |
-| `RooflineVisualizer` | `labs.core.components` | lab_11 |
-| `PredictionLock` | `labs.core.components` | lab_01 (use compliant version from §4.3) |
+| `LatencyWaterfall` | `mlsysim.labs.components` | lab_02 |
+| `MathPeek` | `mlsysim.labs.components` | lab_01 |
+| `ComparisonRow` | `mlsysim.labs.components` | lab_01 |
+| `MetricRow` | `mlsysim.labs.components` | lab_01 |
+| `StakeholderMessage` | `mlsysim.labs.components` | lab_03 |
+| `RooflineVisualizer` | `mlsysim.labs.components` | lab_11 |
+| `PredictionLock` | `mlsysim.labs.components` | lab_01 (use compliant version from §4.3) |
 
 ---
 

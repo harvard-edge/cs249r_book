@@ -128,8 +128,8 @@ def _():
     if str(_root) not in sys.path:
         sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim.core.hardware import Hardware
     from mlsysim.core.models import Models
 
@@ -179,7 +179,7 @@ if __name__ == "__main__":
 
 ```python
 # Import once in setup cell:
-from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
 
 # Color tokens:
 COLORS['BlueLine']   # #006395  primary data
@@ -322,9 +322,9 @@ Every question is designed to produce productive failure. Every chart updates li
 ## Import Reference (working paths, verified)
 
 ```python
-from labs.core.state import DesignLedger       # ✓ verified
-from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme  # ✓ verified
-from labs.core.components import MathPeek, MetricRow, ComparisonRow  # ✓ verified
+from mlsysim.labs.state import DesignLedger       # ✓ verified
+from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme  # ✓ verified
+from mlsysim.labs.components import MathPeek, MetricRow, ComparisonRow  # ✓ verified
 from mlsysim.core.hardware import Hardware     # Cloud.H100, Edge.JetsonOrinNX, etc.
 from mlsysim.core.models import Models         # Language.Llama3_8B, Vision.ResNet50, etc.
 from mlsysim.core.constants import (           # raw constants with units

@@ -102,7 +102,7 @@ export function registerAuditCommands(context: vscode.ExtensionContext, root: st
   context.subscriptions.push(
     vscode.commands.registerCommand('labs.healthCheck', () => {
       runInTerminal(
-        `${pythonPath} -c "from labs.core.state import DesignLedger; from labs.core.style import COLORS; print('Core modules OK')"`,
+        `${pythonPath} -c "from mlsysim.labs.state import DesignLedger; from mlsysim.labs.style import COLORS; print('Core modules OK')"`,
         root,
         'Labs Health Check',
       );

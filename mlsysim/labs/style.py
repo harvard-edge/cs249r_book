@@ -1,8 +1,8 @@
-# labs/core/style.py
+# mlsysim/labs/style.py
 # MLSys Labs — Unified Design System
 #
 # USAGE:
-#   from labs.core.style import COLORS, LAB_CSS, progress_bar, concept_header
+#   from mlsysim.labs.style import COLORS, LAB_CSS, progress_bar, concept_header
 #   Always inject LAB_CSS once at the top of every lab (in the header cell).
 #   Use CSS class names from this file — never write inline style= for structural elements.
 #
