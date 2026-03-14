@@ -166,36 +166,9 @@ def render_scorecard(eval_obj, output_format: str):
         return
 
     # Human Mode: Render the UI Scorecard
-    table = Table(show_header=False, box=None, padding=(0, 2))
-    
-    # Tier 1: Feasibility
-    f_color = "green" if eval_obj.feasibility.status == "PASS" else "red"
-    f_icon = "🟢" if eval_obj.feasibility.status == "PASS" else "🔴"
-    table.add_row(f"[bold {f_color}]{f_icon} Feasibility: {eval_obj.feasibility.status}[/bold {f_color}]", f"({eval_obj.feasibility.summary})")
-    
-    # Tier 2: Performance
-    p_color = "blue"
-    table.add_row(f"[bold {p_color}]🚀 Performance: {eval_obj.performance.status}[/bold {p_color}]", f"({eval_obj.performance.summary})")
-    
-    for k, v in eval_obj.performance.metrics.items():
-        table.add_row(f"  • {k.replace('_', ' ').title()}", _format_metric(k, v))
-            
-    # Tier 3: Macro (Optional)
-    if eval_obj.macro.status != "SKIPPED":
-        m_color = "magenta"
-        table.add_row("", "")
-        table.add_row(f"[bold {m_color}]🌍 Ops & Macro: {eval_obj.macro.status}[/bold {m_color}]", f"({eval_obj.macro.summary})")
-        for k, v in eval_obj.macro.metrics.items():
-            table.add_row(f"  • {k.replace('_', ' ').title()}", _format_metric(k, v))
-    
-    panel = Panel(
-        table,
-        title=f"[bold]MLSys·im Plan: {eval_obj.scenario_name}[/bold]",
-        border_style="green" if eval_obj.passed_all else "red",
-        expand=False
-    )
-    
-    console_out.print(panel)
+    # We use the unified scorecard() method from the core library to ensure 
+    # the CLI matches the textbook (Jupyter) output exactly.
+    console_out.print(eval_obj.scorecard())
 
 
 def render_optimization(opt_name: str, opt_result, output_format: str):
