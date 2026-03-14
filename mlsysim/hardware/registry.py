@@ -87,6 +87,9 @@ class CloudHardware(Registry):
         dispatch_tax=0.03 * ureg.ms
     )
 
+    # Backward-compatible alias
+    TPUv4 = TPUv5p
+
 class WorkstationHardware(Registry):
     """Personal computing systems used for local development."""
     DGX_Spark = HardwareNode(
@@ -178,6 +181,9 @@ class EdgeHardware(Registry):
         dispatch_tax=0.1 * ureg.ms
     )
 
+    # Backward-compatible alias
+    Generic_Phone = MobileHardware.iPhone15Pro
+
 class TinyHardware(Registry):
     """Microcontrollers and sub-watt devices."""
     ESP32_S3 = HardwareNode(
@@ -214,6 +220,7 @@ class Hardware(Registry):
     B200 = CloudHardware.B200
     MI300X = CloudHardware.MI300X
     TPUv5p = CloudHardware.TPUv5p
+    TPUv4 = CloudHardware.TPUv5p
     T4 = CloudHardware.T4
     
     DGXSpark = WorkstationHardware.DGX_Spark
@@ -224,3 +231,6 @@ class Hardware(Registry):
     Jetson = EdgeHardware.JetsonOrinNX
     ESP32 = TinyHardware.ESP32_S3
     Himax = TinyHardware.HimaxWE1
+
+from ..systems.registry import Fabrics
+Hardware.Networks = Fabrics

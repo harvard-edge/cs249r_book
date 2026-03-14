@@ -109,6 +109,7 @@ class VisionModels(Registry):
         layers=8
     )
 
+
 class TinyModels(Registry):
     DS_CNN = CNNWorkload(
         name="DS-CNN (KWS)",

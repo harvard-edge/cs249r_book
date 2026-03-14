@@ -57,6 +57,41 @@ class ModelSpec:
         bpp = precision.to(ureg.byte).magnitude
         return (param_count * bpp * ureg.byte).to(ureg.byte)
 
+    def get_kv_cache_size(self, seq_len: int, batch_size: int, precision: Q_ = BYTES_FP16) -> Q_:
+        """
+        Backward-compatible approximation of KV-cache memory for transformer models.
+
+        This is intended for older textbook notebooks/qmd files that expect
+        ModelSpec.get_kv_cache_size(...). For non-transformer models, KV cache
+        is not applicable.
+        """
+        from .constants import ureg
+
+        if self.architecture != "Transformer":
+            raise AttributeError(
+                f"{type(self).__name__!r} object has no attribute 'get_kv_cache_size' "
+                f"for non-transformer model {self.name!r}"
+            )
+
+        if self.layers is None or self.parameters is None:
+            raise AttributeError(
+                f"{type(self).__name__!r} object has no attribute 'get_kv_cache_size' "
+                f"because {self.name!r} lacks transformer metadata"
+            )
+
+        # Heuristic hidden-size estimate from parameter count and layer count.
+        # For dense decoder-style transformers, params ~ 12 * L * d^2 is a
+        # reasonable back-of-the-envelope approximation.
+        param_count = self.parameters.to(ureg.count).magnitude
+        d_model = (param_count / (12 * self.layers)) ** 0.5
+
+        bytes_per_elem = precision.to(ureg.byte).magnitude
+
+        # KV cache ~ 2 (K+V) * batch * seq_len * layers * d_model * bytes
+        total_bytes = 2 * batch_size * seq_len * self.layers * d_model * bytes_per_elem
+
+        return (total_bytes * ureg.byte).to(ureg.byte)
+
     def __repr__(self):
         return f"Model({self.name}, {self.architecture})"
 
