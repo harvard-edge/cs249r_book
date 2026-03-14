@@ -51,42 +51,46 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible for instructors) ──────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     from pathlib import Path
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    import mlsysim
 
     ledger = DesignLedger()
 
-    # ── Hardware constants (all plain floats, no pint units) ──────────────────
+    # ── Hardware constants (extracted from mlsysim for reference) ─────────────
 
     # Cloud: NVIDIA H100 SXM5 (NVIDIA spec sheet, 2023)
-    H100_BW_GBS      = 3350   # GB/s HBM3e memory bandwidth
-    H100_TFLOPS_FP16 = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
-    H100_TFLOPS_FP32 = 67     # TFLOPS FP32 (non-tensor)
-    H100_TFLOPS_INT8 = 3958   # TFLOPS INT8 tensor core peak (2x FP8)
-    H100_RAM_GB      = 80     # GB HBM3e total capacity
-    H100_TDP_W       = 700    # Watts TDP
-    H100_RIDGE_PT    = 295    # FLOP/byte = 989e12 / 3350e9 (derived)
+    H100_BW_GBS      = mlsysim.Hardware.Cloud.H100.memory.bandwidth.m_as("GB/s")
+    H100_TFLOPS_FP16 = mlsysim.Hardware.Cloud.H100.compute.peak_flops.m_as("TFLOPs/s")
+    H100_TFLOPS_FP32 = mlsysim.Hardware.Cloud.H100.compute.precision_flops.get("tf32", mlsysim.Hardware.Cloud.H100.compute.peak_flops).m_as("TFLOPs/s") # Note: using tf32 as proxy
+    H100_TFLOPS_INT8 = mlsysim.Hardware.Cloud.H100.compute.precision_flops.get("int8").m_as("TFLOPs/s")
+    H100_RAM_GB      = mlsysim.Hardware.Cloud.H100.memory.capacity.m_as("GB")
+    H100_TDP_W       = mlsysim.Hardware.Cloud.H100.tdp.m_as("W")
+    H100_RIDGE_PT    = mlsysim.Hardware.Cloud.H100.ridge_point().m_as("flop/byte")
 
     # Edge: NVIDIA Jetson Orin NX 16GB (NVIDIA Jetson product brief 2023)
-    ORIN_BW_GBS      = 102    # GB/s LPDDR5 memory bandwidth
-    ORIN_TFLOPS_FP16 = 12     # TFLOPS FP16 estimated from GPU die specs
-    ORIN_TFLOPS_INT8 = 100    # TOPS INT8 (advertised on product page)
-    ORIN_RAM_GB      = 16     # GB LPDDR5
-    ORIN_TDP_W       = 25     # Watts maximum TDP
-    ORIN_RIDGE_PT    = 80     # FLOP/byte sustained estimate (12 TFLOPS / 102 GB/s = 118 peak;
-    # ~80 assumes ~70% bandwidth utilization under realistic sustained workloads,
-    # consistent with LPDDR5 efficiency measurements in embedded inference contexts)
+    ORIN_BW_GBS      = mlsysim.Hardware.Edge.Jetson.memory.bandwidth.m_as("GB/s")
+    ORIN_TFLOPS_FP16 = mlsysim.Hardware.Edge.Jetson.compute.peak_flops.m_as("TFLOPs/s")
+    ORIN_TFLOPS_INT8 = mlsysim.Hardware.Edge.Jetson.compute.precision_flops.get("int8").m_as("TFLOPs/s")
+    ORIN_RAM_GB      = mlsysim.Hardware.Edge.Jetson.memory.capacity.m_as("GB")
+    ORIN_TDP_W       = mlsysim.Hardware.Edge.Jetson.tdp.m_as("W")
+    ORIN_RIDGE_PT    = mlsysim.Hardware.Edge.Jetson.ridge_point().m_as("flop/byte")
 
     # Bytes per element by precision
     BYTES_FP32  = 4     # bytes per FP32 element
@@ -486,24 +490,44 @@ def _(
         _bytes_elem = BYTES_FP16
         _prec_label = "FP16"
 
-    # ── GEMM arithmetic intensity ─────────────────────────────────────────────
-    # For square M=N=K GEMM at B bytes/element:
-    #   FLOPs = 2 x N^3   (N multiply-adds per dot product, N^2 outputs)
-    #   Bytes = (MN + NK + MK) x B = 3 x N^2 x B  (read A, B, write C)
-    #   AI    = 2N^3 / (3N^2 x B) = 2N / (3B)
+    # ── Flight Simulator: MLSys·im Engine Evaluation ──────────────────────────
+    import mlsysim
+    
     _flops_gemm = 2.0 * _N * _N * _N
     _bytes_gemm = 3.0 * _N * _N * _bytes_elem
-    _ai_gemm    = _flops_gemm / _bytes_gemm
+    
+    # 1. Construct the workload for the Engine
+    gemm_workload = mlsysim.Models.CNNWorkload(
+        name=f"GEMM_{_N}x{_N}",
+        architecture="GEMM",
+        parameters=mlsysim.Q_(3.0 * _N * _N, "count"),
+        inference_flops=mlsysim.Q_(_flops_gemm, "flop")
+    )
+    
+    _hardware = mlsysim.Hardware.Cloud.H100 if _ctx == "cloud" else mlsysim.Hardware.Edge.Jetson
+    
+    # 2. Ask the Engine for the "Speed of Light" Roofline limit (efficiency=1.0)
+    profile = mlsysim.Engine.solve(
+        model=gemm_workload,
+        hardware=_hardware,
+        batch_size=1,
+        precision=_precision,
+        efficiency=1.0 
+    )
 
-    # ── Attainable performance ────────────────────────────────────────────────
-    _peak_flops_per_s  = _peak_flops_t * 1e12
-    _peak_bw_per_s     = _peak_bw_gbs * 1e9
-    _attain_t = min(_peak_flops_t, (_peak_bw_per_s * _ai_gemm) / 1e12)
-    _mfu_pct  = (_attain_t / _peak_flops_t) * 100.0
+    # 3. Extract the results from the physics engine
+    _ai_gemm = profile.arithmetic_intensity.m_as("flop/byte")
+    _attain_t = (profile.peak_flops_actual * profile.mfu).m_as("TFLOPs/s")
+    _mfu_pct = profile.mfu * 100.0
 
-    _is_mem_bound   = _ai_gemm < _ridge_pt
-    _regime_label   = "Memory-Bound"  if _is_mem_bound else "Compute-Bound"
+    _is_mem_bound   = profile.bottleneck == "Memory"
+    _regime_label   = profile.bottleneck + "-Bound"
     _regime_color   = COLORS["OrangeLine"] if _is_mem_bound else COLORS["GreenLine"]
+    
+    _peak_flops_per_s = _hardware.compute.precision_flops.get(_precision, _hardware.compute.peak_flops).m_as("flop/s")
+    _peak_flops_t     = _peak_flops_per_s / 1e12
+    _peak_bw_per_s    = _hardware.memory.bandwidth.m_as("byte/s")
+    _peak_bw_gbs      = _peak_bw_per_s / 1e9
 
     # ── Build roofline curve ───────────────────────────────────────────────────
     _ai_axis    = np.logspace(-1, 4, 500)
@@ -645,24 +669,37 @@ def _(
             </div>
         </div>
         """),
-        mo.md(f"""
-**Physics (visible):**
-
-```
-GEMM FLOPs     = 2 x M x N x K = 2 x {_N}^3 = {_flops_gemm/1e9:.1f} GFLOPs
-GEMM Bytes     = (MN + NK + MK) x {_bytes_elem} = 3 x {_N}^2 x {_bytes_elem} = {_bytes_gemm/1e6:.1f} MB
-Arith. Intens. = {_flops_gemm:.2e} / {_bytes_gemm:.2e} = {_ai_gemm:.1f} FLOP/byte
-
-Ridge Point    = peak_FLOPS / BW = {_peak_flops_t} TFLOPS / {_peak_bw_gbs} GB/s = {_ridge_pt:.0f} FLOP/byte
-
-Attainable     = min(peak_FLOPS, BW x AI)
-               = min({_peak_flops_t}, {_peak_bw_gbs}e9 x {_ai_gemm:.1f} / 1e12) TFLOPS
-               = min({_peak_flops_t:.0f}, {(_peak_bw_gbs*1e9*_ai_gemm/1e12):.0f}) TFLOPS
-               = {_attain_t:.1f} TFLOPS
-
-MFU            = {_attain_t:.1f} / {_peak_flops_t:.0f} = {_mfu_pct:.1f}%
-```
-        """),
+        mo.accordion({
+            "⚙️ Under the Hood: How MLSys·im Calculates This": mo.md(f"""
+            This "Flight Simulator" doesn't use hardcoded math. It is powered by the `mlsysim` engine. 
+            Here is the exact Python script running in the background to calculate the Roofline limits above:
+            
+            ```python
+            import mlsysim
+            
+            # 1. Define the hardware and the GEMM workload
+            hardware = mlsysim.Hardware.{'Cloud.H100' if _ctx == 'cloud' else 'Edge.Jetson'}
+            gemm_workload = mlsysim.Models.CNNWorkload(
+                name="GEMM_{_N}x{_N}",
+                architecture="GEMM",
+                parameters=mlsysim.Q_({3.0 * _N * _N}, "count"),
+                inference_flops=mlsysim.Q_({2.0 * _N * _N * _N}, "flop")
+            )
+            
+            # 2. Evaluate the theoretical Roofline limit (efficiency=1.0)
+            profile = mlsysim.Engine.solve(
+                model=gemm_workload,
+                hardware=hardware,
+                batch_size=1,
+                precision="{_precision}",
+                efficiency=1.0
+            )
+            
+            print(f"Bottleneck: {{profile.bottleneck}}")
+            print(f"Attainable TFLOPS: {{(profile.peak_flops_actual * profile.mfu).m_as('TFLOPs/s')}}")
+            ```
+            """)
+        }),
     ])
     return (_ai_gemm, _attain_t, _mfu_pct, _is_mem_bound, _peak_flops_t, _ridge_pt, _regime_label)
 
@@ -1469,6 +1506,16 @@ def _(mo, COLORS):
                 padding:28px 32px; margin:24px 0; border:1px solid {COLORS['Border']};">
         <h2 style="margin:0 0 20px; font-size:1.1rem; font-weight:700;
                    color:{COLORS['Text']};">Key Takeaways</h2>
+
+        <div style="background:linear-gradient(to right, #f8fafc, #f1f5f9); border-radius:8px; padding:20px; margin-bottom:24px; border-left:4px solid #8b5cf6;">
+            <div style="font-weight:800; font-size:1.1rem; color:#6d28d9; margin-bottom:8px;">💎 The Iron Law Nugget</div>
+            <div style="color:#334155; font-size:1rem; font-style:italic; line-height:1.6;">
+                "The Ridge Point is the hardware's personality. If your arithmetic intensity is below the ridge, buying a chip with more FLOP/s is literally throwing money away. You must buy bandwidth."
+            </div>
+            <div style="margin-top:12px; font-size:0.8rem; color:#64748b;">
+                <strong>Source:</strong> Adapted from the fundamental limits defined in <em>Williams, S., Waterman, A., & Patterson, D. (2009). Roofline: an insightful visual performance model for multicore architectures. Communications of the ACM, 52(4), 65-76.</em>
+            </div>
+        </div>
 
         <div style="display:flex; flex-direction:column; gap:14px; margin-bottom:24px;">
 

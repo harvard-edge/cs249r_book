@@ -39,7 +39,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible for instructor inspection) ─
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -47,12 +47,17 @@ def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
 
     # ── Hardware constants ───────────────────────────────────────────────────
     H100_TDP_W        = 700     # H100 SXM5 TDP — NVIDIA H100 SXM5 spec sheet
@@ -1454,6 +1459,17 @@ def _(mo, COLORS):
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
                 Key Takeaways
             </div>
+
+            <div style="background:linear-gradient(to right, #f8fafc, #f1f5f9); border-radius:8px; padding:20px; margin-bottom:24px; border-left:4px solid #8b5cf6;">
+                <div style="font-weight:800; font-size:1.1rem; color:#6d28d9; margin-bottom:8px;">💎 The Iron Law Nugget</div>
+                <div style="color:#334155; font-size:1rem; font-style:italic; line-height:1.6;">
+                    "Software optimization saves percentages; geography saves orders of magnitude. The carbon intensity of the local grid is the single most dominant variable in AI sustainability."
+                </div>
+                <div style="margin-top:12px; font-size:0.8rem; color:#64748b;">
+                    <strong>Source:</strong> Adapted from geographic footprint analysis in <em>Patterson, D., et al. (2021). Carbon Emissions and Large Neural Network Training. arXiv.</em>
+                </div>
+            </div>
+
             <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                 <div style="margin-bottom: 10px;">
                     <strong>1. Jevons Paradox governs total carbon, not per-unit efficiency.</strong>

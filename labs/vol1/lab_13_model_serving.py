@@ -45,7 +45,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible) ─────────────────────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     from pathlib import Path
@@ -53,12 +53,17 @@ def _():
     import numpy as np
     import math
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
 
     ledger = DesignLedger()
 
@@ -457,46 +462,33 @@ def _(
 ):
     mo.stop(act1_pred.value is None)
 
-    # ── M/M/1 Queue Physics ───────────────────────────────────────────────────
-    # Source: @sec-littles-law, Kleinrock (1975) "Queueing Systems Vol. 1"
-    #
-    # Little's Law (exact, no distributional assumption):
-    #   L = lambda * W
-    #   L — mean queue depth (requests in system)
-    #   lambda — arrival rate (req/s)
-    #   W — mean sojourn time (ms)
-    #
-    # M/M/1 mean sojourn time:
-    #   W = 1 / (mu - lambda)   for lambda < mu  [rates in req/ms]
-    #
-    # M/M/1 percentile sojourn (exact CDF inversion):
-    #   W_p = -ln(1 - p) / (mu - lambda)   [in ms, rates in req/ms]
-    #   P99:   -ln(0.01) = 4.605
-    #   P99.9: -ln(0.001) = 6.908
+    # ── Flight Simulator: MLSys·im Engine Evaluation ──────────────────────────
+    import mlsysim
 
     _lambda_rps = float(arrival_rate_slider.value)
     _mu_rps     = float(capacity_slider.value)
     _slo_ms     = float(slo_slider.value)
+    
+    _service_latency_ms = 1000.0 / _mu_rps if _mu_rps > 0 else 0
 
-    # Stable queue requires rho < 1
-    _rho        = _lambda_rps / max(_mu_rps, 0.001)
-    _rho        = min(_rho, 0.9999)
+    tail_model = mlsysim.TailLatencyModel()
+    res = tail_model.solve(
+        arrival_rate_qps=_lambda_rps,
+        service_latency_ms=_service_latency_ms,
+        num_replicas=1
+    )
 
-    # Convert to per-ms rates
+    _rho     = res.queue_utilization
+    _p50_ms  = res.p50_latency.m_as("ms")
+    _p99_ms  = res.p99_latency.m_as("ms")
+    
+    # We still need a few intermediate math steps for the specific UI visuals
     _lambda_ms  = _lambda_rps / 1000.0
     _mu_ms      = _mu_rps / 1000.0
     _gap_ms     = max(_mu_ms - _lambda_ms, 1e-9)
-
-    # Mean sojourn: W = 1/(mu-lambda) ms
     _W_ms       = 1.0 / _gap_ms
-
-    # Queue depth via Little's Law
     _L          = _lambda_ms * _W_ms
-
-    # Percentile latencies
-    _p50_ms     = -np.log(0.50) / _gap_ms
     _p95_ms     = -np.log(0.05) / _gap_ms
-    _p99_ms     = -np.log(0.01) / _gap_ms
     _p999_ms    = -np.log(0.001) / _gap_ms
 
     # P99 at 80% utilization for annotation
@@ -635,29 +627,31 @@ def _(
     apply_plotly_theme(_fig1)
 
     # ── Physics block ─────────────────────────────────────────────────────────
-    _formula = mo.md(f"""
-    ```
-    Little's Law:  L = \u03bb \u00d7 W
-      \u03bb (arrival rate)      = {_lambda_rps:.0f} req/s = {_lambda_ms:.5f} req/ms
-      \u03bc (service capacity)  = {_mu_rps:.0f} req/s = {_mu_ms:.5f} req/ms
-      \u03c1 (utilization)       = \u03bb / \u03bc = {_lambda_rps:.0f} / {_mu_rps:.0f} = {_rho:.4f}
-
-    M/M/1 mean sojourn:
-      W = 1 / (\u03bc \u2212 \u03bb) = 1 / {_gap_ms:.6f} = {_W_ms:.1f} ms
-
-    Queue depth:
-      L = \u03bb \u00d7 W = {_lambda_ms:.5f} \u00d7 {_W_ms:.1f} = {_L:.2f} requests
-
-    Percentile latencies  W_p = \u2212ln(1\u2212p) / (\u03bc\u2212\u03bb):
-      P50  = {_p50_ms:.1f} ms
-      P95  = {_p95_ms:.1f} ms
-      P99  = {_p99_ms:.1f} ms       SLO = {_slo_ms:.0f} ms  \u2192  {"PASS" if _p99_ms <= _slo_ms else "FAIL"}
-      P99.9 = {_p999_ms:.1f} ms
-
-    At 80% utilization (scenario baseline for Act I):
-      P99 = \u2212ln(0.01) / {_gap_80:.5f} = {_p99_at_80:.0f} ms
-    ```
-    """)
+    _formula = mo.accordion({
+        "⚙️ Under the Hood: How MLSys·im Calculates This": mo.md(f"""
+        This "Flight Simulator" runs the exact `mlsysim` engine used in the textbook.
+        Here is the code executing the M/M/c queueing model in the background:
+        
+        ```python
+        import mlsysim
+        
+        # 1. Define the serving architecture
+        tail_model = mlsysim.TailLatencyModel()
+        
+        # 2. Evaluate the queueing physics
+        res = tail_model.solve(
+            arrival_rate_qps={_lambda_rps:.0f},
+            service_latency_ms={_service_latency_ms:.1f},
+            num_replicas=1
+        )
+        
+        print(f"Utilization (\u03c1): {{res.queue_utilization*100:.1f}}%")
+        print(f"P50 Wait Time: {{res.p50_latency.m_as('ms'):.1f}} ms")
+        print(f"P99 Wait Time: {{res.p99_latency.m_as('ms'):.1f}} ms")
+        print(f"SLO Violated: {{res.slo_violation_probability > 0}}")
+        ```
+        """)
+    })
 
     _items = [mo.Html(_cards), _formula, mo.ui.plotly(_fig1)]
 
@@ -1165,37 +1159,33 @@ def _(
     _eff_cap        = _cap_per_r * _eff_replicas
     _rho_spike_eff  = min(_lambda_spike / max(_eff_cap, 0.001), 0.9999)
 
-    # ── M/M/1 percentile helper ───────────────────────────────────────────────
-    def _pctile(p_val, lam_rps, cap_rps):
-        """Exact M/M/1 percentile latency in ms."""
-        _g = (cap_rps - lam_rps) / 1000.0   # gap in req/ms
-        if _g <= 0:
-            return 99999.0
-        return -_m2.log(1.0 - p_val) / _g
+    # ── M/M/c queueing model via MLSys·im Engine ──────────────────────────────
+    import mlsysim
+    tail_model = mlsysim.TailLatencyModel()
+    
+    # Current load evaluation
+    res_curr = tail_model.solve(
+        arrival_rate_qps=_lambda_curr,
+        service_latency_ms=ACT2_BASE_SERVICE_MS,
+        num_replicas=_replicas
+    )
+    _p50_curr = res_curr.p50_latency.m_as("ms") - ACT2_BASE_SERVICE_MS # Wait time only
+    _p99_curr = res_curr.p99_latency.m_as("ms") - ACT2_BASE_SERVICE_MS
 
-    def _mean_w(lam_rps, cap_rps):
-        g = (cap_rps - lam_rps) / 1000.0
-        if g <= 0:
-            return 99999.0
-        return 1.0 / g
-
-    _avg_curr   = _mean_w(_lambda_curr,  _total_cap)
-    _avg_spike  = _mean_w(_lambda_spike, _eff_cap)
-
-    _p50_curr   = _pctile(0.50,  _lambda_curr,  _total_cap)
-    _p99_curr   = _pctile(0.99,  _lambda_curr,  _total_cap)
-    _p999_curr  = _pctile(0.999, _lambda_curr,  _total_cap)
-
-    _p50_spike  = _pctile(0.50,  _lambda_spike, _eff_cap)
-    _p99_spike  = _pctile(0.99,  _lambda_spike, _eff_cap)
-    _p999_spike = _pctile(0.999, _lambda_spike, _eff_cap)
-
-    # Queue depths
-    _L_curr  = (_lambda_curr  / 1000.0) * _avg_curr
-    _L_spike = (_lambda_spike / 1000.0) * _avg_spike
+    # Spike load evaluation
+    res_spike = tail_model.solve(
+        arrival_rate_qps=_lambda_spike,
+        service_latency_ms=ACT2_BASE_SERVICE_MS,
+        num_replicas=_eff_replicas
+    )
+    _p50_spike = res_spike.p50_latency.m_as("ms") - ACT2_BASE_SERVICE_MS
+    _p99_spike = res_spike.p99_latency.m_as("ms") - ACT2_BASE_SERVICE_MS
+    
+    # Calculate queue depths (Little's Law approximation)
+    _avg_curr = res_curr.p50_latency.m_as("ms") / _m2.log(2) if res_curr.is_stable else 9999
+    _avg_spike = res_spike.p50_latency.m_as("ms") / _m2.log(2) if res_spike.is_stable else 9999
 
     # Replicas needed to meet SLO without auto-scale
-    # mu_total > lambda + 4.605*1000/SLO_ms
     _needed_cap_slo  = _lambda_spike + 4.605 * 1000.0 / ACT2_SLO_P99_MS
     _needed_replicas = int(_m2.ceil(_needed_cap_slo / _cap_per_r))
 
@@ -1739,6 +1729,17 @@ def _(mo, COLORS):
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
                 Key Takeaways
             </div>
+
+            <div style="background:linear-gradient(to right, #f8fafc, #f1f5f9); border-radius:8px; padding:20px; margin-bottom:24px; border-left:4px solid #8b5cf6;">
+                <div style="font-weight:800; font-size:1.1rem; color:#6d28d9; margin-bottom:8px;">💎 The Iron Law Nugget</div>
+                <div style="color:#334155; font-size:1rem; font-style:italic; line-height:1.6;">
+                    "LLM Inference is a bimodal physics problem. Prefill is compute-bound and loves batching; Decode is memory-bound and hates batching. You must schedule them differently."
+                </div>
+                <div style="margin-top:12px; font-size:0.8rem; color:#64748b;">
+                    <strong>Source:</strong> <em>Pope, R., et al. (2023). Efficiently Scaling Transformer Inference. Proceedings of Machine Learning and Systems (MLSys).</em>
+                </div>
+            </div>
+
             <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                 <div style="margin-bottom: 10px;">
                     <strong>1. Average latency is a lie.</strong>

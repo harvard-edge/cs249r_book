@@ -40,7 +40,7 @@ app = marimo.App(width="full")
 
 
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     from pathlib import Path
@@ -48,27 +48,33 @@ def _():
     import numpy as np
     import math
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    import mlsysim
 
-    # ── Hardware constants (NVIDIA published specs + chapter equations) ──
+    # ── Hardware constants (extracted from mlsysim for reference) ──
     # H100 SXM5: https://www.nvidia.com/en-us/data-center/h100/
-    H100_BW_GBS = 3350       # GB/s  HBM3e memory bandwidth
-    H100_TFLOPS_FP16 = 989   # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
-    H100_RAM_GB = 80         # GB  HBM capacity
+    H100_BW_GBS = mlsysim.Hardware.Cloud.H100.memory.bandwidth.m_as("GB/s")
+    H100_TFLOPS_FP16 = mlsysim.Hardware.Cloud.H100.compute.peak_flops.m_as("TFLOPs/s")
+    H100_RAM_GB = mlsysim.Hardware.Cloud.H100.memory.capacity.m_as("GB")
 
     # A100 SXM4: prior-generation reference for CTO upgrade scenario
-    A100_BW_GBS = 2000       # GB/s  HBM2e (actual: 1935, rounded up for scenario)
-    A100_TFLOPS_FP16 = 312   # TFLOPS  FP16 Tensor Core peak
+    A100_BW_GBS = mlsysim.Hardware.Cloud.A100.memory.bandwidth.m_as("GB/s")
+    A100_TFLOPS_FP16 = mlsysim.Hardware.Cloud.A100.compute.peak_flops.m_as("TFLOPs/s")
 
     # Jetson Orin NX: NVIDIA embedded inference platform
-    ORIN_BW_GBS = 102        # GB/s  LPDDR5 memory bandwidth
-    ORIN_TOPS = 100          # TOPS  INT8 equivalent
-    ORIN_RAM_GB = 16         # GB
+    ORIN_BW_GBS = mlsysim.Hardware.Edge.Jetson.memory.bandwidth.m_as("GB/s")
+    ORIN_TOPS = mlsysim.Hardware.Edge.Jetson.compute.precision_flops.get("int8", mlsysim.Hardware.Edge.Jetson.compute.peak_flops).m_as("TFLOPs/s")
+    ORIN_RAM_GB = mlsysim.Hardware.Edge.Jetson.memory.capacity.m_as("GB")
 
     # Speed of light in fiber — from @eq-latency-physics (ml_systems.qmd):
     #   Latency_min = 2 * Distance / (0.67 * c) ≈ 2 * Distance / 200,000 km/s
@@ -83,7 +89,7 @@ def _():
 
     return (
         mo, ledger, COLORS, LAB_CSS, apply_plotly_theme,
-        go, np, math,
+        go, np, math, mlsysim,
         H100_BW_GBS, H100_TFLOPS_FP16, H100_RAM_GB,
         A100_BW_GBS, A100_TFLOPS_FP16,
         ORIN_BW_GBS, ORIN_TOPS, ORIN_RAM_GB,
@@ -449,44 +455,58 @@ def _(
         _hw_new  = "Jetson Orin NX"
         _hw_old  = "Prior Orin (20% compute)"
 
-    # ── Iron Law calculation ──────────────────────────────────────────────────
-    # Model parameters for a representative transformer layer inference:
-    #   D  = 2 GB (weights loaded per inference for a ~1B param slice in FP16)
-    #   O  = AI * D  (by definition of Arithmetic Intensity)
-    # Source: @sec-ml-systems-architectural-anchor (Memory Wall)
+    # ── Flight Simulator: MLSys·im Engine Evaluation ──────────────────────────
+    import mlsysim
+
     _AI = act1_ai_slider.value       # FLOPs/Byte — user control
     _D_GB  = 2.0                     # GB data moved per inference call
     _D_bytes = _D_GB * 1e9           # bytes
-
-    # Operations = AI × data
     _O_flops = _AI * _D_bytes        # FLOPs
 
-    # ── New hardware (H100 or Orin) ──────────────────────────────────────────
-    _bw_new_bps  = _bw_new  * 1e9   # bytes/s
-    _r_new_fps   = _r_new   * 1e12  # FLOPs/s
+    # Construct the workload for the Engine
+    mock_workload = mlsysim.Models.CNNWorkload(
+        name=f"Layer_Slice_AI_{_AI}",
+        architecture="Generic",
+        parameters=mlsysim.Q_(_D_bytes / 2, "count"), # Assume FP16 (2 bytes/param)
+        inference_flops=mlsysim.Q_(_O_flops, "flop")
+    )
 
-    _t_mem_new_ms  = (_D_bytes / _bw_new_bps)  * 1000   # ms
-    _t_comp_new_ms = (_O_flops / _r_new_fps)   * 1000   # ms
-    _t_ovh_new_ms  = OVERHEAD_MS                         # ms (fixed)
+    # Resolve hardware objects
+    _hw_obj_new = mlsysim.Hardware.Cloud.H100 if _ctx == "cloud" else mlsysim.Hardware.Edge.Jetson
+    _hw_obj_old = mlsysim.Hardware.Cloud.A100 if _ctx == "cloud" else mlsysim.Hardware.Tiny.ESP32 # Using ESP32 as a tiny baseline
+    
+    # Override dispatcher tax to match the fixed OVERHEAD_MS for the lab
+    _hw_obj_new.dispatch_tax = mlsysim.Q_(OVERHEAD_MS, "ms")
+    _hw_obj_old.dispatch_tax = mlsysim.Q_(OVERHEAD_MS, "ms")
+    
+    # Evaluate New Hardware
+    profile_new = mlsysim.Engine.solve(
+        model=mock_workload, hardware=_hw_obj_new, batch_size=1, precision="fp16", efficiency=1.0
+    )
+    # Evaluate Old Hardware
+    profile_old = mlsysim.Engine.solve(
+        model=mock_workload, hardware=_hw_obj_old, batch_size=1, precision="fp16", efficiency=1.0
+    )
+
+    # Extract component times
+    _t_mem_new_ms  = profile_new.latency_memory.m_as("ms")
+    _t_comp_new_ms = profile_new.latency_compute.m_as("ms")
+    _t_ovh_new_ms  = profile_new.latency_overhead.m_as("ms")
+    # To match the classic strict addition in the textbook's first introduction:
     _t_total_new   = _t_mem_new_ms + _t_comp_new_ms + _t_ovh_new_ms
 
-    # ── Old hardware (A100 or prior Orin) ───────────────────────────────────
-    _bw_old_bps  = _bw_old  * 1e9
-    _r_old_fps   = _r_old   * 1e12
-
-    _t_mem_old_ms  = (_D_bytes / _bw_old_bps)  * 1000
-    _t_comp_old_ms = (_O_flops / _r_old_fps)   * 1000
-    _t_ovh_old_ms  = OVERHEAD_MS
+    _t_mem_old_ms  = profile_old.latency_memory.m_as("ms")
+    _t_comp_old_ms = profile_old.latency_compute.m_as("ms")
+    _t_ovh_old_ms  = profile_old.latency_overhead.m_as("ms")
     _t_total_old   = _t_mem_old_ms + _t_comp_old_ms + _t_ovh_old_ms
 
     # ── Ridge points ─────────────────────────────────────────────────────────
-    # Ridge point = R / BW  (FLOPs/Byte at which compute term = memory term)
-    _ridge_new = (_r_new * 1e12) / (_bw_new * 1e9)   # FLOPs/Byte
-    _ridge_old = (_r_old * 1e12) / (_bw_old * 1e9)
+    _ridge_new = _hw_obj_new.ridge_point().m_as("flop/byte")
+    _ridge_old = _hw_obj_old.ridge_point().m_as("flop/byte")
 
     # ── Bottleneck classification ─────────────────────────────────────────────
-    _is_mem_bound_new = _AI < _ridge_new
-    _bottleneck_new   = "Memory-bound" if _is_mem_bound_new else "Compute-bound"
+    _is_mem_bound_new = profile_new.bottleneck == "Memory"
+    _bottleneck_new   = profile_new.bottleneck + "-bound"
     _bottleneck_color = COLORS["RedLine"] if _is_mem_bound_new else COLORS["BlueLine"]
 
     # ── Latency improvement ───────────────────────────────────────────────────
@@ -545,20 +565,36 @@ def _(
     apply_plotly_theme(_fig)
 
     # ── Physics formula display ───────────────────────────────────────────────
-    _formula_block = f"""
-    **Iron Law — Live Calculation** (`AI = {_AI} FLOPs/Byte, D = {_D_GB:.1f} GB`)
-
-    ```
-    Memory  D/BW  =  {_D_GB:.1f} GB  /  {_bw_new:,} GB/s  =  {_t_mem_new_ms:.3f} ms   ← {_hw_new}
-    Compute O/R   =  {_AI * _D_GB:.1f} GFLOPS  /  {_r_new:,} TFLOPS  =  {_t_comp_new_ms:.4f} ms
-    Overhead  L   =  {_t_ovh_new_ms:.1f} ms  (fixed dispatch tax)
-    ─────────────────────────────────────────────────────────────
-    Total    T    =  {_t_total_new:.3f} ms   (vs {_t_total_old:.3f} ms on {_hw_old})
-
-    Ridge Point  =  R / BW  =  {_ridge_new:,.0f} FLOPs/Byte   ({_hw_new})
-    AI = {_AI} FLOPs/Byte  →  {'BELOW ridge → Memory-bound' if _is_mem_bound_new else 'ABOVE ridge → Compute-bound'}
-    ```
-    """
+    _accordion = mo.accordion({
+        "⚙️ Under the Hood: How MLSys·im Calculates This": mo.md(f"""
+        This "Flight Simulator" uses the exact same `mlsysim` physics engine as the textbook.
+        Here is the code running in the background to calculate the Iron Law terms:
+        
+        ```python
+        import mlsysim
+        
+        # 1. Define the hardware and workload
+        hw = mlsysim.Hardware.Cloud.H100 if _ctx == 'cloud' else mlsysim.Hardware.Edge.Jetson
+        workload = mlsysim.Models.Generic(
+            parameters=mlsysim.Q_({_D_bytes / 2}, "count"), # Assume FP16
+            inference_flops=mlsysim.Q_({_O_flops}, "flop")
+        )
+        
+        # 2. Evaluate the theoretical performance
+        profile = mlsysim.Engine.solve(
+            model=workload,
+            hardware=hw,
+            batch_size=1,
+            precision="fp16",
+            efficiency=1.0
+        )
+        
+        print(f"Memory Term: {{profile.latency_memory}}")
+        print(f"Compute Term: {{profile.latency_compute}}")
+        print(f"Overhead Term: {{profile.latency_overhead}}")
+        ```
+        """)
+    })
 
     # ── Metric cards ──────────────────────────────────────────────────────────
     _mem_pct  = _t_mem_new_ms  / _t_total_new * 100 if _t_total_new > 0 else 0
@@ -635,7 +671,7 @@ def _(
         ),
         mo.as_html(_fig),
         mo.Html(_cards_html),
-        mo.md(_formula_block),
+        _accordion,
     ])
     # Export bottleneck for downstream cells
     return (
@@ -1467,6 +1503,17 @@ def _(mo, COLORS):
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
                 Key Takeaways
             </div>
+            
+            <div style="background:linear-gradient(to right, #f8fafc, #f1f5f9); border-radius:8px; padding:20px; margin-bottom:24px; border-left:4px solid #8b5cf6;">
+                <div style="font-weight:800; font-size:1.1rem; color:#6d28d9; margin-bottom:8px;">💎 The Iron Law Nugget</div>
+                <div style="color:#334155; font-size:1rem; font-style:italic; line-height:1.6;">
+                    "The Iron Law of ML Systems states that performance is bounded by the slowest of three things: Computation, Communication, or Memory. You cannot optimize a system without knowing which one is binding."
+                </div>
+                <div style="margin-top:12px; font-size:0.8rem; color:#64748b;">
+                    <strong>Source:</strong> Formalized in <em>Reddi, V. J., et al. (2025). Machine Learning Systems. Chapter 2: ML Systems.</em> (Adapted from the fundamental limits defined in Patterson & Hennessy).
+                </div>
+            </div>
+
             <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                 <div style="margin-bottom: 10px;">
                     <strong>1. The Memory Wall dominates transformer inference at low Arithmetic Intensity.</strong>

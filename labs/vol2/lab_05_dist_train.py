@@ -44,7 +44,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible for instructor inspection) ─
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -53,12 +53,17 @@ def _():
     import numpy as np
     from plotly.subplots import make_subplots
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
 
     ledger = DesignLedger()
     return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, make_subplots
@@ -397,77 +402,72 @@ def _(mo):
 # ─── ACT I: PHYSICS ENGINE ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, apply_plotly_theme, dp_batch_per_gpu, dp_gpus, dp_interconnect, dp_model_b, go, math, mo, np):
-    # ── Hardware constants ───────────────────────────────────────────────────────
-    # Source: NVIDIA H100 SXM5 spec sheet, Mellanox InfiniBand HDR200 spec
-    H100_TFLOPS_FP16  = 989.0     # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
-    H100_RAM_GB       = 80.0      # GB HBM3e; NVIDIA H100 spec sheet
-    NVLINK4_BW_GBS    = 900.0     # GB/s NVLink 4 (per-direction); NVIDIA DGX H100 spec
-    IB_HDR200_BW_GBS  = 400.0     # GB/s InfiniBand HDR200 (per-direction); Mellanox spec
-    GPUS_PER_NODE     = 8         # DGX H100 node size; standard industry config
-    BYTES_PER_PARAM   = 2         # FP16: 2 bytes per parameter
-    BYTES_PER_GRAD    = 2         # FP16 gradients: 2 bytes per gradient
+    # ── Flight Simulator: MLSys·im Engine Evaluation ─────────────────────────────
+    import mlsysim
 
-    # ── Extract widget values ────────────────────────────────────────────────────
-    _params_b  = dp_model_b.value          # billions of params
+    _params_b  = dp_model_b.value
     _gpus      = dp_gpus.value
     _batch_gpu = dp_batch_per_gpu.value
     _fabric    = dp_interconnect.value
 
-    # ── Derived quantities ───────────────────────────────────────────────────────
-    _params     = _params_b * 1e9          # total parameters
-    _grad_bytes = _params * BYTES_PER_GRAD # gradient tensor size in bytes
-    _grad_gb    = _grad_bytes / 1e9        # gradient size in GB
+    # Use the hardware registry
+    h100 = mlsysim.Hardware.Cloud.H100
+    
+    # Network fabric based on selection
+    if _fabric == "nvlink" and _gpus <= 8:
+        fabric = mlsysim.Systems.Fabrics.NVLink_4
+    else:
+        fabric = mlsysim.Systems.Fabrics.InfiniBand_HDR
+        
+    _forced_ib = (_fabric == "nvlink" and _gpus > 8)
+    _effective_bw = fabric.bandwidth.m_as("GB/s")
+    _fabric_label = fabric.name
 
-    # ── AllReduce bandwidth model ────────────────────────────────────────────────
-    # Ring-AllReduce transfers 2*(N-1)/N * data per device
-    # Source: @sec-distributed-training-systems AllReduce bandwidth analysis
-    # Effective bytes per GPU = 2*(N-1)/N * grad_gb
-    _allreduce_factor = 2.0 * (_gpus - 1) / _gpus
-    _allreduce_data_gb = _grad_gb * _allreduce_factor   # GB transferred per GPU
+    # Build the cluster
+    node = mlsysim.Systems.Node(name="DGX H100", accelerator=h100, accelerators_per_node=8, intra_node_bw=mlsysim.Systems.Fabrics.NVLink_4.bandwidth)
+    fleet = mlsysim.Systems.Fleet(name="Custom Cluster", node=node, count=max(1, _gpus // 8), fabric=fabric)
+    
+    # Build the model workload
+    model = mlsysim.Models.Generic(
+        parameters=mlsysim.Q_(_params_b * 1e9, "count"),
+        inference_flops=mlsysim.Q_(2.0 * _params_b * 1e9, "flop") # 2N inference, 6N training handled inside engine
+    )
 
-    # Interconnect selection and effective bandwidth
-    # Note: when >8 GPUs, traffic crosses node boundary via InfiniBand even if NVLink selected
-    _effective_bw     = NVLINK4_BW_GBS if (_fabric == "nvlink" and _gpus <= GPUS_PER_NODE) else IB_HDR200_BW_GBS
-    _fabric_label     = "NVLink 4" if _effective_bw == NVLINK4_BW_GBS else "InfiniBand HDR200"
-    _forced_ib        = (_fabric == "nvlink" and _gpus > GPUS_PER_NODE)
+    # Solve via the engine
+    solver = mlsysim.DistributedModel()
+    res = solver.solve(
+        model=model,
+        fleet=fleet,
+        batch_size=_batch_gpu * _gpus, # Global batch size
+        precision="fp16",
+        efficiency=0.52, # Reference MFU
+        tp_size=1,
+        pp_size=1,
+        overlap_comm=False # Turn off overlap for raw AllReduce math
+    )
 
-    _allreduce_time_s  = _allreduce_data_gb / _effective_bw   # seconds
-
-    # ── Compute step time ────────────────────────────────────────────────────────
-    # Forward + backward pass FLOPs ≈ 6 * params * batch_size
-    # Source: standard transformer FLOP count estimate (6N approximation)
-    _seq_len      = 2048        # typical sequence length for a 7B-class model
-    _hidden_dim   = 4096        # typical for 7B models
-    _flops_step   = 6.0 * _params * _batch_gpu   # forward + backward FLOPs
-    _mfu_ref      = 0.52        # reference MFU at 8 GPUs (from stakeholder message)
-
-    # Compute time at reference MFU to anchor the physics
-    _compute_time_s = _flops_step / (H100_TFLOPS_FP16 * 1e12 * _mfu_ref)
-
-    # ── Effective MFU with AllReduce overhead ────────────────────────────────────
-    # MFU = T_compute / (T_compute + T_allreduce)
-    # When T_allreduce grows relative to T_compute, MFU falls
-    _total_time_s     = _compute_time_s + _allreduce_time_s
-    _mfu_effective    = (_compute_time_s / _total_time_s) * _mfu_ref  # fractional
-    _mfu_pct          = _mfu_effective * 100.0
-
-    # ── Comm/Compute ratio ───────────────────────────────────────────────────────
-    _cc_ratio         = _allreduce_time_s / _compute_time_s
-
-    # ── Color coding ─────────────────────────────────────────────────────────────
-    _mfu_color  = COLORS["GreenLine"] if _mfu_pct >= 45 else (COLORS["OrangeLine"] if _mfu_pct >= 25 else COLORS["RedLine"])
-    _cc_color   = COLORS["GreenLine"] if _cc_ratio <= 0.3 else (COLORS["OrangeLine"] if _cc_ratio <= 0.8 else COLORS["RedLine"])
+    _compute_time_s = res.node_profile.latency.m_as("s")
+    _allreduce_time_s = res.dp_communication_latency.m_as("s")
+    _total_time_s = res.step_latency_total.m_as("s")
+    _mfu_pct = res.scaling_efficiency * 52.0 # Effective MFU = scaling_efficiency * baseline
+    _cc_ratio = _allreduce_time_s / _compute_time_s if _compute_time_s > 0 else 0
 
     # ── Build MFU vs GPU count curve ─────────────────────────────────────────────
     _gpu_range     = [8, 16, 32, 64, 128, 256, 512, 1024]
     _mfu_curve     = []
     for _g in _gpu_range:
-        _ar_factor_g = 2.0 * (_g - 1) / _g
-        _bw_g        = NVLINK4_BW_GBS if _g <= GPUS_PER_NODE else IB_HDR200_BW_GBS
-        _ar_time_g   = (_grad_gb * _ar_factor_g) / _bw_g
-        _total_g     = _compute_time_s + _ar_time_g
-        _mfu_g       = (_compute_time_s / _total_g) * _mfu_ref * 100.0
-        _mfu_curve.append(_mfu_g)
+        # Evaluate each point on the curve using the engine
+        _curve_fleet = mlsysim.Systems.Fleet(
+            name="Sweep Cluster", 
+            node=node, 
+            count=max(1, _g // 8), 
+            fabric=mlsysim.Systems.Fabrics.NVLink_4 if (_fabric == "nvlink" and _g <= 8) else mlsysim.Systems.Fabrics.InfiniBand_HDR
+        )
+        _curve_res = solver.solve(
+            model=model, fleet=_curve_fleet, batch_size=_batch_gpu * _g,
+            precision="fp16", efficiency=0.52, tp_size=1, pp_size=1, overlap_comm=False
+        )
+        _mfu_curve.append(_curve_res.scaling_efficiency * 52.0)
 
     _fig = go.Figure()
     _fig.add_trace(go.Scatter(
@@ -511,6 +511,10 @@ def _(COLORS, apply_plotly_theme, dp_batch_per_gpu, dp_gpus, dp_interconnect, dp
     )
     apply_plotly_theme(_fig)
 
+    # ── Color coding ─────────────────────────────────────────────────────────────
+    _mfu_color  = COLORS["GreenLine"] if _mfu_pct >= 45 else (COLORS["OrangeLine"] if _mfu_pct >= 25 else COLORS["RedLine"])
+    _cc_color   = COLORS["GreenLine"] if _cc_ratio <= 0.3 else (COLORS["OrangeLine"] if _cc_ratio <= 0.8 else COLORS["RedLine"])
+
     # ── Forced-IB warning ────────────────────────────────────────────────────────
     _ib_warn = ""
     if _forced_ib:
@@ -518,36 +522,15 @@ def _(COLORS, apply_plotly_theme, dp_batch_per_gpu, dp_gpus, dp_interconnect, dp
         <div style="background:{COLORS['OrangeLL']}; border:1px solid {COLORS['OrangeLine']};
                     border-radius:8px; padding:10px 14px; margin:8px 0; font-size:0.85rem;">
             <strong style="color:{COLORS['OrangeLine']};">Interconnect Upgrade Applied:</strong>
-            NVLink 4 operates within a single DGX node (8 GPUs). At {_gpus} GPUs, traffic crosses
-            node boundaries. Effective bandwidth is InfiniBand HDR200 ({IB_HDR200_BW_GBS:.0f} GB/s)
-            &mdash; {NVLINK4_BW_GBS/IB_HDR200_BW_GBS:.1f}&times; slower than NVLink 4.
+            NVLink operates within a single DGX node (8 GPUs). At {_gpus} GPUs, traffic crosses
+            node boundaries. The physics engine automatically fell back to InfiniBand.
         </div>
         """
 
     # ── Physics display ──────────────────────────────────────────────────────────
     mo.vstack([
         mo.Html(f"""
-        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
-                    font-size:0.83rem; line-height:1.8;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;
-                        font-family:sans-serif;">
-                Physics — AllReduce Bandwidth Model
-            </div>
-            <div>Gradient tensor = {_params_b}B params &times; {BYTES_PER_GRAD} bytes/param = <strong>{_grad_gb:.1f} GB</strong></div>
-            <div>Ring-AllReduce factor = 2&times;(N-1)/N = 2&times;({_gpus}-1)/{_gpus} = <strong>{_allreduce_factor:.4f}</strong></div>
-            <div>Data transferred per GPU = {_grad_gb:.1f} GB &times; {_allreduce_factor:.4f} = <strong>{_allreduce_data_gb:.2f} GB</strong></div>
-            <div>Interconnect = <strong>{_fabric_label}</strong> &mdash; bandwidth = <strong>{_effective_bw:.0f} GB/s</strong></div>
-            <div>T_allreduce = {_allreduce_data_gb:.2f} GB / {_effective_bw:.0f} GB/s = <strong>{_allreduce_time_s*1000:.1f} ms</strong></div>
-            <div>T_compute (at {_mfu_ref*100:.0f}% MFU ref) = <strong>{_compute_time_s*1000:.1f} ms</strong></div>
-            <div>Comm/Compute ratio = {_allreduce_time_s*1000:.1f} / {_compute_time_s*1000:.1f} = <strong>{_cc_ratio:.2f}</strong></div>
-            <div>MFU_effective = T_compute / (T_compute + T_allreduce) &times; MFU_ref</div>
-            <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = {_compute_time_s*1000:.1f} / {_total_time_s*1000:.1f} &times; {_mfu_ref*100:.0f}% = <strong>{_mfu_pct:.1f}%</strong></div>
-        </div>
         {_ib_warn}
-        """),
-        mo.Html(f"""
         <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
@@ -584,13 +567,37 @@ def _(COLORS, apply_plotly_theme, dp_batch_per_gpu, dp_gpus, dp_interconnect, dp
         </div>
         """),
         mo.ui.plotly(_fig),
+        mo.accordion({
+            "⚙️ Under the Hood: How MLSys·im Calculates This": mo.md(f"""
+            This "Flight Simulator" runs the exact `mlsysim` engine used in the textbook.
+            Here is the code executing the distributed scaling model in the background:
+            
+            ```python
+            import mlsysim
+            
+            # 1. Define the distributed fleet
+            fabric = mlsysim.Systems.Fabrics.InfiniBand_HDR
+            node = mlsysim.Systems.Node(name="DGX", accelerator=mlsysim.Hardware.Cloud.H100)
+            fleet = mlsysim.Systems.Fleet(name="Cluster", node=node, count={max(1, _gpus // 8)}, fabric=fabric)
+            
+            # 2. Evaluate the Ring-AllReduce communication overhead
+            solver = mlsysim.DistributedModel()
+            res = solver.solve(
+                model=mlsysim.Models.Generic(parameters={_params_b}e9),
+                fleet=fleet,
+                batch_size={_batch_gpu * _gpus}, # Global batch size
+                precision="fp16",
+                efficiency=0.52
+            )
+            
+            print(f"Scaling Efficiency: {{res.scaling_efficiency * 100}}%")
+            print(f"AllReduce Penalty: {{res.dp_communication_latency}}")
+            ```
+            """)
+        })
     ])
     return (
-        H100_RAM_GB,
-        H100_TFLOPS_FP16,
-        IB_HDR200_BW_GBS,
-        NVLINK4_BW_GBS,
-        GPUS_PER_NODE,
+        _gpus,
     )
 
 
@@ -1358,6 +1365,17 @@ def _(mo, COLORS):
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
                 Key Takeaways
             </div>
+
+            <div style="background:linear-gradient(to right, #f8fafc, #f1f5f9); border-radius:8px; padding:20px; margin-bottom:24px; border-left:4px solid #8b5cf6;">
+                <div style="font-weight:800; font-size:1.1rem; color:#6d28d9; margin-bottom:8px;">💎 The Iron Law Nugget</div>
+                <div style="color:#334155; font-size:1rem; font-style:italic; line-height:1.6;">
+                    "Scaling a model across more GPUs does not guarantee faster training. The physical bandwidth of the network fabric strictly bounds scaling efficiency. When communication time exceeds compute time, adding more hardware yields negative returns."
+                </div>
+                <div style="margin-top:12px; font-size:0.8rem; color:#64748b;">
+                    <strong>Source:</strong> Adapted from the Megatron-LM 3D Parallelism constraints defined in <em>Shoeybi, M., et al. (2019). Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism.</em>
+                </div>
+            </div>
+
             <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                 <div style="margin-bottom: 10px;">
                     <strong>1. Scaling from 8 to 32 GPUs on 10GbE collapses parallel efficiency from 97% to 13%.</strong>
