@@ -105,6 +105,41 @@ mlsysim optimize placement example_cluster.yaml --carbon-tax 150
 Because this core powers a printed textbook, we enforce strict **Invariant Verification**. Every physical constant is traceable to a primary source (datasheet or paper), and dimensional integrity is enforced via `pint`.
 
 ## 🛠 Installation
+
+MLSys·im is designed to be highly modular. Install only what you need:
+
 ```bash
-pip install -e .
+# Core physics engine only (fastest, smallest footprint)
+pip install mlsysim
+
+# Install with the beautiful Terminal UI & YAML support
+pip install "mlsysim[cli]"
+
+# Install with dependencies for interactive labs (Marimo, Plotly)
+pip install "mlsysim[labs]"
+```
+
+## 🐍 Python API Usage
+
+The framework is just as powerful inside a Python script or Jupyter Notebook. The `SystemEvaluator` provides a clean, unified entry point for full-stack analysis:
+
+```python
+import mlsysim
+
+# 1. Define the scenario
+model = mlsysim.Models.Language.Llama3_8B
+hardware = mlsysim.Hardware.Cloud.H100
+
+# 2. Run the evaluation
+evaluation = mlsysim.SystemEvaluator.evaluate(
+    scenario_name="Llama-3 8B on H100",
+    model_obj=model,
+    hardware_obj=hardware,
+    batch_size=32,
+    precision="fp16",
+    efficiency=0.45
+)
+
+# 3. View the beautifully formatted scorecard
+print(evaluation.scorecard())
 ```
