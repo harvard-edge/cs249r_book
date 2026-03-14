@@ -1655,13 +1655,24 @@ class ParallelismOptimizer(BaseOptimizer):
                 dp = n_gpus // (tp * pp)
                 
                 try:
+                    # Memory feasibility: per-GPU model shard must fit in HBM.
+                    # TP shards weights across tp GPUs; PP shards layers across pp stages.
+                    # Gradients and optimizer states are sharded across DP ranks (ZeRO-1+).
+                    # Conservative check: weights + gradients per GPU < 90% HBM capacity.
+                    per_gpu_weights = model.size_in_bytes() / tp / pp
+                    per_gpu_grads = per_gpu_weights  # gradients same size as weights
+                    per_gpu_mem = per_gpu_weights + per_gpu_grads
+                    gpu_capacity = fleet.node.accelerator.memory.capacity
+                    if per_gpu_mem > gpu_capacity * 0.9:
+                        continue  # Infeasible: model shard doesn't fit in GPU memory
+
                     # Evaluate this config
                     res = dist_model.solve(
                         model, fleet, batch_size=batch_size,
                         precision=precision, efficiency=efficiency,
                         tp_size=tp, pp_size=pp, overlap_comm=overlap_comm
                     )
-                    
+
                     # Store candidate
                     candidates.append({
                         "config": {"tp": tp, "pp": pp, "dp": dp},
