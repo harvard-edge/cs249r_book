@@ -52,40 +52,32 @@ jobs:
         working-directory: kits
         run: |
           echo "🔍 Checking that all referenced images exist..."
-          FAILED=0
-          COUNT=0
+          python3 - <<'PYEOF'
+          import re, os, sys, glob
 
-          # Extract image paths from QMD files and verify they exist
-          for qmd in $(find contents -name "*.qmd" 2>/dev/null); do
-            dir=$(dirname "$qmd")
+          pattern = re.compile(r'!\[.*?\]\(([^)]+)\)')
+          fails = []
 
-            # Match ![...](path) and ![](path) patterns, skip URLs
-            grep -oP '!\[.*?\]\(\K[^)]+' "$qmd" 2>/dev/null | while read -r img; do
-              # Skip URLs, cross-refs, and empty
-              case "$img" in
-                http://*|https://*|#*|@*|"") continue ;;
-              esac
+          for qmd in glob.glob("contents/**/*.qmd", recursive=True):
+              qmd_dir = os.path.dirname(qmd)
+              with open(qmd) as f:
+                  for lineno, line in enumerate(f, 1):
+                      for m in pattern.finditer(line):
+                          img = m.group(1).split("{")[0].strip()
+                          if img.startswith(("http://", "https://", "#", "@")) or not img:
+                              continue
+                          # Check relative to QMD dir and to kits root
+                          if not os.path.isfile(os.path.join(qmd_dir, img)) and not os.path.isfile(img):
+                              fails.append(f"  {qmd}:{lineno} -> {img}")
 
-              # Strip any Quarto attributes like {width=50%}
-              img_clean=$(echo "$img" | sed 's/{.*//' | xargs)
-
-              # Resolve relative to QMD file location
-              if [ ! -f "$dir/$img_clean" ] && [ ! -f "$img_clean" ]; then
-                echo "❌ Missing image: $img_clean (referenced in $qmd)"
-                # Can't increment FAILED in subshell, use temp file
-                echo "FAIL" >> /tmp/kits_img_fails
-              fi
-            done
-          done
-
-          if [ -f /tmp/kits_img_fails ]; then
-            FAILED=$(wc -l < /tmp/kits_img_fails)
-            echo ""
-            echo "❌ $FAILED missing image reference(s) found"
-            exit 1
-          else
-            echo "✅ All image references are valid"
-          fi
+          if fails:
+              print(f"❌ {len(fails)} missing image reference(s):")
+              for f in fails:
+                  print(f)
+              sys.exit(1)
+          else:
+              print("✅ All image references are valid")
+          PYEOF
 
   # ===========================================================================
   # Stage 2: Quarto HTML site build
