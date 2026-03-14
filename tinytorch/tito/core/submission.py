@@ -192,7 +192,14 @@ class SubmissionHandler:
                 if 200 <= response.status < 300:
                     resp_body = json.loads(response.read().decode('utf-8'))
                     self.console.print("✅ [bold green]Sync Successful![/bold green]")
-                    self.console.print(f"   Modules Synced: {resp_body.get('synced_modules', 'N/A')}")
+                    # Handle synced_modules - show count of modules that were synced
+                    synced = resp_body.get('synced_modules')
+                    if synced is not None:
+                        self.console.print(f"   Modules Synced: {synced}")
+                    else:
+                        # If null, show the count of completed modules that were sent
+                        completed_count = payload['module_progress']['completed_count']
+                        self.console.print(f"   Modules Synced: {completed_count} completed module(s)")                    
                     return True
                 else:
                     self.console.print(f"⚠️ Server returned status: {response.status}")
