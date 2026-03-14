@@ -217,6 +217,69 @@ class CarbonFrontier:
 
 ```
 
+```{python}
+#| label: placement-optimizer-example
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PLACEMENT OPTIMIZER (TIER 3)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Automated Carbon-Aware Scheduling"
+# │
+# │ Goal: Demonstrate the Tier 3 Optimizer finding the cheapest geographic placement.
+# │ Show: How a $100/ton carbon tax shifts workloads from coal to hydro regions.
+# │ How: Invoke mlsysim.PlacementOptimizer.
+# │
+# │ Imports: mlsysim (PlacementOptimizer, Systems, Hardware)
+# │ Exports: AutoPlacement.best_region, AutoPlacement.total_tco_str, 
+# │          AutoPlacement.carbon_tax_str, AutoPlacement.energy_mwh_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import PlacementOptimizer, Systems, Hardware
+from mlsysim.fmt import fmt, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class AutoPlacement:
+    '''
+    Namespace for automated Workload Placement.
+    Scenario: Finding the optimal region for a 10,000 MWh training run.
+    '''
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    fleet = Systems.Clusters.Frontier_8K
+    energy_mwh = 10000.0
+    carbon_tax = 100.0  # $/ton
+    duration_days = (energy_mwh / 143.0) / 24.0
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    optimizer = PlacementOptimizer()
+    res = optimizer.solve(fleet, duration_days=duration_days, regions=["US_Avg", "Quebec", "Iowa"], carbon_tax_per_ton=carbon_tax, mfu=0.5)
+    
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(res.best_region == "Quebec", f"Quebec should be optimal with ${carbon_tax}/ton tax")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    best_region = res.best_region
+    total_tco_str = fmt(res.objective_value / 1e6, precision=2)
+    carbon_tax_str = f"{carbon_tax:.0f}"
+    energy_mwh_str = fmt(energy_mwh, precision=0)
+
+```
+
+::: {.callout-notebook title="Automated Carbon-Aware Scheduling (Tier 3 Optimizer)"}
+
+**Problem**: You are planning a massive training run requiring **`{python} AutoPlacement.energy_mwh_str` MWh** of energy. You must choose between three regions with different electricity prices and carbon intensities. With an internal **carbon tax of USD `{python} AutoPlacement.carbon_tax_str`/tonne**, which region minimizes the true Total Cost of Ownership (TCO)?
+
+**The Solution**: We invoke the `PlacementOptimizer` to synthesize grid carbon intensity, regional electricity rates, and the carbon tax into a single optimization objective.
+
+**The Result**: The optimizer evaluates the design space and selects the global minimum:
+
+*   **Optimal Region**: **`{python} AutoPlacement.best_region`**
+*   **Total Projected Cost**: **USD `{python} AutoPlacement.total_tco_str` million** (Including carbon penalty)
+
+**The Systems Insight**: In a pure "Capex-only" model, engineers might choose the region with the lowest raw electricity rate. However, once a carbon tax is introduced, the **Externalities Wall** becomes a first-class economic constraint. The optimizer proves that the hydro-powered grid in `{python} AutoPlacement.best_region` is the most cost-effective choice, as the massive carbon savings more than offset any marginal difference in electricity pricing.
+
+:::
+
+
 ::: {.callout-notebook title="The Geography of Carbon"}
 
 **Problem**: You are choosing a datacenter for a `{python} CarbonFrontier.cf_energy_mwh_str` MWh training run.
@@ -1201,11 +1264,6 @@ class TrainingEmissions:
     a100_tdp_w_str = f"{gpu_power_w:.0f}"
 ```
 
-::: {.callout-example title="Training Emissions Calculation"}
-
-Consider training a 7 billion parameter model on 64 A100 GPUs for 14 days:
-
-#### Step 1: Compute Energy {.unnumbered}
 
 ```{python}
 #| label: a100-power-scenario
@@ -1236,6 +1294,13 @@ class A100PowerScenario:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     a100_tdp_w = f"{a100_tdp.m_as(watt):.0f}"
 ```
+
+::: {.callout-example title="Training Emissions Calculation"}
+
+Consider training a 7 billion parameter model on 64 A100 GPUs for 14 days:
+
+#### Step 1: Compute Energy {.unnumbered}
+
 
 - GPU power: `{python} A100PowerScenario.a100_tdp_w`W per A100 at typical training utilization
 - Training time: 14 days times 24 hours = `{python} TrainingEmissions.training_hours_str` hours
@@ -1333,14 +1398,6 @@ class EmbodiedCarbonAmort:
     share_clean_pct_str = f"{share_clean_pct:.0f}"
 ```
 
-::: {.callout-perspective title="Embodied Carbon Amortization"}
-
-A hidden cost emerges when renting a GPU for an hour: the fee does not cover electricity alone but also amortizes the carbon debt of manufacturing.
-
-**Formula**:
-$$ C_{total} = C_{operational} + \left( \frac{C_{manufacturing}}{T_{lifetime}} \times T_{job} \right) $$
-
-**Scenario**: Training a model for **`{python} EmbodiedCarbonAmort.t_job_hr` hours** on **`{python} EmbodiedCarbonAmort.n_gpus` NVIDIA H100s**.
 
 ```{python}
 #| label: h100-kw-scenario
@@ -1371,6 +1428,16 @@ class H100KwScenario:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_tdp_kw = f"{h100_tdp.m_as(watt) / 1000:.1f}"
 ```
+
+::: {.callout-perspective title="Embodied Carbon Amortization"}
+
+A hidden cost emerges when renting a GPU for an hour: the fee does not cover electricity alone but also amortizes the carbon debt of manufacturing.
+
+**Formula**:
+$$ C_{total} = C_{operational} + \left( \frac{C_{manufacturing}}{T_{lifetime}} \times T_{job} \right) $$
+
+**Scenario**: Training a model for **`{python} EmbodiedCarbonAmort.t_job_hr` hours** on **`{python} EmbodiedCarbonAmort.n_gpus` NVIDIA H100s**.
+
 
 *   **Operational**: 8 GPUs$\times$ `{python} H100KwScenario.h100_tdp_kw` kW$\times$ 10h = 56 kWh. At 0.4 kg/kWh (gas grid) = **`{python} EmbodiedCarbonAmort.op_carbon_dirty_str` kg CO₂**.
 *   **Embodied**: 8 GPUs$\times$ 150 kg/GPU = 1200 kg total.

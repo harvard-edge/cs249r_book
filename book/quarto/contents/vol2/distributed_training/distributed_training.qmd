@@ -733,10 +733,6 @@ Three hard ceilings limit these advantages. The memory wall requires every GPU t
 
 A concrete scaling experiment reveals how these ceilings manifest in practice.
 
-::: {.callout-notebook title="GPT-2 Data Parallel Scaling"}
-
-The following example demonstrates how data parallelism scales in practice, including efficiency degradation.
-
 ```{python}
 #| label: scaling-8gpu-calc
 #| echo: false
@@ -802,29 +798,6 @@ class Scaling8GPU:
     comm_8gpu_ms_str = f"{comm_8gpu_ms_val:.1f}"
     compute_8gpu_ms_str = f"{compute_8gpu_ms}"
 ```
-
-**Single GPU Baseline**
-
-- Batch size: `{python} Scaling8GPU.batch_per_gpu_val` (with gradient checkpointing, fits in 32 GB)
-- Time per step: `{python} Scaling8GPU.single_gpu_step_s` seconds
-- Time to 50K steps: **`{python} Scaling8GPU.training_hours_1gpu` hours**
-
-**8 GPUs: Single Node with NVLink**
-
-Configuration:
-
-- Per-GPU batch: 16, global batch: 128
-- Gradient synchronization: `{python} Scaling8GPU.gpt2_sync_size_gb_str`GB @ `{python} Scaling8GPU.nvlink_h100_gbs` GB/s (NVLink) $\approx$ `{python} Scaling8GPU.comm_8gpu_ms_str`ms
-
-Performance results:
-
-- Computation: `{python} Scaling8GPU.compute_8gpu_ms_str`ms per step
-- Communication: `{python} Scaling8GPU.comm_8gpu_ms_str`ms per step
-- Total: `{python} Scaling8GPU.total_8gpu_str`ms per step
-- Speedup (throughput): `{python} Scaling8GPU.speedup_8gpu_str`$\times$
-- Parallel efficiency: `{python} Scaling8GPU.efficiency_8gpu_str`%
-
-Training time: 25 hours ÷ (`{python} Scaling8GPU.speedup_8gpu_str` / 8) = **`{python} Scaling8GPU.training_8gpu_str` hours**
 
 ```{python}
 #| label: scaling-32gpu-calc
@@ -926,6 +899,33 @@ class GradAccumScenario:
     ga_savings_str = f"{ga_savings_val:,.0f}"
     ga_savings_pct_str = f"{ga_savings_pct_val:.0f}"
 ```
+
+::: {.callout-notebook title="GPT-2 Data Parallel Scaling"}
+
+The following example demonstrates how data parallelism scales in practice, including efficiency degradation.
+
+**Single GPU Baseline**
+
+- Batch size: `{python} Scaling8GPU.batch_per_gpu_val` (with gradient checkpointing, fits in 32 GB)
+- Time per step: `{python} Scaling8GPU.single_gpu_step_s` seconds
+- Time to 50K steps: **`{python} Scaling8GPU.training_hours_1gpu` hours**
+
+**8 GPUs: Single Node with NVLink**
+
+Configuration:
+
+- Per-GPU batch: 16, global batch: 128
+- Gradient synchronization: `{python} Scaling8GPU.gpt2_sync_size_gb_str`GB @ `{python} Scaling8GPU.nvlink_h100_gbs` GB/s (NVLink) $\approx$ `{python} Scaling8GPU.comm_8gpu_ms_str`ms
+
+Performance results:
+
+- Computation: `{python} Scaling8GPU.compute_8gpu_ms_str`ms per step
+- Communication: `{python} Scaling8GPU.comm_8gpu_ms_str`ms per step
+- Total: `{python} Scaling8GPU.total_8gpu_str`ms per step
+- Speedup (throughput): `{python} Scaling8GPU.speedup_8gpu_str`$\times$
+- Parallel efficiency: `{python} Scaling8GPU.efficiency_8gpu_str`%
+
+Training time: 25 hours ÷ (`{python} Scaling8GPU.speedup_8gpu_str` / 8) = **`{python} Scaling8GPU.training_8gpu_str` hours**
 
 **32 GPUs: 4 Nodes with Commodity Network**
 
@@ -1154,6 +1154,7 @@ ax.annotate(
 )
 
 plt.show()
+plt.close()
 ```
 
 :::
@@ -2078,15 +2079,80 @@ class ThreeDParallelism:
     nvlink5_bw_str = f"{nvlink5_bw_tbs} TB/s"
 ```
 
-::: {.callout-notebook title="Configuring 3D Parallelism for GPT-175B"}
+```{python}
+#| label: parallelism-optimizer-example
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PARALLELISM OPTIMIZER (TIER 3)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Automated Design Space Search"
+# │
+# │ Goal: Demonstrate the Tier 3 Optimizer finding the optimal 3D split.
+# │ Show: The optimizer automatically converges on TP=8, PP=8, DP=128 for 175B on 8K GPUs.
+# │ How: Invoke mlsysim.ParallelismOptimizer on Archetype A and Frontier_8K.
+# │
+# │ Imports: mlsysim (ParallelismOptimizer, Models, Systems)
+# │ Exports: AutoParallelism.opt_tp_str, AutoParallelism.opt_pp_str, 
+# │          AutoParallelism.opt_dp_str, AutoParallelism.opt_mfu_str,
+# │          AutoParallelism.params_b_str, AutoParallelism.gpu_count_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import ParallelismOptimizer, Models, Systems
+from mlsysim.fmt import fmt_percent, fmt, check
 
-**Scenario A: Hopper Cluster (H100)**
-Designing the training topology for GPT-3 (175B parameters) requires balancing memory, bandwidth, and compute across three dimensions. A standard configuration uses **Tensor Parallelism (TP=8)** to shard layers within a single node, exploiting the 900 GB/s NVLink bandwidth. **Pipeline Parallelism (PP=16)** then splits the model depth across 16 nodes, tolerant of the slower inter-node bandwidth (InfiniBand) due to bubble overhead. Finally, **Data Parallelism (DP=128)** replicates this entire 16-node pipeline 128 times to scale throughput. The total hardware requirement is massive: $8 \text{ GPUs} \times 16 \text{ Stages} \times 128 \text{ Replicas} =$ `{python} ThreeDParallelism.total_gpus_h100_str` **GPUs**.
+# ┌── LEGO ───────────────────────────────────────────────
+class AutoParallelism:
+    """
+    Namespace for automated 3D parallelism search.
+    Scenario: Finding the optimal split for a 175B model on 8,192 H100 GPUs.
+    """
 
-**Scenario B: Blackwell Cluster (B200)**
-With the Blackwell architecture, we can exploit the `{python} ThreeDParallelism.nvlink5_bw_str` NVLink 5 and FP4 precision. For a 175B model, we can increase **Tensor Parallelism to TP=16** (across two nodes) while maintaining the same low latency. This reduces the required **Pipeline Parallelism to PP=8**, cutting the pipeline bubble fraction by half ($P=8$ vs $P=16$). The resulting fleet is not only faster due to higher TFLOPS but also more efficient due to reduced coordination overhead ($T_{coord}$).
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    # Use Archetype A (GPT-3 175B) and the standard 8K Frontier cluster
+    model = Models.GPT3
+    fleet = Systems.Clusters.Frontier_8K
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    optimizer = ParallelismOptimizer()
+    
+    # We constrain max_pp to 8 to ensure the model fits within 80GB HBM limits while
+    # keeping the pipeline depth manageable.
+    res = optimizer.solve(model, fleet, batch_size=4096, max_pp=8)
+    
+    best_tp = res.best_config['tp']
+    best_pp = res.best_config['pp']
+    best_dp = res.best_config['dp']
+    best_mfu = res.best_mfu
+    
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(best_tp == 8, f"Optimizer should align TP with node size (8), got {best_tp}")
+    check(best_pp * best_dp * best_tp == fleet.count * fleet.node.accelerators_per_node, "Split must use all GPUs")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    opt_tp_str = f"{best_tp}"
+    opt_pp_str = f"{best_pp}"
+    opt_dp_str = f"{best_dp}"
+    opt_mfu_str = fmt_percent(best_mfu, precision=1)
+    params_b_str = "175"
+    gpu_count_str = "8,192"
+
+```
+
+::: {.callout-notebook title="Automated Design Space Search (Tier 3 Optimizer)"}
+
+**Problem**: You need to schedule **Archetype A** (a `{python} AutoParallelism.params_b_str`B parameter model) on a cluster of **`{python} AutoParallelism.gpu_count_str` H100 GPUs**. Manually searching the 3D-parallelism space (TP $	imes$ PP $	imes$ DP) is error-prone: a split that maximizes DP might exceed the 80 GB HBM capacity, while a split that maximizes TP might saturate the NVLink interconnect.
+
+**The Solution**: Instead of trial and error, we invoke a **Tier 3 Optimizer** (like the `ParallelismOptimizer` in our physics engine) to find the mathematically optimal split. We configure the optimizer with the workload and cluster constraints, setting the objective to maximize Model FLOPs Utilization (MFU).
+
+**The Result**: The optimizer performs a constrained grid search over all valid algebraic factorizations. In under a second, it deduces the optimal strategy:
+
+*   **Tensor Parallelism (TP)**: `{python} AutoParallelism.opt_tp_str`
+*   **Pipeline Parallelism (PP)**: `{python} AutoParallelism.opt_pp_str`
+*   **Data Parallelism (DP)**: `{python} AutoParallelism.opt_dp_str`
+
+**The Systems Insight**: The optimizer mathematically proves what engineers discover empirically: TP must match the intra-node GPU count (`{python} AutoParallelism.opt_tp_str`) to avoid traversing the slower inter-node fabric, and PP=8 is the minimal pipeline depth required to fit the remaining state in memory. This automated synthesis achieves a projected **`{python} AutoParallelism.opt_mfu_str` MFU**, demonstrating that empirical engineering heuristics are ultimately governed by structural mathematical laws.
 
 :::
+
 
 ::: {.callout-checkpoint title="Hybrid 3D Parallelism"}
 
@@ -2197,6 +2263,7 @@ ax.legend(handles=legend_elements, loc='lower right', fontsize=8)
 
 plt.tight_layout()
 plt.show()
+plt.close()
 ```
 
 :::

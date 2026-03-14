@@ -1729,10 +1729,10 @@ class BatchingOptimizer(BaseOptimizer):
             service_latency = res.ttft + (res.itl * seq_len)
             
             # 2. Queueing tail latency
-            tail_res = tail_model.solve(arrival_rate_qps, service_latency.m_as("ms"), num_replicas)
+            tail_res = tail_model.solve(arrival_rate_qps / b, service_latency.m_as("ms"), num_replicas)
             
             if not tail_res.is_stable:
-                break
+                continue
                 
             p99 = tail_res.p99_latency
             

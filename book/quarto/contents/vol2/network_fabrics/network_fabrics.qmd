@@ -260,6 +260,7 @@ ax.set_xlabel("GPU Generation")
 ax.legend(loc="upper left", frameon=True, fancybox=True, framealpha=0.9, ncol=2)
 ax.set_title("")
 plt.show()
+plt.close()
 ```
 
 :::
@@ -695,6 +696,7 @@ ax.legend(loc='upper left', frameon=True, framealpha=0.9, fancybox=True)
 ax.xaxis.set_major_locator(ticker.LogLocator(base=10.0, numticks=12))
 plt.tight_layout()
 plt.show()
+plt.close()
 ```
 
 :::
@@ -1216,15 +1218,6 @@ The danger of PFC lies in its cascading nature. When a switch port's buffer fill
 ![](images/svg/incast-flow.svg){width=100%}
 :::
 
-::: {.callout-war-story title="The PFC Storm That Froze a Cluster (2022)"}
-
-**The Context**: A large RoCE-based training cluster connected over 4,096 GPUs through a standard 400 GbE fabric with Priority Flow Control enabled for lossless RDMA.
-
-**The Failure**: A single malfunctioning transceiver on one leaf switch intermittently dropped its link speed from 400 Gbps to 100 Gbps. The reduced bandwidth caused the switch port's buffer to fill during a routine AllReduce burst, triggering PFC PAUSE frames. Because the training job spanned the entire cluster, the pauses propagated through the spine layer and back down to every leaf switch in the fabric. Within 200 milliseconds, every port in the cluster was paused. No data moved. All 4,096 GPUs sat idle. No alarms fired because PFC pauses are a *normal* flow-control mechanism, so monitoring systems treated them as routine. Diagnosis took 30 minutes because standard tools (`ping`, `iperf`) showed the network was "up" but not moving data.
-
-**The Consequence**: The complete fabric freeze lasted over 40 minutes, idling 4,096 GPUs and wasting over 2,700 GPU-hours of compute. The investigation revealed that the cluster lacked PFC watchdog timers that would have detected the storm and disabled PFC on the offending port within seconds.
-
-**The Systems Lesson**: PFC congestion spreading is a structural vulnerability of lossless Ethernet that InfiniBand's credit-based flow control avoids entirely. Credits are consumed and replenished per-hop, so a slow receiver cannot propagate backpressure beyond its immediate neighbor. After the incident, the team deployed per-port PFC pause counters with alerting thresholds and configured hardware watchdog timers to automatically disable PFC on any port sustaining pauses for more than 50 milliseconds.
 
 ```{python}
 #| label: pfc-storm-probability
@@ -1260,6 +1253,17 @@ class PfcStormRisk:
     pfc_storm_prob_str = f"{p_storm * 100:.1f}"
 
 ```
+
+::: {.callout-war-story title="The PFC Storm That Froze a Cluster (2022)"}
+
+**The Context**: A large RoCE-based training cluster connected over 4,096 GPUs through a standard 400 GbE fabric with Priority Flow Control enabled for lossless RDMA.
+
+**The Failure**: A single malfunctioning transceiver on one leaf switch intermittently dropped its link speed from 400 Gbps to 100 Gbps. The reduced bandwidth caused the switch port's buffer to fill during a routine AllReduce burst, triggering PFC PAUSE frames. Because the training job spanned the entire cluster, the pauses propagated through the spine layer and back down to every leaf switch in the fabric. Within 200 milliseconds, every port in the cluster was paused. No data moved. All 4,096 GPUs sat idle. No alarms fired because PFC pauses are a *normal* flow-control mechanism, so monitoring systems treated them as routine. Diagnosis took 30 minutes because standard tools (`ping`, `iperf`) showed the network was "up" but not moving data.
+
+**The Consequence**: The complete fabric freeze lasted over 40 minutes, idling 4,096 GPUs and wasting over 2,700 GPU-hours of compute. The investigation revealed that the cluster lacked PFC watchdog timers that would have detected the storm and disabled PFC on the offending port within seconds.
+
+**The Systems Lesson**: PFC congestion spreading is a structural vulnerability of lossless Ethernet that InfiniBand's credit-based flow control avoids entirely. Credits are consumed and replenished per-hop, so a slow receiver cannot propagate backpressure beyond its immediate neighbor. After the incident, the team deployed per-port PFC pause counters with alerting thresholds and configured hardware watchdog timers to automatically disable PFC on any port sustaining pauses for more than 50 milliseconds.
+
 
 ::: {.callout-notebook title="The Probability of a PFC Storm"}
 

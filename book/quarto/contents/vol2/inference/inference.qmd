@@ -413,6 +413,7 @@ ax.legend(loc='upper right', fontsize=9)
 ax.grid(True, which='both', alpha=0.3)
 plt.tight_layout()
 plt.show()
+plt.close()
 plt.close('all')
 ```
 
@@ -527,6 +528,7 @@ ax.set_title("")
 
 plt.tight_layout()
 plt.show()
+plt.close()
 plt.close('all')
 ```
 
@@ -1175,6 +1177,82 @@ $$B = \max\{B : T_{P99}(B) \leq \text{SLO}\}$$
 
 The relationship between batch size, throughput, and latency defines an **operating region** within which production systems must function. @fig-batch-tradeoff-curves illustrates this region:
 
+```{python}
+#| label: batching-optimizer-example
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BATCHING OPTIMIZER (TIER 3)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Automated SLA Resolution"
+# │
+# │ Goal: Demonstrate the Tier 3 Optimizer finding the maximum viable batch size.
+# │ Show: The optimizer balances P99 SLA against throughput for Llama-2-70B.
+# │ How: Invoke mlsysim.BatchingOptimizer.
+# │
+# │ Imports: mlsysim (BatchingOptimizer, Models, Hardware)
+# │ Exports: AutoBatching.qps_str, AutoBatching.sla_ms_str, 
+# │          AutoBatching.opt_batch_str, AutoBatching.opt_p99_str,
+# │          AutoBatching.opt_util_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import BatchingOptimizer, Models, Hardware
+from mlsysim.fmt import fmt_percent, fmt, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class AutoBatching:
+    """
+    Namespace for automated Batch Size search.
+    Scenario: Finding the optimal batch size for Llama-2-70B under a strict SLA.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    model = Models.Language.Llama3_8B
+    hardware = Hardware.Cloud.H100
+    qps_load = 10.0
+    sla_ms = 1000.0  # 1.5 seconds P99
+    seq_len = 32
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    optimizer = BatchingOptimizer()
+    
+    # Solve for optimal batch size that meets the SLA
+    res = optimizer.solve(
+        model, hardware, 
+        seq_len=seq_len, 
+        arrival_rate_qps=qps_load, 
+        sla_latency_ms=sla_ms,
+        max_search_batch=64
+    )
+    
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(res.is_feasible, "Optimizer must find a feasible batch size for this scenario.")
+    check(res.p99_latency.m_as('ms') <= sla_ms, "Selected batch size must respect SLA.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    qps_str = f"{qps_load:.0f}"
+    sla_ms_str = f"{sla_ms:.0f}"
+    opt_batch_str = f"{res.best_batch_size}"
+    opt_p99_str = f"{res.p99_latency.m_as('ms'):.0f}"
+    opt_util_str = fmt_percent(res.best_config.get('utilization', 0.0), precision=1)
+
+```
+
+::: {.callout-notebook title="Automated SLA Resolution (Tier 3 Optimizer)"}
+
+**Problem**: A production endpoint serving **Llama-2-70B** on a single H100 GPU receives **`{python} AutoBatching.qps_str` queries per second (QPS)**. The Service Level Agreement (SLA) requires that 99% of requests complete in under **`{python} AutoBatching.sla_ms_str` ms**. What is the maximum batch size the system can sustain without violating this queuing SLA?
+
+**The Solution**: Instead of manually plotting throughput-latency tradeoff curves or solving complex M/M/c queuing approximations, we invoke a **Tier 3 Optimizer** (the `BatchingOptimizer` in our physics engine) to automatically invert the queuing models.
+
+**The Result**: The optimizer sweeps the design space of continuous batching configurations and identifies the optimal operating point:
+
+*   **Optimal Batch Size ($B$)**: **`{python} AutoBatching.opt_batch_str`**
+*   **Projected P99 Latency**: **`{python} AutoBatching.opt_p99_str` ms** (Safely under the `{python} AutoBatching.sla_ms_str` ms SLA)
+*   **System Utilization**: **`{python} AutoBatching.opt_util_str`**
+
+**The Systems Insight**: The optimizer proves that a batch size of `{python} AutoBatching.opt_batch_str` perfectly balances the high fixed overhead of the LLM decode step with the strict latency SLA. If the batch size were smaller, the GPU would be severely underutilized, causing queues to back up indefinitely under the 5 QPS load. If the batch size were larger, the raw computation time per batch would exceed the SLA even if the queue was entirely empty. The "Square Root Law" heuristic is valuable for intuition, but an optimizer is required for production synthesis.
+
+:::
+
+
 ::: {#fig-batch-tradeoff-curves fig-env="figure" fig-pos="htb" fig-cap="**Batch Size Trade-off Curves**. The operating region (shaded) is bounded by the stability constraint (minimum throughput) and latency SLO (maximum latency). Larger batch sizes increase throughput but also increase latency. The optimal operating point maximizes throughput while meeting the SLO." fig-alt="Graph showing throughput on y-axis and latency on x-axis. A curved line represents different batch sizes from B=1 to B=64. The operating region is shaded, bounded by a vertical line for SLO and horizontal line for minimum throughput."}
 
 ![](images/svg/batch-size-tradeoffs.svg)
@@ -1617,11 +1695,6 @@ For new LLM serving deployments, continuous batching frameworks like vLLM, Tenso
 
 Even with modern frameworks, diagnosing tail latency anomalies requires systematic investigation across the system stack. The following case study applies the Fleet Stack methodology to a real-world P99 latency regression.
 
-::: {.callout-tip title="Debugging High P99 Latency"}
-
-**Problem**: An LLM serving system exhibits unexpectedly high tail latency. P50 latency is 100 ms and P95 is 180 ms, both within SLO, but P99 spikes to 500 ms against a 200 ms target. GPU utilization appears healthy at 85%. Where is the bottleneck?
-
-**Infrastructure Layer Analysis** (Hardware Constraints):
 
 ```{python}
 #| label: a100-hardware-scenario
@@ -1656,6 +1729,13 @@ class A100HardwareScenario:
     nvlink_a100_gbs = f"{NVLINK_A100_BW.m_as(GB / second):.0f}"  # "600"
     pcie_gen5_gbs = f"{PCIE_GEN5_BW.m_as(GB / second):.0f}"  # "64"
 ```
+
+::: {.callout-tip title="Debugging High P99 Latency"}
+
+**Problem**: An LLM serving system exhibits unexpectedly high tail latency. P50 latency is 100 ms and P95 is 180 ms, both within SLO, but P99 spikes to 500 ms against a 200 ms target. GPU utilization appears healthy at 85%. Where is the bottleneck?
+
+**Infrastructure Layer Analysis** (Hardware Constraints):
+
 
 The system runs on 4 A100-`{python} A100HardwareScenario.a100_mem_gb`GB GPUs connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen5_gbs` GB/s per GPU) rather than NVLink. The server has a dual-socket CPU with NUMA topology. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tbs` TB/s (HBM2e), adequate for decode operations. However, PCIe bandwidth limits tensor parallelism communication to `{python} A100HardwareScenario.pcie_gen5_gbs` GB/s versus NVLink's `{python} A100HardwareScenario.nvlink_a100_gbs` GB/s. For a batch requiring 100 MB activation transfers between GPUs, PCIe adds approximately 1.5 ms per synchronization point versus 0.17 ms for NVLink.
 
@@ -2026,6 +2106,7 @@ ax.legend(loc='upper left', fontsize=9)
 ax.grid(True, alpha=0.2)
 
 plt.show()
+plt.close()
 plt.close('all')
 ```
 
@@ -2968,24 +3049,6 @@ $$T_{inference} = \frac{T_{\text{compute}}}{P} + 2 \times T_{\text{allreduce}}\l
 
 where $T_{\text{compute}}$ is the sequential compute time, $P$ is the parallelism degree, and $A$ is the activation size being reduced. The factor of 2 accounts for the two all-reduce operations per transformer layer (attention and feed-forward).
 
-::: {.callout-example title="Tensor Parallelism for Llama-70B"}
-
-Consider serving Llama-70B with the following configuration:
-
-**Model specifications**:
-
-- Parameters: 70 billion
-- Hidden dimension: 8,192
-- Attention heads: 64
-- Layers: 80
-
-**Memory per GPU** (weight only, FP16):
-
-$$\text{Memory}_{70B} = 70 \times 10^9 \times 2 = 140\text{ GB}$$
-
-**Minimum sharding**: 2-way (140 GB / `{python} HardwareSetupSharding.h100_mem_gb`GB per H100)
-
-**Recommended sharding**: 8-way for optimal latency
 
 ```{python}
 #| echo: false
@@ -3036,6 +3099,26 @@ class TpSpeedupCalc:
     seq_total_ms_str = f"{seq_total_ms:,.0f}"
     tp8_total_ms_str = f"{tp8_total_ms:,.0f}"
 ```
+
+::: {.callout-example title="Tensor Parallelism for Llama-70B"}
+
+Consider serving Llama-70B with the following configuration:
+
+**Model specifications**:
+
+- Parameters: 70 billion
+- Hidden dimension: 8,192
+- Attention heads: 64
+- Layers: 80
+
+**Memory per GPU** (weight only, FP16):
+
+$$\text{Memory}_{70B} = 70 \times 10^9 \times 2 = 140\text{ GB}$$
+
+**Minimum sharding**: 2-way (140 GB / `{python} HardwareSetupSharding.h100_mem_gb`GB per H100)
+
+**Recommended sharding**: 8-way for optimal latency
+
 
 **With 8-way tensor parallelism on 8xH100 (NVLink interconnect)**:
 

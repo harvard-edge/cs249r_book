@@ -57,7 +57,7 @@ from .core.solver import (
 from .hardware.registry import Hardware
 from .models.registry import Models
 from .infra.registry import Infra
-from .systems.registry import Systems
+from .systems.registry import Systems, Tiers
 
 # Export unit registry for custom workload definitions
 from .core.constants import ureg
@@ -86,7 +86,7 @@ __all__ = [
     "ResponsibleEngineeringModel", "ParallelismOptimizer",
     "BatchingOptimizer", "PlacementOptimizer",
     # Registries
-    "Hardware", "Models", "Infra", "Systems",
+    "Hardware", "Models", "Infra", "Systems", "Tiers",
     # Units
     "ureg",
     # Visualization
