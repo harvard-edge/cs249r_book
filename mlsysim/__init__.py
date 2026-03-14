@@ -23,6 +23,7 @@ from . import systems as systems_mod
 from .hardware.types import HardwareNode
 from .models.types import Workload, TransformerWorkload, CNNWorkload
 from .systems.types import Fleet, Node, NetworkFabric, DeploymentTier
+from .core.evaluation import SystemEvaluator, SystemEvaluation
 from .core.scenarios import Scenario, Scenarios, Applications
 from .core.config import SimulationConfig, load_config
 from .core.engine import PerformanceProfile, Engine

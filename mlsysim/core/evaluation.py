@@ -31,16 +31,31 @@ class SystemEvaluation(BaseModel):
 
     def scorecard(self) -> str:
         """Generates a human-readable summary for students."""
+        # Visual styling for the scorecard
+        border = "═" * 60
         lines = [
-            f"=== SYSTEM EVALUATION: {self.scenario_name} ===",
-            f"Level 1: Feasibility -> [{self.feasibility.status}]",
-            f"   {self.feasibility.summary}",
-            f"Level 2: Performance -> [{self.performance.status}]",
-            f"   {self.performance.summary}",
-            f"Level 3: Macro/Economics -> [{self.macro.status}]",
-            f"   {self.macro.summary}",
-            "==============================================="
+            f"╔{border}╗",
+            f"║ MLSys·im SYSTEM EVALUATION",
+            f"║ Scenario: {self.scenario_name}",
+            f"╠{border}╣"
         ]
+        
+        levels = [
+            ("Feasibility", self.feasibility),
+            ("Performance", self.performance),
+            ("Macro/Economics", self.macro)
+        ]
+        
+        for idx, (name, level) in enumerate(levels):
+            status_emoji = "✅" if level.status == "PASS" else "❌" if level.status == "FAIL" else "⚠️"
+            
+            lines.append(f"║ Level {idx+1}: {name} [{level.status}] {status_emoji}")
+            lines.append(f"║ ↳ {level.summary}")
+            
+            if idx < 2:
+                lines.append(f"╟{'-'*60}╢")
+                
+        lines.append(f"╚{border}╝")
         return "\n".join(lines)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -76,6 +91,26 @@ class SystemEvaluator:
         nodes: int = 1,
         duration_days: Optional[float] = None
     ) -> SystemEvaluation:
+        """
+        Evaluates an ML system scenario across three pedagogical lenses: Feasibility, Performance, and Macro/Economics.
+        
+        This method orchestrates the Tier 1 models (SingleNodeModel, DistributedModel) and Tier 2 models 
+        (EconomicsModel, SustainabilityModel) to generate a comprehensive scorecard for the given hardware/software configuration.
+        
+        Args:
+            scenario_name (str): A descriptive name for the evaluation (e.g., "Llama-3 8B on H100").
+            model_obj (Workload): The workload architecture to simulate (e.g., Models.Language.Llama3_8B).
+            hardware_obj (HardwareNode): The target hardware accelerator (e.g., Hardware.Cloud.H100).
+            batch_size (int): The number of samples/tokens processed concurrently.
+            precision (str): The numerical precision used (e.g., 'fp16', 'int8').
+            efficiency (float): The achieved hardware utilization as a fraction of peak (e.g., 0.45 for 45% MFU).
+            fleet_obj (Optional[Fleet]): The cluster topology for distributed runs.
+            nodes (int): The number of accelerators to simulate. Defaults to 1.
+            duration_days (Optional[float]): The expected duration of the run, required for Macro/Economics evaluation.
+            
+        Returns:
+            SystemEvaluation: A multi-level scorecard containing the feasibility, performance, and macro metrics.
+        """
         
         from .solver import SingleNodeModel, DistributedModel, EconomicsModel
 
