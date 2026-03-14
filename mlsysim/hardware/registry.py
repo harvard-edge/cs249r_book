@@ -7,6 +7,7 @@ from ..core.constants import (
     H100_MEM_BW, H100_FLOPS_FP16_TENSOR, H100_MEM_CAPACITY, H100_TDP, H100_FLOPS_TF32, H100_FLOPS_FP8_TENSOR, H100_FLOPS_INT8, H100_UNIT_COST,
     H200_MEM_BW, H200_MEM_CAPACITY, H200_TDP, H200_UNIT_COST,
     B200_MEM_BW, B200_FLOPS_FP16_TENSOR, B200_MEM_CAPACITY, B200_TDP, B200_FLOPS_FP8_TENSOR, B200_FLOPS_INT4, B200_UNIT_COST,
+    NVL72_FLOPS_FP8_TENSOR, NVL72_MEM_CAPACITY, NVL72_MEM_BW, NVL72_NVLINK_BW, NVL72_TDP, NVL72_UNIT_COST,
     MI300X_MEM_BW, MI300X_FLOPS_FP16_TENSOR, MI300X_MEM_CAPACITY, MI300X_TDP, MI300X_UNIT_COST,
     TPUV5P_MEM_BW, TPUV5P_FLOPS_BF16, TPUV5P_MEM_CAPACITY, TPUV5P_TDP,
     T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP, T4_FLOPS_INT8, T4_UNIT_COST,
@@ -71,7 +72,20 @@ class CloudHardware(Registry):
         memory=MemoryHierarchy(capacity=B200_MEM_CAPACITY, bandwidth=B200_MEM_BW),
         tdp=B200_TDP,
         unit_cost=B200_UNIT_COST,
-        dispatch_tax=0.008 * ureg.ms
+        dispatch_tax=0.008 * ureg.ms,
+        metadata={"source_url": "https://www.nvidia.com/en-us/data-center/blackwell/", "last_verified": "2025-03-06"}
+    )
+
+    GB200_NVL72 = HardwareNode(
+        name="NVIDIA GB200 NVL72",
+        release_year=2024,
+        compute=ComputeCore(peak_flops=NVL72_FLOPS_FP8_TENSOR),
+        memory=MemoryHierarchy(capacity=NVL72_MEM_CAPACITY, bandwidth=NVL72_MEM_BW),
+        interconnect=IOInterconnect(name="NVLink Switch (Bisection)", bandwidth=NVL72_NVLINK_BW),
+        tdp=NVL72_TDP,
+        unit_cost=NVL72_UNIT_COST,
+        dispatch_tax=0.005 * ureg.ms,
+        metadata={"source_url": "https://www.nvidia.com/en-us/data-center/gb200-nvl72/"}
     )
 
     MI300X = HardwareNode(
@@ -243,6 +257,7 @@ class Hardware(Registry):
     H100 = CloudHardware.H100
     H200 = CloudHardware.H200
     B200 = CloudHardware.B200
+    NVL72 = CloudHardware.GB200_NVL72
     MI300X = CloudHardware.MI300X
     TPUv5p = CloudHardware.TPUv5p
     T4 = CloudHardware.T4
