@@ -9,7 +9,7 @@ The domain of the ML Systems Engineer. This round tests your understanding of wh
 <details>
 <summary><b>[LEVEL]: [Your Question Title Here]</b></summary>
 
-**Answer:** [Direct answer here]
+**Prompt:** [The scenario or crisis]
 **Realistic Solution:** [Explain the physics/logic here]
 **📖 Deep Dive:** [Optional: Link to Volume I or II Chapter]
 </details>
@@ -18,25 +18,41 @@ The domain of the ML Systems Engineer. This round tests your understanding of wh
 ---
 
 <details>
-<summary><b>🟢 LEVEL 1: What is 'Inductive Bias' and why do we use CNNs instead of MLPs for images?</b></summary>
+<summary><b>🟡 LEVEL 2: The Profiling Crisis (Arithmetic Intensity)</b></summary>
 
-**Answer:** Structural constraints that restrict the hypothesis space (e.g., spatial locality).
-**Realistic Solution:** An MLP treats every pixel independently, requiring a unique weight for every connection. A CNN uses a local filter applied across the whole image. For a $224	imes224$ image, this reduces the parameter count (and thus the memory footprint, $D_{vol}$) by roughly $1,000	imes$, making the model computationally feasible.
-**📖 Deep Dive:** [Volume I: Network Architectures](https://mlsysbook.ai/vol1/dnn_architectures.html)
+**Prompt:** "You've deployed a custom recommendation model. The profiling dashboard shows you are achieving 120 TFLOPS out of a possible 300 TFLOPS on your GPU. Your tech lead suggests buying a faster GPU to fix the latency. Why is your tech lead wrong?"
+**Realistic Solution:** The tech lead hasn't checked the Arithmetic Intensity ($Ops/Bytes$). If the model is memory-bound (intensity is lower than the ridge point of the roofline), a GPU with faster ALUs will do nothing. You must buy a GPU with higher *Memory Bandwidth (HBM)*, or optimize the model to move fewer bytes (e.g., quantization).
+**📖 Deep Dive:** [Volume I: HW Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
 </details>
 
 <details>
-<summary><b>🟡 LEVEL 2: Why are CNNs usually 'Compute-Bound' while MLPs are 'Memory-Bound'?</b></summary>
+<summary><b>🟢 LEVEL 1: The Data Pipeline Stall (The Transformation Wall)</b></summary>
 
-**Answer:** Spatial weight reuse changes the Arithmetic Intensity.
-**Realistic Solution:** It comes down to Arithmetic Intensity ($I$). In a CNN, the same weight is used across the entire spatial dimension of the image, resulting in $50-200+$ FLOPs per byte loaded from memory. The GPU's ALUs are kept busy. In an MLP, a unique weight is loaded for a single multiply-accumulate (MAC) operation, yielding $\approx 1$ FLOP/byte, which starves the GPU while waiting for memory.
-**📖 Deep Dive:** [Volume I: Network Architectures](https://mlsysbook.ai/vol1/dnn_architectures.html)
-</details>
-
-<details>
-<summary><b>🔴 LEVEL 3: How does the "Transformation Wall" (CPU Starvation) limit GPU utilization during training?</b></summary>
-
-**Answer:** The storage I/O or CPU preprocessing pipeline fails to feed the GPU fast enough.
-**Realistic Solution:** Modern GPUs are so fast that the CPU often cannot keep up with JPEG decoding, random cropping, and data augmentation. If the CPU takes 20ms to prepare a batch and the GPU takes 5ms to train on it, the GPU sits idle 75% of the time. To fix this, a systems engineer must increase CPU worker threads or offload preprocessing to the GPU (e.g., using NVIDIA DALI).
+**Prompt:** "You are training a vision model on high-resolution medical images. `nvidia-smi` shows GPU utilization fluctuating violently between 0% and 100%. What is the most likely bottleneck in your node?"
+**Realistic Solution:** CPU Starvation (The Transformation Wall). The GPU finishes its math instantly, then sits at 0% waiting for the CPU to decode, crop, and augment the next batch of JPEGs. You must offload preprocessing to the GPU (like NVIDIA DALI) or increase your CPU worker count.
 **📖 Deep Dive:** [Volume I: Data Engineering](https://mlsysbook.ai/vol1/data_engineering.html)
+</details>
+
+<details>
+<summary><b>🔴 LEVEL 3: The Precision Trade-off (Hardware Mapping)</b></summary>
+
+**Prompt:** "We are quantizing our model from FP16 to INT8. The memory footprint drops by 2x, but the throughput doesn't improve at all. Assuming we are compute-bound, what hardware architectural detail did we forget?"
+**Realistic Solution:** You forgot to check if the silicon has dedicated INT8 Tensor Cores. Without specific hardware paths for 8-bit integer math, the GPU must upcast the INT8 values back to FP16 in the registers to perform the multiply-accumulate (MAC), yielding zero compute speedup despite the memory savings. 
+**📖 Deep Dive:** [Volume I: Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+</details>
+
+<details>
+<summary><b>🟡 LEVEL 2: The Sequence Length Trap (VRAM Accounting)</b></summary>
+
+**Prompt:** "You need to increase your LLM's context window from 4k to 128k tokens. The model weights fit perfectly in your 80GB VRAM. What hidden memory cost will cause your node to OOM (Out of Memory) during generation?"
+**Realistic Solution:** The KV-Cache. While weights are static, the KV-cache grows linearly with sequence length and batch size. At 128k context, the memory required to store the attention keys and values for a single request will massively exceed the size of the model weights themselves. 
+**📖 Deep Dive:** [Volume I: Frameworks](https://mlsysbook.ai/vol1/frameworks.html)
+</details>
+
+<details>
+<summary><b>🟢 LEVEL 1: The Compilation Overhead (JIT vs AOT)</b></summary>
+
+**Prompt:** "You move a PyTorch training loop from a CPU to a GPU. The first few batches take 500ms each, but suddenly the latency drops to 10ms per batch. What happened inside the framework?"
+**Realistic Solution:** Just-In-Time (JIT) compilation overhead. The framework spends the first few iterations tracing the computation graph and compiling optimized CUDA kernels for the specific tensor shapes you provided. Once cached, the dispatch overhead disappears. 
+**📖 Deep Dive:** [Volume I: ML Systems](https://mlsysbook.ai/vol1/ml_systems.html)
 </details>
