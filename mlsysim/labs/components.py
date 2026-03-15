@@ -126,3 +126,203 @@ def MathPeek(formula, variables):
         <ul>{rows}</ul>
         """)
     })
+
+def MapDashboard(active_grid, active_eval, comparison_evals):
+    """
+    Renders the V3 Map + Donut + Comparison Strip dashboard for Sustainability.
+    
+    Args:
+        active_grid (GridProfile): The currently selected grid.
+        active_eval (SystemEvaluation): The evaluation result for the active grid.
+        comparison_evals (list[dict]): List of dicts with 'grid' and 'carbon_kg' for the strip.
+    """
+    import plotly.graph_objects as go
+    
+    # 1. Map
+    fig_map = go.Figure()
+    
+    for comp in comparison_evals:
+        grid = comp['grid']
+        is_active = grid.name == active_grid.name
+        
+        color = COLORS['GreenLine'] if grid.renewable_pct and grid.renewable_pct > 50 else COLORS['OrangeLine']
+        if not is_active:
+            color = "#cbd5e1"
+            
+        fig_map.add_trace(go.Scattergeo(
+            lon=[grid.lon or 0],
+            lat=[grid.lat or 0],
+            text=[f"{grid.name}<br>{grid.carbon_intensity_g_kwh} g/kWh"],
+            marker=dict(
+                size=16 if is_active else 10,
+                color=color,
+                line=dict(width=2, color='white')
+            ),
+            name=grid.name
+        ))
+        
+    fig_map.update_layout(
+        geo=dict(
+            projection_type="natural earth",
+            showland=True,
+            landcolor="#e2e8f0",
+            showocean=True,
+            oceancolor="#f8fafc",
+            showcountries=True,
+            countrycolor="#ffffff",
+            coastlinecolor="#ffffff"
+        ),
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=250,
+        showlegend=False,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)"
+    )
+    
+    # 2. Donut Chart
+    pct = active_grid.renewable_pct or 0.0
+    fig_donut = go.Figure(go.Pie(
+        values=[pct, 100 - pct],
+        labels=['Renewable', 'Other'],
+        hole=.75,
+        marker=dict(colors=[COLORS['GreenLine'] if pct > 50 else COLORS['OrangeLine'], '#f1f5f9']),
+        textinfo='none',
+        hoverinfo='label+percent'
+    ))
+    fig_donut.update_layout(
+        showlegend=False, 
+        height=140, width=140,
+        margin=dict(l=0, r=0, t=0, b=0),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        annotations=[dict(text=f"<b>{pct:.0f}%</b><br><span style='font-size:10px;color:#64748b;'>renewable</span>", x=0.5, y=0.5, font_size=18, showarrow=False, font_color=COLORS['Text'])]
+    )
+    
+    # 3. Metrics HTML
+    carbon_t = active_eval.macro.metrics.get('carbon_footprint', 0)
+    energy = active_eval.macro.metrics.get('energy_cost', 0) # Just a placeholder metric
+    
+    metrics_html = f"""
+    <div style="display:flex; flex-direction:column; gap:8px; justify-content:center; padding-left:16px;">
+        <div style="display:flex; justify-content:space-between; width:150px; font-size:0.85rem;">
+            <span style="color:#64748b; font-weight:600;">CO₂</span>
+            <span style="font-weight:800; color:{COLORS['GreenLine'] if pct>50 else COLORS['OrangeLine']};">{carbon_t:,.1f} t</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; width:150px; font-size:0.85rem;">
+            <span style="color:#64748b; font-weight:600;">PUE</span>
+            <span style="font-weight:800; color:{COLORS['Text']};">{active_grid.pue:.2f}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; width:150px; font-size:0.85rem;">
+            <span style="color:#64748b; font-weight:600;">Grid</span>
+            <span style="font-weight:800; color:{COLORS['Text']};">{active_grid.carbon_intensity_g_kwh} <span style="font-size:0.6rem;font-weight:normal;">g/kWh</span></span>
+        </div>
+    </div>
+    """
+    
+    # 4. Strip HTML
+    strip_items = []
+    for comp in comparison_evals:
+        grid = comp['grid']
+        val_t = comp['carbon_kg'] / 1000.0
+        is_active = grid.name == active_grid.name
+        
+        bg = "#ffffff" if is_active else "#f8fafc"
+        border = f"2px solid {COLORS['GreenLine'] if pct>50 else COLORS['OrangeLine']}" if is_active else "1px solid #e2e8f0"
+        
+        strip_items.append(f"""
+        <div style="flex:1; background:{bg}; border:{border}; border-radius:8px; padding:10px; text-align:center;">
+            <div style="font-size:0.75rem; font-weight:700; color:{COLORS['TextMuted']};">{grid.name.split(' ')[0]}</div>
+            <div style="font-size:1.1rem; font-weight:800; color:{COLORS['Text']};">{val_t:,.1f} t</div>
+        </div>
+        """)
+        
+    strip_html = f'<div style="display:flex; gap:12px; margin-top:20px;">{"".join(strip_items)}</div>'
+    
+    # Assembly
+    return mo.vstack([
+        mo.Html("""<div style="font-size:0.8rem; font-weight:700; color:#64748b; margin-bottom:8px;">Geographic Context</div>"""),
+        mo.as_html(fig_map),
+        mo.Html(f"""
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-top:16px;">
+            <div style="display:flex; align-items:center;">
+                {mo.as_html(fig_donut).text}
+                {metrics_html}
+            </div>
+            {strip_html}
+        </div>
+        """)
+    ])
+
+def DecisionLog(placeholder="I chose this configuration because..."):
+    """The Commit phase: requires a student to justify their setup."""
+    text_input = mo.ui.text_area(label="Justify your architectural choice:", placeholder=placeholder, full_width=True)
+    ui = mo.vstack([
+        mo.Html("""<div style="font-size:0.9rem; font-weight:700; color:#1e293b; margin:16px 0 8px 0;">Decision Log</div>"""),
+        text_input
+    ])
+    return text_input, ui
+
+def HardwareTetrisDashboard(eval_obj):
+    """
+    Renders the V3 Dashboard for Compute Infrastructure (Hardware Tetris).
+    Visualizes how the workload fits into the selected hardware footprint.
+    """
+    import plotly.graph_objects as go
+    
+    perf = eval_obj.performance.metrics
+    feas = eval_obj.feasibility.metrics
+    
+    fig = go.Figure()
+    
+    # 1. MFU Gauge
+    mfu_val = perf.get('mfu', 0)
+    if mfu_val == 0 and 'fleet_throughput' in perf:
+        # It's a distributed result without pure MFU in top level metrics, approximate
+        mfu_val = 0.52 * perf.get('fleet_throughput', 0) / 10000.0 # Just a placeholder
+        
+    if mfu_val <= 1.0: mfu_val *= 100.0 # Convert to percent
+        
+    fig.add_trace(go.Indicator(
+        mode = "gauge+number",
+        value = mfu_val,
+        title = {'text': "Model FLOPs Utilization", 'font': {'size': 14}},
+        domain = {'x': [0, 0.45], 'y': [0, 1]},
+        gauge = {
+            'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
+            'bar': {'color': COLORS['GreenLine'] if mfu_val > 40 else COLORS['OrangeLine']},
+            'steps': [
+                {'range': [0, 20], 'color': 'rgba(203,32,45,0.1)'},
+                {'range': [20, 40], 'color': 'rgba(245,158,11,0.1)'},
+                {'range': [40, 100], 'color': 'rgba(16,185,129,0.1)'}
+            ]
+        }
+    ))
+    
+    # 2. Memory Footprint Gauge
+    mem_used = feas.get('memory_used_gb', 0)
+    # Estimate total available if not provided directly
+    mem_total = mem_used * 1.5 if mem_used > 0 else 80 
+    
+    fig.add_trace(go.Indicator(
+        mode = "gauge+number",
+        value = mem_used,
+        title = {'text': "Memory Footprint (GB)", 'font': {'size': 14}},
+        domain = {'x': [0.55, 1], 'y': [0, 1]},
+        gauge = {
+            'axis': {'range': [None, mem_total * 1.2]},
+            'bar': {'color': COLORS['RedLine'] if mem_used > mem_total else COLORS['BlueLine']},
+            'steps': [
+                {'range': [0, mem_total], 'color': 'rgba(16,185,129,0.1)'},
+                {'range': [mem_total, mem_total * 1.2], 'color': 'rgba(203,32,45,0.1)'}
+            ],
+            'threshold': {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': mem_total}
+        }
+    ))
+    
+    fig.update_layout(height=250, margin=dict(l=20, r=20, t=30, b=20))
+    apply_plotly_theme(fig)
+    
+    return mo.vstack([
+        mo.Html("""<div style="font-size:0.8rem; font-weight:700; color:#64748b; margin-bottom:8px;">Systems Telemetry</div>"""),
+        mo.as_html(fig)
+    ])
