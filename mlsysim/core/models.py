@@ -15,7 +15,11 @@ from .constants import (
     DLRM_MODEL_SIZE_FP32,
     BYTES_FP32, BYTES_FP16, BYTES_INT8,
     GPT3_TRAINING_OPS,
-    RESNET50_FLOPs, MOBILENETV2_FLOPs, KWS_DSCNN_FLOPs
+    RESNET50_FLOPs, MOBILENETV2_FLOPs, KWS_DSCNN_FLOPs,
+    GPT2_LAYERS, GPT2_HIDDEN_DIM, GPT2_HEADS,
+    GPT3_LAYERS, GPT3_HIDDEN_DIM, GPT3_HEADS,
+    LLAMA3_8B_LAYERS, LLAMA3_8B_HIDDEN_DIM, LLAMA3_8B_HEADS, LLAMA3_8B_KV_HEADS,
+    LLAMA3_70B_LAYERS, LLAMA3_70B_HIDDEN_DIM, LLAMA3_70B_HEADS, LLAMA3_70B_KV_HEADS,
 )
 
 @dataclass(frozen=True)
@@ -24,6 +28,9 @@ class ModelSpec:
     parameters: Q_
     architecture: str # "Transformer", "CNN", "MLP"
     layers: Optional[int] = None
+    hidden_dim: Optional[int] = None
+    heads: Optional[int] = None
+    kv_heads: Optional[int] = None
     inference_flops: Optional[Q_] = None
     training_ops: Optional[Q_] = None
     training_gpu_days: Optional[float] = None
@@ -111,19 +118,31 @@ class ModelSpec:
 
 class GPT(Registry):
     """GPT Model Family."""
-    GPT2 = ModelSpec("GPT-2 (1.5B)", GPT2_PARAMS, "Transformer", layers=48)
-    GPT3 = ModelSpec("GPT-3 (175B)", GPT3_PARAMS, "Transformer", layers=96, training_ops=GPT3_TRAINING_OPS)
-    GPT4 = ModelSpec("GPT-4", GPT4_EST_PARAMS, "Transformer", layers=120, training_gpu_days=GPT4_TRAINING_GPU_DAYS)
+    GPT2 = ModelSpec("GPT-2 (1.5B)", GPT2_PARAMS, "Transformer",
+                     layers=GPT2_LAYERS, hidden_dim=GPT2_HIDDEN_DIM, heads=GPT2_HEADS)
+    GPT3 = ModelSpec("GPT-3 (175B)", GPT3_PARAMS, "Transformer",
+                     layers=GPT3_LAYERS, hidden_dim=GPT3_HIDDEN_DIM, heads=GPT3_HEADS,
+                     training_ops=GPT3_TRAINING_OPS)
+    GPT4 = ModelSpec("GPT-4", GPT4_EST_PARAMS, "Transformer",
+                     layers=120, hidden_dim=12288, heads=96,
+                     training_gpu_days=GPT4_TRAINING_GPU_DAYS)
 
 class Language(Registry):
     """Large Language Models."""
-    # GPT is a nested registry here, but for list() we want to treat it specially or flatten it
-    BERT_Base = ModelSpec("BERT-Base", BERT_BASE_PARAMS, "Transformer", layers=12, inference_flops=22e9 * ureg.flop)
-    BERT_Large = ModelSpec("BERT-Large", BERT_LARGE_PARAMS, "Transformer", layers=24)
-    Llama2_70B = ModelSpec("Llama-2-70B", 70e9 * ureg.param, "Transformer", layers=80)
-    Llama3_8B = ModelSpec("Llama-3.1-8B", LLAMA3_8B_PARAMS, "Transformer", layers=32)
-    Llama3_70B = ModelSpec("Llama-3.1-70B", LLAMA3_70B_PARAMS, "Transformer", layers=80)
-    Llama3_405B = ModelSpec("Llama-3.1-405B", LLAMA3_405B_PARAMS, "Transformer", layers=126)
+    BERT_Base = ModelSpec("BERT-Base", BERT_BASE_PARAMS, "Transformer",
+                         layers=12, hidden_dim=768, heads=12, inference_flops=22e9 * ureg.flop)
+    BERT_Large = ModelSpec("BERT-Large", BERT_LARGE_PARAMS, "Transformer",
+                          layers=24, hidden_dim=1024, heads=16)
+    Llama2_70B = ModelSpec("Llama-2-70B", 70e9 * ureg.param, "Transformer",
+                          layers=80, hidden_dim=8192, heads=64, kv_heads=8)
+    Llama3_8B = ModelSpec("Llama-3.1-8B", LLAMA3_8B_PARAMS, "Transformer",
+                          layers=LLAMA3_8B_LAYERS, hidden_dim=LLAMA3_8B_HIDDEN_DIM,
+                          heads=LLAMA3_8B_HEADS, kv_heads=LLAMA3_8B_KV_HEADS)
+    Llama3_70B = ModelSpec("Llama-3.1-70B", LLAMA3_70B_PARAMS, "Transformer",
+                           layers=LLAMA3_70B_LAYERS, hidden_dim=LLAMA3_70B_HIDDEN_DIM,
+                           heads=LLAMA3_70B_HEADS, kv_heads=LLAMA3_70B_KV_HEADS)
+    Llama3_405B = ModelSpec("Llama-3.1-405B", LLAMA3_405B_PARAMS, "Transformer",
+                            layers=126, hidden_dim=16384, heads=128, kv_heads=8)
 
 class Recommendation(Registry):
     """Recommendation Models."""
