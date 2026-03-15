@@ -5,6 +5,7 @@ for your specific scenario. Every value cites its source.
 """
 
 from .units import USD
+from .pedagogy import SystemAssumption
 
 # --- Reliability (Component MTTF) ---
 # Mean Time To Failure for datacenter-grade components.
@@ -101,8 +102,21 @@ OVERHEAD_MAINTENANCE = 0.05        # ~5% for rolling upgrades, maintenance windo
 
 # --- Scaling Laws (Chinchilla Physics) ---
 # Source: Hoffmann et al. (2022), "Training Compute-Optimal Large Language Models"
-CHINCHILLA_TOKENS_PER_PARAM = 20   # Compute-optimal token count (D ≈ 20P)
-CHINCHILLA_COMPUTE_CONSTANT = 6    # C ≈ 6PD (FLOPs per parameter per token)
+CHINCHILLA_TOKENS_PER_PARAM = SystemAssumption(
+    20,
+    name="Compute-Optimal Token Ratio",
+    description="The optimal number of training tokens per model parameter (D ≈ 20P) to minimize loss for a given compute budget.",
+    citation="Hoffmann et al. (2022). Training Compute-Optimal Large Language Models.",
+    url="https://arxiv.org/abs/2203.15556"
+)
+
+CHINCHILLA_COMPUTE_CONSTANT = SystemAssumption(
+    6,
+    name="Training Compute Constant (C ≈ 6PD)",
+    description="The multiplier for calculating total training FLOPs. 2 FLOPs per parameter for the forward pass, and 4 FLOPs for the backward pass.",
+    citation="Hoffmann et al. (2022). Training Compute-Optimal Large Language Models.",
+    url="https://arxiv.org/abs/2203.15556"
+)
 
 # --- Critical Batch Size (McCandlish et al. 2018) ---
 # Source: McCandlish et al. (2018), "An Empirical Model of Large-Batch Training"
@@ -166,7 +180,6 @@ REFERENCE_MFU_SUSTAINED = 0.40
 DP_SGD_SLOWDOWN_COEFFICIENT = 2.0
 
 # --- Engine Default Overrides ---
-from .pedagogy import SystemAssumption
 
 # Default scaling efficiency for parallel clusters
 DEFAULT_SCALING_EFFICIENCY = SystemAssumption(

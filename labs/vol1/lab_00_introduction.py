@@ -135,7 +135,7 @@ def _(mo, COLORS):
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
                     No prior reading required &mdash; this lab introduces the curriculum
                     from first principles. Concepts here will be reinforced in
-                    @sec-introduction and @sec-ml-systems.
+                    Chapter 1: Introduction and Chapter 2: ML Systems.
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -762,8 +762,8 @@ def _(mo, check1, check2, check3, COLORS):
 
         In later labs, tabs structure the workflow:
         ```
-        Act I: Baseline     →  establish the initial state
-        Act II: Intervention →  apply an optimization
+        Part A: Baseline     →  establish the initial state
+        Part AI: Intervention →  apply an optimization
         ```
         The tab structure ensures you *commit* to a baseline before modifying it.
         This is not UX convenience — it enforces the scientific method: measure before you change.
@@ -821,7 +821,7 @@ def _(mo, check1, check2, check3, COLORS):
         <div style="background:#1e293b; border-radius:10px; padding:20px; border-left:4px solid #6366f1;">
             <div style="font-size:0.72rem; font-weight:700; color:#6366f1;
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:10px;">
-                🔒 Prediction Lock — Act I
+                🔒 Prediction Lock — Part A
             </div>
             <div style="color:#e2e8f0; font-size:0.9rem; line-height:1.6; margin-bottom:14px;">
                 <strong>Scenario:</strong> You double the batch size from 32 to 64 on an H100.
@@ -967,7 +967,6 @@ def _(mo, check1, check2, check3):
 
 # ─── CONTEXT REVEAL + STAKEHOLDER MESSAGE + LEDGER INIT ───────────────────────
 
-@app.cell
 @app.cell(hide_code=True)
 def _(mo):
     decision_input, decision_ui = DecisionLog()
@@ -1237,7 +1236,7 @@ def _(mo, COLORS):
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-introduction for the 95% Problem, the D&middot;A&middot;M
+                    <strong>Read:</strong> Chapter 1: Introduction for the 95% Problem, the D&middot;A&middot;M
                     Taxonomy, and the four deployment paradigms with their physical constraints.<br/>
                     <strong>Build:</strong> TinyTorch starts in Module 01 &mdash; the foundations
                     module that builds the forward-pass engine you will profile throughout the curriculum.
@@ -1253,9 +1252,9 @@ def _(mo, COLORS):
 
     2. The D·A·M Triad claims that Data, Algorithm, and Machine are inseparable. After selecting your track, which axis most constrained what model architectures were feasible?
 
-    3. If a friend claims 'the same trained model can run on any device — you just need to make it smaller,' what specific numbers from Act I would you cite to explain why a 2,000,000x compute gap and a 160,000x memory gap make this impossible in practice?
+    3. If a friend claims 'the same trained model can run on any device — you just need to make it smaller,' what specific numbers from Part A would you cite to explain why a 2,000,000x compute gap and a 160,000x memory gap make this impossible in practice?
 
-    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    *If you cannot answer all three from memory, revisit Part A and Part AI.*
     """)
         }),
     ])

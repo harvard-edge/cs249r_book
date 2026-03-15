@@ -1,5 +1,8 @@
 # AI Systems Interview Cheatsheet 🧠
 
+> [!IMPORTANT]
+> **Work in Progress:** This interview hub is currently being seeded with community-contributed questions. We are actively looking for "Silicon Realist" scenarios from recent interviews at top AI labs. [Contribute your experience here](#-community-contribute-intelligence).
+
 The world's most comprehensive community-driven vault of **AI Systems Design** interview questions—from silicon physics to global fleets.
 
 > **Our Mission:** Curate the high-signal questions actually asked at frontier labs (OpenAI, Anthropic, Meta, Google) and provide the "Silicon Realist" answers that LLMs hallucinate.
