@@ -11,6 +11,7 @@ Bottlenecks in moving data from storage to the accelerator.
 
 **Answer:** [Direct answer here]
 **Why:** [Explain the physics/logic here]
+**Deep Dive:** [Optional: Maintainers will add link to Chapter/Wall]
 </details>
 ```
 
@@ -21,6 +22,7 @@ Bottlenecks in moving data from storage to the accelerator.
 
 **Answer:** You are likely hitting **Wall 9 (Transformation)**.
 **Why:** Modern GPUs are so fast that the CPU often cannot keep up with JPEG decoding, random cropping, and data augmentation. If the CPU takes 20ms to prepare a batch and the GPU takes 5ms to train on it, the GPU sits idle 75% of the time. You must increase CPU workers or use GPU-accelerated preprocessing (DALI).
+**📖 Deep Dive:** [Volume I: Data Engineering](https://mlsysbook.ai/vol1/data_engineering.html) (**Wall 9: Transformation**)
 </details>
 
 <details>
@@ -28,4 +30,5 @@ Bottlenecks in moving data from storage to the accelerator.
 
 **Answer:** Limited by the bisection between storage bandwidth and PCIe bandwidth.
 **Why:** To maintain high Model FLOPS Utilization (MFU), your storage system must deliver data at the rate the accelerator consumes it (**Wall 8: Ingestion**). If you are training a 70B model on text, text is small. But if you are training on high-res video, you can easily saturate a 100 Gbps network link before saturating the GPU cores.
+**📖 Deep Dive:** [Volume I: Data Efficiency](https://mlsysbook.ai/vol1/data_selection.html) (**Wall 8: Ingestion**)
 </details>
