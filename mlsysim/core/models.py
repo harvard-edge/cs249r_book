@@ -92,6 +92,20 @@ class ModelSpec:
 
         return (total_bytes * ureg.byte).to(ureg.byte)
 
+    def lower(self, precision: Q_ = BYTES_FP16):
+        """Lowers the ModelSpec into a ComputationGraph for Engine.solve()."""
+        from ..models.types import ComputationGraph
+        ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
+        weights = self.size_in_bytes(precision)
+        return ComputationGraph(
+            name=self.name,
+            total_ops=ops,
+            parameter_count=self.parameters,
+            weight_bytes=weights,
+            arithmetic_intensity=(ops / weights).to("flop/byte"),
+            layers=self.layers
+        )
+
     def __repr__(self):
         return f"Model({self.name}, {self.architecture})"
 
