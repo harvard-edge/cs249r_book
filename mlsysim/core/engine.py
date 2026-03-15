@@ -196,9 +196,18 @@ class Engine:
         )
         bottleneck = roofline["bottleneck"]
 
-        # 6. Latency = max(compute, memory) + dispatch overhead
+        # 6. Latency = max(compute, memory) + dispatch overhead + layer tax
         dispatch_tax = hardware.dispatch_tax
-        latency = max(compute_time.to("ms").magnitude, memory_time.to("ms").magnitude) * ureg.ms + dispatch_tax
+        
+        # Calculate layer-wise software tax
+        # Source: Reddi et al. (2025), Wall 7 (Framework Overhead)
+        num_layers = getattr(model, 'layers', 1) or 1
+        from .defaults import FRAMEWORK_LAYER_TAX_MS
+        # Training has ~3x the launches of inference (Fwd, GradW, GradA)
+        launch_multiplier = 3 if is_training else 1
+        layer_tax = Q_(num_layers * FRAMEWORK_LAYER_TAX_MS * launch_multiplier, "ms")
+        
+        latency = max(compute_time.to("ms").magnitude, memory_time.to("ms").magnitude) * ureg.ms + dispatch_tax + layer_tax
 
         # 7. Throughput
         if latency.magnitude > 0:

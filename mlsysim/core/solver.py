@@ -322,6 +322,66 @@ class DistributedModel(BaseModel):
             parallelism={"dp": dp_size, "tp": tp_size, "pp": pp_size, "ep": ep_size},
         )
 
+class NetworkRooflineModel(BaseModel):
+    """
+    Analyzes the Distributed Performance Bounds (The Network Wall).
+    
+    This model elevates the single-node Roofline analysis to the fleet scale. 
+    It calculates the Communication Intensity (CI) of a workload and identifies 
+    if the fleet is Compute-Bound (Wall 1) or Network-Bound (Wall 2).
+
+    Literature Source:
+    1. Reddi et al. (2025), "Machine Learning Systems," Volume 2, Chapter 1.
+    2. Williams et al. (2009), "Roofline Model." (Theoretical basis)
+    3. Ghose et al. (2019), "A Survey of Communication-Efficient Distributed 
+       Training."
+    """
+    requires = ("workload", "fleet")
+    produces = PerformanceProfile # Reusing PerformanceProfile for consistency
+
+    def solve(self, model: Workload, fleet: Fleet, precision: str = "fp16", efficiency: float = 0.5) -> PerformanceProfile:
+        """
+        Solves for the distributed performance bound.
+        """
+        # 1. Supply (Fleet Capacity)
+        total_flops = (fleet.node.accelerator.compute.precision_flops.get(precision, fleet.node.accelerator.compute.peak_flops) * fleet.total_accelerators).to("TFLOPs/s")
+        # Bisection Bandwidth (total data movement capacity per step)
+        bisection_bw = (fleet.fabric.bandwidth / fleet.fabric.oversubscription_ratio).to("GB/s")
+        
+        # 2. Demand (Workload Characteristics)
+        # For training, total ops = 6 * parameters * dataset_size_per_step
+        # To normalize per-step, we use 1 sample.
+        # But CI is better defined as Total Ops / Total Sync Bytes.
+        # For Data Parallel sync: Bytes = 2 * Parameters * Precision_Bytes
+        prec_bytes = PRECISION_MAP.get(precision, BYTES_FP16)
+        sync_bytes = (2 * model.parameters.to(ureg.count).magnitude * prec_bytes.to(ureg.byte).magnitude) * ureg.byte
+        
+        # Total OPS for one training step (approx 6 * P FLOPs per sample)
+        # We assume CI is independent of batch size for basic All-Reduce sync.
+        training_ops = (6 * model.parameters.to(ureg.count).magnitude) * ureg.flop
+        
+        # CI = FLOPs / Byte
+        ci = (training_ops / sync_bytes).to("flop/byte")
+        
+        # 3. Physics (The Ridge)
+        # Ridge = Peak_FLOPs / Bisection_BW
+        # Convert BW to Byte/s for units to cancel to FLOP/Byte
+        network_ridge = (total_flops / bisection_bw.to("byte/s")).to("flop/byte")
+        
+        # 4. Results
+        is_network_bound = ci < network_ridge
+        achievable_flops = min(total_flops, bisection_bw.to("byte/s") * ci) * efficiency
+        
+        # Return results in a standardized PerformanceProfile
+        return PerformanceProfile(
+            latency=(training_ops / achievable_flops).to("ms") if achievable_flops.magnitude > 0 else Q_("0 ms"),
+            throughput=(achievable_flops / training_ops).to("1/s"),
+            arithmetic_intensity=ci,
+            peak_flops=total_flops,
+            achievable_flops=achievable_flops,
+            bottleneck="Network-Bound" if is_network_bound else "Compute-Bound"
+        )
+
 class ReliabilityModel(BaseModel):
     """
     Calculates Mean Time Between Failures (MTBF) and optimal checkpointing intervals.
@@ -576,8 +636,13 @@ class ServingModel(BaseModel):
         # 3. Decode Phase
         model_weights_bytes = model.size_in_bytes(bpp)
         t_decode_per_token = ((model_weights_bytes + kv_cache_bytes) / decode_hw.memory.bandwidth).to("ms")
+        
+        # 4. Framework Tax (Per-token decode also incurs launch overhead)
+        from .defaults import FRAMEWORK_LAYER_TAX_MS
+        layer_tax = Q_(model.layers * FRAMEWORK_LAYER_TAX_MS, "ms")
+        t_decode_per_token += layer_tax
 
-        # 4. Speculative Decoding
+        # 5. Speculative Decoding
         if draft_model:
             # Time to generate 1 token with draft model
             draft_weights_bytes = draft_model.size_in_bytes(bpp)

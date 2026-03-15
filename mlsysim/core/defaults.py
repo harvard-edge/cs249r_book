@@ -81,6 +81,12 @@ MFU_TRAINING_HIGH = 0.50           # Upper bound for excellent training MFU
 MFU_INFERENCE_BATCH1 = 0.05        # Inference at batch size 1 (memory-bound)
 MFU_INFERENCE_BATCHED = 0.40       # Inference at large batch size
 
+# --- Software Tax ---
+# Latency overhead for a single kernel launch on a modern GPU.
+# Source: NVIDIA (2024), "CUDA C++ Programming Guide."
+KERNEL_LAUNCH_LATENCY_US = 15.0    # 15 μs typical launch overhead
+FRAMEWORK_LAYER_TAX_MS = 0.10      # 100 μs typical framework tax per model layer
+
 # Scaling efficiency η = T_1 / (N × T_N)
 SCALING_EFF_32GPU = 0.90           # Near-linear regime
 SCALING_EFF_256GPU = 0.70          # Communication starts to bite
