@@ -56,3 +56,35 @@ The domain of the AI Infrastructure Engineer. This round tests your understandin
 **Realistic Solution:** No. As node count ($N$) increases, the Mean Time Between Failures ($MTBF$) decreases exponentially ($MTBF_{cluster} = MTBF_{node} / N$). At 10,000 GPUs, failures happen constantly. You must use the **Young-Daly equation** ($\tau_{opt} = \sqrt{2 \cdot T_{write} \cdot MTBF}$) to balance the checkpoint overhead against the cost of lost work, which usually demands asynchronous, in-memory checkpointing to avoid stalling the training loop.
 **📖 Deep Dive:** [Volume II: Fault Tolerance](https://mlsysbook.ai/vol2/fault_tolerance.html)
 </details>
+
+<details>
+<summary><b>🟡 LEVEL 2: The Oversubscription Choke (Fat-Tree Topologies)</b></summary>
+
+**Interviewer:** "We placed half our GPUs in Rack A and half in Rack B. The intra-rack AllReduce is incredibly fast, but the global AllReduce crawls, even though we bought 400 Gbps InfiniBand. Where is the bottleneck?"
+**Realistic Solution:** Oversubscribed spine switches. A true Fat-Tree (Clos) topology guarantees non-blocking, full bisection bandwidth across the entire cluster. However, if your data center uplinks are $3:1$ oversubscribed (e.g., 3 downlinks for every 1 uplink to the spine), cross-rack traffic will instantly choke during global gradient synchronization.
+**📖 Deep Dive:** [Volume II: Network Fabrics](https://mlsysbook.ai/vol2/network_fabrics.html)
+</details>
+
+<details>
+<summary><b>🔴 LEVEL 3: The Ring vs Tree Dilemma (Collective Communication)</b></summary>
+
+**Interviewer:** "For our 10B parameter model, Ring AllReduce utilizes our network perfectly. However, when we switch to a 100M parameter model, it is terribly slow despite moving far less data. Why does the 'best' algorithm fail here?"
+**Realistic Solution:** Ring AllReduce is bandwidth-optimal but latency-bound for small payloads. It requires $2(N-1)$ steps around the ring. For huge models, the bandwidth saturation hides the latency. For small models, the network transfer happens instantly, but the latency of hopping through $N$ nodes dominates. You must switch to a Tree reduction ($O(\log N)$ latency) for small messages.
+**📖 Deep Dive:** [Volume II: Collective Communication](https://mlsysbook.ai/vol2/collective_communication.html)
+</details>
+
+<details>
+<summary><b>🔴 LEVEL 3: Dimensioning the 3D Cube (Parallelism Strategy)</b></summary>
+
+**Interviewer:** "We have 1,024 GPUs. How do you allocate the dimensions for Data ($D$), Tensor ($T$), and Pipeline ($P$) parallelism for a 175B model?"
+**Realistic Solution:** You solve a physical constraint satisfaction problem. $T$ is strictly bounded by the NVLink domain (usually $T=8$ per node). $P$ is bounded by the number of transformer layers and the microbatch count required to hide the bubble (e.g., $P=16$). Data parallelism ($D$) gets the remainder. Total GPUs = $D \times T \times P$, so $D = 1024 / (8 \times 16) = 8$.
+**📖 Deep Dive:** [Volume II: Distributed Training](https://mlsysbook.ai/vol2/distributed_training.html)
+</details>
+
+<details>
+<summary><b>🟡 LEVEL 2: The Straggler Problem (Synchronous SGD)</b></summary>
+
+**Interviewer:** "99 of our 100 nodes finish their backward pass in 500ms. Node 42 takes 800ms. What is the total step time for the cluster?"
+**Realistic Solution:** 800ms. Synchronous SGD requires a global barrier (AllReduce) to synchronize gradients before the optimizer step. The entire cluster moves at the speed of the slowest node (the straggler). You must implement robust observability to detect if Node 42 is thermal throttling, experiencing a slow PCIe lane, or if the data shard lengths are unbalanced.
+**📖 Deep Dive:** [Volume II: Fleet Orchestration](https://mlsysbook.ai/vol2/fleet_orchestration.html)
+</details>

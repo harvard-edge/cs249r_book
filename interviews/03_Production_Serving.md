@@ -56,3 +56,35 @@ The domain of the MLOps and Deployment Engineer. This round tests your ability t
 **Realistic Solution:** Implement Continuous (or In-Flight) Batching. Instead of waiting for all requests in a batch to finish, continuous batching operates at the iteration level. As soon as the 5-token request finishes and emits its `<EOS>` token, it is immediately evicted from the batch, and a new request from the queue is slotted in for the very next forward pass.
 **📖 Deep Dive:** [Volume I: Model Serving](https://mlsysbook.ai/vol1/model_serving.html)
 </details>
+
+<details>
+<summary><b>🔴 LEVEL 3: The Disaggregated Serving Architecture</b></summary>
+
+**Interviewer:** "In our LLM deployment, users sending very long prompts are causing massive latency spikes for other users who are currently in the middle of generating tokens. How do we isolate these workloads?"
+**Realistic Solution:** Disaggregated Serving. The prompt phase (Prefill) is heavily compute-bound and monopolizes the GPU ALUs, starving the token generation phase (Decode), which is memory-bandwidth bound. You must split Prefill and Decode onto entirely separate GPU clusters, computing the KV-Cache on the Prefill nodes and transmitting it over the network to the Decode nodes.
+**📖 Deep Dive:** [Volume II: Inference at Scale](https://mlsysbook.ai/vol2/inference.html)
+</details>
+
+<details>
+<summary><b>🔴 LEVEL 3: The Decoding Bottleneck (Speculative Decoding)</b></summary>
+
+**Interviewer:** "We are heavily memory-bandwidth bound during LLM decoding. How can we generate tokens faster without changing the model weights, quantizing, or losing exact mathematical accuracy?"
+**Realistic Solution:** Speculative Decoding. You use a tiny, fast "draft" model to guess the next $K$ tokens. You then pass these $K$ tokens to your massive target model in a *single forward pass*. The large model verifies the guesses in parallel (trading spare ALU compute capacity to save memory fetches). All correct tokens are accepted, maintaining identical output distributions but yielding 2-3x speedups.
+**📖 Deep Dive:** [Volume I: Model Serving](https://mlsysbook.ai/vol1/model_serving.html)
+</details>
+
+<details>
+<summary><b>🟡 LEVEL 2: The Pre-computation Trade-off (Static vs Dynamic)</b></summary>
+
+**Interviewer:** "We are deploying a photo classification model. Running it in real-time on user upload costs us $10,000 a month in GPU compute. How do we reduce costs without losing model accuracy?"
+**Realistic Solution:** Shift from Dynamic (Real-time) to Static (Batch) inference. Instead of keeping a GPU idling to wait for user uploads, run the model periodically (e.g., overnight) on cheap spot instances where you can use massive batch sizes to hit 100% GPU utilization. Store the results in a fast key-value cache (Redis) for millisecond serving to the user.
+**📖 Deep Dive:** [Volume I: Model Serving](https://mlsysbook.ai/vol1/model_serving.html)
+</details>
+
+<details>
+<summary><b>🟢 LEVEL 1: The Serverless Freeze (Cold Starts)</b></summary>
+
+**Interviewer:** "Our serverless inference endpoint scales down to 0 replicas to save money. However, the first user request after scaling back up takes 30 seconds to process. What is causing this delay?"
+**Realistic Solution:** Cold Start Latency. The system must provision the container and load the Python runtime, but most importantly, it must transfer the massive model weights (gigabytes of data) from network storage into the GPU's HBM *before* the first forward pass can execute. You must use persistent warm replicas or optimized weight loading strategies to fix this.
+**📖 Deep Dive:** [Volume I: Model Serving](https://mlsysbook.ai/vol1/model_serving.html)
+</details>

@@ -56,3 +56,35 @@ The domain of the ML Leadership and Responsible Engineer. This round tests your 
 **Realistic Solution:** Global accuracy masks subgroup failure. Because the model optimizes for average loss, it will achieve 95% by being highly accurate on the majority class (North America) while potentially failing completely on the minority class (Southeast Asia). In safety-critical domains (like self-driving or medical diagnosis), you must evaluate and threshold metrics on a *per-subgroup* basis, not just the global aggregate.
 **📖 Deep Dive:** [Volume I: Responsible Engineering](https://mlsysbook.ai/vol1/responsible_engr.html)
 </details>
+
+<details>
+<summary><b>🔴 LEVEL 3: The Retraining Math (Cost-Aware Automation)</b></summary>
+
+**Interviewer:** "Our model degrades by 1% accuracy every week. Retraining the model costs us $50,000 in GPU time. A 1% accuracy drop costs the business $100,000 a week. Exactly how often should we trigger a retraining pipeline?"
+**Realistic Solution:** Cost-aware automation. You do not retrain based on a calendar; you retrain when the cumulative cost of performance degradation intersects with the fixed cost of retraining. This is the Retraining Staleness Model. You must formulate the threshold mathematically so the MLOps pipeline triggers training autonomously when the financial math dictates it.
+**📖 Deep Dive:** [Volume I: ML Operations](https://mlsysbook.ai/vol1/ml_ops.html)
+</details>
+
+<details>
+<summary><b>🟡 LEVEL 2: The Deployment Risk (Shadow vs Canary)</b></summary>
+
+**Interviewer:** "We want to test a brand new recommendation model, but if it performs poorly, it will severely impact our daily revenue. A standard A/B test (sending 10% of users to the new model) is deemed too risky. How do we test it on production traffic without any business risk?"
+**Realistic Solution:** Shadow Deployment. You send real production requests to the new model asynchronously. The system records its predictions, but actually serves the *old* model's predictions back to the user. This allows you to evaluate the new model's latency and accuracy on real-world distributions with exactly zero impact on the user experience.
+**📖 Deep Dive:** [Volume I: ML Operations](https://mlsysbook.ai/vol1/ml_ops.html)
+</details>
+
+<details>
+<summary><b>🟡 LEVEL 2: The Trust Boundary (Prompt Injection)</b></summary>
+
+**Interviewer:** "We deployed a customer service LLM. Within a day, users figured out how to trick it into ignoring its system instructions and issuing $500 refunds. Why did standard software security fail here?"
+**Realistic Solution:** Adversarial Prompt Injection. In traditional software, code and data are stored in separate memory spaces (preventing SQL injection). In LLMs, the "system instructions" and the "untrusted user data" are concatenated into the exact same context window. The model cannot inherently distinguish between the two, meaning security must be implemented at the orchestration layer (via input/output guardrails).
+**📖 Deep Dive:** [Volume II: Robust AI](https://mlsysbook.ai/vol2/robust_ai.html)
+</details>
+
+<details>
+<summary><b>🔴 LEVEL 3: The Privacy Audit (Differential Privacy)</b></summary>
+
+**Interviewer:** "We trained a diagnostic model on sensitive medical records. A security audit shows that by querying the model millions of times, an attacker can determine if a specific patient was part of the training set. How do we prevent this?"
+**Realistic Solution:** Membership Inference Attack. The model has memorized the training data. To fix this, you must implement Differentially Private SGD (DP-SGD). By clipping the gradients of individual examples and injecting statistical noise during the backward pass, you can provide mathematical guarantees (measured by an epsilon bound $\epsilon$) that the model's output cannot reveal the presence or absence of any single data point.
+**📖 Deep Dive:** [Volume II: Security and Privacy](https://mlsysbook.ai/vol2/security_privacy.html)
+</details>
