@@ -129,6 +129,10 @@ class GPT(Registry):
 
 class Language(Registry):
     """Large Language Models."""
+    # GPT aliases for Language.GPT3 etc. access pattern
+    GPT2 = GPT.GPT2
+    GPT3 = GPT.GPT3
+    GPT4 = GPT.GPT4
     BERT_Base = ModelSpec("BERT-Base", BERT_BASE_PARAMS, "Transformer",
                          layers=12, hidden_dim=768, heads=12, inference_flops=22e9 * ureg.flop)
     BERT_Large = ModelSpec("BERT-Large", BERT_LARGE_PARAMS, "Transformer",
