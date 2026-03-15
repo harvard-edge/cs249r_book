@@ -8,6 +8,7 @@ on:
     branches: [dev]
     paths:
       - 'labs/**'
+      - 'mlsysim/**'
 
 permissions:
   contents: read
@@ -26,6 +27,43 @@ jobs:
       - name: 📥 Checkout
         uses: actions/checkout@v6
 
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 📦 Build mlsysim wheel
+        run: |
+          pip install build
+          cd mlsysim && python3 -m build --wheel
+          echo "✅ Wheel built:"
+          ls -la dist/*.whl
+
+      - name: 🔮 Export labs as WASM HTML
+        run: |
+          pip install marimo
+          mkdir -p labs/_wasm_build/wheels
+
+          # Copy the mlsysim wheel to the output
+          cp mlsysim/dist/mlsysim-*.whl labs/_wasm_build/wheels/
+
+          # Export each lab as a self-contained WASM HTML app
+          for vol in vol1 vol2; do
+            mkdir -p "labs/_wasm_build/${vol}"
+            for lab in labs/${vol}/lab_*.py; do
+              name=$(basename "$lab" .py)
+              echo "  Exporting ${vol}/${name}..."
+              marimo export html-wasm "$lab" \
+                -o "labs/_wasm_build/${vol}/${name}/index.html" \
+                --mode run \
+                2>&1 || echo "⚠️ Failed to export ${vol}/${name}, skipping"
+            done
+          done
+
+          echo "✅ WASM export complete:"
+          find labs/_wasm_build -name "index.html" | wc -l
+          echo " notebooks exported"
+
       - name: 🔧 Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
@@ -34,6 +72,14 @@ jobs:
         run: |
           quarto render
           touch _build/.nojekyll
+
+          # Merge WASM exports into the Quarto build output
+          cp -r _wasm_build/vol1 _build/vol1 2>/dev/null || true
+          cp -r _wasm_build/vol2 _build/vol2 2>/dev/null || true
+          cp -r _wasm_build/wheels _build/wheels 2>/dev/null || true
+
+          echo "✅ Final build contents:"
+          ls -la _build/
 
       - name: 🔧 Modify announcement for dev preview
         run: |

@@ -22,11 +22,13 @@ on:
   pull_request:
     paths:
       - 'labs/**'
+      - 'mlsysim/**'
       - '.github/workflows/labs-*.yml'
   push:
     branches: [dev]
     paths:
       - 'labs/**'
+      - 'mlsysim/**'
       - '.github/workflows/labs-*.yml'
 
 permissions:
@@ -58,6 +60,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r labs/requirements.txt
+          # Install mlsysim from source (the engine that powers all labs)
+          pip install -e mlsysim/
 
       - name: 🔍 Validate Python syntax (all lab files)
         run: |
@@ -83,18 +87,21 @@ jobs:
             echo "✅ All $COUNT lab files pass syntax check"
           fi
 
-      - name: 🔍 Validate core module imports
+      - name: 🔍 Validate mlsysim + lab module imports
         run: |
-          echo "🔍 Checking core module imports..."
-          cd labs
-
-          # Test that core modules import cleanly
-          python3 -c "from core.style import COLORS, LAB_CSS; print('✅ core.style imports OK')"
-          python3 -c "from core.state import DesignLedger; print('✅ core.state imports OK')"
-          python3 -c "from core.components import Card, MetricRow; print('✅ core.components imports OK')"
+          echo "🔍 Checking mlsysim engine imports..."
+          python3 -c "import mlsysim; print('✅ mlsysim engine imports OK')"
+          python3 -c "from mlsysim.core.engine import Engine; print('✅ mlsysim.core.engine imports OK')"
+          python3 -c "from mlsysim.hardware.registry import Hardware; print('✅ mlsysim.hardware imports OK')"
 
           echo ""
-          echo "✅ All core modules import successfully"
+          echo "🔍 Checking mlsysim.labs imports..."
+          python3 -c "from mlsysim.labs.style import COLORS, LAB_CSS; print('✅ mlsysim.labs.style imports OK')"
+          python3 -c "from mlsysim.labs.state import DesignLedger; print('✅ mlsysim.labs.state imports OK')"
+          python3 -c "from mlsysim.labs.components import Card, MetricRow; print('✅ mlsysim.labs.components imports OK')"
+
+          echo ""
+          echo "✅ All modules import successfully"
 
       - name: 🔍 Validate notebook marimo structure
         run: |
@@ -116,6 +123,18 @@ jobs:
               echo "❌ Missing 'app = marimo.App': $f"
               FAILED=$((FAILED + 1))
             fi
+
+            # Every lab must use mlsysim.labs imports (not old labs.core path)
+            if grep -q "from labs\.core\." "$f"; then
+              echo "❌ Uses old import path 'labs.core': $f"
+              FAILED=$((FAILED + 1))
+            fi
+
+            # Every lab must have WASM bootstrap
+            if ! grep -q 'sys.platform == "emscripten"' "$f"; then
+              echo "❌ Missing WASM bootstrap: $f"
+              FAILED=$((FAILED + 1))
+            fi
           done
 
           echo ""
@@ -123,7 +142,34 @@ jobs:
             echo "❌ $FAILED issues found in $COUNT notebooks"
             exit 1
           else
-            echo "✅ All $COUNT notebooks have valid Marimo structure"
+            echo "✅ All $COUNT notebooks have valid Marimo structure + WASM bootstrap"
+          fi
+
+      - name: 🧪 Validate lab execution (import check)
+        run: |
+          echo "🧪 Testing that each lab can be loaded by Python..."
+          FAILED=0
+          COUNT=0
+
+          for f in labs/vol1/lab_*.py labs/vol2/lab_*.py; do
+            [ -f "$f" ] || continue
+            COUNT=$((COUNT + 1))
+            name=$(basename "$f" .py)
+
+            if python3 -c "import importlib.util; spec = importlib.util.spec_from_file_location('lab', '$f'); mod = importlib.util.module_from_spec(spec)" 2>/dev/null; then
+              echo "✅ $name"
+            else
+              echo "❌ Failed to load: $name"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          if [ $FAILED -gt 0 ]; then
+            echo "❌ $FAILED of $COUNT labs failed load test"
+            exit 1
+          else
+            echo "✅ All $COUNT labs pass load test"
           fi
 
   # ===========================================================================
