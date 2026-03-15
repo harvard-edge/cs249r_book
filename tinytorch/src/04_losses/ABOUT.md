@@ -520,16 +520,16 @@ Consider what happens without the trick. Standard softmax computes `exp(x) / sum
 def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
     """Compute log-softmax with numerical stability."""
     # Step 1: Find max along dimension for numerical stability
-    max_vals = np.max(x.data, axis=dim, keepdims=True)
+    x_max = np.max(x.data, axis=dim, keepdims=True)
 
     # Step 2: Subtract max to prevent overflow
-    shifted = x.data - max_vals
+    shifted = x.data - x_max
 
     # Step 3: Compute log(sum(exp(shifted)))
     log_sum_exp = np.log(np.sum(np.exp(shifted), axis=dim, keepdims=True))
 
-    # Step 4: Return log_softmax = input - max - log_sum_exp
-    result = x.data - max_vals - log_sum_exp
+    # Step 4: Return log_softmax = shifted - log_sum_exp
+    result = shifted - log_sum_exp
 
     return Tensor(result)
 ```
