@@ -3,45 +3,7 @@ import marimo
 __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LAB 04: THE DATA GRAVITY TRAP — DISTRIBUTED SCALE
-#
-# Chapter: data_storage.qmd (@sec-data-storage)
-# Core Invariant: Data gravity — once data is stored somewhere, computation
-#   tends to move TO the data rather than data moving to compute. At
-#   distributed training scale, the I/O system becomes the bottleneck when
-#   reading training data. Distributed file systems (Lustre, GPFS) provide
-#   aggregate bandwidth but introduce coordination overhead.
-#
-# 2-Act structure (35-40 min total):
-#   Act I:  The I/O Bottleneck (12-15 min)
-#     128 H100s at 12% GPU utilization despite a 672 GB/s Lustre cluster.
-#     Prediction lock → I/O analyzer → reveal → reflection → MathPeek
-#   Act II: Distributed Storage Architecture (20-25 min)
-#     Design a 4096-GPU cluster's storage layer. Metadata bottleneck lurks.
-#     Prediction lock → storage designer → failure state → reflection → MathPeek
-#
-# Deployment contexts:
-#   NVMe:            Single-node local NVMe (7 GB/s per drive, 4 drives = 28 GB/s)
-#   Distributed FS:  Lustre/GPFS cluster (OST nodes × 28 GB/s each, MDS ceiling)
-#
-# Traceability:
-#   H100 HBM bandwidth      — @sec-data-storage-fuel-line (H100_MEM_BW = 3.35 TB/s)
-#   NVMe sequential BW      — @sec-data-storage-fuel-line (NVME_SEQUENTIAL_BW = 7 GB/s)
-#   Lustre OST BW           — @sec-data-storage (4 × NVMe per OST = 28 GB/s)
-#   GPU utilization formula — @sec-data-storage (t_compute / t_total)
-#   Prefetch depth model    — @sec-data-storage (queue depth × batch_read_time)
-#   Metadata ops rate       — @sec-data-storage (gpus × workers × ops_per_open)
-#   IB HDR200 bandwidth     — @sec-network-fabrics (200 Gbps = 25 GB/s per port)
-#
-# Design Ledger save:
-#   chapter="v2_04", context, storage_type, gpu_count, data_workers_per_gpu,
-#   io_throughput_gbs, act1_prediction, act1_correct, act2_result,
-#   act2_decision, constraint_hit, mds_saturated
-# ─────────────────────────────────────────────────────────────────────────────
 
-
-# ─── CELL 0: SETUP (hide_code=False — leave visible) ─────────────────────────
 @app.cell
 async def _():
     import marimo as mo
@@ -51,10 +13,11 @@ async def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
     if sys.platform == "emscripten":
         import micropip
-        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+        await micropip.install(
+            "https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl"
+        )
     elif "mlsysim" not in sys.modules:
         _root = Path(__file__).resolve().parents[2]
         if str(_root) not in sys.path:
@@ -62,57 +25,76 @@ async def _():
 
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim.labs.components import DecisionLog
+    import mlsysim
+    from mlsysim.core.defaults import GPU_MTTF_HOURS
+    from mlsysim.core.formulas import calc_young_daly_interval, calc_mtbf_cluster
+    from mlsysim.core.constants import (
+        ureg,
+        H100_FLOPS_FP16_TENSOR,
+        A100_FLOPS_FP16_TENSOR,
+        B200_FLOPS_FP16_TENSOR,
+        V100_FLOPS_FP16_TENSOR,
+        NVME_SEQUENTIAL_BW,
+    )
+
+    # Scalar extraction
+    H100_TFLOPS = H100_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
+    A100_TFLOPS = A100_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
+    B200_TFLOPS = B200_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
+    V100_TFLOPS = V100_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
+    NVME_GBS = NVME_SEQUENTIAL_BW.m_as("GB/s")
 
     ledger = DesignLedger()
-    return mo, ledger, COLORS, LAB_CSS, apply_plotly_theme, go, np, math
+    return (
+        COLORS, LAB_CSS, apply_plotly_theme, go, math, mo, np, ledger, ureg,
+        H100_TFLOPS, A100_TFLOPS, B200_TFLOPS, V100_TFLOPS, NVME_GBS,
+        GPU_MTTF_HOURS,
+        calc_young_daly_interval, calc_mtbf_cluster,
+    )
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE A: OPENING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 1: HEADER ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, LAB_CSS, COLORS):
-    _c = COLORS["Cloud"]
+def _(LAB_CSS, mo):
     mo.vstack([
         LAB_CSS,
-        mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        mo.Html("""
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.3); margin-bottom: 8px;">
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
                         color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems · Volume II · Lab 04
+                Machine Learning Systems &middot; Volume II &middot; Lab 04
             </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.2rem; font-weight: 900;
+            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
-                The I/O Bottleneck
+                The Data Pipeline Wall
             </h1>
-            <p style="margin: 0 0 22px 0; font-size: 1.02rem; color: #94a3b8;
-                      max-width: 680px; line-height: 1.65;">
-                128 H100s sit at 12% GPU utilization despite a 672 GB/s Lustre cluster.
-                The storage system looks fine on paper. The accelerators are starving.
-                Before buying more hardware, you need to find the actual bottleneck.
+            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
+                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
+                Storage Chasm &middot; Pipeline Equation &middot; Shard Contention &middot; Checkpoints
             </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
-                <span style="background: rgba(99,102,241,0.15); color: #a5b4fc;
+            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
+                      max-width: 680px; line-height: 1.65;">
+                Storage -- the least glamorous infrastructure component -- can silently
+                determine whether your cluster is productive or an expensive space heater.
+                The compute-storage gap has widened 60x in seven years and is getting worse.
+            </p>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
+                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.25);">
-                    Act I: I/O Bottleneck · 12–15 min
+                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
+                    5 Parts &middot; ~58 min
                 </span>
-                <span style="background: rgba(99,102,241,0.15); color: #a5b4fc;
+                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.25);">
-                    Act II: Storage Architecture · 20–25 min
+                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
+                    Vol II Ch 4: Data and Storage at Scale
                 </span>
-                <span style="background: rgba(16,185,129,0.15); color: #6ee7b7;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(16,185,129,0.25);">
-                    35–40 min total
-                </span>
-                <span class="badge badge-info">Chapter 4: Data Storage</span>
+            </div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <span class="badge badge-info">60x widening gap</span>
+                <span class="badge badge-warn">Birthday problem in shards</span>
+                <span class="badge badge-fail">Young-Daly checkpoint interval</span>
             </div>
         </div>
         """),
@@ -120,40 +102,39 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, COLORS):
+def _(COLORS, mo):
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
                 padding: 20px 28px; margin: 8px 0 16px 0;
                 box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-
-        <!-- LEARNING OBJECTIVES -->
         <div style="margin-bottom: 16px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                 Learning Objectives
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Identify the pipeline bottleneck: predict whether doubling local NVMe capacity improves GPU utilization when the S3 network link (1.25 GB/s) is the slowest stage, and explain why throughput equals the minimum across all pipeline stages.</strong></div>
-                <div style="margin-bottom: 3px;">2. <strong>Quantify the storage-compute chasm: measure why a single H100 at 3.35 TB/s HBM bandwidth creates a 479&times; gap against a single NVMe drive at 7 GB/s, and what pipeline depth is required to bridge it.</strong></div>
-                <div style="margin-bottom: 3px;">3. <strong>Design a checkpoint strategy: find the minimum write bandwidth (35 GB/s) and checkpoint interval that keeps GPU utilization above 90% without checkpoint writes overflowing into the next interval.</strong></div>
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the storage-compute chasm</strong> &mdash; show that
+                    accelerator throughput has grown 236x (V100 to B200) while NVMe bandwidth
+                    grew only 4x, and explain why faster GPUs make the storage problem worse.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose data stalls</strong> &mdash; calculate that prefetching
+                    cannot eliminate stalls when I/O time exceeds compute time, and apply
+                    the pipelining equation T_step = max(T_compute, T_IO).</div>
+                <div style="margin-bottom: 3px;">3. <strong>Optimize checkpoint frequency</strong> &mdash; apply the Young-Daly
+                    formula to find the optimal checkpoint interval that minimizes total waste
+                    (checkpoint overhead + expected rework).</div>
             </div>
         </div>
-
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <!-- PREREQUISITES + DURATION (side by side) -->
-        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 220px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Storage hierarchy tiers and the 479&times; HBM-to-NVMe gap from @sec-data-storage-fuel-line &middot;
-                    Sequential vs. random I/O access patterns for ML workloads from @sec-data-storage-workload-inversion
+                    V2-01 (reliability) &middot; V2-02 (memory hierarchy)
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -162,23 +143,22 @@ def _(mo, COLORS):
                     Duration
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>35-40 min</strong><br/>
-                    Act I: ~12 min &middot; Act II: ~25 min
+                    <strong>~58 min</strong><br/>
+                    Parts A&ndash;E: ~10&ndash;12 min each
                 </div>
             </div>
         </div>
-
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <!-- CORE QUESTION -->
-        <div style="margin-top: 16px;">
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
+                    padding: 16px 28px 0 28px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                 Core Question
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                "If your Lustre cluster provides 672 GB/s of aggregate storage bandwidth and your H100s can consume data at 3.35 TB/s from HBM &mdash; why are GPUs sitting at 12% utilization, and why would buying more NVMe drives do nothing to fix it?"
+                &ldquo;Your cluster is storage-bottlenecked at 30% GPU utilization. You upgrade
+                to GPUs with 2x the TFLOPS. Does utilization improve, stay the same, or get
+                worse &mdash; and how often should you save checkpoints?&rdquo;
             </div>
         </div>
     </div>
@@ -186,1593 +166,706 @@ def _(mo, COLORS):
     return
 
 
-# ─── CELL 3: RECOMMENDED READING ─────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
-    **Recommended Reading** — Complete the following before this lab:
+    **Recommended Reading** -- Complete the following before this lab:
 
-    - **@sec-data-storage-fuel-line** (The Fuel Line) — The 479× gap between H100 HBM
-      bandwidth (3.35 TB/s) and a single NVMe drive (7 GB/s), and why this gap cannot be
-      closed by any single technology. The hierarchical storage model is the only response.
-    - **@sec-data-storage-workload-inversion** (How ML Workloads Invert Storage Assumptions)
-      — Why ML training reads every byte sequentially exactly once per epoch, why there is
-      no hot-data subset, and how this inverts every assumption from database storage design.
-    - **@sec-data-storage** (Data Pipeline Architecture) — Prefetching, pipelining, and the
-      GPU Direct Storage pathway that eliminates the CPU from the data path entirely.
+    - **Vol II Ch 4: The Storage-Compute Chasm** -- 60x widening gap, pipeline equation.
+    - **Vol II Ch 4: Data Stalls and Prefetching** -- when pipelining cannot help.
+    - **Vol II Ch 4: Checkpoint Economics** -- Young-Daly optimal interval.
     """), kind="info")
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE ──────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    context_toggle = mo.ui.radio(
-        options={
-            "NVMe (single node, 4 drives at 7 GB/s each)": "nvme",
-            "Distributed FS (Lustre/GPFS cluster, OST nodes)": "distributed_fs",
-        },
-        value="Distributed FS (Lustre/GPFS cluster, OST nodes)",
-        label="Storage context:",
-        inline=True,
-    )
-    mo.vstack([
-        mo.md("---"),
-        mo.md("### Select Your Storage Context"),
-        mo.md(
-            "This choice sets the storage architecture for both acts. "
-            "NVMe reflects a single training node reading local drives. "
-            "Distributed FS reflects a production multi-node Lustre/GPFS deployment."
-        ),
-        context_toggle,
-    ])
-    return (context_toggle,)
-
-
-@app.cell(hide_code=True)
-def _(mo, context_toggle, COLORS):
-    _ctx = context_toggle.value
-    if _ctx == "nvme":
-        _bw_desc = "4 × NVMe = 28 GB/s local storage bandwidth per node"
-        _arch_desc = "No metadata server overhead — direct kernel I/O"
-        _color = COLORS["GreenLine"]
-        _label = "NVMe — Single Node"
-    else:
-        _bw_desc = "24 OST nodes × 28 GB/s = 672 GB/s aggregate Lustre bandwidth"
-        _arch_desc = "Metadata server (MDS) coordinates all namespace operations"
-        _color = COLORS["Cloud"]
-        _label = "Distributed FS — Lustre/GPFS"
-
-    mo.callout(mo.md(
-        f"**Context: {_label}** — Storage bandwidth: {_bw_desc}. "
-        f"Architecture note: {_arch_desc}. "
-        "The I/O bottleneck analysis in Act I will use these parameters."
-    ), kind="info")
-    return
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: ACT I — CALIBRATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 5: ACT1_BANNER (hide_code=True) ─────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _act_num      = "I"
-    _act_color    = COLORS["BlueLine"]
-    _act_title    = "The I/O Bottleneck"
-    _act_duration = "12&ndash;15 min"
-    _act_why      = (
-        "Your training platform has 128 H100 GPUs and a 24-node Lustre cluster providing "
-        "672 GB/s of aggregate storage bandwidth, yet GPUs are at 12% utilization. "
-        "You expect that adding more NVMe drives will fix this &mdash; the pipeline "
-        "waterfall will show that the S3 network link (1.25 GB/s) is the bottleneck, "
-        "and doubling NVMe capacity provides exactly 0% improvement."
-    )
-    mo.Html(f"""
-    <div style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {_act_color}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;
-                        flex-shrink: 0;">{_act_num}</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act {_act_num} &middot; {_act_duration}</div>
-        </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">
-            {_act_title}
-        </div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            {_act_why}
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT I: STAKEHOLDER MESSAGE ──────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _c = COLORS["OrangeLine"]
-    mo.Html(f"""
-    <div style="border-left: 4px solid {_c}; background: {COLORS['OrangeLL']};
-                border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; color: {_c};
-                    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-            Incoming Message · Training Platform Lead
-        </div>
-        <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-            "We have 128 H100s, each capable of consuming training data at 3.35 TB/s from HBM.
-            We store our training data on a 24-node Lustre cluster — each OST node has 4 NVMe
-            SSDs at 7 GB/s each, giving 28 GB/s per node and 672 GB/s in aggregate.
-            Our GPUs are sitting at 12% utilization during the data loading phase.
-            The infrastructure team says the Lustre cluster is healthy and nowhere near saturated.
-            We're about to request budget for another 256 GPUs. Should we?"
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT I: THE NUMBERS ──────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _c = COLORS["BlueLine"]
-    mo.Html(f"""
-    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px;
-                padding: 20px 24px; margin: 12px 0;">
-        <div style="font-size: 0.82rem; font-weight: 700; color: #475569; text-transform: uppercase;
-                    letter-spacing: 0.08em; margin-bottom: 14px;">
-            The Arithmetic Before You Touch the Simulator
-        </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-            <div>
-                <div style="font-size: 0.82rem; color: #94a3b8; margin-bottom: 4px;">
-                    H100 HBM bandwidth (NVIDIA spec)
-                </div>
-                <div style="font-size: 1.2rem; font-weight: 700; color: {_c};">
-                    3,350 GB/s per GPU
-                </div>
-            </div>
-            <div>
-                <div style="font-size: 0.82rem; color: #94a3b8; margin-bottom: 4px;">
-                    Lustre aggregate bandwidth (24 OSTs × 28 GB/s)
-                </div>
-                <div style="font-size: 1.2rem; font-weight: 700; color: {_c};">
-                    672 GB/s total
-                </div>
-            </div>
-            <div>
-                <div style="font-size: 0.82rem; color: #94a3b8; margin-bottom: 4px;">
-                    Actual data ingestion needed per GPU (4 MB batch / 50 ms step)
-                </div>
-                <div style="font-size: 1.2rem; font-weight: 700; color: {COLORS['GreenLine']};">
-                    ~80 MB/s per GPU
-                </div>
-            </div>
-            <div>
-                <div style="font-size: 0.82rem; color: #94a3b8; margin-bottom: 4px;">
-                    Total I/O demand for 128 GPUs (128 × 80 MB/s)
-                </div>
-                <div style="font-size: 1.2rem; font-weight: 700; color: {COLORS['GreenLine']};">
-                    ~10.24 GB/s needed
-                </div>
-            </div>
-        </div>
-        <div style="margin-top: 14px; font-size: 0.88rem; color: #475569; line-height: 1.65;
-                    border-top: 1px solid #e2e8f0; padding-top: 12px;">
-            <strong>The gap is striking:</strong> 672 GB/s of Lustre capacity against only 10.24 GB/s
-            of actual demand. The cluster is at ~1.5% utilization. The Lustre hardware is
-            not the problem. Something else is consuming the time between batches.
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT I: PREDICTION LOCK ──────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    #### Your Prediction
-
-    *Before interacting with the I/O analyzer, commit to your diagnosis.*
-    The storage cluster is at ~1.5% utilization. The GPUs are at 12%. The gap is real.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    act1_prediction = mo.ui.radio(
-        options={
-            "A) The Lustre cluster is saturated — 672 GB/s is not enough for 128 GPUs": "A",
-            "B) Small random reads — the access pattern does not match Lustre's sequential throughput profile": "B",
-            "C) Network bandwidth between the Lustre nodes and the GPU compute nodes is saturated": "C",
-            "D) 12% utilization is normal — data loading always accounts for 88% of training time": "D",
-        },
-        label="GPU utilization is 12% despite a 672 GB/s Lustre cluster. The most likely root cause is:",
-    )
-    act1_prediction
-    return (act1_prediction,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act1_prediction):
-    mo.stop(
-        act1_prediction.value is None,
-        mo.callout(
-            mo.md("Select your prediction to unlock the I/O bottleneck analyzer."),
-            kind="warn",
-        ),
-    )
-    mo.callout(
-        mo.md(
-            f"**Prediction locked: {act1_prediction.value[:2]}** "
-            "Now use the I/O analyzer to test your hypothesis. "
-            "Adjust the data loader configuration to see what moves the needle."
-        ),
-        kind="info",
-    )
-    return
-
-
-# ─── ACT I: INSTRUMENTS ──────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    #### The I/O Bottleneck Analyzer
-
-    Adjust the data loading configuration below to see how GPU utilization responds.
-    The physics engine models the relationship between prefetch depth, worker count,
-    read pattern, and effective I/O throughput.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    act1_num_workers = mo.ui.slider(
-        start=1, stop=16, value=1, step=1,
-        label="Data loader workers per GPU",
-        show_value=True,
-    )
-    act1_batch_size = mo.ui.slider(
-        start=32, stop=512, value=64, step=32,
-        label="Batch size (samples)",
-        show_value=True,
-    )
-    act1_read_pattern = mo.ui.dropdown(
-        options={
-            "Sequential (large chunks, Lustre-optimal)": "sequential",
-            "Random (small 4K reads, worst case)": "random",
-            "Prefetch pipeline (async, overlapped with compute)": "prefetch",
-        },
-        value="Random (small 4K reads, worst case)",
-        label="Read pattern",
-    )
-    act1_ost_count = mo.ui.slider(
-        start=4, stop=48, value=24, step=4,
-        label="Active Lustre OST nodes",
-        show_value=True,
-    )
-    mo.hstack([
-        act1_num_workers,
-        act1_batch_size,
-        act1_read_pattern,
-        act1_ost_count,
-    ], gap=2, justify="start")
-    return (act1_num_workers, act1_batch_size, act1_read_pattern, act1_ost_count)
-
-
 @app.cell(hide_code=True)
 def _(
-    mo, act1_num_workers, act1_batch_size, act1_read_pattern, act1_ost_count,
-    context_toggle, go, apply_plotly_theme, COLORS, math,
+    COLORS, apply_plotly_theme, go, math, mo, np, ureg,
+    H100_TFLOPS, A100_TFLOPS, B200_TFLOPS, V100_TFLOPS, NVME_GBS,
+    GPU_MTTF_HOURS,
+    calc_young_daly_interval, calc_mtbf_cluster,
 ):
-    # ── Hardware constants ─────────────────────────────────────────────────────
-    # Source: @sec-data-storage-fuel-line
-    _H100_BW_GBS       = 3350.0    # H100 SXM5 HBM3e bandwidth, NVIDIA spec sheet
-    _NVME_SEQ_BW_GBS   = 7.0       # PCIe Gen4 NVMe sequential read bandwidth
-    _NVME_RAND_BW_GBS  = 0.5       # NVMe random 4K read effective throughput
-    _LUSTRE_OST_BW_GBS = 28.0      # Per OST node (4 × NVMe at 7 GB/s each)
-    _IB_HDR200_BW_GBS  = 25.0      # InfiniBand HDR-200 per port (200 Gbps = 25 GB/s)
+    # ═════════════════════════════════════════════════════════════════════════
+    # WIDGETS
+    # ═════════════════════════════════════════════════════════════════════════
 
-    # ── Workload parameters ────────────────────────────────────────────────────
-    _GPU_COUNT         = 128        # fixed for Act I scenario
-    _SAMPLE_SIZE_MB    = 4.0        # 4 MB per training sample (typical image/text)
-    _COMPUTE_TIME_MS   = 50.0       # GPU compute time per batch (H100, realistic)
+    pA_pred = mo.ui.radio(
+        options={
+            "A) ~60% -- faster GPUs process data faster": "60",
+            "B) ~30% -- no change, storage is the bottleneck": "30",
+            "C) ~15% -- utilization drops because GPUs are faster but storage is not": "15",
+            "D) ~5% -- catastrophic collapse": "5",
+        },
+        label="Storage-bottlenecked at 30% utilization. Upgrade GPUs to 2x TFLOPS. What happens?",
+    )
+    pA_gen = mo.ui.dropdown(
+        options={"V100 (2017)": "v100", "A100 (2020)": "a100", "H100 (2022)": "h100", "B200 (2024)": "b200"},
+        value="H100 (2022)", label="GPU generation",
+    )
 
-    # ── Context-dependent base bandwidth ──────────────────────────────────────
-    _ctx = context_toggle.value
-    if _ctx == "nvme":
-        # Single node: 4 × NVMe = 28 GB/s, no network overhead
-        _base_storage_bw = 28.0     # GB/s (4 × 7 GB/s NVMe)
-        _network_overhead = 1.0     # no network factor for local NVMe
-    else:
-        # Distributed Lustre: aggregate bandwidth from active OSTs
-        _base_storage_bw = act1_ost_count.value * _LUSTRE_OST_BW_GBS
-        # Network overhead: IB connects compute to storage, capped at IB bandwidth
-        # 128 GPUs × 1 IB port per node = need aggregate fabric bandwidth
-        _network_overhead = min(1.0, (_IB_HDR200_BW_GBS * 16) / _base_storage_bw)
+    pB_pred = mo.ui.radio(
+        options={
+            "A) ~80% -- utilization stays": "80",
+            "B) ~60% -- moderate drop": "60",
+            "C) ~40% -- storage BW split across twice as many GPUs": "40",
+            "D) ~20% -- catastrophic starving": "20",
+        },
+        label="128 GPUs at 80% utilization. Double to 256 without upgrading storage. What happens?",
+    )
+    pB_gpus = mo.ui.slider(start=8, stop=1024, value=128, step=8, label="GPU count")
+    pB_target = mo.ui.slider(start=50, stop=95, value=80, step=5, label="Target utilization (%)")
 
-    # ── Read pattern factor ────────────────────────────────────────────────────
-    # Sequential reads can sustain near-peak bandwidth on Lustre
-    # Random 4K reads hit IOPS wall: OST NVMe at ~800K IOPS × 4KB = 3.2 GB/s per OST
-    # Prefetch: async pipeline overlaps I/O with compute, hides much of the latency
-    _pattern_factor = {
-        "sequential": 0.85,   # near-peak sequential read efficiency
-        "random":     0.07,   # 4K random read: ~7% of sequential bandwidth
-        "prefetch":   0.78,   # async prefetch hides latency, near-sequential efficiency
-    }[act1_read_pattern.value]
+    pC_pred = mo.ui.radio(
+        options={
+            "A) ~10% -- 1,000 shards is plenty for 256 workers": "10",
+            "B) ~50% -- borderline": "50",
+            "C) ~100% -- collisions are essentially guaranteed": "100",
+            "D) ~75% -- high but not certain": "75",
+        },
+        label="256 GPUs, 1,000 shards, random selection. Collision probability?",
+    )
+    pC_workers = mo.ui.slider(start=8, stop=256, value=256, step=8, label="GPU workers")
+    pC_shards = mo.ui.slider(start=100, stop=10000, value=1000, step=100, label="Dataset shards")
 
-    # ── Worker scaling ─────────────────────────────────────────────────────────
-    # Workers per GPU parallelize reads across CPU cores
-    # Diminishing returns: Amdahl-style. Beyond 8 workers, OS scheduling overhead grows.
-    # Source: empirical characterization from @sec-data-storage
-    _workers = act1_num_workers.value
-    if _workers == 1:
-        _worker_factor = 0.25   # 1 worker: sequential, blocking reads — severe bottleneck
-    elif _workers <= 4:
-        _worker_factor = 0.25 + (_workers - 1) * 0.20   # near-linear scaling 1–4
-    elif _workers <= 8:
-        _worker_factor = 0.85 + (_workers - 4) * 0.03   # sub-linear scaling 4–8
-    else:
-        _worker_factor = min(0.97 + (_workers - 8) * 0.002, 1.0)   # minimal gain > 8
+    pD_pred = mo.ui.radio(
+        options={
+            "A) Yes -- 4 batches of prefetch hide the 300 ms I/O": "yes",
+            "B) No -- stall drops from 60% to 33% but never reaches zero": "no_partial",
+            "C) Partially -- stall drops to ~10%": "partial",
+            "D) No effect -- prefetching only helps random access": "no_effect",
+        },
+        label="200 ms compute, 300 ms I/O. Add prefetch depth 4. Does the stall disappear?",
+    )
+    pD_compute = mo.ui.slider(start=100, stop=500, value=200, step=10, label="Compute time (ms)")
+    pD_io = mo.ui.slider(start=50, stop=1000, value=300, step=10, label="I/O time (ms)")
+    pD_prefetch = mo.ui.slider(start=0, stop=8, value=0, step=1, label="Prefetch depth")
 
-    # ── Prefetch queue depth ───────────────────────────────────────────────────
-    # Prefetch depth: how many batches ahead we read asynchronously
-    # depth = workers × overlap_factor (pattern-dependent)
-    _overlap_factor = {"sequential": 2.0, "random": 0.5, "prefetch": 4.0}[act1_read_pattern.value]
-    _prefetch_depth = max(1, int(_workers * _overlap_factor))
+    pE_pred = mo.ui.radio(
+        options={
+            "A) Every 5 minutes -- minimize lost work": "5",
+            "B) Every ~27 minutes -- Young-Daly sweet spot": "27",
+            "C) Every hour -- minimize I/O overhead": "60",
+            "D) Every 2 hours -- checkpoints are expensive": "120",
+        },
+        label="1,000-GPU cluster, MTBF = 5 hours, checkpoint write = 2 min. Optimal interval?",
+    )
+    pE_mtbf = mo.ui.slider(start=1, stop=24, value=5, step=1, label="Cluster MTBF (hours)")
+    pE_write = mo.ui.slider(start=30, stop=300, value=120, step=10, label="Checkpoint write time (s)")
+    pE_interval = mo.ui.slider(start=1, stop=120, value=30, step=1, label="Checkpoint interval (min)")
 
-    # ── Effective I/O bandwidth per GPU ───────────────────────────────────────
-    _effective_storage_bw = _base_storage_bw * _pattern_factor * _worker_factor * _network_overhead
-    # Per-GPU share of the storage bandwidth
-    _per_gpu_bw = _effective_storage_bw / _GPU_COUNT   # GB/s per GPU
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART A: THE STORAGE-COMPUTE CHASM
+    # ═════════════════════════════════════════════════════════════════════════
 
-    # ── Batch load time and GPU utilization ───────────────────────────────────
-    _batch_gb = (act1_batch_size.value * _SAMPLE_SIZE_MB) / 1024.0
-    _t_io_ms = (_batch_gb / _per_gpu_bw) * 1000.0 if _per_gpu_bw > 0 else 9999.0
+    def build_part_a():
+        items = []
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; VP Infrastructure, DataScale Corp
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We upgraded from A100s to H100s. Our storage-bottlenecked cluster was
+                at 30% GPU utilization. Surely the faster GPUs will help?&rdquo;
+            </div>
+        </div>
+        """))
 
-    # Prefetch pipeline: if prefetch, I/O and compute overlap
-    # Effective wait = max(0, t_io - compute_time × prefetch_depth)
-    if act1_read_pattern.value == "prefetch":
-        _t_wait_ms = max(0.0, _t_io_ms - _COMPUTE_TIME_MS * min(_prefetch_depth, 4))
-    else:
-        _t_wait_ms = max(0.0, _t_io_ms - _COMPUTE_TIME_MS)
+        items.append(mo.md(f"""
+        ## The Storage-Compute Chasm Widens Every Generation
 
-    _t_total_ms = _COMPUTE_TIME_MS + _t_wait_ms
-    _gpu_util = min((_COMPUTE_TIME_MS / _t_total_ms) * 100.0, 100.0) if _t_total_ms > 0 else 0.0
+        | Generation | Compute (TFLOPS) | Storage BW (GB/s) | Ratio |
+        |---|---|---|---|
+        | V100 (2017) | {V100_TFLOPS:.0f} | ~{NVME_GBS*0.5:.1f} | {V100_TFLOPS/(NVME_GBS*0.5):.0f}x |
+        | A100 (2020) | {A100_TFLOPS:.0f} | ~{NVME_GBS*0.7:.1f} | {A100_TFLOPS/(NVME_GBS*0.7):.0f}x |
+        | H100 (2022) | {H100_TFLOPS:.0f} | ~{NVME_GBS:.1f} | {H100_TFLOPS/NVME_GBS:.0f}x |
+        | B200 (2024) | {B200_TFLOPS:.0f} | ~{NVME_GBS*1.4:.1f} | {B200_TFLOPS/(NVME_GBS*1.4):.0f}x |
 
-    # ── Color coding ──────────────────────────────────────────────────────────
-    if _gpu_util >= 80:
-        _util_color = COLORS["GreenLine"]
-        _util_label = "Healthy"
-    elif _gpu_util >= 50:
-        _util_color = COLORS["OrangeLine"]
-        _util_label = "Degraded"
-    else:
-        _util_color = COLORS["RedLine"]
-        _util_label = "Starved"
+        Faster GPUs make the storage problem **worse**, not better.
+        """))
 
-    # ── GPU utilization vs num_workers curve ──────────────────────────────────
-    _worker_range = list(range(1, 17))
-    _util_curve = []
-    for _w in _worker_range:
-        if _w == 1:
-            _wf = 0.25
-        elif _w <= 4:
-            _wf = 0.25 + (_w - 1) * 0.20
-        elif _w <= 8:
-            _wf = 0.85 + (_w - 4) * 0.03
+        items.append(pA_pred)
+        if pA_pred.value is None:
+            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(pA_gen)
+
+        _hw = {
+            "v100": ("V100", V100_TFLOPS, NVME_GBS * 0.5),
+            "a100": ("A100", A100_TFLOPS, NVME_GBS * 0.7),
+            "h100": ("H100", H100_TFLOPS, NVME_GBS),
+            "b200": ("B200", B200_TFLOPS, NVME_GBS * 1.4),
+        }
+        _name, _tflops, _storage_bw = _hw[pA_gen.value]
+
+        # If storage-bottlenecked, utilization = storage_delivery / gpu_demand
+        # Doubling GPU speed halves utilization when storage stays fixed
+        _base_util = 30.0
+        _ratio_vs_a100 = _tflops / A100_TFLOPS
+        _new_util = _base_util / _ratio_vs_a100  # storage-limited
+
+        # Generational chart
+        _gens = ["V100", "A100", "H100", "B200"]
+        _gen_tflops = [V100_TFLOPS, A100_TFLOPS, H100_TFLOPS, B200_TFLOPS]
+        _gen_storage = [NVME_GBS * 0.5, NVME_GBS * 0.7, NVME_GBS, NVME_GBS * 1.4]
+        _gen_ratios = [t / s for t, s in zip(_gen_tflops, _gen_storage)]
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Bar(name="Compute (TFLOPS)", x=_gens, y=_gen_tflops,
+                              marker_color=COLORS["BlueLine"], yaxis="y"))
+        _fig.add_trace(go.Scatter(name="Compute/Storage Ratio", x=_gens, y=_gen_ratios,
+                                  mode="lines+markers", line=dict(color=COLORS["RedLine"], width=2.5),
+                                  marker=dict(size=10), yaxis="y2"))
+        _fig.update_layout(
+            height=340,
+            yaxis=dict(title="TFLOPS", gridcolor="#f1f5f9"),
+            yaxis2=dict(title="Compute/Storage Ratio", overlaying="y", side="right", gridcolor="#f1f5f9"),
+            legend=dict(orientation="h", y=1.12, x=0),
+            margin=dict(l=50, r=60, t=60, b=40),
+        )
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['RedLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">New Utilization</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['RedLine']};">{_new_util:.0f}%</div>
+                <div style="font-size:0.72rem; color:#94a3b8;">Was: 30% (A100)</div>
+            </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Compute/Storage</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['OrangeLine']};">{_tflops/_storage_bw:.0f}x</div>
+            </div>
+        </div>"""))
+
+        _pred = pA_pred.value
+        if _pred == "15":
+            _msg = ("**Correct.** When storage is the bottleneck, faster GPUs reduce utilization. "
+                    f"The {_name} processes data 2x faster but storage delivers at the same rate.")
+            _kind = "success"
         else:
-            _wf = min(0.97 + (_w - 8) * 0.002, 1.0)
-        _eff_bw_w = _base_storage_bw * _pattern_factor * _wf * _network_overhead
-        _per_gpu_bw_w = _eff_bw_w / _GPU_COUNT
-        _t_io_w = (_batch_gb / _per_gpu_bw_w) * 1000.0 if _per_gpu_bw_w > 0 else 9999.0
-        _ov_f = {"sequential": 2.0, "random": 0.5, "prefetch": 4.0}[act1_read_pattern.value]
-        _pd_w = max(1, int(_w * _ov_f))
-        if act1_read_pattern.value == "prefetch":
-            _tw = max(0.0, _t_io_w - _COMPUTE_TIME_MS * min(_pd_w, 4))
+            _msg = (f"**Utilization drops to ~{_new_util:.0f}%.** Faster GPUs wait longer for data. "
+                    "The storage-compute chasm widens every hardware generation.")
+            _kind = "warn"
+        items.append(mo.callout(mo.md(_msg), kind=_kind))
+        return mo.vstack(items)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART B: THE DATA PIPELINE EQUATION
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def build_part_b():
+        items = []
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; Training Lead, DataScale Corp
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We doubled our GPU count from 128 to 256 without upgrading storage.
+                Why did utilization drop?&rdquo;
+            </div>
+        </div>
+        """))
+
+        items.append(mo.md("""
+        ## The Pipeline Equation
+
+        ```
+        BW_required = N_GPUs x U_target x S_batch / T_iteration
+        ```
+
+        Storage bandwidth is a **shared resource**. Doubling GPUs without upgrading
+        storage halves the per-GPU bandwidth, proportionally dropping utilization.
+        """))
+
+        items.append(pB_pred)
+        if pB_pred.value is None:
+            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([pB_gpus, pB_target], justify="start", gap="2rem"))
+
+        _n = pB_gpus.value
+        _target = pB_target.value / 100
+        _base_n = 128
+        _base_bw = NVME_GBS * 20  # 20 NVMe drives
+        _bw_per_gpu = _base_bw / _n
+        _base_bw_per_gpu = _base_bw / _base_n
+        _util = min(_target, _bw_per_gpu / _base_bw_per_gpu * _target) * 100
+
+        # S-curve: utilization vs GPU count
+        _n_range = np.arange(8, 1025, 8)
+        _util_curve = np.minimum(_target * 100, _base_bw / _n_range / _base_bw_per_gpu * _target * 100)
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(x=_n_range, y=_util_curve, mode="lines",
+                                  name="GPU Utilization", line=dict(color=COLORS["BlueLine"], width=2.5)))
+        _fig.add_hline(y=50, line_dash="dash", line_color=COLORS["OrangeLine"],
+                       annotation_text="50% stall threshold")
+        _fig.add_vline(x=_n, line_dash="dash", line_color=COLORS["TextMuted"])
+        _fig.add_trace(go.Scatter(x=[_n], y=[_util], mode="markers",
+                                  name=f"N={_n}: {_util:.0f}%",
+                                  marker=dict(color=COLORS["RedLine"], size=12, symbol="star",
+                                              line=dict(color="white", width=2))))
+        _fig.update_layout(height=320,
+                           xaxis=dict(title="GPU Count", gridcolor="#f1f5f9"),
+                           yaxis=dict(title="GPU Utilization (%)", range=[0, 100], gridcolor="#f1f5f9"),
+                           legend=dict(orientation="h", y=1.12, x=0),
+                           margin=dict(l=50, r=20, t=60, b=40))
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        _uc = COLORS["GreenLine"] if _util > 70 else COLORS["OrangeLine"] if _util > 40 else COLORS["RedLine"]
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {_uc}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Utilization</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{_uc};">{_util:.0f}%</div>
+            </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">BW per GPU</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['BlueLine']};">{_bw_per_gpu:.1f} GB/s</div>
+            </div>
+        </div>"""))
+
+        if _util < 50:
+            items.append(mo.callout(mo.md(
+                f"**Storage-starved.** At {_n} GPUs, utilization is {_util:.0f}%. "
+                "More than half the compute budget is wasted waiting for data."
+            ), kind="danger"))
+
+        _pred = pB_pred.value
+        if _pred == "40":
+            _msg = "**Correct.** Storage BW is split across 2x GPUs, halving per-GPU BW and utilization."
+            _kind = "success"
         else:
-            _tw = max(0.0, _t_io_w - _COMPUTE_TIME_MS)
-        _tt = _COMPUTE_TIME_MS + _tw
-        _u = min((_COMPUTE_TIME_MS / _tt) * 100.0, 100.0) if _tt > 0 else 0.0
-        _util_curve.append(_u)
+            _msg = "**Utilization drops proportionally.** Storage bandwidth is shared; doubling GPUs halves per-GPU BW."
+            _kind = "warn"
+        items.append(mo.callout(mo.md(_msg), kind=_kind))
+        return mo.vstack(items)
 
-    _fig = go.Figure()
-    _fig.add_trace(go.Scatter(
-        x=_worker_range,
-        y=_util_curve,
-        mode="lines+markers",
-        line=dict(color=COLORS["BlueLine"], width=2.5),
-        marker=dict(size=7, color=COLORS["BlueLine"]),
-        name="GPU Utilization (%)",
-    ))
-    # Highlight current workers setting
-    _fig.add_trace(go.Scatter(
-        x=[_workers],
-        y=[_gpu_util],
-        mode="markers",
-        marker=dict(size=14, color=_util_color, symbol="circle", line=dict(width=2, color="white")),
-        name=f"Current: {_workers} workers → {_gpu_util:.0f}%",
-    ))
-    # Target line at 80%
-    _fig.add_hline(
-        y=80,
-        line_dash="dash",
-        line_color=COLORS["GreenLine"],
-        annotation_text="Target: 80% GPU utilization",
-        annotation_position="top right",
-    )
-    _fig.update_layout(
-        height=300,
-        xaxis_title="Data loader workers per GPU",
-        yaxis_title="GPU Utilization (%)",
-        yaxis=dict(range=[0, 105]),
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        margin=dict(l=50, r=20, t=50, b=50),
-        title=dict(
-            text=f"GPU Utilization vs. Workers ({act1_read_pattern.value}, {act1_ost_count.value} OSTs)",
-            font=dict(size=13),
-        ),
-    )
-    apply_plotly_theme(_fig)
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART C: THE SHARD CONTENTION BIRTHDAY PROBLEM
+    # ═════════════════════════════════════════════════════════════════════════
 
-    # ── Metric cards ──────────────────────────────────────────────────────────
-    _lustre_util_pct = (_effective_storage_bw / (_base_storage_bw + 0.001)) * 100.0
-    _lustre_color = COLORS["RedLine"] if _lustre_util_pct < 20 else COLORS["OrangeLine"] if _lustre_util_pct < 60 else COLORS["GreenLine"]
-
-    _cards_html = f"""
-    <div style="display: flex; gap: 16px; flex-wrap: wrap; margin: 16px 0;">
-        <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 12px;
-                    min-width: 165px; text-align: center; background: white;
-                    border-top: 4px solid {_util_color};">
-            <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600; margin-bottom: 6px;">
-                GPU Utilization
+    def build_part_c():
+        items = []
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; Data Engineer, DataScale Corp
             </div>
-            <div style="font-size: 2.2rem; font-weight: 800; color: {_util_color}; line-height: 1;">
-                {_gpu_util:.0f}%
-            </div>
-            <div style="color: {_util_color}; font-size: 0.78rem; font-weight: 700; margin-top: 4px;">
-                {_util_label}
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We have 1,000 dataset shards and 256 workers. Each worker randomly
+                selects a shard. Should collisions be rare?&rdquo;
             </div>
         </div>
-        <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 12px;
-                    min-width: 165px; text-align: center; background: white;">
-            <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600; margin-bottom: 6px;">
-                Effective I/O BW
-            </div>
-            <div style="font-size: 2.2rem; font-weight: 800; color: {COLORS['BlueLine']}; line-height: 1;">
-                {_effective_storage_bw:.1f}
-            </div>
-            <div style="color: #94a3b8; font-size: 0.78rem; margin-top: 4px;">GB/s total</div>
-        </div>
-        <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 12px;
-                    min-width: 165px; text-align: center; background: white;">
-            <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600; margin-bottom: 6px;">
-                I/O Wait
-            </div>
-            <div style="font-size: 2.2rem; font-weight: 800; color: {_util_color}; line-height: 1;">
-                {_t_wait_ms:.1f}
-            </div>
-            <div style="color: #94a3b8; font-size: 0.78rem; margin-top: 4px;">ms per batch</div>
-        </div>
-        <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 12px;
-                    min-width: 165px; text-align: center; background: white;">
-            <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600; margin-bottom: 6px;">
-                Prefetch Queue
-            </div>
-            <div style="font-size: 2.2rem; font-weight: 800; color: {COLORS['BlueLine']}; line-height: 1;">
-                {_prefetch_depth}
-            </div>
-            <div style="color: #94a3b8; font-size: 0.78rem; margin-top: 4px;">batches ahead</div>
-        </div>
-        <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 12px;
-                    min-width: 165px; text-align: center; background: white;">
-            <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600; margin-bottom: 6px;">
-                Storage Utilization
-            </div>
-            <div style="font-size: 2.2rem; font-weight: 800; color: {_lustre_color}; line-height: 1;">
-                {_lustre_util_pct:.0f}%
-            </div>
-            <div style="color: #94a3b8; font-size: 0.78rem; margin-top: 4px;">of capacity</div>
-        </div>
-    </div>
-    """
+        """))
 
-    # ── Physics formula display ───────────────────────────────────────────────
-    _formula_md = f"""
-    **The physics (from @sec-data-storage):**
+        items.append(mo.md("""
+        ## The Birthday Problem at Datacenter Scale
 
-    ```
-    Effective BW  = Storage_BW × pattern_factor × worker_factor × network_overhead
-                  = {_base_storage_bw:.0f} GB/s × {_pattern_factor:.2f} × {_worker_factor:.2f} × {_network_overhead:.2f}
-                  = {_effective_storage_bw:.1f} GB/s
+        Even with many shards, random access by many workers creates surprisingly
+        high collision probability. The birthday problem strikes at n = sqrt(N):
 
-    Per-GPU BW    = Effective_BW / GPU_count
-                  = {_effective_storage_bw:.1f} GB/s / {_GPU_COUNT}
-                  = {_per_gpu_bw:.4f} GB/s = {_per_gpu_bw * 1024:.1f} MB/s
-
-    I/O time      = batch_bytes / per_gpu_bw
-                  = {_batch_gb * 1024:.1f} MB / {_per_gpu_bw * 1024:.1f} MB/s
-                  = {_t_io_ms:.1f} ms
-
-    GPU Util      = t_compute / (t_compute + t_io_wait)
-                  = {_COMPUTE_TIME_MS:.1f} ms / ({_COMPUTE_TIME_MS:.1f} + {_t_wait_ms:.1f}) ms
-                  = {_gpu_util:.1f}%
-    ```
-    """
-
-    mo.vstack([
-        mo.Html(_cards_html),
-        mo.as_html(_fig),
-        mo.md(_formula_md),
-    ])
-    return (
-        _gpu_util,
-        _t_wait_ms,
-        _effective_storage_bw,
-        _per_gpu_bw,
-        _base_storage_bw,
-        _pattern_factor,
-        _worker_factor,
-        _prefetch_depth,
-    )
-
-
-# ─── ACT I: PREDICTION-VS-REALITY OVERLAY ────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_prediction, _gpu_util):
-    _pred_text = {
-        "A": "Lustre cluster saturated (too little storage bandwidth)",
-        "B": "Small random reads — access pattern mismatch",
-        "C": "Network bandwidth between Lustre and GPU nodes saturated",
-        "D": "12% GPU utilization is normal for data loading",
-    }[act1_prediction.value]
-
-    _is_correct = act1_prediction.value == "B"
-
-    if _is_correct:
-        mo.callout(mo.md(
-            f"**Correct. You predicted: {_pred_text}.**\n\n"
-            f"The simulation confirms it. With 1 worker and random reads, GPU utilization is "
-            f"**{_gpu_util:.0f}%** — matching the reported 12%. "
-            "The Lustre cluster is at roughly 1.5% of its capacity. The bottleneck is not "
-            "aggregate bandwidth — it is the *access pattern*. Each training sample requires "
-            "an independent file open, seek, and read. At 128 GPUs × 1 worker each, this "
-            "generates 128 independent random I/O streams hitting the Lustre namespace. "
-            "Each random 4K read delivers ~7% of the sequential bandwidth the hardware can provide. "
-            "The fix is **not more hardware** — it is changing the access pattern to sequential "
-            "reads (e.g., WebDataset tar shards) and increasing workers to 4–8 per GPU."
-        ), kind="success")
-    elif act1_prediction.value == "A":
-        mo.callout(mo.md(
-            f"**Not quite. You predicted: {_pred_text}.**\n\n"
-            f"The numbers refute this immediately: 128 GPUs need only ~10.24 GB/s total, "
-            "while Lustre provides 672 GB/s — a 65× margin. Saturation would require the "
-            "actual demand to approach the cluster capacity. The cluster is at ~1.5% utilization. "
-            "The root cause is the *read pattern*: random 4K reads from individual files deliver "
-            "only ~7% of the sequential bandwidth. Increase num_workers and switch to a "
-            "sequential prefetch pattern to see utilization climb. "
-            "**Correct answer: B — access pattern mismatch.**"
-        ), kind="warn")
-    elif act1_prediction.value == "C":
-        mo.callout(mo.md(
-            f"**Not quite. You predicted: {_pred_text}.**\n\n"
-            "InfiniBand HDR-200 provides 25 GB/s per port, and a 24-node Lustre cluster with "
-            "one IB port per node has 600 GB/s of aggregate network fabric — more than enough "
-            "for 10.24 GB/s of actual demand. The OST-to-compute network is not saturated. "
-            "The bottleneck is within the storage access pattern itself: random small reads "
-            "from many independent file handles serialize I/O that Lustre's hardware could "
-            "service as fast sequential streams. "
-            "**Correct answer: B — access pattern mismatch.**"
-        ), kind="warn")
-    else:
-        mo.callout(mo.md(
-            f"**Not quite. You predicted: {_pred_text}.**\n\n"
-            "12% GPU utilization is definitively not normal. A properly configured data "
-            "pipeline should achieve 75–90% GPU utilization during training. The simulation "
-            "shows that switching to 4 workers with a prefetch pipeline raises utilization "
-            "above 75% with the same storage hardware. This is a configuration failure, "
-            "not a hardware limitation. "
-            "**Correct answer: B — access pattern mismatch.**"
-        ), kind="warn")
-    return
-
-
-# ─── ACT I: REFLECTION ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    #### Reflection
-
-    You have seen how access pattern dominates throughput on distributed filesystems.
-    Now identify the correct architectural response.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    act1_reflection = mo.ui.radio(
-        options={
-            "A) Purchase faster NVMe SSDs for each Lustre OST node": "A",
-            "B) Pre-shuffle and pack data into large sequential shards (WebDataset / TFDS format)": "B",
-            "C) Add more DataLoader processes to increase RAM cache utilization": "C",
-            "D) Replace the filesystem with a database to enable faster indexed lookups": "D",
-        },
-        label="What is the primary fix for small random read performance on a distributed filesystem?",
-    )
-    act1_reflection
-    return (act1_reflection,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act1_reflection):
-    mo.stop(
-        act1_reflection.value is None,
-        mo.callout(mo.md("Select your answer to continue to Act II."), kind="warn"),
-    )
-
-    if act1_reflection.value == "B":
-        mo.callout(mo.md(
-            "**Correct.** Packing data into large sequential shards (WebDataset `.tar` archives, "
-            "TensorFlow Record files, Parquet) converts random access into sequential streaming. "
-            "Lustre's aggregate bandwidth — 672 GB/s — is genuinely available to sequential reads. "
-            "The hardware was never the problem; the access pattern was. "
-            "Sequential shards allow a single worker per GPU to sustain near-peak throughput "
-            "by reading one large file contiguously rather than opening thousands of small files. "
-            "This is the standard production fix for I/O-bound distributed training pipelines, "
-            "documented in @sec-data-storage."
-        ), kind="success")
-    elif act1_reflection.value == "A":
-        mo.callout(mo.md(
-            "**Incorrect.** The NVMe SSDs are not the bottleneck. Each OST node already provides "
-            "28 GB/s (4 × 7 GB/s NVMe) — far more than the ~80 MB/s per GPU the workload demands. "
-            "Faster SSDs would give you faster hardware with the same utilization ceiling. "
-            "The constraint is software: the access pattern generates random I/O that cannot "
-            "benefit from higher sequential bandwidth. The correct fix is B: sequential shards."
-        ), kind="warn")
-    elif act1_reflection.value == "C":
-        mo.callout(mo.md(
-            "**Incorrect.** Adding more DataLoader processes increases the *number* of concurrent "
-            "I/O requests, but each request is still a small random read from a different file. "
-            "More processes multiply the IOPS demand, which can worsen metadata server load on "
-            "Lustre without improving actual throughput. The root cause — fragmented random access "
-            "pattern — is not addressed by adding more workers. The correct fix is B: pack data "
-            "into sequential shards so each worker reads large contiguous chunks."
-        ), kind="warn")
-    else:
-        mo.callout(mo.md(
-            "**Incorrect.** A database adds indexing overhead, transactions, and write-ahead "
-            "logging — all of which increase latency and reduce throughput for the purely "
-            "sequential read pattern that training requires. Databases are optimized for "
-            "transactional workloads with random read/write patterns. ML training requires "
-            "high-throughput sequential streaming, which a well-configured filesystem (with "
-            "sequential shards) handles better than any database engine. The correct fix is B."
-        ), kind="warn")
-    return
-
-
-# ─── ACT I: MATHPEEK ─────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.accordion({
-        "The governing equations — I/O Throughput and Prefetch Depth": mo.md("""
-        **I/O Throughput Model** (from @sec-data-storage):
-
-        $$\\text{Effective BW} = BW_{storage} \\times f_{pattern} \\times f_{workers} \\times f_{network}$$
-
-        Where:
-        - **BW_storage** — peak sequential storage bandwidth (OSTs × 28 GB/s for Lustre)
-        - **f_pattern** — read pattern efficiency: sequential ≈ 0.85, random ≈ 0.07, prefetch ≈ 0.78
-        - **f_workers** — worker scaling factor (near-linear 1–4, diminishing returns beyond 8)
-        - **f_network** — IB fabric utilization fraction (usually close to 1.0 if not saturated)
-
-        **GPU Utilization:**
-
-        $$\\eta_{GPU} = \\frac{t_{compute}}{t_{compute} + t_{IO\\ wait}}$$
-
-        With prefetch pipelining:
-
-        $$t_{IO\\ wait} = \\max\\left(0,\\ t_{IO} - t_{compute} \\times d_{prefetch}\\right)$$
-
-        Where $d_{prefetch}$ is the number of batches pre-loaded asynchronously.
-
-        **Random vs. Sequential Bandwidth Gap:**
         ```
-        Sequential read (1 worker, Lustre):  672 GB/s × 0.85 = 571 GB/s aggregate
-        Random 4K read  (1 worker, Lustre):  672 GB/s × 0.07 = 47 GB/s aggregate
-        Per-GPU share   (128 GPUs):          571 / 128 = 4.46 GB/s  vs  47 / 128 = 0.37 GB/s
-
-        Batch load time (64 samples × 4 MB = 256 MB):
-          Sequential:  256 MB / 4,460 MB/s ≈ 0.057 ms  →  GPU util ≈ 99%
-          Random:      256 MB /   370 MB/s ≈ 0.69 ms  →  GPU util ≈ 7%  (matches ~12% observed)
+        P(collision) = 1 - e^(-n^2 / 2N)
         ```
 
-        **WebDataset Sequential Read Benchmark:**
-        - Individual JPEG files, random access: ~70 MB/s per node
-        - WebDataset `.tar` shards, sequential: ~2.8 GB/s per node (40× improvement)
-        - Source: NVIDIA DGX documentation, @sec-data-storage
-        """),
+        With 256 workers and 1,000 shards: exponent = -256^2/2000 = -32.8.
+        P = 1 - e^(-32.8) = **near certainty**.
+        """))
+
+        items.append(pC_pred)
+        if pC_pred.value is None:
+            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([pC_workers, pC_shards], justify="start", gap="2rem"))
+
+        _n = pC_workers.value
+        _N = pC_shards.value
+        _exponent = -(_n ** 2) / (2 * _N)
+        _p_collision = 1 - math.exp(max(_exponent, -500))
+        _birthday_threshold = math.sqrt(_N)
+
+        # Collision probability vs workers
+        _w_range = np.arange(1, 257)
+        _p_curve = 1 - np.exp(np.maximum(-_w_range ** 2 / (2 * _N), -500))
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(x=_w_range, y=_p_curve * 100, mode="lines",
+                                  name=f"Shards = {_N:,}",
+                                  line=dict(color=COLORS["BlueLine"], width=2.5)))
+        _fig.add_hline(y=50, line_dash="dash", line_color=COLORS["OrangeLine"],
+                       annotation_text="50% collision probability")
+        _fig.add_vline(x=_birthday_threshold, line_dash="dot", line_color=COLORS["GreenLine"],
+                       annotation_text=f"sqrt({_N}) = {_birthday_threshold:.0f}",
+                       annotation_font_size=10)
+        _fig.add_trace(go.Scatter(x=[_n], y=[_p_collision * 100], mode="markers",
+                                  name=f"Your config: {_p_collision*100:.1f}%",
+                                  marker=dict(color=COLORS["RedLine"], size=14, symbol="star",
+                                              line=dict(color="white", width=2))))
+        _fig.update_layout(height=340,
+                           xaxis=dict(title="Workers", gridcolor="#f1f5f9"),
+                           yaxis=dict(title="Collision Probability (%)", range=[0, 105], gridcolor="#f1f5f9"),
+                           legend=dict(orientation="h", y=1.12, x=0),
+                           margin=dict(l=50, r=20, t=60, b=40))
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        _pc = COLORS["GreenLine"] if _p_collision < 0.5 else COLORS["OrangeLine"] if _p_collision < 0.9 else COLORS["RedLine"]
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {_pc}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Collision Prob.</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{_pc};">{_p_collision*100:.1f}%</div>
+            </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Birthday Threshold</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['BlueLine']};">{_birthday_threshold:.0f} workers</div>
+            </div>
+        </div>"""))
+
+        _pred = pC_pred.value
+        if _pred == "100":
+            _msg = f"**Correct.** With {_n} workers and {_N:,} shards, collisions are near-certain ({_p_collision*100:.1f}%)."
+            _kind = "success"
+        else:
+            _msg = (f"**Collisions are {_p_collision*100:.1f}% probable.** The birthday problem "
+                    f"strikes at sqrt({_N}) = {_birthday_threshold:.0f} workers, far below {_n}.")
+            _kind = "warn"
+        items.append(mo.callout(mo.md(_msg), kind=_kind))
+        return mo.vstack(items)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART D: THE DATA STALL DIAGNOSTIC
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def build_part_d():
+        items = []
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; Performance Engineer, DataScale Corp
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We added prefetch depth 4. The PM says the stall should be eliminated.
+                But GPU utilization barely improved. Why?&rdquo;
+            </div>
+        </div>
+        """))
+
+        items.append(mo.md("""
+        ## Pipelining Cannot Fix I/O > Compute
+
+        ```
+        Without pipeline: T_step = T_IO + T_compute
+        With pipeline:    T_step = max(T_compute, T_IO)
+        Stall %         = (T_step - T_compute) / T_step
+        ```
+
+        When I/O exceeds compute, **no amount of prefetching eliminates the stall**.
+        The only fix is faster storage or smaller data.
+        """))
+
+        items.append(pD_pred)
+        if pD_pred.value is None:
+            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([pD_compute, pD_io], justify="start", gap="2rem"))
+        items.append(pD_prefetch)
+
+        _tc = pD_compute.value
+        _tio = pD_io.value
+        _depth = pD_prefetch.value
+
+        _sequential_ms = _tc + _tio
+        _sequential_stall = _tio / _sequential_ms * 100
+
+        _pipelined_ms = max(_tc, _tio)
+        _pipelined_stall = max(0, (_pipelined_ms - _tc)) / _pipelined_ms * 100 if _pipelined_ms > 0 else 0
+
+        # With partial pipeline (depth effect: transitions from sequential to pipelined)
+        _alpha = min(1.0, _depth / 4.0)  # 0 = sequential, 1 = fully pipelined
+        _actual_ms = (1 - _alpha) * _sequential_ms + _alpha * _pipelined_ms
+        _actual_stall = max(0, (_actual_ms - _tc)) / _actual_ms * 100 if _actual_ms > 0 else 0
+
+        # Timeline bars
+        _fig = go.Figure()
+        _configs = [
+            ("No prefetch", _sequential_ms, _sequential_stall),
+            (f"Prefetch={_depth}", _actual_ms, _actual_stall),
+            ("Perfect pipeline", _pipelined_ms, _pipelined_stall),
+        ]
+        for _name, _time, _stall in _configs:
+            _col = COLORS["GreenLine"] if _stall < 10 else COLORS["OrangeLine"] if _stall < 30 else COLORS["RedLine"]
+            _fig.add_trace(go.Bar(name=f"{_name} ({_stall:.0f}% stall)",
+                                  x=[_name], y=[_time],
+                                  marker_color=_col, width=0.4))
+
+        _fig.add_hline(y=_tc, line_dash="dash", line_color=COLORS["BlueLine"],
+                       annotation_text=f"Compute = {_tc} ms")
+        _fig.update_layout(height=300,
+                           yaxis=dict(title="Step Time (ms)", gridcolor="#f1f5f9"),
+                           legend=dict(orientation="h", y=1.15, x=0),
+                           margin=dict(l=50, r=20, t=60, b=40))
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        _sc = COLORS["GreenLine"] if _actual_stall < 10 else COLORS["OrangeLine"] if _actual_stall < 30 else COLORS["RedLine"]
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:130px; text-align:center; background:white; border-top:3px solid {_sc}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Current Stall</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{_sc};">{_actual_stall:.0f}%</div>
+            </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Best Possible</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['BlueLine']};">{_pipelined_stall:.0f}%</div>
+                <div style="font-size:0.72rem; color:#94a3b8;">Perfect pipeline</div>
+            </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">I/O Bound?</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['OrangeLine']};">{'Yes' if _tio > _tc else 'No'}</div>
+            </div>
+        </div>"""))
+
+        _pred = pD_pred.value
+        if _pred == "no_partial":
+            _msg = (f"**Correct.** With I/O ({_tio} ms) > compute ({_tc} ms), "
+                    f"perfect pipelining gives T_step = max({_tc}, {_tio}) = {_pipelined_ms} ms. "
+                    f"Stall = ({_pipelined_ms} - {_tc})/{_pipelined_ms} = {_pipelined_stall:.0f}%. "
+                    "The only fix is faster storage or smaller data.")
+            _kind = "success"
+        else:
+            _msg = (f"**Stall persists at {_pipelined_stall:.0f}% even with perfect pipelining.** "
+                    f"When I/O > compute, T_step = max(compute, I/O) = I/O. "
+                    "Prefetching converts sequential to pipelined but cannot shrink max().")
+            _kind = "warn"
+        items.append(mo.callout(mo.md(_msg), kind=_kind))
+        return mo.vstack(items)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART E: CHECKPOINT ECONOMICS
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def build_part_e():
+        items = []
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid #6366f1; background:#f0f4ff;
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:#6366f1;
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; Training Manager, DataScale Corp
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;How often should we checkpoint? Too frequent wastes I/O bandwidth.
+                Too infrequent wastes compute on rework after failures. What is optimal?&rdquo;
+            </div>
+        </div>
+        """))
+
+        items.append(mo.md("""
+        ## Young-Daly Optimal Checkpoint Interval
+
+        ```
+        tau_opt = sqrt(2 * delta * MTBF)
+        ```
+
+        The U-shaped waste curve has three terms:
+        - Checkpoint overhead (decreases with interval)
+        - Expected rework (increases with interval)
+        - Total waste = overhead + rework (U-curve with minimum at tau_opt)
+        """))
+
+        items.append(pE_pred)
+        if pE_pred.value is None:
+            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([pE_mtbf, pE_write], justify="start", gap="2rem"))
+        items.append(pE_interval)
+
+        _mtbf_s = pE_mtbf.value * 3600
+        _delta_s = pE_write.value
+        _interval_s = pE_interval.value * 60
+
+        # Young-Daly optimal
+        _yd = calc_young_daly_interval(_delta_s, _mtbf_s)
+        _tau_opt_s = _yd.m_as(ureg.second)
+        _tau_opt_min = _tau_opt_s / 60
+
+        # Waste components at current interval
+        _overhead_pct = (_delta_s / _interval_s) * 100 if _interval_s > 0 else 100
+        _rework_pct = (_interval_s / (2 * _mtbf_s)) * 100
+        _total_waste = _overhead_pct + _rework_pct
+
+        # Waste at optimal
+        _opt_overhead = (_delta_s / _tau_opt_s) * 100
+        _opt_rework = (_tau_opt_s / (2 * _mtbf_s)) * 100
+        _opt_waste = _opt_overhead + _opt_rework
+
+        # U-curve
+        _intervals = np.linspace(60, 7200, 200)
+        _oh_curve = (_delta_s / _intervals) * 100
+        _rw_curve = (_intervals / (2 * _mtbf_s)) * 100
+        _total_curve = _oh_curve + _rw_curve
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(x=_intervals / 60, y=_oh_curve, mode="lines",
+                                  name="Checkpoint overhead",
+                                  line=dict(color=COLORS["OrangeLine"], width=1.5, dash="dash")))
+        _fig.add_trace(go.Scatter(x=_intervals / 60, y=_rw_curve, mode="lines",
+                                  name="Expected rework",
+                                  line=dict(color=COLORS["RedLine"], width=1.5, dash="dash")))
+        _fig.add_trace(go.Scatter(x=_intervals / 60, y=_total_curve, mode="lines",
+                                  name="Total waste", line=dict(color=COLORS["BlueLine"], width=2.5)))
+        _fig.add_vline(x=_tau_opt_min, line_dash="dot", line_color=COLORS["GreenLine"],
+                       annotation_text=f"Optimal: {_tau_opt_min:.0f} min",
+                       annotation_font_size=10)
+        _fig.add_trace(go.Scatter(x=[pE_interval.value], y=[_total_waste], mode="markers",
+                                  name=f"Your interval: {pE_interval.value} min",
+                                  marker=dict(color=COLORS["RedLine"], size=14, symbol="star",
+                                              line=dict(color="white", width=2))))
+        _fig.update_layout(height=360,
+                           xaxis=dict(title="Checkpoint Interval (min)", gridcolor="#f1f5f9"),
+                           yaxis=dict(title="Waste (%)", gridcolor="#f1f5f9"),
+                           legend=dict(orientation="h", y=1.15, x=0),
+                           margin=dict(l=50, r=20, t=60, b=40))
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        # Failure: checkpoint write exceeds interval
+        _write_exceeds = _delta_s >= _interval_s
+        if _write_exceeds:
+            items.append(mo.callout(mo.md(
+                f"**Checkpoint write ({_delta_s}s) exceeds interval ({_interval_s}s).** "
+                "The system spends all its time writing checkpoints and never trains."
+            ), kind="danger"))
+
+        _wc = COLORS["GreenLine"] if abs(pE_interval.value - _tau_opt_min) < 5 else COLORS["OrangeLine"]
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Optimal Interval</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['GreenLine']};">{_tau_opt_min:.0f} min</div>
+                <div style="font-size:0.72rem; color:#94a3b8;">Young-Daly</div>
+            </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:130px; text-align:center; background:white; border-top:3px solid {_wc}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Your Waste</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{_wc};">{_total_waste:.1f}%</div>
+            </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Optimal Waste</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['BlueLine']};">{_opt_waste:.1f}%</div>
+            </div>
+        </div>"""))
+
+        _pred = pE_pred.value
+        if _pred == "27":
+            _msg = f"**Correct.** Young-Daly optimal = sqrt(2 x {_delta_s} x {_mtbf_s}) = {_tau_opt_min:.0f} min."
+            _kind = "success"
+        else:
+            _msg = (f"**Optimal interval is {_tau_opt_min:.0f} minutes.** "
+                    "Too frequent wastes I/O on checkpoint writes. "
+                    "Too infrequent wastes compute on rework after failures.")
+            _kind = "warn"
+        items.append(mo.callout(mo.md(_msg), kind=_kind))
+        return mo.vstack(items)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # SYNTHESIS
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def build_synthesis():
+        return mo.vstack([
+            mo.md("## Key Takeaways"),
+            mo.callout(mo.md(
+                "**1. Faster GPUs make storage bottlenecks worse.** "
+                "Accelerator throughput grew 236x while NVMe bandwidth grew only 4x. "
+                "Upgrading GPUs on a storage-starved cluster reduces utilization, not improves it."
+            ), kind="info"),
+            mo.callout(mo.md(
+                "**2. Prefetching cannot fix I/O > compute.** "
+                "With perfect pipelining, T_step = max(T_compute, T_IO). "
+                "When I/O exceeds compute, the stall is irreducible without faster storage. "
+                "The birthday problem makes shard contention near-certain at scale."
+            ), kind="info"),
+            mo.callout(mo.md(
+                "**3. Checkpoint frequency is a U-shaped optimization.** "
+                "Young-Daly gives tau_opt = sqrt(2 * delta * MTBF). "
+                "Too-frequent checkpointing saturates storage bandwidth. "
+                "Too-infrequent checkpointing wastes millions in rework after failures."
+            ), kind="info"),
+            mo.md("""
+## Connections
+
+**Textbook:** Vol II Ch 4 -- storage-compute chasm, data pipeline equation,
+birthday problem in shard contention, Young-Daly checkpointing.
+
+**Next Lab:** V2-05 explores the parallelism puzzle: data parallelism hits a communication
+wall, ZeRO trades communication for memory, pipeline parallelism creates bubbles,
+and 3D parallelism maps strategies to the bandwidth hierarchy.
+            """),
+        ])
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # COMPOSE TABS
+    # ═════════════════════════════════════════════════════════════════════════
+
+    tabs = mo.ui.tabs({
+        "Part A -- Storage-Compute Chasm": build_part_a(),
+        "Part B -- Pipeline Equation": build_part_b(),
+        "Part C -- Shard Contention": build_part_c(),
+        "Part D -- Data Stall Diagnostic": build_part_d(),
+        "Part E -- Checkpoint Economics": build_part_e(),
+        "Synthesis": build_synthesis(),
     })
+    tabs
     return
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: ACT II — DESIGN CHALLENGE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 12: ACT2_BANNER (hide_code=True) ────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, COLORS):
-    _act_num      = "II"
-    _act_color    = COLORS["OrangeLine"]
-    _act_title    = "Distributed Storage Architecture"
-    _act_duration = "20&ndash;25 min"
-    _act_why      = (
-        "Act I showed that the S3 network link is the pipeline bottleneck &mdash; not NVMe. "
-        "Now design storage for a 4,096-GPU cluster where bandwidth math looks sufficient, "
-        "but checkpoint writes (1,050 GB every 30 minutes) compete with training reads for "
-        "the same NVMe drives, creating write storms that stall the entire pipeline."
-    )
+def _(COLORS, ledger, mo):
+    _track = ledger._state.track or "not set"
     mo.Html(f"""
-    <div style="margin: 40px 0 12px 0; border-top: 2px solid {COLORS['Border']}; padding-top: 32px;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {_act_color}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;
-                        flex-shrink: 0;">{_act_num}</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act {_act_num} &middot; {_act_duration}</div>
-        </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">
-            {_act_title}
-        </div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            {_act_why}
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT II: STAKEHOLDER MESSAGE ─────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _c = COLORS["BlueLine"]
-    mo.Html(f"""
-    <div style="border-left: 4px solid {_c}; background: {COLORS['BlueLL']};
-                border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; color: {_c};
-                    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-            Incoming Message · Infrastructure CTO
-        </div>
-        <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-            "We're building a new 4,096-GPU training cluster. Current design: 48 Lustre OST
-            nodes with 24 TB NVMe each, an InfiniBand fabric, compute-storage separated.
-            Aggregate bandwidth: 48 × 28 GB/s = 1,344 GB/s. At 80 MB/s per GPU, we need
-            only 328 GB/s — a 4× safety margin. The storage team says the design is sound.
-            We need to provision enough I/O for the next 3 years of growth. What are we missing?"
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT II: PREDICTION LOCK ─────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    #### Your Prediction
-
-    *Commit to your hypothesis before using the storage architecture designer.*
-    The bandwidth math is correct. The safety margin exists. Something else will fail first.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    act2_prediction = mo.ui.radio(
-        options={
-            "A) The Lustre cluster will hit bandwidth saturation immediately at 4096 GPUs": "A",
-            "B) At 4096 GPUs with 8 workers each, the metadata server (MDS) becomes the bottleneck": "B",
-            "C) Storage will always be sufficient — just add OST nodes as needed to meet demand": "C",
-            "D) Compute-storage network separation causes unacceptable latency (>1 ms per read)": "D",
-        },
-        label="A 4096-GPU cluster with 1344 GB/s aggregate Lustre bandwidth. What fails first?",
-    )
-    act2_prediction
-    return (act2_prediction,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act2_prediction):
-    mo.stop(
-        act2_prediction.value is None,
-        mo.callout(
-            mo.md("Select your prediction to unlock the distributed storage designer."),
-            kind="warn",
-        ),
-    )
-    mo.callout(
-        mo.md(
-            f"**Prediction locked: {act2_prediction.value[:2]}** "
-            "Now use the architecture designer to find the failure mode. "
-            "Adjust GPU count, worker count, and MDS configuration to see where the ceiling hits."
-        ),
-        kind="info",
-    )
-    return
-
-
-# ─── ACT II: INSTRUMENTS ─────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    #### The Distributed Storage Architecture Designer
-
-    Adjust the cluster parameters below to find the failure boundary.
-    The designer models bandwidth demand, metadata operation rate, and the MDS throughput ceiling.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    act2_gpu_count = mo.ui.slider(
-        start=128, stop=4096, value=512, step=128,
-        label="GPU count",
-        show_value=True,
-    )
-    act2_workers_per_gpu = mo.ui.slider(
-        start=1, stop=16, value=4, step=1,
-        label="Data workers per GPU",
-        show_value=True,
-    )
-    act2_dataset_files = mo.ui.dropdown(
-        options={
-            "Sequential shards (1 file per 10K samples, ~1K total files)": "shards",
-            "Individual files (1 file per sample, ~100M total files)": "individual",
-            "Object store (no POSIX, content-addressed)": "object_store",
-        },
-        value="Individual files (1 file per sample, ~100M total files)",
-        label="Dataset organization",
-    )
-    act2_mds_count = mo.ui.slider(
-        start=1, stop=8, value=1, step=1,
-        label="Metadata server (MDS) count",
-        show_value=True,
-    )
-    mo.hstack([
-        act2_gpu_count,
-        act2_workers_per_gpu,
-        act2_dataset_files,
-        act2_mds_count,
-    ], gap=2, justify="start")
-    return (act2_gpu_count, act2_workers_per_gpu, act2_dataset_files, act2_mds_count)
-
-
-@app.cell(hide_code=True)
-def _(
-    mo, act2_gpu_count, act2_workers_per_gpu, act2_dataset_files, act2_mds_count,
-    context_toggle, go, apply_plotly_theme, COLORS,
-):
-    # ── Hardware constants ─────────────────────────────────────────────────────
-    # Source: @sec-data-storage, @sec-network-fabrics
-    _H100_BW_GBS_II     = 3350.0   # H100 HBM bandwidth, NVIDIA spec
-    _NVME_SEQ_BW_II     = 7.0      # NVMe Gen4 sequential read bandwidth
-    _LUSTRE_OST_BW_II   = 28.0     # Per OST node: 4 × 7 GB/s NVMe
-    _OST_COUNT          = 48       # Fixed per the design spec
-    _TOTAL_LUSTRE_BW    = _OST_COUNT * _LUSTRE_OST_BW_II   # 1344 GB/s aggregate
-
-    # ── Metadata server capacity model ────────────────────────────────────────
-    # Lustre MDS handles: open, stat, close, readdir, rename, create, unlink
-    # Each file access typically generates 2–4 metadata ops (open + read + close + stat)
-    # Source: Lustre filesystem documentation, @sec-data-storage
-    _MDS_OPS_PER_NODE   = 50_000    # ops/sec per MDS node (Lustre typical, enterprise NVMe MDS)
-    _METADATA_OPS_PER_FILE_ACCESS = 3.0    # open + close + stat per file read
-
-    # ── Dataset organization factor ────────────────────────────────────────────
-    # Sequential shards: one large tar file opened per worker per epoch → very few metadata ops
-    # Individual files: one file open per sample → maximum metadata pressure
-    # Object store: no POSIX metadata server — content-addressed, no namespace overhead
-    _dataset_type = act2_dataset_files.value
-    if _dataset_type == "shards":
-        # Each worker opens ~1 shard file at a time, rotates through epoch
-        # Metadata ops = workers × files_per_epoch ÷ samples_per_file
-        _files_open_per_sec_per_worker = 0.2   # ~5 seconds per shard
-        _metadata_pressure_factor = 0.02       # very low — large sequential files
-    elif _dataset_type == "individual":
-        # Each worker opens one file per sample at ~20ms training steps
-        # Metadata ops = workers × (1 / step_time) × metadata_ops_per_file
-        _files_open_per_sec_per_worker = 50.0  # 50 files/sec at ~20ms/sample
-        _metadata_pressure_factor = 1.0        # maximum pressure
-    else:
-        # Object store: no POSIX MDS. Operations go directly to object server.
-        _files_open_per_sec_per_worker = 50.0  # same access rate
-        _metadata_pressure_factor = 0.0        # object store has no MDS bottleneck
-
-    # ── Total metadata operations per second ──────────────────────────────────
-    _total_workers = act2_gpu_count.value * act2_workers_per_gpu.value
-    _ops_per_sec_demand = (
-        _total_workers
-        * _files_open_per_sec_per_worker
-        * _METADATA_OPS_PER_FILE_ACCESS
-        * _metadata_pressure_factor
-    )
-
-    # ── MDS capacity and saturation ────────────────────────────────────────────
-    _mds_capacity = act2_mds_count.value * _MDS_OPS_PER_NODE
-    _mds_saturated = (_dataset_type != "object_store") and (_ops_per_sec_demand > _mds_capacity)
-    _ops_k = _ops_per_sec_demand / 1000
-    _mds_capacity_k = _mds_capacity / 1000
-    _mds_util_pct = min((_ops_per_sec_demand / _mds_capacity) * 100.0, 200.0) if _mds_capacity > 0 else 0.0
-
-    # ── Bandwidth demand vs supply ─────────────────────────────────────────────
-    # Actual bandwidth demand: 80 MB/s per GPU (realistic per @sec-data-storage)
-    _bw_demand_gbs = act2_gpu_count.value * 0.08   # 80 MB/s = 0.08 GB/s per GPU
-
-    # Context factor: NVMe context has different supply
-    _ctx_ii = context_toggle.value
-    if _ctx_ii == "nvme":
-        _bw_supply_gbs = 28.0    # single node local NVMe
-    else:
-        _bw_supply_gbs = _TOTAL_LUSTRE_BW   # 1344 GB/s aggregate Lustre
-
-    _bw_headroom_pct = ((_bw_supply_gbs - _bw_demand_gbs) / _bw_supply_gbs) * 100.0
-    _bw_saturated = _bw_demand_gbs > _bw_supply_gbs
-
-    # ── Needed MDS nodes to handle demand ─────────────────────────────────────
-    _needed_mds = max(1, int(math.ceil(_ops_per_sec_demand / _MDS_OPS_PER_NODE))) if _dataset_type != "object_store" else 1
-
-    # ── Architecture recommendation ────────────────────────────────────────────
-    if _dataset_type == "object_store":
-        _recommendation = "Object store — no MDS. Scales to any GPU count."
-        _rec_color = COLORS["GreenLine"]
-    elif _mds_saturated:
-        _recommendation = f"Add {_needed_mds - act2_mds_count.value} more MDS nodes or migrate to object store."
-        _rec_color = COLORS["RedLine"]
-    elif _mds_util_pct > 60:
-        _recommendation = "MDS approaching capacity. Switch to sequential shards or pre-provision additional MDS."
-        _rec_color = COLORS["OrangeLine"]
-    else:
-        _recommendation = "Architecture is sound at current scale. Monitor MDS utilization as GPU count grows."
-        _rec_color = COLORS["GreenLine"]
-
-    # ── Chart: demand vs supply (bandwidth and metadata) ─────────────────────
-    _gpu_range = list(range(128, 4097, 128))
-    _bw_demand_curve = [g * 0.08 for g in _gpu_range]
-    _ops_demand_curve = [
-        (g * act2_workers_per_gpu.value * _files_open_per_sec_per_worker
-         * _METADATA_OPS_PER_FILE_ACCESS * _metadata_pressure_factor) / 1000
-        for g in _gpu_range
-    ]
-
-    _fig2 = go.Figure()
-
-    # Bandwidth demand vs supply
-    _fig2.add_trace(go.Scatter(
-        x=_gpu_range, y=_bw_demand_curve,
-        mode="lines", name="Bandwidth Demand (GB/s)",
-        line=dict(color=COLORS["BlueLine"], width=2),
-        yaxis="y1",
-    ))
-    _fig2.add_hline(
-        y=_bw_supply_gbs, line_dash="dash", line_color=COLORS["GreenLine"],
-        annotation_text=f"Storage BW Supply: {_bw_supply_gbs:.0f} GB/s",
-        annotation_position="top left", yref="y1",
-    )
-
-    # Metadata ops demand vs MDS capacity (secondary y axis)
-    _fig2.add_trace(go.Scatter(
-        x=_gpu_range, y=_ops_demand_curve,
-        mode="lines", name="Metadata Ops Demand (K ops/sec)",
-        line=dict(color=COLORS["OrangeLine"], width=2, dash="dot"),
-        yaxis="y2",
-    ))
-    _fig2.add_hline(
-        y=_mds_capacity_k, line_dash="dash", line_color=COLORS["RedLine"],
-        annotation_text=f"MDS Capacity: {_mds_capacity_k:.0f}K ops/sec ({act2_mds_count.value} MDS)",
-        annotation_position="top right", yref="y2",
-    )
-
-    # Mark current GPU count
-    _fig2.add_vline(
-        x=act2_gpu_count.value, line_dash="solid", line_color="#6366f1",
-        annotation_text=f"{act2_gpu_count.value} GPUs",
-        annotation_position="top",
-    )
-
-    _fig2.update_layout(
-        height=340,
-        xaxis_title="GPU Count",
-        yaxis=dict(title="Bandwidth (GB/s)", side="left", gridcolor="#f1f5f9"),
-        yaxis2=dict(title="Metadata Ops (K ops/sec)", side="right", overlaying="y", gridcolor="#f1f5f9"),
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        margin=dict(l=60, r=60, t=60, b=50),
-        title=dict(
-            text=f"Bandwidth and Metadata Demand vs. Cluster Scale ({act2_dataset_files.value[:20]}...)",
-            font=dict(size=13),
-        ),
-    )
-    apply_plotly_theme(_fig2)
-
-    # ── Metric cards ──────────────────────────────────────────────────────────
-    _mds_color = COLORS["RedLine"] if _mds_saturated else COLORS["OrangeLine"] if _mds_util_pct > 60 else COLORS["GreenLine"]
-    _bw_color = COLORS["RedLine"] if _bw_saturated else COLORS["GreenLine"]
-
-    _cards2_html = f"""
-    <div style="display: flex; gap: 16px; flex-wrap: wrap; margin: 16px 0;">
-        <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 12px;
-                    min-width: 170px; text-align: center; background: white;
-                    border-top: 4px solid {_bw_color};">
-            <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600; margin-bottom: 6px;">
-                Bandwidth Demand
-            </div>
-            <div style="font-size: 1.9rem; font-weight: 800; color: {_bw_color}; line-height: 1;">
-                {_bw_demand_gbs:.1f}
-            </div>
-            <div style="color: #94a3b8; font-size: 0.78rem; margin-top: 4px;">
-                GB/s of {_bw_supply_gbs:.0f} GB/s supply
-            </div>
-        </div>
-        <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 12px;
-                    min-width: 170px; text-align: center; background: white;
-                    border-top: 4px solid {_mds_color};">
-            <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600; margin-bottom: 6px;">
-                Metadata Demand
-            </div>
-            <div style="font-size: 1.9rem; font-weight: 800; color: {_mds_color}; line-height: 1;">
-                {_ops_k:.0f}K
-            </div>
-            <div style="color: #94a3b8; font-size: 0.78rem; margin-top: 4px;">
-                ops/sec of {_mds_capacity_k:.0f}K capacity
-            </div>
-        </div>
-        <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 12px;
-                    min-width: 170px; text-align: center; background: white;
-                    border-top: 4px solid {_mds_color};">
-            <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600; margin-bottom: 6px;">
-                MDS Utilization
-            </div>
-            <div style="font-size: 1.9rem; font-weight: 800; color: {_mds_color}; line-height: 1;">
-                {min(_mds_util_pct, 199):.0f}%
-            </div>
-            <div style="color: #94a3b8; font-size: 0.78rem; margin-top: 4px;">
-                {act2_mds_count.value} MDS node(s)
-            </div>
-        </div>
-        <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 12px;
-                    min-width: 170px; text-align: center; background: white;
-                    border-top: 4px solid {_rec_color};">
-            <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600; margin-bottom: 6px;">
-                Concurrent Connections
-            </div>
-            <div style="font-size: 1.9rem; font-weight: 800; color: {COLORS['BlueLine']}; line-height: 1;">
-                {_total_workers:,}
-            </div>
-            <div style="color: #94a3b8; font-size: 0.78rem; margin-top: 4px;">
-                {act2_gpu_count.value} GPUs × {act2_workers_per_gpu.value} workers
-            </div>
-        </div>
-    </div>
-    """
-
-    # ── Physics formula ────────────────────────────────────────────────────────
-    _formula2_md = f"""
-    **The physics (from @sec-data-storage):**
-
-    ```
-    Metadata ops/sec  = GPU_count × workers_per_gpu × files_per_sec_per_worker
-                        × metadata_ops_per_file × pressure_factor
-                      = {act2_gpu_count.value} × {act2_workers_per_gpu.value} × {_files_open_per_sec_per_worker:.1f}
-                        × {_METADATA_OPS_PER_FILE_ACCESS:.0f} × {_metadata_pressure_factor:.2f}
-                      = {_ops_per_sec_demand:,.0f} ops/sec = {_ops_k:.0f}K ops/sec
-
-    MDS capacity      = MDS_nodes × ops_per_MDS_node
-                      = {act2_mds_count.value} × {_MDS_OPS_PER_NODE:,}
-                      = {_mds_capacity:,} ops/sec = {_mds_capacity_k:.0f}K ops/sec
-
-    MDS utilization   = demand / capacity = {_ops_k:.0f}K / {_mds_capacity_k:.0f}K = {_mds_util_pct:.0f}%
-
-    Bandwidth demand  = GPU_count × 80 MB/s = {act2_gpu_count.value} × 0.08 GB/s = {_bw_demand_gbs:.1f} GB/s
-    Bandwidth headroom= {_bw_headroom_pct:.0f}% of {_bw_supply_gbs:.0f} GB/s supply
-    ```
-    """
-
-    # ── Architecture recommendation panel ────────────────────────────────────
-    _rec_html = f"""
-    <div style="background: #f8fafc; border: 1.5px solid {_rec_color}; border-radius: 12px;
-                padding: 18px 22px; margin: 12px 0;">
-        <div style="font-size: 0.82rem; font-weight: 700; color: #475569; text-transform: uppercase;
-                    letter-spacing: 0.08em; margin-bottom: 8px;">
-            Architecture Recommendation
-        </div>
-        <div style="font-size: 1.0rem; font-weight: 600; color: {_rec_color}; line-height: 1.6;">
-            {_recommendation}
-        </div>
-    </div>
-    """
-
-    mo.vstack([
-        mo.Html(_cards2_html),
-        mo.as_html(_fig2),
-        mo.md(_formula2_md),
-        mo.Html(_rec_html),
-    ])
-    return (
-        _mds_saturated,
-        _ops_k,
-        _mds_capacity_k,
-        _needed_mds,
-        _mds_util_pct,
-        _bw_demand_gbs,
-        _bw_supply_gbs,
-        _bw_headroom_pct,
-        _dataset_type,
-        _total_workers,
-    )
-
-
-# ─── ACT II: FAILURE STATE ────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(
-    mo, _mds_saturated, _ops_k, _mds_capacity_k, _needed_mds,
-    act2_mds_count, _dataset_type, _total_workers, act2_gpu_count,
-):
-    if _dataset_type == "object_store":
-        mo.callout(mo.md(
-            "**Object store bypasses the MDS bottleneck entirely.** "
-            "Content-addressed object stores (S3, GCS, Azure Blob) have no POSIX namespace "
-            "and no metadata server. Each object is accessed by a globally unique key — "
-            "no directory traversal, no file locking, no inode table. This is the primary "
-            "architectural reason object stores dominate production ML training pipelines "
-            "at scale. The bandwidth remains the same, but the scaling ceiling disappears. "
-            "Switch back to 'individual files' to see the bottleneck re-emerge."
-        ), kind="success")
-    elif _mds_saturated:
-        mo.callout(mo.md(
-            f"**Metadata server saturation. This cluster cannot function at this configuration.**\n\n"
-            f"Demand: **{_ops_k:.0f}K ops/sec** | MDS capacity: **{_mds_capacity_k:.0f}K ops/sec** "
-            f"({act2_mds_count.value} MDS node{'s' if act2_mds_count.value > 1 else ''}).\n\n"
-            f"**{_total_workers:,} concurrent connections** ({act2_gpu_count.value} GPUs × "
-            f"{_total_workers // act2_gpu_count.value} workers) are all generating file-open "
-            "requests to the same metadata server. Lustre's MDS is a single coordination "
-            "point for all namespace operations — even though the bandwidth is fine, "
-            "every file access requires an MDS round-trip for the inode lookup. "
-            f"To fix: add {_needed_mds - act2_mds_count.value} more MDS nodes, switch to "
-            "sequential shards (reduces opens by 50×+), or migrate to object storage entirely."
-        ), kind="danger")
-    elif _mds_util_pct > 60:
-        mo.callout(mo.md(
-            f"**MDS approaching saturation: {_mds_util_pct:.0f}% utilization.** "
-            f"At {act2_gpu_count.value} GPUs with individual files, metadata operations are consuming "
-            "more than half of MDS capacity. Doubling the GPU count will push this into "
-            "saturation before bandwidth demand becomes significant. "
-            "The architectural decision: switch to sequential shards now, or provision "
-            f"{_needed_mds} MDS nodes proactively. Bandwidth headroom is not the constraint to watch."
-        ), kind="warn")
-    else:
-        mo.callout(mo.md(
-            f"**Architecture is currently feasible.** "
-            f"MDS utilization: {_mds_util_pct:.0f}%. Bandwidth demand: {_ops_k * 0 + 0:.0f} — "
-            "well within supply. Push the GPU count slider to 4,096 with individual files "
-            "and 8 workers to see the metadata bottleneck emerge. The bandwidth will still "
-            "be fine; the MDS will not."
-        ), kind="success")
-    return
-
-
-# ─── ACT II: PREDICTION REVEAL ───────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act2_prediction, _ops_k, _mds_capacity_k):
-    _is_correct = act2_prediction.value == "B"
-    # At 4096 GPUs × 8 workers × 50 opens/sec × 3 ops/file = 4,915,200 ops/sec = 4,915K ops/sec
-    # vs MDS capacity of 50K ops/sec (1 MDS node)
-    _actual_ops_demand_k = (4096 * 8 * 50.0 * 3.0) / 1000
-    _actual_mds_cap_k = 50.0
-
-    if _is_correct:
-        mo.callout(mo.md(
-            f"**Correct. You predicted: metadata server saturation.**\n\n"
-            f"At 4,096 GPUs × 8 workers = 32,768 concurrent connections, all generating "
-            "file-open requests against the Lustre namespace: "
-            f"**{_actual_ops_demand_k:,.0f}K ops/sec demand** against "
-            f"**{_actual_mds_cap_k:.0f}K ops/sec MDS capacity** — a "
-            f"{_actual_ops_demand_k/_actual_mds_cap_k:.0f}× overload. "
-            "Meanwhile, bandwidth demand is 4,096 × 80 MB/s = 328 GB/s — well within "
-            "the 1,344 GB/s supply. The bandwidth safety margin the team computed is real; "
-            "the metadata capacity they never measured is the actual constraint. "
-            "Every add-OST investment solves the wrong problem."
-        ), kind="success")
-    elif act2_prediction.value == "A":
-        mo.callout(mo.md(
-            f"**Not quite. You predicted: bandwidth saturation.**\n\n"
-            "4,096 GPUs × 80 MB/s = 328 GB/s demand against 1,344 GB/s supply — a 4× safety margin. "
-            "The bandwidth math the CTO computed is correct. But the metadata server running "
-            "at 50K ops/sec capacity against 4,915K ops/sec demand (a 98× overload) fails "
-            "first and catastrophically. Adding more OST nodes improves bandwidth capacity "
-            "but does nothing for the MDS bottleneck. "
-            "**Correct answer: B — metadata server becomes the bottleneck.**"
-        ), kind="warn")
-    elif act2_prediction.value == "C":
-        mo.callout(mo.md(
-            f"**Not quite. You predicted: storage scales linearly with OST nodes.**\n\n"
-            "For *bandwidth*, this is correct — adding OSTs increases aggregate throughput. "
-            "But the Lustre Metadata Server (MDS) is a separate component that manages the "
-            "filesystem namespace. It does not scale with OST node count. A single MDS "
-            "serves all namespace operations for the entire cluster, and its throughput "
-            "ceiling is a hard constraint no OST addition can move. "
-            "**Correct answer: B — metadata server becomes the bottleneck.**"
-        ), kind="warn")
-    else:
-        mo.callout(mo.md(
-            f"**Not quite. You predicted: network latency is the bottleneck.**\n\n"
-            "InfiniBand HDR-200 introduces ~1–5 microseconds of fabric latency — "
-            "far below the millisecond-scale batch processing window. At 128 GB/s per "
-            "compute node IB port, the network fabric is not the constraint. "
-            "The Lustre metadata server, handling every file-open and close operation "
-            "for 32,768 concurrent workers, saturates at 50K ops/sec against a demand "
-            "of 4,915K ops/sec. Network latency is measurable but negligible; "
-            "metadata throughput is the hard ceiling. "
-            "**Correct answer: B — metadata server becomes the bottleneck.**"
-        ), kind="warn")
-    return
-
-
-# ─── ACT II: REFLECTION ──────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    #### Reflection
-
-    You have seen metadata saturation emerge at scale where bandwidth was never the issue.
-    Now identify the architectural principle this demonstrates.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    act2_reflection = mo.ui.radio(
-        options={
-            "A) Object stores are faster for sequential reads than POSIX filesystems": "A",
-            "B) Object stores eliminate the metadata bottleneck — objects are addressed by content hash, removing directory traversal": "B",
-            "C) POSIX filesystems cannot store files larger than 4 GB": "C",
-            "D) Object stores support more concurrent connections per storage node than POSIX": "D",
-        },
-        label="Why is object storage (S3/GCS) often preferred over POSIX filesystems for training data at scale?",
-    )
-    act2_reflection
-    return (act2_reflection,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act2_reflection):
-    mo.stop(
-        act2_reflection.value is None,
-        mo.callout(mo.md("Select your answer to complete Act II."), kind="warn"),
-    )
-
-    if act2_reflection.value == "B":
-        mo.callout(mo.md(
-            "**Correct.** Object stores (S3, GCS, Azure Blob Storage) address objects by "
-            "globally unique keys — no POSIX namespace, no inode table, no directory hierarchy. "
-            "There is no metadata server to saturate. A GET request goes directly to the "
-            "object's physical location, resolved through a distributed key-value index that "
-            "scales horizontally without a coordination bottleneck. "
-            "This explains why production training pipelines at Google, Meta, and Microsoft "
-            "all use object storage as the primary data tier — not because sequential bandwidth "
-            "is higher (it is similar), but because the namespace scaling barrier does not exist. "
-            "The data gravity consequence: if training data lives in S3, compute must also run "
-            "in the same cloud region. Moving 100 TB to a local Lustre cluster costs the same "
-            "as running the training job where the data already lives."
-        ), kind="success")
-    elif act2_reflection.value == "A":
-        mo.callout(mo.md(
-            "**Incorrect.** Sequential read bandwidth for S3 and a well-configured Lustre "
-            "cluster are similar for large files — both can sustain hundreds of GB/s in aggregate. "
-            "The advantage of object stores is not in raw sequential throughput; it is in the "
-            "absence of a namespace coordination bottleneck. A POSIX filesystem routes all "
-            "namespace operations through one or a few MDS nodes. An object store does not "
-            "have a metadata server at all. **Correct answer: B.**"
-        ), kind="warn")
-    elif act2_reflection.value == "C":
-        mo.callout(mo.md(
-            "**Incorrect.** Modern POSIX filesystems (Lustre, GPFS, ext4, XFS) support files "
-            "measured in petabytes — there is no practical size limit for training workloads. "
-            "The limitation of POSIX at ML scale is metadata coordination overhead, not file "
-            "size. **Correct answer: B — the metadata bottleneck is the architectural constraint.**"
-        ), kind="warn")
-    else:
-        mo.callout(mo.md(
-            "**Incorrect.** POSIX filesystems with appropriate tuning (Lustre with many OST "
-            "nodes, GPFS with distributed metadata) can handle tens of thousands of concurrent "
-            "connections. The issue is not raw concurrency capacity — it is that every connection "
-            "must serialize through the MDS for namespace operations. Object stores route each "
-            "request directly to the storage backend without a centralized coordinator. "
-            "**Correct answer: B — content-addressed objects eliminate namespace bottlenecks.**"
-        ), kind="warn")
-    return
-
-
-# ─── ACT II: MATHPEEK ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.accordion({
-        "The governing equations — Metadata Rate and Data Gravity at Scale": mo.md("""
-        **Metadata Operation Rate** (from @sec-data-storage):
-
-        $$\\text{MDS demand} = N_{GPU} \\times W_{GPU} \\times f_{open} \\times m_{ops}$$
-
-        Where:
-        - **N_GPU** — number of GPU accelerators
-        - **W_GPU** — data loader workers per GPU
-        - **f_open** — file opens per second per worker (varies by dataset organization)
-        - **m_ops** — metadata operations per file access (open + stat + close ≈ 3)
-
-        **Example: 4096 GPUs, 8 workers, individual files:**
-        ```
-        MDS demand = 4,096 × 8 × 50 ops/sec × 3
-                   = 4,915,200 ops/sec ≈ 4,915K ops/sec
-        MDS supply = 1 node × 50K ops/sec = 50K ops/sec
-        Saturation = 4,915 / 50 = 98× overload → training stalls
-        ```
-
-        **Sequential shards fix (same GPUs):**
-        ```
-        f_open     ≈ 0.2 opens/sec per worker (5s per shard)
-        MDS demand = 4,096 × 8 × 0.2 × 3 = 19,661 ops/sec ≈ 20K ops/sec
-        MDS supply = 1 node × 50K ops/sec = 50K ops/sec
-        Utilization = 40%  ← within bounds
-        ```
-
-        **Object Store vs POSIX Comparison:**
-        | Property | Lustre (POSIX) | S3 / GCS (Object) |
-        |----------|:-------------:|:-----------------:|
-        | Metadata server | Required (MDS) | None |
-        | Namespace scalability | MDS-bound | Distributed hash |
-        | Sequential BW | 672 GB/s (48 OSTs) | ~same per region |
-        | Random access IOPS | NVMe-bound | Tiered by class |
-        | Training suitability | Good (with shards) | Excellent (any pattern) |
-
-        **Data Gravity Implication:**
-        Once training data is in S3 (us-east-1), moving 100 TB to a local Lustre cluster:
-        ```
-        T_transfer = 100,000 GB / 12.5 GB/s (100 Gbps) = 8,000 s ≈ 2.2 hours
-        Cost       = 100,000 GB × $0.09/GB (S3 egress) = $9,000
-
-        Compare to running the training job in us-east-1 for 24 hours:
-        Cost       = 512 × H100 spot × $3.50/GPU-hr × 24h = $43,008
-
-        Data gravity decision: move compute to data if transfer cost + latency
-        exceeds the cost of provisioning compute near the data.
-        ```
-        """),
-    })
-    return
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.vstack([
-        mo.md("---"),
-
-        # ── KEY TAKEAWAYS ──
-        mo.Html(f"""
-        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                Key Takeaways
-            </div>
-            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
-                <div style="margin-bottom: 10px;">
-                    <strong>1. Pipeline throughput equals the throughput of the slowest stage.</strong>
-                    Doubling NVMe capacity provides exactly 0% improvement when the S3 network link
-                    (1.25 GB/s) is the bottleneck. The NVMe tier is a latency-hiding buffer, not a
-                    speed solution &mdash; its value only materializes when the pipeline can fill it
-                    faster than GPUs drain it.
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>2. The 479&times; storage-compute gap cannot be closed by single-tier hardware.</strong>
-                    H100 HBM delivers 3.35 TB/s; a single NVMe drive delivers 7 GB/s. GPU throughput
-                    has grown 236&times; since 2016 while NVMe throughput grew only 4&times;. A tiered
-                    pipeline (Object Store &rarr; NVMe &rarr; HBM) with prefetching is the only
-                    architectural response to this widening gap.
-                </div>
-                <div>
-                    <strong>3. Checkpoint writes require 35 GB/s sustained bandwidth and compete directly with training reads.</strong>
-                    A 175B model checkpoint is ~1,050 GB (Adam optimizer state). Writing it within 30 seconds
-                    requires 35 GB/s &mdash; 5 dedicated NVMe drives &mdash; leaving only 14 GB/s for
-                    training data. Checkpoint interval of 15&ndash;30 minutes with 50% NVMe write allocation
-                    keeps GPU utilization above 90% during write windows.
-                </div>
-            </div>
-        </div>
-        """),
-
-        # ── CONNECTIONS ──
-        mo.Html(f"""
-        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-
-            <!-- What's Next -->
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    What's Next
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab V2-05: The Parallelism Paradox</strong> &mdash; This lab showed that
-                    the storage pipeline bottleneck starves GPUs regardless of compute power. The next
-                    lab asks: when GPUs are fully fed, why does adding more of them in data-parallel
-                    training eventually decrease training efficiency due to communication overhead?
-                </div>
-            </div>
-
-            <!-- Textbook Connection -->
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    Textbook &amp; TinyTorch
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-data-storage-fuel-line for the 479&times; gap derivation
-                    and checkpoint sizing math, and @sec-data-storage-workload-inversion for sequential
-                    vs. random I/O patterns.<br/>
-                    <strong>Build:</strong> TinyTorch data loader module &mdash; implement prefetch
-                    pipelines with configurable queue depth in <code>tinytorch/src/data/</code>.
-                </div>
-            </div>
-
-        </div>
-        """),
-
-        mo.accordion({
-
-
-            "Self-Assessment": mo.md("""
-**Check your understanding:**
-
-1. A cluster has 4 NVMe SSDs (28 GB/s aggregate) but streams data from S3 over a 10 Gbps link (1.25 GB/s). Why does doubling NVMe capacity provide exactly 0% improvement, and what determines the actual pipeline throughput?
-2. Writing a 175B model checkpoint (~1,050 GB) within 30 seconds requires 35 GB/s sustained bandwidth. How many NVMe drives does this consume, and what happens to training data read throughput during a checkpoint write window?
-3. The storage-compute gap has widened from ~100x to 479x between 2016 and 2024. Why can no single-tier storage solution close this gap, and what makes tiered prefetching (Object Store to NVMe to HBM) the only viable architectural response?
-
-**You're ready to move on if you can:**
-- Identify the bottleneck stage in a multi-tier storage pipeline and explain why upgrading non-bottleneck tiers yields zero improvement
-- Calculate checkpoint write bandwidth requirements and their impact on training data read throughput
-- Explain why the storage-compute gap widens with each GPU generation and what architectural pattern addresses it
-""")
-
-
-        }),
-    ])
-    return
-
-
-# ─── CELL 21: LEDGER_HUD ─────────────────────────────────────────────────────
-# ─── DESIGN LEDGER SAVE + HUD ─────────────────────────────────────────────────
-@app.cell
-@app.cell(hide_code=True)
-def _(mo):
-    decision_input, decision_ui = DecisionLog()
-    return decision_input, decision_ui
-
-
-@app.cell(hide_code=True)
-def _(
-    mo, ledger, context_toggle,
-    act1_prediction, act1_reflection,
-    act2_prediction, act2_reflection,
-    act2_gpu_count, act2_workers_per_gpu,
-    act1_num_workers,
-    _gpu_util, _effective_storage_bw,
-    _mds_saturated, _ops_k, _dataset_type, _total_workers,
-    COLORS,
-, decision_input, decision_ui):
-    _act1_correct = (act1_prediction.value == "B") if act1_prediction.value else False
-    _act1_refl_correct = (act1_reflection.value == "B") if act1_reflection.value else False
-    _act2_correct = (act2_prediction.value == "B") if act2_prediction.value else False
-    _act2_refl_correct = (act2_reflection.value == "B") if act2_reflection.value else False
-
-    # Map dataset type to a clean label for the ledger
-    _storage_type_map = {
-        "shards": "sequential_shards",
-        "individual": "individual_files",
-        "object_store": "object_store",
-    }
-    _storage_type = _storage_type_map.get(_dataset_type, "individual_files")
-
-    ledger.save(
-        chapter="v2_04",
-        design={
-            "context": context_toggle.value,
-            "storage_type": _storage_type,
-            "gpu_count": act2_gpu_count.value,
-            "data_workers_per_gpu": act2_workers_per_gpu.value,
-            "io_throughput_gbs": round(float(_effective_storage_bw), 2),
-            "act1_prediction": act1_prediction.value if act1_prediction.value else "none",
-            "act1_correct": _act1_correct,
-            "act2_result": round(float(_ops_k), 1),   # metadata ops/sec demand in K
-            "act2_decision": _storage_type,
-            "constraint_hit": bool(_mds_saturated),
-        "student_justification": str(decision_input.value),
-            "mds_saturated": bool(_mds_saturated),
-        },
-    )
-
-    # HUD footer
-    _ctx_label = "NVMe — Single Node" if context_toggle.value == "nvme" else "Distributed FS — Lustre"
-    _act1_status = "correct" if _act1_correct else ("pending" if not act1_prediction.value else "incorrect")
-    _act2_status = "correct" if _act2_correct else ("pending" if not act2_prediction.value else "incorrect")
-    _mds_status = "saturated" if _mds_saturated else "healthy"
-
-    def _sc(s):
-        return {
-            "correct": "#4ade80", "pending": "#94a3b8", "incorrect": "#f87171",
-            "saturated": "#f87171", "healthy": "#4ade80",
-        }.get(s, "#94a3b8")
-
-    mo.Html(f"""
-    <div style="display: flex; gap: 24px; align-items: center; flex-wrap: wrap;
-                padding: 14px 24px; background: #0f172a; border-radius: 12px;
-                margin-top: 40px; font-family: 'SF Mono', monospace; font-size: 0.8rem;
-                border: 1px solid #1e293b;">
-        <span style="color: #94a3b8; font-weight: 600; letter-spacing: 0.06em;">
-            DESIGN LEDGER · V2-CH04
-        </span>
-        <span style="color: #475569;">|</span>
-        <span>
-            <span style="color: #94a3b8;">Context: </span>
-            <span style="color: #e2e8f0;">{_ctx_label}</span>
-        </span>
-        <span>
-            <span style="color: #94a3b8;">Act I prediction: </span>
-            <span style="color: {_sc(_act1_status)};">{_act1_status}</span>
-        </span>
-        <span>
-            <span style="color: #94a3b8;">Act II prediction: </span>
-            <span style="color: {_sc(_act2_status)};">{_act2_status}</span>
-        </span>
-        <span>
-            <span style="color: #94a3b8;">GPU util (Act I): </span>
-            <span style="color: #e2e8f0;">{_gpu_util:.0f}%</span>
-        </span>
-        <span>
-            <span style="color: #94a3b8;">Effective I/O BW: </span>
-            <span style="color: #e2e8f0;">{_effective_storage_bw:.1f} GB/s</span>
-        </span>
-        <span>
-            <span style="color: #94a3b8;">MDS status: </span>
-            <span style="color: {_sc(_mds_status)};">{_mds_status} ({_ops_k:.0f}K ops/sec)</span>
-        </span>
-        <span>
-            <span style="color: #94a3b8;">Workers: </span>
-            <span style="color: #e2e8f0;">{_total_workers:,} ({act2_gpu_count.value}×{act2_workers_per_gpu.value})</span>
-        </span>
+    <div class="lab-hud">
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">V2-04 &middot; The Data Pipeline Wall</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">TRACK</span>
+        <span class="{'hud-active' if _track != 'not set' else 'hud-none'}">{_track}</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">VOL&nbsp;II&nbsp;CH&nbsp;4</span>
+        <span class="hud-value">Data and Storage at Scale</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">active</span>
     </div>
     """)
     return

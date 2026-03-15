@@ -3,38 +3,12 @@ import marimo
 __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LAB 08: THE TRAINING MEMORY BUDGET
-#
-# Chapter: Model Training (@sec-model-training)
-# Core Invariant:
-#   Training memory = weights + gradients + optimizer state + activations.
-#   For Adam in FP32: 16× model size (4× base × 4 bytes). Activations scale
-#   with batch size. OOM is the most common training failure.
-#
-# 2 Contexts: Cloud (H100, 80 GB) vs Mobile (fine-tuning device, 8 GB)
-#
-# Act I  — The Memory Budget Shock (12–15 min)
-#   Prediction: 7B FP32 Adam minimum memory (correct: 112 GB)
-#   Instrument: Memory Ledger stacked bar
-#   Reflection: Why bf16 cuts memory by 2×
-#
-# Act II — Gradient Accumulation vs Batch Size (20–25 min)
-#   Prediction: Gradient accumulation throughput vs direct batch
-#   Instrument: Activation + accumulation explorer
-#   Failure state: OOM banner when total > device RAM
-#   Reflection: Gradient checkpointing trade-off
-#
-# Design Ledger: chapter=8, context, model_size_params, precision_chosen,
-#                oom_triggered, grad_accum_steps, optimizer_chosen
-# ─────────────────────────────────────────────────────────────────────────────
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
 # ZONE A: OPENING
-# ═══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
 
-# ── CELL 0: SETUP ────────────────────────────────────────────────────────────
+# ─── CELL 0: SETUP ──────────────────────────────────────────────────────────
 @app.cell
 async def _():
     import marimo as mo
@@ -44,10 +18,11 @@ async def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
     if sys.platform == "emscripten":
         import micropip
-        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+        await micropip.install(
+            "https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl"
+        )
     elif "mlsysim" not in sys.modules:
         _root = Path(__file__).resolve().parents[2]
         if str(_root) not in sys.path:
@@ -55,86 +30,80 @@ async def _():
 
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim.labs.components import DecisionLog
+    import mlsysim
+    from mlsysim.core.engine import Engine
 
-    # ── Hardware constants (from LABS_SPEC.md, all plain floats, source: NVIDIA specs) ──
-    H100_RAM_GB      = 80     # H100 SXM5 HBM3e memory capacity
-    H100_TDP_W       = 700    # H100 TDP
-    MOBILE_RAM_GB    = 8      # Smartphone / fine-tuning device budget
-    MOBILE_TDP_W     = 5      # Watts sustained
+    H100 = mlsysim.Hardware.Cloud.H100
+    V100 = mlsysim.Hardware.Cloud.V100
+    A100 = mlsysim.Hardware.Cloud.A100
+    JETSON = mlsysim.Hardware.Edge.JetsonOrinNX
 
-    # ── Precision bytes per value ─────────────────────────────────────────────
-    # Sources: IEEE 754 standards; BYTES_FP32=4, BYTES_BF16=2, INT8=1
-    DTYPE_BYTES = {
-        "fp32": 4,
-        "bf16": 2,
-        "fp16": 2,
-        "int8": 1,
-    }
+    H100_RAM_GB = H100.memory.capacity.m_as("GB")
+    H100_BW_GBS = H100.memory.bandwidth.m_as("GB/s")
+    V100_RAM_GB = V100.memory.capacity.m_as("GB")
+    A100_RAM_GB = A100.memory.capacity.m_as("GB")
 
-    # ── Optimizer memory multipliers relative to weight bytes ─────────────────
-    # SGD: weights only → 1×; Momentum: +1 vector → 2×;
-    # Adam: +m_t + v_t (FP32 always, even in mixed precision) → +2× FP32
-    # Source: training.qmd §Training Systems Fundamentals:
-    #   "4× the inference memory cost per parameter when using Adam:
-    #    14 GB (weights FP16) + 14 GB (grads) + 28 GB (Adam m+v FP32) = 56 GB"
-    #   (for 7B model). For FP32: weights+grads+2×optimizer = 4×weight_size.
-    OPTIMIZER_EXTRA_MULTIPLIER = {
-        "sgd":       0,   # no extra state
-        "momentum":  1,   # one moment vector (same dtype as weights)
-        "adam":      2,   # two FP32 moment vectors (m_t, v_t)
-        "adafactor": 0.5, # factored moments, ~0.5× weight size extra
+    # Optimizer bytes per parameter
+    OPTIMIZER_BPP = {
+        "SGD":          8,   # weights (4B) + gradients (4B)
+        "SGD+Momentum": 12,  # + momentum (4B)
+        "Adam":         16,  # + momentum (4B) + variance (4B)
+        "Adafactor":    10,  # approximate factored state
     }
 
     ledger = DesignLedger()
     return (
-        mo, go, np, math,
-        ledger, COLORS, LAB_CSS, apply_plotly_theme,
-        H100_RAM_GB, MOBILE_RAM_GB, H100_TDP_W, MOBILE_TDP_W,
-        DTYPE_BYTES, OPTIMIZER_EXTRA_MULTIPLIER,
+        COLORS, Engine, H100, V100, A100, JETSON,
+        H100_RAM_GB, H100_BW_GBS, V100_RAM_GB, A100_RAM_GB,
+        OPTIMIZER_BPP,
+        LAB_CSS, apply_plotly_theme, go, math, mo, np, ledger, mlsysim,
     )
 
 
-# ── CELL 1: HEADER ───────────────────────────────────────────────────────────
+# ─── CELL 1: HEADER ─────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, LAB_CSS, COLORS):
+def _(LAB_CSS, mo):
     mo.vstack([
         LAB_CSS,
-        mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        mo.Html("""
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.3);">
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
                         color: #475569; text-transform: uppercase; margin-bottom: 10px;">
                 Machine Learning Systems &middot; Volume I &middot; Lab 08
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
-                The Training Memory Budget
+                The Training Gauntlet
             </h1>
-            <p style="margin: 0 0 20px 0; font-size: 1.05rem; color: #94a3b8;
-                      max-width: 680px; line-height: 1.65;">
-                Training a 7B-parameter model requires not 7 GB of memory — it requires
-                <strong style="color:#f8fafc;">112 GB</strong>.
-                OOM is the most common training failure, and it is entirely predictable
-                from first principles.
+            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
+                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
+                Memory Budget &middot; Pipeline Bubbles &middot; Mixed Precision &middot; Communication Tax
             </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                <span style="background: rgba(99,102,241,0.15); color: #a5b4fc;
+            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
+                      max-width: 680px; line-height: 1.65;">
+                Training is not "forward pass but bigger" -- it is a four-stage pipeline
+                where memory budgets, pipeline bottlenecks, precision traps, and
+                communication overhead each create surprising walls, and optimizing the
+                wrong stage wastes resources while the true bottleneck goes untouched.
+            </p>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
+                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.25);">
-                    Act I: Memory Budget Shock &middot; Act II: Gradient Accumulation
-                </span>
-                <span style="background: rgba(16,185,129,0.15); color: #6ee7b7;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(16,185,129,0.25);">
-                    35&ndash;40 min
+                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
+                    4 Parts + Synthesis &middot; ~52 min
                 </span>
                 <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    OOM failure state active
+                    Chapter 8: Model Training
                 </span>
+            </div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <span class="badge badge-info">Adam: 16 bytes/param</span>
+                <span class="badge badge-warn">7B model: 112 GB static</span>
+                <span class="badge badge-fail">Mixed precision: 1.5x, not 2x</span>
             </div>
         </div>
         """),
@@ -142,41 +111,44 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ── CELL 2: BRIEFING ─────────────────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, COLORS):
+def _(COLORS, mo):
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
                 padding: 20px 28px; margin: 8px 0 16px 0;
                 box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-
-        <!-- LEARNING OBJECTIVES -->
         <div style="margin-bottom: 16px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                 Learning Objectives
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the 16&times; training memory multiplier</strong> — compute why a 7B FP32 Adam run requires 112 GB (weights + gradients + Adam m_t + v_t), not 28 GB, before a single activation is stored.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Diagnose why mixed precision reduces memory by ~1.5&times;, not 2&times;</strong> — trace the FP32 master copy that persists even when activations are in FP16.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Predict the throughput cost of gradient accumulation</strong> — determine whether accumulating 32 micro-batches produces the same throughput as a native batch-32 run and identify the +33% compute overhead of gradient checkpointing.</div>
+                <div style="margin-bottom: 3px;">1. <strong>Calculate the training memory budget</strong>:
+                    Adam on a 7B model requires 112 GB of parameter state alone (16 bytes/param),
+                    exceeding an H100 before storing any activations.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Identify the pipeline bottleneck</strong>:
+                    diagnose whether data loading, PCIe transfer, compute, or gradient sync
+                    limits training throughput.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Quantify the mixed-precision trap</strong>:
+                    FP32 master weights + Adam state persist at full precision, yielding only
+                    1.5-1.7x memory savings, not the expected 2x.</div>
+                <div style="margin-bottom: 3px;">4. <strong>Model the communication tax</strong>:
+                    predict multi-GPU scaling efficiency using Speedup = N / (1 + (N-1)*r).</div>
             </div>
         </div>
-
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <!-- PREREQUISITES + DURATION (side by side) -->
-        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 220px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Training memory components (weights, gradients, optimizer state) from
-                    @sec-model-training-training-systems-fundamentals-05d2 &middot;
-                    Iron Law of Training Performance from @sec-model-training-iron-law-training-performance-a53f
+                    Forward vs. backward memory from @sec-nn-computation-backprop-memory &middot;
+                    Iron Law from @sec-introduction-iron-law &middot;
+                    Dispatch overhead from @sec-frameworks-dispatch-overhead
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -185,25 +157,24 @@ def _(mo, COLORS):
                     Duration
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>35&ndash;40 min</strong><br/>
-                    Act I: ~12 min &middot; Act II: ~25 min
+                    <strong>~52 min</strong><br/>
+                    Part A: ~10 min &middot; Part B: ~12 min<br/>
+                    Part C: ~10 min &middot; Part D: ~10 min
                 </div>
             </div>
         </div>
-
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <!-- CORE QUESTION -->
-        <div style="margin-top: 16px;">
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
+                    padding: 16px 28px 0 28px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                 Core Question
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                "An H100 has 80 GB of memory and a 7B model weighs 28 GB in FP32 &mdash;
-                so why does training that model immediately OOM, and can gradient accumulation
-                solve it without sacrificing throughput?"
+                &ldquo;Your 7B model runs inference perfectly on an H100. You switch to
+                training and immediately hit OOM -- before processing a single batch.
+                Where did 112 GB of memory come from, and why does &lsquo;half precision&rsquo;
+                only save 35%?&rdquo;
             </div>
         </div>
     </div>
@@ -211,1159 +182,810 @@ def _(mo, COLORS):
     return
 
 
-# ── CELL 3: READING ───────────────────────────────────────────────────────────
+# ─── CELL 3: READING ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
-    **Recommended Reading** — Complete the following before this lab:
+    **Recommended Reading** -- Complete the following before this lab:
 
-    - **@sec-model-training-training-systems-fundamentals-05d2** — Training Systems Fundamentals:
-      the 4× memory multiplier, Adam optimizer state, the most common OOM failure mode.
-    - **@sec-model-training-iron-law-training-performance-a53f** — Iron Law of Training Performance:
-      the three levers (operations, peak throughput, utilization).
-    - The **Mixed-Precision Training** and **Gradient Checkpointing** footnotes in the chapter.
+    - **Chapter 8: Training Memory** -- the 16-byte-per-parameter breakdown
+      for Adam (weights + gradients + momentum + variance).
+    - **Chapter 8: The Training Pipeline** -- four-stage pipeline (data loading,
+      transfer, compute, gradient sync) and pipeline bubble analysis.
+    - **Chapter 8: Mixed Precision** -- FP16/BF16 forward + FP32 master weights,
+      and why savings are 1.5-1.7x not 2x.
+    - **Chapter 8: Communication Tax** -- AllReduce overhead and the scaling
+      formula Speedup = N / (1 + (N-1)*r).
     """), kind="info")
     return
 
 
-# ── CELL 4: CONTEXT TOGGLE ────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    context_toggle = mo.ui.radio(
-        options={
-            "Cloud (H100, 80 GB HBM)": "cloud",
-            "Mobile / Fine-tuning (8 GB)": "mobile",
-        },
-        value="Cloud (H100, 80 GB HBM)",
-        label="Deployment context:",
-        inline=True,
-    )
-    mo.vstack([
-        mo.md("---"),
-        mo.md("**Select your deployment context.** This determines the memory budget for both acts."),
-        context_toggle,
-    ])
-    return (context_toggle,)
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE B-D: ALL PARTS AS TABS
+# ═════════════════════════════════════════════════════════════════════════════
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: ACT I — CALIBRATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _act_num = "I"
-    _act_color = COLORS["BlueLine"]
-    _act_title = "The Memory Budget Shock"
-    _act_duration = "12 min"
-    _act_why = (
-        "You know the H100 has 80 GB and a 7B model weighs 28 GB in FP32 \u2014 "
-        "so the job should fit. The instruments will show that training memory "
-        "is not the model size: it is weights + gradients + Adam state, which "
-        "multiplies the requirement by 4\u00d7 before a single batch is loaded."
-    )
-    mo.vstack([
-        mo.md("---"),
-        mo.Html(f"""
-        <div style="margin: 32px 0 12px 0;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <div style="background: {_act_color}; color: white; border-radius: 50%;
-                            width: 32px; height: 32px; display: inline-flex; align-items: center;
-                            justify-content: center; font-size: 0.9rem; font-weight: 800;
-                            flex-shrink: 0;">{_act_num}</div>
-                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em;">
-                    Act {_act_num} &middot; {_act_duration}</div>
-            </div>
-            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                        margin-top: 8px; line-height: 1.2;">
-                {_act_title}
-            </div>
-            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                        line-height: 1.55; max-width: 700px;">
-                {_act_why}
-            </div>
-        </div>
-        """),
-    ])
-    return
-
-
-# ── CELL 6: ACT1_STAKEHOLDER ─────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _color = COLORS["RedLine"]
-    mo.vstack([
-        mo.Html(f"""
-        <div style="border-left: 4px solid {_color}; background: #fef2f2;
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {_color};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message &middot; Junior Engineer
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "Our new 7B model training job OOM'd on the H100 after 2 steps. I set
-                precision to fp32 and used Adam &mdash; that should be fine, right? H100 has
-                80 GB and the model is only 7 billion parameters."
-            </div>
-        </div>
-        """),
-        mo.md("""
-        The junior engineer is wrong, but not carelessly — the mistake is a specific,
-        systematic underestimate of what training actually needs. Before we debug the job,
-        predict the actual memory requirement from first principles.
-        """),
-    ])
-    return
-
-
-# ── CELL 5: ACT I PREDICTION LOCK ────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    act1_prediction = mo.ui.radio(
-        options={
-            "A) 7 GB — one byte per parameter": "7gb",
-            "B) 28 GB — FP32 weights only": "28gb",
-            "C) 56 GB — weights + gradients in FP32": "56gb",
-            "D) 112 GB — weights + gradients + Adam m_t + v_t, all FP32": "112gb",
-        },
-        label=(
-            "Training a 7B parameter model in FP32 with Adam optimizer. "
-            "What is the minimum memory required for weights + gradients + "
-            "optimizer state (before any activations)?"
-        ),
-    )
-    mo.vstack([
-        mo.Html("""
-        <div style="background: #1e293b; border-radius: 12px; padding: 20px;
-                    border-left: 4px solid #6366f1; margin: 8px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: #a5b4fc;
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px;">
-                Prediction Lock — Act I
-            </div>
-            <div style="color: #e2e8f0; font-size: 0.88rem; margin-bottom: 12px;">
-                Commit to a prediction before touching any controls.
-                The instruments will unlock once you select an answer.
-            </div>
-        </div>
-        """),
-        act1_prediction,
-    ])
-    return (act1_prediction,)
-
-
-# ── CELL 6: ACT I GATE ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_prediction):
-    mo.stop(
-        act1_prediction.value is None,
-        mo.callout(
-            mo.md("Select your prediction above to unlock the Memory Ledger."),
-            kind="warn",
-        ),
-    )
-    return
-
-
-# ── CELL 7: ACT I CONTROLS ───────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    # Model size slider: 100M to 70B parameters
-    # Range source: training.qmd — GPT-2 (1.5B), GPT-3 (175B), 7B class models
-    act1_model_billions = mo.ui.slider(
-        start=0.1, stop=70, value=7, step=0.1,
-        label="Model size (billions of parameters)",
-    )
-    # Precision selector
-    act1_precision = mo.ui.dropdown(
-        options={
-            "FP32 (4 bytes/value)": "fp32",
-            "BF16 (2 bytes/value)": "bf16",
-            "FP16 (2 bytes/value)": "fp16",
-            "INT8 (1 byte/value)":  "int8",
-        },
-        value="FP32 (4 bytes/value)",
-        label="Training precision",
-    )
-    # Optimizer selector
-    act1_optimizer = mo.ui.dropdown(
-        options={
-            "Adam (m_t + v_t in FP32)": "adam",
-            "SGD (no optimizer state)": "sgd",
-            "Momentum (one extra vector)": "momentum",
-            "Adafactor (~0.5× extra)": "adafactor",
-        },
-        value="Adam (m_t + v_t in FP32)",
-        label="Optimizer",
-    )
-    # Batch size slider: activations scale with batch
-    act1_batch_size = mo.ui.slider(
-        start=1, stop=128, value=8, step=1,
-        label="Batch size (for activation estimate)",
-    )
-    mo.vstack([
-        mo.md("### Memory Ledger Controls"),
-        mo.hstack([act1_model_billions, act1_precision], justify="start", gap="2rem"),
-        mo.hstack([act1_optimizer, act1_batch_size], justify="start", gap="2rem"),
-    ])
-    return (act1_model_billions, act1_precision, act1_optimizer, act1_batch_size)
-
-
-# ── CELL 8: ACT I PHYSICS ENGINE + CHART ────────────────────────────────────
+# ─── CELL 4: TABS CELL ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
-    mo, go, np,
-    act1_model_billions, act1_precision, act1_optimizer, act1_batch_size,
-    context_toggle, COLORS, apply_plotly_theme,
-    H100_RAM_GB, MOBILE_RAM_GB, DTYPE_BYTES, OPTIMIZER_EXTRA_MULTIPLIER,
+    COLORS, Engine, H100, V100, A100, JETSON,
+    H100_RAM_GB, H100_BW_GBS, V100_RAM_GB, A100_RAM_GB,
+    OPTIMIZER_BPP, apply_plotly_theme, go, math, mo, np, ledger, mlsysim,
 ):
-    # ── Physics ───────────────────────────────────────────────────────────────
-    # Source: training.qmd §Training Systems Fundamentals callout-definition:
-    #   "a 7B-parameter model requires 14 GB (FP16 weights) + 14 GB (gradients)
-    #    + 28 GB (Adam first and second moments in FP32) = 56 GB minimum"
-    # For FP32 weights (7B): 7B×4B = 28 GB weights, 28 GB grads, 56 GB optimizer = 112 GB
+    # ─────────────────────────────────────────────────────────────────────
+    # SHARED WIDGET STATE
+    # ─────────────────────────────────────────────────────────────────────
 
-    _params_b = act1_model_billions.value * 1e9   # total parameter count
-    _dtype    = act1_precision.value
-    _opt      = act1_optimizer.value
-    _batch    = act1_batch_size.value
-    _ctx      = context_toggle.value
-
-    _bpv = DTYPE_BYTES[_dtype]   # bytes per value for weights/grads
-
-    # Weights: params × bytes_per_value
-    _weights_gb = (_params_b * _bpv) / 1e9
-
-    # Gradients: same dtype and size as weights (one gradient per parameter)
-    _grads_gb = _weights_gb
-
-    # Optimizer state: stored in FP32 regardless of training precision
-    # Adam: 2 FP32 vectors (m_t, v_t) → 2 × params × 4 bytes
-    # SGD: 0 extra; Momentum: 1 FP32 vector; Adafactor: ~0.5× FP32
-    _opt_extra_fp32_vectors = OPTIMIZER_EXTRA_MULTIPLIER[_opt]
-    _optimizer_gb = (_params_b * 4 * _opt_extra_fp32_vectors) / 1e9
-
-    # Activations: linear in batch size and model depth
-    # Simplified estimate: batch × 1024 (seq_len) × 4096 (hidden) × 32 (layers) × bpv
-    # Calibrated to GPT-2 XL (1.5B, 48 layers, h=1600): ~2 GB at batch=8
-    # Source: training.qmd footnote [fn-checkpointing-training]: activation storage
-    #   grows linearly with model depth and batch size.
-    _hidden_dim  = max(512, int(act1_model_billions.value ** 0.5 * 1024))
-    _n_layers    = max(12,  int(act1_model_billions.value ** 0.33 * 12))
-    _seq_len     = 1024   # standard transformer sequence length
-    _act_bytes   = _batch * _seq_len * _hidden_dim * _n_layers * _bpv
-    _activations_gb = _act_bytes / 1e9
-
-    _total_gb = _weights_gb + _grads_gb + _optimizer_gb + _activations_gb
-    _static_gb = _weights_gb + _grads_gb + _optimizer_gb  # before activations
-
-    # Device memory budget
-    _device_ram = H100_RAM_GB if _ctx == "cloud" else MOBILE_RAM_GB
-    _device_name = "H100 (80 GB)" if _ctx == "cloud" else "Mobile / Fine-tuning (8 GB)"
-    _oom = _total_gb > _device_ram
-    _oom_static = _static_gb > _device_ram  # OOM even before first activation
-
-    # ── Colors ───────────────────────────────────────────────────────────────
-    if _oom:
-        _bar_colors = [
-            COLORS["RedLine"], COLORS["RedLine"], COLORS["RedLine"], COLORS["RedLine"]
-        ]
-    else:
-        _bar_colors = [
-            COLORS["BlueLine"],   # weights
-            COLORS["GreenLine"],  # gradients
-            COLORS["OrangeLine"], # optimizer state
-            "#6366f1",            # activations (indigo)
-        ]
-
-    # ── Stacked bar chart ─────────────────────────────────────────────────────
-    _components = ["Weights", "Gradients", "Optimizer State", "Activations"]
-    _values_gb  = [_weights_gb, _grads_gb, _optimizer_gb, _activations_gb]
-
-    _fig = go.Figure()
-    for _i, (_name, _val, _color) in enumerate(
-        zip(_components, _values_gb, _bar_colors)
-    ):
-        _fig.add_trace(go.Bar(
-            name=_name,
-            x=["Training Memory"],
-            y=[_val],
-            marker_color=_color,
-            text=f"{_val:.1f} GB",
-            textposition="inside",
-            textfont=dict(color="white", size=12, family="SF Mono, monospace"),
-        ))
-
-    # Device RAM threshold line
-    _fig.add_hline(
-        y=_device_ram,
-        line_color=COLORS["RedLine"],
-        line_width=2.5,
-        line_dash="dash",
-        annotation_text=f"{_device_name} RAM limit",
-        annotation_position="right",
-        annotation_font_color=COLORS["RedLine"],
+    # Part A widgets
+    partA_prediction = mo.ui.radio(
+        options={
+            "A) 28 GB (7B * 4 bytes)": "28gb",
+            "B) 56 GB (weights + gradients)": "56gb",
+            "C) 84 GB (+ one momentum buffer)": "84gb",
+            "D) 112 GB (+ two momentum buffers)": "112gb",
+        },
+        label="A 7B-parameter model trained with Adam in FP32. Minimum memory for "
+              "parameter state (weights + gradients + optimizer), before any activations?",
+    )
+    partA_model_size = mo.ui.slider(
+        start=0.1, stop=70, value=7, step=0.1, label="Model size (billions of params)",
+    )
+    partA_optimizer = mo.ui.dropdown(
+        options={"SGD (8 B/param)": "SGD", "SGD+Momentum (12 B/param)": "SGD+Momentum",
+                 "Adam (16 B/param)": "Adam", "Adafactor (10 B/param)": "Adafactor"},
+        value="Adam (16 B/param)", label="Optimizer",
+    )
+    partA_precision_a = mo.ui.radio(
+        options={"FP32": "fp32", "BF16": "bf16"},
+        value="FP32", label="Precision:", inline=True,
     )
 
-    _fig.update_layout(
-        barmode="stack",
-        height=420,
-        yaxis_title="Memory (GB)",
-        yaxis=dict(range=[0, max(_total_gb * 1.15, _device_ram * 1.15)]),
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        margin=dict(l=40, r=160, t=50, b=40),
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        font=dict(family="Inter, sans-serif"),
+    # Part B widgets
+    partB_prediction = mo.ui.radio(
+        options={
+            "A) Data loading (disk I/O)": "data",
+            "B) Host-to-device transfer (PCIe)": "pcie",
+            "C) Forward + backward pass (compute)": "compute",
+            "D) Gradient synchronization (inter-GPU)": "sync",
+        },
+        label="GPT-2 training on V100 with SSD storage and 4 GPUs over PCIe. "
+              "Which stage is the bottleneck?",
     )
-    _fig = apply_plotly_theme(_fig)
+    partB_data_ms = mo.ui.slider(
+        start=1, stop=100, value=50, step=1, label="Data loading (ms)",
+    )
+    partB_pcie_ms = mo.ui.slider(
+        start=0.1, stop=10, value=2, step=0.1, label="PCIe transfer (ms)",
+    )
+    partB_compute_ms = mo.ui.slider(
+        start=5, stop=200, value=30, step=1, label="Forward+Backward (ms)",
+    )
+    partB_sync_ms = mo.ui.slider(
+        start=0, stop=50, value=15, step=1, label="Gradient sync (ms)",
+    )
 
-    # ── Formula display ───────────────────────────────────────────────────────
-    _bpv_opt = 4  # optimizer moments always FP32
-    _opt_label = {
-        "adam":      f"2 × {act1_model_billions.value:.1f}B × 4 B = {_optimizer_gb:.1f} GB",
-        "sgd":       "0 GB (no optimizer state)",
-        "momentum":  f"1 × {act1_model_billions.value:.1f}B × 4 B = {_optimizer_gb:.1f} GB",
-        "adafactor": f"0.5 × {act1_model_billions.value:.1f}B × 4 B = {_optimizer_gb:.1f} GB",
-    }[_opt]
+    # Part C widgets
+    partC_prediction = mo.ui.radio(
+        options={
+            "A) ~38 GB (exactly half)": "38gb",
+            "B) ~45 GB (~1.7x savings)": "45gb",
+            "C) ~55 GB (~1.4x savings)": "55gb",
+            "D) ~70 GB (almost no savings)": "70gb",
+        },
+        label="GPT-2 (1.5B) requires ~77 GB in full FP32 (with activations). "
+              "Mixed precision (FP16 forward + FP32 master + FP32 Adam) requires how much?",
+    )
+    partC_model_c = mo.ui.slider(
+        start=0.1, stop=13, value=1.5, step=0.1, label="Model size (billions)",
+    )
+    partC_precision_c = mo.ui.radio(
+        options={"Full FP32": "fp32", "Mixed BF16+FP32 master": "mixed", "Pure BF16": "bf16"},
+        value="Full FP32", label="Precision mode:", inline=True,
+    )
 
-    _formula_md = f"""
-### Memory Ledger — Physics
+    # Part D widgets
+    partD_prediction = mo.ui.radio(
+        options={
+            "A) ~8x (linear scaling)": "8x",
+            "B) ~6.5x (slight overhead)": "6.5x",
+            "C) ~3.9x (significant overhead)": "3.9x",
+            "D) ~2x (communication dominates)": "2x",
+        },
+        label="Training on 8 GPUs with r=0.15 (gradient sync = 15% of step time). "
+              "What speedup over 1 GPU?",
+    )
+    partD_gpus = mo.ui.slider(
+        start=1, stop=256, value=8, step=1, label="Number of GPUs",
+    )
+    partD_r = mo.ui.slider(
+        start=0.01, stop=0.50, value=0.15, step=0.01, label="Communication fraction (r)",
+    )
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PART A BUILDER: The Memory Budget Shock
+    # ─────────────────────────────────────────────────────────────────────
+
+    def build_part_a():
+        items = []
+
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; Training Engineer, FoundationAI
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We just got an H100 with 80 GB of memory. Our 7B model runs inference
+                perfectly. But the moment we switch to training with Adam, we get OOM --
+                before processing a single batch. The model is only 28 GB in FP32. Where
+                did the other 84 GB come from?&rdquo;
+            </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; Jordan Kim, Training Engineer &middot; FoundationAI
+            </div>
+        </div>
+        """))
+
+        items.append(mo.md("""
+## Training Memory = Weights + Gradients + Optimizer State + Activations
+
+For Adam in FP32, each parameter requires **16 bytes** of static state:
+
+| Component | Size per Parameter | Purpose |
+|-----------|-------------------|---------|
+| Weights | 4 bytes (FP32) | Current parameter values |
+| Gradients | 4 bytes (FP32) | Computed during backward pass |
+| Momentum (m) | 4 bytes (FP32) | First moment estimate |
+| Variance (v) | 4 bytes (FP32) | Second moment estimate |
+| **Total** | **16 bytes** | **Before any activations** |
+
+For a 7B model: 7B * 16 = **112 GB** -- exceeding an H100's 80 GB.
+        """))
+
+        items.append(partA_prediction)
+
+        if partA_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction above to unlock the memory budget calculator."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([partA_model_size, partA_optimizer, partA_precision_a], justify="start"))
+
+        _params_b = partA_model_size.value
+        _opt = partA_optimizer.value
+        _prec = partA_precision_a.value
+        _bpp = OPTIMIZER_BPP[_opt]
+
+        if _prec == "bf16":
+            # BF16 training: weights in BF16, gradients in BF16, but Adam states still FP32
+            _weight_bytes = _params_b * 1e9 * 2  # BF16
+            _grad_bytes = _params_b * 1e9 * 2   # BF16
+            if _opt == "Adam":
+                _opt_bytes = _params_b * 1e9 * 8  # momentum + variance in FP32
+            elif _opt == "SGD+Momentum":
+                _opt_bytes = _params_b * 1e9 * 4
+            else:
+                _opt_bytes = 0
+            _total_bytes = _weight_bytes + _grad_bytes + _opt_bytes
+        else:
+            _total_bytes = _params_b * 1e9 * _bpp
+
+        _total_gb = _total_bytes / (1024**3)
+
+        # Component breakdown
+        if _prec == "fp32":
+            _w_gb = _params_b * 1e9 * 4 / (1024**3)
+            _g_gb = _params_b * 1e9 * 4 / (1024**3)
+            _o_gb = _total_gb - _w_gb - _g_gb
+        else:
+            _w_gb = _weight_bytes / (1024**3)
+            _g_gb = _grad_bytes / (1024**3)
+            _o_gb = _opt_bytes / (1024**3)
+
+        _fig = go.Figure()
+        _components = ["Weights", "Gradients", "Optimizer State"]
+        _vals = [_w_gb, _g_gb, _o_gb]
+        _cols = [COLORS["BlueLine"], COLORS["GreenLine"], COLORS["OrangeLine"]]
+        for _name, _val, _col in zip(_components, _vals, _cols):
+            _fig.add_trace(go.Bar(name=_name, x=["Training Memory"], y=[_val],
+                                  marker_color=_col, opacity=0.88))
+        _fig.add_hline(y=H100_RAM_GB, line_dash="dash", line_color=COLORS["BlueLine"],
+                       annotation_text=f"H100 ({H100_RAM_GB:.0f} GB)")
+        _fig.add_hline(y=A100_RAM_GB, line_dash="dash", line_color=COLORS["OrangeLine"],
+                       annotation_text=f"A100 ({A100_RAM_GB:.0f} GB)")
+        _fig.update_layout(barmode="stack", height=380, yaxis_title="Memory (GB)",
+                           title=f"Training Memory: {_params_b:.1f}B params, {_opt}, {_prec.upper()}",
+                           legend=dict(orientation="h", y=1.12, x=0))
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        _oom_h100 = _total_gb > H100_RAM_GB
+        _color = COLORS["RedLine"] if _oom_h100 else COLORS["GreenLine"]
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {_color}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Total Static Memory</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_color};">{_total_gb:,.1f} GB</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Bytes per Parameter</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_bpp} B</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Optimizer Overhead</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_o_gb:,.1f} GB</div>
+            </div>
+        </div>
+        """))
+
+        if _oom_h100:
+            items.append(mo.callout(mo.md(
+                f"**OOM on H100 -- static state alone exceeds device memory.** "
+                f"Training requires {_total_gb:,.1f} GB for parameter state, but the H100 "
+                f"has only {H100_RAM_GB:.0f} GB. This is before storing a single activation. "
+                f"Model parallelism, ZeRO, or a larger device is required."
+            ), kind="danger"))
+
+        _pred = partA_prediction.value
+        if _pred == "112gb":
+            items.append(mo.callout(mo.md(
+                "**Correct.** 7B * 16 bytes/param = 112 GB. Adam's two additional state "
+                "tensors (momentum and variance) each add 4 bytes/param, tripling the "
+                "memory beyond what naive 'weights + gradients' would suggest."
+            ), kind="success"))
+        elif _pred == "56gb":
+            items.append(mo.callout(mo.md(
+                "**You forgot the optimizer state.** Weights (28 GB) + Gradients (28 GB) = 56 GB. "
+                "But Adam adds momentum (28 GB) + variance (28 GB) = 112 GB total."
+            ), kind="warn"))
+        elif _pred == "28gb":
+            items.append(mo.callout(mo.md(
+                "**That is only the weights.** Training requires gradients (same size) plus "
+                "optimizer state. Adam adds two more buffers: 7B * 16 = 112 GB total."
+            ), kind="warn"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Close -- but Adam has two state tensors, not one.** Both momentum and "
+                "variance require 4 bytes/param each. Total: 7B * 16 = 112 GB."
+            ), kind="warn"))
+
+        items.append(mo.accordion({
+            "MathPeek: Training Memory Budget": mo.md(f"""
+```
+Adam FP32: {_bpp} bytes/param
+  = 4 (weights) + 4 (gradients) + 4 (momentum) + 4 (variance)
+
+For {_params_b:.1f}B parameters:
+  = {_params_b:.1f}B * {_bpp} = {_total_gb:,.1f} GB
+```
+Note: This excludes activations (Lab 05) which add batch*depth*width per layer.
+
+Source: @sec-training-memory-budget
+"""),
+        }))
+
+        return mo.vstack(items)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PART B BUILDER: The Training Pipeline
+    # ─────────────────────────────────────────────────────────────────────
+
+    def build_part_b():
+        items = []
+
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; Training Lead, FoundationAI
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;Our GPU utilization during training is only 40%. We assumed the GPU
+                would be busy 90%+ of the time since training is compute-heavy. Where is the
+                other 60% going?&rdquo;
+            </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; Sarah Zhang, Training Lead &middot; FoundationAI
+            </div>
+        </div>
+        """))
+
+        items.append(mo.md("""
+## Training Is a Four-Stage Pipeline
 
 ```
-Weights        = {act1_model_billions.value:.1f}B params × {_bpv} bytes  = {_weights_gb:.1f} GB
-Gradients      = {act1_model_billions.value:.1f}B params × {_bpv} bytes  = {_grads_gb:.1f} GB
-Optimizer state= {_opt_label}
-Activations    ≈ batch={_batch} × seq={_seq_len} × h={_hidden_dim} × L={_n_layers} × {_bpv}B
-               = {_activations_gb:.1f} GB
-─────────────────────────────────────────────────
-Static floor   = {_static_gb:.1f} GB  (weights + grads + optimizer, before any batch)
-Total          = {_total_gb:.1f} GB
-Device budget  = {_device_ram:.0f} GB  ({_device_name})
+Data Loading -> PCIe Transfer -> Forward+Backward -> Gradient Sync
+    (disk)       (host->GPU)      (GPU compute)     (GPU<->GPU)
 ```
-"""
 
-    # ── Summary metric cards ──────────────────────────────────────────────────
-    _status_color = COLORS["RedLine"] if _oom else COLORS["GreenLine"]
-    _status_label = "OOM" if _oom else "Fits"
+Total throughput is limited by the **slowest stage**. The GPU sits idle
+("accelerator bubble") whenever it waits for data or communication.
+Most training runs are **not** compute-bound.
+        """))
 
-    _cards_html = f"""
-<div style="display: flex; gap: 16px; justify-content: flex-start;
-            flex-wrap: wrap; margin: 16px 0;">
-    <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 10px;
-                min-width: 150px; text-align: center; background: white;">
-        <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600;
-                    text-transform: uppercase; letter-spacing: 0.06em;">Static Floor</div>
-        <div style="font-size: 2rem; font-weight: 800; color: {COLORS['BlueLine']};
-                    font-family: SF Mono, monospace;">
-            {_static_gb:.1f} GB
-        </div>
-        <div style="color: #94a3b8; font-size: 0.78rem;">before activations</div>
-    </div>
-    <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 10px;
-                min-width: 150px; text-align: center; background: white;">
-        <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600;
-                    text-transform: uppercase; letter-spacing: 0.06em;">Total Required</div>
-        <div style="font-size: 2rem; font-weight: 800; color: {COLORS['OrangeLine']};
-                    font-family: SF Mono, monospace;">
-            {_total_gb:.1f} GB
-        </div>
-        <div style="color: #94a3b8; font-size: 0.78rem;">incl. activations</div>
-    </div>
-    <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 10px;
-                min-width: 150px; text-align: center; background: white;">
-        <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600;
-                    text-transform: uppercase; letter-spacing: 0.06em;">Device Budget</div>
-        <div style="font-size: 2rem; font-weight: 800; color: #475569;
-                    font-family: SF Mono, monospace;">
-            {_device_ram:.0f} GB
-        </div>
-        <div style="color: #94a3b8; font-size: 0.78rem;">{_device_name}</div>
-    </div>
-    <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 10px;
-                min-width: 150px; text-align: center; background: white;">
-        <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600;
-                    text-transform: uppercase; letter-spacing: 0.06em;">Status</div>
-        <div style="font-size: 2rem; font-weight: 800; color: {_status_color};
-                    font-family: SF Mono, monospace;">
-            {_status_label}
-        </div>
-        <div style="color: #94a3b8; font-size: 0.78rem;">
-            {"exceeds budget" if _oom else "within budget"}
-        </div>
-    </div>
-</div>
-"""
+        items.append(partB_prediction)
 
-    # ── Assemble ──────────────────────────────────────────────────────────────
-    _items = [
-        mo.md(_formula_md),
-        mo.Html(_cards_html),
-        mo.ui.plotly(_fig),
-    ]
+        if partB_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction to unlock the pipeline simulator."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
 
-    if _oom_static:
-        _items.append(mo.callout(
-            mo.md(
-                f"**OOM — Static memory floor exceeds device budget.** "
-                f"The {_opt.upper()} optimizer requires {_static_gb:.1f} GB for weights, "
-                f"gradients, and optimizer state alone — before a single activation is "
-                f"computed. {_device_name} has {_device_ram:.0f} GB. "
-                f"**No batch size change can fix this.** "
-                f"Try switching to bf16 precision or a smaller optimizer."
-            ),
-            kind="danger",
-        ))
-    elif _oom:
-        _items.append(mo.callout(
-            mo.md(
-                f"**OOM — Activation memory pushes over budget.** "
-                f"Static memory ({_static_gb:.1f} GB) fits, but activations at "
-                f"batch={_batch} add {_activations_gb:.1f} GB, totalling "
-                f"{_total_gb:.1f} GB. {_device_name} has {_device_ram:.0f} GB. "
-                f"**Reduce batch size, enable gradient checkpointing, or switch precision.**"
-            ),
-            kind="danger",
-        ))
-    else:
-        _items.append(mo.callout(
-            mo.md(
-                f"**Configuration fits.** Total {_total_gb:.1f} GB within "
-                f"{_device_ram:.0f} GB budget — {_device_ram - _total_gb:.1f} GB headroom."
-            ),
-            kind="success",
-        ))
+        items.append(mo.hstack([partB_data_ms, partB_pcie_ms, partB_compute_ms, partB_sync_ms], justify="start"))
 
-    mo.vstack(_items)
-    return (
-        _weights_gb, _grads_gb, _optimizer_gb, _activations_gb,
-        _static_gb, _total_gb,
-    )
+        _data = partB_data_ms.value
+        _pcie = partB_pcie_ms.value
+        _compute = partB_compute_ms.value
+        _sync = partB_sync_ms.value
+        _stages = {"Data Loading": _data, "PCIe Transfer": _pcie,
+                   "Forward+Backward": _compute, "Gradient Sync": _sync}
+        _total_sequential = sum(_stages.values())
+        _bottleneck_stage = max(_stages, key=_stages.get)
+        _bottleneck_time = _stages[_bottleneck_stage]
 
+        # With prefetching, total = max(stages) + small overlap overhead
+        _total_overlapped = max(_stages.values()) * 1.1  # 10% overlap overhead
+        _gpu_util = (_compute / _total_sequential) * 100
+        _bubble_pct = 100 - _gpu_util
 
-# ── CELL 9: ACT I PREDICTION REVEAL ──────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_prediction):
-    # Source: training.qmd §Training Systems Fundamentals callout-definition:
-    #   "a 7B-parameter model requires 14 GB (FP16 weights) + 14 GB (gradients)
-    #    + 28 GB (Adam first and second moments in FP32) = 56 GB minimum"
-    # For FP32 training: 28 GB weights + 28 GB grads + 56 GB Adam state = 112 GB.
+        _stage_colors = {
+            "Data Loading": COLORS["OrangeLine"],
+            "PCIe Transfer": COLORS["BlueLine"],
+            "Forward+Backward": COLORS["GreenLine"],
+            "Gradient Sync": COLORS["RedLine"],
+        }
 
-    _actual_gb = 112  # 7B × 4B × 4 components (weights, grads, m_t, v_t)
+        # Gantt-style waterfall
+        _fig = go.Figure()
+        _x_pos = 0
+        for _stage, _time in _stages.items():
+            _is_bottleneck = _stage == _bottleneck_stage
+            _fig.add_trace(go.Bar(
+                name=_stage, x=[_time], y=["Sequential"],
+                orientation="h", marker_color=_stage_colors[_stage],
+                opacity=1.0 if _is_bottleneck else 0.6,
+                base=_x_pos,
+            ))
+            _x_pos += _time
 
-    _predicted_label = {
-        "7gb":   "A) 7 GB",
-        "28gb":  "B) 28 GB",
-        "56gb":  "C) 56 GB",
-        "112gb": "D) 112 GB",
-    }.get(act1_prediction.value, "—")
+        _fig.update_layout(
+            barmode="stack", height=200,
+            xaxis_title="Time (ms)", showlegend=True,
+            title=f"Training Step Pipeline (bottleneck: {_bottleneck_stage})",
+            legend=dict(orientation="h", y=1.2, x=0),
+        )
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
 
-    _predicted_val = {
-        "7gb":   7,
-        "28gb":  28,
-        "56gb":  56,
-        "112gb": 112,
-    }.get(act1_prediction.value, 0)
-
-    _ratio = _actual_gb / _predicted_val if _predicted_val > 0 else float("inf")
-    _correct = act1_prediction.value == "112gb"
-
-    if _correct:
-        mo.callout(mo.md(
-            f"**Correct.** You predicted {_predicted_label} = {_predicted_val} GB. "
-            f"The actual minimum is **{_actual_gb} GB** — exactly matching your prediction. "
-            f"The breakdown: 7B × 4 bytes = 28 GB weights + 28 GB gradients "
-            f"+ 28 GB Adam m_t (FP32) + 28 GB Adam v_t (FP32) = 112 GB. "
-            f"This exceeds the H100's 80 GB capacity before a single activation is stored. "
-            f"The junior engineer's 7B model requires 112 GB, not 7 GB — a 16× underestimate."
-        ), kind="success")
-    else:
-        mo.callout(mo.md(
-            f"**You predicted {_predicted_label} = {_predicted_val} GB. "
-            f"The actual minimum is {_actual_gb} GB — you were off by {_ratio:.1f}×.** "
-            f"The 7B model in FP32 with Adam needs: "
-            f"28 GB (weights) + 28 GB (gradients) + 28 GB (Adam m_t) + 28 GB (Adam v_t) = **112 GB**. "
-            f"This is the 4× training multiplier: each of the four components is exactly "
-            f"one copy of the model. The H100's 80 GB is not enough — training OOM'd "
-            f"because the static memory floor alone exceeds the device budget."
-        ), kind="warn")
-    return
-
-
-# ── CELL 10: ACT I REFLECTION ────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    act1_reflection = mo.ui.radio(
-        options={
-            "A) bf16 is less accurate so it stores less data per value": "wrong_accuracy",
-            "B) bf16 uses 2 bytes per value instead of 4 bytes, halving every buffer": "correct",
-            "C) bf16 disables gradient computation entirely": "wrong_no_grad",
-            "D) bf16 fuses optimizer kernels, reducing memory overhead": "wrong_fusion",
-        },
-        label=(
-            "Switching from fp32 to bf16 training precision cuts the memory for "
-            "weights and gradients by 2×. Why?"
-        ),
-    )
-    mo.vstack([
-        mo.md("### Reflection — Act I"),
-        act1_reflection,
-    ])
-    return (act1_reflection,)
-
-
-# ── CELL 11: ACT I REFLECTION FEEDBACK ───────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_reflection):
-    mo.stop(
-        act1_reflection.value is None,
-        mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"),
-    )
-
-    _feedback = {
-        "correct": (
-            "**Correct.** bf16 is a 16-bit floating-point format: 1 sign bit, "
-            "8 exponent bits (same as fp32), 7 mantissa bits (vs 23 in fp32). "
-            "Fewer bits per value = fewer bytes: 2 bytes instead of 4. "
-            "Every weight and gradient buffer halves. The accuracy difference is small "
-            "because bf16 preserves fp32's exponent range — making it suitable for "
-            "training without the overflow problems of fp16. "
-            "**However,** Adam's m_t and v_t moment vectors are still stored in fp32 "
-            "for numerical stability, so the full optimizer-state savings are 1.5× "
-            "rather than 2× on total memory."
-        ),
-        "wrong_accuracy": (
-            "**Not quite.** The bit-width change is not about accuracy tolerance — "
-            "it is about the physical representation size. bf16 uses 16 bits (2 bytes) "
-            "vs fp32's 32 bits (4 bytes). The precision difference (7 vs 23 mantissa bits) "
-            "is a consequence of the smaller size, not its cause."
-        ),
-        "wrong_no_grad": (
-            "**Not quite.** bf16 does not disable gradients. The backward pass "
-            "runs in bf16 just as the forward pass does. What changes is the number "
-            "of bytes per gradient value: 2 bytes in bf16 vs 4 in fp32."
-        ),
-        "wrong_fusion": (
-            "**Not quite.** Kernel fusion (covered in Lab 07) reduces kernel launch "
-            "overhead and improves compute efficiency, but it does not change the "
-            "number of bytes stored for weights or gradients. The memory savings "
-            "from bf16 come from the reduced bit-width of the format itself."
-        ),
-    }[act1_reflection.value]
-
-    _kind = "success" if act1_reflection.value == "correct" else "warn"
-    mo.callout(mo.md(_feedback), kind=_kind)
-    return
-
-
-# ── CELL 12: ACT I MATHPEEK ──────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.accordion({
-        "The governing equation — Training Memory": mo.md(r"""
-**Memory Budget Formula** (from @sec-model-training-training-systems-fundamentals-05d2):
-
-$$M_{train} = \underbrace{P \cdot b_w}_{\text{weights}} + \underbrace{P \cdot b_w}_{\text{gradients}} + \underbrace{2 \cdot P \cdot b_{opt}}_{\text{Adam } m_t, v_t} + \underbrace{B \cdot L \cdot s \cdot h \cdot b_w}_{\text{activations}}$$
-
-Where:
-- $P$ = number of parameters (e.g., $7 \times 10^9$)
-- $b_w$ = bytes per value for weights/gradients: 4 (FP32), 2 (BF16/FP16), 1 (INT8)
-- $b_{opt}$ = bytes per optimizer moment value: **always 4 (FP32)** for numerical stability
-- $B$ = batch size, $L$ = number of layers, $s$ = sequence length, $h$ = hidden dimension
-
-**For Adam in FP32** ($b_w = b_{opt} = 4$):
-
-$$M_{static} = P \cdot 4 + P \cdot 4 + 2 \cdot P \cdot 4 = 16 \cdot P \text{ bytes}$$
-
-At 7B parameters: $16 \times 7 \times 10^9 = 112 \text{ GB}$
-
-**For Adam in BF16** (weights/grads in BF16, moments still FP32):
-
-$$M_{static} = P \cdot 2 + P \cdot 2 + 2 \cdot P \cdot 4 = 12 \cdot P \text{ bytes}$$
-
-At 7B parameters: $12 \times 7 \times 10^9 = 84 \text{ GB}$ — still exceeds H100's 80 GB for bare static state.
-
-**The 4× training multiplier** cited in the chapter refers to Adam in FP32: training needs 4× the inference memory per parameter (weights only).
-        """),
-    })
-    return
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: ACT II — DESIGN CHALLENGE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _act_num = "II"
-    _act_color = COLORS["OrangeLine"]
-    _act_title = "Gradient Accumulation vs Batch Size"
-    _act_duration = "25 min"
-    _act_why = (
-        "Act I established that the static memory floor is fixed at 112 GB before activations. "
-        "Now discover the one technique that lets you achieve effective batch-256 training "
-        "on a device that can only fit batch-8 \u2014 and measure exactly what that "
-        "flexibility costs in throughput."
-    )
-    mo.vstack([
-        mo.md("---"),
-        mo.Html(f"""
-        <div style="margin: 32px 0 12px 0;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <div style="background: {_act_color}; color: white; border-radius: 50%;
-                            width: 32px; height: 32px; display: inline-flex; align-items: center;
-                            justify-content: center; font-size: 0.9rem; font-weight: 800;
-                            flex-shrink: 0;">{_act_num}</div>
-                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em;">
-                    Act {_act_num} &middot; {_act_duration}</div>
+        _util_color = COLORS["GreenLine"] if _gpu_util > 70 else COLORS["OrangeLine"] if _gpu_util > 40 else COLORS["RedLine"]
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white;
+                        border-top:3px solid {COLORS['RedLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Bottleneck</div>
+                <div style="font-size:1.2rem; font-weight:800; color:{COLORS['RedLine']};">{_bottleneck_stage}</div>
             </div>
-            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                        margin-top: 8px; line-height: 1.2;">
-                {_act_title}
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white;
+                        border-top:3px solid {_util_color}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">GPU Utilization</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_util_color};">{_gpu_util:.0f}%</div>
             </div>
-            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                        line-height: 1.55; max-width: 700px;">
-                {_act_why}
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white;
+                        border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Bubble (idle)</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_bubble_pct:.0f}%</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white;
+                        border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Step Time</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_total_sequential:.0f} ms</div>
             </div>
         </div>
-        """),
-    ])
-    return
+        """))
 
+        _pred = partB_prediction.value
+        if _pred == "data" and _bottleneck_stage == "Data Loading":
+            items.append(mo.callout(mo.md(
+                f"**Correct for these settings.** Data loading ({_data} ms) dominates the "
+                f"pipeline. The GPU is idle {_bubble_pct:.0f}% of the time waiting for data. "
+                f"Faster storage or more DataLoader workers would help; more GPUs would not."
+            ), kind="success"))
+        elif _pred == "compute" and _bottleneck_stage == "Forward+Backward":
+            items.append(mo.callout(mo.md(
+                f"**Correct for these settings.** Compute ({_compute} ms) is the bottleneck. "
+                f"This is the rare case where a GPU upgrade would actually help."
+            ), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**At current settings, the bottleneck is {_bottleneck_stage} ({_bottleneck_time} ms).** "
+                f"Try the preset configurations: with SSD and 1 GPU, data loading often dominates. "
+                f"With 4+ GPUs on PCIe, gradient sync can dominate. The compute stage is "
+                f"rarely the actual bottleneck."
+            ), kind="warn"))
 
-# ── CELL 13: ACT2_STAKEHOLDER ────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _color = COLORS["OrangeLine"]
-    mo.vstack([
-        mo.Html(f"""
-        <div style="border-left: 4px solid {_color}; background: #fff7ed;
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {_color};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message &middot; ML Engineer
+        # Presets
+        items.append(mo.callout(mo.md(
+            "**Try these presets** (adjust sliders manually):\n"
+            "- **V100 + SSD + 1 GPU**: Data=50ms, PCIe=2ms, Compute=30ms, Sync=0ms (data-bound)\n"
+            "- **V100 + NVMe + 4 GPU PCIe**: Data=10ms, PCIe=2ms, Compute=30ms, Sync=25ms (sync-bound)\n"
+            "- **H100 + NVMe + 1 GPU**: Data=5ms, PCIe=1ms, Compute=50ms, Sync=0ms (compute-bound)"
+        ), kind="info"))
+
+        items.append(mo.accordion({
+            "MathPeek: Pipeline Bottleneck": mo.md(f"""
+```
+Sequential: T_total = T_data + T_pcie + T_compute + T_sync
+          = {_data} + {_pcie} + {_compute} + {_sync} = {_total_sequential:.0f} ms
+
+GPU utilization = T_compute / T_total = {_compute}/{_total_sequential:.0f} = {_gpu_util:.0f}%
+
+Bottleneck: {_bottleneck_stage} ({_bottleneck_time} ms)
+```
+Source: @sec-training-pipeline
+"""),
+        }))
+
+        return mo.vstack(items)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PART C BUILDER: Mixed Precision Trap
+    # ─────────────────────────────────────────────────────────────────────
+
+    def build_part_c():
+        items = []
+
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; ML Researcher, FoundationAI
             </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "We need an effective batch size of 256 for stable training, but the
-                device only fits batch=8 in activation memory. Someone suggested
-                gradient accumulation — apparently it gives us the same effective batch
-                without the memory. Is that true? What's the throughput cost?"
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We switched to mixed precision to halve our memory usage. But nvidia-smi
+                shows only a 35% reduction. Is the driver reporting wrong? Half precision
+                should mean half memory, right?&rdquo;
+            </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; Dr. Elena Volkov, ML Researcher &middot; FoundationAI
             </div>
         </div>
-        """),
-        mo.md("""
-        Gradient accumulation runs multiple forward-backward passes with a small
-        micro-batch before performing a single optimizer step. The gradients from each
-        micro-batch are summed (accumulated). After all accumulation steps complete,
-        the optimizer updates the weights exactly once — as if it had seen the full
-        effective batch all at once.
+        """))
 
-        Before we measure the throughput cost, predict what happens.
-        """),
-    ])
-    return
+        items.append(mo.md("""
+## The FP32 Master Copy Trap
 
+Mixed precision uses FP16/BF16 for forward and backward passes but **retains
+FP32 master copies** of weights and Adam state for numerical stability.
 
-# ── CELL 14: ACT II PREDICTION LOCK ──────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    act2_prediction = mo.ui.radio(
-        options={
-            "A) Same throughput — accumulation is mathematically equivalent": "same",
-            "B) 32× slower — each accumulation step serializes the compute": "32x_slower",
-            "C) Slightly slower — small overhead per step from extra gradient bookkeeping": "slightly_slower",
-            "D) Faster — smaller per-step working set fits better in cache": "faster",
-        },
-        label=(
-            "Effective batch size = 256, micro-batch = 8, gradient accumulation steps = 32. "
-            "Compared to training with a native batch of 256 directly, throughput using "
-            "gradient accumulation is:"
-        ),
-    )
-    mo.vstack([
-        mo.Html("""
-        <div style="background: #1e293b; border-radius: 12px; padding: 20px;
-                    border-left: 4px solid #f97316; margin: 8px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: #fdba74;
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px;">
-                Prediction Lock — Act II
+| Component | Full FP32 | Mixed (BF16 + FP32 master) |
+|-----------|-----------|---------------------------|
+| Weights | 4B (FP32) | 2B (BF16) + 4B (FP32 master) = 6B |
+| Gradients | 4B | 2B (BF16) |
+| Adam momentum | 4B | 4B (FP32) |
+| Adam variance | 4B | 4B (FP32) |
+| **Total** | **16B** | **16B** (no saving on state!) |
+
+Savings come only from **activations** being stored in BF16 (half size).
+The FP32 "tail" is identical in both modes.
+        """))
+
+        items.append(partC_prediction)
+
+        if partC_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction to unlock the precision comparison."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([partC_model_c, partC_precision_c], justify="start"))
+
+        _params_b = partC_model_c.value
+        _prec = partC_precision_c.value
+
+        # Memory model with activations (estimated as fraction of base)
+        # Simplified: activation memory ~ 2x weight memory for typical batch
+        _act_multiplier = 2.0
+
+        if _prec == "fp32":
+            _w_gb = _params_b * 4 / 1.074  # GB
+            _g_gb = _params_b * 4 / 1.074
+            _m_gb = _params_b * 4 / 1.074
+            _v_gb = _params_b * 4 / 1.074
+            _act_gb = _w_gb * _act_multiplier
+        elif _prec == "mixed":
+            _w_gb = _params_b * 6 / 1.074  # BF16 (2B) + FP32 master (4B)
+            _g_gb = _params_b * 2 / 1.074  # BF16
+            _m_gb = _params_b * 4 / 1.074  # FP32
+            _v_gb = _params_b * 4 / 1.074  # FP32
+            _act_gb = (_params_b * 4 / 1.074) * _act_multiplier * 0.5  # BF16 activations
+        else:  # pure bf16
+            _w_gb = _params_b * 2 / 1.074
+            _g_gb = _params_b * 2 / 1.074
+            _m_gb = _params_b * 2 / 1.074
+            _v_gb = _params_b * 2 / 1.074
+            _act_gb = _w_gb * _act_multiplier
+
+        _total_gb = _w_gb + _g_gb + _m_gb + _v_gb + _act_gb
+        _fp32_total = _params_b * 16 / 1.074 + (_params_b * 4 / 1.074) * _act_multiplier
+        _savings = _fp32_total / _total_gb if _total_gb > 0 else 1
+
+        _fig = go.Figure()
+        _components = ["Weights", "Gradients", "Momentum", "Variance", "Activations"]
+        _vals = [_w_gb, _g_gb, _m_gb, _v_gb, _act_gb]
+        _cols = [COLORS["BlueLine"], COLORS["GreenLine"], COLORS["OrangeLine"],
+                 "#CC5500", COLORS["RedLine"]]
+
+        # Show FP32 baseline for comparison
+        _fp32_vals = [_params_b * 4 / 1.074] * 4 + [(_params_b * 4 / 1.074) * _act_multiplier]
+
+        for i, (_name, _val, _col) in enumerate(zip(_components, _vals, _cols)):
+            _fig.add_trace(go.Bar(name=_name, x=[_prec.upper()], y=[_val],
+                                  marker_color=_col, opacity=0.88))
+
+        _fig.add_hline(y=H100_RAM_GB, line_dash="dash", line_color=COLORS["BlueLine"],
+                       annotation_text=f"H100 ({H100_RAM_GB:.0f} GB)")
+        _fig.update_layout(barmode="stack", height=380, yaxis_title="Memory (GB)",
+                           title=f"Training Memory: {_params_b:.1f}B params, {_prec.upper()}",
+                           legend=dict(orientation="h", y=1.15, x=0))
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Total Memory</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_total_gb:,.1f} GB</div>
             </div>
-            <div style="color: #e2e8f0; font-size: 0.88rem;">
-                Commit before adjusting the sliders below.
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">vs FP32 Baseline</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_savings:.2f}x savings</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">FP32 State Persists</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_m_gb + _v_gb:,.1f} GB</div>
             </div>
         </div>
-        """),
-        act2_prediction,
-    ])
-    return (act2_prediction,)
+        """))
 
+        _pred = partC_prediction.value
+        if _pred == "45gb":
+            items.append(mo.callout(mo.md(
+                "**Correct.** Mixed precision yields ~1.5-1.7x savings, not 2x. "
+                "The FP32 master weights and Adam state persist unchanged. "
+                "Only activations and gradient buffers shrink to BF16."
+            ), kind="success"))
+        elif _pred == "38gb":
+            items.append(mo.callout(mo.md(
+                "**Half precision does not mean half memory.** The FP32 master weights "
+                "and Adam momentum/variance persist at full precision in mixed mode. "
+                "Actual savings are ~1.5-1.7x, not 2x."
+            ), kind="warn"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**The actual savings are ~{_savings:.1f}x.** FP32 master weights and "
+                f"Adam state ({_m_gb + _v_gb:,.1f} GB) persist unchanged. Only activations "
+                f"and gradient accumulation buffers benefit from BF16."
+            ), kind="warn"))
 
-# ── CELL 15: ACT II GATE ─────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act2_prediction):
-    mo.stop(
-        act2_prediction.value is None,
-        mo.callout(
-            mo.md("Select your prediction above to unlock the Act II instruments."),
-            kind="warn",
-        ),
-    )
-    return
+        items.append(mo.accordion({
+            "MathPeek: Mixed Precision Memory": mo.md(f"""
+```
+FP32 total:  {_fp32_total:,.1f} GB (W=4B + G=4B + m=4B + v=4B + Act)
+Mixed total: {_total_gb:,.1f} GB  (W=2B+4B_master + G=2B + m=4B + v=4B + Act_BF16)
+Savings:     {_savings:.2f}x  (not 2x!)
+```
+What shrank: activations (BF16) and gradient buffers (BF16).
+What did NOT shrink: FP32 master weights, Adam momentum, Adam variance.
 
+Source: @sec-training-mixed-precision
+"""),
+        }))
 
-# ── CELL 16: ACT II CONTROLS ──────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    # Model size for act II (independent slider for act II exploration)
-    act2_model_billions = mo.ui.slider(
-        start=0.1, stop=70, value=7, step=0.1,
-        label="Model size (billions of parameters)",
-    )
-    # Batch size (micro-batch): what actually loads into GPU memory
-    act2_batch_size = mo.ui.slider(
-        start=1, stop=512, value=8, step=1,
-        label="Micro-batch size (per accumulation step)",
-    )
-    # Gradient accumulation steps
-    act2_accum_steps = mo.ui.slider(
-        start=1, stop=64, value=32, step=1,
-        label="Gradient accumulation steps",
-    )
-    # Precision
-    act2_precision = mo.ui.dropdown(
-        options={
-            "FP32 (4 bytes/value)": "fp32",
-            "BF16 (2 bytes/value)": "bf16",
-            "FP16 (2 bytes/value)": "fp16",
-        },
-        value="BF16 (2 bytes/value)",
-        label="Training precision",
-    )
-    # Gradient checkpointing toggle
-    act2_checkpointing = mo.ui.checkbox(
-        value=False,
-        label="Enable gradient checkpointing (recompute activations during backward pass)",
-    )
+        return mo.vstack(items)
 
-    mo.vstack([
-        mo.md("### Act II Simulator Controls"),
-        mo.hstack([act2_model_billions, act2_precision], justify="start", gap="2rem"),
-        mo.hstack([act2_batch_size, act2_accum_steps], justify="start", gap="2rem"),
-        act2_checkpointing,
-    ])
-    return (
-        act2_model_billions, act2_batch_size, act2_accum_steps,
-        act2_precision, act2_checkpointing,
-    )
+    # ─────────────────────────────────────────────────────────────────────
+    # PART D BUILDER: The Communication Tax
+    # ─────────────────────────────────────────────────────────────────────
 
+    def build_part_d():
+        items = []
 
-# ── CELL 17: ACT II PHYSICS ENGINE ────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(
-    mo, go,
-    act2_model_billions, act2_batch_size, act2_accum_steps,
-    act2_precision, act2_checkpointing,
-    context_toggle, COLORS, apply_plotly_theme,
-    H100_RAM_GB, MOBILE_RAM_GB, DTYPE_BYTES, OPTIMIZER_EXTRA_MULTIPLIER,
-):
-    # ── Memory physics ────────────────────────────────────────────────────────
-    _params_b = act2_model_billions.value * 1e9
-    _dtype    = act2_precision.value
-    _bpv      = DTYPE_BYTES[_dtype]
-    _micro    = act2_batch_size.value
-    _accum    = act2_accum_steps.value
-    _ctx      = context_toggle.value
-    _ckpt     = act2_checkpointing.value
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; Infrastructure Director, FoundationAI
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We went from 4 GPUs to 8 GPUs expecting 2x speedup. We got 1.5x.
+                We went to 16 GPUs expecting another 2x. We got 1.3x. Management is asking
+                why we are buying GPUs that do not deliver proportional speedup.&rdquo;
+            </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; David Kim, Infrastructure Director &middot; FoundationAI
+            </div>
+        </div>
+        """))
 
-    _effective_batch = _micro * _accum
+        items.append(mo.md("""
+## The Communication Tax: Diminishing Returns from Multi-GPU
 
-    # Static memory (always Adam for this act, bf16 weights + fp32 moments)
-    _weights_gb   = (_params_b * _bpv) / 1e9
-    _grads_gb     = _weights_gb  # same dtype
-    _optimizer_gb = (_params_b * 4 * 2) / 1e9  # Adam: 2 FP32 vectors
-
-    # Activation memory with optional gradient checkpointing
-    # Source: training.qmd footnote [fn-checkpointing-training]:
-    #   "saving activations at only sqrt(L) strategic layers and recomputing the rest"
-    #   "reducing activations by 4×" (line 4604 of plan's traceability table)
-    _hidden_dim = max(512, int(act2_model_billions.value ** 0.5 * 1024))
-    _n_layers   = max(12, int(act2_model_billions.value ** 0.33 * 12))
-    _seq_len    = 1024
-
-    if _ckpt:
-        # Gradient checkpointing: O(sqrt(L)) layers stored instead of O(L)
-        # This reduces activation memory by ~4× in practice (plan line 4604)
-        _ckpt_layers = max(1, int(_n_layers ** 0.5))
-        _act_bytes   = _micro * _seq_len * _hidden_dim * _ckpt_layers * _bpv
-        _act_factor  = _ckpt_layers / _n_layers  # fraction of layers stored
-    else:
-        _act_bytes   = _micro * _seq_len * _hidden_dim * _n_layers * _bpv
-        _act_factor  = 1.0
-
-    _activations_gb = _act_bytes / 1e9
-    _total_gb       = _weights_gb + _grads_gb + _optimizer_gb + _activations_gb
-    _static_gb      = _weights_gb + _grads_gb + _optimizer_gb
-
-    # Device budget
-    _device_ram  = H100_RAM_GB if _ctx == "cloud" else MOBILE_RAM_GB
-    _device_name = "H100 (80 GB)" if _ctx == "cloud" else "Mobile / Fine-tuning (8 GB)"
-    _oom         = _total_gb > _device_ram
-
-    # ── Throughput model ──────────────────────────────────────────────────────
-    # Source: training.qmd §Iron Law of Training Performance
-    #   Gradient accumulation overhead: the extra cost is a fixed per-optimizer-step
-    #   overhead (~3-5%) from gradient summation bookkeeping, NOT proportional to K.
-    #   Each micro-batch forward-backward is the same compute as the native case;
-    #   the only extras are K-1 gradient += ops (cheap) and optimizer step overhead.
-    #   Source: training.qmd §Iron Law of Training Performance
-    _accum_overhead_fixed = 0.04  # ~4% fixed overhead per optimizer step
-    _total_overhead       = 1.0 + _accum_overhead_fixed
-
-    # Throughput: samples per second (normalized to native batch = 1.0)
-    # Native large batch baseline: 1 optimizer step per _effective_batch samples
-    # Gradient accumulation: same samples processed, but _total_overhead multiplier
-    _throughput_native_norm = 1.0   # baseline = native batch size
-    _throughput_accum_norm  = 1.0 / _total_overhead  # slightly lower
-
-    # Gradient checkpointing compute overhead: +33% of compute
-    # Source: training.qmd footnote [fn-checkpointing-training]:
-    #   "trading roughly 33% additional compute"
-    if _ckpt:
-        _ckpt_compute_overhead = 1.33
-    else:
-        _ckpt_compute_overhead = 1.0
-
-    _effective_throughput = _throughput_accum_norm / _ckpt_compute_overhead
-
-    # ── Stacked memory bar chart ──────────────────────────────────────────────
-    _bar_color = COLORS["RedLine"] if _oom else COLORS["BlueLine"]
-    _bar_colors_act2 = [
-        _bar_color,           # weights
-        COLORS["GreenLine"],  # gradients
-        COLORS["OrangeLine"], # optimizer
-        "#6366f1",            # activations
-    ]
-    if _oom:
-        _bar_colors_act2 = [COLORS["RedLine"]] * 4
-
-    _fig2 = go.Figure()
-    _comp_names = ["Weights", "Gradients", "Optimizer State", "Activations"]
-    _comp_vals  = [_weights_gb, _grads_gb, _optimizer_gb, _activations_gb]
-
-    for _name, _val, _col in zip(_comp_names, _comp_vals, _bar_colors_act2):
-        _fig2.add_trace(go.Bar(
-            name=_name,
-            x=["Memory Breakdown"],
-            y=[_val],
-            marker_color=_col,
-            text=f"{_val:.1f} GB",
-            textposition="inside",
-            textfont=dict(color="white", size=11, family="SF Mono, monospace"),
-        ))
-
-    _fig2.add_hline(
-        y=_device_ram,
-        line_color=COLORS["RedLine"],
-        line_width=2.5,
-        line_dash="dash",
-        annotation_text=f"{_device_name} RAM",
-        annotation_position="right",
-        annotation_font_color=COLORS["RedLine"],
-    )
-
-    _fig2.update_layout(
-        barmode="stack",
-        height=360,
-        yaxis_title="Memory (GB)",
-        yaxis=dict(range=[0, max(_total_gb * 1.2, _device_ram * 1.15)]),
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        margin=dict(l=40, r=160, t=50, b=40),
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        font=dict(family="Inter, sans-serif"),
-    )
-    _fig2 = apply_plotly_theme(_fig2)
-
-    # ── Metric cards ─────────────────────────────────────────────────────────
-    _status_color = COLORS["RedLine"] if _oom else COLORS["GreenLine"]
-    _ckpt_label   = f"ON ({int((1 - _act_factor) * 100):.0f}% activations freed)" if _ckpt else "OFF"
-
-    _cards2 = f"""
-<div style="display: flex; gap: 14px; flex-wrap: wrap; margin: 16px 0;">
-    <div style="padding: 16px 20px; border: 1px solid #e2e8f0; border-radius: 10px;
-                min-width: 155px; text-align: center; background: white;">
-        <div style="color: #94a3b8; font-size: 0.78rem; font-weight: 600;
-                    text-transform: uppercase;">Effective Batch</div>
-        <div style="font-size: 1.9rem; font-weight: 800; color: {COLORS['BlueLine']};
-                    font-family: SF Mono, monospace;">{_effective_batch}</div>
-        <div style="color: #94a3b8; font-size: 0.75rem;">micro={_micro} × steps={_accum}</div>
-    </div>
-    <div style="padding: 16px 20px; border: 1px solid #e2e8f0; border-radius: 10px;
-                min-width: 155px; text-align: center; background: white;">
-        <div style="color: #94a3b8; font-size: 0.78rem; font-weight: 600;
-                    text-transform: uppercase;">Activation Memory</div>
-        <div style="font-size: 1.9rem; font-weight: 800; color: {COLORS['OrangeLine']};
-                    font-family: SF Mono, monospace;">{_activations_gb:.1f} GB</div>
-        <div style="color: #94a3b8; font-size: 0.75rem;">checkpointing: {_ckpt_label}</div>
-    </div>
-    <div style="padding: 16px 20px; border: 1px solid #e2e8f0; border-radius: 10px;
-                min-width: 155px; text-align: center; background: white;">
-        <div style="color: #94a3b8; font-size: 0.78rem; font-weight: 600;
-                    text-transform: uppercase;">Relative Throughput</div>
-        <div style="font-size: 1.9rem; font-weight: 800;
-                    color: {"#CC5500" if _effective_throughput < 0.9 else COLORS['GreenLine']};
-                    font-family: SF Mono, monospace;">{_effective_throughput:.2f}×</div>
-        <div style="color: #94a3b8; font-size: 0.75rem;">vs native large batch</div>
-    </div>
-    <div style="padding: 16px 20px; border: 1px solid #e2e8f0; border-radius: 10px;
-                min-width: 155px; text-align: center; background: white;">
-        <div style="color: #94a3b8; font-size: 0.78rem; font-weight: 600;
-                    text-transform: uppercase;">Status</div>
-        <div style="font-size: 1.9rem; font-weight: 800; color: {_status_color};
-                    font-family: SF Mono, monospace;">{"OOM" if _oom else "OK"}</div>
-        <div style="color: #94a3b8; font-size: 0.75rem;">{_total_gb:.1f} / {_device_ram:.0f} GB</div>
-    </div>
-</div>
-"""
-
-    # ── Physics formula ───────────────────────────────────────────────────────
-    _ckpt_note = (
-        f"Gradient checkpointing: stores {_ckpt_layers} of {_n_layers} layers "
-        f"({100 * _ckpt_layers // _n_layers}% of activation memory), "
-        f"+33% compute overhead."
-        if _ckpt else
-        "Gradient checkpointing: OFF (all layer activations stored)."
-    )
-
-    _formula2_md = f"""
-### Act II Physics
+Multi-GPU data-parallel training follows:
 
 ```
-Effective batch size  = micro-batch ({_micro}) × accum steps ({_accum}) = {_effective_batch}
-Activation memory     = {_micro} × {_seq_len} × {_hidden_dim} × {_n_layers if not _ckpt else _ckpt_layers} layers × {_bpv}B
-                      = {_activations_gb:.2f} GB
-{_ckpt_note}
-Static memory floor   = {_static_gb:.1f} GB  (weights + grads + Adam)
-Total required        = {_total_gb:.1f} GB
-Accumulation overhead = {(_total_overhead - 1) * 100:.0f}%  (fixed bookkeeping cost per optimizer step)
-Relative throughput   = 1 / ({_total_overhead:.2f} overhead × {_ckpt_compute_overhead:.2f} ckpt) = {_effective_throughput:.3f}×
+Speedup(N, r) = N / (1 + (N-1) * r)
 ```
-"""
 
-    # ── Failure state ─────────────────────────────────────────────────────────
-    _items2 = [
-        mo.md(_formula2_md),
-        mo.Html(_cards2),
-        mo.ui.plotly(_fig2),
-    ]
+Where r = fraction of step time spent on gradient synchronization (AllReduce).
 
-    if _oom:
-        _items2.append(mo.callout(
-            mo.md(
-                f"**OOM — Training requires {_total_gb:.1f} GB. "
-                f"{_device_name} has {_device_ram:.0f} GB.** "
-                f"Try: reduce micro-batch size, enable gradient checkpointing, "
-                f"or switch to bf16 precision."
-            ),
-            kind="danger",
+| Scenario | r | 8-GPU Speedup |
+|----------|---|---------------|
+| ResNet + NVLink | 0.05 | 5.7x |
+| LLM + NVLink | 0.10 | 4.7x |
+| LLM + PCIe | 0.25 | 2.9x |
+| Slow network | 0.40 | 2.1x |
+
+The "communication tax" is the gap between ideal linear scaling and actual throughput.
+        """))
+
+        items.append(partD_prediction)
+
+        if partD_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction to unlock the scaling simulator."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([partD_gpus, partD_r], justify="start"))
+
+        _n = partD_gpus.value
+        _r = partD_r.value
+
+        def _scaling(n, r):
+            return n / (1 + (n - 1) * r) if n > 0 else 0
+
+        _speedup = _scaling(_n, _r)
+        _ideal = float(_n)
+        _efficiency = _speedup / _ideal * 100 if _ideal > 0 else 0
+        _wasted_gpus = _ideal - _speedup
+
+        # Scaling curve
+        _gpu_range = np.arange(1, 257)
+        _actual_curve = np.array([_scaling(n, _r) for n in _gpu_range])
+        _ideal_curve = _gpu_range.astype(float)
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(
+            x=_gpu_range.tolist(), y=_ideal_curve.tolist(),
+            mode="lines", name="Ideal (linear)",
+            line=dict(color=COLORS["Grey"], width=2, dash="dash"),
         ))
-    else:
-        _headroom = _device_ram - _total_gb
-        _items2.append(mo.callout(
-            mo.md(
-                f"**Configuration fits.** {_total_gb:.1f} GB required, "
-                f"{_device_ram:.0f} GB available — {_headroom:.1f} GB headroom. "
-                f"Relative throughput: {_effective_throughput:.2f}× vs native large batch."
-            ),
-            kind="success",
+        _fig.add_trace(go.Scatter(
+            x=_gpu_range.tolist(), y=_actual_curve.tolist(),
+            mode="lines", name=f"Actual (r={_r:.2f})",
+            line=dict(color=COLORS["BlueLine"], width=2.5),
+            fill="tonexty", fillcolor="rgba(203,32,45,0.08)",
         ))
+        _fig.add_trace(go.Scatter(
+            x=[_n], y=[_speedup],
+            mode="markers", name="Current",
+            marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond",
+                        line=dict(width=2, color="white")),
+        ))
+        _fig.update_layout(
+            height=380, xaxis_title="Number of GPUs", yaxis_title="Effective Speedup",
+            title=f"Multi-GPU Scaling (r={_r:.2f}) -- shaded = communication tax",
+            xaxis_type="log", yaxis_type="log",
+        )
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
 
-    mo.vstack(_items2)
-    return (
-        _effective_batch, _total_gb, _effective_throughput,
-        _activations_gb, _ckpt_compute_overhead, _oom,
-    )
+        _eff_color = COLORS["GreenLine"] if _efficiency > 70 else COLORS["OrangeLine"] if _efficiency > 40 else COLORS["RedLine"]
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Speedup ({_n} GPUs)</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_speedup:.1f}x</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {_eff_color}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Scaling Efficiency</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_eff_color};">{_efficiency:.0f}%</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['RedLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Wasted GPU-equivalents</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['RedLine']};">{_wasted_gpus:.1f}</div>
+            </div>
+        </div>
+        """))
 
+        _pred = partD_prediction.value
+        _actual_8_015 = _scaling(8, 0.15)
+        if _pred == "3.9x":
+            items.append(mo.callout(mo.md(
+                f"**Correct.** 8 / (1 + 7 * 0.15) = 8 / 2.05 = {_actual_8_015:.1f}x. "
+                f"At r=0.15, gradient sync consumes enough of each step to cut efficiency "
+                f"to {_actual_8_015/8*100:.0f}%. Scaling further to 16 GPUs yields only "
+                f"{_scaling(16, 0.15):.1f}x, not 16x."
+            ), kind="success"))
+        elif _pred == "8x":
+            items.append(mo.callout(mo.md(
+                f"**Linear scaling assumes zero communication cost.** At r=0.15, "
+                f"actual speedup is {_actual_8_015:.1f}x, not 8x. The formula: "
+                f"Speedup = N / (1 + (N-1)*r) = 8 / (1 + 7*0.15) = {_actual_8_015:.1f}x."
+            ), kind="warn"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**At r=0.15 with 8 GPUs, speedup is {_actual_8_015:.1f}x.** "
+                f"The communication fraction r determines how quickly returns diminish. "
+                f"Try different presets: NVLink (r=0.05) vs PCIe (r=0.25)."
+            ), kind="warn"))
 
-# ── CELL 18: ACT II PREDICTION REVEAL ────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act2_prediction):
-    # Source: training.qmd @tbl-iron-law-mapping:
-    #   "Gradient Accumulation | Utilization ↑ | Maintains high batch parallelism efficiency"
-    # The prediction-vs-reality: accumulation is slightly slower due to gradient
-    # bookkeeping overhead per step, not 32× slower (compute is still serial-batch)
-    # and not the same (there is real, small overhead).
+        items.append(mo.accordion({
+            "MathPeek: Communication Tax": mo.md(f"""
+```
+Speedup(N, r) = N / (1 + (N-1) * r)
+             = {_n} / (1 + {_n-1} * {_r:.2f})
+             = {_n} / {1 + (_n-1)*_r:.2f}
+             = {_speedup:.2f}x
 
-    _labels = {
-        "same":         "A) Same throughput",
-        "32x_slower":   "B) 32× slower",
-        "slightly_slower": "C) Slightly slower",
-        "faster":       "D) Faster",
-    }
-    _predicted_label = _labels.get(act2_prediction.value, "—")
-    _correct = act2_prediction.value == "slightly_slower"
+Efficiency = {_speedup:.1f} / {_n} = {_efficiency:.0f}%
+Wasted GPU-equiv = {_n} - {_speedup:.1f} = {_wasted_gpus:.1f}
+```
+Source: @sec-training-communication-tax
+"""),
+        }))
 
-    if _correct:
-        mo.callout(mo.md(
-            f"**Correct.** You predicted: {_predicted_label}. "
-            f"Gradient accumulation runs the same total compute as a native batch — "
-            f"every sample sees a forward and backward pass exactly once. "
-            f"The only extra cost is a fixed per-optimizer-step overhead (~4%) from "
-            f"gradient summation bookkeeping. This overhead does not scale with K: "
-            f"accumulating 4 or 32 micro-batches costs roughly the same ~4% penalty."
-        ), kind="success")
-    elif act2_prediction.value == "same":
-        mo.callout(mo.md(
-            f"**Close, but not quite.** You predicted: {_predicted_label}. "
-            f"Gradient accumulation is nearly equivalent, but each optimizer step "
-            f"incurs a small fixed overhead (~4%) from gradient summation bookkeeping. "
-            f"The chapter maps accumulation to the Utilization ($\\eta$) term of the "
-            f"Iron Law: it keeps the GPU busy but adds a minor fixed cost per step."
-        ), kind="warn")
-    elif act2_prediction.value == "32x_slower":
-        mo.callout(mo.md(
-            f"**Not quite.** You predicted: {_predicted_label}. "
-            f"Gradient accumulation does NOT serialize compute 32× — the GPU runs "
-            f"a full forward-backward pass for each micro-batch just as efficiently "
-            f"as it would for any small batch. The 32 steps run sequentially but each "
-            f"is not blocked by the others beyond gradient summation. "
-            f"Total throughput is nearly the same as the native large batch, "
-            f"with only minor overhead from gradient bookkeeping."
-        ), kind="warn")
-    else:
-        mo.callout(mo.md(
-            f"**Not quite.** You predicted: {_predicted_label}. "
-            f"Gradient accumulation does not improve cache behavior enough to be faster. "
-            f"The smaller micro-batch does fit better in activation memory, "
-            f"but the per-step gradient bookkeeping overhead is a real cost. "
-            f"The net effect is slightly slower than native large batch."
-        ), kind="warn")
-    return
+        return mo.vstack(items)
 
+    # ─────────────────────────────────────────────────────────────────────
+    # SYNTHESIS BUILDER
+    # ─────────────────────────────────────────────────────────────────────
 
-# ── CELL 19: ACT II REFLECTION ────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    act2_reflection = mo.ui.radio(
-        options={
-            "A) Speed for accuracy — checkpointing slows training to improve model quality": "wrong_accuracy",
-            "B) Memory for compute — recomputes activations on backward pass instead of storing them": "correct",
-            "C) Precision for speed — checkpointing uses lower precision to free memory": "wrong_precision",
-            "D) Parameters for activations — smaller model needed when checkpointing is on": "wrong_params",
-        },
-        label="Gradient checkpointing trades what for what?",
-    )
-    mo.vstack([
-        mo.md("### Reflection — Act II"),
-        act2_reflection,
-    ])
-    return (act2_reflection,)
+    def build_synthesis():
+        items = []
+        items.append(mo.md("""
+## Synthesis: Train a 7B Model
 
+You must train a 7B parameter model on H100 GPUs. Using numbers from this lab:
+        """))
 
-# ── CELL 20: ACT II REFLECTION FEEDBACK ──────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act2_reflection):
-    mo.stop(
-        act2_reflection.value is None,
-        mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"),
-    )
+        items.append(mo.callout(mo.md("""
+1. **Precision mode**: Full FP32 or mixed BF16? Justify whether the model's
+   parameter state fits in 80 GB with your chosen optimizer.
 
-    _feedback2 = {
-        "correct": (
-            "**Correct.** Gradient checkpointing (activation checkpointing) discards "
-            "the intermediate activations from the forward pass — activations that would "
-            "normally be kept in GPU memory for use during the backward pass. "
-            "Instead, it saves only activations at $\\sqrt{L}$ strategic checkpoint "
-            "boundaries and recomputes the rest during the backward pass. "
-            "The memory reduction is roughly $\\sqrt{L}$ — for GPT-2's 48 layers, "
-            "storing 7 checkpoints instead of 48 full activation tensors. "
-            "The compute cost is +33% (one extra forward pass worth of computation "
-            "during backward). This is the classic memory-compute trade-off: "
-            "you can always trade one for the other, but never get both for free."
-        ),
-        "wrong_accuracy": (
-            "**Not quite.** Gradient checkpointing does not affect model quality "
-            "or convergence — the gradients computed are mathematically identical "
-            "to those computed with full activation storage. Only the memory "
-            "footprint changes (smaller), at the cost of more compute (recomputation)."
-        ),
-        "wrong_precision": (
-            "**Not quite.** Gradient checkpointing does not change the numerical "
-            "precision of any stored tensor. It changes *which* tensors are stored "
-            "at all — keeping fewer activations in memory and recomputing the rest "
-            "on demand during the backward pass."
-        ),
-        "wrong_params": (
-            "**Not quite.** Gradient checkpointing has no effect on the number of "
-            "parameters in the model. The model size (weights + gradients + optimizer "
-            "state) is unchanged. Only activation memory changes."
-        ),
-    }[act2_reflection.value]
+2. **Pipeline bottleneck**: Which stage would you optimize first? With NVMe
+   storage and NVLink interconnect, which stage dominates?
 
-    _kind2 = "success" if act2_reflection.value == "correct" else "warn"
-    mo.callout(mo.md(_feedback2), kind=_kind2)
-    return
+3. **GPU count**: How many GPUs do you need, and what scaling efficiency
+   do you expect? Show the formula with your r estimate.
 
+4. **Communication fraction**: For your setup, estimate r and compute the
+   expected speedup. Is it worth going from 8 to 16 GPUs?
+        """), kind="info"))
 
-# ── CELL 21: ACT II MATHPEEK ─────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.accordion({
-        "The governing equations — Gradient Accumulation and Checkpointing": mo.md(r"""
-**Gradient Accumulation** (from @tbl-iron-law-mapping, `training.qmd`):
-
-The effective batch size equals the micro-batch times accumulation steps:
-
-$$B_{eff} = B_{micro} \times K_{accum}$$
-
-Memory required scales only with $B_{micro}$ (the micro-batch), not $B_{eff}$:
-
-$$M_{act} = B_{micro} \times s \times h \times L \times b_w$$
-
-Throughput overhead (per-step gradient bookkeeping, $\epsilon \approx 0.03$):
-
-$$\text{Throughput} \approx \frac{1}{1 + K_{accum} \cdot \epsilon} \times \text{Native throughput}$$
-
-For $K_{accum} = 32$, $\epsilon = 0.03$: throughput $\approx \frac{1}{1.96} \approx 0.96 \times$ native — roughly 4% slower.
-
----
-
-**Gradient Checkpointing** (from footnote `fn-checkpointing-training`, `training.qmd`):
-
-Without checkpointing: all $L$ layers' activations are stored:
-
-$$M_{act,full} = B \cdot s \cdot h \cdot L \cdot b_w \qquad [\text{linear in } L]$$
-
-With checkpointing: only $\sqrt{L}$ checkpoint layers stored, rest recomputed:
-
-$$M_{act,ckpt} = B \cdot s \cdot h \cdot \sqrt{L} \cdot b_w \qquad [\text{sublinear in } L]$$
-
-Compute overhead: $+33\%$ of forward-pass FLOPs for recomputation during backward pass.
-
-For GPT-2's 48 layers: $\sqrt{48} \approx 7$ — store 7 checkpoints instead of 48 activation tensors.
-        """),
-    })
-    return
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ── CELL 20: SYNTHESIS ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.vstack([
-        mo.md("---"),
-
-        mo.Html(f"""
+        items.append(mo.Html(f"""
         <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
                     border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
@@ -1372,159 +994,99 @@ def _(mo, COLORS):
             </div>
             <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                 <div style="margin-bottom: 10px;">
-                    <strong>1. Training a 7B FP32 Adam model requires 112 GB &mdash; 4&times; the inference size.</strong>
-                    Weights (28 GB) + gradients (28 GB) + Adam m_t (28 GB) + Adam v_t (28 GB)
-                    = 112 GB before a single activation is stored. An H100 OOM is not a
-                    configuration mistake; it is a predictable consequence of the formula.
+                    <strong>1. Adam requires 16 bytes per parameter.</strong>
+                    A 7B model needs 112 GB of static state before any activations.
+                    Optimizer choice is a first-order memory constraint.
                 </div>
                 <div style="margin-bottom: 10px;">
-                    <strong>2. Mixed precision reduces static memory by ~1.5&times;, not 2&times;.</strong>
-                    Switching weights and gradients to BF16 halves those buffers, but Adam
-                    moments remain in FP32. Total goes from 16 bytes/param to ~12 bytes/param
-                    &mdash; a real saving, but not the 2&times; improvement that "half precision"
-                    implies.
+                    <strong>2. Training is rarely compute-bound.</strong>
+                    Data loading (slow storage) and gradient sync (slow interconnect)
+                    are the typical bottlenecks. Faster GPUs help only when compute
+                    is actually the binding constraint.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>3. Mixed precision saves 1.5x, not 2x.</strong>
+                    FP32 master weights and Adam state persist unchanged. Only
+                    activations and gradient buffers benefit from half precision.
                 </div>
                 <div>
-                    <strong>3. Gradient accumulation costs ~4% throughput regardless of accumulation depth.</strong>
-                    Accumulating K micro-batches produces the same gradient as a native batch
-                    at ~4% overhead per optimizer step. The overhead is fixed (gradient summation
-                    bookkeeping), not proportional to K &mdash; doubling K does not double the cost.
+                    <strong>4. Multi-GPU scaling follows diminishing returns.</strong>
+                    At r=0.15, 8 GPUs yield only 3.9x speedup. The communication tax
+                    is the gap between ideal and actual -- and it grows with GPU count.
                 </div>
             </div>
         </div>
-        """),
+        """))
 
-        mo.Html(f"""
-        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-
+        items.append(mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
                     What's Next
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab 09: The Data Selection Tradeoff</strong> &mdash; This lab
-                    computed the memory cost per optimizer step. Lab 09 asks how the content
-                    of the training data &mdash; not just its volume &mdash; affects how many
-                    steps are needed to converge, multiplying the total cost you measured here.
+                    <strong>Lab 09: Data Selection</strong> -- Training is expensive.
+                    Lab 09 shows how selecting the right training data can achieve the
+                    same accuracy with 10x less compute -- making the training budget
+                    from this lab go much further.
                 </div>
             </div>
-
             <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-model-training-training-systems-fundamentals-05d2
-                    for the full memory accounting framework.<br/>
-                    <strong>Build:</strong> TinyTorch Module 08 &mdash; implement Adam optimizer
-                    state allocation and gradient accumulation from scratch.
+                    <strong>Read:</strong> @sec-training for the full training memory
+                    model, pipeline analysis, and scaling formulas.<br/>
+                    <strong>Build:</strong> TinyTorch Module 08 -- implement a training
+                    loop with gradient accumulation and mixed precision.
                 </div>
             </div>
-
         </div>
-        """),
+        """))
 
+        return mo.vstack(items)
 
-        mo.accordion({
-            "Self-Assessment: Can you answer these?": mo.md("""
-    1. Training GPT-2 XL (1.5B parameters) in FP32 with Adam requires how many GB of static memory (weights + gradients + optimizer state) before a single activation is stored — and what is the Adam-to-SGD memory ratio?
+    # ─────────────────────────────────────────────────────────────────────
+    # COMPOSE TABS
+    # ─────────────────────────────────────────────────────────────────────
 
-    2. A baseline GPT-2 training run achieves only 45% MFU with 40% of iteration time consumed by data loading. After applying mixed precision, gradient checkpointing, and prefetching, what is the target MFU from Act II — and which bottleneck did each optimization address?
-
-    3. Mixed precision reduces training memory by ~1.5x rather than 2x. Why does the FP32 master copy prevent the naive 2x calculation — and would switching from Adam to SGD save more memory than switching from FP32 to FP16 mixed precision for a 1.5B parameter model?
-
-    *If you cannot answer all three from memory, revisit Act I and Act II.*
-    """)
-        }),
-    ])
+    tabs = mo.ui.tabs({
+        "Part A \u2014 The Memory Budget Shock":       build_part_a(),
+        "Part B \u2014 The Pipeline Bottleneck":       build_part_b(),
+        "Part C \u2014 Mixed Precision Trap":          build_part_c(),
+        "Part D \u2014 The Communication Tax":         build_part_d(),
+        "Synthesis":                                   build_synthesis(),
+    })
+    tabs
     return
 
 
-# ── CELL 21: DESIGN LEDGER SAVE + HUD ────────────────────────────────────────
-@app.cell
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 5: LEDGER HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    decision_input, decision_ui = DecisionLog()
-    return decision_input, decision_ui
-
-
-@app.cell(hide_code=True)
-def _(
-    mo, ledger, COLORS,
-    context_toggle,
-    act1_model_billions, act1_precision, act1_optimizer,
-    act1_prediction, act1_reflection,
-    act2_accum_steps, act2_checkpointing,
-    act2_prediction, act2_reflection,
-, decision_input, decision_ui):
-    # Save chapter results to Design Ledger
-    # Fields consumed by: lab_10 (precision baseline), lab_11 (MFU starting point)
-    _ctx = context_toggle.value
-
-    _act1_correct = (act1_prediction.value == "112gb")
-    _act1_refl_correct = (act1_reflection.value == "correct") if act1_reflection.value else False
-    _act2_correct = (act2_prediction.value == "slightly_slower")
-    _act2_refl_correct = (act2_reflection.value == "correct") if act2_reflection.value else False
-
-    ledger.save(
-        chapter=8,
-        design={
-            "context":            _ctx,
-            "model_size_params":  act1_model_billions.value * 1e9,
-            "precision_chosen":   act1_precision.value,
-            "optimizer_chosen":   act1_optimizer.value,
-            "oom_triggered":      act1_prediction.value != "112gb",   # proxy for OOM surprise
-            "grad_accum_steps":   act2_accum_steps.value,
-            "checkpointing_used": act2_checkpointing.value,
-            "act1_prediction":    act1_prediction.value,
-            "act1_correct":       _act1_correct,
-            "act2_prediction":    act2_prediction.value,
-            "act2_correct":       _act2_correct,
-            "constraint_hit":     act1_prediction.value != "112gb",
-        "student_justification": str(decision_input.value),
-        },
-    )
-
-    # HUD footer
-    _p1_status  = "correct" if _act1_correct else ("pending" if act1_prediction.value is None else "incorrect")
-    _p2_status  = "correct" if _act2_correct else ("pending" if act2_prediction.value is None else "incorrect")
-    _r1_status  = "correct" if _act1_refl_correct else ("pending" if not act1_reflection.value else "incorrect")
-    _r2_status  = "correct" if _act2_refl_correct else ("pending" if not act2_reflection.value else "incorrect")
-
-    def _status_color(s):
-        return {"correct": "#4ade80", "incorrect": "#f87171", "pending": "#94a3b8"}[s]
-
+def _(COLORS, ledger, mo):
+    _track = ledger._state.track or "not set"
     mo.Html(f"""
     <div class="lab-hud">
-        <span class="hud-label">LAB 08</span>
-        <span style="color:#475569; margin: 0 4px;">|</span>
-        <span class="hud-label">CTX:</span>
-        <span class="hud-value">{_ctx}</span>
-        <span style="color:#475569; margin: 0 4px;">|</span>
-        <span class="hud-label">ACT I PRED:</span>
-        <span style="color: {_status_color(_p1_status)}; font-family: SF Mono, monospace;
-                     font-size: 0.8rem;">{_p1_status}</span>
-        <span style="color:#475569; margin: 0 4px;">|</span>
-        <span class="hud-label">ACT I REFL:</span>
-        <span style="color: {_status_color(_r1_status)}; font-family: SF Mono, monospace;
-                     font-size: 0.8rem;">{_r1_status}</span>
-        <span style="color:#475569; margin: 0 4px;">|</span>
-        <span class="hud-label">ACT II PRED:</span>
-        <span style="color: {_status_color(_p2_status)}; font-family: SF Mono, monospace;
-                     font-size: 0.8rem;">{_p2_status}</span>
-        <span style="color:#475569; margin: 0 4px;">|</span>
-        <span class="hud-label">ACT II REFL:</span>
-        <span style="color: {_status_color(_r2_status)}; font-family: SF Mono, monospace;
-                     font-size: 0.8rem;">{_r2_status}</span>
-        <span style="color:#475569; margin: 0 4px;">|</span>
-        <span class="hud-label">LEDGER:</span>
-        <span class="hud-active">ch08 saved</span>
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">08 &middot; The Training Gauntlet</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">TRACK</span>
+        <span class="{'hud-active' if _track != 'not set' else 'hud-none'}">{_track}</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">CHAPTER&nbsp;8</span>
+        <span class="hud-value">Model Training</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">active</span>
     </div>
     """)
     return

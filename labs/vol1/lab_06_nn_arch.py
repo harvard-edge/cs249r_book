@@ -3,52 +3,26 @@ import marimo
 __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LAB 06: THE QUADRATIC WALL
-#
-# Chapter: nn_architectures.qmd — "Network Architectures"
-# Core Invariant: Transformer self-attention is O(N²) in sequence length.
-#   Doubling the context quadruples attention memory. This is the architectural
-#   bottleneck of modern LLMs — not FLOPS, but attention memory.
-#
-# 2-Act Structure (35–40 min total):
-#   Act I  — The Attention Explosion (12–15 min)
-#             Prediction → quadratic chart → reveal → FlashAttention reflection
-#   Act II — Depth vs Width Tradeoff (20–25 min)
-#             Prediction → parameter/latency instruments → OOM failure state
-#             → parallelism reflection
-#
-# Deployment Contexts: Cloud (H100, 80 GB HBM) vs Edge (Jetson Orin NX, 16 GB)
-#
-# Sources:
-#   - Attention memory formula: sec-network-architectures-transformers-attentiononly-architecture-1b56
-#     "for a 4,096-token sequence with 16-bit scores, the attention matrix alone
-#      consumes 4096² × 2 ≈ 32 MB per layer per head"
-#   - Quadratic scaling: TransformerScaling class in chapter — scaling_ratio = 4.0
-#   - FlashAttention: "tiling to avoid materializing the full matrix"
-#   - Depth sequential bottleneck: "O(T) sequential depth that prevents GPU
-#     parallelization" (from RNN section; same physics applies to layer depth)
-#   - H100 specs: H100 SXM5 HBM3e, NVIDIA spec (80 GB HBM, 3350 GB/s BW)
-#   - Jetson Orin NX: 16 GB unified memory, 102 GB/s
-#
-# Design Ledger saves: chapter=6, context, seq_len_chosen,
-#   quadratic_oom_triggered, depth_width_decision
-# ─────────────────────────────────────────────────────────────────────────────
 
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═════════════════════════════════════════════════════════════════════════════
 
-# ─── CELL 0: SETUP (hide_code=False — leave visible) ─────────────────────────
+# ─── CELL 0: SETUP ──────────────────────────────────────────────────────────
 @app.cell
 async def _():
     import marimo as mo
     import sys
+    import math
     from pathlib import Path
-    import numpy as np
     import plotly.graph_objects as go
+    import numpy as np
 
-    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
     if sys.platform == "emscripten":
         import micropip
-        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+        await micropip.install(
+            "https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl"
+        )
     elif "mlsysim" not in sys.modules:
         _root = Path(__file__).resolve().parents[2]
         if str(_root) not in sys.path:
@@ -56,93 +30,77 @@ async def _():
 
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim.labs.components import DecisionLog
+    import mlsysim
+    from mlsysim.core.engine import Engine
+
+    # ── Hardware constants ─────────────────────────────────────────────────
+    H100 = mlsysim.Hardware.Cloud.H100
+    JETSON = mlsysim.Hardware.Edge.JetsonOrinNX
+    IPHONE = mlsysim.Hardware.Mobile.iPhone15Pro
+
+    H100_RAM_GB   = H100.memory.capacity.m_as("GB")
+    JETSON_RAM_GB = JETSON.memory.capacity.m_as("GB")
+    IPHONE_RAM_GB = IPHONE.memory.capacity.m_as("GB")
+
+    H100_TFLOPS   = H100.compute.peak_flops.m_as("TFLOPs/s")
+    H100_BW_GBS   = H100.memory.bandwidth.m_as("GB/s")
+    H100_DISPATCH = H100.dispatch_tax.m_as("ms")
+
+    JETSON_DISPATCH = JETSON.dispatch_tax.m_as("ms")
 
     ledger = DesignLedger()
-
-    # ── Hardware constants (all plain floats, no pint) ──
-    # Source: NVIDIA H100 SXM5 HBM3e spec
-    H100_RAM_GB      = 80     # GB HBM3e
-    H100_BW_GBS      = 3350   # GB/s
-    H100_TFLOPS_FP16 = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
-
-    # Source: NVIDIA Jetson Orin NX 16GB spec
-    ORIN_RAM_GB  = 16     # GB unified memory
-    ORIN_BW_GBS  = 102    # GB/s
-    ORIN_TOPS    = 100    # TOPS (INT8 equivalent)
-
-    # ── Attention constants ──
-    # Source: chapter LEGO cell — AttentionMemory class
-    # "for a 4,096-token sequence with 16-bit scores, the attention matrix alone
-    #  consumes 4096² × 2 ≈ 32 MB per layer per head"
-    BYTES_FP16   = 2      # bytes per FP16 element
-    BYTES_FP32   = 4      # bytes per FP32 element
-
-    # GPT-2 XL default config (lighthouse from chapter)
-    GPT2_NUM_HEADS   = 16    # multi-head attention heads
-    GPT2_HEAD_DIM    = 64    # head dimension (d_model / num_heads = 1024 / 16)
-    GPT2_NUM_LAYERS  = 48    # transformer blocks
-    GPT2_D_MODEL     = 1024  # hidden dimension
-
     return (
-        mo, ledger, COLORS, LAB_CSS, apply_plotly_theme, np, go,
-        H100_RAM_GB, H100_BW_GBS, H100_TFLOPS_FP16,
-        ORIN_RAM_GB, ORIN_BW_GBS, ORIN_TOPS,
-        BYTES_FP16, BYTES_FP32,
-        GPT2_NUM_HEADS, GPT2_HEAD_DIM, GPT2_NUM_LAYERS, GPT2_D_MODEL,
+        COLORS, Engine, H100, JETSON, IPHONE,
+        H100_RAM_GB, JETSON_RAM_GB, IPHONE_RAM_GB,
+        H100_TFLOPS, H100_BW_GBS, H100_DISPATCH, JETSON_DISPATCH,
+        LAB_CSS, apply_plotly_theme, go, math, mo, np, ledger, mlsysim,
     )
 
 
-# ─── CELL 1: HEADER ──────────────────────────────────────────────────────────
+# ─── CELL 1: HEADER ─────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, LAB_CSS, COLORS):
-    _cloud_color = COLORS["Cloud"]
-    _edge_color  = COLORS["Edge"]
-
+def _(LAB_CSS, mo):
     mo.vstack([
         LAB_CSS,
-        mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        mo.Html("""
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.3);">
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
                         color: #475569; text-transform: uppercase; margin-bottom: 10px;">
                 Machine Learning Systems &middot; Volume I &middot; Lab 06
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
-                The Quadratic Wall
+                The Architecture Tax
             </h1>
-            <p style="margin: 0 0 20px 0; font-size: 1.05rem; color: #94a3b8;
-                      max-width: 640px; line-height: 1.65;">
-                Transformer self-attention is O(N&sup2;) in sequence length.
-                Marketing wants 100K-token context. Engineering says memory will
-                explode. This lab shows you the numbers — and why depth vs width
-                determines whether your model runs at all on edge hardware.
+            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
+                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
+                Inductive Bias &middot; Quadratic Wall &middot; Depth vs. Width &middot; Workload Signatures
             </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 18px;">
-                <span style="background: rgba(99,102,241,0.15); color: #a5b4fc;
+            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
+                      max-width: 680px; line-height: 1.65;">
+                Architecture is not just an accuracy choice -- it is a systems choice
+                that determines parameter count, memory access patterns, parallelism,
+                and hardware utilization. Each architecture family occupies a distinct
+                point in the compute-memory trade-off space.
+            </p>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
+                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.25);">
-                    Act I: Attention Explosion &middot; 12&ndash;15 min
+                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
+                    4 Parts + Synthesis &middot; ~52 min
                 </span>
                 <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    Act II: Depth vs Width &middot; 20&ndash;25 min
-                </span>
-                <span style="background: rgba(16,185,129,0.15); color: #6ee7b7;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(16,185,129,0.25);">
-                    35&ndash;40 min total
+                    Chapter 6: Network Architectures
                 </span>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">N&sup2; Attention Memory</span>
-                <span class="badge badge-info">FlashAttention</span>
-                <span class="badge badge-info">Depth vs Width</span>
-                <span class="badge badge-ok">&#9729; Cloud: H100 (80 GB HBM)</span>
-                <span class="badge badge-fail">&#9881; Edge: Jetson Orin NX (16 GB)</span>
+                <span class="badge badge-info">MLP: 22.7B params / layer</span>
+                <span class="badge badge-warn">Attention: O(N^2) memory</span>
+                <span class="badge badge-fail">Depth: dispatch tax</span>
             </div>
         </div>
         """),
@@ -150,44 +108,45 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE A: OPENING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 2: BRIEFING ─────────────────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, COLORS):
+def _(COLORS, mo):
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
                 padding: 20px 28px; margin: 8px 0 16px 0;
                 box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-
-        <!-- LEARNING OBJECTIVES -->
         <div style="margin-bottom: 16px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                 Learning Objectives
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the arithmetic intensity gap</strong> between ResNet-50 (I &asymp; 40.2 FLOPs/byte) and GPT-2 (I &asymp; 0.50 FLOPs/byte) on the same H100 GPU, and explain why the 80&times; difference determines which hardware resource is the binding constraint.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Predict the maximum sequence length</strong> for a 32-layer, 12-head Transformer within 80 GB of attention memory (FP16), discovering the hard quadratic ceiling before interacting with the scaling instrument.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Identify the OOM boundary</strong> where N&sup2; &times; H &times; bytes &times; L exceeds GPU memory, and compare how the same boundary appears at 80 GB (H100) versus 16 GB (Jetson Orin NX).</div>
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the parameter explosion</strong>
+                    from removing inductive bias: an MLP first layer on 224x224 images requires
+                    22.7 billion parameters vs. 1,728 for a 3x3 CNN -- a 13.1 million-fold reduction.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Calculate the quadratic attention wall</strong>:
+                    doubling context length from 4K to 8K tokens quadruples attention memory,
+                    creating hard OOM ceilings on context window size.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Diagnose the depth-vs-width trade-off</strong>:
+                    two networks with identical FLOPs can have 10x different latencies due to
+                    sequential dispatch overhead.</div>
+                <div style="margin-bottom: 3px;">4. <strong>Compare workload signatures</strong>:
+                    predict which architecture achieves highest GPU utilization based on
+                    arithmetic intensity.</div>
             </div>
         </div>
-
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <!-- PREREQUISITES + DURATION (side by side) -->
-        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 220px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Arithmetic intensity definition from @sec-network-architectures-understanding-arithmetic-intensity-ade5 &middot;
-                    O(N&sup2;) attention memory from @sec-network-architectures-transformers-attentiononly-architecture-1b56
+                    Dense layer FLOPs from @sec-nn-computation-flop-counting &middot;
+                    Memory hierarchy cliffs from @sec-nn-computation-memory-hierarchy &middot;
+                    Iron Law from @sec-introduction-iron-law
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -196,26 +155,23 @@ def _(mo, COLORS):
                     Duration
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>35&ndash;40 min</strong><br/>
-                    Act I: ~12 min &middot; Act II: ~25 min
+                    <strong>~52 min</strong><br/>
+                    Part A: ~12 min &middot; Part B: ~12 min<br/>
+                    Part C: ~10 min &middot; Part D: ~8 min
                 </div>
             </div>
         </div>
-
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <!-- CORE QUESTION -->
-        <div style="margin-top: 16px;">
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
+                    padding: 16px 28px 0 28px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                 Core Question
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                &ldquo;ResNet-50 and GPT-2 perform similar GFLOPs per inference on the same H100 &mdash;
-                so why does GPT-2 waste &gt;98% of the GPU&rsquo;s peak compute, and what happens
-                to attention memory when you try to support the 100K-token context window
-                marketing promised?&rdquo;
+                &ldquo;Two networks have identical FLOPs and parameter counts. Why is one
+                10x faster than the other -- and why does the &lsquo;modern&rsquo; Transformer
+                achieve lower GPU utilization than the &lsquo;old&rsquo; CNN?&rdquo;
             </div>
         </div>
     </div>
@@ -223,1106 +179,774 @@ def _(mo, COLORS):
     return
 
 
-# ─── CELL 3: READING ──────────────────────────────────────────────────────────
+# ─── CELL 3: READING ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
-    **Recommended Reading** — Complete these sections before this lab:
+    **Recommended Reading** -- Complete the following before this lab:
 
-    - **@sec-network-architectures-transformers-attentiononly-architecture-1b56** —
-      Transformer architecture, self-attention, and the O(N²) memory scaling law
-    - **The Quadratic Bottleneck** callout — 100K-token memory calculation
-    - **@sec-network-architectures-multilayer-perceptrons-dense-pattern-processing-bc11** —
-      MLP depth vs width parameter scaling
+    - **Chapter 6: Inductive Bias** -- why CNNs have 13M fewer parameters than MLPs
+      for the same image task. Weight sharing and locality as physical constraints.
+    - **Chapter 6: Attention Complexity** -- the N*N score matrix, quadratic memory
+      scaling, and OOM ceilings on context length.
+    - **Chapter 6: Depth vs. Width** -- sequential dispatch overhead, parallelism,
+      and why FLOPs are an insufficient proxy for latency.
+    - **Chapter 6: Workload Signatures** -- arithmetic intensity by architecture
+      family and the roofline model connection.
     """), kind="info")
     return
 
 
-# ─── CELL 4: CONTEXT_TOGGLE ──────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    context_toggle = mo.ui.radio(
-        options={"☁️ Cloud (H100, 80 GB HBM)": "cloud", "⚙️ Edge (Jetson Orin NX, 16 GB)": "edge"},
-        value="☁️ Cloud (H100, 80 GB HBM)",
-        label="**Deployment context** (used in Act II):",
-        inline=True,
-    )
-    context_toggle
-    return (context_toggle,)
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE B-D: ALL PARTS AS TABS
+# ═════════════════════════════════════════════════════════════════════════════
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: ACT I -- CALIBRATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _act_num      = "I"
-    _act_color    = COLORS["BlueLine"]
-    _act_title    = "The Attention Explosion"
-    _act_duration = "12&ndash;15 min"
-    _act_why      = ("You expect that two &ldquo;deep learning&rdquo; workloads performing "
-                     "similar GFLOPs on the same GPU will have similar performance. "
-                     "The arithmetic intensity comparator will show an 80&times; gap: "
-                     "ResNet-50 reuses weights across spatial dimensions and saturates GPU compute, "
-                     "while GPT-2 at batch=1 loads 6 GB of weights for just 3 GFLOPs per token "
-                     "and wastes &gt;98% of peak FLOPS.")
-
-    mo.vstack([
-        mo.md("---"),
-        mo.Html(f"""
-        <div style="margin: 8px 0 12px 0;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <div style="background: {_act_color}; color: white; border-radius: 50%;
-                            width: 32px; height: 32px; display: inline-flex; align-items: center;
-                            justify-content: center; font-size: 0.9rem; font-weight: 800;
-                            flex-shrink: 0;">{_act_num}</div>
-                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em;">
-                    Act {_act_num} &middot; {_act_duration}</div>
-            </div>
-            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                        margin-top: 8px; line-height: 1.2;">
-                {_act_title}
-            </div>
-            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                        line-height: 1.55; max-width: 700px;">
-                {_act_why}
-            </div>
-        </div>
-        """),
-    ])
-    return
-
-
-# ─── ACT I STAKEHOLDER MESSAGE ────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _color = COLORS["Cloud"]
-    mo.Html(f"""
-    <div style="border-left:4px solid {_color}; background:{COLORS['BlueL']};
-                border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-        <div style="font-size:0.72rem; font-weight:700; color:{_color};
-                    text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-            Incoming Message &middot; VP of Product
-        </div>
-        <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-            "Marketing needs us to support 100K token context for enterprise document analysis.
-            Our competitor just announced it. Engineering is pushing back and says memory
-            will 'explode' — but I don't understand why doubling the context window is
-            such a big deal. Can you show me the actual numbers?"
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT I PREDICTION LOCK ───────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ### Your Prediction
-
-    *Before touching the simulator, commit to your hypothesis.*
-
-    The attention matrix for a single layer and a single head holds N × N score values,
-    where N is the sequence length. The chapter states that attention memory scales O(N²).
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    act1_prediction = mo.ui.radio(
-        options={
-            "A) 2× larger  — linear scaling, like doubling a list": "linear",
-            "B) 4× larger  — quadratic scaling, one order of magnitude jump": "quadratic",
-            "C) 8× larger  — cubic scaling, each token sees twice as many tokens": "cubic",
-            "D) Same size  — it just depends on positional encoding, not raw length": "same",
-        },
-        label="**Prediction Lock** — Doubling context length from 4K to 8K tokens increases "
-              "the attention matrix memory by:",
-    )
-    mo.vstack([
-        act1_prediction,
-        mo.callout(mo.md("Select your prediction to unlock the simulator."), kind="warn")
-        if act1_prediction.value is None
-        else mo.md(""),
-    ])
-    return (act1_prediction,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act1_prediction):
-    mo.stop(
-        act1_prediction.value is None,
-        mo.callout(mo.md("**Select a prediction above to unlock Act I.**"), kind="warn"),
-    )
-    return
-
-
-# ─── ACT I SIMULATOR ─────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ### The Simulator
-
-    Adjust the sequence length and observe how attention memory scales relative to
-    FFN (Feed-Forward Network) memory. The red line marks your device's HBM capacity.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    # Sequence length slider — log scale via discrete steps
-    # Source: chapter uses 512 base, 4096 as example, 100K as wall case
-    act1_seq_slider = mo.ui.slider(
-        start=512,
-        stop=131072,
-        value=4096,
-        step=512,
-        label="Sequence length (tokens)",
-    )
-    act1_num_heads_slider = mo.ui.slider(
-        start=1,
-        stop=32,
-        value=12,
-        step=1,
-        label="Number of attention heads",
-    )
-    mo.hstack([act1_seq_slider, act1_num_heads_slider], justify="start", gap="2rem")
-    return (act1_seq_slider, act1_num_heads_slider)
-
-
+# ─── CELL 4: TABS CELL ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
-    mo, go, np, apply_plotly_theme,
-    act1_seq_slider, act1_num_heads_slider,
-    COLORS, BYTES_FP16,
-    GPT2_D_MODEL, GPT2_NUM_LAYERS,
-    H100_RAM_GB, ORIN_RAM_GB,
+    COLORS, Engine, H100, JETSON, IPHONE,
+    H100_RAM_GB, JETSON_RAM_GB, IPHONE_RAM_GB,
+    H100_TFLOPS, H100_BW_GBS, H100_DISPATCH, JETSON_DISPATCH,
+    apply_plotly_theme, go, math, mo, np, ledger, mlsysim,
 ):
-    # Use named (non-underscore) variables for those that cross cell boundaries
-    act1_seq = act1_seq_slider.value
-    act1_h   = act1_num_heads_slider.value
+    # ─────────────────────────────────────────────────────────────────────
+    # SHARED WIDGET STATE
+    # ─────────────────────────────────────────────────────────────────────
 
-    # ── Physics: Attention matrix memory ──────────────────────────────────────
-    # Source: chapter callout "The Quadratic Bottleneck"
-    # Formula: attention_bytes = seq_len^2 * num_heads * BYTES_FP16
-    # Per-layer, per-head: seq_len^2 * 2 bytes = N^2 * 2
-    # Full model: * num_heads * num_layers
-
-    # Single-layer, all-heads attention matrix
-    act1_attn_single_gb = (act1_seq ** 2) * act1_h * BYTES_FP16 / 1e9
-
-    # Full model attention (all layers — for training, all must be resident)
-    act1_attn_full_gb = act1_attn_single_gb * GPT2_NUM_LAYERS
-
-    # ── Physics: FFN memory (for comparison — linear in seq_len) ──────────────
-    _ffn_activations_gb = (act1_seq * 4 * GPT2_D_MODEL * BYTES_FP16 * GPT2_NUM_LAYERS) / 1e9
-
-    # ── Build scaling curve ────────────────────────────────────────────────────
-    _seq_range = np.arange(512, 131073, 512)
-    _attn_curve = (_seq_range ** 2) * act1_h * BYTES_FP16 * GPT2_NUM_LAYERS / 1e9
-    _ffn_curve  = (_seq_range * 4 * GPT2_D_MODEL * BYTES_FP16 * GPT2_NUM_LAYERS) / 1e9
-
-    # ── Quadratic ratio (the key insight) ─────────────────────────────────────
-    _base_seq = 4096
-    act1_ratio = (act1_seq / _base_seq) ** 2
-
-    # ── Color state ───────────────────────────────────────────────────────────
-    _attn_color = (
-        COLORS["RedLine"] if act1_attn_single_gb > H100_RAM_GB
-        else COLORS["OrangeLine"] if act1_attn_single_gb > H100_RAM_GB * 0.5
-        else COLORS["BlueLine"]
-    )
-
-    # ── Plot ──────────────────────────────────────────────────────────────────
-    _fig = go.Figure()
-
-    _fig.add_trace(go.Scatter(
-        x=_seq_range / 1000,
-        y=_attn_curve,
-        name="Attention matrix (all layers, full model)",
-        line=dict(color=COLORS["BlueLine"], width=2.5),
-        fill="tozeroy",
-        fillcolor="rgba(0,99,149,0.08)",
-    ))
-
-    _fig.add_trace(go.Scatter(
-        x=_seq_range / 1000,
-        y=_ffn_curve,
-        name="FFN activations (all layers — linear in N)",
-        line=dict(color=COLORS["GreenLine"], width=2, dash="dot"),
-    ))
-
-    _fig.add_hline(
-        y=H100_RAM_GB,
-        line_dash="dash",
-        line_color=COLORS["OrangeLine"],
-        annotation_text=f"H100 HBM: {H100_RAM_GB} GB",
-        annotation_position="top right",
-    )
-
-    _fig.add_hline(
-        y=ORIN_RAM_GB,
-        line_dash="dash",
-        line_color=COLORS["RedLine"],
-        annotation_text=f"Orin NX RAM: {ORIN_RAM_GB} GB",
-        annotation_position="top right",
-    )
-
-    _fig.add_trace(go.Scatter(
-        x=[act1_seq / 1000],
-        y=[act1_attn_full_gb],
-        mode="markers",
-        marker=dict(size=14, color=_attn_color, symbol="circle", line=dict(color="white", width=2)),
-        name=f"Current: {act1_seq:,} tokens",
-        showlegend=True,
-    ))
-
-    _fig.update_layout(
-        xaxis_title="Sequence length (thousands of tokens)",
-        yaxis_title="Memory (GB)",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        height=400,
-    )
-    apply_plotly_theme(_fig)
-
-    # ── Metric cards ──────────────────────────────────────────────────────────
-    _card_attn_color = (
-        COLORS["RedLine"] if act1_attn_single_gb > H100_RAM_GB
-        else COLORS["OrangeLine"] if act1_attn_single_gb > 10
-        else COLORS["BlueLine"]
-    )
-    _card_ratio_color = (
-        COLORS["RedLine"] if act1_ratio > 100
-        else COLORS["OrangeLine"] if act1_ratio > 10
-        else COLORS["GreenLine"]
-    )
-
-    _ffn_idx = min((act1_seq // 512) - 1, len(_ffn_curve) - 1)
-
-    mo.vstack([
-        mo.md(f"""
-        **Physics**
-
-        ```
-        Attention memory  = N² × H × 2 bytes × L  (full model, all layers)
-                          = {act1_seq:,}² × {act1_h} heads × 2 B × {GPT2_NUM_LAYERS} layers
-                          = {act1_attn_full_gb:.2f} GB
-
-        FFN activations   = N × 4 × d_model × 2 bytes × L  (linear in N)
-                          = {act1_seq:,} × 4 × {GPT2_D_MODEL} × 2 B × {GPT2_NUM_LAYERS} layers
-                          = {_ffn_curve[_ffn_idx]:.2f} GB
-        ```
-        """),
-        mo.Html(f"""
-        <div style="display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0;">
-            <div style="padding: 18px 24px; border: 1.5px solid {COLORS['Border']};
-                        border-radius: 12px; min-width: 200px; text-align: center;
-                        background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
-                <div style="color: #475569; font-size: 0.85rem; font-weight: 500;
-                            margin-bottom: 4px;">Attention (full model)</div>
-                <div style="font-size: 2rem; font-weight: 800;
-                            color: {_card_attn_color};">
-                    {act1_attn_full_gb:.1f} GB
-                </div>
-                <div style="color: #94a3b8; font-size: 0.75rem; margin-top: 4px;">
-                    {GPT2_NUM_LAYERS} layers &times; {act1_h} heads
-                </div>
-            </div>
-            <div style="padding: 18px 24px; border: 1.5px solid {COLORS['Border']};
-                        border-radius: 12px; min-width: 200px; text-align: center;
-                        background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
-                <div style="color: #475569; font-size: 0.85rem; font-weight: 500;
-                            margin-bottom: 4px;">Single-layer attention</div>
-                <div style="font-size: 2rem; font-weight: 800;
-                            color: {COLORS['BlueLine']};">
-                    {act1_attn_single_gb:.2f} GB
-                </div>
-                <div style="color: #94a3b8; font-size: 0.75rem; margin-top: 4px;">
-                    per transformer block
-                </div>
-            </div>
-            <div style="padding: 18px 24px; border: 1.5px solid {COLORS['Border']};
-                        border-radius: 12px; min-width: 200px; text-align: center;
-                        background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
-                <div style="color: #475569; font-size: 0.85rem; font-weight: 500;
-                            margin-bottom: 4px;">Scale vs 4K baseline</div>
-                <div style="font-size: 2rem; font-weight: 800;
-                            color: {_card_ratio_color};">
-                    {act1_ratio:.1f}&times;
-                </div>
-                <div style="color: #94a3b8; font-size: 0.75rem; margin-top: 4px;">
-                    vs {_base_seq:,}-token baseline
-                </div>
-            </div>
-        </div>
-        """),
-        mo.as_html(_fig),
-    ])
-    return (act1_seq, act1_h, act1_attn_single_gb, act1_attn_full_gb, act1_ratio)
-
-
-# ─── ACT I OOM BANNER ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_attn_full_gb, H100_RAM_GB, ORIN_RAM_GB, act1_seq):
-    if act1_attn_full_gb > H100_RAM_GB:
-        mo.callout(mo.md(
-            f"**OOM — Cloud infeasible without tiling.** "
-            f"Attention alone requires **{act1_attn_full_gb:.0f} GB**. "
-            f"H100 HBM capacity: **{H100_RAM_GB} GB**. "
-            f"This is exactly why FlashAttention exists: it tiles the computation "
-            f"to avoid materializing the full N&times;N matrix in HBM. "
-            f"Pull the sequence length back below ~20K tokens to fit on a single H100."
-        ), kind="danger")
-    elif act1_attn_full_gb > ORIN_RAM_GB:
-        mo.callout(mo.md(
-            f"**OOM — Edge infeasible.** "
-            f"Attention requires **{act1_attn_full_gb:.0f} GB**. "
-            f"Jetson Orin NX has only **{ORIN_RAM_GB} GB**. "
-            f"Cloud (H100) can still handle this sequence length, but the edge context "
-            f"window is severely limited by the quadratic wall."
-        ), kind="warn")
-    elif act1_seq >= 32000:
-        mo.callout(mo.md(
-            f"**Approaching the wall.** At {act1_seq:,} tokens, attention alone consumes "
-            f"**{act1_attn_full_gb:.1f} GB**. This is getting close to practical limits. "
-            f"Notice how fast memory grows — try 64K and 128K to see why 100K context "
-            f"is an engineering challenge, not a model quality decision."
-        ), kind="warn")
-    else:
-        mo.callout(mo.md(
-            f"**Feasible at {act1_seq:,} tokens.** "
-            f"Attention uses {act1_attn_full_gb:.1f} GB. "
-            f"Try increasing to 32K, 64K, and 100K to see the quadratic explosion."
-        ), kind="success")
-    return
-
-
-# ─── ACT I REVEAL — PREDICTION vs REALITY ────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_prediction, act1_ratio):
-    _pred_map = {
-        "linear":    2.0,
-        "quadratic": 4.0,
-        "cubic":     8.0,
-        "same":      1.0,
-    }
-    _predicted_ratio = _pred_map[act1_prediction.value]
-    _actual_ratio    = 4.0  # quadratic: (8K/4K)^2 = 4
-    _gap = abs(_actual_ratio - _predicted_ratio)
-
-    if act1_prediction.value == "quadratic":
-        mo.callout(mo.md(
-            f"**Correct.** You predicted {_predicted_ratio:.0f}×. "
-            f"The actual ratio when doubling from 4K to 8K tokens is exactly **{_actual_ratio:.0f}×**. "
-            f"The N² scaling law is direct: (8000/4000)² = 4. "
-            f"At 100K tokens, the memory is (100000/4000)² = **625× larger** than at 4K. "
-            f"That is why marketing's request is not a feature — it is a physics problem."
-        ), kind="success")
-    elif act1_prediction.value == "linear":
-        mo.callout(mo.md(
-            f"**Off by {_actual_ratio / _predicted_ratio:.0f}×.** "
-            f"You predicted {_predicted_ratio:.0f}× (linear). "
-            f"The actual ratio is **{_actual_ratio:.0f}×** (quadratic). "
-            f"Linear scaling would mean attention memory grows proportionally with N. "
-            f"But the attention matrix stores N × N scores — every token attends to every "
-            f"other token — so doubling N doubles *both* dimensions, quadrupling the matrix."
-        ), kind="warn")
-    elif act1_prediction.value == "cubic":
-        mo.callout(mo.md(
-            f"**Close, but too pessimistic by {_predicted_ratio / _actual_ratio:.0f}×.** "
-            f"You predicted {_predicted_ratio:.0f}× (cubic). "
-            f"The actual ratio is **{_actual_ratio:.0f}×** (quadratic). "
-            f"The N × N attention matrix grows as N², not N³. "
-            f"The head dimension is fixed — only sequence length scales. "
-            f"Quadratic is already severe: 625× at 100K tokens."
-        ), kind="warn")
-    else:  # same
-        mo.callout(mo.md(
-            f"**Off by {_actual_ratio / _predicted_ratio:.0f}×.** "
-            f"You predicted {_predicted_ratio:.0f}× (no change). "
-            f"The actual ratio is **{_actual_ratio:.0f}×** when doubling context. "
-            f"Positional encoding adds negligible memory. The bottleneck is the "
-            f"N × N attention score matrix — quadratic in sequence length. "
-            f"At 100K tokens, this is 625× larger than at 4K tokens."
-        ), kind="warn")
-    return
-
-
-# ─── ACT I REFLECTION ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ### Reflection
-
-    *The chapter notes: "FlashAttention and sparse attention variants exist — they recompute
-    rather than store the attention matrix to break this memory wall."*
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    act1_reflection = mo.ui.radio(
+    # Part A widgets
+    partA_prediction = mo.ui.radio(
         options={
-            "A) Compressing the attention matrix using a learned low-rank factorization": "compress",
-            "B) Computing attention in tiles without materializing the full N×N matrix in HBM": "tiling",
-            "C) Approximating attention by using fewer heads in deeper layers": "fewer_heads",
-            "D) Converting attention scores to INT8 precision before the softmax": "int8",
+            "A) ~150K (about the input size)": "150k",
+            "B) ~23M (like ResNet-50 total)": "23m",
+            "C) ~1B (a billion)": "1b",
+            "D) ~22.7B (twenty-two billion)": "22b",
         },
-        label="**FlashAttention reduces memory from O(N²) to O(N) by:**",
+        label="An MLP takes a 224x224 RGB image as a flattened input (150,528 dims). "
+              "The first hidden layer also has 150,528 neurons. How many parameters in this single layer?",
     )
-    mo.vstack([
-        act1_reflection,
-        mo.callout(mo.md("Select your answer."), kind="warn")
-        if act1_reflection.value is None
-        else mo.md(""),
-    ])
-    return (act1_reflection,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act1_reflection):
-    mo.stop(
-        act1_reflection.value is None,
-        mo.callout(mo.md("Select your answer above."), kind="warn"),
+    partA_arch = mo.ui.radio(
+        options={"MLP (no structure)": "mlp", "CNN 3x3": "cnn3", "CNN 5x5": "cnn5"},
+        value="MLP (no structure)", label="Architecture:", inline=True,
+    )
+    partA_resolution = mo.ui.slider(
+        start=28, stop=512, value=224, step=28, label="Image resolution (px)",
     )
 
-    if act1_reflection.value == "tiling":
-        mo.callout(mo.md(
-            "**Correct.** FlashAttention tiles the Q, K, V matrices to fit in SRAM (fast on-chip "
-            "memory), computes attention incrementally using the online softmax algorithm, and "
-            "accumulates the output without ever writing the full N×N matrix to HBM. "
-            "Memory usage drops from O(N²) to O(N) — the N×N matrix simply never exists "
-            "as a whole in device memory. Arithmetic (FLOPs) is identical; only data movement "
-            "to HBM changes. The chapter states: *'FlashAttention — tiling to avoid "
-            "materializing the full matrix.'*"
-        ), kind="success")
-    elif act1_reflection.value == "compress":
-        mo.callout(mo.md(
-            "**Not quite.** Low-rank factorization (as in Linformer) is a separate approach "
-            "that *approximates* attention. FlashAttention achieves *exact* attention — the "
-            "same mathematical result — by restructuring how the computation accesses memory. "
-            "The key insight is tiling: splitting the sequence into blocks that fit in fast "
-            "SRAM, so the full N×N matrix never needs to be written to slow HBM."
-        ), kind="warn")
-    elif act1_reflection.value == "fewer_heads":
-        mo.callout(mo.md(
-            "**Not quite.** FlashAttention does not reduce the number of heads or change the "
-            "model architecture in any way. It is a pure IO-optimization: the same computation "
-            "is performed, but memory access to HBM is restructured via tiling so the full "
-            "N×N score matrix never needs to reside in HBM simultaneously."
-        ), kind="warn")
-    else:  # int8
-        mo.callout(mo.md(
-            "**Not quite.** INT8 quantization of attention scores is a separate technique that "
-            "reduces precision but still stores the full N×N matrix (in INT8). The memory "
-            "savings from INT8 vs FP16 is 2×, not the O(N) vs O(N²) reduction that FlashAttention "
-            "achieves. FlashAttention tiles the computation so the full matrix is never "
-            "materialized — the result is exact, not approximate."
-        ), kind="warn")
-    return
-
-
-# ─── ACT I MATHPEEK ──────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.accordion({
-        "The governing equation: Attention memory": mo.md("""
-        **Formula:**
-
-        `Attention_memory = N² × H × d_head × dtype_bytes`
-
-        Where:
-        - **N** — sequence length (tokens)
-        - **H** — number of attention heads
-        - **d_head** — head dimension (= d_model / H)
-        - **dtype_bytes** — 2 for FP16, 4 for FP32
-
-        **Full model (all layers):**
-
-        `Total_attention_GB = (N² × H × dtype_bytes × L) / 1e9`
-
-        - **L** — number of transformer layers
-
-        **Quadratic scaling proof:**
-
-        If N₂ = k × N₁, then:
-
-        `Attention(N₂) / Attention(N₁) = (k × N₁)² / N₁² = k²`
-
-        Doubling N (k = 2) → 4× memory. Tripling N (k = 3) → 9× memory.
-
-        At 100K tokens vs 4K baseline: k = 25, so **625× more attention memory**.
-
-        **Source:** @sec-network-architectures-transformers-attentiononly-architecture-1b56 —
-        "for a 4,096-token sequence with 16-bit scores, the attention matrix alone
-        consumes 4096² × 2 ≈ 32 MB per layer per head"
-        """),
-    })
-    return
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: ACT II -- DESIGN CHALLENGE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _act_num      = "II"
-    _act_color    = COLORS["OrangeLine"]
-    _act_title    = "Depth vs Width Tradeoff"
-    _act_duration = "20&ndash;25 min"
-    _act_why      = ("Act I showed that architecture determines which hardware resource bottlenecks. "
-                     "Now discover a constraint that applies even when memory is abundant: "
-                     "sequential depth creates a latency floor that no GPU can parallelize away. "
-                     "You expect that equal FLOPS means equal latency. The instruments will show "
-                     "that a 64-layer model&rsquo;s O(L) sequential dependency makes it slower "
-                     "on a Jetson Orin NX than a 4-layer model with the same parameter count "
-                     "and identical total operations.")
-
-    mo.vstack([
-        mo.md("---"),
-        mo.Html(f"""
-        <div style="margin: 8px 0 12px 0;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <div style="background: {_act_color}; color: white; border-radius: 50%;
-                            width: 32px; height: 32px; display: inline-flex; align-items: center;
-                            justify-content: center; font-size: 0.9rem; font-weight: 800;
-                            flex-shrink: 0;">{_act_num}</div>
-                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em;">
-                    Act {_act_num} &middot; {_act_duration}</div>
-            </div>
-            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                        margin-top: 8px; line-height: 1.2;">
-                {_act_title}
-            </div>
-            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                        line-height: 1.55; max-width: 700px;">
-                {_act_why}
-            </div>
-        </div>
-        """),
-    ])
-    return
-
-
-# ─── ACT II STAKEHOLDER MESSAGE ───────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS, context_toggle):
-    _ctx = context_toggle.value
-    _color = COLORS["Cloud"] if _ctx == "cloud" else COLORS["Edge"]
-    _device = "H100 (Cloud)" if _ctx == "cloud" else "Jetson Orin NX (Edge)"
-
-    mo.Html(f"""
-    <div style="border-left:4px solid {_color}; background:{COLORS['BlueL']};
-                border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-        <div style="font-size:0.72rem; font-weight:700; color:{_color};
-                    text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-            Incoming Message &middot; Edge ML Lead ({_device})
-        </div>
-        <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-            "We have a 100M parameter budget for our on-device text classifier. I want to use
-            a 64-layer deep network to get better representations. A colleague says I should
-            use 4 layers with a wider hidden dimension instead — that it will run faster on
-            {_device} even with the same parameter count. I don't understand why depth would
-            matter if FLOPS are the same."
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT II PREDICTION LOCK ───────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ### Your Prediction
-
-    *Consider the architecture: a deeper network has more sequential layer dependencies.
-    Each layer must wait for the output of the layer before it.*
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    act2_prediction = mo.ui.radio(
+    # Part B widgets
+    partB_prediction = mo.ui.radio(
         options={
-            "A) Deeper (better parallelism — more layers = more GPU threads)": "deeper",
-            "B) Wider (fewer sequential dependencies — more parallel work per layer)": "wider",
-            "C) Same — parameters determine FLOPS, FLOPS determine latency": "same_flops",
-            "D) Depends only on batch size, not architecture shape": "batch_size",
+            "A) 2x (linear with tokens)": "2x",
+            "B) 4x (quadratic)": "4x",
+            "C) 8x": "8x",
+            "D) 16x": "16x",
         },
-        label="**Prediction Lock** — For a fixed 100M parameter budget, a deeper network "
-              "(64 layers, small width) vs a wider network (4 layers, large width): "
-              "on edge hardware (Jetson Orin NX), which runs faster for inference?",
+        label="Doubling a Transformer's context from 4,096 to 8,192 tokens -- "
+              "how much more memory does attention require?",
     )
-    mo.vstack([
-        act2_prediction,
-        mo.callout(mo.md("Select your prediction to unlock the Design Challenge."), kind="warn")
-        if act2_prediction.value is None
-        else mo.md(""),
-    ])
-    return (act2_prediction,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act2_prediction):
-    mo.stop(
-        act2_prediction.value is None,
-        mo.callout(mo.md("**Select a prediction above to unlock Act II.**"), kind="warn"),
+    partB_seq_len = mo.ui.slider(
+        start=512, stop=131072, value=4096, step=512, label="Sequence length (tokens)",
     )
-    return
-
-
-# ─── ACT II INSTRUMENTS ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ### The Design Challenge
-
-    Explore the depth/width tradeoff. Stay within the device's memory budget.
-    The parameter target is shown — try to stay near 100M parameters.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    # Source: MLP parameter formula from chapter — parameters = layers × (width² + width × 4×width)
-    # Transformer block: attention (4×d²) + FFN (8×d²) ≈ 12×d² parameters per layer
-    act2_depth_slider = mo.ui.slider(
-        start=2,
-        stop=100,
-        value=12,
-        step=2,
-        label="Number of layers (depth)",
-    )
-    act2_width_slider = mo.ui.slider(
-        start=64,
-        stop=4096,
-        value=512,
-        step=64,
-        label="Hidden dimension (width)",
-    )
-    mo.hstack([act2_depth_slider, act2_width_slider], justify="start", gap="2rem")
-    return (act2_depth_slider, act2_width_slider)
-
-
-@app.cell(hide_code=True)
-def _(
-    mo, go, np, apply_plotly_theme,
-    act2_depth_slider, act2_width_slider, context_toggle,
-    COLORS, BYTES_FP16,
-    H100_RAM_GB, H100_BW_GBS, H100_TFLOPS_FP16,
-    ORIN_RAM_GB, ORIN_BW_GBS, ORIN_TOPS,
-):
-    # Named (non-underscore) variables used across cells
-    act2_L = act2_depth_slider.value
-    act2_W = act2_width_slider.value
-    act2_ctx = context_toggle.value
-
-    # ── Device selection ──────────────────────────────────────────────────────
-    if act2_ctx == "cloud":
-        act2_device_name = "H100 (Cloud)"
-        act2_device_ram  = H100_RAM_GB
-        _device_bw       = H100_BW_GBS
-        _device_tops     = H100_TFLOPS_FP16 * 1000  # GOPS
-        _par_factor      = 1.0
-        _dev_color       = COLORS["Cloud"]
-    else:
-        act2_device_name = "Jetson Orin NX"
-        act2_device_ram  = ORIN_RAM_GB
-        _device_bw       = ORIN_BW_GBS
-        _device_tops     = ORIN_TOPS * 1000
-        _par_factor      = 0.15
-        _dev_color       = COLORS["Edge"]
-
-    # ── Parameter count ───────────────────────────────────────────────────────
-    # Source: chapter MLP section — "parameters = layers × (width² + ...)"
-    # For a transformer block: ~12 × d_model² parameters (4d² attention + 8d² FFN)
-    _params_per_layer = 12 * act2_W ** 2
-    _total_params     = act2_L * _params_per_layer
-    act2_params_m     = _total_params / 1e6   # in millions; shared with other cells
-    _target_params_m  = 100.0
-
-    # ── Model memory ─────────────────────────────────────────────────────────
-    act2_model_mem_gb = (_total_params * BYTES_FP16) / 1e9
-
-    # ── Sequential depth penalty ─────────────────────────────────────────────
-    # Source: chapter RNN analysis — "O(T) sequential depth prevents GPU
-    #   parallelization"; same physics for transformer layer depth at inference.
-    _flops_per_token     = 2 * 12 * act2_W ** 2 * act2_L
-    _compute_ms_raw      = (_flops_per_token / (_device_tops * 1e9)) * 1000
-    _depth_overhead_ms   = act2_L * 0.01 / (1 + _par_factor * 10)
-    _latency_ms          = _compute_ms_raw + _depth_overhead_ms
-    _bw_ms               = (act2_model_mem_gb * 1e9 / (_device_bw * 1e9)) * 1000
-    act2_latency_ms      = max(_latency_ms, _bw_ms)
-    _bottleneck          = "Memory-BW bound" if _bw_ms > _latency_ms else "Compute bound"
-
-    # ── Parallelism utilization gauge ─────────────────────────────────────────
-    _width_par   = min(1.0, act2_W / 1024)
-    _depth_pen   = min(1.0, 24 / act2_L)
-    act2_par_pct = _width_par * _depth_pen * 100
-
-    # ── OOM + budget checks ───────────────────────────────────────────────────
-    act2_oom         = act2_model_mem_gb > act2_device_ram
-    act2_over_budget = act2_params_m > _target_params_m * 1.5
-
-    # ── Build depth vs width comparison curves ────────────────────────────────
-    _depths   = np.arange(2, 101, 2)
-    _ws_tgt   = np.clip(np.sqrt(_target_params_m * 1e6 / (12 * _depths)), 64, 4096)
-    _dl       = np.array([
-        max(
-            (2 * 12 * w**2 * d / (_device_tops * 1e9)) * 1000,
-            ((12 * w**2 * d * BYTES_FP16) / 1e9 * 1e9 / (_device_bw * 1e9)) * 1000,
-        ) + d * 0.01 / (1 + _par_factor * 10)
-        for d, w in zip(_depths, _ws_tgt)
-    ])
-
-    _fig2 = go.Figure()
-    _fig2.add_trace(go.Scatter(
-        x=_depths, y=_dl,
-        name="Latency at 100M param budget",
-        line=dict(color=_dev_color, width=2.5),
-    ))
-    _fig2.add_vline(
-        x=act2_L, line_dash="dash", line_color=COLORS["OrangeLine"],
-        annotation_text=f"Current: L={act2_L}", annotation_position="top",
-    )
-    _opt_idx = int(np.argmin(_dl))
-    _fig2.add_trace(go.Scatter(
-        x=[_depths[_opt_idx]], y=[_dl[_opt_idx]],
-        mode="markers+text",
-        marker=dict(size=12, color=COLORS["GreenLine"], symbol="star"),
-        text=[f"Optimal: L={_depths[_opt_idx]}"],
-        textposition="top center",
-        name="Optimal depth",
-    ))
-    _fig2.update_layout(
-        xaxis_title="Number of layers (depth)",
-        yaxis_title="Estimated inference latency (ms per token)",
-        title=f"Depth vs Latency at Fixed 100M Param Budget — {act2_device_name}",
-        height=350,
-    )
-    apply_plotly_theme(_fig2)
-
-    # ── Colors ────────────────────────────────────────────────────────────────
-    _gauge_color = (
-        COLORS["GreenLine"] if act2_par_pct > 60
-        else COLORS["OrangeLine"] if act2_par_pct > 30
-        else COLORS["RedLine"]
-    )
-    _param_color = (
-        COLORS["RedLine"] if act2_over_budget or act2_oom
-        else COLORS["OrangeLine"] if abs(act2_params_m - _target_params_m) > 30
-        else COLORS["GreenLine"]
+    partB_heads = mo.ui.slider(
+        start=1, stop=64, value=32, step=1, label="Attention heads",
     )
 
-    mo.vstack([
-        mo.md(f"""
-        **Physics**
+    # Part C widgets
+    partC_prediction = mo.ui.radio(
+        options={
+            "A) Same speed -- same FLOPs means same time": "same",
+            "B) Deep network -- more specialized": "deep",
+            "C) Shallow-wide -- by ~2x": "2x",
+            "D) Shallow-wide -- by ~10x": "10x",
+        },
+        label="Two networks: identical FLOPs/params. One is 128 layers deep (width 32). "
+              "The other is 2 layers deep (width 512). Which is faster at inference?",
+    )
+    partC_depth = mo.ui.slider(
+        start=2, stop=128, value=64, step=2, label="Depth (layers)",
+    )
+    partC_context_c = mo.ui.radio(
+        options={"Cloud (H100)": "cloud", "Edge (Jetson)": "edge"},
+        value="Cloud (H100)", label="Deployment:", inline=True,
+    )
 
-        ```
-        params_per_layer  = 12 × width²  (attention + FFN per transformer block)
-                          = 12 × {act2_W}² = {_params_per_layer:,}
+    # Part D widgets
+    partD_prediction = mo.ui.radio(
+        options={
+            "A) Transformer (modern and optimized)": "transformer",
+            "B) CNN (high arithmetic intensity)": "cnn",
+            "C) MLP (simplest architecture)": "mlp",
+            "D) All roughly equal": "equal",
+        },
+        label="Which architecture family achieves the highest GPU utilization (MFU) at batch=1?",
+    )
+    partD_batch_d = mo.ui.slider(
+        start=1, stop=256, value=1, step=1, label="Batch size",
+    )
 
-        total_params      = depth × params_per_layer
-                          = {act2_L} × {_params_per_layer:,} = {_total_params:,} ({act2_params_m:.1f} M)
+    # ─────────────────────────────────────────────────────────────────────
+    # PART A BUILDER: The Cost of No Structure
+    # ─────────────────────────────────────────────────────────────────────
 
-        model_memory      = total_params × 2 bytes (FP16)
-                          = {act2_model_mem_gb:.2f} GB
+    def build_part_a():
+        items = []
 
-        bottleneck        = {_bottleneck}
-        effective_latency ≈ {act2_latency_ms:.3f} ms  (per token, single request)
-        ```
-        """),
-        mo.Html(f"""
-        <div style="display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0;">
-            <div style="padding: 16px 22px; border: 1.5px solid {COLORS['Border']};
-                        border-radius: 12px; min-width: 170px; text-align: center;
-                        background: white;">
-                <div style="color: #475569; font-size: 0.82rem; font-weight: 500;
-                            margin-bottom: 4px;">Total parameters</div>
-                <div style="font-size: 1.8rem; font-weight: 800; color: {_param_color};">
-                    {act2_params_m:.0f} M
-                </div>
-                <div style="color: #94a3b8; font-size: 0.72rem; margin-top: 4px;">
-                    target: 100 M
-                </div>
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; ML Architect, WildlifeVision
             </div>
-            <div style="padding: 16px 22px; border: 1.5px solid {COLORS['Border']};
-                        border-radius: 12px; min-width: 170px; text-align: center;
-                        background: white;">
-                <div style="color: #475569; font-size: 0.82rem; font-weight: 500;
-                            margin-bottom: 4px;">Model memory (FP16)</div>
-                <div style="font-size: 1.8rem; font-weight: 800;
-                            color: {COLORS['RedLine'] if act2_oom else COLORS['BlueLine']};">
-                    {act2_model_mem_gb:.2f} GB
-                </div>
-                <div style="color: #94a3b8; font-size: 0.72rem; margin-top: 4px;">
-                    budget: {act2_device_ram} GB ({act2_device_name})
-                </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We want to classify camera trap images using a simple fully-connected
+                network. No fancy convolutions, no attention -- just pure MLPs. Our intern
+                says this should work fine for 224x224 images. How many parameters do we need?&rdquo;
             </div>
-            <div style="padding: 16px 22px; border: 1.5px solid {COLORS['Border']};
-                        border-radius: 12px; min-width: 170px; text-align: center;
-                        background: white;">
-                <div style="color: #475569; font-size: 0.82rem; font-weight: 500;
-                            margin-bottom: 4px;">Inference latency</div>
-                <div style="font-size: 1.8rem; font-weight: 800; color: {_dev_color};">
-                    {act2_latency_ms:.3f} ms
-                </div>
-                <div style="color: #94a3b8; font-size: 0.72rem; margin-top: 4px;">
-                    per token &middot; {_bottleneck}
-                </div>
-            </div>
-            <div style="padding: 16px 22px; border: 1.5px solid {COLORS['Border']};
-                        border-radius: 12px; min-width: 170px; text-align: center;
-                        background: white;">
-                <div style="color: #475569; font-size: 0.82rem; font-weight: 500;
-                            margin-bottom: 4px;">Parallelism utilization</div>
-                <div style="font-size: 1.8rem; font-weight: 800; color: {_gauge_color};">
-                    {act2_par_pct:.0f}%
-                </div>
-                <div style="color: #94a3b8; font-size: 0.72rem; margin-top: 4px;">
-                    width util &times; depth penalty
-                </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; Dr. Sarah Kimani, ML Architect &middot; WildlifeVision
             </div>
         </div>
-        """),
-        mo.as_html(_fig2),
-    ])
-    return (
-        act2_L, act2_W, act2_params_m, act2_model_mem_gb, act2_latency_ms,
-        act2_oom, act2_over_budget, act2_par_pct, act2_device_name, act2_device_ram,
-    )
+        """))
 
+        items.append(mo.md("""
+## Inductive Bias Is a Physical Memory Constraint
 
-# ─── ACT II FAILURE STATE ─────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act2_oom, act2_model_mem_gb, act2_device_ram, act2_device_name,
-      act2_over_budget, act2_params_m):
-    _under = act2_params_m < 50.0
+An MLP processing a 224x224 RGB image flattens the input to 150,528 dimensions.
+With a matching hidden layer, the first-layer weight matrix has:
 
-    if act2_oom:
-        mo.callout(mo.md(
-            f"**OOM — Model infeasible on {act2_device_name}.** "
-            f"Model requires **{act2_model_mem_gb:.1f} GB** RAM. "
-            f"{act2_device_name} has **{act2_device_ram} GB**. "
-            f"Reduce depth, reduce width, or switch to the Cloud context. "
-            f"This is the architecture selection constraint: the contract with physics "
-            f"(@sec-network-architectures) is violated before inference even begins."
-        ), kind="danger")
-    elif act2_over_budget:
-        mo.callout(mo.md(
-            f"**Over parameter budget.** "
-            f"Current design has **{act2_params_m:.0f} M** parameters vs 100 M target. "
-            f"Reduce depth or width to stay within the design envelope."
-        ), kind="warn")
-    elif _under:
-        mo.callout(mo.md(
-            f"**Under-parameterized.** "
-            f"Current design has only **{act2_params_m:.0f} M** parameters. "
-            f"The 100 M target gives sufficient capacity for most classification tasks. "
-            f"Increase depth or width to reach the budget."
-        ), kind="info")
-    else:
-        mo.callout(mo.md(
-            f"**Feasible design.** {act2_params_m:.0f} M params fit on {act2_device_name} "
-            f"({act2_model_mem_gb:.2f} GB of {act2_device_ram} GB used). "
-            f"Now explore whether going deeper (more layers) or wider (larger hidden dim) "
-            f"changes inference latency. The parameter count stays roughly constant "
-            f"when you trade depth for width."
-        ), kind="success")
-    return
+```
+Parameters = 150,528 * 150,528 = 22.66 billion
+Memory     = 22.66B * 4 bytes  = 90.6 GB (FP32)
+```
 
+A CNN with 3x3 filters requires only **1,728 parameters** for the same first layer
+(3 * 3 * 3 channels_in * 64 channels_out). That is a **13.1 million-fold reduction**.
 
-# ─── ACT II REVEAL ───────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act2_prediction):
-    if act2_prediction.value == "wider":
-        mo.callout(mo.md(
-            "**Correct.** On edge hardware, a wider network (fewer layers, larger hidden dim) "
-            "runs faster than a deeper network with the same parameter count. "
-            "Each layer is a sequential dependency: the GPU must complete layer L before "
-            "it can start layer L+1. On a large H100 with thousands of SMs, this overhead is "
-            "hidden by massive parallelism. On a Jetson Orin NX with far fewer compute units, "
-            "sequential depth becomes the bottleneck — exactly the same physics as RNNs, "
-            "where the chapter notes *'O(T) sequential depth prevents GPU parallelization.'* "
-            "Wider layers provide more parallel work *within* a single layer, matching the "
-            "hardware's available parallelism."
-        ), kind="success")
-    elif act2_prediction.value == "deeper":
-        mo.callout(mo.md(
-            "**Incorrect.** More layers do not mean more parallelism — they mean more *sequential* "
-            "dependencies. Each layer must complete before the next begins. On the H100 with "
-            "thousands of SMs, this overhead is mostly hidden. On the Jetson Orin NX with far "
-            "fewer compute units, each additional layer adds a sequential barrier that the small "
-            "device cannot overlap. The chapter's RNN analysis applies here: *'O(T) sequential "
-            "depth prevents GPU parallelization.'* For inference on edge hardware, fewer deeper "
-            "sequential steps with more parallel work per step wins."
-        ), kind="warn")
-    elif act2_prediction.value == "same_flops":
-        mo.callout(mo.md(
-            "**Partially correct, but wrong conclusion.** FLOPs determine the *compute* time, "
-            "but inference latency is not purely compute-bound. Every layer boundary is a "
-            "synchronization point and kernel launch. On edge hardware with limited compute units, "
-            "sequential depth means the hardware cannot pipeline across layers. A 64-layer network "
-            "has 64 sequential synchronization barriers; a 4-layer network has 4. With the same "
-            "FLOP count, the 4-layer version exposes more parallelism within each wider layer — "
-            "and parallelism is the scarce resource on edge hardware."
-        ), kind="warn")
-    else:  # batch_size
-        mo.callout(mo.md(
-            "**Incorrect.** Batch size affects throughput (samples/second) but not the "
-            "fundamental sequential dependency structure of layers. Even at batch size = 1 "
-            "(the common edge inference case), a deeper network has more sequential layers "
-            "that must execute in order. Width affects how much parallel work is available "
-            "per layer; depth affects how many sequential steps the hardware must take. "
-            "The depth/width tradeoff is architectural, not just a batching concern."
-        ), kind="warn")
-    return
+Inductive bias (locality, weight sharing) is not an abstract concept -- it is the
+mechanism that makes computer vision physically feasible.
+        """))
 
+        items.append(partA_prediction)
 
-# ─── ACT II REFLECTION ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ### Reflection
+        if partA_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction above to unlock the architecture comparison."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
 
-    *The chapter's RNN analysis established: "O(T) sequential depth prevents GPU
-    parallelization across the time dimension." The same physics applies to transformer
-    layer depth during inference.*
-    """)
-    return
+        items.append(mo.hstack([partA_arch, partA_resolution], justify="start"))
 
+        _res = partA_resolution.value
+        _arch = partA_arch.value
+        _channels_in = 3
+        _channels_out = 64
+        _input_dim = _res * _res * _channels_in
 
-@app.cell(hide_code=True)
-def _(mo):
-    act2_reflection = mo.ui.radio(
-        options={
-            "A) Shallower models are less accurate and should be avoided": "accuracy",
-            "B) Sequential layer depth limits parallelism on smaller accelerators, "
-               "making wider shallow networks faster at inference": "sequential",
-            "C) Edge devices have fewer total parameters, so depth doesn't matter": "params",
-            "D) Wider networks are easier to quantize, reducing latency indirectly": "quantize",
-        },
-        label="**Why do edge devices prefer shallower, wider architectures for inference?**",
-    )
-    mo.vstack([
-        act2_reflection,
-        mo.callout(mo.md("Select your answer."), kind="warn")
-        if act2_reflection.value is None
-        else mo.md(""),
-    ])
-    return (act2_reflection,)
+        if _arch == "mlp":
+            _params = _input_dim * _input_dim
+            _arch_label = f"MLP ({_input_dim:,} x {_input_dim:,})"
+        elif _arch == "cnn3":
+            _params = 3 * 3 * _channels_in * _channels_out
+            _arch_label = f"CNN 3x3 ({3}x{3}x{_channels_in}x{_channels_out})"
+        else:
+            _params = 5 * 5 * _channels_in * _channels_out
+            _arch_label = f"CNN 5x5 ({5}x{5}x{_channels_in}x{_channels_out})"
 
+        _mem_gb = _params * 4 / (1024**3)
+        _cnn3_params = 3 * 3 * _channels_in * _channels_out
+        _fold_reduction = _params / _cnn3_params if _cnn3_params > 0 else 1
 
-@app.cell(hide_code=True)
-def _(mo, act2_reflection):
-    mo.stop(
-        act2_reflection.value is None,
-        mo.callout(mo.md("Select your answer above."), kind="warn"),
-    )
+        # Bar chart on log scale
+        _archs = ["MLP", "CNN 3x3", "CNN 5x5"]
+        _p_mlp = _input_dim * _input_dim
+        _p_cnn3 = 3 * 3 * _channels_in * _channels_out
+        _p_cnn5 = 5 * 5 * _channels_in * _channels_out
+        _all_params = [_p_mlp, _p_cnn3, _p_cnn5]
+        _bar_colors = [COLORS["RedLine"], COLORS["BlueLine"], COLORS["GreenLine"]]
 
-    if act2_reflection.value == "sequential":
-        mo.callout(mo.md(
-            "**Correct.** On the H100 with ~16,000 CUDA cores, sequential layer dependencies "
-            "are largely hidden — the device has enough parallelism to keep compute units busy "
-            "even while waiting for the previous layer's output. On the Jetson Orin NX with far "
-            "fewer compute units, each layer boundary is a stall: the device finishes the layer, "
-            "synchronizes, and starts the next one. Wider layers expose more parallelism *within* "
-            "a single layer computation (larger matrix multiplications), matching the hardware's "
-            "available SM count more efficiently."
-        ), kind="success")
-    elif act2_reflection.value == "accuracy":
-        mo.callout(mo.md(
-            "**Incorrect — this conflates model quality with systems performance.** "
-            "This lab measures inference *latency*, not accuracy. A shallower wider model "
-            "can achieve comparable accuracy to a deeper narrower one at the same parameter "
-            "count (this is the MobileNet design philosophy). The reason to prefer it on edge "
-            "is systems performance: sequential depth limits parallelism on smaller accelerators."
-        ), kind="warn")
-    elif act2_reflection.value == "params":
-        mo.callout(mo.md(
-            "**Incorrect.** This lab holds total parameters *fixed* across depth/width variations. "
-            "The question is not about parameter count but about architectural shape: a 100M-param "
-            "model with 4 layers (wide) has the same parameter count as a 100M-param model with "
-            "64 layers (deep). They differ in sequential depth and thus in parallelism utilization "
-            "on devices with limited compute units."
-        ), kind="warn")
-    else:  # quantize
-        mo.callout(mo.md(
-            "**Indirect at best, not the primary reason.** Quantization benefits do not depend "
-            "on network width — both deep and wide networks can be quantized to INT8. The "
-            "fundamental reason shallow wide networks are faster on edge hardware is the "
-            "sequential depth bottleneck: fewer layer synchronization barriers, more parallel "
-            "work per layer, better utilization of a small SM count."
-        ), kind="warn")
-    return
+        _fig = go.Figure()
+        _fig.add_trace(go.Bar(
+            x=_archs, y=_all_params,
+            marker_color=_bar_colors, opacity=0.88,
+            text=[f"{p:,.0f}" for p in _all_params],
+            textposition="outside",
+        ))
+        # Device threshold lines
+        for _dev, _ram, _col in [("H100 80GB", 80, COLORS["BlueLine"]),
+                                  ("Jetson 16GB", 16, COLORS["OrangeLine"]),
+                                  ("iPhone 8GB", 8, COLORS["RedLine"])]:
+            _max_params = _ram * (1024**3) / 4
+            _fig.add_hline(y=_max_params, line_dash="dash", line_color=_col,
+                           annotation_text=_dev, annotation_position="right")
 
+        _fig.update_layout(
+            height=400, yaxis_title="First-Layer Parameters", yaxis_type="log",
+            title=f"First-Layer Parameters at {_res}x{_res} Resolution (log scale)",
+        )
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
 
-# ─── ACT II MATHPEEK ─────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.accordion({
-        "The governing equations: Parameter scaling and sequential depth": mo.md("""
-        **Parameter count for a transformer-style block:**
+        _oom_color = COLORS["RedLine"] if _mem_gb > 80 else COLORS["OrangeLine"] if _mem_gb > 8 else COLORS["GreenLine"]
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {_oom_color}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Parameters ({_arch.upper()})</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_oom_color};">{_params:,.0f}</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {_oom_color}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Memory (FP32)</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_oom_color};">{_mem_gb:,.1f} GB</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">MLP/CNN Fold Reduction</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_fold_reduction:,.0f}x</div>
+            </div>
+        </div>
+        """))
 
-        `params_per_layer = 12 × width²`
+        if _mem_gb > H100_RAM_GB and _arch == "mlp":
+            items.append(mo.callout(mo.md(
+                f"**OOM -- Even the H100 cannot hold this single layer.** "
+                f"The MLP first layer requires {_mem_gb:,.1f} GB in FP32, exceeding "
+                f"the H100's {H100_RAM_GB:.0f} GB. This is not a performance problem -- "
+                f"it is a **feasibility violation**. CNNs exist because MLPs cannot."
+            ), kind="danger"))
 
-        - Attention (4×d²) + FFN (8×d²) ≈ 12×d² per layer
+        _pred = partA_prediction.value
+        if _pred == "22b":
+            items.append(mo.callout(mo.md(
+                "**Correct.** 150,528^2 = 22.66 billion parameters in one layer. "
+                "This exceeds even an H100 in FP32. CNNs reduce this by 13.1 million-fold "
+                "through locality and weight sharing -- inductive bias is a physical necessity."
+            ), kind="success"))
+        elif _pred == "150k":
+            items.append(mo.callout(mo.md(
+                "**You confused input size with parameter count.** A dense layer connecting "
+                "N inputs to N outputs has N*N parameters. At 150,528 inputs, that is "
+                "150,528^2 = 22.66 billion -- not 150,528."
+            ), kind="warn"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**Not quite.** The first dense layer has input_dim * hidden_dim = "
+                f"150,528 * 150,528 = 22.66 billion parameters. The O(d^2) scaling of "
+                f"dense layers makes MLPs physically infeasible for image-sized inputs."
+            ), kind="warn"))
 
-        `total_params = depth × 12 × width²`
+        items.append(mo.accordion({
+            "MathPeek: Parameter Count": mo.md(f"""
+**MLP:** params = input_dim * hidden_dim = {_input_dim:,} * {_input_dim:,} = {_input_dim*_input_dim:,}
+**CNN 3x3:** params = 3 * 3 * C_in * C_out = 9 * {_channels_in} * {_channels_out} = {_p_cnn3:,}
+**Fold reduction:** {_input_dim*_input_dim / _p_cnn3:,.0f}x
 
-        **Depth/Width tradeoff at fixed parameter budget P:**
+Source: @sec-architectures-inductive-bias
+"""),
+        }))
 
-        `width = sqrt(P / (12 × depth))`
+        return mo.vstack(items)
 
-        Doubling depth → width shrinks by √2.
-        Halving depth → width grows by √2.
+    # ─────────────────────────────────────────────────────────────────────
+    # PART B BUILDER: The Quadratic Wall
+    # ─────────────────────────────────────────────────────────────────────
 
-        **Sequential depth bottleneck:**
+    def build_part_b():
+        items = []
 
-        `inference_latency ≥ depth × t_layer`
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; Product Manager, WildlifeVision
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We want to use a Transformer for analyzing long audio recordings from
+                wildlife sensors. The research paper uses 4K token context. We need 128K for
+                full recordings. Just double the context a few times -- how much more memory?&rdquo;
+            </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; Alex Torres, Product Manager &middot; WildlifeVision
+            </div>
+        </div>
+        """))
 
-        Where `t_layer` is the minimum time to execute a single layer.
-        This lower bound is hard: no amount of hardware parallelism within a
-        layer can reduce the sequential dependency across layers.
+        items.append(mo.md("""
+## The Quadratic Wall: Attention Memory Scales as N^2
 
-        On an H100 (large SM count): `t_layer` is small → depth overhead is hidden.
-        On a Jetson Orin NX (small SM count): `t_layer` is larger → depth multiplies directly
-        into latency.
+Transformer self-attention creates an N x N score matrix. Doubling context
+from N to 2N:
 
-        **Source:** @sec-network-architectures-multilayer-perceptrons-dense-pattern-processing-bc11 —
-        parameter scaling formula; RNN sequential bottleneck analysis for depth physics.
-        """),
-    })
-    return
+```
+Attention memory = 2 * N^2 * heads * bytes_per_element
+At 2N:           = 2 * (2N)^2 * heads * bytes = 4 * original
+```
 
+This is a **4x increase**, not 2x. At 128K tokens with 32 heads in FP16,
+the attention matrix alone requires ~64 GB -- exceeding even an H100 for
+a single head's computation.
+        """))
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═══════════════════════════════════════════════════════════════════════════════
+        items.append(partB_prediction)
 
-# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.vstack([
-        mo.md("---"),
+        if partB_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction above to unlock the attention memory simulator."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
 
-        # ── KEY TAKEAWAYS ──
-        mo.Html(f"""
+        items.append(mo.hstack([partB_seq_len, partB_heads], justify="start"))
+
+        _seq = partB_seq_len.value
+        _heads = partB_heads.value
+        _bytes = 2  # FP16
+        _attn_mem_bytes = 2 * _seq * _seq * _heads * _bytes
+        _attn_mem_gb = _attn_mem_bytes / (1024**3)
+
+        # Memory curve
+        _seq_range = np.array([512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072])
+        _mem_curve = 2 * _seq_range.astype(float)**2 * _heads * _bytes / (1024**3)
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(
+            x=_seq_range.tolist(), y=_mem_curve.tolist(),
+            mode="lines+markers", name="Attention Memory (GB)",
+            line=dict(color=COLORS["RedLine"], width=2.5),
+        ))
+        _fig.add_trace(go.Scatter(
+            x=[_seq], y=[_attn_mem_gb],
+            mode="markers", name="Current Setting",
+            marker=dict(size=14, color=COLORS["BlueLine"], symbol="diamond",
+                        line=dict(width=2, color="white")),
+        ))
+        _fig.add_hline(y=H100_RAM_GB, line_dash="dash", line_color=COLORS["BlueLine"],
+                       annotation_text=f"H100 ({H100_RAM_GB:.0f} GB)")
+        _fig.add_hline(y=JETSON_RAM_GB, line_dash="dash", line_color=COLORS["OrangeLine"],
+                       annotation_text=f"Jetson ({JETSON_RAM_GB:.0f} GB)")
+        _fig.update_layout(
+            height=380, xaxis_title="Sequence Length (tokens)",
+            yaxis_title="Attention Memory (GB)", xaxis_type="log", yaxis_type="log",
+            title=f"Attention Memory vs. Sequence Length ({_heads} heads, FP16)",
+        )
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        _oom_h100 = _attn_mem_gb > H100_RAM_GB
+        _oom_jetson = _attn_mem_gb > JETSON_RAM_GB
+        _color = COLORS["RedLine"] if _oom_h100 else COLORS["OrangeLine"] if _oom_jetson else COLORS["GreenLine"]
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {_color}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Attention Memory</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_color};">{_attn_mem_gb:,.2f} GB</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Sequence Length</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_seq:,} tokens</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Score Matrix Size</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_seq:,} x {_seq:,}</div>
+            </div>
+        </div>
+        """))
+
+        if _oom_h100:
+            items.append(mo.callout(mo.md(
+                f"**OOM on H100.** Attention alone requires {_attn_mem_gb:,.1f} GB, exceeding "
+                f"the H100's {H100_RAM_GB:.0f} GB. Techniques like FlashAttention or sparse "
+                f"attention are required to make this sequence length feasible."
+            ), kind="danger"))
+        elif _oom_jetson:
+            items.append(mo.callout(mo.md(
+                f"**OOM on Jetson.** Attention requires {_attn_mem_gb:,.1f} GB, exceeding "
+                f"the Jetson's {JETSON_RAM_GB:.0f} GB. This context length requires cloud hardware."
+            ), kind="danger"))
+
+        _pred = partB_prediction.value
+        if _pred == "4x":
+            items.append(mo.callout(mo.md(
+                "**Correct.** The N*N attention matrix means doubling context gives 4x memory. "
+                "This quadratic wall is why context length extensions (4K->128K) require "
+                "fundamental algorithmic innovations like FlashAttention, not just more RAM."
+            ), kind="success"))
+        elif _pred == "2x":
+            items.append(mo.callout(mo.md(
+                "**Linear intuition fails for attention.** The score matrix is N*N. "
+                "Doubling N gives (2N)^2 = 4N^2 -- a 4x increase, not 2x."
+            ), kind="warn"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Not quite.** Attention memory scales as N^2. Doubling N yields exactly "
+                "4x memory. The key insight: each token must attend to every other token."
+            ), kind="warn"))
+
+        items.append(mo.accordion({
+            "MathPeek: Attention Memory": mo.md(f"""
+```
+Attention_memory = 2 * seq_len^2 * heads * bytes_per_element
+                 = 2 * {_seq:,}^2 * {_heads} * {_bytes}
+                 = {_attn_mem_bytes:,.0f} bytes = {_attn_mem_gb:,.2f} GB
+```
+Doubling seq_len: 2 * (2N)^2 = 4 * 2N^2 = **4x memory**
+
+Source: @sec-architectures-attention-complexity
+"""),
+        }))
+
+        return mo.vstack(items)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PART C BUILDER: Depth vs. Width
+    # ─────────────────────────────────────────────────────────────────────
+
+    def build_part_c():
+        items = []
+
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; Systems Engineer, WildlifeVision
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We have two model candidates with identical FLOP counts and identical
+                accuracy. One is deep-narrow (128 layers, width 32), the other shallow-wide
+                (2 layers, width 512). Our benchmarks show a 10x latency difference. Must be
+                a measurement error -- same FLOPs should mean same speed, right?&rdquo;
+            </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; Ravi Patel, Systems Engineer &middot; WildlifeVision
+            </div>
+        </div>
+        """))
+
+        items.append(mo.md("""
+## FLOPs Are Not Latency: Depth Imposes Sequential Overhead
+
+Each layer dispatch incurs a fixed overhead (kernel launch tax). A 128-layer
+network pays this tax 128 times; a 2-layer network pays it twice.
+
+Additionally, narrow layers (width 32) have fewer parallel operations per
+layer, reducing hardware utilization. The combination of high dispatch tax
+and low per-layer parallelism makes deep-narrow networks dramatically
+slower than shallow-wide ones -- even at identical total FLOPs.
+        """))
+
+        items.append(partC_prediction)
+
+        if partC_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction to unlock the depth-vs-width simulator."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([partC_depth, partC_context_c], justify="start"))
+
+        _depth = partC_depth.value
+        _ctx = partC_context_c.value
+        _dispatch_ms = H100_DISPATCH if _ctx == "cloud" else JETSON_DISPATCH
+
+        # Fixed total param budget: ~32,768 params
+        _total_param_budget = 32768
+        _width = max(4, int(math.sqrt(_total_param_budget / _depth)))
+        _actual_params = _depth * _width * _width
+        _flops_per_layer = 2 * _width * _width
+        _total_flops = _depth * _flops_per_layer
+
+        _peak_tflops = H100_TFLOPS if _ctx == "cloud" else 25.0
+        _compute_per_layer_ms = (_flops_per_layer / (_peak_tflops * 1e12)) * 1000
+        _total_compute_ms = _depth * _compute_per_layer_ms
+        _total_dispatch_ms = _depth * _dispatch_ms
+        _total_latency_ms = _total_compute_ms + _total_dispatch_ms
+        _dispatch_fraction = _total_dispatch_ms / _total_latency_ms * 100 if _total_latency_ms > 0 else 0
+
+        # Reference: shallow-wide (2 layers)
+        _ref_depth = 2
+        _ref_width = max(4, int(math.sqrt(_total_param_budget / _ref_depth)))
+        _ref_compute = _ref_depth * (2 * _ref_width * _ref_width) / (_peak_tflops * 1e12) * 1000
+        _ref_dispatch = _ref_depth * _dispatch_ms
+        _ref_total = _ref_compute + _ref_dispatch
+        _speedup = _total_latency_ms / _ref_total if _ref_total > 0 else 1
+
+        # Depth curve
+        _depths = np.arange(2, 129, 2)
+        _widths_c = np.array([max(4, int(math.sqrt(_total_param_budget / d))) for d in _depths])
+        _compute_c = _depths * (2 * _widths_c**2) / (_peak_tflops * 1e12) * 1000
+        _dispatch_c = _depths * _dispatch_ms
+        _total_c = _compute_c + _dispatch_c
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(
+            x=_depths.tolist(), y=_total_c.tolist(),
+            mode="lines", name="Total Latency",
+            line=dict(color=COLORS["RedLine"], width=2.5),
+        ))
+        _fig.add_trace(go.Scatter(
+            x=_depths.tolist(), y=_dispatch_c.tolist(),
+            mode="lines", name="Dispatch Overhead",
+            line=dict(color=COLORS["OrangeLine"], width=2, dash="dash"),
+            fill="tozeroy", fillcolor="rgba(204,85,0,0.1)",
+        ))
+        _fig.add_trace(go.Scatter(
+            x=[_depth], y=[_total_latency_ms],
+            mode="markers", name="Current",
+            marker=dict(size=12, color=COLORS["BlueLine"], symbol="diamond",
+                        line=dict(width=2, color="white")),
+        ))
+        _fig.update_layout(
+            height=360, xaxis_title="Depth (layers)", yaxis_title="Latency (ms)",
+            title=f"Latency vs. Depth (fixed ~{_total_param_budget:,} params) -- {'Cloud' if _ctx=='cloud' else 'Edge'}",
+        )
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Depth</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_depth} layers</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Width</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_width}</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:130px; text-align:center; background:white;
+                        border-top:3px solid {COLORS['OrangeLine'] if _dispatch_fraction > 30 else COLORS['GreenLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Dispatch Overhead</div>
+                <div style="font-size:1.5rem; font-weight:800;
+                     color:{COLORS['OrangeLine'] if _dispatch_fraction > 30 else COLORS['GreenLine']};">{_dispatch_fraction:.0f}%</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:130px; text-align:center; background:white;
+                        border-top:3px solid {COLORS['RedLine'] if _speedup > 5 else COLORS['OrangeLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">vs. 2-Layer (same FLOPs)</div>
+                <div style="font-size:1.5rem; font-weight:800;
+                     color:{COLORS['RedLine'] if _speedup > 5 else COLORS['OrangeLine']};">{_speedup:.1f}x slower</div>
+            </div>
+        </div>
+        """))
+
+        _pred = partC_prediction.value
+        if _pred == "10x":
+            items.append(mo.callout(mo.md(
+                f"**Correct.** At {_depth} layers, the deep-narrow network is {_speedup:.1f}x "
+                f"slower than the 2-layer alternative. Dispatch overhead ({_dispatch_fraction:.0f}% "
+                f"of total) and reduced per-layer parallelism make FLOPs a necessary but "
+                f"insufficient proxy for latency."
+            ), kind="success"))
+        elif _pred == "same":
+            items.append(mo.callout(mo.md(
+                f"**FLOPs are not latency.** Same FLOPs, but the 128-layer network pays "
+                f"dispatch overhead 128 times. At current settings, the deep network is "
+                f"{_speedup:.1f}x slower."
+            ), kind="warn"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**The gap is larger than expected.** The deep-narrow network is {_speedup:.1f}x "
+                f"slower due to accumulated dispatch overhead and reduced parallelism."
+            ), kind="warn"))
+
+        items.append(mo.accordion({
+            "MathPeek: Dispatch Overhead": mo.md(f"""
+```
+Per-layer dispatch: {_dispatch_ms} ms
+Total dispatch:     {_depth} * {_dispatch_ms} = {_total_dispatch_ms:.3f} ms
+Total compute:      {_total_compute_ms:.4f} ms
+Dispatch fraction:  {_dispatch_fraction:.1f}%
+```
+The shallow-wide (2 layers, width {_ref_width}) completes in {_ref_total:.4f} ms.
+
+Source: @sec-architectures-depth-vs-width
+"""),
+        }))
+
+        return mo.vstack(items)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PART D BUILDER: Workload Signatures
+    # ─────────────────────────────────────────────────────────────────────
+
+    def build_part_d():
+        items = []
+
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; CTO, WildlifeVision
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We are choosing between a CNN and a Transformer for our edge deployment.
+                The Transformer is newer and gets better benchmark scores. But our edge GPU
+                utilization numbers look backwards -- the CNN achieves higher MFU. Is our
+                profiling tool broken?&rdquo;
+            </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; Dr. Maya Rodriguez, CTO &middot; WildlifeVision
+            </div>
+        </div>
+        """))
+
+        items.append(mo.md("""
+## Workload Signatures: Arithmetic Intensity Determines Utilization
+
+Each architecture family has a characteristic arithmetic intensity (AI = FLOPs/byte):
+
+- **CNNs**: High AI (>20 FLOPs/byte) -- weight reuse across spatial positions
+  makes them compute-bound and GPU-efficient.
+- **Transformers at batch=1**: Low AI (<5 FLOPs/byte) for attention --
+  memory-bound, lower GPU utilization.
+- **MLPs at batch=1**: Very low AI (~0.5 FLOPs/byte) -- permanently bandwidth-bound.
+
+The hardware ridge point (peak_FLOPS / peak_BW) determines the crossover.
+        """))
+
+        items.append(partD_prediction)
+
+        if partD_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction to unlock the workload signature comparison."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
+
+        items.append(partD_batch_d)
+
+        _bs = partD_batch_d.value
+
+        # Use Engine.solve for representative models
+        _models = [
+            ("ResNet-50 (CNN)", mlsysim.Models.ResNet50),
+            ("GPT-2 (Transformer)", mlsysim.Models.GPT2),
+            ("MobileNetV2 (CNN)", mlsysim.Models.MobileNetV2),
+        ]
+        _results = []
+        for _name, _model in _models:
+            try:
+                _profile = Engine.solve(_model, H100, batch_size=_bs, precision="fp16", efficiency=0.5)
+                _ai = _profile.arithmetic_intensity.magnitude
+                _mfu = _profile.mfu
+                _bn = _profile.bottleneck
+                _results.append((_name, _ai, _mfu, _bn))
+            except Exception:
+                _results.append((_name, 0.0, 0.0, "Error"))
+
+        # Ridge point for H100
+        _ridge = H100_TFLOPS * 1000 / H100_BW_GBS  # FLOPS/byte
+
+        _names = [r[0] for r in _results]
+        _ais = [r[1] for r in _results]
+        _mfus = [r[2] for r in _results]
+        _bottlenecks = [r[3] for r in _results]
+
+        _ai_colors = [COLORS["GreenLine"] if ai > _ridge else COLORS["OrangeLine"] if ai > _ridge/2 else COLORS["RedLine"]
+                      for ai in _ais]
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Bar(
+            x=_names, y=_ais,
+            marker_color=_ai_colors, opacity=0.88,
+            text=[f"{ai:.1f}" for ai in _ais], textposition="outside",
+        ))
+        _fig.add_hline(y=_ridge, line_dash="dash", line_color=COLORS["BlueLine"],
+                       annotation_text=f"H100 Ridge Point ({_ridge:.0f} FLOPs/byte)")
+        _fig.update_layout(
+            height=360, yaxis_title="Arithmetic Intensity (FLOPs/byte)", yaxis_type="log",
+            title=f"Arithmetic Intensity by Architecture (batch={_bs})",
+        )
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        _cards = '<div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">'
+        for _name, _ai, _mfu, _bn in _results:
+            _mfu_col = COLORS["GreenLine"] if _mfu > 0.5 else COLORS["OrangeLine"] if _mfu > 0.2 else COLORS["RedLine"]
+            _cards += f"""
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:180px; text-align:center; background:white; border-top:3px solid {_mfu_col}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.72rem; font-weight:700; margin-bottom:6px;">{_name}</div>
+                <div style="font-size:1.3rem; font-weight:800; color:{_mfu_col};">MFU: {_mfu:.1%}</div>
+                <div style="font-size:0.78rem; color:{COLORS['TextSec']}; margin-top:4px;">
+                    AI: {_ai:.1f} | {_bn}
+                </div>
+            </div>"""
+        _cards += '</div>'
+        items.append(mo.Html(_cards))
+
+        _pred = partD_prediction.value
+        if _pred == "cnn":
+            items.append(mo.callout(mo.md(
+                "**Correct.** CNNs achieve the highest GPU utilization because weight reuse "
+                "across spatial positions gives them high arithmetic intensity. They operate "
+                "in the compute-bound regime. Transformers at batch=1 are memory-bound due "
+                "to the attention mechanism's low arithmetic intensity."
+            ), kind="success"))
+        elif _pred == "transformer":
+            items.append(mo.callout(mo.md(
+                "**Common misconception.** Transformers are newer but are memory-bound at "
+                "small batch sizes due to low arithmetic intensity in attention. CNNs achieve "
+                "higher MFU through spatial weight reuse. Try increasing batch size to see "
+                "Transformers improve."
+            ), kind="warn"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Not quite.** CNNs win on utilization because spatial weight reuse gives "
+                "them the highest arithmetic intensity. Architecture determines hardware "
+                "efficiency, not recency."
+            ), kind="warn"))
+
+        items.append(mo.accordion({
+            "MathPeek: Arithmetic Intensity": mo.md(f"""
+**Ridge Point (H100):**
+```
+Ridge = peak_FLOPS / peak_BW = {H100_TFLOPS:.0f} TFLOPS / {H100_BW_GBS:.0f} GB/s
+      = {_ridge:.0f} FLOPs/byte
+```
+Workloads with AI < Ridge are **memory-bound** (low MFU).
+Workloads with AI > Ridge are **compute-bound** (high MFU).
+
+Source: @sec-architectures-workload-signatures
+"""),
+        }))
+
+        return mo.vstack(items)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # SYNTHESIS BUILDER
+    # ─────────────────────────────────────────────────────────────────────
+
+    def build_synthesis():
+        items = []
+        items.append(mo.md("""
+## Synthesis: Design for the Edge
+
+A wildlife conservation project needs to classify animals from camera trap
+images on a 16 GB Jetson Orin NX with a 50 ms latency SLA.
+        """))
+
+        items.append(mo.callout(mo.md("""
+Using the four analyses from this lab, justify:
+
+1. **Why not an MLP?** (cite the parameter explosion from Part A)
+2. **Why not a large Transformer?** (cite the quadratic wall from Part B)
+3. **Deep-narrow or shallow-wide CNN?** (cite dispatch overhead from Part C)
+4. **What MFU should you expect?** (cite arithmetic intensity from Part D)
+        """), kind="info"))
+
+        items.append(mo.Html(f"""
         <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
                     border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
@@ -1331,155 +955,99 @@ def _(mo, COLORS):
             </div>
             <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                 <div style="margin-bottom: 10px;">
-                    <strong>1. Architecture determines bottleneck regime, not hardware.</strong>
-                    ResNet-50 (I &asymp; 40.2 FLOPs/byte) and GPT-2 (I &asymp; 0.50 FLOPs/byte)
-                    on the same H100 occupy opposite ends of the arithmetic intensity spectrum.
-                    GPT-2 at batch=1 wastes &gt;98% of peak FLOPS because it is memory-bandwidth-bound,
-                    not because the GPU is too slow.
+                    <strong>1. Inductive bias is a physical necessity.</strong>
+                    An MLP on 224x224 images needs 22.7B parameters in its first layer --
+                    exceeding even an H100. CNNs reduce this by 13.1 million-fold through
+                    locality and weight sharing.
                 </div>
                 <div style="margin-bottom: 10px;">
-                    <strong>2. Attention memory is O(N&sup2;) &mdash; not a linear cost, a quadratic wall.</strong>
-                    Doubling context from 4K to 8K tokens quadruples attention memory.
-                    At 100K tokens vs 4K, the factor is 625&times;. For 32 layers and 12 heads at FP16,
-                    the total reaches ~7,680 GB &mdash; nearly 100&times; an H100&rsquo;s capacity.
-                    FlashAttention avoids materializing the full N&times;N matrix; the compute is unchanged.
+                    <strong>2. Attention scales quadratically.</strong>
+                    Doubling context length quadruples attention memory (N^2).
+                    At 128K tokens, attention alone can exceed 80 GB.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>3. FLOPs are not latency.</strong>
+                    A 128-layer network with identical FLOPs to a 2-layer network can be
+                    10x slower due to accumulated dispatch overhead and reduced parallelism.
                 </div>
                 <div>
-                    <strong>3. For edge inference, depth is the enemy of latency.</strong>
-                    Sequential layer dependencies cannot be parallelized away on hardware with limited
-                    compute units. At a fixed parameter budget, a shallower wider network runs faster
-                    on a Jetson Orin NX &mdash; it exposes more parallel work per layer. Architecture
-                    selection is a systems contract, not a modeling preference.
+                    <strong>4. Architecture determines utilization.</strong>
+                    CNNs achieve higher GPU utilization than Transformers at small batch sizes
+                    because spatial weight reuse gives them higher arithmetic intensity.
                 </div>
             </div>
         </div>
-        """),
+        """))
 
-        # ── CONNECTIONS ──
-        mo.Html(f"""
-        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-
-            <!-- What's Next -->
+        items.append(mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
                     What's Next
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab 07: The Training Throughput Race</strong> &mdash; this lab showed
-                    that architecture determines whether a workload is compute-bound or memory-bound.
-                    Lab 07 asks: given your chosen architecture and hardware context, how do you
-                    maximize Model FLOPS Utilization (MFU) &mdash; the fraction of theoretical peak
-                    FLOPS you actually achieve during training?
+                    <strong>Lab 07: ML Frameworks</strong> -- Architecture determines the workload.
+                    But the framework determines how that workload executes. Lab 07 shows how
+                    eager vs. compiled execution and kernel fusion can change latency by 17x
+                    without touching a single weight.
                 </div>
             </div>
-
-            <!-- Textbook Connection -->
             <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-network-architectures-understanding-arithmetic-intensity-ade5
-                    for the full Roofline Model and Workload Signatures derivation.<br/>
-                    <strong>Build:</strong> TinyTorch Module 06 &mdash; implement the self-attention
-                    mechanism from scratch and measure its N&sup2; memory footprint directly.
-                    See <code>tinytorch/src/06_attention/</code>.
+                    <strong>Read:</strong> @sec-architectures for inductive bias,
+                    attention complexity, depth-width trade-offs.<br/>
+                    <strong>Build:</strong> TinyTorch Module 06 -- implement CNN
+                    convolution and self-attention from scratch.
                 </div>
             </div>
-
         </div>
-        """),
+        """))
 
+        return mo.vstack(items)
 
-        mo.accordion({
-            "Self-Assessment: Can you answer these?": mo.md("""
-    1. ResNet-50 has arithmetic intensity ~40 FLOPs/byte while GPT-2 at batch=1 has ~0.5 FLOPs/byte. On the same H100, which is compute-bound and which is memory-bandwidth-bound — and what does that mean for the GPU utilization of each?
+    # ─────────────────────────────────────────────────────────────────────
+    # COMPOSE TABS
+    # ─────────────────────────────────────────────────────────────────────
 
-    2. A 100K-token Transformer context window requires ~240 GB of attention memory per layer (O(N^2) scaling). For a 32-layer model, how many total GB of attention memory are needed — and why does this exceed any single GPU regardless of FLOPS?
-
-    3. MobileNet has 14x fewer FLOPs than ResNet-50 but can run slower on datacenter GPUs. Explain why in terms of arithmetic intensity, and describe what deployment context MobileNet is actually optimized for.
-
-    *If you cannot answer all three from memory, revisit Act I and Act II.*
-    """)
-        }),
-    ])
+    tabs = mo.ui.tabs({
+        "Part A \u2014 The Cost of No Structure":    build_part_a(),
+        "Part B \u2014 The Quadratic Wall":          build_part_b(),
+        "Part C \u2014 Depth vs. Width":             build_part_c(),
+        "Part D \u2014 Workload Signatures":         build_part_d(),
+        "Synthesis":                                 build_synthesis(),
+    })
+    tabs
     return
 
 
-# ─── CELL 21: LEDGER_HUD ──────────────────────────────────────────────────────
-@app.cell
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 5: LEDGER HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    decision_input, decision_ui = DecisionLog()
-    return decision_input, decision_ui
-
-
-@app.cell(hide_code=True)
-def _(
-    mo, ledger,
-    context_toggle, act1_prediction, act1_reflection, act2_prediction, act2_reflection,
-    act1_seq_slider,
-    act2_oom, act2_params_m,
-, decision_input, decision_ui):
-    _ctx = context_toggle.value
-    _seq_chosen = act1_seq_slider.value
-
-    # Save design decisions to ledger
-    ledger.save(
-        chapter=6,
-        design={
-            "context":               _ctx,
-            "seq_len_chosen":        _seq_chosen,
-            "act1_prediction":       act1_prediction.value or "unanswered",
-            "act1_correct":          act1_prediction.value == "quadratic",
-            "act1_reflection":       act1_reflection.value or "unanswered",
-            "act2_prediction":       act2_prediction.value or "unanswered",
-            "act2_reflection":       act2_reflection.value or "unanswered",
-            "quadratic_oom_triggered": act2_oom,
-            "depth_width_decision":  (act2_prediction.value or "unanswered"),
-            "act2_result":           float(act2_params_m),
-        },
-    )
-
-    _act1_done = act1_prediction.value is not None
-    _act2_done = act2_prediction.value is not None
-
+def _(COLORS, ledger, mo):
+    _track = ledger._state.track or "not set"
     mo.Html(f"""
     <div class="lab-hud">
-        <span>
-            <span class="hud-label">LAB</span>&nbsp;
-            <span class="hud-value">06 · The Quadratic Wall</span>
-        </span>
-        <span>
-            <span class="hud-label">CONTEXT</span>&nbsp;
-            <span class="hud-value">{_ctx.upper()}</span>
-        </span>
-        <span>
-            <span class="hud-label">SEQ LEN</span>&nbsp;
-            <span class="hud-value">{_seq_chosen:,} tokens</span>
-        </span>
-        <span>
-            <span class="hud-label">OOM HIT</span>&nbsp;
-            <span class="{'hud-none' if act2_oom else 'hud-active'}">{str(act2_oom).upper()}</span>
-        </span>
-        <span>
-            <span class="hud-label">ACT I</span>&nbsp;
-            <span class="{'hud-active' if _act1_done else 'hud-none'}">
-                {'COMPLETE' if _act1_done else 'PENDING'}
-            </span>
-        </span>
-        <span>
-            <span class="hud-label">ACT II</span>&nbsp;
-            <span class="{'hud-active' if _act2_done else 'hud-none'}">
-                {'COMPLETE' if _act2_done else 'PENDING'}
-            </span>
-        </span>
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">06 &middot; The Architecture Tax</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">TRACK</span>
+        <span class="{'hud-active' if _track != 'not set' else 'hud-none'}">{_track}</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">CHAPTER&nbsp;6</span>
+        <span class="hud-value">Network Architectures</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">active</span>
     </div>
     """)
     return

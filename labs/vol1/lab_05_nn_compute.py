@@ -3,52 +3,26 @@ import marimo
 __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LAB 05: THE ACTIVATION TAX
-#
-# Chapter: Neural Computation (@sec-neural-computation)
-# Core Invariant: Activation functions have wildly different hardware costs.
-#   ReLU ≈ free (50 transistors). Sigmoid/Tanh require exponential computation
-#   (2,500 transistors) — a 50× silicon penalty. The memory hierarchy adds a
-#   second multiplier: L1 → L2 → HBM → DRAM each 10× slower and larger.
-#
-# Two deployment contexts: Cloud (H100) vs Mobile (NPU).
-# 2-Act structure: ~35-40 minutes total.
-#
-# Act I — The Activation Cost Blindspot (12–15 min)
-#   Prediction: How much more expensive is Sigmoid than ReLU in transistors?
-#   Instrument: Activation cost bar chart, layer-by-layer selector.
-#   Reveal: Swapping all Sigmoid→ReLU saves 47× activation time.
-#   Reflection: Why does GELU cost more than ReLU despite similar accuracy?
-#
-# Act II — The Memory Hierarchy (20–25 min)
-#   Introduces the Memory Ledger instrument for the first time.
-#   Prediction: What fraction of a 3×3 conv's activations fit in L2 on mobile?
-#   Instrument: Layer size + batch → Memory Ledger with tier coloring.
-#   Failure state: OOM when total_activation_memory > device RAM.
-#   Reflection: Why does batch size affect memory-boundedness?
-#
-# Design Ledger save: chapter=5, context, activation_choice, oom_triggered,
-#   cache_miss_rate.
-# ─────────────────────────────────────────────────────────────────────────────
 
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═════════════════════════════════════════════════════════════════════════════
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CELL 0: SETUP (hide_code=False — leave visible for instructor inspection)
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ─── CELL 0: SETUP ──────────────────────────────────────────────────────────
 @app.cell
 async def _():
     import marimo as mo
     import sys
+    import math
     from pathlib import Path
     import plotly.graph_objects as go
     import numpy as np
 
-    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
     if sys.platform == "emscripten":
         import micropip
-        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+        await micropip.install(
+            "https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl"
+        )
     elif "mlsysim" not in sys.modules:
         _root = Path(__file__).resolve().parents[2]
         if str(_root) not in sys.path:
@@ -56,94 +30,85 @@ async def _():
 
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim.labs.components import DecisionLog
+    import mlsysim
 
-    # ── Hardware constants from chapter (@sec-neural-computation-transistor-tax)
-    # ReLU: comparator + mux (~50 transistors)
-    # Sigmoid/Tanh: exponential approximation unit (~2,500 transistors)
-    # Ratio: 2500 / 50 = 50× — "The Transistor Tax"
-    RELU_TRANSISTORS    = 50        # single comparator + mux
-    SIGMOID_TRANSISTORS = 2500      # exponential Taylor/lookup unit
-    ACTIVATION_TAX_RATIO = SIGMOID_TRANSISTORS / RELU_TRANSISTORS  # 50
+    # ── Hardware constants ─────────────────────────────────────────────────
+    H100_TFLOPS   = mlsysim.Hardware.Cloud.H100.compute.peak_flops.m_as("TFLOPs/s")
+    H100_BW_GBS   = mlsysim.Hardware.Cloud.H100.memory.bandwidth.m_as("GB/s")
+    H100_RAM_GB   = mlsysim.Hardware.Cloud.H100.memory.capacity.m_as("GB")
 
-    # Memory hierarchy latency multipliers (from footnote fn-memory-wall-nn)
-    # L1 cache: ~1 ns; main memory: ~100 ns → 100× gap
-    MEM_L1_MULT   = 1       # L1 SRAM (fastest, smallest)
-    MEM_L2_MULT   = 4       # L2 cache (~4× L1 latency)
-    MEM_HBM_MULT  = 10      # HBM / GDDR (~10× L1)
-    MEM_DRAM_MULT = 100     # Main DRAM (~100× L1)
+    MOBILE_TFLOPS = mlsysim.Hardware.Mobile.iPhone15Pro.compute.peak_flops.m_as("TFLOPs/s")
+    MOBILE_BW_GBS = mlsysim.Hardware.Mobile.iPhone15Pro.memory.bandwidth.m_as("GB/s")
+    MOBILE_RAM_GB = mlsysim.Hardware.Mobile.iPhone15Pro.memory.capacity.m_as("GB")
 
-    # Cloud context: H100 SXM5
-    H100_RAM_GB      = 80       # GB HBM3e
-    H100_L2_CACHE_MB = 50       # MB L2 (H100 SXM5 spec)
-    H100_L1_CACHE_KB = 6 * 1024 # KB per SM × 108 SMs (shared L1 budget approx)
-    # For per-layer L1 we use a practical per-SM allocation
-    H100_L1_PER_SM_KB = 256     # KB per SM L1/shared mem
+    # ── Activation function transistor costs ───────────────────────────────
+    # Source: @sec-nn-computation-activation-functions (textbook Table 5.x)
+    TRANSISTOR_COSTS = {
+        "ReLU":    50,      # Single comparison: max(0, x)
+        "GELU":    1200,    # Approximate erf() or tanh polynomial
+        "Sigmoid": 2500,    # exp(-x), division, addition
+        "Swish":   2550,    # Sigmoid(x) * x
+    }
 
-    # Mobile NPU context
-    MOBILE_RAM_GB     = 8        # GB
-    MOBILE_L2_CACHE_KB = 512     # KB L2
-    MOBILE_L1_CACHE_KB = 64      # KB L1
+    # ── Memory hierarchy tier latencies (ns per access) ────────────────────
+    # Source: @sec-nn-computation-memory-hierarchy
+    TIER_LATENCY_NS = {"L1": 1.0, "L2": 5.0, "HBM": 100.0, "DRAM": 200.0}
+    CLOUD_TIERS_KB  = {"L1": 256, "L2": 50_000, "HBM": 80_000_000}
+    MOBILE_TIERS_KB = {"L1": 128, "L2": 32_000, "HBM": 8_000_000}
 
     ledger = DesignLedger()
     return (
-        mo, ledger, COLORS, LAB_CSS, apply_plotly_theme, go, np,
-        RELU_TRANSISTORS, SIGMOID_TRANSISTORS, ACTIVATION_TAX_RATIO,
-        MEM_L1_MULT, MEM_L2_MULT, MEM_HBM_MULT, MEM_DRAM_MULT,
-        H100_RAM_GB, H100_L2_CACHE_MB, H100_L1_PER_SM_KB,
-        MOBILE_RAM_GB, MOBILE_L2_CACHE_KB, MOBILE_L1_CACHE_KB,
+        COLORS, H100_TFLOPS, H100_BW_GBS, H100_RAM_GB,
+        MOBILE_TFLOPS, MOBILE_BW_GBS, MOBILE_RAM_GB,
+        TRANSISTOR_COSTS, TIER_LATENCY_NS, CLOUD_TIERS_KB, MOBILE_TIERS_KB,
+        LAB_CSS, apply_plotly_theme, go, math, mo, np, ledger,
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CELL 1: HEADER
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ─── CELL 1: HEADER ─────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, LAB_CSS, COLORS):
-    _mobile_color = COLORS["Mobile"]
-    _cloud_color  = COLORS["Cloud"]
+def _(LAB_CSS, mo):
     mo.vstack([
         LAB_CSS,
-        mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        mo.Html("""
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.3);">
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
                         color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems · Volume I · Lab 05
+                Machine Learning Systems &middot; Volume I &middot; Lab 05
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
-                The Activation Tax
+                The Transistor Tax
             </h1>
-            <p style="margin: 0 0 20px 0; font-size: 1.05rem; color: #94a3b8;
-                      max-width: 700px; line-height: 1.65;">
-                Not all activation functions cost the same. ReLU is a comparator.
-                Sigmoid requires an exponential. The memory hierarchy multiplies
-                every cost by 10× per tier. Where you put your data is as important
-                as what you compute with it.
+            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
+                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
+                Silicon Cost &middot; Memory Cliffs &middot; Width-Squared Scaling &middot; Backprop Memory
             </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                <span style="background: rgba(99,102,241,0.15); color: #a5b4fc;
+            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
+                      max-width: 680px; line-height: 1.65;">
+                Four quantitative realities about neural computation that shape every
+                architecture decision: activation functions have wildly different silicon
+                costs, memory hierarchies create cliffs not slopes, width scales
+                quadratically, and training demands storing everything inference can discard.
+            </p>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
+                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.25);">
-                    Act I: Activation Cost Blindspot · 12–15 min
+                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
+                    4 Parts + Synthesis &middot; ~50 min
                 </span>
-                <span style="background: rgba(204,85,0,0.15); color: #fdba74;
+                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(204,85,0,0.25);">
-                    Act II: Memory Hierarchy · 20–25 min
-                </span>
-                <span style="background: rgba(16,185,129,0.15); color: #6ee7b7;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(16,185,129,0.25);">
-                    35–40 min total
+                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
+                    Chapter 5: Neural Computation
                 </span>
             </div>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px;">
-                <span class="badge badge-info">First use: Memory Ledger instrument</span>
-                <span class="badge badge-info">First use: Activation Comparator</span>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <span class="badge badge-info">ReLU: 50 transistors</span>
+                <span class="badge badge-warn">Sigmoid: 2,500 transistors</span>
+                <span class="badge badge-fail">Memory Cliffs: 10-100x</span>
             </div>
         </div>
         """),
@@ -151,44 +116,44 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE A: OPENING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 2: BRIEFING ─────────────────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, COLORS):
+def _(COLORS, mo):
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
                 padding: 20px 28px; margin: 8px 0 16px 0;
                 box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-
-        <!-- LEARNING OBJECTIVES -->
         <div style="margin-bottom: 16px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                 Learning Objectives
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the transistor cost ratio</strong> between ReLU (~50 transistors) and Sigmoid (~2,500 transistors) and verify the 50&times; silicon penalty using the Activation Comparator instrument.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Predict which memory hierarchy tier</strong> a given layer&rsquo;s activations will land in for a specified batch size, channel count, and spatial dimension, given L1/L2/HBM (High Bandwidth Memory)/DRAM capacity boundaries.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Identify the batch size threshold</strong> where activation memory exceeds the mobile L2 cache (512 KB) and triggers the 10&times; latency penalty of HBM access for a 3&times;3 convolutional layer.</div>
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the transistor cost ratio</strong>
+                    between ReLU (~50 transistors) and Sigmoid (~2,500 transistors) and predict
+                    when this 50x gap becomes a dominant fraction of inference time.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Predict which memory hierarchy tier</strong>
+                    a layer's activations land in given batch size and width, and identify the
+                    batch size threshold where a 10x latency cliff appears.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Calculate the FLOPs scaling law</strong>
+                    for dense layers: doubling width yields ~4x FLOPs, not 2x.</div>
+                <div style="margin-bottom: 3px;">4. <strong>Compare forward vs. backward memory</strong>:
+                    training stores all layer activations simultaneously, creating a 4-10x
+                    memory multiplier over inference.</div>
             </div>
         </div>
-
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <!-- PREREQUISITES + DURATION (side by side) -->
-        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 220px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Activation function definitions from @sec-neural-computation-artificial-neuron-computing-primitive-45b4 &middot;
-                    Memory hierarchy tiers from @sec-neural-computation-transistor-tax
+                    Activation function definitions from @sec-neural-computation-artificial-neuron
+                    &middot; Memory hierarchy tiers from @sec-neural-computation-transistor-tax
+                    &middot; Iron Law equation from @sec-introduction-iron-law
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -197,26 +162,23 @@ def _(mo, COLORS):
                     Duration
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>35&ndash;40 min</strong><br/>
-                    Act I: ~12 min &middot; Act II: ~25 min
+                    <strong>~50 min</strong><br/>
+                    Part A: ~10 min &middot; Part B: ~10 min<br/>
+                    Part C: ~10 min &middot; Part D: ~10 min
                 </div>
             </div>
         </div>
-
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <!-- CORE QUESTION -->
-        <div style="margin-top: 16px;">
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
+                    padding: 16px 28px 0 28px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                 Core Question
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                &ldquo;ReLU and Sigmoid produce similar accuracy on the same network &mdash;
-                so why does the choice of activation function determine whether your model
-                fits in cache or spills to memory 100&times; slower, and whether gradient
-                signals survive 20 layers of backpropagation?&rdquo;
+                &ldquo;ReLU and Sigmoid produce similar accuracy &mdash; so why does the
+                choice of activation function determine whether your model fits in cache
+                or spills to memory 100x slower?&rdquo;
             </div>
         </div>
     </div>
@@ -224,1237 +186,855 @@ def _(mo, COLORS):
     return
 
 
-# ─── CELL 3: READING ──────────────────────────────────────────────────────────
+# ─── CELL 3: READING ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
-    **Recommended Reading** — Complete these sections before this lab:
+    **Recommended Reading** -- Complete the following before this lab:
 
-    - **@sec-neural-computation-artificial-neuron-computing-primitive-45b4** — The artificial neuron: inputs, weights, activation functions, MAC operations
-    - **@sec-neural-computation-transistor-tax** — The Transistor Tax: ReLU vs Sigmoid silicon cost (50×)
-    - **@sec-neural-computation-computational-implementation-details-1ecc** — Training memory decomposition: weights, gradients, optimizer state, activations
-    - **Footnote fn-memory-wall-nn** — L1 cache ~1 ns vs main memory ~100 ns: the 100× latency gap
+    - **Chapter 5: The Artificial Neuron** -- activation function definitions, computational
+      graph of a single neuron, transistor-level implementation of ReLU vs. Sigmoid.
+    - **Chapter 5: The Transistor Tax** -- silicon cost table for common activation functions,
+      percentage of inference time consumed by activations on Cloud vs. Mobile.
+    - **Chapter 5: Memory Hierarchy** -- cache tiers (L1/L2/HBM/DRAM), tier latencies,
+      and the concept of memory cliffs vs. gradual degradation.
+    - **Chapter 5: Backpropagation Memory** -- why training must store all intermediate
+      activations, and the forward-vs-backward memory multiplier.
     """), kind="info")
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ─── CELL 4: CONTEXT_TOGGLE ──────────────────────────────────────────────────
-# ─────────────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE B-D: ALL PARTS AS TABS
+# ═════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 4: TABS CELL ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    context_toggle = mo.ui.radio(
-        options={"Cloud (H100 — 80 GB HBM)": "cloud", "Mobile (NPU — 8 GB)": "mobile"},
-        value="Cloud (H100 — 80 GB HBM)",
+def _(
+    COLORS, CLOUD_TIERS_KB, H100_BW_GBS, H100_RAM_GB, H100_TFLOPS,
+    MOBILE_BW_GBS, MOBILE_RAM_GB, MOBILE_TFLOPS, MOBILE_TIERS_KB,
+    TIER_LATENCY_NS, TRANSISTOR_COSTS, apply_plotly_theme,
+    go, math, mo, np, ledger,
+):
+    # ─────────────────────────────────────────────────────────────────────
+    # SHARED WIDGET STATE
+    # ─────────────────────────────────────────────────────────────────────
+
+    # Part A widgets
+    partA_prediction = mo.ui.radio(
+        options={
+            "A) <1% (negligible, like on GPUs)": "lt1",
+            "B) ~5% (noticeable but small)": "5pct",
+            "C) ~23% (significant cost)": "23pct",
+            "D) ~50% (dominant cost)": "50pct",
+        },
+        label="On a mobile NPU, what fraction of inference time comes from activation "
+              "functions if you use Sigmoid instead of ReLU in every layer?",
+    )
+    partA_context = mo.ui.radio(
+        options={"Cloud GPU (H100)": "cloud", "Mobile NPU (iPhone)": "mobile"},
+        value="Cloud GPU (H100)",
         label="Deployment context:",
         inline=True,
     )
-    context_toggle
-    return (context_toggle,)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ─── CELL 4b: CONTEXT SPECS DISPLAY ─────────────────────────────────────────
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo, context_toggle, COLORS):
-    _ctx = context_toggle.value
-    if _ctx == "cloud":
-        _accent = COLORS["Cloud"]
-        _bg = "#f0f4ff"
-        _border = "#c7d2fe"
-        _specs = [
-            ("Device", "NVIDIA H100 SXM5"),
-            ("HBM Capacity", "80 GB"),
-            ("L2 Cache", "40 MB"),
-            ("L1 / SM", "256 KB"),
-            ("Memory BW", "3,350 GB/s"),
-            ("Power Budget", "700 W TDP"),
-        ]
-    else:
-        _accent = COLORS["Mobile"]
-        _bg = "#fff7ed"
-        _border = "#fed7aa"
-        _specs = [
-            ("Device", "Mobile NPU"),
-            ("RAM Capacity", "8 GB"),
-            ("L2 Cache", "512 KB"),
-            ("L1 Cache", "64 KB"),
-            ("Memory BW", "68 GB/s"),
-            ("Power Budget", "5 W sustained"),
-        ]
-
-    _rows = "".join(
-        f'<div style="display:flex; justify-content:space-between; padding:4px 0; '
-        f'border-bottom:1px solid {_border}; font-size:0.85rem;">'
-        f'<span style="color:#475569; font-weight:600;">{k}</span>'
-        f'<span style="font-family:monospace; color:{_accent}; font-weight:700;">{v}</span>'
-        f'</div>'
-        for k, v in _specs
+    partA_act_l1 = mo.ui.dropdown(
+        options={"ReLU": "ReLU", "GELU": "GELU", "Sigmoid": "Sigmoid", "Swish": "Swish"},
+        value="Sigmoid", label="Layer 1",
+    )
+    partA_act_l2 = mo.ui.dropdown(
+        options={"ReLU": "ReLU", "GELU": "GELU", "Sigmoid": "Sigmoid", "Swish": "Swish"},
+        value="Sigmoid", label="Layer 2",
+    )
+    partA_act_l3 = mo.ui.dropdown(
+        options={"ReLU": "ReLU", "GELU": "GELU", "Sigmoid": "Sigmoid", "Swish": "Swish"},
+        value="Sigmoid", label="Layer 3",
+    )
+    partA_act_l4 = mo.ui.dropdown(
+        options={"ReLU": "ReLU", "GELU": "GELU", "Sigmoid": "Sigmoid", "Swish": "Swish"},
+        value="Sigmoid", label="Layer 4",
     )
 
-    mo.Html(f"""
-    <div style="background:{_bg}; border:1px solid {_border}; border-left:4px solid {_accent};
-                border-radius:8px; padding:16px 20px; margin: 8px 0;">
-        <div style="font-size:0.72rem; font-weight:700; color:{_accent}; text-transform:uppercase;
-                    letter-spacing:0.1em; margin-bottom:10px;">
-            Active Context — Hardware Constraints
+    # Part B widgets
+    partB_prediction = mo.ui.radio(
+        options={
+            "A) 2x (linear with data size)": "2x",
+            "B) 1.5x (some overhead)": "1.5x",
+            "C) 10x (cache tier boundary crossed)": "10x",
+            "D) No change (hardware handles it)": "none",
+        },
+        label="A layer produces a 16 KB activation tensor in L2 cache. You double the "
+              "batch size (32 KB now). How does latency change on a mobile NPU?",
+    )
+    partB_context = mo.ui.radio(
+        options={"Cloud GPU (H100)": "cloud", "Mobile NPU (iPhone)": "mobile"},
+        value="Mobile NPU (iPhone)",
+        label="Deployment context:",
+        inline=True,
+    )
+    partB_batch = mo.ui.slider(
+        start=1, stop=512, value=1, step=1, label="Batch size",
+    )
+    partB_width = mo.ui.slider(
+        start=64, stop=4096, value=256, step=64, label="Layer width",
+    )
+
+    # Part C widgets
+    partC_prediction = mo.ui.radio(
+        options={
+            "A) 2x (linear with width)": "2x",
+            "B) 3x": "3x",
+            "C) ~4x (quadratic)": "4x",
+            "D) 8x (cubic)": "8x",
+        },
+        label="A 3-layer MLP has hidden layers of width 128. You double the hidden "
+              "width to 256. By how much do total FLOPs increase?",
+    )
+    partC_width = mo.ui.slider(
+        start=32, stop=2048, value=128, step=32, label="Hidden layer width",
+    )
+
+    # Part D widgets
+    partD_prediction = mo.ui.radio(
+        options={
+            "A) ~50 MB (same as inference)": "50mb",
+            "B) ~100 MB (2x for gradients)": "100mb",
+            "C) ~200 MB (4x)": "200mb",
+            "D) ~500 MB+ (10x+)": "500mb",
+        },
+        label="A 20-layer model uses 50 MB for inference. How much memory does training "
+              "require (weights + gradients + activations, ignoring optimizer state)?",
+    )
+    partD_depth = mo.ui.slider(
+        start=3, stop=50, value=20, step=1, label="Network depth (layers)",
+    )
+    partD_batch = mo.ui.slider(
+        start=1, stop=128, value=32, step=1, label="Batch size",
+    )
+    partD_phase = mo.ui.radio(
+        options={"Inference": "inference", "Training": "training"},
+        value="Inference",
+        label="Phase:",
+        inline=True,
+    )
+    partD_width_d = mo.ui.slider(
+        start=64, stop=2048, value=512, step=64, label="Layer width",
+    )
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PART A BUILDER: The Transistor Tax
+    # ─────────────────────────────────────────────────────────────────────
+
+    def build_part_a():
+        items = []
+
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; ML Compiler Engineer, NeuralEdge Inc.
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;Our mobile vision model uses Sigmoid activations in every layer. The
+                cloud version runs perfectly, but on the phone it is 30% slower than our
+                latency budget. Engineering says the activations are irrelevant &mdash;
+                they are just element-wise ops. Can you check the silicon cost?&rdquo;
+            </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; Priya Nair, ML Compiler Engineer &middot; NeuralEdge Inc.
+            </div>
         </div>
-        {_rows}
-    </div>
-    """)
-    return
+        """))
 
+        items.append(mo.md("""
+## The Transistor Tax: Not All Activations Are Created Equal
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: ACT I -- CALIBRATION
-# ═══════════════════════════════════════════════════════════════════════════════
+Every activation function compiles down to transistor-level logic. The cost
+varies enormously:
 
-# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _act_num      = "I"
-    _act_color    = COLORS["BlueLine"]
-    _act_title    = "The Activation Cost Blindspot"
-    _act_duration = "12&ndash;15 min"
-    _act_why      = ("You expect activation functions to be &ldquo;free&rdquo; &mdash; just a "
-                     "nonlinearity tacked onto a matrix multiply. The Transistor Tax shows "
-                     "that Sigmoid costs 50&times; more silicon than ReLU. For a mobile AR "
-                     "model running 4 sigmoid layers at 12 FPS, swapping to ReLU is not an "
-                     "accuracy trade-off; it is an architectural decision with a measurable "
-                     "thermal and throughput consequence.")
+| Function | Transistors | Operation |
+|----------|-------------|-----------|
+| **ReLU** | ~50 | Single comparison: `max(0, x)` |
+| **GELU** | ~1,200 | Approximate `erf()` or tanh polynomial |
+| **Sigmoid** | ~2,500 | Exponentiation + division: `1/(1+exp(-x))` |
+| **Swish** | ~2,550 | Sigmoid(x) * x |
 
-    mo.vstack([
-        mo.md("---"),
-        mo.Html(f"""
-        <div style="margin: 8px 0 12px 0;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <div style="background: {_act_color}; color: white; border-radius: 50%;
-                            width: 32px; height: 32px; display: inline-flex; align-items: center;
-                            justify-content: center; font-size: 0.9rem; font-weight: 800;
-                            flex-shrink: 0;">{_act_num}</div>
-                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em;">
-                    Act {_act_num} &middot; {_act_duration}</div>
+On a cloud GPU, activation compute is <1% of total inference time because
+matrix multiplies dominate. On a mobile NPU, the 50x transistor gap between
+ReLU and Sigmoid becomes a **significant fraction** of total inference time.
+        """))
+
+        items.append(partA_prediction)
+
+        if partA_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction above to unlock the activation cost simulator."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([partA_context], justify="start"))
+        items.append(mo.hstack([partA_act_l1, partA_act_l2, partA_act_l3, partA_act_l4], justify="start"))
+
+        # Simulation
+        _ctx = partA_context.value
+        _is_mobile = _ctx == "mobile"
+        _hw_clock_ghz = 1.5 if _is_mobile else 2.1
+        _hw_label = "Mobile NPU (iPhone)" if _is_mobile else "Cloud GPU (H100)"
+        _channels = 64
+        _spatial = 56 * 56
+        _activations_per_layer = _channels * _spatial
+
+        _matmul_flops_per_layer = 2 * _channels * _channels * _spatial
+        _total_mm_flops = 4 * _matmul_flops_per_layer
+        _peak_tflops = MOBILE_TFLOPS if _is_mobile else H100_TFLOPS
+        _matmul_time_ms = (_total_mm_flops / (_peak_tflops * 1e12)) * 1000
+
+        _pipeline_width = 256 if _is_mobile else 16384
+        _act_names = [partA_act_l1.value, partA_act_l2.value, partA_act_l3.value, partA_act_l4.value]
+        _layer_times_act = []
+        for _act in _act_names:
+            _transistors = TRANSISTOR_COSTS.get(_act, 50)
+            _cycles_per_act = _transistors / 50
+            _act_time = (_activations_per_layer * _cycles_per_act) / (_hw_clock_ghz * 1e9 * _pipeline_width) * 1000
+            _layer_times_act.append(_act_time)
+
+        _total_act_time = sum(_layer_times_act)
+        _total_mm_time = _matmul_time_ms
+        _norm_time = _total_mm_time * 0.05
+        _other_time = _total_mm_time * 0.02
+        _total_time = _total_mm_time + _total_act_time + _norm_time + _other_time
+        _act_pct = (_total_act_time / _total_time) * 100 if _total_time > 0 else 0
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Bar(name="Matrix Multiply", x=["Breakdown"], y=[_total_mm_time],
+                              marker_color=COLORS["BlueLine"], opacity=0.88))
+        _fig.add_trace(go.Bar(name="Activations", x=["Breakdown"], y=[_total_act_time],
+                              marker_color=COLORS["RedLine"] if _act_pct > 10 else COLORS["OrangeLine"],
+                              opacity=0.88))
+        _fig.add_trace(go.Bar(name="Normalization", x=["Breakdown"], y=[_norm_time],
+                              marker_color=COLORS["GreenLine"], opacity=0.88))
+        _fig.add_trace(go.Bar(name="Other", x=["Breakdown"], y=[_other_time],
+                              marker_color=COLORS["Grey"], opacity=0.88))
+        _fig.update_layout(barmode="stack", height=320, yaxis_title="Time (ms)",
+                           title=f"Inference Time Decomposition -- {_hw_label}",
+                           legend=dict(orientation="h", y=1.12, x=0))
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        _total_transistors = sum(TRANSISTOR_COSTS[a] * _activations_per_layer for a in _act_names)
+        _relu_baseline = 50 * _activations_per_layer * 4
+        _color = COLORS["RedLine"] if _act_pct > 15 else COLORS["OrangeLine"] if _act_pct > 5 else COLORS["GreenLine"]
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:150px; text-align:center; background:white;
+                        border-top:3px solid {_color}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Activation % of Total</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{_color};">{_act_pct:.1f}%</div>
             </div>
-            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                        margin-top: 8px; line-height: 1.2;">
-                {_act_title}
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:150px; text-align:center; background:white;
+                        border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Total Transistors (Act.)</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['BlueLine']};">{_total_transistors:,.0f}</div>
             </div>
-            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                        line-height: 1.55; max-width: 700px;">
-                {_act_why}
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:150px; text-align:center; background:white;
+                        border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">vs. All-ReLU Baseline</div>
+                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['OrangeLine']};">{_total_transistors/_relu_baseline:.1f}x</div>
             </div>
         </div>
-        """),
-        mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeLL']};
+        """))
+
+        # Reveal
+        _pred = partA_prediction.value
+        if _pred == "23pct":
+            items.append(mo.callout(mo.md(
+                "**Correct.** On a mobile NPU, switching all layers to Sigmoid pushes "
+                "activation compute to ~23% of total inference time. On cloud hardware "
+                "with 16,000+ ALUs, the same switch is barely measurable (<1%). "
+                "The deployment context determines whether this design choice has a real cost."
+            ), kind="success"))
+        elif _pred == "lt1":
+            items.append(mo.callout(mo.md(
+                "**That is the cloud GPU answer, not mobile.** On cloud hardware, activations "
+                "are indeed <1% thanks to massive parallelism. But on mobile with ~256 ALUs, "
+                "the 50x transistor gap translates to ~23% of inference time. "
+                "Try switching the context toggle to Mobile to see the difference."
+            ), kind="warn"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**Close but not quite.** The actual fraction on mobile is ~23%. "
+                f"Sigmoid requires ~2,500 transistors per activation vs. ReLU's ~50 -- "
+                f"a 50x gap that becomes significant when hardware parallelism is limited."
+            ), kind="warn"))
+
+        items.append(mo.accordion({
+            "MathPeek: Activation Cost Formula": mo.md(f"""
+**Activation time per layer:**
+```
+T_act = (N_activations * C_transistors) / (f_clock * N_ALUs)
+      = ({_activations_per_layer:,} * C) / ({_hw_clock_ghz} GHz * {_pipeline_width})
+```
+Where C varies: ReLU=50, GELU=1200, Sigmoid=2500, Swish=2550.
+
+Source: @sec-nn-computation-activation-functions, @sec-nn-computation-transistor-tax
+"""),
+        }))
+
+        return mo.vstack(items)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PART B BUILDER: The Memory Hierarchy Cliff
+    # ─────────────────────────────────────────────────────────────────────
+
+    def build_part_b():
+        items = []
+
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
                     border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
             <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Mobile AR Team Lead
+                Incoming Message &middot; Performance Engineer, NeuralEdge Inc.
             </div>
             <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                "Our mobile AR model runs at 12 FPS &mdash; half our 24 FPS target. The team
-                wants to add a larger backbone. Before you approve that, look at what
-                activations are already costing us. We have four layers that could each
-                use different activation functions. Right now they all use Sigmoid."
+                &ldquo;We doubled our batch size and expected 2x throughput. Instead, latency
+                jumped 10x on the mobile target. On the cloud GPU, everything was fine. The
+                model is identical. What happened?&rdquo;
+            </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; Marcus Chen, Performance Engineer &middot; NeuralEdge Inc.
             </div>
         </div>
-        """),
-        mo.md("""
-        The chapter established the **Transistor Tax** (@sec-neural-computation-transistor-tax):
-        choosing an activation function is a hardware design decision, not just a mathematical
-        one. ReLU requires a single comparator. Sigmoid requires an exponential unit built from
-        lookup tables or Taylor series. The silicon cost difference is not marginal — it is the
-        difference between 50 transistors and 2,500.
+        """))
 
-        Before you explore the instruments, commit to a prediction.
-        """),
-    ])
-    return
+        items.append(mo.md("""
+## Memory Hierarchies Create Cliffs, Not Slopes
 
+Memory is not flat. Hardware organizes it into tiers with dramatically different latencies:
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CELL 5: ACT I PREDICTION LOCK
-# ─────────────────────────────────────────────────────────────────────────────
+| Tier | Typical Capacity | Latency | Relative Speed |
+|------|-----------------|---------|---------------|
+| **L1 Cache** | ~128-256 KB | ~1 ns | 1x (baseline) |
+| **L2 Cache** | 32-50 MB | ~5 ns | 5x slower |
+| **HBM / DRAM** | 8-80 GB | ~100-200 ns | 100-200x slower |
 
-@app.cell(hide_code=True)
-def _(mo):
-    act1_prediction = mo.ui.radio(
-        options={
-            "A) About the same cost — both are just nonlinear functions": "1x",
-            "B) ~5× more — Sigmoid requires a division operation": "5x",
-            "C) ~50× more — Sigmoid needs an exponential unit": "50x",
-            "D) ~500× more — Sigmoid requires iterative convergence": "500x",
-        },
-        label="Compared to ReLU, a Sigmoid activation requires approximately how much more silicon (transistor count)?",
-    )
-    mo.vstack([
-        mo.Html("""
-        <div style="background:#1e293b; border-radius:8px; padding:14px 20px;
-                    border-left:4px solid #6366f1; margin:8px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:#a5b4fc;
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;">
-                Prediction Lock — Act I
+When a tensor exceeds a tier capacity, latency does not degrade gradually -- it
+**falls off a cliff** to the next tier. Doubling batch size can push activations
+from L2 (5 ns) to HBM (100 ns): a **20x latency jump**, not 2x.
+        """))
+
+        items.append(partB_prediction)
+
+        if partB_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction above to unlock the memory tier simulator."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([partB_context, partB_batch, partB_width], justify="start"))
+
+        _ctx = partB_context.value
+        _batch = partB_batch.value
+        _width = partB_width.value
+        _is_mobile = _ctx == "mobile"
+        _tiers = MOBILE_TIERS_KB if _is_mobile else CLOUD_TIERS_KB
+
+        _tensor_bytes = _batch * _width * 4
+        _tensor_kb = _tensor_bytes / 1024
+
+        def _get_tier(sz_kb, tiers):
+            if sz_kb <= tiers["L1"]:
+                return "L1"
+            elif sz_kb <= tiers["L2"]:
+                return "L2"
+            elif sz_kb <= tiers["HBM"]:
+                return "HBM"
+            return "DRAM"
+
+        _tier = _get_tier(_tensor_kb, _tiers)
+        _tier_colors = {"L1": COLORS["GreenLine"], "L2": COLORS["BlueLine"],
+                        "HBM": COLORS["OrangeLine"], "DRAM": COLORS["RedLine"]}
+        _tier_color = _tier_colors[_tier]
+        _access_ns = TIER_LATENCY_NS[_tier]
+        _latency_ratio = _access_ns / TIER_LATENCY_NS["L2"]
+
+        _batch_range = np.arange(1, 513)
+        _sizes_kb = _batch_range * _width * 4 / 1024
+        _latencies = np.array([TIER_LATENCY_NS[_get_tier(s, _tiers)] for s in _sizes_kb])
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(
+            x=_batch_range.tolist(), y=_latencies.tolist(),
+            mode="lines", name="Access Latency",
+            line=dict(color=COLORS["BlueLine"], width=2.5),
+            fill="tozeroy", fillcolor="rgba(0,99,149,0.1)",
+        ))
+        _fig.add_trace(go.Scatter(
+            x=[_batch], y=[_access_ns],
+            mode="markers", name="Current Setting",
+            marker=dict(size=14, color=_tier_color, symbol="diamond",
+                        line=dict(width=2, color="white")),
+        ))
+        for _tier_name, _tier_cap in _tiers.items():
+            _boundary_batch = max(1, int(_tier_cap / (_width * 4 / 1024)))
+            if 1 < _boundary_batch < 512:
+                _fig.add_vline(x=_boundary_batch, line_dash="dash",
+                               line_color=COLORS["OrangeLine"], opacity=0.6,
+                               annotation_text=f"{_tier_name} limit", annotation_position="top")
+        _fig.update_layout(
+            height=360, xaxis_title="Batch Size", yaxis_title="Access Latency (ns)",
+            yaxis_type="log",
+            title=f"Memory Tier Latency vs. Batch Size -- {'Mobile' if _is_mobile else 'Cloud'} (width={_width})",
+        )
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        _oom = _tensor_kb > _tiers["HBM"]
+        if _oom:
+            items.append(mo.callout(mo.md(
+                f"**OOM -- Activation tensor ({_tensor_kb:,.0f} KB) exceeds device memory "
+                f"({_tiers['HBM']:,} KB).** Reduce batch size or layer width."
+            ), kind="danger"))
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {_tier_color}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Tensor Size</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_tier_color};">{_tensor_kb:,.1f} KB</div>
             </div>
-            <div style="font-size:0.88rem; color:#94a3b8; line-height:1.5;">
-                Select your prediction before the instruments unlock. Your answer is
-                recorded and compared to the actual result at the end of this act.
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {_tier_color}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Memory Tier</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_tier_color};">{_tier}</div>
             </div>
-        </div>
-        """),
-        act1_prediction,
-    ])
-    return (act1_prediction,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act1_prediction):
-    mo.stop(
-        act1_prediction.value is None,
-        mo.callout(
-            mo.md("Select your prediction above to unlock the Act I instruments."),
-            kind="warn",
-        ),
-    )
-    return
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CELL 6: ACT I INSTRUMENT — ACTIVATION COST COMPARATOR
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ### The Activation Cost Comparator
-
-    The chart below shows the silicon cost of each activation function in transistors,
-    relative to ReLU. Move through the four layer selectors to assign an activation
-    function to each layer in the AR model. The total inference cost updates live.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    # Layer activation selectors — 4 layers in the mobile AR model
-    _act_options = {
-        "ReLU   (max(0,x) — comparator)": "relu",
-        "Leaky ReLU   (max(αx,x))": "leaky_relu",
-        "Sigmoid   (1/(1+e^−x))": "sigmoid",
-        "Tanh   ((e^x−e^−x)/(e^x+e^−x))": "tanh",
-        "GELU   (x·Φ(x) — erf approx)": "gelu",
-        "Softmax   (exp / sum(exp))": "softmax",
-    }
-    act1_layer1 = mo.ui.dropdown(
-        options=_act_options, value="Sigmoid   (1/(1+e^−x))", label="Layer 1 activation"
-    )
-    act1_layer2 = mo.ui.dropdown(
-        options=_act_options, value="Sigmoid   (1/(1+e^−x))", label="Layer 2 activation"
-    )
-    act1_layer3 = mo.ui.dropdown(
-        options=_act_options, value="Sigmoid   (1/(1+e^−x))", label="Layer 3 activation"
-    )
-    act1_layer4 = mo.ui.dropdown(
-        options=_act_options, value="Sigmoid   (1/(1+e^−x))", label="Layer 4 activation"
-    )
-    mo.vstack([
-        mo.md("**Assign an activation function to each of the four AR model layers:**"),
-        mo.hstack([act1_layer1, act1_layer2], justify="start", gap="2rem"),
-        mo.hstack([act1_layer3, act1_layer4], justify="start", gap="2rem"),
-    ])
-    return (act1_layer1, act1_layer2, act1_layer3, act1_layer4)
-
-
-@app.cell(hide_code=True)
-def _(
-    mo, go, np, apply_plotly_theme, COLORS,
-    act1_layer1, act1_layer2, act1_layer3, act1_layer4,
-    RELU_TRANSISTORS, SIGMOID_TRANSISTORS, ACTIVATION_TAX_RATIO,
-    context_toggle,
-):
-    # ── Activation transistor cost model ─────────────────────────────────────
-    # Source: @sec-neural-computation-transistor-tax
-    # ReLU: ~50 transistors (comparator + mux)
-    # Sigmoid/Tanh: ~2,500 transistors (exponential unit)
-    # GELU: ~1,500 transistors (erf polynomial approximation, cheaper than full exp)
-    # Leaky ReLU: ~60 transistors (comparator + mux + scale)
-    # Softmax: ~3,000 transistors (exp + accumulate + divide, worst case)
-    _TRANSISTOR_COST = {
-        "relu":       RELU_TRANSISTORS,        # 50    — comparator + mux
-        "leaky_relu": 60,                      # 60    — comparator + scale + mux
-        "sigmoid":    SIGMOID_TRANSISTORS,     # 2,500 — exponential unit
-        "tanh":       SIGMOID_TRANSISTORS,     # 2,500 — same exponential complexity
-        "gelu":       1500,                    # 1,500 — polynomial erf approximation
-        "softmax":    3000,                    # 3,000 — exp + sum + divide
-    }
-    _CYCLE_COST = {
-        "relu":       1,    # 1 cycle
-        "leaky_relu": 2,    # 2 cycles
-        "sigmoid":    25,   # 20–30 cycles (exponential pipeline)
-        "tanh":       25,   # 20–30 cycles
-        "gelu":       8,    # 6–10 cycles (polynomial)
-        "softmax":    30,   # exp + reduction
-    }
-    _ACT_NAMES = {
-        "relu":       "ReLU",
-        "leaky_relu": "Leaky ReLU",
-        "sigmoid":    "Sigmoid",
-        "tanh":       "Tanh",
-        "gelu":       "GELU",
-        "softmax":    "Softmax",
-    }
-
-    _selected = [
-        act1_layer1.value,
-        act1_layer2.value,
-        act1_layer3.value,
-        act1_layer4.value,
-    ]
-    _layer_names = ["Layer 1", "Layer 2", "Layer 3", "Layer 4"]
-
-    # ── Reference bar chart: transistor cost comparison ───────────────────────
-    _all_acts  = list(_TRANSISTOR_COST.keys())
-    _all_costs = [_TRANSISTOR_COST[a] for a in _all_acts]
-    _all_names = [_ACT_NAMES[a] for a in _all_acts]
-    _bar_colors = [
-        COLORS["RedLine"] if c >= 1000 else
-        COLORS["OrangeLine"] if c >= 200 else
-        COLORS["GreenLine"]
-        for c in _all_costs
-    ]
-
-    _fig_ref = go.Figure()
-    _fig_ref.add_trace(go.Bar(
-        x=_all_names, y=_all_costs,
-        marker_color=_bar_colors,
-        text=[f"{c:,}" for c in _all_costs],
-        textposition="outside",
-        name="Transistor cost",
-    ))
-    _fig_ref.add_hline(
-        y=RELU_TRANSISTORS, line_dash="dot",
-        line_color=COLORS["GreenLine"], line_width=2,
-        annotation_text="ReLU baseline",
-        annotation_position="right",
-    )
-    _fig_ref.update_layout(
-        title_text="Silicon Cost by Activation Function (transistors)",
-        xaxis_title="Activation Function",
-        yaxis_title="Transistor Count (log scale)",
-        yaxis_type="log",
-        showlegend=False,
-        height=320,
-    )
-    apply_plotly_theme(_fig_ref)
-
-    # ── Live: selected layers total cost ─────────────────────────────────────
-    _selected_costs   = [_TRANSISTOR_COST[a] for a in _selected]
-    _selected_cycles  = [_CYCLE_COST[a] for a in _selected]
-    _selected_colors  = [
-        COLORS["RedLine"] if c >= 1000 else
-        COLORS["OrangeLine"] if c >= 200 else
-        COLORS["GreenLine"]
-        for c in _selected_costs
-    ]
-
-    _fig_layers = go.Figure()
-    _fig_layers.add_trace(go.Bar(
-        x=_layer_names, y=_selected_costs,
-        marker_color=_selected_colors,
-        text=[f"{_ACT_NAMES[a]}<br>{c:,} transistors" for a, c in zip(_selected, _selected_costs)],
-        textposition="outside",
-        name="Selected layers",
-    ))
-    _fig_layers.update_layout(
-        title_text="Your Layer Assignments — Silicon Cost",
-        xaxis_title="Layer",
-        yaxis_title="Transistors (log scale)",
-        yaxis_type="log",
-        showlegend=False,
-        height=320,
-    )
-    apply_plotly_theme(_fig_layers)
-
-    # ── Metrics ───────────────────────────────────────────────────────────────
-    _total_transistors    = sum(_selected_costs)
-    _total_cycles         = sum(_selected_cycles)
-    _relu_total           = RELU_TRANSISTORS * 4
-    _ratio_vs_all_relu    = _total_transistors / _relu_total
-    _cycle_ratio          = _total_cycles / 4.0  # vs 1 cycle/layer ReLU baseline
-
-    # Context-dependent inference latency impact
-    # Mobile NPU: activation compute is tighter because total throughput ~35 TOPS
-    # A 50× heavier activation function occupies ~3–5% of inference budget vs <0.1%
-    _ctx = context_toggle.value
-    if _ctx == "mobile":
-        _act_time_baseline_us  = 0.8   # µs total activation time with all-ReLU
-        _act_time_current_us   = _act_time_baseline_us * (_total_cycles / 4.0)
-        _inference_total_us    = 42.0  # µs total inference for this layer config
-        _act_pct               = 100.0 * _act_time_current_us / _inference_total_us
-        _speedup_if_all_relu   = _act_time_current_us / _act_time_baseline_us
-        _ctx_label             = "Mobile NPU"
-    else:
-        _act_time_baseline_us  = 0.05  # µs on H100 (activation near-free in compute terms)
-        _act_time_current_us   = _act_time_baseline_us * (_total_cycles / 4.0)
-        _inference_total_us    = 2.1
-        _act_pct               = 100.0 * _act_time_current_us / _inference_total_us
-        _speedup_if_all_relu   = _act_time_current_us / _act_time_baseline_us
-        _ctx_label             = "Cloud H100"
-
-    # Color coding
-    _ratio_color = (
-        COLORS["RedLine"] if _ratio_vs_all_relu > 10
-        else COLORS["OrangeLine"] if _ratio_vs_all_relu > 3
-        else COLORS["GreenLine"]
-    )
-    _pct_color = (
-        COLORS["RedLine"] if _act_pct > 5
-        else COLORS["OrangeLine"] if _act_pct > 1
-        else COLORS["GreenLine"]
-    )
-
-    mo.vstack([
-        mo.hstack([_fig_ref, _fig_layers], justify="center"),
-        mo.Html(f"""
-        <div style="display:flex; gap:16px; justify-content:center; margin-top:16px; flex-wrap:wrap;">
-            <div style="padding:16px 20px; border:1px solid #e2e8f0; border-radius:10px;
-                        width:200px; text-align:center; background:white; box-shadow:0 2px 8px rgba(0,0,0,0.04);">
-                <div style="color:#475569; font-size:0.82rem; font-weight:600; margin-bottom:4px;">
-                    Total Silicon vs All-ReLU
-                </div>
-                <div style="font-size:2rem; font-weight:800; color:{_ratio_color};">
-                    {_ratio_vs_all_relu:.1f}×
-                </div>
-                <div style="color:#94a3b8; font-size:0.75rem;">{_total_transistors:,} transistors</div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {_tier_color}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Access Latency</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_tier_color};">{_access_ns:.0f} ns</div>
             </div>
-            <div style="padding:16px 20px; border:1px solid #e2e8f0; border-radius:10px;
-                        width:200px; text-align:center; background:white; box-shadow:0 2px 8px rgba(0,0,0,0.04);">
-                <div style="color:#475569; font-size:0.82rem; font-weight:600; margin-bottom:4px;">
-                    Activation Time ({_ctx_label})
-                </div>
-                <div style="font-size:2rem; font-weight:800; color:{_pct_color};">
-                    {_act_pct:.1f}%
-                </div>
-                <div style="color:#94a3b8; font-size:0.75rem;">of total inference</div>
-            </div>
-            <div style="padding:16px 20px; border:1px solid #e2e8f0; border-radius:10px;
-                        width:200px; text-align:center; background:white; box-shadow:0 2px 8px rgba(0,0,0,0.04);">
-                <div style="color:#475569; font-size:0.82rem; font-weight:600; margin-bottom:4px;">
-                    Speedup if All-ReLU
-                </div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']};">
-                    {_speedup_if_all_relu:.1f}×
-                </div>
-                <div style="color:#94a3b8; font-size:0.75rem;">activation compute only</div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white;
+                        border-top:3px solid {COLORS['RedLine'] if _latency_ratio > 5 else COLORS['GreenLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">vs. L2 Baseline</div>
+                <div style="font-size:1.5rem; font-weight:800;
+                     color:{COLORS['RedLine'] if _latency_ratio > 5 else COLORS['GreenLine']};">{_latency_ratio:.0f}x</div>
             </div>
         </div>
-        """),
-    ])
-    return
+        """))
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CELL 7: ACT I PHYSICS PEEK
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo, RELU_TRANSISTORS, SIGMOID_TRANSISTORS, ACTIVATION_TAX_RATIO):
-    mo.accordion({
-        "The governing equation — Transistor Tax": mo.md(f"""
-        **The Transistor Tax** (@sec-neural-computation-transistor-tax):
-
-        ```
-        ReLU  cost = {RELU_TRANSISTORS} transistors    (comparator + mux)
-        Sigmoid cost = {SIGMOID_TRANSISTORS:,} transistors (exponential unit)
-
-        Tax ratio = Sigmoid / ReLU = {int(ACTIVATION_TAX_RATIO)}×
-        ```
-
-        **Why exponentials are expensive:**
-        Hardware cannot compute `exp(x)` in one clock cycle. It must approximate
-        using a piecewise lookup table or a Taylor series expansion:
-
-        ```
-        exp(x) ≈ 1 + x + x²/2! + x³/3! + ...  (Taylor, ~8 terms for FP32 precision)
-        ```
-
-        Each term requires a multiply-accumulate. A dedicated floating-point exponential
-        unit pipelines this over 20–30 cycles. A ReLU does the same job in 1 cycle with
-        a single comparison.
-
-        **GELU** uses a polynomial approximation to the Gaussian CDF Φ(x):
-
-        ```
-        GELU(x) ≈ 0.5 × x × (1 + tanh(√(2/π) × (x + 0.044715 × x³)))
-        ```
-
-        This polynomial is cheaper than a full sigmoid (fewer terms) but still 6–10×
-        the cost of ReLU. GELU is accurate-better and hardware-worse than ReLU — a direct
-        accuracy-vs-silicon trade-off.
-
-        **Activation cost fraction:**
-
-        ```
-        activation_time = layer_neurons × cycles_per_activation / TOPS
-        fraction = activation_time / total_inference_time
-        ```
-
-        On a mobile NPU with 35 TOPS (INT8): even a 4-layer sigmoid network
-        spends ~23% of inference time on activation alone — compute that could
-        be reclaimed instantly by switching to ReLU.
-        """)
-    })
-    return
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CELL 8: ACT I REVEAL — PREDICTION vs REALITY
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo, act1_prediction, ACTIVATION_TAX_RATIO):
-    _predicted_map = {"1x": 1, "5x": 5, "50x": 50, "500x": 500}
-    _predicted = _predicted_map[act1_prediction.value]
-    _actual = int(ACTIVATION_TAX_RATIO)  # 50
-    _ratio = _actual / _predicted if _predicted > 0 else float("inf")
-
-    if abs(_ratio - 1.0) < 0.15:
-        _kind = "success"
-        _verdict = "Correct."
-    elif _predicted < _actual:
-        _kind = "warn"
-        _verdict = "Underestimate."
-    else:
-        _kind = "warn"
-        _verdict = "Overestimate."
-
-    mo.callout(
-        mo.md(
-            f"**{_verdict}** You predicted **{_predicted}×**. "
-            f"The actual silicon cost ratio is **{_actual}×** "
-            f"(ReLU: 50 transistors vs Sigmoid: 2,500 transistors). "
-            + (
-                "" if abs(_ratio - 1.0) < 0.15 else
-                f"You were off by **{_ratio:.1f}×**. "
-            )
-            + """
-            This is the **Transistor Tax** from @sec-neural-computation-transistor-tax.
-            Selecting Sigmoid over ReLU multiplies the silicon budget of each activation unit
-            by 50× — not 2×, not 5×, but fifty times. On a mobile NPU that constraint
-            translates directly to heat, battery drain, and missed frame rate targets.
-            Swapping all four Sigmoid layers to ReLU drops activation compute by **47×**
-            and reclaims roughly 23% of total inference time on mobile.
-            """
-        ),
-        kind=_kind,
-    )
-    return
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CELL 9: ACT I STRUCTURED REFLECTION
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo):
-    act1_reflection = mo.ui.radio(
-        options={
-            "A) GELU has more trainable parameters than ReLU": "wrong_params",
-            "B) GELU uses a polynomial approximation to erf() requiring multi-step computation": "correct",
-            "C) GELU requires backpropagation while ReLU does not": "wrong_backprop",
-            "D) GELU is only defined for transformer architectures": "wrong_arch",
-        },
-        label="Why does GELU outperform ReLU in accuracy but cost more in silicon?",
-    )
-    mo.vstack([
-        mo.md("**Reflection:** Answer before reading the explanation below."),
-        act1_reflection,
-    ])
-    return (act1_reflection,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act1_reflection):
-    mo.stop(act1_reflection.value is None, mo.md(""))
-
-    _feedback = {
-        "wrong_params": mo.callout(mo.md(
-            "**Not quite.** GELU has *zero* additional parameters — it is a fixed "
-            "mathematical function, not a learned one. The cost difference is purely "
-            "computational: the function itself requires more arithmetic operations per call."
-        ), kind="warn"),
-        "correct": mo.callout(mo.md(
-            "**Correct.** GELU(x) = x · Φ(x) where Φ is the Gaussian CDF. "
-            "Hardware cannot compute Φ(x) exactly, so it uses a polynomial approximation: "
-            "`GELU(x) ≈ 0.5·x·(1 + tanh(√(2/π)·(x + 0.044715·x³)))`. "
-            "That tanh itself requires an exponential unit. The accuracy benefit comes "
-            "from the smooth, probabilistic gating behavior — neurons are not hard-zeroed "
-            "as in ReLU, which helps gradient flow. The silicon cost is real and unavoidable: "
-            "GELU is 6–10× more expensive than ReLU per evaluation. Transformers "
-            "(BERT, GPT) use GELU because they run on cloud hardware where that tax is "
-            "affordable; mobile architectures use ReLU or Leaky ReLU where it is not."
-        ), kind="success"),
-        "wrong_backprop": mo.callout(mo.md(
-            "**Not quite.** Both ReLU and GELU require backpropagation during training — "
-            "the choice of activation function does not change whether backprop runs. "
-            "The cost difference is in the *forward pass computation*, not in the "
-            "backward pass structure."
-        ), kind="warn"),
-        "wrong_arch": mo.callout(mo.md(
-            "**Not quite.** GELU was introduced in 2016 and is used across CNNs, MLPs, "
-            "and transformers. Its use in transformers (BERT, GPT) made it famous, but "
-            "it is a general activation function. The hardware cost applies equally "
-            "regardless of architecture."
-        ), kind="warn"),
-    }
-    _feedback[act1_reflection.value]
-    return
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: ACT II -- DESIGN CHALLENGE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _act_num      = "II"
-    _act_color    = COLORS["OrangeLine"]
-    _act_title    = "The Memory Hierarchy"
-    _act_duration = "20&ndash;25 min"
-    _act_why      = ("Act I quantified the silicon cost of activation functions. "
-                     "Now discover that where activations live in memory is a second, "
-                     "independent 10&times; multiplier per tier boundary. You expect a "
-                     "3&times;3 convolution&rsquo;s activations to fit in mobile L2 cache. "
-                     "The Memory Ledger will show that at batch=1, the 224&times;224 input "
-                     "layer alone generates ~50 MB &mdash; 100&times; larger than mobile L2 &mdash; "
-                     "and every access hits HBM at 10&times; the L1 cost.")
-
-    mo.vstack([
-        mo.md("---"),
-        mo.Html(f"""
-        <div style="margin: 8px 0 12px 0;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <div style="background: {_act_color}; color: white; border-radius: 50%;
-                            width: 32px; height: 32px; display: inline-flex; align-items: center;
-                            justify-content: center; font-size: 0.9rem; font-weight: 800;
-                            flex-shrink: 0;">{_act_num}</div>
-                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em;">
-                    Act {_act_num} &middot; {_act_duration}</div>
-            </div>
-            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                        margin-top: 8px; line-height: 1.2;">
-                {_act_title}
-            </div>
-            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                        line-height: 1.55; max-width: 700px;">
-                {_act_why}
-            </div>
-        </div>
-        """),
-        mo.md("""
-        Activation *functions* are one cost dimension. But where activations *live in memory*
-        is a second, independent multiplier on performance. The memory hierarchy creates a
-        10× penalty at every tier boundary:
-
-        | Tier | Latency | Capacity (Mobile) | Capacity (Cloud) |
-        |------|---------|-------------------|------------------|
-        | L1 SRAM | 1× (fastest) | 64 KB | 256 KB/SM |
-        | L2 Cache | 4× | 512 KB | 40 MB |
-        | HBM / Device RAM | 10× | 8 GB | 80 GB |
-        | Host DRAM | 100× | (off-device) | (off-device) |
-
-        This is the **Memory Ledger** instrument — used here for the first time.
-        For each layer, the Ledger shows which tier its activations reside in, and
-        the live latency multiplier that tier imposes on every memory access.
-
-        Before you explore, make a prediction.
-        """),
-    ])
-    return
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CELL 10: ACT II PREDICTION LOCK
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo):
-    act2_prediction = mo.ui.radio(
-        options={
-            "A) 100% — L2 can always cache convolution activations": "100pct",
-            "B) ~50% — about half the activation map fits": "50pct",
-            "C) ~5% — only a small fraction fits in L2": "5pct",
-            "D) <1% — almost nothing fits in L2 cache on mobile": "lt1pct",
-        },
-        label=(
-            "A 3×3 convolution with 256 input channels on a 224×224 image: "
-            "what fraction of its output activation map fits in mobile L2 cache (512 KB)?"
-        ),
-    )
-    mo.vstack([
-        mo.Html("""
-        <div style="background:#1e293b; border-radius:8px; padding:14px 20px;
-                    border-left:4px solid #6366f1; margin:8px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:#a5b4fc;
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;">
-                Prediction Lock — Act II
-            </div>
-            <div style="font-size:0.88rem; color:#94a3b8; line-height:1.5;">
-                Activation map = 224×224×256 values. FP32 = 4 bytes per value.
-                Mobile L2 = 512 KB. Commit before checking your arithmetic.
-            </div>
-        </div>
-        """),
-        act2_prediction,
-    ])
-    return (act2_prediction,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act2_prediction):
-    mo.stop(
-        act2_prediction.value is None,
-        mo.callout(
-            mo.md("Select your prediction above to unlock the Memory Ledger."),
-            kind="warn",
-        ),
-    )
-    return
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CELL 11: ACT II REVEAL — PREDICTION vs ACTUAL
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo, act2_prediction):
-    # 224×224×256 × 4 bytes = 51,380,224 bytes ≈ 51 MB
-    # Mobile L2 = 512 KB = 524,288 bytes
-    _activation_bytes = 224 * 224 * 256 * 4       # 51,380,224 bytes ≈ 51 MB
-    _l2_bytes         = 512 * 1024                 # 524,288 bytes
-    _fraction_pct     = 100.0 * _l2_bytes / _activation_bytes   # ~1.02%
-
-    _predicted_label = {
-        "100pct": "100%",
-        "50pct":  "~50%",
-        "5pct":   "~5%",
-        "lt1pct": "<1%",
-    }[act2_prediction.value]
-
-    _correct = act2_prediction.value == "lt1pct"
-
-    mo.callout(
-        mo.md(
-            f"You predicted **{_predicted_label}**. "
-            f"The actual fraction is **{_fraction_pct:.1f}%**. "
-            + ("**Correct.**" if _correct else f"**The gap is larger than expected.**")
-            + f"""
-
-            **The arithmetic:**
-            ```
-            Activation map = 224 × 224 × 256 channels × 4 bytes (FP32)
-                           = {_activation_bytes:,} bytes ≈ {_activation_bytes/1e6:.0f} MB
-
-            Mobile L2      = 512 KB = {_l2_bytes:,} bytes
-
-            Fraction in L2 = {_l2_bytes:,} / {_activation_bytes:,} = {_fraction_pct:.1f}%
-            ```
-
-            A single convolution layer at 224×224 resolution with 256 channels generates
-            **{_activation_bytes/1e6:.0f} MB** of activation data. Mobile L2 cache holds **512 KB**.
-            That is 100× more data than cache can hold. Every memory access for this layer
-            hits HBM (or DRAM if HBM is also saturated), paying the **10–100× latency penalty**.
-            This is the Memory Wall made concrete.
-            """
-        ),
-        kind="success" if _correct else "warn",
-    )
-    return
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CELL 12: ACT II INSTRUMENT — MEMORY LEDGER
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ### The Memory Ledger (first introduced here)
-
-    The Memory Ledger maps each layer's activations to their memory tier and shows
-    the resulting latency penalty. Use the controls below to explore how layer size,
-    batch size, and precision interact with the memory hierarchy.
-
-    **Color key:**
-    - Green = fits in L1/L2 cache (fast path)
-    - Orange = spills to HBM/device RAM (4–10× penalty)
-    - Red = approaches or exceeds device RAM (OOM risk)
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    # Memory Ledger controls
-    act2_image_size = mo.ui.dropdown(
-        options={"28×28 (MNIST)": 28, "64×64 (thumbnail)": 64, "128×128 (mobile)": 128,
-                 "224×224 (ImageNet)": 224, "512×512 (high-res)": 512},
-        value="224×224 (ImageNet)",
-        label="Input image size",
-    )
-    act2_channels = mo.ui.slider(
-        start=1, stop=512, value=64, step=1,
-        label="Output channels (conv layer)",
-    )
-    act2_batch = mo.ui.slider(
-        start=1, stop=128, value=8, step=1,
-        label="Batch size",
-    )
-    act2_precision = mo.ui.radio(
-        options={"FP32 (4 bytes)": 4, "FP16/BF16 (2 bytes)": 2, "INT8 (1 byte)": 1},
-        value="FP32 (4 bytes)",
-        label="Precision:",
-        inline=True,
-    )
-    mo.vstack([
-        mo.hstack([act2_image_size, act2_channels], justify="start", gap="2rem"),
-        act2_batch,
-        act2_precision,
-    ])
-    return (act2_image_size, act2_channels, act2_batch, act2_precision)
-
-
-@app.cell(hide_code=True)
-def _(
-    mo, go, apply_plotly_theme, COLORS,
-    act2_image_size, act2_channels, act2_batch, act2_precision,
-    context_toggle,
-    H100_RAM_GB, H100_L2_CACHE_MB, H100_L1_PER_SM_KB,
-    MOBILE_RAM_GB, MOBILE_L2_CACHE_KB, MOBILE_L1_CACHE_KB,
-    MEM_L1_MULT, MEM_L2_MULT, MEM_HBM_MULT, MEM_DRAM_MULT,
-):
-    # ── Device memory parameters ──────────────────────────────────────────────
-    _ctx = context_toggle.value
-    if _ctx == "cloud":
-        _device_ram_mb  = H100_RAM_GB * 1024               # 81,920 MB
-        _l2_cache_kb    = H100_L2_CACHE_MB * 1024          # 40,960 KB
-        _l1_cache_kb    = H100_L1_PER_SM_KB                # 256 KB per SM
-        _ctx_label      = "Cloud H100"
-        _ctx_color      = COLORS["Cloud"]
-    else:
-        _device_ram_mb  = MOBILE_RAM_GB * 1024             # 8,192 MB
-        _l2_cache_kb    = MOBILE_L2_CACHE_KB               # 512 KB
-        _l1_cache_kb    = MOBILE_L1_CACHE_KB               # 64 KB
-        _ctx_label      = "Mobile NPU"
-        _ctx_color      = COLORS["Mobile"]
-
-    # ── Layer activation sizes ────────────────────────────────────────────────
-    # Model: 4 conv layers, each halving spatial dimensions, doubling channels
-    _img         = act2_image_size.value
-    _ch_out      = act2_channels.value
-    _batch       = act2_batch.value
-    _bytes_pp    = act2_precision.value
-
-    _layers = []
-    _w = _img
-    _ch = _ch_out
-    for _layer_idx in range(6):
-        # Source: activation_memory = batch × height × width × channels × bytes
-        _size_bytes = _batch * _w * _w * _ch * _bytes_pp
-        _size_kb    = _size_bytes / 1024.0
-        _size_mb    = _size_kb / 1024.0
-
-        # Memory tier assignment
-        if _size_kb <= _l1_cache_kb:
-            _tier       = "L1 Cache"
-            _mult       = MEM_L1_MULT
-            _bar_color  = COLORS["GreenLine"]
-            _tier_short = "L1"
-        elif _size_kb <= _l2_cache_kb:
-            _tier       = "L2 Cache"
-            _mult       = MEM_L2_MULT
-            _bar_color  = COLORS["GreenLine"]
-            _tier_short = "L2"
-        elif _size_mb <= _device_ram_mb:
-            _tier       = "Device RAM (HBM)"
-            _mult       = MEM_HBM_MULT
-            _bar_color  = COLORS["OrangeLine"]
-            _tier_short = "HBM"
+        _pred = partB_prediction.value
+        if _pred == "10x":
+            items.append(mo.callout(mo.md(
+                "**Correct.** On mobile, doubling from 16 KB to 32 KB can cross the L2 boundary "
+                "into HBM, triggering a ~20x latency jump. Memory hierarchies create step "
+                "functions, not gradual slopes. On cloud with 50 MB L2, the same doubling "
+                "stays comfortably in cache."
+            ), kind="success"))
+        elif _pred == "2x":
+            items.append(mo.callout(mo.md(
+                "**That assumes flat memory -- but memory is tiered.** A 2x increase in tensor "
+                "size that crosses a tier boundary triggers a 10-20x latency jump. Switch the "
+                "context to Mobile and watch at the L2 boundary."
+            ), kind="warn"))
         else:
-            _tier       = "Exceeds Device RAM"
-            _mult       = MEM_DRAM_MULT
-            _bar_color  = COLORS["RedLine"]
-            _tier_short = "OOM"
+            items.append(mo.callout(mo.md(
+                "**The answer depends on context.** On mobile, crossing L2->HBM gives ~20x. "
+                "On cloud, 32 KB fits comfortably in 50 MB L2, so ~2x is roughly correct."
+            ), kind="warn"))
 
-        _layers.append({
-            "name":       f"Layer {_layer_idx+1}",
-            "size_kb":    _size_kb,
-            "size_mb":    _size_mb,
-            "spatial":    f"{_w}×{_w}",
-            "channels":   _ch,
-            "tier":       _tier,
-            "tier_short": _tier_short,
-            "mult":       _mult,
-            "color":      _bar_color,
-        })
-        _w = max(_w // 2, 1)
-        _ch = _ch * 2
+        items.append(mo.accordion({
+            "MathPeek: Memory Tier Placement": mo.md(f"""
+**Tensor size:** `batch * width * 4 bytes = {_batch} * {_width} * 4 = {_tensor_bytes:,} bytes = {_tensor_kb:,.1f} KB`
 
-    # ── Build Memory Ledger visualization ─────────────────────────────────────
-    _layer_names      = [l["name"] for l in _layers]
-    _sizes_mb         = [l["size_mb"] for l in _layers]
-    _colors           = [l["color"] for l in _layers]
-    _tier_labels      = [l["tier_short"] for l in _layers]
-    _mult_labels      = [f"{l['mult']}×" for l in _layers]
-    _hover_texts      = [
-        f"<b>{l['name']}</b><br>"
-        f"Spatial: {l['spatial']} | Channels: {l['channels']}<br>"
-        f"Activation size: {l['size_kb']:.1f} KB<br>"
-        f"Memory tier: {l['tier']}<br>"
-        f"Latency multiplier: {l['mult']}×<br>"
-        f"Batch: {_batch} | Precision: {_bytes_pp*8}-bit"
-        for l in _layers
-    ]
+**Cliff at boundary:** L2 (5 ns) to HBM (100 ns) = **20x jump**
 
-    _fig_ledger = go.Figure()
-    _fig_ledger.add_trace(go.Bar(
-        x=_layer_names,
-        y=_sizes_mb,
-        marker_color=_colors,
-        text=[f"{t}<br>{m}" for t, m in zip(_tier_labels, _mult_labels)],
-        textposition="outside",
-        hovertext=_hover_texts,
-        hoverinfo="text",
-        name="Activation size",
-    ))
+Source: @sec-nn-computation-memory-hierarchy
+"""),
+        }))
 
-    # Reference lines for cache tiers
-    _l2_mb   = _l2_cache_kb / 1024.0
-    _l1_mb   = _l1_cache_kb / 1024.0
-    _ram_mb  = _device_ram_mb
+        return mo.vstack(items)
 
-    _fig_ledger.add_hline(
-        y=_l1_mb, line_dash="dot", line_color=COLORS["GreenLine"], line_width=1.5,
-        annotation_text=f"L1 ({_l1_cache_kb} KB)",
-        annotation_position="right",
-    )
-    _fig_ledger.add_hline(
-        y=_l2_mb, line_dash="dash", line_color=COLORS["OrangeLine"], line_width=2,
-        annotation_text=f"L2 ({_l2_cache_kb:,} KB)",
-        annotation_position="right",
-    )
-    _fig_ledger.add_hline(
-        y=_ram_mb, line_dash="solid", line_color=COLORS["RedLine"], line_width=2,
-        annotation_text=f"Device RAM ({_device_ram_mb/1024:.0f} GB)",
-        annotation_position="right",
-    )
+    # ─────────────────────────────────────────────────────────────────────
+    # PART C BUILDER: The Width-Squared Surprise
+    # ─────────────────────────────────────────────────────────────────────
 
-    _fig_ledger.update_layout(
-        title_text=f"Memory Ledger — {_ctx_label} — Batch {_batch} — {_bytes_pp*8}-bit",
-        xaxis_title="Network Layer",
-        yaxis_title="Activation Memory (MB, log scale)",
-        yaxis_type="log",
-        showlegend=False,
-        height=380,
-    )
-    apply_plotly_theme(_fig_ledger)
+    def build_part_c():
+        items = []
 
-    # ── Latency multiplier chart ───────────────────────────────────────────────
-    _mults     = [l["mult"] for l in _layers]
-    _mult_colors = [l["color"] for l in _layers]
-    _fig_mult  = go.Figure()
-    _fig_mult.add_trace(go.Bar(
-        x=_layer_names, y=_mults,
-        marker_color=_mult_colors,
-        text=[f"{m}×" for m in _mults],
-        textposition="outside",
-    ))
-    _fig_mult.update_layout(
-        title_text="Memory Access Latency Multiplier by Layer",
-        xaxis_title="Layer",
-        yaxis_title="Latency multiplier (×L1 baseline)",
-        showlegend=False,
-        height=280,
-    )
-    apply_plotly_theme(_fig_mult)
-
-    # ── Summary metrics ────────────────────────────────────────────────────────
-    _total_act_mb    = sum(_sizes_mb)
-    _avg_mult        = sum(_mults) / len(_mults)
-    _cache_miss_pct  = 100.0 * sum(1 for l in _layers if l["mult"] > MEM_L2_MULT) / len(_layers)
-    _oom             = _total_act_mb > _device_ram_mb
-
-    _total_color = COLORS["RedLine"] if _oom else (
-        COLORS["OrangeLine"] if _total_act_mb > _device_ram_mb * 0.5 else COLORS["GreenLine"]
-    )
-    _mult_color  = COLORS["RedLine"] if _avg_mult >= MEM_HBM_MULT else (
-        COLORS["OrangeLine"] if _avg_mult > MEM_L2_MULT else COLORS["GreenLine"]
-    )
-
-    _metric_cards = mo.Html(f"""
-    <div style="display:flex; gap:16px; justify-content:center; margin-top:12px; flex-wrap:wrap;">
-        <div style="padding:14px 18px; border:1px solid #e2e8f0; border-radius:10px;
-                    width:190px; text-align:center; background:white; box-shadow:0 2px 8px rgba(0,0,0,0.04);">
-            <div style="color:#475569; font-size:0.8rem; font-weight:600; margin-bottom:4px;">
-                Total Activation Memory
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; Research Lead, NeuralEdge Inc.
             </div>
-            <div style="font-size:1.8rem; font-weight:800; color:{_total_color};">
-                {_total_act_mb:.0f} MB
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We doubled the hidden layer width and expected the model to be twice
+                as expensive. But our profiler shows a 3.8x increase in FLOPs. There must
+                be a bug in the profiler. Can you verify?&rdquo;
             </div>
-            <div style="color:#94a3b8; font-size:0.72rem;">
-                Device RAM: {_device_ram_mb/1024:.0f} GB
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; Dr. Liang Wei, Research Lead &middot; NeuralEdge Inc.
             </div>
         </div>
-        <div style="padding:14px 18px; border:1px solid #e2e8f0; border-radius:10px;
-                    width:190px; text-align:center; background:white; box-shadow:0 2px 8px rgba(0,0,0,0.04);">
-            <div style="color:#475569; font-size:0.8rem; font-weight:600; margin-bottom:4px;">
-                Avg Latency Multiplier
+        """))
+
+        items.append(mo.md("""
+## Dense Layer FLOPs Scale as O(width^2)
+
+For a dense (fully connected) layer: `FLOPs = 2 * width_in * width_out`
+
+For hidden-to-hidden layers, both dimensions are the hidden width W,
+so FLOPs = 2W^2. Doubling W yields 2*(2W)^2 = 8W^2 -- a **4x increase**.
+
+For a 3-layer MLP (784 -> W -> W -> 10):
+- **Input-to-hidden**: 2 * 784 * W (linear in W)
+- **Hidden-to-hidden**: 2 * W * W (quadratic in W)
+- **Hidden-to-output**: 2 * W * 10 (linear in W)
+
+The quadratic term dominates as W grows.
+        """))
+
+        items.append(partC_prediction)
+
+        if partC_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction above to unlock the FLOP scaling simulator."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
+
+        items.append(partC_width)
+
+        _w = partC_width.value
+        _input_dim = 784
+        _output_dim = 10
+        _flops_l1 = 2 * _input_dim * _w
+        _flops_l2 = 2 * _w * _w
+        _flops_l3 = 2 * _w * _output_dim
+        _total_flops = _flops_l1 + _flops_l2 + _flops_l3
+
+        _ref_w = 128
+        _ref_flops = 2 * _input_dim * _ref_w + 2 * _ref_w * _ref_w + 2 * _ref_w * _output_dim
+        _flops_ratio = _total_flops / _ref_flops if _ref_flops > 0 else 1
+        _width_ratio = _w / _ref_w
+
+        _fig = go.Figure()
+        for _name, _val, _col in zip(
+            ["Input->Hidden", "Hidden->Hidden", "Hidden->Output"],
+            [_flops_l1, _flops_l2, _flops_l3],
+            [COLORS["BlueLine"], COLORS["OrangeLine"], COLORS["GreenLine"]],
+        ):
+            _fig.add_trace(go.Bar(name=_name, x=["Current Width"], y=[_val],
+                                  marker_color=_col, opacity=0.88))
+        _fig.update_layout(barmode="stack", height=300, yaxis_title="FLOPs",
+                           title=f"Per-Layer FLOPs -- MLP (784->{_w}->{_w}->10)",
+                           legend=dict(orientation="h", y=1.12, x=0))
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        _widths = np.arange(32, 2049, 32)
+        _total_curve = (2 * _input_dim * _widths + 2 * _widths**2 + 2 * _widths * _output_dim).astype(float)
+        _linear_ref = _total_curve[0] * (_widths / _widths[0])
+
+        _fig2 = go.Figure()
+        _fig2.add_trace(go.Scatter(x=_widths.tolist(), y=_total_curve.tolist(),
+                                   mode="lines", name="Actual FLOPs (quadratic)",
+                                   line=dict(color=COLORS["RedLine"], width=2.5)))
+        _fig2.add_trace(go.Scatter(x=_widths.tolist(), y=_linear_ref.tolist(),
+                                   mode="lines", name="If linear (2x width = 2x FLOPs)",
+                                   line=dict(color=COLORS["Grey"], width=2, dash="dash")))
+        _fig2.add_trace(go.Scatter(x=[_w], y=[float(_total_flops)],
+                                   mode="markers", name="Current Width",
+                                   marker=dict(size=12, color=COLORS["BlueLine"], symbol="diamond",
+                                               line=dict(width=2, color="white"))))
+        _fig2.update_layout(height=360, xaxis_title="Hidden Width", yaxis_title="Total FLOPs",
+                            title="FLOPs Scaling: Actual (Quadratic) vs. Linear Assumption",
+                            legend=dict(orientation="h", y=1.12, x=0))
+        apply_plotly_theme(_fig2)
+        items.append(mo.as_html(_fig2))
+
+        _qcolor = COLORS["RedLine"] if _flops_ratio > 3 else COLORS["OrangeLine"] if _flops_ratio > 1.5 else COLORS["GreenLine"]
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Width Ratio (vs 128)</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_width_ratio:.1f}x</div>
             </div>
-            <div style="font-size:1.8rem; font-weight:800; color:{_mult_color};">
-                {_avg_mult:.1f}×
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {_qcolor}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">FLOPs Ratio (vs 128)</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_qcolor};">{_flops_ratio:.1f}x</div>
             </div>
-            <div style="color:#94a3b8; font-size:0.72rem;">vs L1 baseline</div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Total FLOPs</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_total_flops:,.0f}</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Hidden->Hidden Share</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_flops_l2/_total_flops*100:.0f}%</div>
+            </div>
         </div>
-        <div style="padding:14px 18px; border:1px solid #e2e8f0; border-radius:10px;
-                    width:190px; text-align:center; background:white; box-shadow:0 2px 8px rgba(0,0,0,0.04);">
-            <div style="color:#475569; font-size:0.8rem; font-weight:600; margin-bottom:4px;">
-                Cache Miss Rate (HBM+)
+        """))
+
+        _actual_256 = (2*784*256 + 2*256*256 + 2*256*10) / (2*784*128 + 2*128*128 + 2*128*10)
+        _pred = partC_prediction.value
+        if _pred == "4x":
+            items.append(mo.callout(mo.md(
+                f"**Correct.** Doubling width from 128 to 256 increases total FLOPs by "
+                f"~{_actual_256:.1f}x. The hidden-to-hidden layer scales as W^2. "
+                f"Architecture decisions -- not just hardware -- dominate the Operations term."
+            ), kind="success"))
+        elif _pred == "2x":
+            items.append(mo.callout(mo.md(
+                f"**Linear intuition fails here.** Doubling width actually yields ~{_actual_256:.1f}x "
+                f"FLOPs. The hidden-to-hidden layer has FLOPs=2*W*W. Double W: 4x that layer."
+            ), kind="warn"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**Not quite.** The actual increase is ~{_actual_256:.1f}x. The quadratic layer "
+                f"dominates, but input/output layers scale linearly, pulling total below 4x."
+            ), kind="warn"))
+
+        items.append(mo.accordion({
+            "MathPeek: FLOPs Scaling": mo.md(f"""
+**Per-layer FLOPs for MLP (784->{_w}->{_w}->10):**
+```
+Layer 1: 2 * 784 * {_w} = {_flops_l1:,}
+Layer 2: 2 * {_w} * {_w} = {_flops_l2:,}
+Layer 3: 2 * {_w} * 10  = {_flops_l3:,}
+Total = {_total_flops:,}
+```
+Doubling 128->256: ratio = {_actual_256:.2f}x (not 2x!)
+
+Source: @sec-nn-computation-flop-counting
+"""),
+        }))
+
+        return mo.vstack(items)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PART D BUILDER: Forward vs. Backward Memory
+    # ─────────────────────────────────────────────────────────────────────
+
+    def build_part_d():
+        items = []
+
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; Training Infra Lead, NeuralEdge Inc.
             </div>
-            <div style="font-size:1.8rem; font-weight:800; color:{
-                COLORS['RedLine'] if _cache_miss_pct > 60 else
-                COLORS['OrangeLine'] if _cache_miss_pct > 30 else
-                COLORS['GreenLine']
-            };">
-                {_cache_miss_pct:.0f}%
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;Inference works perfectly on our edge device. We want to add on-device
+                fine-tuning, but training immediately runs OOM. The model is the same. Why
+                does training need so much more memory than inference?&rdquo;
             </div>
-            <div style="color:#94a3b8; font-size:0.72rem;">of layers in slow memory</div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; James Okafor, Training Infra Lead &middot; NeuralEdge Inc.
+            </div>
         </div>
-    </div>
-    """)
+        """))
 
-    mo.vstack([
-        _fig_ledger,
-        _fig_mult,
-        _metric_cards,
-    ])
-    return
+        items.append(mo.md("""
+## Inference Discards; Training Stores Everything
 
+During **inference**, each layer's activations can be discarded after the next
+layer consumes them. Memory usage is approximately constant.
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CELL 13: ACT II FAILURE STATE — OOM DETECTOR
-# ─────────────────────────────────────────────────────────────────────────────
+During **training**, backpropagation needs every intermediate activation to
+compute gradients. All layer activations must be stored **simultaneously**.
 
-@app.cell(hide_code=True)
-def _(
-    mo,
-    act2_image_size, act2_channels, act2_batch, act2_precision,
-    context_toggle,
-    H100_RAM_GB, MOBILE_RAM_GB,
-    MEM_L1_MULT, MEM_L2_MULT, MEM_HBM_MULT, MEM_DRAM_MULT,
-    H100_L2_CACHE_MB, H100_L1_PER_SM_KB,
-    MOBILE_L2_CACHE_KB, MOBILE_L1_CACHE_KB,
-):
-    # Compute total activation memory across 6 layers
-    _ctx = context_toggle.value
-    _device_ram_mb = (H100_RAM_GB if _ctx == "cloud" else MOBILE_RAM_GB) * 1024
-    _device_label  = "H100 (80 GB HBM)" if _ctx == "cloud" else "Mobile NPU (8 GB)"
+```
+Inference memory = weights + max_single_layer_activation
+Training memory  = weights + gradients + ALL_layer_activations
+```
 
-    _img      = act2_image_size.value
-    _ch_out   = act2_channels.value
-    _batch    = act2_batch.value
-    _bytes_pp = act2_precision.value
+The training-to-inference ratio grows with depth and batch size.
+        """))
 
-    _total_act_bytes = 0
-    _w = _img
-    _ch = _ch_out
-    for _ in range(6):
-        _total_act_bytes += _batch * _w * _w * _ch * _bytes_pp
-        _w = max(_w // 2, 1)
-        _ch = _ch * 2
-    _total_act_mb = _total_act_bytes / (1024 * 1024)
+        items.append(partD_prediction)
 
-    # Note: real training also requires weights + gradients + optimizer state
-    # (training_memory ≈ weights + gradients + 2×weights_Adam + activations)
-    # Here we focus on activation memory alone as the variable component.
-    _oom = _total_act_mb > _device_ram_mb
+        if partD_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction above to unlock the memory comparison."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
 
-    if _oom:
-        mo.callout(
-            mo.md(
-                f"**OOM — Activation memory exceeds device RAM.** "
-                f"Required: **{_total_act_mb:.0f} MB** | "
-                f"Available: **{_device_label}** ({_device_ram_mb/1024:.0f} GB = {_device_ram_mb:,} MB). "
-                f"Reduce batch size, cut channels, or enable activation checkpointing "
-                f"(@sec-neural-computation to `@sec-model-training`)."
-            ),
-            kind="danger",
-        )
-    elif _total_act_mb > _device_ram_mb * 0.75:
-        mo.callout(
-            mo.md(
-                f"**Memory warning.** Activation memory is {_total_act_mb:.0f} MB — "
-                f"{100*_total_act_mb/_device_ram_mb:.0f}% of device RAM. "
-                f"Training (which requires weights + gradients + optimizer state on top) "
-                f"will almost certainly OOM. This is inference-only viable."
-            ),
-            kind="warn",
-        )
-    else:
-        mo.callout(
-            mo.md(
-                f"**Memory is feasible.** Activation memory: {_total_act_mb:.1f} MB "
-                f"({100*_total_act_mb/_device_ram_mb:.1f}% of device RAM). "
-                f"Note: training requires additional memory for weights, gradients, "
-                f"and optimizer state — approximately 4× the model size for Adam."
-            ),
-            kind="success",
-        )
-    return
+        items.append(mo.hstack([partD_phase, partD_depth, partD_batch, partD_width_d], justify="start"))
 
+        _phase = partD_phase.value
+        _depth = partD_depth.value
+        _batch = partD_batch.value
+        _w = partD_width_d.value
+        _is_training = _phase == "training"
+        _bpp = 4
+        _input_dim = 784
+        _output_dim = 10
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CELL 14: ACT II MATH PEEK
-# ─────────────────────────────────────────────────────────────────────────────
+        _params_l1 = _input_dim * _w
+        _params_hidden = max(0, _depth - 2) * _w * _w
+        _params_out = _w * _output_dim
+        _total_params = _params_l1 + _params_hidden + _params_out
+        _weight_mb = _total_params * _bpp / (1024 * 1024)
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.accordion({
-        "The governing equation — Activation Memory": mo.md("""
-        **Activation memory per layer** (@sec-neural-computation-computational-implementation-details-1ecc):
+        _act_per_layer_mb = _batch * _w * _bpp / (1024 * 1024)
 
-        ```
-        activation_memory = batch × height × width × channels × bytes_per_value
-        ```
+        if _is_training:
+            _act_total_mb = _act_per_layer_mb * _depth
+            _grad_mb = _weight_mb
+            _total_mb = _weight_mb + _grad_mb + _act_total_mb
+        else:
+            _act_total_mb = _act_per_layer_mb
+            _grad_mb = 0.0
+            _total_mb = _weight_mb + _act_total_mb
 
-        For FP32 (4 bytes), batch=1, 224×224, 256 channels:
+        _inference_mb = _weight_mb + _act_per_layer_mb
+        _ratio = _total_mb / _inference_mb if _inference_mb > 0 else 1
 
-        ```
-        activation_memory = 1 × 224 × 224 × 256 × 4
-                          = 51,380,224 bytes
-                          ≈ 51 MB
-        ```
+        _fig = go.Figure()
+        _colors_bar = [COLORS["BlueLine"], COLORS["GreenLine"],
+                       COLORS["RedLine"] if _is_training else COLORS["OrangeLine"]]
+        for _name, _val, _col in zip(["Weights", "Gradients", "Activations"],
+                                      [_weight_mb, _grad_mb, _act_total_mb], _colors_bar):
+            _fig.add_trace(go.Bar(name=_name, x=[_phase.capitalize()], y=[_val],
+                                  marker_color=_col, opacity=0.88))
+        _fig.add_hline(y=80_000, line_dash="dash", line_color=COLORS["BlueLine"],
+                       annotation_text="H100 (80 GB)", annotation_position="right")
+        _fig.add_hline(y=8_000, line_dash="dash", line_color=COLORS["OrangeLine"],
+                       annotation_text="iPhone (8 GB)", annotation_position="right")
+        _fig.update_layout(barmode="stack", height=380, yaxis_title="Memory (MB)",
+                           title=f"Memory Breakdown -- {_phase.capitalize()} (depth={_depth}, batch={_batch}, width={_w})",
+                           legend=dict(orientation="h", y=1.12, x=0))
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
 
-        **Memory tier thresholds (Mobile NPU):**
+        _depths = np.arange(3, 51)
+        _inf_mem = np.array([
+            (_input_dim * _w + max(0, d-2) * _w * _w + _w * _output_dim) * _bpp / (1024*1024)
+            + _act_per_layer_mb for d in _depths])
+        _train_mem = np.array([
+            ((_input_dim * _w + max(0, d-2) * _w * _w + _w * _output_dim) * _bpp * 2
+            + d * _batch * _w * _bpp) / (1024*1024) for d in _depths])
 
-        ```
-        L1 SRAM:    64 KB   — latency: 1×  (fastest)
-        L2 Cache:  512 KB   — latency: 4×
-        Device HBM:  8 GB   — latency: 10×
-        Host DRAM: (off)    — latency: 100×
-        ```
+        _fig2 = go.Figure()
+        _fig2.add_trace(go.Scatter(x=_depths.tolist(), y=_inf_mem.tolist(),
+                                   mode="lines", name="Inference",
+                                   line=dict(color=COLORS["GreenLine"], width=2.5)))
+        _fig2.add_trace(go.Scatter(x=_depths.tolist(), y=_train_mem.tolist(),
+                                   mode="lines", name="Training",
+                                   line=dict(color=COLORS["RedLine"], width=2.5),
+                                   fill="tonexty", fillcolor="rgba(203,32,45,0.1)"))
+        _fig2.add_trace(go.Scatter(x=[_depth], y=[_total_mb], mode="markers", name="Current",
+                                   marker=dict(size=12, color=COLORS["BlueLine"], symbol="diamond",
+                                               line=dict(width=2, color="white"))))
+        _fig2.update_layout(height=360, xaxis_title="Network Depth (layers)", yaxis_title="Memory (MB)",
+                            title=f"Memory vs. Depth (batch={_batch}, width={_w})",
+                            legend=dict(orientation="h", y=1.12, x=0))
+        apply_plotly_theme(_fig2)
+        items.append(mo.as_html(_fig2))
 
-        **Latency multiplier on memory-bound operations:**
+        _ratio_color = COLORS["RedLine"] if _ratio > 5 else COLORS["OrangeLine"] if _ratio > 2 else COLORS["GreenLine"]
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Weights</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_weight_mb:,.1f} MB</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Gradients</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_grad_mb:,.1f} MB</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {_colors_bar[2]}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Activations</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_colors_bar[2]};">{_act_total_mb:,.1f} MB</div>
+            </div>
+            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {_ratio_color}; flex:1;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Train/Inference Ratio</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_ratio_color};">{_ratio:.1f}x</div>
+            </div>
+        </div>
+        """))
 
-        The Memory Wall footnote (fn-memory-wall-nn) states: L1 cache delivers data
-        in ~1 ns; main memory takes ~100 ns — a 100× gap.
+        if _total_mb > 8_000 and _is_training:
+            items.append(mo.callout(mo.md(
+                f"**OOM on mobile (8 GB).** Training requires {_total_mb:,.0f} MB. "
+                f"On-device fine-tuning is infeasible. Reduce batch size, depth, or width."
+            ), kind="danger"))
 
-        **Training memory total** (@eq-training-memory):
+        _pred = partD_prediction.value
+        if _pred in ("200mb", "500mb"):
+            items.append(mo.callout(mo.md(
+                f"**Correct range.** Training requires {_ratio:.1f}x the memory of inference "
+                f"at current settings. Stored activations dominate: training keeps all {_depth} "
+                f"layers simultaneously for backpropagation."
+            ), kind="success"))
+        elif _pred == "100mb":
+            items.append(mo.callout(mo.md(
+                "**You accounted for gradients but forgot activations.** Gradients double "
+                "weight memory (2x), but stored activations add depth * batch * width per "
+                "layer -- the dominant term at deep networks."
+            ), kind="warn"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**Training is much more expensive than inference.** The actual ratio is "
+                f"{_ratio:.1f}x. Backpropagation requires storing all intermediate activations."
+            ), kind="warn"))
 
-        ```
-        training_memory ≈ weights + gradients + optimizer_state + activations
-        ```
+        items.append(mo.accordion({
+            "MathPeek: Training vs. Inference Memory": mo.md(f"""
+**Inference:** {_weight_mb:,.1f} + {_act_per_layer_mb:,.1f} = {_inference_mb:,.1f} MB
+**Training:** {_weight_mb:,.1f} + {_grad_mb:,.1f} + {_act_total_mb:,.1f} = {_total_mb:,.1f} MB
+**Ratio:** {_ratio:.1f}x
 
-        For Adam optimizer (weights W):
+Note: Optimizer state (Lab 08) adds 2 more weight-sized buffers for Adam.
+Source: @sec-nn-computation-backprop-memory
+"""),
+        }))
 
-        ```
-        weights         = W × 4 bytes (FP32)
-        gradients       = W × 4 bytes
-        Adam momentum   = W × 4 bytes
-        Adam velocity   = W × 4 bytes
-        optimizer_total = 4W bytes
-        activations     = batch × sum(layer_sizes) × 4 bytes
-        ```
+        return mo.vstack(items)
 
-        Total training memory ≈ 4× weights + activation memory.
-        This is why "will this fit?" is not a model question — it is a batch size question.
-        """)
-    })
-    return
+    # ─────────────────────────────────────────────────────────────────────
+    # SYNTHESIS BUILDER
+    # ─────────────────────────────────────────────────────────────────────
 
+    def build_synthesis():
+        items = []
+        items.append(mo.md("""
+## Synthesis: Design a Mobile Inference Pipeline
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CELL 15: ACT II STRUCTURED REFLECTION
-# ─────────────────────────────────────────────────────────────────────────────
+You are deploying a 10-layer vision model on a mobile NPU (iPhone, 8 GB RAM,
+5W power budget) for both real-time inference (30 FPS) and on-device fine-tuning.
+        """))
 
-@app.cell(hide_code=True)
-def _(mo):
-    act2_reflection = mo.ui.radio(
-        options={
-            "A) Larger batches need more parameters to process": "wrong_params",
-            "B) Larger batches increase activation memory proportionally, pushing data into slower tiers": "correct",
-            "C) Batch size has no effect on memory-boundedness": "wrong_none",
-            "D) Larger batches always improve throughput, so memory tier does not matter": "wrong_throughput",
-        },
-        label="Why does batch size affect memory-boundedness?",
-    )
-    mo.vstack([
-        mo.md("**Reflection:** Answer before reading the explanation."),
-        act2_reflection,
-    ])
-    return (act2_reflection,)
+        items.append(mo.callout(mo.md("""
+1. **Activation function choice**: Which activation and why? What is the impact on mobile?
+2. **Maximum batch size**: Before activations cross the L2 boundary on mobile
+   (32 MB L2, width=256), what is the maximum batch size?
+   *Hint: batch * 256 * 4 bytes <= 32 MB*
+3. **Training memory**: At depth=10, batch=32, width=256, what is the total
+   (weights + gradients + activations, ignoring optimizer state)?
+4. **Feasibility**: Can on-device fine-tuning fit in 8 GB?
+        """), kind="info"))
 
-
-@app.cell(hide_code=True)
-def _(mo, act2_reflection):
-    mo.stop(act2_reflection.value is None, mo.md(""))
-
-    _feedback = {
-        "wrong_params": mo.callout(mo.md(
-            "**Not quite.** Model parameters (weights) do not change with batch size — "
-            "the same weights are reused for every sample in the batch. What grows "
-            "linearly with batch size is *activation memory*: each sample in the batch "
-            "produces its own activation tensor that must be stored for backpropagation."
-        ), kind="warn"),
-        "correct": mo.callout(mo.md(
-            "**Correct.** Activation memory scales as: "
-            "`batch × height × width × channels × bytes`. "
-            "Doubling batch size doubles activation memory. When activations at batch=1 "
-            "fit in L2 cache (4× latency), activations at batch=64 may spill to HBM "
-            "(10× latency) — a 2.5× additional slowdown with no change in the model "
-            "at all. The boundary that separates 'this runs fast' from 'this is "
-            "memory-bound' is often a single doubling of batch size. This is why profiling "
-            "tools report memory-boundedness as a function of batch, not just architecture."
-        ), kind="success"),
-        "wrong_none": mo.callout(mo.md(
-            "**Not quite.** Batch size directly controls activation memory: "
-            "`activation_memory = batch × spatial × channels × bytes`. "
-            "A batch of 64 uses 64× the activation memory of batch=1. When that memory "
-            "crosses a cache tier boundary, every activation access pays the tier penalty."
-        ), kind="warn"),
-        "wrong_throughput": mo.callout(mo.md(
-            "**Not quite.** Larger batches *can* improve throughput when computation "
-            "is the bottleneck — because they amortize kernel launch overhead. But when "
-            "activation memory spills out of fast cache into HBM or DRAM, the memory "
-            "bandwidth becomes the bottleneck and throughput stops improving despite "
-            "more parallelism. The trade-off between batch size, compute efficiency, "
-            "and memory-tier pressure is the core tension in training configuration."
-        ), kind="warn"),
-    }
-    _feedback[act2_reflection.value]
-    return
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS, ACTIVATION_TAX_RATIO):
-    mo.vstack([
-        mo.md("---"),
-
-        # ── KEY TAKEAWAYS ──
-        mo.Html(f"""
+        items.append(mo.Html(f"""
         <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
                     border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
@@ -1463,192 +1043,100 @@ def _(mo, COLORS, ACTIVATION_TAX_RATIO):
             </div>
             <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                 <div style="margin-bottom: 10px;">
-                    <strong>1. The Transistor Tax is real and large.</strong>
-                    ReLU costs ~50 transistors; Sigmoid costs ~2,500 &mdash;
-                    a <strong>{int(ACTIVATION_TAX_RATIO)}&times; silicon penalty</strong> per activation unit
-                    (@sec-neural-computation-transistor-tax). On mobile hardware with a fixed power
-                    and area budget, this translates directly to FPS targets missed and battery drain.
-                    Activation function choice is not a mathematical preference; it is a hardware constraint.
+                    <strong>1. The Transistor Tax is deployment-dependent.</strong>
+                    Sigmoid costs 50x more transistors than ReLU. On cloud: invisible (<1%).
+                    On mobile: ~23% of inference time. Architecture choices free on one target
+                    are expensive on another.
                 </div>
                 <div style="margin-bottom: 10px;">
-                    <strong>2. Where data lives matters as much as what you compute with it.</strong>
-                    The memory hierarchy imposes a 10&times; latency penalty per tier boundary.
-                    A single convolution layer at 224&times;224 with 256 channels generates ~51 MB of
-                    activations &mdash; 100&times; what mobile L2 cache can hold. Every memory access
-                    for that layer hits HBM at 10&times; the L1 cost.
+                    <strong>2. Memory creates cliffs, not slopes.</strong>
+                    Crossing L2 to HBM triggers a 10-20x latency jump. Memory-aware design
+                    means keeping tensors within tier boundaries.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>3. Width scales quadratically.</strong>
+                    Doubling hidden width increases dense layer FLOPs by ~4x. The Operations
+                    term in the Iron Law is dominated by architecture decisions.
                 </div>
                 <div>
-                    <strong>3. Batch size is the lever that determines memory tier placement.</strong>
-                    At batch=1, small layers may fit in L2. At batch=32, the same layer spills to HBM.
-                    The OOM boundary is predictable from first principles: total activation memory
-                    = &Sigma;<sub>l</sub> batch &times; width<sub>l</sub>&sup2; &times; channels<sub>l</sub> &times; bytes/element.
+                    <strong>4. Training stores everything inference discards.</strong>
+                    Backpropagation requires all intermediate activations simultaneously,
+                    creating a 4-10x memory multiplier over inference.
                 </div>
             </div>
         </div>
-        """),
+        """))
 
-        # ── CONNECTIONS ──
-        mo.Html(f"""
+        items.append(mo.Html(f"""
         <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-
-            <!-- What's Next -->
             <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
                     What's Next
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab 06: The Quadratic Wall</strong> &mdash; this lab showed that
-                    activation memory is a linear cost in layer count and batch size. Lab 06
-                    asks: what happens when the memory cost is O(N&sup2;)? Transformer
-                    self-attention materializes an N&times;N similarity matrix &mdash; and doubling
-                    the sequence length quadruples the memory requirement.
+                    <strong>Lab 06: Network Architectures</strong> -- This lab showed how
+                    individual layer costs scale. Lab 06 asks: when you compose layers into
+                    architectures (MLP, CNN, Transformer), which designs are physically feasible?
                 </div>
             </div>
-
-            <!-- Textbook Connection -->
             <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-neural-computation-transistor-tax (Transistor Tax),
-                    @sec-neural-computation-computational-implementation-details-1ecc (training memory),
-                    footnote fn-memory-wall-nn (L1 vs DRAM latency gap).<br/>
-                    <strong>Build:</strong> TinyTorch Module 05 &mdash; implement forward passes for
-                    each activation function by hand and measure their computational cost directly.
-                    See <code>tinytorch/src/05_activations/</code>.
+                    <strong>Read:</strong> @sec-nn-computation for transistor costs,
+                    memory hierarchies, and FLOP scaling.<br/>
+                    <strong>Build:</strong> TinyTorch Module 05 -- implement forward and
+                    backward passes for dense layers and activation functions.
                 </div>
             </div>
-
         </div>
-        """),
+        """))
 
+        return mo.vstack(items)
 
-        mo.accordion({
-            "Self-Assessment: Can you answer these?": mo.md("""
-    1. Sigmoid costs approximately 50x more transistors than ReLU and causes gradient magnitudes to collapse to ~0.25^L after L layers. At what depth does the gradient fall below the 'learning becomes impossible' threshold of 10^-6?
+    # ─────────────────────────────────────────────────────────────────────
+    # COMPOSE TABS
+    # ─────────────────────────────────────────────────────────────────────
 
-    2. Training the MNIST network (784->128->64->10) requires approximately how many times more memory than inference at batch=32 — and which of the four memory components (weights, gradients, optimizer state, activations) grows with batch size?
-
-    3. A team switches from ReLU to Sigmoid to improve convergence on a 12-layer network. Predict what happens to (a) gradient magnitude after 12 layers, (b) training memory requirements, and (c) inference power per evaluation — and explain which failure is silent versus visible.
-
-    *If you cannot answer all three from memory, revisit Act I and Act II.*
-    """)
-        }),
-    ])
+    tabs = mo.ui.tabs({
+        "Part A \u2014 The Transistor Tax":       build_part_a(),
+        "Part B \u2014 The Memory Cliff":         build_part_b(),
+        "Part C \u2014 Width-Squared Surprise":   build_part_c(),
+        "Part D \u2014 Forward vs. Backward":     build_part_d(),
+        "Synthesis":                              build_synthesis(),
+    })
+    tabs
     return
 
 
-# ─── CELL 21: LEDGER_HUD ──────────────────────────────────────────────────────
-@app.cell
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 5: LEDGER HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    decision_input, decision_ui = DecisionLog()
-    return decision_input, decision_ui
-
-
-@app.cell(hide_code=True)
-def _(
-    mo, ledger, COLORS,
-    context_toggle,
-    act1_prediction, act1_layer1, act1_layer2, act1_layer3, act1_layer4,
-    act1_reflection, act2_prediction, act2_reflection,
-    act2_image_size, act2_channels, act2_batch, act2_precision,
-    H100_RAM_GB, MOBILE_RAM_GB, ACTIVATION_TAX_RATIO,
-    H100_L2_CACHE_MB, H100_L1_PER_SM_KB,
-    MOBILE_L2_CACHE_KB, MOBILE_L1_CACHE_KB,
-    MEM_L1_MULT, MEM_L2_MULT, MEM_HBM_MULT, MEM_DRAM_MULT,
-, decision_input, decision_ui):
-    _ctx = context_toggle.value
-    _device_ram_mb = (H100_RAM_GB if _ctx == "cloud" else MOBILE_RAM_GB) * 1024
-    _l2_cache_kb   = H100_L2_CACHE_MB * 1024 if _ctx == "cloud" else MOBILE_L2_CACHE_KB
-    _l1_cache_kb   = H100_L1_PER_SM_KB if _ctx == "cloud" else MOBILE_L1_CACHE_KB
-
-    # Compute activation memory and OOM state
-    _img      = act2_image_size.value
-    _ch_out   = act2_channels.value
-    _batch    = act2_batch.value
-    _bytes_pp = act2_precision.value
-    _total_act_bytes = 0
-    _w, _ch = _img, _ch_out
-    for _ in range(6):
-        _total_act_bytes += _batch * _w * _w * _ch * _bytes_pp
-        _w = max(_w // 2, 1)
-        _ch = _ch * 2
-    _total_act_mb = _total_act_bytes / (1024 * 1024)
-    _oom_triggered = _total_act_mb > _device_ram_mb
-
-    # Cache miss rate
-    _cache_miss_layers = 0
-    _w, _ch = _img, _ch_out
-    for _ in range(6):
-        _size_kb = _batch * _w * _w * _ch * _bytes_pp / 1024
-        if _size_kb > _l2_cache_kb:
-            _cache_miss_layers += 1
-        _w = max(_w // 2, 1)
-        _ch = _ch * 2
-    _cache_miss_rate = _cache_miss_layers / 6.0
-
-    # Layer activation choices — map back to canonical key
-    _act_map = {
-        "ReLU   (max(0,x) — comparator)": "relu",
-        "Leaky ReLU   (max(αx,x))": "leaky_relu",
-        "Sigmoid   (1/(1+e^−x))": "sigmoid",
-        "Tanh   ((e^x−e^−x)/(e^x+e^−x))": "tanh",
-        "GELU   (x·Φ(x) — erf approx)": "gelu",
-        "Softmax   (exp / sum(exp))": "softmax",
-    }
-    _activation_choice = {
-        "layer1": _act_map.get(act1_layer1.value, "sigmoid"),
-        "layer2": _act_map.get(act1_layer2.value, "sigmoid"),
-        "layer3": _act_map.get(act1_layer3.value, "sigmoid"),
-        "layer4": _act_map.get(act1_layer4.value, "sigmoid"),
-    }
-
-    # Correctness flags
-    _act1_correct = (act1_prediction.value == "50x") if act1_prediction.value else False
-    _act2_correct = (act2_prediction.value == "lt1pct") if act2_prediction.value else False
-    _refl1_correct = (act1_reflection.value == "correct") if act1_reflection.value else False
-    _refl2_correct = (act2_reflection.value == "correct") if act2_reflection.value else False
-
-    # Save to Design Ledger (chapter 5)
-    ledger.save(chapter=5, design={
-        "context":            _ctx,
-        "activation_choice":  _activation_choice,
-        "act1_prediction":    act1_prediction.value or "",
-        "act1_correct":       _act1_correct,
-        "act2_result":        round(_total_act_mb, 2),
-        "act2_decision":      f"batch={_batch}_channels={_ch_out}_{_bytes_pp*8}bit",
-        "constraint_hit":     _oom_triggered,
-        "student_justification": str(decision_input.value),
-        "oom_triggered":      _oom_triggered,
-        "cache_miss_rate":    round(_cache_miss_rate, 2),
-    })
-
-    # HUD footer
-    _hud_items = [
-        ("Chapter", "5 — Neural Computation"),
-        ("Context", _ctx.upper()),
-        ("Act I correct", "Yes" if _act1_correct else "No"),
-        ("Act II correct", "Yes" if _act2_correct else "No"),
-        ("OOM triggered", "Yes" if _oom_triggered else "No"),
-        ("Cache miss rate", f"{_cache_miss_rate*100:.0f}%"),
-    ]
-    _hud_html = "".join(
-        f'<div style="display:flex; flex-direction:column; gap:2px;">'
-        f'<span class="hud-label">{k}</span>'
-        f'<span class="{"hud-active" if v in ("Yes","cloud","mobile") else "hud-value"}">{v}</span>'
-        f'</div>'
-        for k, v in _hud_items
-    )
-
-    mo.Html(f'<div class="lab-hud">{_hud_html}</div>')
+def _(COLORS, ledger, mo):
+    _track = ledger._state.track or "not set"
+    mo.Html(f"""
+    <div class="lab-hud">
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">05 &middot; The Transistor Tax</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">TRACK</span>
+        <span class="{'hud-active' if _track != 'not set' else 'hud-none'}">{_track}</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">CHAPTER&nbsp;5</span>
+        <span class="hud-value">Neural Computation</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">active</span>
+    </div>
+    """)
     return
 
 
