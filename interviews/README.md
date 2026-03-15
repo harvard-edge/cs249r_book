@@ -7,6 +7,19 @@ A community-driven collection of high-stakes systems design questions for AI inf
 
 ---
 
+## 📊 The Mastery Levels
+
+Every question in this hub is tagged with a mastery level, reflecting the "Funnel of Mastery" used in real systems engineering interviews.
+
+*   **🟢 Level 1: The Screen (Junior/Mid)**
+    *   *Goal:* Can you define the core concepts and constants? (e.g., "What are the three terms of the Iron Law?")
+*   **🟡 Level 2: The Architect (Senior)**
+    *   *Goal:* Can you reason about trade-offs and bottleneck physics? (e.g., "Why does increasing batch size reduce dispatch overhead?")
+*   **🔴 Level 3: The Lead (Staff/Principal)**
+    *   *Goal:* Can you perform "Whiteboard Physics" on the fly? (e.g., "Size the KV-cache for a 70B model with 128k context and prove it fits on 8xH100s.")
+
+---
+
 ## 🏗️ Question Categories
 
 Follow the progression from single-accelerator foundations to global production fleets.

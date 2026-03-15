@@ -7,7 +7,7 @@ Physics of fleets, communication, and fault tolerance at scale.
 ### 📋 Copy-Paste Template
 ```markdown
 <details>
-<summary><b>SCALE: [Your Question Title Here]</b></summary>
+<summary><b>[LEVEL]: [Your Question Title Here]</b></summary>
 
 **Answer:** [Direct answer here]
 **Realistic Solution:** [Explain the physics/logic here]
@@ -18,25 +18,25 @@ Physics of fleets, communication, and fault tolerance at scale.
 ---
 
 <details>
-<summary><b>AMDAHL: Why does adding more GPUs sometimes decrease throughput?</b></summary>
+<summary><b>🟢 LEVEL 1: What are the three axes of the 3D Parallelism Cube?</b></summary>
 
-**Answer:** Communication Overhead.
-**Realistic Solution:** In distributed training, you must synchronize gradients via AllReduce. As you add nodes, the computation time per node decreases, but the communication time (synchronization) increases. If the time to "talk" exceeds the time to "compute," the scaling efficiency drops.
+**Answer:** Data, Tensor, and Pipeline Parallelism.
+**Realistic Solution:** **Data Parallelism** unrolls the batch loop (replicating the model across devices). **Tensor Parallelism** vectorizes the inner matrix math of a single layer across devices. **Pipeline Parallelism** stages the sequential layers across different nodes. Production runs of models like GPT-4 require a hybrid of all three.
 **📖 Deep Dive:** [Volume II: Distributed Training](https://mlsysbook.ai/vol2/distributed_training.html)
 </details>
 
 <details>
-<summary><b>FRAGILITY: How do we size checkpoint intervals for large clusters?</b></summary>
+<summary><b>🟡 LEVEL 2: Why can't you use Tensor Parallelism across different server racks?</b></summary>
 
-**Answer:** The Young-Daly Equation.
-**Realistic Solution:** As node count increases, the Mean Time Between Failures (MTBF) of the cluster decreases exponentially. You must balance the time wasted saving checkpoints against the time lost re-calculating work after a failure.
-**📖 Deep Dive:** [Volume II: Fault Tolerance](https://mlsysbook.ai/vol2/fault_tolerance.html)
+**Answer:** The "Jeff Dean Test" for bandwidth constraints.
+**Realistic Solution:** Tensor Parallelism requires an AllReduce operation on the activations of *every single layer*. This volume demands the massive bandwidth of intra-node interconnects like NVLink (900 GB/s). If you attempt this across server racks connected by standard InfiniBand/Ethernet (~50 GB/s), the GPUs will stall waiting for data. For cross-rack scaling, you must switch to Pipeline or Data parallelism.
+**📖 Deep Dive:** [Volume II: Distributed Training](https://mlsysbook.ai/vol2/distributed_training.html)
 </details>
 
 <details>
-<summary><b>LOCALITY: Why use Fat-Tree networks in AI datacenters?</b></summary>
+<summary><b>🔴 LEVEL 3: How does the Communication-Computation Ratio cap cluster performance?</b></summary>
 
-**Answer:** To maximize Bisection Bandwidth.
-**Realistic Solution:** AllReduce operations require massive bandwidth between all pairs of nodes. A Fat-Tree topology ensures that any group of nodes can communicate at full wire speed without being throttled by network hierarchy bottlenecks.
-**📖 Deep Dive:** [Volume II: Network Fabrics](https://mlsysbook.ai/vol2/network_fabrics.html)
+**Answer:** Amdahl's Law at the cluster level.
+**Realistic Solution:** The Iron Law of Scale dictates that $T_{step} = (T_{compute}/N) + T_{comm}(N) - T_{overlap}$. As you add nodes ($N$), computation time drops, but communication time (synchronization) grows. If the time to "talk" exceeds the time to "compute", adding more H100s actively degrades throughput. A senior engineer must optimize for communication intensity, not just arithmetic intensity.
+**📖 Deep Dive:** [Volume II: Distributed Training](https://mlsysbook.ai/vol2/distributed_training.html)
 </details>

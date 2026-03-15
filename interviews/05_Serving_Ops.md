@@ -7,7 +7,7 @@ The economics and reliability of production AI systems.
 ### 📋 Copy-Paste Template
 ```markdown
 <details>
-<summary><b>SERVING: [Your Question Title Here]</b></summary>
+<summary><b>[LEVEL]: [Your Question Title Here]</b></summary>
 
 **Answer:** [Direct answer here]
 **Realistic Solution:** [Explain the physics/logic here]
@@ -18,25 +18,25 @@ The economics and reliability of production AI systems.
 ---
 
 <details>
-<summary><b>TAIL LATENCY: Why do LLMs feel slow even when average throughput is high?</b></summary>
+<summary><b>🟢 LEVEL 1: What is the 'Serving Inversion' compared to Training?</b></summary>
 
-**Answer:** Non-linear queueing delays at high utilization.
-**Realistic Solution:** Request latency follows an Erlang-C distribution. As GPU utilization approaches 100%, the probability of requests "piling up" increases exponentially. A system at 90% utilization might have an average latency of 50ms but a P99 latency of 5 seconds. 
-**📖 Deep Dive:** [Volume I: Benchmarking](https://mlsysbook.ai/vol1/benchmarking.html)
+**Answer:** The shift from maximizing throughput to minimizing latency.
+**Realistic Solution:** Training maximizes throughput ($T$) by using massive batches to keep the GPUs at 100% utilization. Serving minimizes latency ($L_{lat}$) because a slow response is a broken product. The batch-heavy architectures that saturate accelerators during training are fundamentally ill-suited for the bursty, latency-critical reality of production traffic.
+**📖 Deep Dive:** [Volume I: Model Serving](https://mlsysbook.ai/vol1/model_serving.html)
 </details>
 
 <details>
-<summary><b>TCO: Why is electricity cost as critical as hardware cost?</b></summary>
+<summary><b>🟡 LEVEL 2: Why do production serving clusters rarely run at 90% GPU utilization?</b></summary>
 
-**Answer:** 3-year Total Cost of Ownership (TCO).
-**Realistic Solution:** Training a frontier model can cost $100M in hardware (CapEx), but the energy and cooling bills (OpEx) over 3 years can match or exceed that cost. System efficiency isn't just about speed; it's about financial viability.
-**📖 Deep Dive:** [Volume II: Sustainable AI](https://mlsysbook.ai/vol2/sustainable_ai.html)
+**Answer:** The Tail Latency Explosion (Queueing Theory).
+**Realistic Solution:** As system utilization ($\rho$) passes the "Knee" at ~70%, request queue lengths grow exponentially, not linearly (per Erlang-C / Little's Law). A system at 90% load might have an average latency of 50ms but a P99 latency of 5 seconds. To maintain SLAs, engineers must deliberately over-provision hardware to maintain 40-60% headroom, drastically increasing the dollar cost per query.
+**📖 Deep Dive:** [Volume I: Model Serving](https://mlsysbook.ai/vol1/model_serving.html)
 </details>
 
 <details>
-<summary><b>DRIFT: Why do accurate models fail in production?</b></summary>
+<summary><b>🔴 LEVEL 3: Why can an ML system be perfectly available but perfectly wrong?</b></summary>
 
-**Answer:** Statistical distribution shift.
-**Realistic Solution:** Unlike traditional software, ML systems fail silently when the live data distribution shifts away from the training distribution. Continuous monitoring is required to identify when the "Silicon Contract" has been broken.
-**📖 Deep Dive:** [Volume I: ML Operations](https://mlsysbook.ai/vol1/ops.html)
+**Answer:** The Operational Mismatch (Silent Degradation).
+**Realistic Solution:** Traditional DevOps monitors deterministic health (uptime, 200 OK HTTP codes). MLOps must monitor statistical health. A model experiencing Data Drift will continue serving predictions with full confidence, triggering no infrastructure alerts, while its accuracy silently drops from 95% to 80%. You must engineer telemetry (KL Divergence, PSI) to detect distribution shifts before they hit business metrics.
+**📖 Deep Dive:** [Volume I: ML Operations](https://mlsysbook.ai/vol1/ml_ops.html)
 </details>
