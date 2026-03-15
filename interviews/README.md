@@ -63,6 +63,7 @@ We welcome contributions of questions and scenarios from recent AI systems inter
 1.  **Submit an Issue:** Use the **[💼 New Interview Question](https://github.com/harvard-edge/cs249r_book/issues/new?template=interview_question.yml)** template.
 2.  **The 10-Upvote Rule:** Once a community question reaches **10 upvotes (👍)**, it is added to the official category files and you are added to the **Hall of Fame**.
 
+
 ---
 
 ## 💌 A Note on the Mission
