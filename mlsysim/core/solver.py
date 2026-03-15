@@ -1784,60 +1784,58 @@ class BatchingOptimizer(BaseOptimizer):
               num_replicas: int = 1, precision: str = "fp16", 
               efficiency: float = 0.5, max_search_batch: int = 256) -> BatchingOptimizerResult:
         
+        from .optimization.registry import OptimizationRegistry
         serving_model = ServingModel()
         tail_model = TailLatencyModel()
         
-        best_batch = 0
-        max_tps = 0.0
-        best_p99 = Q_("0 ms")
-        best_viol = 0.0
-        
-        candidates = []
-        
-        for b in range(1, max_search_batch + 1):
-            # 1. Base inference performance
+        def objective(b_array):
+            b = int(b_array[0])
             res = serving_model.solve(model, hardware, seq_len=seq_len, batch_size=b, precision=precision, efficiency=efficiency)
             if not res.feasible:
-                break
+                return 1e12 # Infeasible due to memory
                 
-            # Service latency for the batch
-            # Note: For continuous batching, service latency is TTFT + (seq_len * ITL)
             service_latency = res.ttft + (res.itl * seq_len)
-            
-            # 2. Queueing tail latency
             tail_res = tail_model.solve(arrival_rate_qps / b, service_latency.m_as("ms"), num_replicas)
             
-            if not tail_res.is_stable:
-                continue
+            if not tail_res.is_stable or tail_res.p99_latency.m_as("ms") > sla_latency_ms:
+                return 1e12 # Infeasible due to queueing instability or SLA violation
                 
-            p99 = tail_res.p99_latency
+            # We want to maximize batch size (which maximizes valid throughput), so minimize -b
+            return -b
             
-            if p99.m_as("ms") <= sla_latency_ms:
-                # Throughput is bounded by arrival rate (if stable) or max capacity
-                throughput = arrival_rate_qps * seq_len
-                
-                candidates.append({
-                    "batch_size": b,
-                    "throughput": throughput,
-                    "p99": p99,
-                    "viol": tail_res.slo_violation_probability
-                })
-                
-                if throughput > max_tps:
-                    max_tps = throughput
-                    best_batch = b
-                    best_p99 = p99
-                    best_viol = tail_res.slo_violation_probability
-                    
+        backend = OptimizationRegistry.get_backend("exhaustive")
+        backend.compile(objective_fn=objective, ranges=[(1, max_search_batch)], grid_size=max_search_batch)
+        opt_res = backend.solve()
+
+        if not opt_res.feasible:
+            return BatchingOptimizerResult(
+                objective_value=0.0,
+                best_config={"max_batch_size": 0},
+                best_batch_size=0,
+                max_throughput=0.0,
+                p99_latency=Q_("0 ms"),
+                slo_violation_probability=0.0,
+                is_feasible=False,
+                total_searched=max_search_batch
+            )
+            
+        best_b = int(opt_res.best_configuration["optimal_variable"])
+        max_tps = arrival_rate_qps * seq_len
+        
+        # Resolve final exact metrics for the optimal batch size
+        res = serving_model.solve(model, hardware, seq_len=seq_len, batch_size=best_b, precision=precision, efficiency=efficiency)
+        service_latency = res.ttft + (res.itl * seq_len)
+        tail_res = tail_model.solve(arrival_rate_qps / best_b, service_latency.m_as("ms"), num_replicas)
+
         return BatchingOptimizerResult(
             objective_value=max_tps,
-            best_config={"max_batch_size": best_batch},
-            best_batch_size=best_batch,
+            best_config={"max_batch_size": best_b},
+            best_batch_size=best_b,
             max_throughput=max_tps,
-            p99_latency=best_p99,
-            slo_violation_probability=best_viol,
-            is_feasible=best_batch > 0,
-            total_searched=len(candidates)
+            p99_latency=tail_res.p99_latency,
+            slo_violation_probability=tail_res.slo_violation_probability,
+            is_feasible=True,
+            total_searched=max_search_batch
         )
 
 

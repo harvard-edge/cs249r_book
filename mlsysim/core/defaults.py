@@ -164,3 +164,32 @@ REFERENCE_MFU_SUSTAINED = 0.40
 # NOT derived from Abadi et al. (2016) — calibrated to match reported
 # slowdowns: ~3x at ε=1.0, ~1.2x at ε=10.0.
 DP_SGD_SLOWDOWN_COEFFICIENT = 2.0
+
+# --- Engine Default Overrides ---
+from .pedagogy import SystemAssumption
+
+# Default scaling efficiency for parallel clusters
+DEFAULT_SCALING_EFFICIENCY = SystemAssumption(
+    0.90,
+    name="Scaling Efficiency (η)",
+    description="The efficiency of parallel scaling. A value of 0.90 means 90% of theoretical linear speedup is achieved.",
+    citation="Common industry rule-of-thumb for highly optimized clusters."
+)
+
+# Default communication overlap efficiency (e.g., Megatron-LM can overlap ~85% of communication)
+DEFAULT_OVERLAP_EFFICIENCY = SystemAssumption(
+    0.85,
+    name="Communication Overlap Efficiency",
+    description="The fraction of network communication time that can be successfully hidden behind compute operations.",
+    citation="Shoeybi et al. (2019). Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism.",
+    url="https://arxiv.org/abs/1909.08053"
+)
+
+# Default compute efficiency (MFU baseline)
+DEFAULT_COMPUTE_EFFICIENCY = SystemAssumption(
+    0.50,
+    name="Baseline Model FLOPs Utilization (MFU)",
+    description="A highly optimized large language model typically achieves around 50% MFU due to communication overhead and memory bandwidth constraints.",
+    citation="Chowdhery et al. (2022). PaLM: Scaling Language Modeling with Pathways.",
+    url="https://arxiv.org/abs/2204.02311"
+)
