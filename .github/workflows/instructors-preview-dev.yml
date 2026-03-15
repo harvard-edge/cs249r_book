@@ -1,0 +1,81 @@
+name: '🎓 Instructors · 👁️ Preview (Dev)'
+
+# Builds and deploys The Blueprint instructor site to dev preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - 'instructors/**'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: instructors-dev-deploy
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: '🎓 Build & Deploy Instructors (Dev)'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build Instructor Site
+        working-directory: instructors
+        run: |
+          quarto render
+          touch _build/.nojekyll
+
+      - name: 🔍 Validate build
+        run: |
+          if [ ! -f "instructors/_build/index.html" ]; then
+            echo "❌ CRITICAL: index.html missing. Aborting deployment."
+            exit 1
+          fi
+          echo "✅ Site built: $(find instructors/_build -name '*.html' | wc -l) pages"
+
+      - name: 🚀 Deploy to Dev Site via SSH
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning dev preview repository..."
+          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+          cd target-repo
+
+          echo "🧹 Cleaning instructors directory..."
+          rm -rf instructors
+          mkdir -p instructors
+
+          echo "🚚 Copying instructor site content..."
+          cp -r "${{ github.workspace }}/instructors/_build/." instructors/
+
+          if [ ! -f "instructors/index.html" ]; then
+            echo "❌ CRITICAL: instructors/index.html missing. Aborting."
+            exit 1
+          fi
+
+          echo "📦 Committing and pushing..."
+          git add .
+          git commit -m "🎓 Deploy Instructors dev to /instructors/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+          git push origin main
+
+          echo "✅ Instructor site deployed to dev preview"
