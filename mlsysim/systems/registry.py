@@ -97,3 +97,10 @@ class Systems:
     Nodes = Nodes
     Clusters = Clusters
     Fabrics = Fabrics
+
+    # Backward-compatible aliases expected by older book content
+    Cloud = Hardware.H100
+    Edge = Hardware.Edge.JetsonOrinNX
+    Mobile = Hardware.iPhone
+    Tiny = Hardware.Tiny.ESP32_S3
+    
