@@ -1,8 +1,8 @@
-# Distributed ML & Scaling 🚀
+# Round 2: Distributed AI Infrastructure 🚀
 
-Physics of fleets, communication, and fault tolerance at scale.
+The domain of the AI Infrastructure Engineer. This round tests your understanding of what happens when a model exceeds the capacity of a single node: 3D parallelism, network topologies, and fault tolerance.
 
-> **[➕ Add a Flashcard to this section](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/04_Distributed_ML.md)** (Edit in Browser)
+> **[➕ Add a Flashcard to this section](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/02_Distributed_Infrastructure.md)** (Edit in Browser)
 
 ### 📋 Copy-Paste Template
 ```markdown
@@ -34,9 +34,9 @@ Physics of fleets, communication, and fault tolerance at scale.
 </details>
 
 <details>
-<summary><b>🔴 LEVEL 3: How does the Communication-Computation Ratio cap cluster performance?</b></summary>
+<summary><b>🔴 LEVEL 3: How do we size checkpoint intervals for a 10,000 GPU cluster?</b></summary>
 
-**Answer:** Amdahl's Law at the cluster level.
-**Realistic Solution:** The Iron Law of Scale dictates that $T_{step} = (T_{compute}/N) + T_{comm}(N) - T_{overlap}$. As you add nodes ($N$), computation time drops, but communication time (synchronization) grows. If the time to "talk" exceeds the time to "compute", adding more H100s actively degrades throughput. A senior engineer must optimize for communication intensity, not just arithmetic intensity.
-**📖 Deep Dive:** [Volume II: Distributed Training](https://mlsysbook.ai/vol2/distributed_training.html)
+**Answer:** The Young-Daly Equation (Balancing MTBF and Checkpoint Cost).
+**Realistic Solution:** As node count ($N$) increases, the Mean Time Between Failures ($MTBF$) of the cluster decreases exponentially ($MTBF_{cluster} = MTBF_{node} / N$). A 10,000 GPU cluster will experience failures every few hours. You must balance the time wasted saving frequent checkpoints against the time lost re-calculating work after a failure.
+**📖 Deep Dive:** [Volume II: Fault Tolerance](https://mlsysbook.ai/vol2/fault_tolerance.html)
 </details>
