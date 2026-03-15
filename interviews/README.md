@@ -2,8 +2,19 @@
 
 A community-driven collection of high-stakes systems design questions for AI infrastructure and ML systems engineering roles.
 
-> [!IMPORTANT]
-> **The "Systems-First" Philosophy:** This is *not* a pure machine learning study guide. We do not ask how to tune hyperparameters or derive backpropagation. We focus on the **intersection of ML and Systems**. Companies like Meta, Google, and OpenAI are aggressively hiring engineers who understand the *physics* of AI computation—how to keep 10,000 GPUs fed, how to manage P99 latency during traffic spikes, and how to survive the memory wall. 
+---
+
+## ⚡ The Motivation: Why Systems Engineering?
+
+The traditional software engineering interview has fundamentally changed. 
+
+Using LLMs to generate algorithms or boilerplate code is the new normal. But when it comes to *engineering* AI systems at scale, you are hard-wired by the physics of the data center. **You cannot prompt your way out of a silicon bottleneck.**
+
+An LLM can write a flawless PyTorch training loop, but it cannot intuitively calculate why a 175B parameter model will hit a communication wall across InfiniBand, or why serving a 128k context window will fragment your KV-cache and explode your P99 latency. These are physical constraints, not code syntax.
+
+**The frontier of AI hiring is at the intersection of Machine Learning and Systems Physics.** Companies like Meta, Google, and OpenAI are aggressively seeking engineers who possess *Mechanical Sympathy*—the ability to look past the framework abstractions and understand the hard reality of how to keep 10,000 GPUs fed and 1 million users served. 
+
+This hub is your playbook for that new frontier.
 
 ---
 
@@ -51,6 +62,16 @@ We welcome contributions of questions and scenarios from recent AI systems inter
 
 1.  **Submit an Issue:** Use the **[💼 New Interview Question](https://github.com/harvard-edge/cs249r_book/issues/new?template=interview_question.yml)** template.
 2.  **The 10-Upvote Rule:** Once a community question reaches **10 upvotes (👍)**, it is added to the official category files and you are added to the **Hall of Fame**.
+
+---
+
+## 💌 A Note on the Mission
+
+I created this hub to help people learn the true physical realities of building AI systems. My hope is that as you interview and encounter new challenges, you will bring those scenarios back here and contribute them to the community. Together, we can build and train the next generation of AI engineers. 
+
+Wishing you all the best in your interviews and your engineering journey!
+
+— *Vijay Janapa Reddi*
 
 ---
 
