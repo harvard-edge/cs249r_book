@@ -1017,6 +1017,7 @@ The Roofline's diagnostic power makes it one of the most practically useful anal
 # │ Exports: InfraSetup.gpt3_params_b, H100PerformanceScenario.h100_tflops, MemoryBandwidthScenario.h100_bw, InfraSetup.h100_ridge
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import H100_FLOPS_FP8_TENSOR, H100_MEM_BW, GPT3_PARAMS, TFLOPs, TB, second, param, BILLION, flop, byte
+from mlsysim.fmt import check
 
 class RooflineScenario:
     """H100 and GPT-3 specs for roofline analysis."""
@@ -1029,6 +1030,10 @@ class RooflineScenario:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     ridge = (flops / bw).m_as(flop/byte)
     params_b = gpt3_params / BILLION
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(1.0 < ridge, "Narrative Violation: Batch-1 inference is no longer memory-bound!")
+    check(ridge / 1.0 > 50, "Narrative Violation: The gap between compute-bound and memory-bound is too small.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b = f"{params_b:.0f}"
@@ -1617,7 +1622,7 @@ class BandwidthStaircase:
     gap_hbm_nv = hbm_bw_gbs / nvlink_bw_gbs
     gap_nv_ib = nvlink_bw_gbs / ib_bw_gbs
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(gap_nv_ib == 18.0, f"Gap {gap_nv_ib} unexpected")
+    check(gap_nv_ib > 10, f"Narrative Violation: Bandwidth staircase collapsed! Ratio is only {gap_nv_ib:.1f}x (needs to be >10x)")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     bs_hbm_bw_str = f"{hbm_bw_gbs:,.0f}"
     bs_nvlink_bw_str = f"{nvlink_bw_gbs:.0f}"
@@ -2536,6 +2541,10 @@ class CommScalingMath:
     """Formatted math strings for scaling efficiency and communication overhead analysis."""
 
     _ib_gbs = BandwidthHierarchyScenario.ib_bw_gbs
+    
+    # ┌── GUARD (Invariants) ──────────────────────────────────────────
+    _time_s = (2 * 350) / float(_ib_gbs)
+    check(_time_s > 5.0, f"Narrative Violation: Communication is too fast ({_time_s:.1f}s)! The 'bottleneck' narrative is broken.")
 
     comm_time_formula_math = md_math(f"2 \\times (N-1)/N \\times 350 / {_ib_gbs}")
     comm_approx_math = md_math(f"2 \\times 350 / {_ib_gbs}")
