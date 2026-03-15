@@ -36,7 +36,7 @@ app = marimo.App(width="full")
 
 # ── CELL 0: SETUP ────────────────────────────────────────────────────────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -44,12 +44,18 @@ def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     # ── Hardware constants (from LABS_SPEC.md, all plain floats, source: NVIDIA specs) ──
     H100_RAM_GB      = 80     # H100 SXM5 HBM3e memory capacity
@@ -1441,6 +1447,13 @@ def _(mo, COLORS):
 
 
 # ── CELL 21: DESIGN LEDGER SAVE + HUD ────────────────────────────────────────
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1449,7 +1462,7 @@ def _(
     act1_prediction, act1_reflection,
     act2_accum_steps, act2_checkpointing,
     act2_prediction, act2_reflection,
-):
+, decision_input, decision_ui):
     # Save chapter results to Design Ledger
     # Fields consumed by: lab_10 (precision baseline), lab_11 (MFU starting point)
     _ctx = context_toggle.value
@@ -1474,6 +1487,7 @@ def _(
             "act2_prediction":    act2_prediction.value,
             "act2_correct":       _act2_correct,
             "constraint_hit":     act1_prediction.value != "112gb",
+        "student_justification": str(decision_input.value),
         },
     )
 

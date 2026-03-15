@@ -227,54 +227,81 @@ def _(mo):
 # ─── CELL 3: CONTEXT TOGGLE (hide_code=True) ──────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
-    context_toggle = mo.ui.radio(
+    grid_selector = mo.ui.dropdown(
         options={
-            "Coal Region (820 gCO\u2082/kWh)": "coal",
-            "Renewable Region (40 gCO\u2082/kWh)": "renewable",
+            "US Average (Mixed)": "us",
+            "Poland (Coal)": "poland",
+            "Norway (Hydro)": "norway",
+            "Quebec (Hydro)": "quebec"
         },
-        value="Coal Region (820 gCO\u2082/kWh)",
-        label="Deployment context:",
-        inline=True,
+        value="US Average (Mixed)",
+        label="Select Datacenter Region:"
     )
     mo.vstack([
         mo.md("---"),
-        mo.md("### Select your grid region to orient both acts:"),
-        context_toggle,
+        mo.md("### Select your datacenter region to orient both acts:"),
+        grid_selector,
     ])
-    return (context_toggle,)
+    return (grid_selector,)
 
 
 @app.cell(hide_code=True)
-def _(mo, context_toggle, COLORS, COAL_CI_G_KWH, RENEW_CI_G_KWH):
-    _ctx = context_toggle.value
-    _is_coal = _ctx == "coal"
-    _color = COLORS["RedLine"] if _is_coal else COLORS["GreenLine"]
-    _bg = COLORS["RedL"] if _is_coal else COLORS["GreenL"]
-    _label = "Coal Region (820 gCO\u2082/kWh)" if _is_coal else "Renewable Region (40 gCO\u2082/kWh)"
-    _ci = COAL_CI_G_KWH if _is_coal else RENEW_CI_G_KWH
-    _specs = (
-        f"US coal-heavy grid &middot; {COAL_CI_G_KWH} gCO\u2082/kWh &middot; "
-        "West Virginia / Poland tier &mdash; US EPA eGRID 2022"
-        if _is_coal else
-        f"Pacific Northwest / Nordic grid &middot; {RENEW_CI_G_KWH} gCO\u2082/kWh &middot; "
-        "hydro + wind mix &mdash; US EPA eGRID data"
+def _(mo, grid_selector):
+    import mlsysim
+    from mlsysim.labs.components import MapDashboard, DecisionLog
+    
+    # Map the dropdown value to the exact mlsysim GridProfile
+    grid_map = {
+        "us": mlsysim.Infra.Grids.US_Avg,
+        "poland": mlsysim.Infra.Grids.Poland,
+        "norway": mlsysim.Infra.Grids.Norway,
+        "quebec": mlsysim.Infra.Grids.Quebec
+    }
+    
+    active_grid = grid_map[grid_selector.value]
+    
+    # Establish a baseline workload (e.g. 1000 GPU-hours on H100) to feed the dashboard
+    fleet = mlsysim.Systems.Clusters.Research_256
+    
+    # Run the engine for the active grid
+    active_eval = mlsysim.SystemEvaluator.evaluate(
+        scenario_name="Baseline Setup",
+        model_obj=mlsysim.Models.Language.Llama3_8B,
+        hardware_obj=mlsysim.Hardware.Cloud.H100,
+        batch_size=1,
+        precision="fp16",
+        efficiency=0.5,
+        fleet_obj=fleet,
+        nodes=256,
+        duration_days=1.0 # Short duration for baseline comparison
     )
-    _ratio = COAL_CI_G_KWH / RENEW_CI_G_KWH
-    mo.Html(f"""
-    <div style="border-left: 4px solid {_color}; background: {_bg};
-                border-radius: 0 10px 10px 0; padding: 14px 20px; margin: 10px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; color: {_color};
-                    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">
-            Active Context
-        </div>
-        <div style="font-weight: 700; font-size: 1.05rem; color: #1e293b;">{_label}</div>
-        <div style="font-size: 0.85rem; color: #475569; margin-top: 3px;">{_specs}</div>
-        <div style="font-size: 0.82rem; color: #475569; margin-top: 6px;">
-            Grid intensity ratio coal/renewable: <strong>{_ratio:.0f}&times;</strong> &mdash;
-            identical workload, {_ratio:.0f}&times; different carbon footprint
-        </div>
-    </div>
-    """)
+    # The active_eval needs its macro numbers calibrated to the specific grid.
+    # Currently evaluate() uses the fleet.datacenter. We can override by building a custom solve:
+    sus_model = mlsysim.SustainabilityModel()
+    res = sus_model.solve(fleet=fleet, duration_days=1.0, datacenter=active_grid, mfu=0.5)
+    # Patch the macro metrics for the dashboard
+    active_eval.macro.metrics['carbon_footprint'] = res.carbon_footprint_kg / 1000.0
+    
+    # Run the comparison sweeps for the strip
+    comp_evals = []
+    for g in [mlsysim.Infra.Grids.Norway, mlsysim.Infra.Grids.US_Avg, mlsysim.Infra.Grids.Poland]:
+        _res = sus_model.solve(fleet=fleet, duration_days=1.0, datacenter=g, mfu=0.5)
+        comp_evals.append({
+            'grid': g,
+            'carbon_kg': _res.carbon_footprint_kg
+        })
+
+    # Render the rich MapDashboard
+    ui = MapDashboard(active_grid, active_eval, comp_evals)
+    
+    return active_grid, active_eval, ui, grid_map
+
+@app.cell(hide_code=True)
+def _(mo, ui):
+    mo.vstack([
+        mo.md("*Same 6,000 GPU-hours. Pick your datacenter.*"),
+        ui
+    ])
     return
 
 
@@ -1555,11 +1582,17 @@ def _(mo, COLORS):
 
 # ─── CELL 21: LEDGER SAVE + HUD FOOTER ───────────────────────────────────────
 @app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
+@app.cell(hide_code=True)
 def _(mo, ledger, COLORS,
       context_toggle, efficiency_gain, deployment_scale,
       _net_change_pct, _carbon_savings_pct, _target_met,
       act1_pred, act1_reflect, act2_pred, act2_reflect,
-      _sla_violation_pct):
+      _sla_violation_pct, decision_input, decision_ui):
     _ctx_val    = context_toggle.value
     _eff_val    = efficiency_gain.value
     _dep_val    = deployment_scale.value
@@ -1588,6 +1621,7 @@ def _(mo, ledger, COLORS,
             "act2_result":          _a2_result,
             "act2_decision":        _a2_decision,
             "constraint_hit":       _constraint,
+        "student_justification": str(decision_input.value),
         },
     )
 

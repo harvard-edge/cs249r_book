@@ -25,7 +25,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP ────────────────────────────────────────────────────────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     from pathlib import Path
@@ -33,13 +33,18 @@ def _():
     import numpy as np
     import math
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
-    from labs.core.components import StakeholderMessage, MathPeek
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import StakeholderMessage, MathPeek, DecisionLog
 
     ledger = DesignLedger()
 
@@ -1481,6 +1486,13 @@ def _(mo, COLORS):
 
 
 # ─── CELL 21: LEDGER_HUD ──────────────────────────────────────────────────────
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1492,7 +1504,7 @@ def _(
     LARGE_START_ACC, LARGE_GAIN_ITER, SMALL_START_ACC, SMALL_GAIN_ITER,
     ACC_CEILING,
     np,
-):
+, decision_input, decision_ui):
     mo.stop(act2_reflection.value is None)
 
     # Compute crossover week for ledger
@@ -1533,6 +1545,7 @@ def _(
         "constraint_discovery_stage": act1_discovery_stage.value,
         "cost_multiplier":       2 ** (act1_discovery_stage.value - 1),
         "constraint_hit":        (act2_context.value == "mobile" and _sc_hrs == 1),
+        "student_justification": str(decision_input.value),
     }
 
     ledger.save(chapter=3, design=_design)

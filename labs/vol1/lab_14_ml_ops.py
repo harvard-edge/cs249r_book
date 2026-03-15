@@ -42,7 +42,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible) ─────────────────────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -50,12 +50,18 @@ def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
 
@@ -1725,6 +1731,13 @@ def _(mo, COLORS):
 
 # ─── CELL 21: LEDGER SAVE + HUD ───────────────────────────────────────────────
 
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1737,7 +1750,7 @@ def _(
     _first_cross_week,
     cloud_drift_days, cloud_retrain_k,
     edge_drift_days, edge_retrain_k,
-):
+, decision_input, decision_ui):
     _act1_correct    = act1_pred.value == "C" if act1_pred.value else False
     _reflect1_correct = act1_reflect.value == "B" if act1_reflect.value else False
     _act2_correct    = act2_pred.value == "B" if act2_pred.value else False
@@ -1759,6 +1772,7 @@ def _(
             "act2_result":         float(_t_star_primary),
             "act2_decision":       f"cloud_{_cloud_t_star:.0f}d_edge_{_edge_t_star:.0f}d_mobile_{_mobile_t_star:.0f}d",
             "constraint_hit":      bool(_any_fail),
+        "student_justification": str(decision_input.value),
             "annual_retrain_cost": float(_annual_primary),
         },
     )

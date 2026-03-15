@@ -42,7 +42,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible) ─────────────────────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -50,12 +50,18 @@ def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
     return mo, ledger, COLORS, LAB_CSS, apply_plotly_theme, go, np, math
@@ -1416,10 +1422,17 @@ def _(mo, COLORS):
 
 
 # ─── CELL 21: LEDGER_HUD ──────────────────────────────────────────────────────
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(mo, ledger, context_toggle, act1_prediction, act1_reflection,
       act2_prediction, act2_reflection, _gpu_util, _transfer_exceeds_training,
-      act1_storage_type, COLORS):
+      act1_storage_type, COLORS, decision_input, decision_ui):
     # Save chapter results to Design Ledger
     _act1_correct = act1_prediction.value == "B" if act1_prediction.value else False
     _act1_refl_correct = act1_reflection.value == "C" if act1_reflection.value else False

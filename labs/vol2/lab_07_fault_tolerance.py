@@ -32,7 +32,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible for instructor inspection) ─
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -40,12 +40,18 @@ def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
 
@@ -1559,6 +1565,13 @@ def _(mo, COLORS):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     COLORS,
@@ -1576,7 +1589,7 @@ def _(
     context_toggle,
     ledger,
     mo,
-):
+, decision_input, decision_ui):
     # ── Determine correctness ─────────────────────────────────────────────
     _act1_correct = act1_pred.value == "B"
     _act2_decision = f"T={_T_snapped_min:.0f}min_{_write_mode}"
@@ -1596,6 +1609,7 @@ def _(
             "act2_result":            _efficiency,
             "act2_decision":          _act2_decision,
             "constraint_hit":         _oom_flag,
+        "student_justification": str(decision_input.value),
         },
     )
 

@@ -64,6 +64,7 @@ async def _():
 
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
 
@@ -1653,6 +1654,12 @@ def _(mo, act2_pred, act2_reflect):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
+@app.cell(hide_code=True)
 def _(
     mo, ledger,
     act1_pred, act2_pred,
@@ -1661,6 +1668,7 @@ def _(
     replicas_slider, batch_size_slider2,
     ACT2_BASE_SERVICE_MS, ACT2_SLO_P99_MS,
     ACT2_BASE_CAPACITY, ACT2_SPIKE_FACTOR,
+    decision_input, decision_ui
 ):
     mo.stop(act1_pred.value is None or act2_pred.value is None)
 
@@ -1696,6 +1704,7 @@ def _(
         "act2_result":      float(min(_p99_l, 99999.0)),
         "act2_decision":    f"replicas={_rep_l},batch={_bat_l}",
         "constraint_hit":   bool(not _slo_met),
+        "student_justification": str(decision_input.value),
         "slo_met":          bool(_slo_met),
     })
 

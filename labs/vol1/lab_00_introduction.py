@@ -34,17 +34,23 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP ─────────────────────────────────────────────────────────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     from pathlib import Path
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS
+    from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
     return mo, ledger, COLORS, LAB_CSS
@@ -962,7 +968,14 @@ def _(mo, check1, check2, check3):
 # ─── CONTEXT REVEAL + STAKEHOLDER MESSAGE + LEDGER INIT ───────────────────────
 
 @app.cell
-def _(mo, check1, check2, check3, context_selector, ledger, COLORS):
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
+@app.cell
+def _(mo, check1, check2, check3, context_selector, ledger, COLORS, decision_input, decision_ui):
     mo.stop(
         check1.value is None
         or len(check2.value) == 0
@@ -1102,6 +1115,7 @@ def _(mo, check1, check2, check3, context_selector, ledger, COLORS):
     mo.vstack([
         context_selector,
         mo.md("---"),
+        decision_ui,
 
         # Stakeholder message
         mo.Html(f"""

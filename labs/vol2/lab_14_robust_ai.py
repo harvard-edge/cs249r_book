@@ -38,7 +38,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible) ──────────────────────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -46,12 +46,18 @@ def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     # ── Hardware constants (from NVIDIA H100 SXM5 spec and Vol2 robust_ai.qmd) ─
     H100_BW_GBS       = 3350    # GB/s HBM3e — NVIDIA H100 SXM5 spec
@@ -1675,6 +1681,13 @@ def _(mo, COLORS):
 
 
 # ─── CELL 21: LEDGER SAVE + HUD FOOTER ───────────────────────────────────────
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1684,7 +1697,7 @@ def _(
     train_eps_slider, pgd_steps_slider, adv_loss_weight,
     _adv_acc_2, _clean_acc_2, _security_met, _product_met, _both_met, _train_overhead,
     CLEAN_ACC_BASELINE,
-):
+, decision_input, decision_ui):
     # ── Save to Design Ledger ────────────────────────────────────────────────────
     _ctx = context_toggle.value
     _a1  = act1_pred.value or "unanswered"
@@ -1716,6 +1729,7 @@ def _(
         "act2_reflection":         _a2r,
         "act2_reflect_correct":    _a2r == "ref2_b",
         "constraint_hit":          _any_constraint_hit,
+        "student_justification": str(decision_input.value),
         "pareto_optimal":          _pareto_optimal,
         "clean_acc_cost_pp":       float(CLEAN_ACC_BASELINE - _clean_acc_2),
     })

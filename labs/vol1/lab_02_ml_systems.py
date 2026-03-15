@@ -59,6 +59,7 @@ async def _():
 
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
     import mlsysim
 
     # ── Hardware constants (extracted from mlsysim for reference) ──
@@ -1600,11 +1601,17 @@ def _(mo, COLORS):
 
 # ─── CELL 21: LEDGER_HUD ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
+@app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
     act1_prediction, act1_reflection, act2_prediction, act2_reflection,
     context_toggle,
-    _bottleneck_new, _pct_improvement, _sla_violated,
+    _bottleneck_new, _pct_improvement, _sla_violated, decision_input, decision_ui
 ):
     mo.stop(
         act1_prediction.value is None
@@ -1632,6 +1639,7 @@ def _(
             "act2_result":      float(f"{_pct_improvement:.1f}"),
             "act2_decision":    "edge_deploy" if _sla_violated else "cloud_ok",
             "constraint_hit":   _sla_violated,
+        "student_justification": str(decision_input.value),
         }
     )
 

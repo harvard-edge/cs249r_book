@@ -34,7 +34,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible for instructor inspection) ─
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -42,12 +42,18 @@ def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
 
@@ -394,10 +400,16 @@ def _(COLORS, go, ledger, mo, np, apply_plotly_theme):
 
     # Build chapter → design map
     _ledger_map = {}
-    for _entry in _history:
-        _ch = str(_entry.get("chapter", ""))
-        _design = _entry.get("design", {})
-        _ledger_map[_ch] = _design
+    if isinstance(_history, dict):
+        # New dictionary-based history format (ch_id -> design_dict)
+        for _ch, _design in _history.items():
+            _ledger_map[str(_ch)] = _design
+    elif isinstance(_history, list):
+        # Legacy list-based history format ([{"chapter": N, "design": {...}}])
+        for _entry in _history:
+            _ch = str(_entry.get("chapter", ""))
+            _design = _entry.get("design", {})
+            _ledger_map[_ch] = _design
 
     # ── Domain → chapter membership ──────────────────────────────────────────
     # Maps domain → chapter keys (Vol1 are plain integers as strings, Vol2 are "v2_NN")
@@ -1910,6 +1922,13 @@ def _(mo, COLORS):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     COLORS,
@@ -1937,7 +1956,7 @@ def _(
     model_size_b,
     mo,
     parallelism_strategy,
-):
+, decision_input, decision_ui):
     # ── Save to Design Ledger ─────────────────────────────────────────────────
     ledger.save(
         chapter="v2_17",
@@ -1961,6 +1980,7 @@ def _(
             "act2_result":            "approved" if _constraints_all_met else "infeasible",
             "act2_decision":          parallelism_strategy.value,
             "constraint_hit":         not _constraints_all_met,
+        "student_justification": str(decision_input.value),
             "curriculum_complete":    True,
         }
     )
@@ -1989,6 +2009,7 @@ def _(
     _arch_status = "APPROVED" if _constraints_all_met else f"INFEASIBLE ({_n_met}/6)"
     _status_color = "#4ade80" if _constraints_all_met else "#f87171"
 
+    decision_ui
     _hud = mo.Html(f"""
     <div style="background: linear-gradient(135deg, #0a0f1e 0%, #0f172a 100%);
                 border-radius: 12px; padding: 20px 28px; margin-top: 24px;

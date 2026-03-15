@@ -69,6 +69,7 @@ async def _():
 
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
     import mlsysim
 
     ledger = DesignLedger()
@@ -491,7 +492,6 @@ def _(
         _prec_label = "FP16"
 
     # ── Flight Simulator: MLSys·im Engine Evaluation ──────────────────────────
-    import mlsysim
     
     _flops_gemm = 2.0 * _N * _N * _N
     _bytes_gemm = 3.0 * _N * _N * _bytes_elem
@@ -1617,6 +1617,13 @@ def _(mo):
 
 
 # ─── CELL 21: LEDGER_HUD ──────────────────────────────────────────────────────
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1625,7 +1632,7 @@ def _(
     _ai_gemm, _is_mem_bound, _mfu_pct,
     _oom2, _tokens_per_sec2,
     _fusion,
-):
+, decision_input, decision_ui):
     _ctx    = context_toggle.value
     _p1     = act1_pred.value  or "none"
     _p2     = act2_pred.value  or "none"
@@ -1644,6 +1651,7 @@ def _(
         "act2_result":          float(_mfu_pct),
         "act2_decision":        _fus,
         "constraint_hit":       bool(_oom2),
+        "student_justification": str(decision_input.value),
         "mfu_percent":          float(_mfu_pct),
     })
 
@@ -1664,6 +1672,7 @@ def _(
 
     mo.vstack([
         mo.md("---"),
+        decision_ui,
         mo.Html(f"""
         <div style="display:flex; gap:22px; align-items:center; padding:12px 24px;
                     background:#0f172a; border-radius:10px; margin-top:16px; flex-wrap:wrap;

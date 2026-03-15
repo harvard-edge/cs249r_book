@@ -38,7 +38,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible) ────────────────────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     from pathlib import Path
@@ -46,12 +46,18 @@ def _():
     import numpy as np
     import math
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     # ── Hardware and regulatory constants ───────────────────────────────────
     # All sourced from @sec-security-privacy-differential-privacy-8c2b and
@@ -1545,6 +1551,13 @@ def _(mo, COLORS):
 
 
 # ─── CELL 21: LEDGER SAVE + HUD ──────────────────────────────────────────────
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1552,7 +1565,7 @@ def _(
     _eps, _delta, _model_accuracy, _mi_risk,
     _hipaa_violated, _clinical_viable,
     _is_medical, _is_cloud,
-):
+, decision_input, decision_ui):
     _context   = context_toggle.value
     _a1_val    = act1_pred.value
     _a2_val    = act2_pred.value
@@ -1577,6 +1590,7 @@ def _(
         "act2_result":             float(_model_accuracy),
         "act2_decision":           _a2_decision,
         "constraint_hit":          bool(_constraint_hit),
+        "student_justification": str(decision_input.value),
         "clinical_viable":         bool(_clinical_viable),
     })
 
@@ -1599,6 +1613,7 @@ def _(
     )
 
     mo.vstack([
+        decision_ui,
         mo.Html(f"""
         <div class="lab-hud">
             <span>

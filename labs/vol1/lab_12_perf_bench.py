@@ -47,7 +47,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible for instructor inspection) ─
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -55,12 +55,18 @@ def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     # ── Hardware constants (plain floats — no pint, sourced from @sec-benchmarking) ─
     H100_BW_GBS       = 3350.0   # GB/s  — H100 SXM5 HBM3e, NVIDIA spec
@@ -1597,6 +1603,13 @@ def _(mo, COLORS, CLOUD_SERIAL_FRAC, GPU_PURCHASE, CLOUD_AMDAHL_64, CTO_EXPECTED
 
 
 # ─── CELL 21: DESIGN LEDGER SAVE + HUD FOOTER ────────────────────────────────
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(mo, ledger, COLORS,
       act1_pred, act1_reflect, act2_pred, act2_reflect,
@@ -1605,7 +1618,7 @@ def _(mo, ledger, COLORS,
       _speedup_theoretical, _validity_score, _failure,
       bench_type,
       BASELINE_HOURS, CTO_EXPECTED_SPEEDUP,
-      CLOUD_SERIAL_FRAC, GPU_PURCHASE, CLOUD_AMDAHL_64):
+      CLOUD_SERIAL_FRAC, GPU_PURCHASE, CLOUD_AMDAHL_64, decision_input, decision_ui):
 
     _ctx = context_toggle.value
 
@@ -1627,6 +1640,7 @@ def _(mo, ledger, COLORS,
         "act2_result":       round(float(_validity_score), 3),
         "act2_decision":     bench_type.value,
         "constraint_hit":    bool(_failure),
+        "student_justification": str(decision_input.value),
         "expected_speedup":  _expected,
     })
 

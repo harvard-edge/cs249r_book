@@ -47,7 +47,7 @@ app = marimo.App(width="full")
 
 # ── CELL 0: SETUP ─────────────────────────────────────────────────────────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -55,12 +55,18 @@ def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     # ── Hardware constants — all plain floats, sources annotated ─────────────
 
@@ -384,12 +390,18 @@ def _(ledger):
     # Each entry is {"chapter": N, "design": {...}}
     _history = ledger._state.history
 
-    # Build a lookup: chapter -> design dict (last write wins)
+    # Build a lookup: chapter -> design dict
     _ch_data = {}
-    for _entry in _history:
-        _ch = _entry.get("chapter", 0)
-        _d  = _entry.get("design", {})
-        _ch_data[_ch] = _d
+    if isinstance(_history, dict):
+        # New dictionary-based history format (ch_id -> design_dict)
+        for _ch, _design in _history.items():
+            _ch_data[int(_ch)] = _design
+    elif isinstance(_history, list):
+        # Legacy list-based history format ([{"chapter": N, "design": {...}}])
+        for _entry in _history:
+            _ch = _entry.get("chapter", 0)
+            _d  = _entry.get("design", {})
+            _ch_data[int(_ch)] = _d
 
     # ── Count labs completed ──────────────────────────────────────────────────
     _lab_chapters = list(range(1, 16))  # Labs 01–15
@@ -1874,6 +1886,13 @@ def _(mo, COLORS):
 
 
 # ─── CELL 21: LEDGER SAVE + HUD ──────────────────────────────────────────────
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1884,7 +1903,7 @@ def _(
     cloud_p99_ms, cost_per_req_usd, effective_accuracy,
     tier_assignments, system_valid, constraint_hit,
     n_completed, pct_correct, weakest_invariant,
-):
+, decision_input, decision_ui):
     # ── Resolve values with safe defaults ─────────────────────────────────────
     _a1_pred   = act1_prediction.value  or "none"
     _a1_ok     = (_a1_pred == act1_correct_answer)
@@ -1922,6 +1941,7 @@ def _(
             "act2_result":            "feasible" if system_valid else "infeasible",
             "act2_decision":          f"H100x{_n}_{_qc}_{_srv}",
             "constraint_hit":         bool(constraint_hit),
+        "student_justification": str(decision_input.value),
             "system_valid":           bool(system_valid),
             "labs_completed":         int(n_completed),
             "pct_correct":            round(float(pct_correct), 1),

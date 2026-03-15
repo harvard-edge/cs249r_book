@@ -44,7 +44,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible) ─────────────────────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -52,12 +52,18 @@ def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     # ── Hardware and scale constants ──────────────────────────────────────────
     H100_BW_GBS       = 3350            # GB/s HBM3e — NVIDIA H100 SXM5 spec
@@ -1755,6 +1761,13 @@ def _(mo, COLORS):
 
 
 # ─── CELL 21: LEDGER SAVE + HUD ──────────────────────────────────────────────
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1764,7 +1777,7 @@ def _(
     total_daily_fp_millions, overall_accuracy,
     compliant_pct, gstd, trans, n_audits,
     dp_satisfied, eo_satisfied, cal_satisfied,
-):
+, decision_input, decision_ui):
     _ctx = context_toggle.value
     _act1_correct = act1_pred.value == "option_b"
     _act2_correct = act2_pred.value == "option_b"
@@ -1783,6 +1796,7 @@ def _(
         "act2_result":            compliant_pct / 100.0,
         "act2_decision":          str(act2_pred.value),
         "constraint_hit":         _constraint_hit,
+        "student_justification": str(decision_input.value),
         "scale_impact_high":      _scale_impact_high,
     })
 
@@ -1804,6 +1818,7 @@ def _(
 
     mo.vstack([
         mo.md("---"),
+        decision_ui,
         mo.Html(f"""
         <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
                     padding: 24px 32px; border-radius: 16px; color: white;

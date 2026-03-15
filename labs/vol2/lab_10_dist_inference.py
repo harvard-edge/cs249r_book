@@ -31,7 +31,7 @@ app = marimo.App(width="full")
 
 
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     from pathlib import Path
@@ -39,12 +39,18 @@ def _():
     import numpy as np
     import math
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
 
@@ -1743,6 +1749,13 @@ def _(mo, COLORS):
 # DESIGN LEDGER SAVE + HUD FOOTER
 # ─────────────────────────────────────────────────────────────────────────────
 
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1755,7 +1768,7 @@ def _(
     lat_serving_mode, tput_serving_mode,
     SLO_TTFT_MS, SLO_TPS_TARGET,
     LLAMA70B_PARAMS_B,
-):
+, decision_input, decision_ui):
     # Only save if student has progressed through both acts
     _a1 = act1_pred.value
     _a2 = act2_pred.value if act2_pred.value is not None else "unanswered"
@@ -1784,6 +1797,7 @@ def _(
             "act2_result":      float(_lat["ttft_ms"]),
             "act2_decision":    lat_serving_mode.value,
             "constraint_hit":   _constraint,
+        "student_justification": str(decision_input.value),
             "slo_met":          _slo_met,
         }
     )

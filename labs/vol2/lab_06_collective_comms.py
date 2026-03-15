@@ -45,7 +45,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible for instructor inspection) ─
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -53,12 +53,18 @@ def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
     return COLORS, LAB_CSS, DesignLedger, apply_plotly_theme, go, ledger, math, mo, np
@@ -1502,6 +1508,13 @@ def _(COLORS, mo):
 # DESIGN LEDGER SAVE + HUD FOOTER
 # ═══════════════════════════════════════════════════════════════════════════════
 
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     COLORS,
@@ -1516,7 +1529,7 @@ def _(
     context_toggle,
     ledger,
     mo,
-):
+, decision_input, decision_ui):
     # ── Compute prediction correctness ──────────────────────────────────────────
     _a1_correct = (act1_pred.value is not None and act1_pred.value.startswith("C"))
     _a2_correct = (act2_pred.value is not None and act2_pred.value.startswith("B"))
@@ -1541,6 +1554,7 @@ def _(
             "act2_result":          round(best_comm_s, 4),
             "act2_decision":        best_alg,
             "constraint_hit":       comm_dominates,
+        "student_justification": str(decision_input.value),
             "comm_overhead_pct":    round(comm_overhead_pct, 1),
         },
     )
@@ -1557,6 +1571,7 @@ def _(
         return f'<span class="{cls}">{txt}</span>'
 
     mo.vstack([
+        decision_ui,
         mo.Html(f"""
         <div style="margin-top: 32px;">
             <div style="font-size: 0.72rem; font-weight: 700; color: {_tm};

@@ -43,7 +43,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible) ─────────────────────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -51,12 +51,18 @@ def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
     return mo, ledger, COLORS, LAB_CSS, apply_plotly_theme, go, np, math
@@ -1669,6 +1675,13 @@ def _(mo, COLORS):
 
 # ─── CELL 21: LEDGER_HUD ─────────────────────────────────────────────────────
 # ─── DESIGN LEDGER SAVE + HUD ─────────────────────────────────────────────────
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     mo, ledger, context_toggle,
@@ -1679,7 +1692,7 @@ def _(
     _gpu_util, _effective_storage_bw,
     _mds_saturated, _ops_k, _dataset_type, _total_workers,
     COLORS,
-):
+, decision_input, decision_ui):
     _act1_correct = (act1_prediction.value == "B") if act1_prediction.value else False
     _act1_refl_correct = (act1_reflection.value == "B") if act1_reflection.value else False
     _act2_correct = (act2_prediction.value == "B") if act2_prediction.value else False
@@ -1706,6 +1719,7 @@ def _(
             "act2_result": round(float(_ops_k), 1),   # metadata ops/sec demand in K
             "act2_decision": _storage_type,
             "constraint_hit": bool(_mds_saturated),
+        "student_justification": str(decision_input.value),
             "mds_saturated": bool(_mds_saturated),
         },
     )

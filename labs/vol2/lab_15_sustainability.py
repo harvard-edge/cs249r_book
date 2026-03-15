@@ -5,7 +5,7 @@ app = marimo.App(width="full")
 
 
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import os
@@ -13,9 +13,14 @@ def _():
     import plotly.graph_objects as go
 
     # Robust path finding: find the repo root relative to this file
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
     from mlsysim.sim import Personas, ResourceSimulation
     from mlsysim import Applications, Fleet, viz

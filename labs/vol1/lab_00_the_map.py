@@ -5,7 +5,7 @@ app = marimo.App(width="medium")
 
 
 @app.cell
-def __():
+async def __():
     import marimo as mo
     import sys
     import os
@@ -13,18 +13,22 @@ def __():
     import plotly.graph_objects as go
     import numpy as np
 
-    try:
-        notebook_path = Path(os.path.abspath(__file__))
-    except NameError:
-        notebook_path = Path(os.getcwd()) / "labs" / "vol1" / "lab_00_the_map.py"
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        try:
+            notebook_path = Path(os.path.abspath(__file__))
+        except NameError:
+            notebook_path = Path(os.getcwd()) / "labs" / "vol1" / "lab_00_the_map.py"
+        project_root = notebook_path.parents[2]
+        sys.path.append(str(project_root / "book" / "quarto"))
+        sys.path.append(str(project_root))
 
-    project_root = notebook_path.parents[2]
-    sys.path.append(str(project_root / "book" / "quarto"))
-    sys.path.append(str(project_root))
-
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
-    from labs.core.components import Card, PredictionLock, MetricRow, StakeholderMessage, MathPeek
-    from labs.core.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import Card, PredictionLock, MetricRow, StakeholderMessage, MathPeek
+    from mlsysim.labs.state import DesignLedger
 
     ledger = DesignLedger()
 

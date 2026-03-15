@@ -42,7 +42,7 @@ app = marimo.App(width="full")
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible for instructor inspection) ─
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -50,12 +50,18 @@ def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
 
@@ -1612,12 +1618,19 @@ def _(mo, COLORS):
 
 # ─── CELL 21: LEDGER_HUD ────────────────────────────────────────────────────────
 # ─── CELL 21: DESIGN LEDGER SAVE + HUD ────────────────────────────────────────
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     COLORS, _budget_exceeded, _mfu_improvement, _mfu_new,
     _total_cost_weeks, act1_pred, act1_reflection, act2_pred,
     act2_reflection, context_toggle, ledger, mo,
-):
+, decision_input, decision_ui):
     _ctx     = context_toggle.value or "batch"
     _a1_pred = act1_pred.value or "none"
     _a1_ok   = (_a1_pred == "B")
@@ -1637,6 +1650,7 @@ def _(
             "act2_result":           _mfu_improvement,
             "act2_decision":         _a2_pred,
             "constraint_hit":        _budget_exceeded,
+        "student_justification": str(decision_input.value),
             "budget_exceeded":       _budget_exceeded,
         },
     )
@@ -1651,6 +1665,7 @@ def _(
 
     mo.vstack([
         mo.md("---"),
+        decision_ui,
         mo.Html(f"""
         <div class="lab-hud">
             <span class="hud-label">LAB</span>

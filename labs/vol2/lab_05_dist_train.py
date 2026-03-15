@@ -64,6 +64,7 @@ async def _():
 
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
     return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, make_subplots
@@ -1463,6 +1464,12 @@ def _(mo, COLORS):
 # ─── CELL 21: LEDGER_HUD ─────────────────────────────────────────────────────
 # ─── LEDGER SAVE + HUD ─────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
+@app.cell(hide_code=True)
 def _(
     COLORS,
     _bubble_pct,
@@ -1481,6 +1488,7 @@ def _(
     n_microbatches,
     pp_degree,
     tp_degree,
+    decision_input, decision_ui
 ):
     # ── Save to Design Ledger ────────────────────────────────────────────────────
     _context = "3d_parallel" if tp_degree.value > 1 or pp_degree.value > 1 else "data_parallel"
@@ -1500,6 +1508,7 @@ def _(
             "act2_result":     round(_mfu_pct_3d, 2),
             "act2_decision":   act2_pred.value if act2_pred.value else "no_selection",
             "constraint_hit":  _oom or _tp_crosses_node,
+        "student_justification": str(decision_input.value),
             "memory_feasible": not _oom,
         },
     )
@@ -1513,6 +1522,7 @@ def _(
     _tier_color = COLORS["GreenLine"] if _tier == "Optimal" else (COLORS["OrangeLine"] if _tier == "Partial" else COLORS["TextMuted"])
 
     # ── HUD Footer ───────────────────────────────────────────────────────────────
+    decision_ui
     _hud = mo.Html(f"""
     <div class="lab-hud">
         <div>

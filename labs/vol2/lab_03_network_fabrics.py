@@ -46,7 +46,7 @@ app = marimo.App(width="full")
 
 
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -54,12 +54,18 @@ def _():
     import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     # ── Hardware constants (source: vendor datasheets + @sec-network-fabrics) ──
 
@@ -1682,6 +1688,13 @@ def _(mo, COLORS):
 # ─── LEDGER SAVE + HUD ────────────────────────────────────────────────────────
 
 
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1690,7 +1703,7 @@ def _(
     act2_prediction, act2_reflection,
     act2_fabric, act2_cluster_n,
     _bw_bisect, _allreduce_sec, _sla_violated, _fabric_name, _fabric_cost_m,
-):
+, decision_input, decision_ui):
     # Only save when both acts are complete
     _acts_complete = (
         act1_prediction.value is not None and
@@ -1713,6 +1726,7 @@ def _(
                 "act2_result":       round(_allreduce_sec, 3),
                 "act2_decision":     act2_fabric.value,
                 "constraint_hit":    _sla_violated,
+        "student_justification": str(decision_input.value),
             },
         )
 

@@ -43,7 +43,7 @@ app = marimo.App(width="full")
 
 # ── CELL 0: SETUP (hide_code=False — leave visible for instructor inspection) ─
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
@@ -52,12 +52,18 @@ def _():
     import numpy as np
     from plotly.subplots import make_subplots
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
 
     # ── Hardware constants (LABS_SPEC.md / NVIDIA and Apple specs) ────────────
     H100_BW_GBS       = 3350   # GB/s — H100 SXM5 HBM3e bandwidth
@@ -1736,6 +1742,13 @@ def _(mo, COLORS):
 # ═════════════════════════════════════════════════════════════════════════════
 
 # ── CELL 21: LEDGER_HUD ───────────────────────────────────────────────────────
+@app.cell
+@app.cell(hide_code=True)
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return decision_input, decision_ui
+
+
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1743,7 +1756,7 @@ def _(
     act1_prediction,
     act2_flagship, act2_midrange, act2_budget,
     LLAMA3_8B_FP32_GB,
-):
+, decision_input, decision_ui):
     _ctx_hud = context_toggle.value
 
     _a1_pred_hud    = act1_prediction.value or "unanswered"
@@ -1794,6 +1807,7 @@ def _(
                 f"budget={_SELECTED_HUD['budget']}"
             ),
             "constraint_hit":     _constraint_hit_hud,
+        "student_justification": str(decision_input.value),
             "pareto_optimal":     _pareto_optimal_hud,
         },
     )
@@ -1810,6 +1824,7 @@ def _(
 
     mo.vstack([
         mo.md("---"),
+        decision_ui,
         mo.Html(f"""
         <div style="background:#0f172a; border-radius:12px; padding:16px 28px;
                     margin-top:24px; border:1px solid #1e293b;
