@@ -2902,6 +2902,86 @@ The schedule ensures decode latency remains bounded regardless of incoming promp
 
 KV Cache management enables a single GPU to handle many concurrent requests without crashing. When the model itself exceeds single-GPU capacity, as a 175-billion parameter foundation model does, fitting even the weights requires splitting the workload across multiple devices through model sharding for inference.
 
+## Dynamic State & Agentic Workflows {#sec-inference-dynamic-state}
+
+As machine learning systems transition from monolithic pattern matchers to **Agentic Workflows** (chains, loops, and tool-use), the serving architecture undergoes its final transformation. In this regime, the system is no longer serving a single request; it is managing a **Stateful reasoning session** that may span multiple specialized models, external tools, and retrieval steps. This transition introduces two new "Walls": the **State Wall** and the **Logic Wall**.
+
+### The Physics of State Migration
+
+In a monolithic LLM call, the KV-cache is generated and consumed on a single node. In an agentic workflow, a session might start on a large "General Reasoning" model (e.g., Llama-3-405B) and then hand off to a smaller "Tool-Specialized" model (e.g., Llama-3-8B) to execute a coding task.
+
+This requires **State Migration**\index{State Migration}: moving the accumulated KV-cache—the "short-term memory" of the reasoning process—across the network fabric. The latency of this handoff ($L_{\text{mig}}$) is governed by the size of the state and the bisection bandwidth:
+
+$$ L_{\text{mig}} = \frac{\text{KV-Cache Size}}{\text{Bisection BW}} $$
+
+For large context windows (128k+ tokens), the KV-cache can exceed 10--20 GB. Moving this state over a standard 100G Ethernet link adds hundreds of milliseconds of delay, violating interactive reasoning SLAs.
+
+```{python}
+#| label: state-migration-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STATE MIGRATION PHYSICS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-inference-dynamic-state — the cost of agentic handoffs
+# │
+# │ Goal: Quantify the latency of moving reasoning state across nodes.
+# │ Show: ~10 GB KV-cache takes ~200ms on 400G fabric vs ~800ms on 100G.
+# │ How: Latency = Size / BW.
+# │
+# │ Imports: mlsysim.core.constants (LLAMA3_8B_PARAMS, GB, Gbps, BITS_PER_BYTE)
+# │ Exports: StateMigration.cache_size_gb_str, StateMigration.eth_lat_ms_str,
+# │          StateMigration.ib_lat_ms_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import LLAMA3_8B_PARAMS, GB, Gbps, BITS_PER_BYTE
+from mlsysim.fmt import fmt, check
+
+class StateMigration:
+    """Calculates state handoff latency for agentic workflows."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # A 128k context KV-cache for a 70B model is ~10.2 GB (FP16)
+    kv_cache_gb = 10.2
+    bw_100g = 100 * Gbps
+    bw_400g = 400 * Gbps
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # Bytes to Bits: 10.2 * 8 = 81.6 Gb
+    bits = kv_cache_gb * GB.m_as('byte') * BITS_PER_BYTE
+
+    t_100g_ms = (bits / bw_100g.m_as('bit/second')) * 1000
+    t_400g_ms = (bits / bw_400g.m_as('bit/second')) * 1000
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(t_100g_ms > 500, f"100G migration should be slow (~800ms), got {t_100g_ms:.1f}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    cache_size_gb_str = f"{kv_cache_gb:.1f}"
+    eth_lat_ms_str = fmt(t_100g_ms, precision=0)
+    ib_lat_ms_str = fmt(t_400g_ms, precision=0)
+```
+
+::: {.callout-notebook title="State Migration Latency"}
+
+**Problem**: An agentic workflow hands off a **`{python} StateMigration.cache_size_gb_str` GB** KV-cache (128k context) between two inference nodes. *How* does the network choice impact the "handoff pause" the user experiences?
+
+**The Math**:
+
+1.  **100G Ethernet**: $L_{\text{mig}} \approx$ **`{python} StateMigration.eth_lat_ms_str` ms**. The user experiences a nearly 1-second lag every time the agent switches models.
+2.  **400G InfiniBand**: $L_{\text{mig}} \approx$ **`{python} StateMigration.ib_lat_ms_str` ms**. The handoff is perceived as a minor stutter, within the range of standard inter-token latency.
+
+**The Systems Insight**: In the agentic era, the **Network Wall** is the primary bottleneck for **Reasoning Continuity**. If the bisection bandwidth is low, the fleet is forced to be "Sticky"—pinning sessions to single nodes and sacrificing utilization—or pay a massive "Handoff Tax." High-bandwidth fabrics are no longer just for training; they are the backplane of distributed reasoning.
+
+:::
+
+### The Reasoning-to-Compute Ratio
+
+The final invariant of inference at scale is the **Reasoning-to-Compute Ratio ($R:C$)**. We distinguish between two regimes of intelligence:
+
+1.  **Fast Execution ($R:C \approx 1$):** Every token generated is a final output. This is the regime of standard chat and search.
+2.  **Slow Reasoning ($R:C \gg 1$):** For every output token, the model executes multiple internal reasoning steps, searches, or tool calls.
+
+At production scale, agentic systems shift the fleet from a **Throughput Factory** to a **Search Engine**. The binding constraint moves from memory bandwidth (loading weights) to **Logic Throughput** (how many reasoning steps can the fleet execute per megawatt). Mastering this shift requires moving from simple token-based SLAs to **Goal-based SLAs**, where the system is optimized to find the correct answer with the minimum total energy, regardless of the number of intermediate tokens generated.
+
 ## Model Sharding for Inference {#sec-inference-scale-model-sharding-inference-82b3}
 
 ```{python}
