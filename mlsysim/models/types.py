@@ -139,11 +139,8 @@ class TransformerWorkload(Workload):
             strategy=strategy
         )
         
-<<<<<<< HEAD
         return (weight_mem + grad_mem + opt_mem + act_mem).to(ureg.GB)
-=======
-        return (w_grad_mem + opt_mem + act_mem).to(ureg.GB)
-    
+
     @property
     def training_gpu_days(self):
         """
@@ -154,7 +151,6 @@ class TransformerWorkload(Workload):
         raise AttributeError(
             f"{type(self).__name__!r} object has no attribute 'training_gpu_days'"
         )
->>>>>>> efeda2067 (Add compatibility layer for textbook scenarios)
 
     def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
         ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)

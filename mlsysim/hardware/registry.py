@@ -117,7 +117,6 @@ class CloudHardware(Registry):
         dispatch_tax=0.03 * ureg.ms
     )
 
-<<<<<<< HEAD
     Cerebras_CS3 = HardwareNode(
         name="Cerebras CS-3 (WSE-3)",
         release_year=2024,
@@ -132,10 +131,9 @@ class CloudHardware(Registry):
         dispatch_tax=0.001 * ureg.ms,
         metadata={"source_url": "https://www.cerebras.net/product-system/"}
     )
-=======
+
     # Backward-compatible alias
     TPUv4 = TPUv5p
->>>>>>> efeda2067 (Add compatibility layer for textbook scenarios)
 
 class WorkstationHardware(Registry):
     """Personal computing systems used for local development."""

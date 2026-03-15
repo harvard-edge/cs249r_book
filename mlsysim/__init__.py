@@ -71,7 +71,6 @@ from .core.constants import ureg
 # Visualization
 from .viz.plots import plot_evaluation_scorecard, plot_roofline
 
-<<<<<<< HEAD
 __all__ = [
     # Submodules
     "core", "hardware", "models", "infra", "systems", "sim", "fmt", "show", "viz",
@@ -87,7 +86,7 @@ __all__ = [
     "SingleNodeModel", "DistributedModel", "ReliabilityModel",
     "SustainabilityModel", "EconomicsModel", "ServingModel",
     "ContinuousBatchingModel", "WeightStreamingModel", "TailLatencyModel",
-    "CheckpointModel", "DataModel", "ScalingModel", "OrchestrationModel", 
+    "CheckpointModel", "DataModel", "ScalingModel", "OrchestrationModel",
     "CompressionModel", "EfficiencyModel", "TransformationModel", "TopologyModel",
     "InferenceScalingModel", "SensitivitySolver", "SynthesisSolver",
     "ResponsibleEngineeringModel", "ParallelismOptimizer",
@@ -99,8 +98,3 @@ __all__ = [
     # Visualization
     "plot_evaluation_scorecard", "plot_roofline",
 ]
-=======
-from .systems.registry import Tiers as _Tiers
-Tiers = _Tiers
-del _Tiers
->>>>>>> efeda2067 (Add compatibility layer for textbook scenarios)
