@@ -155,6 +155,8 @@ class Models(Registry):
     GPT3 = GPT.GPT3
     GPT4 = GPT.GPT4
     BERT = Language.BERT_Base
+    Llama3_8B = Language.Llama3_8B
+    Llama3_70B = Language.Llama3_70B
     DLRM = Recommendation.DLRM
     ResNet50 = Vision.ResNet50
     MobileNetV2 = Vision.MobileNetV2
