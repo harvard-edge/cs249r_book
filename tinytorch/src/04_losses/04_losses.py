@@ -96,6 +96,15 @@ If you see import errors, ensure you've run `tito export` after completing previ
 #| default_exp core.losses
 #| export
 
+from __future__ import annotations
+from typing import Union, Any, List, Optional, Tuple
+from typing_extensions import TypeAlias  # or from typing import TypeAlias if Python 3.10+
+import numpy.typing as npt
+
+# Define type aliases used throughout module
+ArrayLike: TypeAlias = npt.ArrayLike
+TensorLike: TypeAlias = Union[ArrayLike, "Tensor"]
+
 import numpy as np
 from typing import Optional
 
@@ -316,7 +325,7 @@ This test validates our log_softmax function works correctly with numerical stab
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-log-softmax", "locked": true, "points": 10}
-def test_unit_log_softmax():
+def test_unit_log_softmax() -> None:
     """🧪 Test log_softmax numerical stability and correctness."""
     print("🧪 Unit Test: Log-Softmax...")
 
@@ -411,7 +420,7 @@ Error Sensitivity Comparison:
 class MSELoss:
     """Mean Squared Error loss for regression tasks."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize MSE loss function."""
         pass
 
@@ -476,7 +485,7 @@ This test validates our MSELoss implementation with various prediction scenarios
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-mse-loss", "locked": true, "points": 10}
-def test_unit_mse_loss():
+def test_unit_mse_loss() -> None:
     """🧪 Test MSELoss implementation and properties."""
     print("🧪 Unit Test: MSE Loss...")
 
@@ -599,7 +608,7 @@ Uses: CrossEntropyLoss            Uses: BinaryCrossEntropyLoss
 class CrossEntropyLoss:
     """Cross-entropy loss for multi-class classification."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize cross-entropy loss function."""
         pass
 
@@ -668,7 +677,7 @@ This test validates our CrossEntropyLoss implementation with various confidence 
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-cross-entropy-loss", "locked": true, "points": 10}
-def test_unit_cross_entropy_loss():
+def test_unit_cross_entropy_loss() -> None:
     """🧪 Test CrossEntropyLoss implementation and properties."""
     print("🧪 Unit Test: Cross-Entropy Loss...")
 
@@ -812,7 +821,7 @@ Message: "Be confident about positive class, uncertain is okay,
 class BinaryCrossEntropyLoss:
     """Binary cross-entropy loss for binary classification."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize binary cross-entropy loss function."""
         pass
 
@@ -881,7 +890,7 @@ This test validates our BinaryCrossEntropyLoss implementation with binary classi
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-binary-cross-entropy-loss", "locked": true, "points": 10}
-def test_unit_binary_cross_entropy_loss():
+def test_unit_binary_cross_entropy_loss() -> None:
     """🧪 Test BinaryCrossEntropyLoss implementation and properties."""
     print("🧪 Unit Test: Binary Cross-Entropy Loss...")
 
@@ -969,11 +978,12 @@ BCE/CE: Logarithmic growth, explodes with confident wrong predictions
 """
 
 # %% nbgrader={"grade": false, "grade_id": "loss-comparison", "solution": true}
-def analyze_loss_behaviors():
+def analyze_loss_behaviors() -> Tuple[float, float, float]:
     """
     📊 Compare how different loss functions behave with various prediction patterns.
 
     This helps students understand when to use each loss function.
+    Returns a tuple of (mse, cross_entropy, bce) losses for the demo scenarios.
     """
     print("📊 Analysis: Loss Function Behavior Comparison...")
 
