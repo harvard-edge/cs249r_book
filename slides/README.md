@@ -1,3 +1,19 @@
+<!-- DEV-BANNER-START -->
+<div align="center">
+<table>
+<tr><td>
+<h3>🚧 Under Active Development</h3>
+<p>This component is being built on the <code>dev</code> branch and is <b>not yet available</b> on the live site.<br>
+Content may be incomplete or change without notice. The published curriculum lives at <a href="https://mlsysbook.ai"><b>mlsysbook.ai</b></a>.</p>
+<p>
+<a href="https://github.com/harvard-edge/cs249r_book/tree/dev"><img src="https://img.shields.io/badge/branch-dev-orange?logo=git&logoColor=white" alt="dev branch"></a>
+<a href="https://mlsysbook.ai"><img src="https://img.shields.io/badge/live_site-mlsysbook.ai-blue?logo=safari&logoColor=white" alt="live site"></a>
+</p>
+</td></tr>
+</table>
+</div>
+<!-- DEV-BANNER-END -->
+
 # ML Systems Lecture Slides
 
 Beamer slide decks for the ML Systems textbook lecture series.

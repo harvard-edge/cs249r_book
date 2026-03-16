@@ -28,11 +28,11 @@
 </p>
 
 <p align="center">
-  <b><a href="https://mlsysbook.ai/vol1/">📘 Volume I</a></b> •
-  <b><a href="https://mlsysbook.ai/vol2/">📙 Volume II <i>(Summer 2026)</i></a></b> •
+  <b><a href="https://mlsysbook.ai">📘 Volume I</a></b> •
+  <b>📙 Volume II <i>(Summer 2026)</i></b> •
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
-  <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
-  <b><a href="interviews/README.md">💼 Interview Playbook</a></b> •
+  <b><a href="mlsysim/README.md">🔮 MLSys·im <i>(dev)</i></a></b> •
+  <b><a href="interviews/README.md">💼 Interview Playbook <i>(dev)</i></a></b> •
   <b><a href="https://mlsysbook.org">🌐 Ecosystem</a></b>
 </p>
 
@@ -58,76 +58,104 @@ That gap is what we mean by AI engineering.
 
 ---
 
-## The Learning Stack
+## Why One Repository
 
-This repository is the open learning stack for AI systems engineering. Read the textbook, then pick your path: build a framework from scratch, deploy to real hardware, or simulate infrastructure at scale.
+I designed this as a single integrated curriculum, not a collection of independent projects. The textbook teaches the theory. TinyTorch makes you build the internals. The hardware kits force you to confront real constraints. The simulator lets you reason about infrastructure you can't afford to rent. Each piece exists because I found that students who only read don't internalize, and students who only code don't generalize.
 
-```
-                              ┌───────────────────────────┐
-                              │      TEXTBOOK              │
-                              │  Theory + Quantitative     │
-                              │  Reasoning + Case Studies  │
-                              └─────────────┬─────────────┘
-                                            │
-          ┌──────────────────┬──────────────┼──────────────┬──────────────────┐
-          │                  │              │              │                  │
-          ▼                  ▼              ▼              ▼                  ▼
-   ┌─────────────┐  ┌──────────────┐ ┌────────────┐ ┌────────────┐ ┌──────────────┐
-   │  TINYTORCH   │  │ HARDWARE     │ │  MLSYS-IM  │ │   LABS     │ │  INTERVIEW   │
-   │              │  │ KITS         │ │            │ │            │ │  PLAYBOOK    │
-   │  Build an ML │  │ Deploy to    │ │ Simulate   │ │ Interactive│ │ 43 systems   │
-   │  framework   │  │ Arduino, Pi, │ │ ML infra   │ │ notebooks  │ │ design Qs    │
-   │  from scratch│  │ edge devices │ │ physics    │ │ for algo-  │ │ for AI roles │
-   │              │  │              │ │            │ │ system     │ │ at frontier  │
-   │  20 modules  │  │ Real HW      │ │ Chip to    │ │ exploration│ │ labs         │
-   │              │  │ constraints  │ │ fleet      │ │            │ │              │
-   └─────────────┘  └──────────────┘ └────────────┘ └────────────┘ └──────────────┘
-       BUILD             DEPLOY         SIMULATE       PRACTICE        INTERVIEW
-```
+The repository is the curriculum.
+
+A growing community of contributors helps improve every part of it: fixing errors, sharpening explanations, testing on new hardware. Their work makes this better for everyone, and I'm grateful for every pull request.
+
+---
+
+## The Curriculum
+
+Every component connects. The textbook gives you the mental models. The labs let you explore trade-offs interactively, powered by MLSys·im, the modeling engine for infrastructure you can't physically access. TinyTorch makes you build the machinery yourself. The hardware kits put you face-to-face with real constraints. The interview playbook tests whether you actually understand it. And the instructor hub, slides, and newsletter give educators everything they need to bring this into a classroom.
+
+<p align="center">
+  <img src="README/curriculum-map.svg?v=2" alt="Curriculum map showing how the textbook, labs, Tiny Torch, hardware kits, MLSys im, and interview playbook connect" width="760">
+</p>
+
+### For Students
 
 <table>
   <thead>
     <tr>
-      <th width="20%">Component</th>
-      <th width="50%">What It Is</th>
+      <th width="5%"></th>
+      <th width="15%">Component</th>
+      <th width="50%">Role in the Curriculum</th>
       <th width="30%">Link</th>
     </tr>
   </thead>
   <tbody>
     <tr>
+      <td align="center">📖</td>
       <td><b>Textbook</b></td>
-      <td>Two-volume MIT Press textbook on ML systems</td>
-      <td><a href="https://mlsysbook.ai/vol1/">Volume I</a> · <a href="https://mlsysbook.ai/vol2/">Volume II</a></td>
+      <td>Two-volume MIT Press textbook. The theory, the mental models, and the quantitative reasoning that everything else builds on.</td>
+      <td><a href="https://mlsysbook.ai">Volume I</a> · Volume II <i>(Summer 2026)</i></td>
     </tr>
     <tr>
-      <td><b>TinyTorch</b></td>
-      <td>Build your own ML framework from scratch (20 modules)</td>
+      <td align="center">🔬</td>
+      <td><b>Labs</b></td>
+      <td>Interactive Marimo notebooks where you explore trade-offs from the textbook: change a parameter, see what breaks, build intuition. Powered by MLSys·im under the hood.</td>
+      <td><a href="labs/README.md">Read more</a> <i>(dev)</i></td>
+    </tr>
+    <tr>
+      <td align="center">🔥</td>
+      <td><b>Tiny🔥Torch</b></td>
+      <td>Build your own ML framework from scratch across 20 progressive modules. You don't understand a system until you've built one.</td>
       <td><a href="https://mlsysbook.ai/tinytorch/">Get started</a></td>
     </tr>
     <tr>
+      <td align="center">🛠️</td>
       <td><b>Hardware Kits</b></td>
-      <td>Deploy ML to Arduino, Raspberry Pi, and edge devices</td>
-      <td><a href="https://mlsysbook.ai/kits/">Browse labs</a></td>
+      <td>Deploy ML to Arduino, Raspberry Pi, and Jetson. Real memory limits, real power budgets, real latency.</td>
+      <td><a href="kits/README.md">Browse labs</a> <i>(dev)</i></td>
     </tr>
     <tr>
+      <td align="center">🔮</td>
       <td><b>MLSys·im</b></td>
-      <td>Physics-grounded simulator for ML infrastructure</td>
-      <td><a href="https://mlsysbook.ai/mlsysim/">Try it</a> · <kbd>pip install mlsysim</kbd></td>
+      <td>Calculate memory bottlenecks, network saturation, and scheduling limits at infrastructure scales you can't physically access.</td>
+      <td><a href="mlsysim/README.md">Read more</a> <i>(dev)</i></td>
     </tr>
     <tr>
-      <td><b>Labs</b></td>
-      <td>Interactive notebooks for algorithm-system exploration</td>
-      <td><i>Coming Summer 2026</i></td>
-    </tr>
-    <tr>
+      <td align="center">💼</td>
       <td><b>Interview Playbook</b></td>
-      <td>43 systems design questions for AI infrastructure roles</td>
-      <td><a href="interviews/README.md">Start drilling</a></td>
+      <td>40+ systems design questions for AI infrastructure roles. Silicon physics, distributed infra, production serving, and ML operations.</td>
+      <td><a href="interviews/README.md">Start drilling</a> <i>(dev)</i></td>
+    </tr>
+  </tbody>
+</table>
+
+### For Educators
+
+<table>
+  <thead>
+    <tr>
+      <th width="5%"></th>
+      <th width="15%">Component</th>
+      <th width="50%">What It Provides</th>
+      <th width="30%">Link</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center">🎓</td>
+      <td><b>Instructor Hub</b></td>
+      <td>The AI Engineering Blueprint: two 12-week syllabi, pedagogy guide, assessment rubrics, and a TA handbook.</td>
+      <td><a href="instructors/index.qmd">View hub</a></td>
     </tr>
     <tr>
-      <td><b>Instructor Hub</b></td>
-      <td>Turnkey curricula with two 12-week syllabi</td>
-      <td><a href="instructors/index.qmd">View hub</a></td>
+      <td align="center">🎬</td>
+      <td><b>Lecture Slides</b></td>
+      <td>Beamer slide decks for every chapter, with four theme variants. Drop into your course and teach.</td>
+      <td><a href="slides/README.md">Browse decks</a> <i>(dev)</i></td>
+    </tr>
+    <tr>
+      <td align="center">📬</td>
+      <td><b>Newsletter</b></td>
+      <td>Updates on the curriculum, new chapters, and what the community is building.</td>
+      <td><a href="https://buttondown.email/mlsysbook">Subscribe</a></td>
     </tr>
   </tbody>
 </table>
@@ -197,38 +225,25 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
 
 ---
 
-## Start Here
+## Quick Start
 
 <table>
   <tbody>
     <tr>
-      <td width="15%" align="center"><b>READ</b></td>
-      <td>Start with the <a href="https://mlsysbook.ai/book/">textbook</a>:
-        <ul>
-          <li><a href="https://mlsysbook.ai/vol1/">Volume I: Foundations</a> covers ML basics, development, and optimization.</li>
-          <li><a href="https://mlsysbook.ai/vol2/">Volume II: At Scale</a> covers distributed training and production fleets.</li>
-        </ul>
-      </td>
+      <td width="10%" align="center"><b>1</b></td>
+      <td><b>Read the textbook.</b> Start with <a href="https://mlsysbook.ai">Volume I</a>. It's the foundation for everything else.</td>
     </tr>
     <tr>
-      <td width="15%" align="center"><b>BUILD</b></td>
-      <td>Start TinyTorch with the <a href="https://mlsysbook.ai/tinytorch/getting-started.html">getting started guide</a>. Implement autograd and transformers from scratch.</td>
+      <td width="10%" align="center"><b>2</b></td>
+      <td><b>Pick a hands-on path.</b> <a href="https://mlsysbook.ai/tinytorch/">Build a framework</a> (TinyTorch), <a href="labs/README.md">explore trade-offs</a> (Labs), or <a href="kits/README.md">deploy to real hardware</a> (Kits).</td>
     </tr>
     <tr>
-      <td width="15%" align="center"><b>DEPLOY</b></td>
-      <td>Pick a <a href="https://mlsysbook.ai/kits/">hardware kit</a> and run the labs on Arduino, Raspberry Pi, or Jetson.</td>
+      <td width="10%" align="center"><b>3</b></td>
+      <td><b>Test yourself.</b> Drill the <a href="interviews/README.md">interview playbook</a>: 40+ systems design questions across cloud, edge, mobile, and TinyML.</td>
     </tr>
     <tr>
-      <td width="15%" align="center"><b>SIMULATE</b></td>
-      <td>Explore the <a href="mlsysim/README.md">MLSys·im Engine</a> to calculate the physics of ML infrastructure.</td>
-    </tr>
-    <tr>
-      <td width="15%" align="center"><b>INTERVIEW</b></td>
-      <td>Drill 43 systems design questions across 5 rounds with the <a href="interviews/README.md">ML Systems Interview Playbook</a>. Covers silicon physics, distributed infra, production serving, and ML operations.</td>
-    </tr>
-    <tr>
-      <td width="15%" align="center"><b>INSTRUCT</b></td>
-      <td>Adopt the curriculum with the <a href="instructors/index.qmd">AI Engineering Blueprint</a> (two 12-week syllabi).</td>
+      <td width="10%" align="center"><b>4</b></td>
+      <td><b>Teach it.</b> Adopt the curriculum with the <a href="instructors/index.qmd">AI Engineering Blueprint</a> and <a href="slides/README.md">lecture slides</a>.</td>
     </tr>
   </tbody>
 </table>
@@ -244,14 +259,17 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          BRANCH STRUCTURE                               │
 ├─────────────────────────────────────────────────────────────────────────┤
-│   main (last stable release)                                            │
-│   └── Single-volume textbook (published and available)                  │
-│         │                                                               │
+│   main (live at mlsysbook.ai)                                           │
+│   └── Single-volume textbook (what readers see today)                   │
+│                                                                         │
 │   dev (default branch, you are here)                                    │
 │   ├── Volume I: Introduction to Machine Learning Systems                │
 │   │      Status: Content complete, undergoing editorial polish          │
-│   └── Volume II: Machine Learning Systems at Scale                      │
-│          Status: Active development, chapters being written             │
+│   ├── Volume II: Machine Learning Systems at Scale                      │
+│   │      Status: Active development, chapters being written             │
+│   ├── TinyTorch, Hardware Kits, MLSys·im, Labs, Interview Playbook     │
+│   │      Status: In development, not yet on the live site               │
+│   └── Two-volume split replaces the single-volume edition at launch     │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
