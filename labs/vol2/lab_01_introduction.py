@@ -228,6 +228,10 @@ def _(
         label="Your cluster has 1,000 GPUs, each with 99.9% individual uptime. "
               "What fraction of the time is the entire cluster healthy?",
     )
+    return (partA_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partA_prediction):
     partA_fleet_size = mo.ui.slider(
         start=100, stop=25000, value=1000, step=100,
         label="Fleet size (GPUs)",
@@ -248,6 +252,10 @@ def _(
         label="You scale a 175B model from 1 GPU to 256 GPUs on InfiniBand NDR. "
               "What fleet efficiency do you expect?",
     )
+    return (partB_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_prediction):
     partB_gpu_count = mo.ui.slider(
         start=1, stop=1024, value=256, step=1, label="Number of GPUs",
     )
@@ -275,6 +283,10 @@ def _(
         label="Fixed budget of 10^23 FLOPs. Which achieves lower loss: "
               "a 10B model on 200B tokens, or a 3B model on 600B tokens?",
     )
+    return (partC_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_prediction):
     partC_params = mo.ui.slider(start=1, stop=100, value=10, step=1, label="Model params (B)")
     partC_tokens = mo.ui.slider(start=10, stop=10000, value=200, step=10, label="Training tokens (B)")
 
@@ -289,6 +301,10 @@ def _(
         label="For a workload with 20% communication overhead (r = 0.20), "
               "how many GPUs before scaling efficiency drops below 50%?",
     )
+    return (partD_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_prediction):
     partD_comm_frac = mo.ui.slider(start=0.01, stop=0.50, value=0.20, step=0.01, label="Communication fraction (r)")
     partD_n_gpus = mo.ui.slider(start=1, stop=512, value=64, step=1, label="Number of GPUs")
     partD_overlap = mo.ui.slider(start=0, stop=80, value=0, step=10, label="Overlap (%)")
@@ -306,6 +322,10 @@ def _(
         options={"Computation": "comp", "Communication": "comm", "Coordination": "coord"},
         label="Federated MobileNet (edge devices) -- dominant bottleneck?",
     )
+    return (partE_llm, partE_dlrm, partE_fed)
+
+@app.cell(hide_code=True)
+def _(mo, partE_llm, partE_dlrm, partE_fed):
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A: THE RELIABILITY COLLAPSE

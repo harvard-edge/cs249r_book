@@ -40,10 +40,10 @@ async def _():
     RESNET50_PARAMS = mlsysim.Models.ResNet50.parameters.m_as("count")
     RESNET50_FLOPS  = mlsysim.Models.ResNet50.inference_flops.m_as("flop")
 
-    LLAMA2_70B_PARAMS = mlsysim.Models.Llama2_70B.parameters.m_as("count")
-    LLAMA2_70B_LAYERS = mlsysim.Models.Llama2_70B.layers
-    LLAMA2_70B_HIDDEN = mlsysim.Models.Llama2_70B.hidden_dim
-    LLAMA2_70B_HEADS  = mlsysim.Models.Llama2_70B.heads
+    LLAMA2_70B_PARAMS = mlsysim.Models.Language.Llama2_70B.parameters.m_as("count")
+    LLAMA2_70B_LAYERS = mlsysim.Models.Language.Llama2_70B.layers
+    LLAMA2_70B_HIDDEN = mlsysim.Models.Language.Llama2_70B.hidden_dim
+    LLAMA2_70B_HEADS  = mlsysim.Models.Language.Llama2_70B.heads
 
     ledger = DesignLedger()
     return (
@@ -188,6 +188,10 @@ def _(
         },
         label="ResNet-50 server, 5 ms service time, 80% utilization. P99 latency?",
     )
+    return (partA_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partA_pred):
     partA_rho = mo.ui.slider(start=0.10, stop=0.95, value=0.80, step=0.05,
                               label="Server utilization (rho)")
     partA_svc = mo.ui.slider(start=1.0, stop=20.0, value=5.0, step=1.0,
@@ -205,6 +209,10 @@ def _(
         },
         label="Batch size 1 to 32, arrival 500 QPS, SLO 50 ms. What happens?",
     )
+    return (partB_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_pred):
     partB_batch = mo.ui.slider(start=1, stop=64, value=1, step=1, label="Batch size")
     partB_arr = mo.ui.slider(start=100, stop=2000, value=500, step=50, label="Arrival rate (QPS)")
     partB_slo = mo.ui.slider(start=10, stop=100, value=50, step=5, label="SLO budget (ms)")
@@ -219,6 +227,10 @@ def _(
         },
         label="Llama-2 70B, 128K context, 8xH100 (640 GB). Max concurrent batch?",
     )
+    return (partC_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_pred):
     partC_model = mo.ui.dropdown(options={"7B": 7, "13B": 13, "70B": 70}, value="70B",
                                   label="Model size")
     partC_prec = mo.ui.dropdown(
@@ -240,6 +252,10 @@ def _(
         },
         label="Auto-scaling Llama-2 70B during traffic spike. First-user wait?",
     )
+    return (partD_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_pred):
     partD_model = mo.ui.dropdown(options={"7B": 7, "13B": 13, "70B": 70}, value="70B",
                                   label="Model size")
     partD_stor = mo.ui.dropdown(

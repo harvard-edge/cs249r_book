@@ -189,7 +189,6 @@ def _(
     # ═════════════════════════════════════════════════════════════════════════
     # WIDGETS
     # ═════════════════════════════════════════════════════════════════════════
-
     pA_pred = mo.ui.radio(
         options={
             "A) ~0.5 ms -- network latency dominates": "0.5",
@@ -199,6 +198,10 @@ def _(
         },
         label="70B FP32 gradients, 64 GPUs, IB NDR. How long does one Ring AllReduce take?",
     )
+    return (pA_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, pA_pred):
     pA_model = mo.ui.dropdown(
         options={"1B": 1, "7B": 7, "13B": 13, "70B": 70, "175B": 175},
         value="70B", label="Model params (B)",
@@ -221,6 +224,10 @@ def _(
         },
         label="256 GPUs on IB NDR. Which AllReduce is faster for a 1 MB message?",
     )
+    return (pB_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, pB_pred):
     pB_msg_exp = mo.ui.slider(start=0, stop=10, value=0, step=1, label="Message size (10^x KB)")
     pB_n_gpus = mo.ui.dropdown(
         options={"64": 64, "256": 256, "1024": 1024},
@@ -236,6 +243,10 @@ def _(
         },
         label="Hierarchical AllReduce vs flat ring for 64 GPUs (8 nodes x 8). Speedup?",
     )
+    return (pC_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, pC_pred):
     pC_topo = mo.ui.dropdown(
         options={"Flat Ring": "flat", "Hierarchical 2-level": "hier2"},
         value="Flat Ring", label="Topology",
@@ -256,6 +267,10 @@ def _(
         label="INT8 gradient compression (4x BW reduction) for 70B on 64 GPUs with IB NDR. "
               "Does total training time decrease?",
     )
+    return (pD_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, pD_pred):
     pD_comp = mo.ui.dropdown(
         options={"None": 1.0, "FP16 (2x)": 0.5, "INT8 (4x)": 0.25, "Top-K 1%": 0.01, "1-bit": 0.03125},
         value="None", label="Compression method",
@@ -272,6 +287,10 @@ def _(
         label="Starting from 11s AllReduce for 70B: how many optimizations "
               "to get under 20% of step time?",
     )
+    return (pE_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, pE_pred):
     pE_hier = mo.ui.checkbox(label="Hierarchical AllReduce")
     pE_fp16 = mo.ui.checkbox(label="FP16 gradients")
     pE_bucket = mo.ui.checkbox(label="Bucket fusion")

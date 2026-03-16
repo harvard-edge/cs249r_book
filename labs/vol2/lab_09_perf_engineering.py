@@ -71,7 +71,6 @@ async def _():
     from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
-    ledger.set("chapter", "v2_09")
 
     # ── Hardware constants (NVIDIA datasheets) ────────────────────────────────
     H100_TFLOPS_FP16 = 989.0
@@ -1487,7 +1486,7 @@ def _(COLORS, mo):
 # ─── CELL 31: LEDGER ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
-    ledger.set("v2_09", {
+    ledger.save(chapter=9, design={
         "roofline_diagnostic": "memory-bound",
         "flash_savings_ratio_32k": 256,
         "optimization_methodology": "profile-diagnose-treat",

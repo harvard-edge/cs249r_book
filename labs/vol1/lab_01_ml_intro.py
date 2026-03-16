@@ -270,6 +270,10 @@ def _(
         label="A recommendation system is showing poor accuracy. The team proposes "
               "buying 4x more GPUs. What happens to accuracy?",
     )
+    return (partA_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partA_prediction):
     partA_scenario = mo.ui.dropdown(
         options={
             "Rec System: stale training data": "stale_data",
@@ -300,6 +304,10 @@ def _(
         label="For ResNet-50 inference at batch=1 on an H100 GPU, which Iron Law "
               "term dominates total inference latency?",
     )
+    return (partB_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_prediction):
     partB_batch = mo.ui.slider(
         start=1, stop=256, value=1, step=1, label="Batch size",
     )
@@ -315,6 +323,10 @@ def _(
         label="ResNet-50 requires ~49 MB in FP16. The ESP32-S3 has 512 KB of SRAM. "
               "What is the ratio of model size to available memory?",
     )
+    return (partC_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_prediction):
     partC_target = mo.ui.radio(
         options={
             "H100 (Cloud)": "h100",
@@ -337,6 +349,10 @@ def _(
         label="What is the compute ratio between an H100 GPU and an ESP32 "
               "microcontroller?",
     )
+    return (partD_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_prediction):
     partD_scale = mo.ui.radio(
         options={"Linear scale": "linear", "Log scale": "log"},
         value="Linear scale",

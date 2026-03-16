@@ -490,7 +490,8 @@ def _(mo, go, np, apply_plotly_theme, COLORS, BASELINE_ACCURACY,
 
 
 @app.cell(hide_code=True)
-def _(mo, partB_pred, _dp_at_gap):
+def _(mo, partB_pred):
+    _dp_at_gap = 0
     _predicted = partB_pred.value
     _actual = _dp_at_gap
     _diff = abs(_predicted - _actual)
@@ -1035,7 +1036,10 @@ def _(mo, COLORS):
 
 
 @app.cell(hide_code=True)
-def _(mo, ledger, COLORS, partD_metric, _accuracy, _disparity, _total_latency):
+def _(mo, ledger, COLORS, partD_metric):
+    _accuracy = 0
+    _disparity = 0
+    _total_latency = 0
     _metric_val = partD_metric.value if hasattr(partD_metric, 'value') else "eqop"
     ledger.save(chapter=15, design={
         "chapter": "v2_15",

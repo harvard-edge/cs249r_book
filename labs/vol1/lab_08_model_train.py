@@ -226,6 +226,10 @@ def _(
         label="A 7B-parameter model trained with Adam in FP32. Minimum memory for "
               "parameter state (weights + gradients + optimizer), before any activations?",
     )
+    return (partA_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partA_prediction):
     partA_model_size = mo.ui.slider(
         start=0.1, stop=70, value=7, step=0.1, label="Model size (billions of params)",
     )
@@ -250,6 +254,10 @@ def _(
         label="GPT-2 training on V100 with SSD storage and 4 GPUs over PCIe. "
               "Which stage is the bottleneck?",
     )
+    return (partB_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_prediction):
     partB_data_ms = mo.ui.slider(
         start=1, stop=100, value=50, step=1, label="Data loading (ms)",
     )
@@ -274,6 +282,10 @@ def _(
         label="GPT-2 (1.5B) requires ~77 GB in full FP32 (with activations). "
               "Mixed precision (FP16 forward + FP32 master + FP32 Adam) requires how much?",
     )
+    return (partC_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_prediction):
     partC_model_c = mo.ui.slider(
         start=0.1, stop=13, value=1.5, step=0.1, label="Model size (billions)",
     )
@@ -293,6 +305,10 @@ def _(
         label="Training on 8 GPUs with r=0.15 (gradient sync = 15% of step time). "
               "What speedup over 1 GPU?",
     )
+    return (partD_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_prediction):
     partD_gpus = mo.ui.slider(
         start=1, stop=256, value=8, step=1, label="Number of GPUs",
     )

@@ -231,6 +231,10 @@ def _(
         label="On a mobile NPU, what fraction of inference time comes from activation "
               "functions if you use Sigmoid instead of ReLU in every layer?",
     )
+    return (partA_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partA_prediction):
     partA_context = mo.ui.radio(
         options={"Cloud GPU (H100)": "cloud", "Mobile NPU (iPhone)": "mobile"},
         value="Cloud GPU (H100)",
@@ -265,6 +269,10 @@ def _(
         label="A layer produces a 16 KB activation tensor in L2 cache. You double the "
               "batch size (32 KB now). How does latency change on a mobile NPU?",
     )
+    return (partB_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_prediction):
     partB_context = mo.ui.radio(
         options={"Cloud GPU (H100)": "cloud", "Mobile NPU (iPhone)": "mobile"},
         value="Mobile NPU (iPhone)",
@@ -289,6 +297,10 @@ def _(
         label="A 3-layer MLP has hidden layers of width 128. You double the hidden "
               "width to 256. By how much do total FLOPs increase?",
     )
+    return (partC_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_prediction):
     partC_width = mo.ui.slider(
         start=32, stop=2048, value=128, step=32, label="Hidden layer width",
     )
@@ -304,6 +316,10 @@ def _(
         label="A 20-layer model uses 50 MB for inference. How much memory does training "
               "require (weights + gradients + activations, ignoring optimizer state)?",
     )
+    return (partD_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_prediction):
     partD_depth = mo.ui.slider(
         start=3, stop=50, value=20, step=1, label="Network depth (layers)",
     )

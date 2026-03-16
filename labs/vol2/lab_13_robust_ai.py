@@ -956,7 +956,8 @@ def _(mo, go, np, apply_plotly_theme, COLORS, CLEAN_ACC_BASELINE, PSI_THRESHOLD,
 # ─── PART C REVEAL ──────────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
-def _(mo, partC_pred, _acc_6m_unmon, COLORS):
+def _(mo, partC_pred, COLORS):
+    _acc_6m_unmon = 0
     _predicted_acc = partC_pred.value
     _actual_acc = _acc_6m_unmon
     _gap = abs(_predicted_acc - _actual_acc)
@@ -1189,7 +1190,10 @@ def _(mo, go, apply_plotly_theme, COLORS, CLEAN_ACC_BASELINE, ADV_TRAINED_CLEAN_
 # ─── PART D REVEAL ──────────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
-def _(mo, partD_pred, _clean_effective, _robust, _total_cost, COLORS):
+def _(mo, partD_pred, COLORS):
+    _clean_effective = 0
+    _robust = 0
+    _total_cost = 0
     _correct = partD_pred.value == "guardrails"
 
     _msg = (

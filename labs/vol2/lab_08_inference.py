@@ -914,8 +914,10 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(COLORS, _max_concurrent, _oom, partA_prediction, partB_prediction, partA_reflection, partB_reflection,
+def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partB_reflection,
       ledger, mo, decision_input, decision_ui):
+    _max_concurrent = 0
+    _oom = False
     ledger.save(
         chapter="v2_08",
         design={

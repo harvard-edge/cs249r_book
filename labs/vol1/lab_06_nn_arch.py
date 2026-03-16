@@ -224,6 +224,10 @@ def _(
         label="An MLP takes a 224x224 RGB image as a flattened input (150,528 dims). "
               "The first hidden layer also has 150,528 neurons. How many parameters in this single layer?",
     )
+    return (partA_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partA_prediction):
     partA_arch = mo.ui.radio(
         options={"MLP (no structure)": "mlp", "CNN 3x3": "cnn3", "CNN 5x5": "cnn5"},
         value="MLP (no structure)", label="Architecture:", inline=True,
@@ -243,6 +247,10 @@ def _(
         label="Doubling a Transformer's context from 4,096 to 8,192 tokens -- "
               "how much more memory does attention require?",
     )
+    return (partB_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_prediction):
     partB_seq_len = mo.ui.slider(
         start=512, stop=131072, value=4096, step=512, label="Sequence length (tokens)",
     )
@@ -261,6 +269,10 @@ def _(
         label="Two networks: identical FLOPs/params. One is 128 layers deep (width 32). "
               "The other is 2 layers deep (width 512). Which is faster at inference?",
     )
+    return (partC_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_prediction):
     partC_depth = mo.ui.slider(
         start=2, stop=128, value=64, step=2, label="Depth (layers)",
     )
@@ -279,6 +291,10 @@ def _(
         },
         label="Which architecture family achieves the highest GPU utilization (MFU) at batch=1?",
     )
+    return (partD_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_prediction):
     partD_batch_d = mo.ui.slider(
         start=1, stop=256, value=1, step=1, label="Batch size",
     )

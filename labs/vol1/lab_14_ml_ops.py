@@ -165,6 +165,10 @@ def _(COLORS, apply_plotly_theme, go, math, mo, np):
         },
         label="Fraud model deployed 6 months. Dashboard: 100% uptime, <50 ms, 0.01% error. Accuracy?",
     )
+    return (partA_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partA_pred):
     partA_weeks = mo.ui.slider(start=0, stop=26, value=0, step=1,
                                 label="Weeks since deployment")
     partA_drift_rate = mo.ui.slider(start=0.005, stop=0.05, value=0.02, step=0.005,
@@ -180,6 +184,10 @@ def _(COLORS, apply_plotly_theme, go, math, mo, np):
         },
         label="Retraining costs $10K. Drift costs $500/day. Current cadence: 30 days. Optimal?",
     )
+    return (partB_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_pred):
     partB_retrain_cost = mo.ui.slider(start=1000, stop=50000, value=10000, step=1000,
                                        label="Retraining cost ($)")
     partB_drift_cost = mo.ui.slider(start=100, stop=5000, value=500, step=100,
@@ -195,6 +203,10 @@ def _(COLORS, apply_plotly_theme, go, math, mo, np):
         },
         label="Cloud retraining: $1K, T*=7 days. Edge: $100K. What is edge T*?",
     )
+    return (partC_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_pred):
     partC_cloud_cost = mo.ui.slider(start=500, stop=10000, value=1000, step=500,
                                      label="Cloud retrain cost ($)")
     partC_edge_cost = mo.ui.slider(start=10000, stop=500000, value=100000, step=10000,
@@ -212,6 +224,10 @@ def _(COLORS, apply_plotly_theme, go, math, mo, np):
         },
         label="You defer retraining for 3 consecutive T* cycles. Total accuracy loss vs single miss?",
     )
+    return (partD_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_pred):
     partD_missed = mo.ui.slider(start=1, stop=6, value=3, step=1,
                                  label="Missed retraining cycles")
     partD_downstream = mo.ui.slider(start=0, stop=5, value=2, step=1,

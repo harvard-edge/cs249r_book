@@ -222,7 +222,6 @@ def _(
     # ═════════════════════════════════════════════════════════════════════════
     # WIDGETS
     # ═════════════════════════════════════════════════════════════════════════
-
     pA_pred = mo.ui.radio(
         options={
             "A) ~10% idle -- GPUs are mostly computing": "10",
@@ -233,6 +232,10 @@ def _(
         label="During single-token generation of a 70B model on H100, "
               "what fraction of the time are the arithmetic units idle?",
     )
+    return (pA_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, pA_pred):
     pA_model = mo.ui.dropdown(
         options={"7B": 7, "70B": 70, "175B": 175},
         value="70B", label="Model size (B params)",
@@ -248,6 +251,10 @@ def _(
         },
         label="Which fleet-scale workloads fall above the H100 ridge point?",
     )
+    return (pB_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, pB_pred):
     pB_hw = mo.ui.dropdown(
         options={"V100": "v100", "A100": "a100", "H100": "h100", "B200": "b200"},
         value="H100", label="Accelerator",
@@ -262,6 +269,10 @@ def _(
         },
         label="How much slower is a 10 GB AllReduce over IB NDR vs NVLink 4.0?",
     )
+    return (pC_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, pC_pred):
     pC_size = mo.ui.slider(start=1, stop=10000, value=10000, step=100, label="Transfer size (MB)")
 
     pD_pred = mo.ui.radio(
@@ -274,6 +285,10 @@ def _(
         label="Can a single 8-GPU DGX H100 node (640 GB HBM) train a 175B "
               "model with Adam in FP16 without ZeRO?",
     )
+    return (pD_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, pD_pred):
     pD_model_b = mo.ui.slider(start=1, stop=175, value=175, step=1, label="Model params (B)")
     pD_gpus = mo.ui.slider(start=1, stop=8, value=8, step=1, label="GPUs per node")
     pD_zero = mo.ui.dropdown(
@@ -290,6 +305,10 @@ def _(
         },
         label="For a 1,000-GPU H100 cluster over 3 years: GPUs or electricity costs more?",
     )
+    return (pE_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, pE_pred):
     pE_n_gpus = mo.ui.slider(start=100, stop=5000, value=1000, step=100, label="GPU count")
     pE_util = mo.ui.slider(start=30, stop=90, value=70, step=5, label="Utilization (%)")
     pE_pue = mo.ui.slider(start=1.06, stop=1.60, value=1.12, step=0.02, label="PUE")

@@ -55,7 +55,6 @@ async def _():
     from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
-    ledger.set("chapter", "v2_11")
 
     # ── Operational constants ────────────────────────────────────────────────
     # Part A — Complexity Model
@@ -1019,7 +1018,7 @@ def _(COLORS, mo):
 
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
-    ledger.set("v2_11", {
+    ledger.save(chapter=11, design={
         "complexity_crossover": 50,
         "silent_failure_24h_cost": 1_080_000,
         "platform_breakeven": 20,

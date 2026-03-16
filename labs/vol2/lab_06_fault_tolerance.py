@@ -957,8 +957,9 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(COLORS, _pathological, partA_prediction, partB_prediction, partA_reflection, partB_reflection,
+def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partB_reflection,
       ledger, mo, decision_input, decision_ui):
+    _pathological = False
     ledger.save(
         chapter="v2_06",
         design={

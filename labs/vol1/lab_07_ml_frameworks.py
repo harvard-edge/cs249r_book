@@ -235,6 +235,10 @@ def _(
         label="Two models on the same GPU. Model A (KWS) has 1,000 operations of 5 us each. "
               "Model B (GPT-2-like) has 20 operations of 500 us each. Which achieves higher GPU utilization?",
     )
+    return (partA_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partA_prediction):
     partA_kernels = mo.ui.slider(
         start=10, stop=2000, value=1000, step=10, label="Number of kernels",
     )
@@ -253,6 +257,10 @@ def _(
         label="Fusing 3 element-wise operations into one kernel eliminates intermediate "
               "HBM writes. What speedup do you expect?",
     )
+    return (partB_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_prediction):
     partB_num_ops = mo.ui.slider(
         start=2, stop=8, value=3, step=1, label="Operations to fuse",
     )
@@ -271,6 +279,10 @@ def _(
         label="torch.compile gives 48% speedup on ResNet-50 but takes 30s to compile. "
               "How many inferences before compilation pays off?",
     )
+    return (partC_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_prediction):
     partC_compile_time = mo.ui.slider(
         start=5, stop=300, value=30, step=5, label="Compile time (seconds)",
     )
@@ -289,6 +301,10 @@ def _(
         label="PyTorch runtime alone requires ~1,800 MB. The ESP32 has 512 KB. "
               "By what factor does the runtime exceed device memory?",
     )
+    return (partD_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_prediction):
     partD_framework = mo.ui.dropdown(
         options={"PyTorch": "PyTorch", "TensorFlow": "TensorFlow",
                  "ONNX Runtime": "ONNX Runtime", "TF Lite": "TF Lite",

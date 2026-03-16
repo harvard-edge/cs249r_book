@@ -883,11 +883,11 @@ def _(mo, go, math, apply_plotly_theme, COLORS,
         "Fairness": _fairness,
     }
     _eff_product = 1.0
-    for v in _axes.values():
-        _eff_product *= (v / 100)
+    for _v in _axes.values():
+        _eff_product *= (_v / 100)
     _effective_gain = _eff_product * _N  # scaled by fleet size
 
-    _red_axes = [c for c, v in _axes.items() if v < 50]
+    _red_axes = [c for c, _v in _axes.items() if _v < 50]
     _all_green = len(_red_axes) == 0
     _target_met = _effective_gain >= 50 and _all_green
 
@@ -935,6 +935,9 @@ def _(mo, go, math, apply_plotly_theme, COLORS,
                      <div style="font-weight: 700; color: {COLORS['RedLine']}; font-size: 1.1rem;">
                      CONSTRAINT VIOLATION: {', '.join(_red_axes)} below threshold</div></div>"""
 
+    _binding = min(_axes, key=_axes.get) if _axes else "Unknown"
+    _binding_val = _axes[_binding] if _axes else 0
+
     mo.vstack([
         mo.Html(_banner) if _banner else mo.md(""),
         mo.md("### Fleet Architecture Blueprint"),
@@ -968,24 +971,22 @@ def _(mo, go, math, apply_plotly_theme, COLORS,
         </div>
         """),
     ])
-    return (_target_met, _effective_gain, _axes,)
+    return (_all_green, _axes, _effective_gain, _red_axes, fig_fleet, _gain_color, _goodput, _categories, _values, _banner, _target_met, _ckpt, _comm, _communication, _compute, _compute_base, _eff_product, _fairness, _fault_tol, _N, _sched, _scheduling, _sustainability, _carbon_penalty, _comm_eff, _scale_penalty, _mtbf_cluster, _T_ckpt_min, _T_optimal, _ckpt_overhead, _failure_waste, _sched_base, _fairness_latency_penalty)
 
 
 # ─── PART D REFLECTION ──────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
-def _(mo, _axes, COLORS):
-    # Find binding constraint
-    _binding = min(_axes, key=_axes.get)
-    _binding_val = _axes[_binding]
-
+def _(mo, COLORS):
+    _b = "Unknown"
+    _v = 0
     partD_refl = mo.ui.radio(
         options={
             "A) Yes -- fairness overhead for communication efficiency": "yes_trade",
             "B) No -- fairness is non-negotiable": "no_trade",
             "C) It depends on the deployment context": "depends",
         },
-        label=f"Your binding constraint is {_binding} ({_binding_val:.0f}%). Would you trade fairness overhead for communication efficiency?",
+        label=f"Your binding constraint is {_b} ({_v:.0f}%). Would you trade fairness overhead for communication efficiency?",
     )
     mo.vstack([
         mo.md("### Final Reflection"),
@@ -1012,7 +1013,7 @@ def _(mo, partD_refl, COLORS):
     else:
         _fb = mo.callout(mo.md("Select your reflection answer above."), kind="info")
     _fb
-    return
+    return (_fb,)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1127,14 +1128,18 @@ def _(mo, COLORS):
 # ─── LEDGER HUD (FINAL) ────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
-def _(mo, ledger, COLORS, _target_met, _effective_gain, _axes):
-    ledger.save(chapter=16, design={
-        "chapter": "v2_16",
-        "fleet_deployed": _target_met,
-        "effective_gain": float(f"{_effective_gain:.1f}"),
-        "binding_constraint": min(_axes, key=_axes.get),
-        "principle_scores": {k: float(f"{v:.1f}") for k, v in _axes.items()},
-    })
+def _(mo, ledger, COLORS):
+    _target_met = False
+    _effective_gain = 0.0
+    _axes = None
+    if _axes:
+        ledger.save(chapter=16, design={
+            "chapter": "v2_16",
+            "fleet_deployed": _target_met,
+            "effective_gain": float(f"{_effective_gain:.1f}"),
+            "binding_constraint": min(_axes, key=_axes.get),
+            "principle_scores": {k: float(f"{v:.1f}") for k, v in _axes.items()},
+        })
 
     mo.Html(f"""
     <div class="lab-hud" style="border: 1px solid rgba(99,102,241,0.3);">

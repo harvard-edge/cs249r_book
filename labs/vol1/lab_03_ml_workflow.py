@@ -190,6 +190,10 @@ def _(
         label="A team trained a 95%-accurate model (100 MB FP16) for deployment on "
               "an ESP32 (512 KB SRAM). When is the constraint cheapest to address?",
     )
+    return (partA_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partA_prediction):
     partA_stage = mo.ui.slider(
         start=1, stop=6, value=5, step=1,
         label="Discovery stage (1=Problem Definition, 6=Monitoring)",
@@ -206,6 +210,10 @@ def _(
         label="Team A: 95% start, 1-week cycles. Team B: 90% start, 1-hour cycles. "
               "After 26 weeks, which team has higher accuracy?",
     )
+    return (partB_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_prediction):
     partB_cycle_a = mo.ui.slider(
         start=1, stop=336, value=168, step=1,
         label="Team A cycle time (hours)",
@@ -226,6 +234,10 @@ def _(
         label="What fraction of total engineering effort goes to model development "
               "(architecture, training, hyperparameters)?",
     )
+    return (partC_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_prediction):
     partC_sliders = {
         "data_collect": mo.ui.slider(start=0, stop=20, value=3, step=1,
                                       label="Data Collection (person-months)"),
@@ -250,6 +262,10 @@ def _(
         label="After deploying from 5 pilot clinics to 200 clinics, how many "
               "complete lifecycle iterations before the system stabilizes?",
     )
+    return (partD_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_prediction):
     partD_months = mo.ui.slider(
         start=0, stop=24, value=0, step=1,
         label="Months since production launch",

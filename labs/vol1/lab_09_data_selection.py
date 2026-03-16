@@ -212,6 +212,10 @@ def _(
         label="You have a 1M-image dataset. You want 99% of full-dataset accuracy. "
               "What fraction of the data can you discard?",
     )
+    return (partA_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partA_pred):
     partA_frac = mo.ui.slider(
         start=5, stop=100, value=100, step=5,
         label="Dataset fraction (%)",
@@ -233,6 +237,10 @@ def _(
         label="ResNet-50 scores 1M images on A100 (2.8 hrs). Full training: 8.0 hrs. "
               "Coreset (50%) training: 4.2 hrs. Is selection worth it?",
     )
+    return (partB_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_pred):
     partB_coreset = mo.ui.slider(
         start=10, stop=90, value=50, step=5,
         label="Coreset fraction (%)",
@@ -265,6 +273,10 @@ def _(
               "feeding an A100 GPU. GPU forward-backward: 12 ms/batch. "
               "What fraction of step time is GPU compute?",
     )
+    return (partC_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_pred):
     partC_workers = mo.ui.slider(
         start=1, stop=16, value=8, step=1,
         label="CPU workers",
@@ -295,6 +307,10 @@ def _(
         },
         label="Fixed budget: 10^21 FLOPs. Which achieves lower loss?",
     )
+    return (partD_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_pred):
     partD_params_b = mo.ui.slider(
         start=0.5, stop=50, value=10, step=0.5,
         label="Model size (B parameters)",

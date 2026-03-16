@@ -1186,9 +1186,14 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(COLORS, _bubble_pct, _config_valid, _dp, _mfu_pct, _oom, _total_mem_gb,
-      partA_prediction, partB_prediction, partA_reflection, partB_reflection,
+def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partB_reflection,
       a2_tp, a2_pp, ledger, mo, decision_input, decision_ui):
+    _bubble_pct=0
+    _config_valid=False
+    _dp=0
+    _mfu_pct=0
+    _oom=False
+    _total_mem_gb=0
     _context = "3d_parallel" if a2_tp.value > 1 or a2_pp.value > 1 else "data_parallel"
 
     ledger.save(

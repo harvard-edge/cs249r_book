@@ -259,6 +259,10 @@ def _(
         label="Upgrading from A100 ($15K) to H100 ($30K) -- a 6x compute increase. "
               "For a workload with AI = 5 FLOPs/Byte, what latency improvement?",
     )
+    return (partA_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partA_prediction):
     partA_ai = mo.ui.slider(
         start=1, stop=400, value=5, step=1,
         label="Arithmetic Intensity (FLOPs/Byte)",
@@ -276,6 +280,10 @@ def _(
               "Nearest datacenter: 1,500 km. Model runs in 1 ms on cloud GPU. "
               "Is cloud inference feasible?",
     )
+    return (partB_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_prediction):
     partB_distance = mo.ui.slider(
         start=0, stop=5000, value=1500, step=50,
         label="Datacenter distance (km)",
@@ -297,6 +305,10 @@ def _(
         label="ResNet-50 achieves 60 FPS on a mobile NPU. "
               "After 90 seconds of continuous use, what frame rate?",
     )
+    return (partC_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_prediction):
     partC_target = mo.ui.dropdown(
         options={
             "Cloud (300W TDP)": "cloud",
@@ -328,6 +340,10 @@ def _(
         label="A sensor captures 16 KB of audio. "
               "Energy ratio of cloud transmission vs. local inference?",
     )
+    return (partD_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_prediction):
     partD_data_size = mo.ui.slider(
         start=1, stop=1024, value=16, step=1,
         label="Data size (KB)",

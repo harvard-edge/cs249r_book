@@ -57,7 +57,6 @@ async def _():
     from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
-    ledger.set("chapter", "v2_10")
 
     # ── Mobile hardware constants ────────────────────────────────────────────
     # Source: @sec-edge-intelligence, smartphone compute constraints
@@ -1108,7 +1107,7 @@ def _(COLORS, mo):
 # ─── CELL 24: LEDGER ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
-    ledger.set("v2_10", {
+    ledger.save(chapter=10, design={
         "memory_amplification": "4-12x",
         "adaptation_strategy": "LoRA",
         "execution_target": "NPU",

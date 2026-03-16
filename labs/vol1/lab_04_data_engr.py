@@ -192,6 +192,10 @@ def _(
         label="Training ResNet-50 on an A100 with a standard cloud SSD (250 MB/s). "
               "What percentage of wall-clock time is the GPU computing?",
     )
+    return (partA_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partA_prediction):
     partA_storage = mo.ui.dropdown(
         options={
             "HDD (100 MB/s)": 100, "SSD (250 MB/s)": 250,
@@ -215,6 +219,10 @@ def _(
         },
         label="50 TB dataset, 10 Gbps link. How long to transfer?",
     )
+    return (partB_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_prediction):
     partB_dataset = mo.ui.slider(
         start=1, stop=500, value=50, step=1,
         label="Dataset size (TB)",
@@ -235,6 +243,10 @@ def _(
         },
         label="A pipeline has 2% error at ingestion. What accuracy degradation at output?",
     )
+    return (partC_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_prediction):
     partC_error_rate = mo.ui.slider(
         start=0.5, stop=10.0, value=2.0, step=0.5,
         label="Ingestion error rate (%)",
@@ -255,6 +267,10 @@ def _(
         label="Always-on speaker, 1 false wake per month max. "
               "What rejection rate is required?",
     )
+    return (partD_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_prediction):
     partD_tolerance = mo.ui.slider(
         start=1, stop=50, value=1, step=1,
         label="False wake-ups per month (tolerance)",

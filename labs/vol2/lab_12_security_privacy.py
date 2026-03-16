@@ -56,7 +56,6 @@ async def _():
     from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
-    ledger.set("chapter", "v2_12")
 
     # ── Privacy constants ────────────────────────────────────────────────────
     # Source: @sec-security-privacy-differential-privacy-8c2b
@@ -973,7 +972,7 @@ def _(COLORS, mo):
 
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
-    ledger.set("v2_12", {
+    ledger.save(chapter=12, design={
         "privacy_scaling": "1/N per-person error",
         "defense_overhead": "25-35% throughput reduction",
         "budget_basic_hours": 2.4,

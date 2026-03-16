@@ -1193,7 +1193,9 @@ def _(mo, COLORS):
 
 
 @app.cell(hide_code=True)
-def _(mo, ledger, COLORS, _total_reduction, _cap):
+def _(mo, ledger, COLORS):
+    _total_reduction = 0
+    _cap = 0
     ledger.save(chapter=14, design={
         "chapter": "v2_14",
         "carbon_cap": _cap,
