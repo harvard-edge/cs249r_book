@@ -1,11 +1,13 @@
+---
+title: "Master Lab Plans"
+---
+
 # MASTER LAB PLANS — FINAL VERSION
 
 Generated: 2026-03-15
 Status: All structural fixes applied, ed-tech reviewed, narrative style enforced.
 
 Total: 32 labs (16 Vol1 + 16 Vol2) after V2-03/V2-06 merger.
-
----
 
 # VOLUME I: Introduction to Machine Learning Systems
 

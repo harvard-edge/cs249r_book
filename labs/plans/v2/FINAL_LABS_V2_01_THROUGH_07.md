@@ -1,3 +1,7 @@
+---
+title: "Volume 2 Labs V2-01 through V2-07"
+---
+
 # Volume 2 Labs: Final Cleaned Plans (V2-01 through V2-07)
 
 Generated: 2026-03-15

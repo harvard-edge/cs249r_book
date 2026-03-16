@@ -1,3 +1,7 @@
+---
+title: "Ed-Tech Review Summary"
+---
+
 # Ed-Tech Review Summary — Lab Proposals
 
 Generated: 2026-03-15

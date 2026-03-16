@@ -1,3 +1,7 @@
+---
+title: "Lab Parts Proposals"
+---
+
 # Lab Parts Proposals — Master Review Document
 
 Generated: 2026-03-15

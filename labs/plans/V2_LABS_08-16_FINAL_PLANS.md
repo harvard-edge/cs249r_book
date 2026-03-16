@@ -1,3 +1,7 @@
+---
+title: "Volume 2 Labs V2-08 through V2-16"
+---
+
 # Volume 2 Labs V2-08 through V2-16: Final Cleaned Plans
 
 Post-merger numbering. Each lab specifies a 5-part story arc that maps onto the 2-Act implementation structure (Parts A-B = Act 1 Calibration; Parts C-E = Act 2 Design Challenge). Total target per lab: 55-60 minutes across all parts. Each part has a prediction, instrument, mlsysim grounding, and an explicit narrative transition to the next part.

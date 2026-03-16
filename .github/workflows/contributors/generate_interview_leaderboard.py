@@ -57,8 +57,7 @@ def generate_markdown_table(issues):
         title = issue["title"].replace("Interview Question: ", "")
         lines.append(f"| [{title}]({issue['url']}) | {issue['upvotes']} 👍 | @{issue['author']} |")
     
-    return "
-".join(lines)
+    return "\n".join(lines)
 
 def update_readme(repo_root, markdown):
     readme_path = repo_root / "interviews" / "README.md"
@@ -70,9 +69,7 @@ def update_readme(repo_root, markdown):
     
     # Pattern to match the Trending Questions section
     pattern = r"(<!-- TRENDING-QUESTIONS-START -->).*(<!-- TRENDING-QUESTIONS-END -->)"
-    replacement = f"\1
-{markdown}
-\2"
+    replacement = f"\\1\n{markdown}\n\\2"
     
     new_content = re.sub(pattern, replacement, content, flags=re.DOTALL)
     readme_path.write_text(new_content)

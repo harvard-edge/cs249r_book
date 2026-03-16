@@ -1,3 +1,7 @@
+---
+title: "Final Lab Plans: Volume I, Labs 09-16"
+---
+
 # Final Lab Plans: Volume I, Labs 09--16
 
 Generated: 2026-03-15
