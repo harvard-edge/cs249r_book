@@ -71,11 +71,38 @@
 \section{Welcome}
 
 \begin{frame}{Welcome to Volume II}
-\note{[3 min] Set the tone: this is the advanced course. Students already know
-how one machine works; now they learn how thousands coordinate. The metaphor:
-``The fleet is the computer'' --- like ``The network is the computer'' (Sun
-Microsystems), but for ML clusters. Ask: ``How many of you have SSH'd into a
-multi-GPU cluster?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+Volume I taught the single-machine mental model: one node, 1--8 GPUs,
+shared memory, PCIe/NVLink. This slide establishes that everything
+students learned still applies --- but a new scale axis changes the rules.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the comparison table on the right: ``Every row flips when you
+cross the node boundary. The bus becomes a network. Shared memory becomes
+message passing. Rare failures become daily certainty.'' Use the tagline:
+``The fleet is the computer'' --- echoing Sun Microsystems' ``The network
+is the computer,'' but applied to ML clusters.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``How many of you have SSH'd into a multi-GPU cluster?''
+Hands up. Then: ``How many have debugged a training job that stalled
+because one of 1,000 GPUs went silent?'' The gap between those two
+counts is what this course fills.
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students assume ``distributed = just add more GPUs.''
+Correct framing: crossing a node boundary changes failure modes,
+communication patterns, and programming models qualitatively.
+IF STUCK: Ask them to compare restarting a crashed browser tab vs.\
+restarting one node in a 1,000-node synchronized training job.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] This is the opening frame --- it sets the tone for the entire course.
+IF AHEAD: Ask what specific Vol I concept they found most surprising;
+connect it to the fleet version.
+IF SHORT: Skip the hand-raise, go straight to the table walkthrough.
+}
 
 \small
 \begin{columns}[T]
@@ -122,10 +149,38 @@ multi-GPU cluster?''}
 % =============================================================================
 
 \begin{frame}{From Single Node to Fleet}
-\note{[3 min] The transition slide. Walk through left vs.\ right.
-Key insight: at fleet scale, the network replaces the memory bus as the
-critical interconnect. Latency goes from nanoseconds to milliseconds.
-Ask: ``What happens to your training job when one of 10,000 GPUs dies?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+The Welcome slide introduced the fleet concept verbally. This diagram
+makes the transition visual --- left side is Vol I territory, right side
+is Vol II.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk left-to-right through the diagram: ``On the left, one node ---
+everything connected by NVLink at 900 GB/s, failures are rare, latency
+is nanoseconds. Cross the dotted line to the right: the bus becomes
+InfiniBand at 50 GB/s, latency jumps to microseconds, and with 10,000
+GPUs, one fails every few hours. The network replaces the memory bus as
+the critical interconnect.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What happens to your training job when one of 10,000 GPUs dies?''
+Give 15 seconds of think time. Expected answer: the entire job stalls
+or crashes --- which is exactly why fault tolerance is first-class.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will underestimate the latency jump: nanoseconds to microseconds
+sounds small, but it is a 1,000x increase. At 350 GB of gradients per
+step, that 1,000x turns into minutes of synchronization overhead per hour.
+IF STUCK: Compare it to a highway going from 300 mph to 0.3 mph at a
+toll booth --- the booth is the node boundary.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] This diagram anchors the entire course narrative.
+IF AHEAD: ``At what fleet size does the probability of zero failures
+during a 1-hour training window drop below 50\%?''
+IF SHORT: Point to the diagram, read the insight callout, move on.
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -137,10 +192,41 @@ Ask: ``What happens to your training job when one of 10,000 GPUs dies?''}
 \end{frame}
 
 \begin{frame}{Why Scale Changes Everything}
-\note{[3 min] Three fundamental changes. These are NOT just ``more of the same.''
-Each one requires new engineering disciplines that do not exist in single-node ML.
-Common error: students think distributed = ``just add more GPUs.''
-Ask: ``Which of these three surprises you most?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+The previous diagram showed the physical transition. This slide names
+the three qualitative changes that make fleet engineering a different
+discipline from single-node optimization.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to each card in order. ``First, communication dominates ---
+at 10,000 GPUs, AllReduce takes longer than the forward pass. Second,
+failure is routine --- 10,000 GPUs times 100,000h MTBF equals one failure
+every 10 hours. Third, emergent behavior --- stragglers, hot spots, and
+cascading failures that no single component predicts.''
+ANALOGY: ``A single car can break down. A fleet of 10,000 taxis has
+at least one broken down at any moment --- and every taxi must wait for
+every other taxi before the next fare.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which of these three surprises you most?'' Cold-call one student.
+Most will say failure frequency --- use that to preview the reliability
+math coming later.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will treat these as independent problems. In reality they
+interact: a straggler (emergent behavior) that triggers a timeout
+(failure) during an AllReduce (communication) cascades across all three.
+IF STUCK: Walk through a concrete cascade: slow GPU triggers BSP
+barrier timeout, which triggers checkpoint, which stalls all 10,000 GPUs.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] These three categories structure the entire course.
+IF AHEAD: ``Can you think of a fourth qualitative change at scale?''
+(Answer: cost --- 1\% inefficiency at 10,000 GPUs is millions of dollars.)
+IF SHORT: Read the three card titles and the bottom-line callout, skip
+the analogy.
+}
 
 \small
 \begin{columns}[T]
@@ -175,11 +261,41 @@ Ask: ``Which of these three surprises you most?''}
 % =============================================================================
 
 \begin{frame}{The \Cthree{} Taxonomy: Compute, Communication, Coordination}
-\note{[3 min] Introduce the diagnostic framework for Vol 2. Every performance
-problem in a fleet can be traced to one of these three axes. This replaces
+\note{
+% -- LINK: What prior concept connects to this slide
+The previous slide named three qualitative changes at scale. The C3
+taxonomy formalizes these into a diagnostic framework --- it replaces
 the single-node D-A-M taxonomy with a fleet-scale lens.
-Ask: ``If training stalls for 30 seconds every hour, which C is the culprit?''
-(Answer: Coordination --- likely checkpointing or straggler mitigation.)}
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the diagram: ``Every performance problem in a fleet traces to
+one of these three axes. Compute: are the GPUs doing useful math?
+Communication: how fast can gradients and activations move? Coordination:
+who decides what runs where, when to checkpoint, how to handle stragglers?''
+Draw the parallel explicitly: ``Vol I asked `is this workload Data-bound,
+Algorithm-bound, or Memory-bound?' Vol II asks `is the fleet bottlenecked
+on Compute, Communication, or Coordination?'''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If training stalls for 30 seconds every hour, which C is the
+culprit?'' Give 15 seconds. Cold-call. Expected answer: Coordination ---
+likely synchronous checkpointing or straggler mitigation, not raw
+compute or bandwidth.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will conflate Communication and Coordination. Communication is
+moving bytes (AllReduce, gradient sync). Coordination is making decisions
+(scheduling, checkpointing, barrier management). A straggler that slows
+AllReduce is a Coordination problem manifesting through Communication.
+IF STUCK: ``Communication is the pipe. Coordination is the traffic cop.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] C3 is the diagnostic backbone of the entire volume.
+IF AHEAD: ``Can a problem be bottlenecked on two C's simultaneously?
+Give an example.'' (Yes: gradient compression reduces Communication but
+adds Compute overhead for encode/decode.)
+IF SHORT: Show diagram, ask the 30-second stall question, move on.
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -191,9 +307,37 @@ Ask: ``If training stalls for 30 seconds every hour, which C is the culprit?''
 \end{frame}
 
 \begin{frame}{\Cthree{} in Practice}
-\note{[2 min] Concrete examples mapping real problems to the C3 axes.
-Walk through the table row by row. The point: every fleet problem has
-a C3 diagnosis that guides the engineering response.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The previous slide defined C3 abstractly. This table maps real fleet
+symptoms to C3 axes, showing the framework in diagnostic action.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the table row by row. ``Low GPU utilization? That is
+Compute --- memory-bound kernels, fix with operator fusion. Throughput
+plateau? Communication --- AllReduce saturated, fix with gradient
+compression. Periodic 30-second stalls? Coordination --- synchronous
+checkpointing, fix with async checkpointing.'' Emphasize the pattern:
+diagnosis precedes optimization.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Cover the ``Response'' column with your hand. Point to ``Throughput
+variance'' and ask: ``Which C axis and what would you do?'' Give 20
+seconds. Expected: Coordination (straggler nodes), response is straggler
+mitigation or redundant computation.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will jump to solutions before diagnosing. ``Just buy faster
+GPUs'' is the default instinct. The table shows that 4 of 6 symptoms
+are NOT solved by faster hardware --- they require algorithmic or
+systems-level interventions.
+IF STUCK: Ask which rows would NOT be helped by doubling GPU TFLOPS.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] The C3 concept was introduced on the previous slide.
+IF SHORT: Show the table briefly, read the insight callout, move on.
+IF AHEAD: Ask students to propose a 7th row with a novel symptom.
+}
 
 \scriptsize
 \renewcommand{\arraystretch}{1.15}
@@ -217,9 +361,27 @@ a C3 diagnosis that guides the engineering response.}
 
 % --- ACTIVE LEARNING 1: Predict ---
 \begin{frame}{Predict: Where Is the Bottleneck?}
-\note{[2 min] Prediction exercise. Give students 60 seconds. Do NOT reveal
-the answer yet. The point: build intuition for C3 diagnosis before the
-course teaches the formal tools. Ask 2-3 students to share.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Read the scenario aloud. ``You are training a 70B model across 4,096
+GPUs. Throughput is only 40\% of theoretical peak. Which C3 axis is
+most likely the bottleneck?'' Emphasize: 40\% means 60\% of silicon
+is doing nothing useful.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Give 60 seconds for individual writing. Then 30 seconds of pair
+discussion. Cold-call 2--3 students. Expected answer: Communication ---
+at 4,096 GPUs, AllReduce overhead for 70B parameters (140 GB gradients)
+is massive. Some students will say Compute (kernel inefficiency) ---
+acknowledge it but redirect: at 40\% peak with 4,096 GPUs, the
+Communication term is almost certainly dominant.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] This is the first active learning moment --- establishes the
+predict-before-reveal pattern for the entire course.
+IF SHORT: Reduce to 30 seconds writing, skip pair discussion, cold-call
+one student.
+}
 
 \centering
 \vspace{0.8cm}
@@ -243,12 +405,42 @@ Write your answer and one reason why. \textcolor{midgray}{(60 seconds)}}
 % =============================================================================
 
 \begin{frame}{The Fleet Stack: Four Layers}
-\note{[3 min] The organizing framework for the entire course. Walk through
-bottom to top: infrastructure provides the physical substrate, distributed ML
-adds the training algorithms, deployment puts models into production,
-governance ensures responsible operation.
-Key insight: you cannot skip layers. A governance failure is ultimately
-an infrastructure failure.}
+\note{
+% -- LINK: What prior concept connects to this slide
+C3 diagnoses WHERE the bottleneck is. The Fleet Stack organizes HOW the
+course addresses each layer of the system --- from physical silicon to
+societal governance.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk bottom-to-top through the diagram: ``Infrastructure provides the
+physical substrate --- compute, network, storage. Distributed ML adds
+the training algorithms --- data, tensor, pipeline parallelism.
+Deployment puts models into production --- inference optimization,
+scheduling, SLAs. Governance ensures responsible operation --- security,
+sustainability, fairness.'' Pause on the insight: ``You cannot skip
+layers. A governance failure is ultimately an infrastructure failure ---
+if the cluster cannot audit which data trained which model, no amount
+of policy fixes that.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which layer do most ML courses stop at?'' Expected answer:
+Layer 2 (Distributed ML). ``This course covers all four --- production
+ML fails when any layer is neglected.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students will treat layers as independent. In reality, decisions at the
+bottom constrain possibilities at the top: a network topology that
+cannot isolate tenants makes multi-tenant governance impossible.
+IF STUCK: Give the concrete example: ``If your IB fabric has no SR-IOV,
+you cannot do secure multi-tenant serving.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] The Fleet Stack is the course roadmap --- every chapter maps
+to a layer.
+IF AHEAD: ``Which layer do you think has the highest dollar-cost of
+getting wrong?''
+IF SHORT: Name the four layers, read the insight callout, move on.
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -260,9 +452,38 @@ an infrastructure failure.}
 \end{frame}
 
 \begin{frame}{Fleet Stack: What Each Layer Teaches}
-\note{[2 min] Quick overview of what students will learn in each layer.
-This is the ``what's in it for me'' slide. Emphasize that the course
-covers the full stack, not just distributed training.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The previous slide showed the Fleet Stack as a diagram. This table
+translates it into concrete skills students will develop in each layer.
+
+% -- NARRATE: What to SAY while showing this slide
+Read each row as a promise: ``In the Infrastructure layer, you will
+learn to reason about cluster hardware --- GPU selection, InfiniBand
+topology, storage hierarchy. In Distributed ML, you will design parallel
+training --- DP, TP, PP, collective ops, fault-tolerant training.''
+Emphasize the crimson card: ``Most courses stop at Layer 2. This course
+covers all four.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which layer interests you most and why?'' Quick show of hands
+for each layer. Use the distribution to preview which chapters will
+resonate most.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will discount Governance as ``not technical.'' Counter with:
+the EU AI Act requires auditable training provenance --- that is a
+distributed systems problem (data lineage across a 10,000-GPU fleet),
+not a policy problem.
+IF STUCK: ``If you cannot prove which data trained your model, you
+cannot deploy in Europe. That is infrastructure.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] The Fleet Stack was covered on the previous slide.
+IF SHORT: Skip this slide entirely --- the diagram carries the message.
+IF AHEAD: Ask which layer they think is most under-invested at real
+companies.
+}
 
 \scriptsize
 \renewcommand{\arraystretch}{1.15}
@@ -289,10 +510,39 @@ covers the full stack, not just distributed training.}
 % =============================================================================
 
 \begin{frame}{17 Chapters in Four Parts}
-\note{[3 min] The map of the semester. Walk through each part briefly.
-Emphasize that C3 threads through all four parts. Point out the chapter
-numbers so students can look ahead. If short: just name the four parts
-and move on.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The Fleet Stack named four layers. This roadmap maps those layers to
+17 specific chapters across the semester, showing the learning arc.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to each part in the diagram: ``Part I is Infrastructure ---
+compute, network, storage. Part II is Distributed ML --- parallelism
+strategies, collective communication, fault tolerance. Part III is
+Deployment --- inference, scheduling, serving. Part IV is Governance ---
+security, sustainability, responsible AI.'' Highlight the color coding:
+``Notice how C3 threads through all four parts --- Compute constraints
+dominate Parts I and II, Communication in Parts II and III, Coordination
+in Parts III and IV.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Looking at this map, which chapter title are you most curious
+about?'' Quick poll. This surfaces student interests early.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will assume the parts are independent. In reality, Part III
+(Deployment) depends heavily on Part I (Infrastructure) decisions ---
+you cannot optimize inference serving without understanding the memory
+hierarchy from Chapter 2.
+IF STUCK: ``Think of it as a building: you cannot furnish the penthouse
+before pouring the foundation.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] This is a reference slide that students will revisit.
+IF SHORT: Show the diagram, name the four parts, move on.
+IF AHEAD: Ask students to predict which part will be most relevant
+to their career goals.
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -306,10 +556,40 @@ and move on.}
 \end{frame}
 
 \begin{frame}{The Numbers That Define Fleet Scale}
-\note{[3 min] Let the numbers speak. Pause on each one. The failure rate
-calculation is the most surprising: 10,000 GPUs with 100,000h MTBF means
-one failure every 10 hours. Ask: ``How does this change how you think about
-writing training code?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+The roadmap showed the course structure. This slide grounds it in
+physical reality --- the numbers that make fleet engineering different
+from single-node work.
+
+% -- NARRATE: What to SAY while showing this slide
+Let the numbers speak. Pause on each one: ``10,000 GPUs. 100 MW of
+power --- that is a small city. 350 GB of gradients synchronized every
+few seconds. And the one that changes everything: 10,000 GPUs with
+100,000h MTBF means one failure every 10 hours. Not one failure per
+year. Every 10 hours.''
+ANALOGY: ``Imagine a 10,000-person orchestra where one musician
+collapses every 10 hours, and the entire orchestra must stop and restart
+from a checkpoint.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``How does this failure rate change how you think about writing
+training code?'' Give 20 seconds. Expected insight: checkpointing
+becomes the most critical code path, not the model architecture.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will try to prevent failures rather than engineer for
+resilience. At 10,000 GPUs, prevention is impossible --- the math
+guarantees failures. The correct framing is: minimize recovery time,
+not failure probability.
+IF STUCK: ``You cannot prevent rain. You build a roof.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] These numbers recur throughout the entire course as anchors.
+IF AHEAD: ``Calculate the fleet MTBF for 25,000 GPUs with 100,000h
+per-GPU MTBF.'' (Answer: 4 hours.)
+IF SHORT: Highlight the failure rate number and the bottom-line callout.
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -322,7 +602,17 @@ writing training code?''}
 
 % --- ACTIVE LEARNING: Micro-Retrieval Cue ---
 \begin{frame}{Quick Check}
-\note{[1 min] Answer: ~once per hour (10000/8760).}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Read the question aloud: ``If one GPU fails once per year, how often
+does a 10,000-GPU cluster fail?'' Pause 15 seconds. Cold-call.
+Answer: approximately once per hour (10,000 failures/year divided by
+8,760 hours/year is about 1.14 per hour).
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] This cements the failure-rate intuition before moving on.
+IF SHORT: Ask, pause 10 seconds, give the answer, move on.
+}
 
 \centering
 \vspace{1.0cm}
@@ -343,9 +633,37 @@ writing training code?''}
 % =============================================================================
 
 \begin{frame}{Learning Outcomes}
-\note{[2 min] Read through outcomes. These map to assessable skills.
-Emphasize that every outcome is \emph{quantitative} --- ``design'' means
-calculate, not just describe.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The roadmap and scale numbers established what the course covers and
+why. This slide translates that into measurable skills students will
+demonstrate.
+
+% -- NARRATE: What to SAY while showing this slide
+Read through outcomes emphasizing the verbs: ``Design --- not describe,
+design. Calculate --- not estimate, calculate. Every outcome is
+quantitative. When we say `design distributed training pipelines,' we
+mean you will specify TP degree, PP stages, and DP replicas for a given
+model and cluster, then calculate the expected MFU.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which of these seven outcomes do you currently feel least
+prepared for?'' Quick show of hands per outcome. Use the distribution
+to calibrate pacing for early chapters.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will underestimate outcome 7 (governance). It requires the
+same quantitative rigor as the others --- calculating carbon footprint
+per training run, auditing data provenance across a distributed pipeline.
+IF STUCK: ``Governance is not an essay. It is a systems design problem
+with measurable constraints.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Outcomes are a reference --- students will revisit on the
+syllabus.
+IF SHORT: Skim the list, emphasize the quantitative verbs, move on.
+IF AHEAD: Ask students to rank the outcomes by difficulty.
+}
 
 \footnotesize
 By the end of this course, you will be able to:
@@ -364,8 +682,19 @@ By the end of this course, you will be able to:
 \end{frame}
 
 \begin{frame}{Visual Language}
-\note{[1 min] Explain the semantic color system used throughout the course.
-These colors are consistent across all diagrams and slides.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Point to each card: ``Blue means compute or processing --- GPU ops,
+forward/backward pass. Green means data flow or healthy paths. Orange
+means routing or scheduling. Red means error, cost, or bottleneck.
+These colors are consistent across every diagram and slide in the
+course. When you see red in a figure, something is wrong or expensive.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Reference slide for the color system.
+IF SHORT: Skip entirely --- students will absorb the colors through
+exposure.
+}
 
 \small
 Throughout this course, colors carry meaning:
@@ -400,10 +729,43 @@ Throughout this course, colors carry meaning:
 
 
 \begin{frame}{A Taste of What's Coming}
-\note{[3 min] The hook. Make it visceral. Walk through the scenario step by step.
-The point: every one of these failure modes is a chapter in the course.
+\note{
+% -- LINK: What prior concept connects to this slide
+The learning outcomes listed abstract skills. This scenario makes them
+visceral --- a concrete frontier training run where every failure mode
+maps to a course chapter.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the scenario step by step: ``25,000 GPUs. A GPU dies every
+4 hours. AllReduce across 25,000 GPUs takes 500 ms per step. A rack
+switch fails and 128 GPUs go dark. Gradient staleness causes loss
+spikes. Power budget limits utilization to 80\%.'' Then map each
+problem to a chapter on the right: ``Fault-tolerant checkpointing ---
+Chapter 7. Collective communication optimization --- Chapter 6. Network
+fabric redundancy --- Chapter 3. Async training --- Chapter 5.
+Sustainability and power budgets --- Chapter 15.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
 Ask: ``Which of these problems would you know how to solve today?''
-(Expected answer: none of them --- that's why they're taking this course.)}
+Expected answer: none of them --- and that gap is exactly why they are
+taking this course. If a student claims to know one, press for
+specifics.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will try to solve each problem in isolation. The real challenge
+is that these problems interact: a GPU failure triggers checkpointing,
+which saturates the network, which causes gradient staleness, which
+spikes loss. The system view matters more than any individual fix.
+IF STUCK: ``These are not five separate problems. They are one system
+with five failure modes.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] This is the motivational hook that justifies the entire course.
+IF AHEAD: ``What is the dollar cost of 4 hours of 25,000 idle H100s
+at \$3/GPU-hour?'' (Answer: \$300K wasted per failure event.)
+IF SHORT: Read the left column only, point to the right column as
+``what this course teaches,'' move on.
+}
 
 \footnotesize
 \textbf{Scenario: Training a Frontier Model Across 25,000 GPUs}
@@ -441,10 +803,40 @@ Ask: ``Which of these problems would you know how to solve today?''
 
 % --- ACTIVE LEARNING 2: Discussion ---
 \begin{frame}{Discussion: What Breaks First?}
-\note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
-Cold-call 2-3 pairs. No single right answer --- the point is that
-``more GPUs'' is never the full answer. Common student answer: ``the network''
---- press them on whether that's communication or coordination.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The scenario slide listed five failure modes. This discussion forces
+students to reason about which one strikes first --- building intuition
+for failure ordering at scale.
+
+% -- NARRATE: What to SAY while showing this slide
+Read the scenario: ``Your startup raised \$100M. You buy 10,000 H100
+GPUs, connect them with InfiniBand. What breaks first?'' Point to the
+five options along the bottom.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Turn-and-talk for 90 seconds. Then cold-call 2--3 pairs. There is no
+single right answer --- the point is that ``more GPUs'' is never the
+full answer. Common student answer: ``the network'' --- press them on
+whether that is Communication (bandwidth saturation) or Coordination
+(scheduling, straggler management). Some will say ``your budget'' ---
+that is a valid and insightful answer worth exploring.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will focus on GPU hardware failures. In practice, the software
+stack (NCCL hangs, CUDA OOM, driver crashes) breaks far more often than
+physical hardware. Meta's Grand Teton paper reports that software issues
+cause more downtime than hardware failures.
+IF STUCK: ``Think about what you have to set up BEFORE the GPUs start
+computing.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] This is the second active learning moment and the most
+interactive slide in the deck.
+IF SHORT: Reduce to 60-second pairs, cold-call one pair.
+IF AHEAD: After discussion, ask: ``What would you monitor to detect
+the failure before it happens?''
+}
 
 \centering
 \vspace{0.8cm}
@@ -471,10 +863,40 @@ You buy 10,000 H100 GPUs and connect them with InfiniBand.\\[0.3cm]
 % =============================================================================
 
 \begin{frame}{Prerequisites}
-\note{[2 min] Set expectations clearly. Students need Vol 1 or equivalent.
-Distributed systems basics (consensus, message passing) are helpful but
-will be introduced as needed. Programming: PyTorch and basic Linux/cluster
-experience expected.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The course content and motivation are established. Now students need to
+know: am I prepared for this?
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the Required column: ``Vol I or equivalent --- you must
+understand single-GPU training, the memory hierarchy, and basic
+profiling. PyTorch proficiency --- you will write torch.distributed
+code from week 2. Linux and SSH --- you will be running jobs on
+multi-node clusters.'' Then the Helpful column: ``Distributed systems
+concepts like consensus and RPC will be introduced as needed. If you
+know Slurm or Kubernetes, you will have a head start on the scheduling
+chapters, but it is not required.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Raise your hand if you are comfortable explaining what AllReduce
+does.'' The fraction of hands up calibrates how much Ch.~5--6 review
+is needed.
+
+% -- WARN: What students will get wrong on THIS topic
+Students without cluster experience will feel behind. Reassure them:
+the course introduces cluster concepts from scratch. The real
+prerequisite is single-GPU fluency, not distributed systems expertise.
+IF STUCK: ``If you can train a ResNet on one GPU and profile where time
+goes, you are ready.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Logistical slide.
+IF SHORT: Name the top 3 required skills, mention the ``helpful but not
+required'' list exists, move on.
+IF AHEAD: Ask a student with cluster experience to share one surprising
+lesson from their first multi-node job.
+}
 
 \small
 \begin{columns}[T]
@@ -505,11 +927,40 @@ experience expected.}
 \end{frame}
 
 \begin{frame}{Relationship to Volume I}
-\note{[2 min] Address the key question: ``Is this harder than Vol I?''
-Answer: not harder --- wider. The distinction is SCOPE, not DEPTH.
-Vol I went deep on one machine; Vol II goes wide across the fleet.
-Both are equally rigorous. Vol II re-derives key frameworks (like the
-Iron Law) at fleet scale.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Prerequisites established what students need. This slide addresses the
+elephant in the room: ``Is this harder than Vol I?''
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the two cards side by side: ``Vol I: one machine, 1--8 GPUs,
+shared memory, DataParallel, the Iron Law. Vol II: 10,000+ GPUs,
+InfiniBand, message passing, torch.distributed, C3.'' Then the key
+message: ``The distinction is SCOPE, not DEPTH. Vol I went deep on one
+machine. Vol II goes wide across the fleet. Both are equally rigorous.
+We re-derive key frameworks like the Iron Law at fleet scale, adding
+communication and coordination terms.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What Vol I concept do you think will change most at fleet scale?''
+Cold-call. Any answer works --- use it to preview how that concept
+evolves. (e.g., ``the memory wall'' becomes the ``network wall.'')
+
+% -- WARN: What students will get wrong on THIS topic
+Students will assume Vol II content is ``harder.'' It is not --- it is
+different. A student who struggled with cache hierarchies in Vol I may
+excel at distributed fault tolerance in Vol II. The thinking patterns
+are complementary, not hierarchical.
+IF STUCK: ``Think of it as learning to fly after learning to drive.
+Different skills, not harder skills.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Context-setting slide.
+IF SHORT: Read the crimson card at the bottom, skip the detailed
+comparison.
+IF AHEAD: Ask: ``Which Vol I equation do you think we will generalize
+first?'' (Answer: the Iron Law, in Chapter 1.)
+}
 
 \small
 \begin{columns}[T]
@@ -559,9 +1010,17 @@ Iron Law) at fleet scale.}
 
 % --- MUDDIEST POINT ---
 \begin{frame}{Muddiest Point}
-\note{[2 min] Quick anonymous poll. Students write on a slip of paper or submit
-digitally. Collect and scan for patterns. Address the top 2--3 confusions in the
-next lecture's opening. This closes the feedback loop.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Before we close, I want to know what confused you most. Write one
+sentence --- the concept you found muddiest. Anonymous. Submit before
+you leave --- slip of paper or digital form.'' Scan responses after
+class and address the top 2--3 confusions at the start of next lecture.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Closes the feedback loop --- essential for adaptive teaching.
+IF SHORT: Reduce to ``write one word on a slip of paper.''
+}
 
 \centering
 \vspace{1.0cm}
@@ -576,8 +1035,18 @@ next lecture's opening. This closes the feedback loop.}
 \end{frame}
 
 \begin{frame}{What Were the Key Ideas?}
-\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
-Do NOT show next slide yet. Walk around the room.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Close your notes. 90 seconds. Write down the 3 most important ideas
+from today. No peeking.'' Walk around the room while students write.
+Do NOT show the next slide yet --- the struggle to recall is where
+learning happens.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Retrieval practice is the highest-impact learning technique
+(Rosenshine). Never skip.
+IF SHORT: Reduce to 60 seconds.
+}
 
 \centering
 \vspace{1.5cm}
@@ -592,9 +1061,24 @@ Do NOT show next slide yet. Walk around the room.}
 \end{frame}
 
 \begin{frame}{Key Takeaways}
-\note{[2 min] Reveal. Walk through each bullet. Emphasize that every concept
-here will recur throughout the course. The C3 framework is the lens; the
-Fleet Stack is the map.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just attempted recall. This slide reveals the answers and
+fills gaps.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through each bullet, pausing on the quantitative anchors: ``The
+fleet is the computer --- thousands of accelerators as one unit. Scale
+is qualitative --- not just more, but fundamentally different. C3
+framework --- every bottleneck maps to Compute, Communication, or
+Coordination. Fleet Stack --- four layers from infrastructure to
+governance. Failure math --- one failure every 10 hours at 10,000 GPUs.
+Scope not depth --- Vol II is wider, not harder.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Consolidation slide.
+IF SHORT: Read just the first three bullets.
+}
 
 \scriptsize
 \begin{itemize}\setlength\itemsep{0pt}
@@ -610,7 +1094,17 @@ Fleet Stack is the map.}
 \end{frame}
 
 \begin{frame}{References}
-\note{[1 min] Point students to foundational readings for the course.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``These five references are the foundational readings for the course.
+Verbraeken is the survey that maps the landscape. Narayanan and Jiang
+show how frontier labs actually train at scale. Dean is the historical
+origin. Patterson and Hennessy is the pedagogical model we follow.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Reference slide.
+IF SHORT: Skip verbal walkthrough --- students can read it.
+}
 
 \small
 \mlsysref{Verbraeken+20}{Verbraeken et al. ``A Survey on Distributed ML.'' ACM Computing Surveys, 2020.}
@@ -622,10 +1116,24 @@ Fleet Stack is the map.}
 \end{frame}
 
 \begin{frame}{Next Lecture: The Distributed Landscape}
-\note{[1 min] Forward hook. The next lecture introduces the fleet as a system:
-what hardware is in a modern GPU cluster, how nodes are connected, and why
-the topology matters. The question ``how do 10,000 GPUs talk to each other?''
-is the central puzzle.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Today established why scale matters and introduced C3 and the Fleet
+Stack. The next lecture dives into the first concrete question: what
+is actually inside a modern GPU cluster?
+
+% -- NARRATE: What to SAY while showing this slide
+``The fleet is the computer. But what hardware makes up this computer?
+Next lecture: Chapter 1 introduces the fleet as a system --- what
+accelerators, what interconnects, what topology, and why the answer to
+`how do 10,000 GPUs talk to each other?' is the central puzzle of
+fleet engineering.'' Point to the three columns: Compute, Communication,
+Coordination --- the C3 lens applied to hardware.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Forward hook that creates anticipation.
+IF SHORT: Read the central question and move on.
+}
 
 \small
 \centering
@@ -664,7 +1172,14 @@ is the central puzzle.}
 \appendix
 
 \begin{frame}{Backup: Extended Reference}
-\note{Backup slide with additional reference material for this chapter.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Backup reference slide. Only show if students ask for additional
+resources or problem set reference material.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Backup slide --- do not present unless needed.
+}
 
 \footnotesize
 This slide provides extended reference material for students who want to go deeper.
@@ -679,7 +1194,14 @@ textbook's summary tables. Use them as a quick reference during problem sets.
 \end{frame}
 
 \begin{frame}{Backup: Further Reading}
-\note{Backup slide. Point students to additional resources beyond the references slide.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Backup slide pointing to additional resources. Only present if a
+student asks ``where can I learn more before next class?''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Backup slide --- do not present unless needed.
+}
 
 \footnotesize
 \textbf{For deeper exploration:}

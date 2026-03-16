@@ -68,10 +68,23 @@
 % LEARNING OBJECTIVES
 % =============================================================================
 \begin{frame}{Learning Objectives}
-\note{[2 min] Walk through objectives. Emphasize that this chapter bridges
-the physical network (Ch5) with the algorithms that run on it. Every concept
-reduces to the alpha-beta model. Ask: ``How long does it take to send 140 GB
-across a datacenter?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+Ch5 established the physical network --- NVLink, InfiniBand, fat-tree topologies. This chapter asks: what traffic patterns actually flow over those wires during training?
+
+% -- NARRATE: What to SAY while showing this slide
+Read each objective aloud, pausing on ``alpha-beta model'' and ``gradient compression.'' Emphasize that every concept in this chapter reduces to one question: how long does it take to move N bytes across P GPUs?
+ANALOGY: ``Ch5 built the highway system; today we study the traffic patterns.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``How long does it take to send 140 GB of gradients across a datacenter?'' Accept guesses --- we will calculate the exact answer shortly.
+
+% -- WARN: What students will get wrong on THIS topic
+Students often think communication is a minor overhead. Set up the surprise: at scale, GPUs spend most of their time waiting, not computing.
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF SHORT: Read only objectives 1, 2, and 6 aloud; let students read the rest.
+}
 
 \small
 \begin{enumerate}
@@ -86,8 +99,13 @@ across a datacenter?''}
 \end{frame}
 
 \begin{frame}{Visual Language}
-\note{[1 min] Explain the semantic color system used throughout the course.
-These colors are consistent across all diagrams and slides.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Point to each card: ``Blue is compute --- GPU ops, forward and backward passes. Green is data flow and healthy paths. Orange is routing and scheduling. Red is error, cost, or bottleneck.'' These colors are consistent across every diagram in this course.
+
+% -- FLEX: [OPTIONAL] Skip if students have seen this in a prior lecture.
+IF SHORT: Say ``same color system as last lecture'' and move on in 15 seconds.
+}
 
 \small
 Throughout this course, colors carry meaning:
@@ -126,9 +144,23 @@ Throughout this course, colors carry meaning:
 % =============================================================================
 
 \begin{frame}{The Communication Bottleneck}
-\note{[3 min] Open with the visceral fact: at scale, GPUs spend most of their
-time waiting for data, not computing. The 70B model example grounds this.
-Ask: ``If compute is cheap but communication is expensive, what should we optimize?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+Ch5 showed that InfiniBand NDR delivers 50 GB/s per port. This slide reveals what happens when you actually need to move hundreds of gigabytes of gradients across that fabric.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the left column: ``Adding GPUs is easy --- compute scales linearly. But coordination scales quadratically or worse.'' Walk through the 70B example: 70 billion params times 4 bytes = 280 GB of gradients per step. Point to the red card: ``Ring AllReduce across 64 GPUs at 50 GB/s costs 11.2 seconds of pure communication per training step.''
+ANALOGY: ``Imagine 64 people in a room each holding a 4 GB file. Everyone needs a copy of the merged result. That is AllReduce.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If compute is cheap but communication is expensive, which term in the Iron Law should we optimize?'' Expected answer: the data movement term.
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume adding more GPUs always speeds up training. At 64+ GPUs, communication can consume 40--70\% of the step, making additional GPUs counterproductive without communication optimization.
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF AHEAD: Ask ``At what GPU count does communication exceed 50\% of the step?''
+}
 
 \footnotesize
 \begin{columns}[T]
@@ -156,9 +188,22 @@ Ask: ``If compute is cheap but communication is expensive, what should we optimi
 \end{frame}
 
 \begin{frame}{The Compute-Communication Timeline}
-\note{[3 min] Walk through the stacked bars. Key transition: from NVLink-dominated
-(8 GPUs, 25\% comm) to InfiniBand-limited (4096 GPUs, 65\% comm + 15\% sync).
-Ask: ``At what point does buying more GPUs stop helping?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+The previous slide stated 40--70\% overhead abstractly. This diagram shows the concrete breakdown as GPU count grows from 8 to 4,096.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the stacked bars left-to-right: ``At 8 GPUs, NVLink keeps communication to about 25\% of the step. At 256 GPUs, InfiniBand dominates and communication rises to 50\%. At 4,096 GPUs, communication plus sync consume 80\% of the training step.'' Trace the inflection point where the blue bar shrinks relative to the red and orange bars.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``At what point does buying more GPUs stop helping?'' Expected answer: when communication exceeds the compute time gained by adding GPUs --- roughly the 512--1024 GPU range without hierarchical AllReduce.
+
+% -- WARN: What students will get wrong on THIS topic
+Students read ``80\% communication'' and think the hardware is slow. The hardware is near wire-speed --- the problem is algorithmic (flat Ring over too many hops).
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF SHORT: Point to the 4,096-GPU bar and state the 80\% figure; skip the intermediate data points.
+}
 
 % --- Layout: FULL-WIDTH IMAGE + annotation ---
 \centering
@@ -170,10 +215,23 @@ Ask: ``At what point does buying more GPUs stop helping?''}
 \end{frame}
 
 \begin{frame}{The Physics of Data Movement}
-\note{[2 min] Three physical constraints: speed of light (latency floor),
-bandwidth-distance product, and energy per bit. Emphasize that these are
-not software problems --- they are physics constraints.
-Common error: students think faster NICs solve everything.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The timeline showed communication growing with scale. This slide explains the three physical constraints that make communication fundamentally expensive, regardless of the algorithm.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the table row by row. ``Latency: light in fiber travels at 5 microseconds per kilometer. A 500-meter datacenter round-trip costs thousands of GPU cycles.'' ``Bandwidth: PAM4 signaling limits copper to about 2 meters at NDR speeds --- that is why optical cables cost more.'' ``Energy: moving a bit over InfiniBand costs 20--50 picojoules, 40--100 times more than an SRAM access.'' Then highlight RDMA: ``GPUDirect RDMA bypasses the kernel, cutting latency from 10--20 microseconds to 1--3 microseconds.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which of these three constraints is a software problem that we can engineer away?'' Expected answer: none --- all three are physics. Software can only minimize exposure, not eliminate the constraints.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think faster NICs solve everything. Even with 800G networking, latency is bounded by speed of light and energy per bit scales with distance. The constraints are multiplicative, not additive.
+
+% -- FLEX: [OPTIONAL] Can be compressed to 1 minute.
+IF SHORT: State ``three physics constraints --- latency, bandwidth, energy --- none are software problems'' and move on.
+IF AHEAD: Discuss the energy implications at 10K GPUs where communication power approaches compute power.
+}
 
 \footnotesize
 \textbf{Three constraints interact multiplicatively:}
@@ -197,10 +255,22 @@ Common error: students think faster NICs solve everything.}
 
 % --- ACTIVE LEARNING 1: Predict ---
 \begin{frame}{Predict: What Determines Communication Cost?}
-\note{[2 min] Prediction exercise before revealing the alpha-beta model.
-Give students 60 seconds. Do NOT reveal the answer yet.
-Ask 2--3 students to share. Most will say ``bandwidth'' --- set up the reveal
-that latency matters too.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just learned about the three physics constraints. This prediction exercise primes them for the alpha-beta model by asking them to reason about message size before seeing the formula.
+
+% -- NARRATE: What to SAY while showing this slide
+Read the prompt aloud. ``A 4 KB message and a 140 GB message, same 50 GB/s network. Which takes longer relative to its theoretical minimum?'' Emphasize ``relative'' --- the 140 GB message takes longer in absolute time, but the question is about overhead ratio.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Give 60 seconds to write. Do NOT reveal the answer. Ask 2--3 students to share. Most will say ``the small message'' --- this is correct. The 4 KB message is dominated by startup latency (alpha), making its actual time orders of magnitude above the bandwidth limit. The 140 GB message is almost entirely bandwidth-bound, achieving near-theoretical throughput.
+
+% -- WARN: What students will get wrong on THIS topic
+Some students will say ``the large message'' because it takes longer in absolute time. Redirect: the question is about relative overhead, not absolute time. This distinction is exactly what the alpha-beta model formalizes.
+
+% -- FLEX: [CORE] This slide is essential --- it primes the alpha-beta model.
+IF SHORT: Reduce to 30 seconds of think time and skip pair sharing.
+}
 
 \centering
 \vspace{1.0cm}
@@ -225,10 +295,23 @@ $T(n) = \underbrace{\alpha}_{\text{Startup latency}} + \underbrace{\dfrac{n}{\be
 }
 
 \begin{frame}{Two Regimes, One Crossover}
-\note{[3 min] Walk through the alpha-beta model. The critical message size
-n* = alpha * beta separates two regimes. For IB NDR: n* = 100 KB.
-MoE tokens (4 KB) are latency-bound; LLM gradients (140 GB) are bandwidth-bound.
-Ask: ``Which optimization helps MoE but not LLMs?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+The prediction exercise showed that small and large messages behave very differently. The alpha-beta model formalizes this into two regimes separated by the critical message size n*.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the diagram: ``Left of n-star, latency dominates --- the message is so small that startup overhead dwarfs transfer time. Right of n-star, bandwidth dominates --- the message is large enough that transfer time dwarfs startup.'' State the crossover: ``For IB NDR, n-star is about 100 KB. MoE tokens at 4 KB are deeply latency-bound. LLM gradients at 140 GB are deeply bandwidth-bound.''
+ANALOGY: ``Alpha is the cost of picking up the phone. Beta is how fast you can talk. A one-word message is dominated by dialing time. A novel is dominated by reading speed.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which optimization helps MoE routing tokens but not LLM gradients?'' Expected answer: latency reduction (RDMA, kernel bypass, topology optimization). Bandwidth compression helps LLMs but not MoE.
+
+% -- WARN: What students will get wrong on THIS topic
+Students conflate ``latency'' with ``slowness.'' Clarify: a latency-bound message is not slow in absolute terms --- it just cannot be sped up by increasing bandwidth. The optimization target is different for each regime.
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF AHEAD: Ask students to calculate n* for PCIe Gen5 (alpha=5us, beta=64 GB/s) and compare with IB NDR.
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -256,9 +339,22 @@ Ask: ``Which optimization helps MoE but not LLMs?''}
 \end{frame}
 
 \begin{frame}{Your Turn: Critical Message Size}
-\note{[3 min] Give students 90 seconds. Answer: n* = 2e-6 * 50e9 = 100 KB.
-A 140 GB gradient is 1.4 million times above n*, so bandwidth optimization
-dominates. A 4 KB MoE token is 25x below n*, so latency optimization dominates.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just learned the alpha-beta model conceptually. This exercise makes them apply it quantitatively for the first time.
+
+% -- NARRATE: What to SAY while showing this slide
+Read the problem aloud. ``InfiniBand NDR 400G: alpha is 2 microseconds, beta is 50 GB/s.'' Give 90 seconds. After the pause, walk through: ``n-star equals alpha times beta equals 2 times 10 to the minus 6 times 50 times 10 to the 9 equals 100,000 bytes equals 100 KB.'' Then: ``A 140 GB gradient is 1.4 million times above n-star --- bandwidth optimization dominates. A 4 KB MoE token is 25 times below n-star --- latency optimization dominates.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students calculate n* and classify two workloads. After solving, ask neighbors to compare. Cold-call one pair to present.
+
+% -- WARN: What students will get wrong on THIS topic
+Unit errors: students will forget to convert microseconds to seconds or gigabytes to bytes. Emphasize writing out the full exponents: 2e-6 times 50e9.
+
+% -- FLEX: [CORE] This slide is essential --- first quantitative application of alpha-beta.
+IF SHORT: Show the solution immediately (skip the 90-second work period) and narrate through it.
+}
 
 \small
 \begin{columns}[T]
@@ -300,9 +396,22 @@ dominates. A 4 KB MoE token is 25x below n*, so latency optimization dominates.}
 % =============================================================================
 
 \begin{frame}{The Six Core Primitives}
-\note{[3 min] Walk through all six. Key insight: AllReduce = ReduceScatter + AllGather.
-FSDP exploits this decomposition. AllToAll is the hardest to scale (O(N\^2) connections).
-Ask: ``Why can't we use AllReduce for MoE?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+The alpha-beta model tells us how expensive a single message is. But distributed training does not send single messages --- it uses collective operations involving all GPUs simultaneously. This slide catalogs the six primitives.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the diagram left-to-right: ``Broadcast: one-to-all. Reduce: all-to-one with aggregation. AllReduce: everyone gets the aggregated result --- this is the workhorse of data parallelism. AllGather: everyone gets everyone's shard. ReduceScatter: reduce then distribute shards. AllToAll: everyone sends a unique piece to everyone else --- the hardest to scale.'' Then state the key decomposition: ``AllReduce equals ReduceScatter plus AllGather. FSDP exploits this by splitting the two phases in time.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why can't we use AllReduce for Mixture-of-Experts routing?'' Expected answer: MoE needs to send different tokens to different experts --- that is a personalized exchange (AllToAll), not a global aggregation (AllReduce).
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume AllReduce is always the right choice because it is the most discussed. MoE and RecSys require AllToAll, which has fundamentally different scaling properties (O(N^2) connections).
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF AHEAD: Ask students to sketch how FSDP uses ReduceScatter during backward and AllGather during forward.
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -314,10 +423,22 @@ Ask: ``Why can't we use AllReduce for MoE?''}
 \end{frame}
 
 \begin{frame}{Matching Primitives to Parallelism}
-\note{[3 min] This is the ``travel manifest'' --- the parallelism strategy
-determines the communication pattern. Data parallelism = AllReduce (bandwidth-bound).
-MoE = AllToAll (latency + contention). Wrong primitive = wrong scaling ceiling.
-Common error: using AllReduce for everything.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The six primitives are tools. This slide is the ``travel manifest'' that maps each parallelism strategy to its required primitive.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the table: ``Data parallel uses AllReduce --- bandwidth-bound because gradients are large. Tensor parallel also uses AllReduce but is latency-bound because it happens within each layer, requiring NVLink speeds. Pipeline parallel uses point-to-point --- latency-bound because stages are sequential. MoE uses AllToAll --- the hardest, because it creates O(N-squared) logical connections.'' Point to the red card: ``AllToAll hits a communication wall much earlier than AllReduce because contention grows quadratically.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``At 1024 GPUs, which parallelism strategy hits the communication wall first: data parallel or expert parallel?'' Expected answer: expert parallel, because AllToAll creates O(N^2) connections while AllReduce is O(1) per-node bandwidth.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think using AllReduce for everything is safe. For MoE and RecSys workloads, AllReduce cannot express the required communication pattern --- using it would require redundant computation or incorrect results.
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF SHORT: Focus on data parallel (AllReduce) and MoE (AllToAll) rows; skip the middle rows.
+}
 
 \footnotesize
 \renewcommand{\arraystretch}{1.15}
@@ -346,10 +467,22 @@ Common error: using AllReduce for everything.}
 % =============================================================================
 
 \begin{frame}{Ring AllReduce: Bandwidth-Optimal}
-\note{[3 min] Walk through the two phases: Scatter-Reduce + AllGather.
-Key property: every link active every step. Bandwidth-optimal but O(N) latency.
-For 10,000 nodes, 20,000 sequential hops is devastating.
-Ask: ``What breaks when N = 10,000?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+The primitives table showed AllReduce is the workhorse for data-parallel and tensor-parallel training. This slide examines the simplest bandwidth-optimal implementation: the Ring algorithm.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the diagram: ``Phase 1, Scatter-Reduce: N minus 1 steps where each GPU sends one chunk clockwise and accumulates partial sums. Phase 2, AllGather: N minus 1 more steps where the completed sums circulate to all nodes.'' Write the formula: ``Total time is 2(N-1) alpha plus 2 times (N-1)/N times M over beta.'' Then highlight: ``The bandwidth term approaches 2M/beta as N grows --- optimal! But the latency term is O(N) --- 2 times (N-1) startup delays. For 10,000 nodes, that is 20,000 sequential hops.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What breaks when N equals 10,000?'' Expected answer: the O(N) latency term. At alpha=2 microseconds and N=10,000, latency alone costs 40 milliseconds --- before any data moves.
+
+% -- WARN: What students will get wrong on THIS topic
+Students see ``bandwidth-optimal'' and assume Ring is always the best choice. It is optimal only in the bandwidth term; the O(N) latency term makes it catastrophic for small messages or large clusters.
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF AHEAD: Ask students to calculate the Ring latency overhead for N=10,000 at alpha=2 microseconds.
+}
 
 \small
 \begin{columns}[T]
@@ -379,10 +512,23 @@ Ask: ``What breaks when N = 10,000?''}
 \end{frame}
 
 \begin{frame}{Algorithm Comparison}
-\note{[3 min] Walk through the four algorithms. Ring = BW-optimal but O(N) latency.
-Tree = O(log N) latency but log N BW penalty. Butterfly = best of both but needs N=2\^k.
-Double Binary Tree = NCCL default. Crossover formula determines the winner.
-If short: focus on Ring vs Tree.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Ring AllReduce is bandwidth-optimal but has O(N) latency. This slide introduces three alternatives that trade bandwidth efficiency for lower latency, and identifies when each wins.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the table: ``Ring: O(N) latency, bandwidth-optimal --- best for large gradients on small-to-medium clusters. Tree: O(log N) latency, but log N bandwidth penalty --- best for small messages. Butterfly: best of both but requires N to be a power of 2. Double Binary Tree: NCCL's default, near-optimal in both.'' Then point to the crossover formula: ``M-crossover equals N times alpha times beta. Below this message size, Tree wins. Above it, Ring wins. For 64 GPUs on IB NDR, the crossover is about 6.4 MB.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``For a 1 MB AllReduce across 64 GPUs, which algorithm wins?'' Expected answer: Tree, because 1 MB is below the 6.4 MB crossover.
+
+% -- WARN: What students will get wrong on THIS topic
+Students memorize ``Ring is optimal'' without qualifying it. Ring is bandwidth-optimal but latency-poor. The crossover formula quantifies exactly when Ring loses to Tree.
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF SHORT: Focus on Ring vs Tree only. Skip Butterfly and Double Tree rows.
+IF AHEAD: Ask students to calculate the crossover for 256 GPUs.
+}
 
 \footnotesize
 \renewcommand{\arraystretch}{1.15}
@@ -411,10 +557,22 @@ For 64 GPUs on IB NDR: $M_{\text{crossover}} \approx 64 \times 2\ \mu\text{s} \t
 % =============================================================================
 
 \begin{frame}{The Bandwidth Hierarchy}
-\note{[3 min] Real clusters are NOT flat. NVLink is 18x faster than InfiniBand.
-A flat Ring wastes NVLink by routing data over IB when NVLink suffices.
-The 3-phase hierarchical approach confines expensive IB traffic.
-Ask: ``How much does inter-node traffic drop with 8 GPUs per node?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+The algorithm comparison assumed a flat network where every link has the same bandwidth. Real clusters have a hierarchy: NVLink at 900 GB/s within a node, InfiniBand at 50 GB/s between nodes. Ignoring this hierarchy wastes NVLink bandwidth.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the diagram phases: ``Phase 1: ReduceScatter within each node using NVLink at 900 GB/s. Phase 2: AllReduce across nodes using InfiniBand at 50 GB/s --- but now each node sends only 1/G of the data, where G is GPUs per node. Phase 3: AllGather within each node using NVLink again.'' Emphasize: ``The expensive IB traffic is confined to 1/G of the data. With 8 GPUs per node, inter-node traffic drops 8 times.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``How much does inter-node traffic drop with 8 GPUs per node?'' Expected answer: 8 times, because each node reduces locally before sending across the network.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think hierarchical AllReduce is an optimization trick. It is actually the default in NCCL --- flat Ring across nodes is the anti-pattern. The hierarchy is not optional; it matches the physical bandwidth tiers.
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF SHORT: State the three phases and the 1/G reduction; skip the detailed bandwidth numbers.
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -440,9 +598,22 @@ Ask: ``How much does inter-node traffic drop with 8 GPUs per node?''}
 \end{frame}
 
 \begin{frame}{Hierarchical AllReduce: Worked Example}
-\note{[3 min] Walk through the numbers: flat = 40 ms, hierarchical = 7 ms.
-5.7x speedup from respecting the bandwidth hierarchy. The key: inter-node
-traffic drops by 8x (GPUs per node). This is why NCCL defaults to hierarchical.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The hierarchy concept was introduced abstractly. This worked example puts concrete numbers to each phase and shows a 5.7x speedup.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the table: ``Flat Ring sends 2 GB over InfiniBand at 50 GB/s: 40 ms. Hierarchical: Phase 1, ReduceScatter sends 875 MB over NVLink at 900 GB/s: about 1 ms. Phase 2, inter-node AllReduce sends only 125 MB over IB: about 5 ms. Phase 3, AllGather sends 875 MB over NVLink: about 1 ms. Total: 7 ms. That is a 5.7x speedup just from respecting the bandwidth hierarchy.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Where did the 125 MB come from?'' Expected answer: 1 GB divided by 8 GPUs per node. Each node reduces locally first, so only the reduced shard crosses the network.
+
+% -- WARN: What students will get wrong on THIS topic
+Students forget that the inter-node data volume shrinks by 1/G. They apply the original 1 GB to the IB bandwidth and get the wrong answer. Emphasize: local reduction is the key step.
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF AHEAD: Ask ``What happens with 16 GPUs per node instead of 8?'' (Answer: inter-node traffic drops to 62.5 MB, further speedup.)
+}
 
 \footnotesize
 \textbf{1 GB gradient, 8 nodes $\times$ 8 GPUs (64 total)}
@@ -472,7 +643,13 @@ traffic drops by 8x (GPUs per node). This is why NCCL defaults to hierarchical.}
 
 % --- ACTIVE LEARNING: Micro-Retrieval Cue ---
 \begin{frame}{Quick Check}
-\note{[1 min] Answer: confines expensive IB traffic to 1/G of the data.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Read the question. Give 15 seconds of silence. Then cold-call. Expected answer: hierarchical AllReduce confines expensive IB traffic to 1/G of the data by reducing locally first within each NVLink domain.
+
+% -- FLEX: [CORE] Quick retrieval cue --- takes only 1 minute.
+IF SHORT: Ask the question aloud and answer it yourself in 20 seconds.
+}
 
 \centering
 \vspace{1.0cm}
@@ -490,10 +667,22 @@ traffic drops by 8x (GPUs per node). This is why NCCL defaults to hierarchical.}
 
 % --- ACTIVE LEARNING 2: Discussion ---
 \begin{frame}{Discussion: AllReduce vs.\ AllToAll Scaling}
-\note{[3 min] Turn-and-talk. AllReduce scales gracefully (O(1) per-node BW).
-AllToAll creates O(N\^2) connections --- network contention is the wall.
-This is why MoE hits limits earlier than dense LLMs.
-Cold-call 2--3 pairs.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students learned that AllReduce is bandwidth-bound and AllToAll creates O(N^2) connections. This discussion forces them to reason about which scaling limit is hit first.
+
+% -- NARRATE: What to SAY while showing this slide
+Read the prompt. Set the timer for 90 seconds. Walk around the room listening to pairs. After time, cold-call 2--3 pairs.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+The MoE model hits the communication wall first because AllToAll creates O(N^2) logical connections, causing network contention to grow quadratically. AllReduce maintains O(1) per-node bandwidth regardless of cluster size. At 512 GPUs, AllToAll contention becomes the dominant bottleneck while AllReduce remains manageable.
+
+% -- WARN: What students will get wrong on THIS topic
+Some students will say ``both are equally hard'' because they have the same number of GPUs. Redirect: it is not the hardware that differs --- it is the communication pattern. AllReduce is a structured reduction; AllToAll is a full permutation.
+
+% -- FLEX: [CORE] This slide is essential --- builds intuition for MoE scaling limits.
+IF SHORT: Do a show-of-hands poll (AllReduce vs AllToAll) instead of pair discussion.
+}
 
 \centering
 \vspace{0.8cm}
@@ -514,10 +703,22 @@ and a MoE model using AllToAll on the same 512-GPU cluster.\\[0.3cm]
 % =============================================================================
 
 \begin{frame}{Gradient Compression Techniques}
-\note{[3 min] When even the fastest wires aren't enough, send fewer bits.
-Walk through the compression spectrum: FP16 (2x), INT8 (4x), Top-K (100x),
-1-bit (32x). Key: always use Error Feedback beyond FP16.
-Ask: ``What happens if you discard 99\% of gradients without error feedback?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+Hierarchical AllReduce minimizes wasted bandwidth. But when even the fastest wires are not enough, the next strategy is to send fewer bits per gradient element.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the diagram left-to-right: ``FP16 gives 2x compression with almost no quality loss --- this is the baseline. INT8 gives 4x. Top-K sparsification sends only the largest 1\% of gradients for 100x compression. 1-bit quantization sends only the sign of each gradient for 32x compression.'' Then point to the rule: ``Beyond FP16, always use Error Feedback. Without it, small gradients below the threshold are permanently lost, causing 1--3\% accuracy degradation.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What happens if you discard 99\% of gradients without error feedback?'' Expected answer: small but persistent gradients are permanently lost, causing the model to converge to a worse optimum (1--3\% accuracy loss).
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume ``99\% compression with only 1\% accuracy loss'' is free. The accuracy loss compounds over training --- 1\% on a benchmark can mean significantly worse real-world performance. Error Feedback is the mechanism that makes aggressive compression safe.
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF AHEAD: Discuss how PowerSGD achieves better compression ratios than Top-K by projecting gradients into a low-rank subspace.
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -529,10 +730,23 @@ Ask: ``What happens if you discard 99\% of gradients without error feedback?''}
 \end{frame}
 
 \begin{frame}{Error Feedback: No Information Lost}
-\note{[3 min] Walk through the error feedback mechanism step by step.
-Without EF: small gradients below threshold are permanently lost.
-With EF: residuals accumulate until they cross the threshold.
-Sum(transmitted) + error = true gradient. This is the key mathematical guarantee.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The previous slide stated the Error Feedback rule. This slide proves why it works by walking through the mathematical guarantee step by step.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the equation: ``Error feedback stores the residual: what we wanted to send minus what we actually sent.'' Walk through the table row by row: ``Step 1: gradient 0.4, error 0, sum 0.4, below threshold, send 0, new error 0.4. Step 2: gradient 0.3 plus error 0.4 equals 0.7, above threshold, send 1, new error -0.3.'' Continue through all 5 steps. Then: ``After 5 steps, we sent 2 and have error -0.4. The true sum of all gradients is 1.6. And 2 plus -0.4 equals 1.6 --- nothing was lost, just delayed.''
+ANALOGY: ``Error feedback is like a jar where you save your loose change. Each day you might not have enough for a coffee, but the jar accumulates until you do.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Without error feedback, how much of the 1.6 total gradient would have been transmitted?'' Expected answer: only 0 --- every individual gradient is below the threshold of 1, so naive compression sends nothing.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think error feedback is approximate. It is mathematically exact: sum of transmitted values plus the final error always equals the true gradient sum. The information is delayed, not lost.
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF SHORT: Skip rows 3--4 in the table walkthrough; show rows 1, 2, and 5 to demonstrate the pattern.
+}
 
 \small
 \begin{columns}[T]
@@ -583,11 +797,23 @@ Sum(transmitted) + error = true gradient. This is the key mathematical guarantee
 % =============================================================================
 
 \begin{frame}{Communication-Computation Overlap}
-\note{[3 min] The final optimization: hide communication behind computation.
-Layer-by-layer overlap launches AllReduce for completed layers while
-earlier layers still compute. Bucket fusion amortizes alpha overhead.
-Walk through the pipelined timeline vs sequential.
-Ask: ``When does overlap fail?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+Hierarchical AllReduce and gradient compression reduce communication time. Overlap is the final strategy: hide whatever communication remains behind computation.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the diagram: ``The sequential timeline shows backward pass completing fully, then AllReduce starting. The pipelined timeline interleaves them: as layer N finishes its backward pass, its AllReduce launches immediately while layer N-1 continues computing.'' Point to the bucket fusion detail: ``Bucket fusion groups small per-layer AllReduces into larger chunks to amortize the alpha overhead --- typically 25--100 MB buckets.''
+ANALOGY: ``Overlap is like washing dishes while the next pot boils. You are doing two things in parallel using different resources.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``When does overlap fail?'' Expected answer: when AllReduce per layer takes longer than the backward pass per layer --- the communication is ``exposed'' and cannot be hidden.
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume overlap hides all communication. It only hides communication that fits within the computation window. If AllReduce per layer exceeds backward per layer, the excess is exposed and adds to total time.
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF AHEAD: Ask students to derive the condition for full overlap: T_bwd/layer must exceed T_AR/layer.
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -599,9 +825,22 @@ Ask: ``When does overlap fail?''}
 \end{frame}
 
 \begin{frame}{Overlap Budget: Worked Example}
-\note{[2 min] 32-layer 7B model: without overlap = 1325 ms, with overlap = 360 ms.
-73\% savings. The remaining exposed comm comes from AllReduce being slower than
-per-layer backward. To eliminate: increase batch size or reduce AllReduce time.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The overlap concept was introduced qualitatively. This slide quantifies it for a 32-layer 7B model to show 73\% savings.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the table: ``Backward per layer is 15 ms. AllReduce per layer is 26 ms for 880 MB of gradients in 100 MB buckets. Without overlap: 480 ms backward plus 832 ms AllReduce equals 1,325 ms. With overlap: the backward pass starts, and each layer's AllReduce launches immediately. But 26 ms exceeds 15 ms, so 11 ms per layer is exposed. Total exposed: about 360 ms --- a 73\% savings.'' Then: ``The remaining exposed communication can be reduced by increasing batch size (longer backward) or using faster networking (shorter AllReduce).''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What two knobs reduce the 11 ms exposed gap per layer?'' Expected answer: increase batch size (makes backward longer) or reduce AllReduce time (faster network, compression, hierarchical).
+
+% -- WARN: What students will get wrong on THIS topic
+Students read ``73\% savings'' and think the problem is solved. The remaining 360 ms is still a significant cost at scale. The full optimization stack (hierarchical + compression + overlap) reduces effective overhead to 5--15\%, not zero.
+
+% -- FLEX: [OPTIONAL] Can be compressed if running behind schedule.
+IF SHORT: State the 73\% savings result and the condition T_bwd/layer > T_AR/layer; skip the detailed numbers.
+}
 
 \footnotesize
 \textbf{32-layer transformer, 7B parameters, 64 GPUs}
@@ -630,7 +869,16 @@ per-layer backward. To eliminate: increase batch size or reduce AllReduce time.}
 % =============================================================================
 
 \begin{frame}{Fallacies}
-\note{[2 min] Four common misconceptions with quantitative evidence.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students have seen the full optimization stack. These fallacies test whether they internalized the key distinctions: latency vs bandwidth, Ring vs Tree, sync vs async, flat vs hierarchical.
+
+% -- NARRATE: What to SAY while showing this slide
+Read each fallacy and its rebuttal. For the first: ``Bandwidth is not the only metric --- for 4 KB MoE tokens, latency dominates and 400G networking gives zero benefit.'' For the second: ``Ring pays O(N) latency --- for small messages across 64 GPUs, Tree wins.'' For the third: ``The LogP overhead o is non-overlappable --- if GPU compute is less than o, the GPU still stalls.'' For the fourth: ``Hierarchical achieves 5--6x speedup by cutting inter-node traffic 8x.''
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF SHORT: Cover fallacies 1 and 4 only; skip 2 and 3.
+}
 
 \footnotesize
 \textbf{Fallacy:} \textit{Bandwidth is the only metric that matters.}\\
@@ -651,7 +899,16 @@ Hierarchical achieves 5--6$\times$ speedup on 8-node clusters by cutting inter-n
 \end{frame}
 
 \begin{frame}{Pitfalls}
-\note{[2 min] Three operational pitfalls.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Fallacies addressed conceptual errors. Pitfalls address operational mistakes that teams make when deploying collective communication in production.
+
+% -- NARRATE: What to SAY while showing this slide
+Read each pitfall. For the first: ``MoE and DLRM need AllToAll, which creates O(N^2) connections and hits contention at smaller cluster sizes than AllReduce.'' For the second: ``Without error feedback, Top-K permanently discards small gradients, causing 1--3\% accuracy loss.'' For the third: ``nccl-tests reports theoretical peak bandwidth, but real training sees 50--60\% if ranks are topology-misaligned --- for example, a tensor-parallel group spanning two nodes instead of staying within NVLink.'' For the fourth: ``At 10K nodes, a 1-in-10^15 bit-flip rate means multiple corruptions per day. These appear as unexplained NaN gradients.''
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF SHORT: Cover pitfalls 1 and 2 only.
+}
 
 \footnotesize
 \textbf{Pitfall:} \textit{Assuming AllReduce works for everything.}\\
@@ -675,9 +932,13 @@ At 10K nodes, ``rare'' bit flips ($1$ in $10^{15}$) happen multiple times per da
 
 % --- MUDDIEST POINT ---
 \begin{frame}{Muddiest Point}
-\note{[2 min] Quick anonymous poll. Students write on a slip of paper or submit
-digitally. Collect and scan for patterns. Address the top 2--3 confusions in the
-next lecture's opening. This closes the feedback loop.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Say: ``Before we close, write down the one concept from today that you found most confusing. This is anonymous --- one sentence, submit before you leave. I will address the top two or three confusions at the start of next lecture.''
+
+% -- FLEX: [CORE] Always include --- closes the feedback loop.
+IF SHORT: Reduce to 30 seconds. Students can submit digitally after class.
+}
 
 \centering
 \vspace{1.0cm}
@@ -692,8 +953,13 @@ next lecture's opening. This closes the feedback loop.}
 \end{frame}
 
 \begin{frame}{What Were the Key Ideas?}
-\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
-Do NOT show next slide yet. Walk around the room.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Say: ``Close your notes. No screens. Write down the four most important concepts from today's lecture. You have 90 seconds.'' Walk around the room to observe. Do NOT show the next slide yet --- the retrieval effort is the learning event.
+
+% -- FLEX: [CORE] Always include --- retrieval practice is the highest-impact learning activity.
+IF SHORT: Reduce to 60 seconds but do not skip entirely.
+}
 
 \centering
 \vspace{1.5cm}
@@ -708,8 +974,16 @@ Do NOT show next slide yet. Walk around the room.}
 \end{frame}
 
 \begin{frame}{Key Takeaways}
-\note{[2 min] Reveal. Walk through each bullet. Emphasize quantitative anchors:
-n* = 100 KB, 11s AllReduce, 5.7x hierarchical speedup, 73\% overlap savings.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just attempted retrieval. This slide reveals the answers so they can compare and fill gaps.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through each bullet, pausing on the quantitative anchors: ``n-star equals 100 KB --- that separates latency-bound from bandwidth-bound. 11 seconds of AllReduce for a 70B model. 5.7x speedup from hierarchical AllReduce. 73\% overlap savings from layer pipelining. The full stack reduces overhead from 50--80\% to 5--15\%.''
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF SHORT: Read only bullets 1, 3, and 7.
+}
 
 \scriptsize
 \begin{itemize}\setlength\itemsep{0pt}
@@ -725,7 +999,12 @@ n* = 100 KB, 11s AllReduce, 5.7x hierarchical speedup, 73\% overlap savings.}
 \end{frame}
 
 \begin{frame}{References}
-\note{[1 min] Point students to canonical papers.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Point students to the Patarasuk paper for Ring AllReduce theory and the Gibiansky blog post for intuitive explanation. Sergeev for Horovod. Tang for 1-bit Adam. Stich for error feedback theory. Rajbhandari for ZeRO.
+
+% -- FLEX: [OPTIONAL] Can be skipped in lecture; students read on their own.
+}
 
 \small
 \mlsysref{Patarasuk+09}{Patarasuk \& Yuan. ``Bandwidth Optimal All-Reduce Algorithms.'' 2009.}
@@ -738,9 +1017,15 @@ n* = 100 KB, 11s AllReduce, 5.7x hierarchical speedup, 73\% overlap savings.}
 \end{frame}
 
 \begin{frame}{Next Lecture: Fault Tolerance}
-\note{[1 min] Forward hook. The fleet has its traffic patterns, but the roads
-are crumbling. GPUs overheat, networks drop packets, nodes fail mid-training.
-How do we maintain the illusion of a perfect supercomputer on imperfect hardware?}
+\note{
+% -- LINK: What prior concept connects to this slide
+This chapter built the communication patterns for distributed training. The next chapter asks: what happens when the infrastructure breaks?
+
+% -- NARRATE: What to SAY while showing this slide
+Say: ``The fleet has its traffic patterns, but the roads are crumbling. GPUs overheat, networks drop packets, nodes fail mid-training. At 10,000 GPUs, failure is not exceptional --- it is the steady state. Next lecture: how do we maintain the illusion of a perfect supercomputer on imperfect hardware?''
+
+% -- FLEX: [CORE] Always include --- forward hooks maintain narrative continuity.
+}
 
 \footnotesize
 \begin{columns}[c]
@@ -779,7 +1064,10 @@ How do we maintain the illusion of a perfect supercomputer on imperfect hardware
 \appendix
 
 \begin{frame}{Backup: Extended Reference}
-\note{Backup slide with additional reference material for this chapter.}
+\note{
+% -- NARRATE: Backup slide with additional reference material.
+% -- FLEX: [OPTIONAL] Use only if students request deeper material.
+}
 
 \footnotesize
 This slide provides extended reference material for students who want to go deeper.
@@ -794,7 +1082,10 @@ textbook's summary tables. Use them as a quick reference during problem sets.
 \end{frame}
 
 \begin{frame}{Backup: Further Reading}
-\note{Backup slide. Point students to additional resources beyond the references slide.}
+\note{
+% -- NARRATE: Backup slide pointing to additional resources.
+% -- FLEX: [OPTIONAL] Use only if students request further reading.
+}
 
 \footnotesize
 \textbf{For deeper exploration:}

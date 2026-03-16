@@ -67,9 +67,30 @@
 % LEARNING OBJECTIVES
 % =============================================================================
 \begin{frame}{Learning Objectives}
-\note{[2 min] Read objectives aloud. Emphasize the inversion theme: everything
-students learned about training optimization is about to be flipped.
-Ask: ``How many of you have deployed a model to production?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students spent 12 chapters optimizing throughput. This slide frames the
+inversion: every training priority is about to flip.
+
+% -- NARRATE: What to SAY while showing this slide
+Read each objective aloud, pausing on ``latency budget'' and ``queuing
+theory'' --- these are the new quantitative anchors replacing samples/hour.
+ANALOGY: ``Training is a factory running 24/7. Serving is an ER --- every
+patient has a deadline.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``How many of you have deployed a model to production? What was your
+biggest surprise?'' Cold-call one responder.
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students assume serving is just calling model.predict().
+Correct framing: serving is a six-stage pipeline where the model is one
+stage consuming less than 50\% of the budget.
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF AHEAD: Ask students to predict which objective will be hardest.
+IF SHORT: Read objectives without discussion; move to content.
+}
 
 \footnotesize
 \begin{enumerate}\setlength\itemsep{0pt}
@@ -85,8 +106,16 @@ Ask: ``How many of you have deployed a model to production?''}
 \end{frame}
 
 \begin{frame}{Visual Language}
-\note{[1 min] Explain the semantic color system used throughout the course.
-These colors are consistent across all diagrams and slides.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Point to each card: ``Blue is compute --- GPU forward passes. Green is data
+flow and memory. Orange is routing and scheduling. Red flags bottlenecks
+and cost.'' In serving diagrams, you will see orange load balancers feeding
+blue inference runners, with red marking decode bottlenecks.
+
+% -- FLEX: [OPTIONAL] Skip if students already know the palette from earlier chapters.
+IF SHORT: Say ``same colors as always'' and advance.
+}
 
 \small
 Throughout this course, colors carry meaning:
@@ -124,11 +153,34 @@ Throughout this course, colors carry meaning:
 % =============================================================================
 
 \begin{frame}{Why Serving Is Different}
-\note{[3 min] Core thesis of the chapter. Training maximizes throughput; serving
-minimizes latency. Same hardware, opposite priorities. Walk through the DAM
-inversion: Data goes from Volume to Freshness, Algorithm from Mutable to
-Frozen, Machine from Saturation to Headroom.
-Ask: ``If training saturates GPUs at 95\%, why would serving aim for 50\%?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+In every prior chapter, success meant saturating the GPU. This slide
+reveals why that strategy fails in production serving.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the diagram: ``Left side is training --- maximize throughput,
+saturate hardware. Right side is serving --- minimize latency, maintain
+headroom.'' Walk through the DAM inversion: Data shifts from Volume to
+Freshness, Algorithm from Mutable to Frozen, Machine from Saturation to
+Headroom.
+ANALOGY: ``Training is a freight train --- pack it full. Serving is an
+ambulance --- it must always be ready to go.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If training saturates GPUs at 95\%, why would serving aim for
+50\%?'' Give 15 seconds, then cold-call. [Expected: queuing theory ---
+high utilization causes latency spikes.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think serving is just training with batch size 1.
+Correct framing: serving inverts the optimization objective itself ---
+latency replaces throughput as the primary metric.
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF AHEAD: ``What happens to cost when you run GPUs at 50\% instead of 95\%?''
+IF SHORT: Show diagram, state the inversion, skip the DAM walkthrough.
+}
 
 % --- Full-width diagram ---
 \centering
@@ -140,9 +192,34 @@ Ask: ``If training saturates GPUs at 95\%, why would serving aim for 50\%?''}
 \end{frame}
 
 \begin{frame}{The D\raisebox{0.04em}{\tiny$\bullet$}A\raisebox{0.04em}{\tiny$\bullet$}M Inversion}
-\note{[2 min] Formalize the inversion along DAM axes. Students already know DAM
-from Ch1; here we show how every axis flips. The Iron Law shifts from the
-compute term dominating (training) to the latency term dominating (serving).}
+\note{
+% -- LINK: What prior concept connects to this slide
+The previous slide showed the inversion visually. This slide formalizes
+it along the three DAM axes students learned in Ch1.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk down the table row by row: ``Data: training ingests billions of
+samples; serving handles one request at a time --- freshness replaces
+volume. Algorithm: training runs backprop; serving is forward-only ---
+no optimizer state needed. Machine: training saturates at 95\%; serving
+holds headroom at 40--60\% to absorb traffic spikes.'' End on the Iron
+Law row: ``The dominant term flips from compute to latency overhead.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Before showing the bottom card, ask: ``If both training and serving use
+the same GPU, why does the Iron Law's dominant term change?''
+[Expected: serving processes one request at low arithmetic intensity,
+making the latency/overhead term dominate.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think removing backprop makes serving trivially
+easy. Correct framing: removing backprop frees memory but exposes the
+latency term that training's large batches amortized away.
+
+% -- FLEX: [CORE] This slide is essential --- do not skip.
+IF AHEAD: ``What happens to the Machine row during a traffic spike?''
+IF SHORT: Cover Data and Machine rows; skip Algorithm row.
+}
 
 \scriptsize
 \renewcommand{\arraystretch}{1.1}
@@ -167,10 +244,33 @@ compute term dominating (training) to the latency term dominating (serving).}
 \end{frame}
 
 \begin{frame}{Static vs.\ Dynamic Inference}
-\note{[2 min] First architectural decision: when to compute predictions.
-Static = pre-compute overnight (photo classification). Dynamic = on-demand
-(content moderation). Most production systems use a hybrid.
-If short on time: cover the table quickly and move on.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The DAM inversion showed that serving prioritizes freshness over volume.
+This slide presents the first design decision that follows: when to
+compute predictions.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the green card: ``Static inference pre-computes overnight ---
+10,000 photos times 5 ms equals 50 seconds total. Zero runtime latency,
+but it cannot handle novel inputs.'' Then the red card: ``Dynamic
+inference computes on demand under a 100 ms budget. Flexible but
+expensive.'' Finish with the hybrid insight at the bottom.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``A search engine autocomplete --- static or dynamic?''
+[Expected: hybrid --- common queries are cached, novel queries computed
+on demand.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students dismiss static inference as outdated. Correct
+framing: recommendation systems pre-compute candidate sets for millions
+of users nightly; only the final ranking is dynamic.
+
+% -- FLEX: [OPTIONAL] This slide provides context but is not load-bearing.
+IF SHORT: Cover the two cards quickly and move on to Server Anatomy.
+IF AHEAD: ``What determines the boundary between cached and dynamic?''
+}
 
 \footnotesize
 \begin{columns}[T]
