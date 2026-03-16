@@ -50,7 +50,7 @@ The domain of the ML Systems Engineer. This round tests your understanding of wh
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Precision Trade-off</b></summary>
 
 **Interviewer:** "We are quantizing our model from FP16 to INT8. The memory footprint drops by 2x, but the throughput doesn't improve at all. Assuming we are compute-bound, what hardware architectural detail did we forget?"
-**Realistic Solution:** You forgot to check if the silicon has dedicated INT8 Tensor Cores. Without specific hardware paths for 8-bit integer math, the GPU must upcast the INT8 values back to FP16 in the registers to perform the multiply-accumulate (MAC), yielding zero compute speedup despite the memory savings. 
+**Realistic Solution:** You forgot to check if the silicon has dedicated INT8 Tensor Cores. Without specific hardware paths for 8-bit integer math, the GPU must upcast the INT8 values back to FP16 in the registers to perform the multiply-accumulate (MAC), yielding zero compute speedup despite the memory savings.
 **📖 Deep Dive:** [Volume I: Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
 </details>
 
@@ -58,7 +58,7 @@ The domain of the ML Systems Engineer. This round tests your understanding of wh
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Sequence Length Trap</b></summary>
 
 **Interviewer:** "You need to increase your LLM's context window from 4k to 128k tokens. The model weights fit perfectly in your 80GB VRAM. What hidden memory cost will cause your node to OOM (Out of Memory) during generation?"
-**Realistic Solution:** The KV-Cache. While weights are static, the KV-cache grows linearly with sequence length and batch size. At 128k context, the memory required to store the attention keys and values for a single request will massively exceed the size of the model weights themselves. 
+**Realistic Solution:** The KV-Cache. While weights are static, the KV-cache grows linearly with sequence length and batch size. At 128k context, the memory required to store the attention keys and values for a single request will massively exceed the size of the model weights themselves.
 **📖 Deep Dive:** [Volume I: Frameworks](https://mlsysbook.ai/vol1/frameworks.html)
 </details>
 
@@ -66,7 +66,7 @@ The domain of the ML Systems Engineer. This round tests your understanding of wh
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Compilation Overhead</b></summary>
 
 **Interviewer:** "You move a PyTorch training loop from a CPU to a GPU. The first few batches take 500ms each, but suddenly the latency drops to 10ms per batch. What happened inside the framework?"
-**Realistic Solution:** Just-In-Time (JIT) compilation overhead. The framework spends the first few iterations tracing the computation graph and compiling optimized CUDA kernels for the specific tensor shapes you provided. Once cached, the dispatch overhead disappears. 
+**Realistic Solution:** Just-In-Time (JIT) compilation overhead. The framework spends the first few iterations tracing the computation graph and compiling optimized CUDA kernels for the specific tensor shapes you provided. Once cached, the dispatch overhead disappears.
 **📖 Deep Dive:** [Volume I: ML Systems](https://mlsysbook.ai/vol1/ml_systems.html)
 </details>
 
@@ -82,7 +82,7 @@ The domain of the ML Systems Engineer. This round tests your understanding of wh
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Roofline Shift</b></summary>
 
 **Interviewer:** "We upgraded our serving fleet from A100s to H100s. The H100 has 3x more FP16 TFLOPS. However, our LLM decode throughput got exactly 0% faster. How is that physically possible?"
-**Realistic Solution:** The ridge point of the Roofline shifted right. Your workload was already memory-bandwidth bound on the A100 (Arithmetic Intensity < Ridge Point). The H100 has 3x more compute, but only 1.5x more memory bandwidth. Because LLM decoding is bandwidth-starved ($I \approx 1$), faster ALUs literally cannot do any work. 
+**Realistic Solution:** The ridge point of the Roofline shifted right. Your workload was already memory-bandwidth bound on the A100 (Arithmetic Intensity < Ridge Point). The H100 has 3x more compute, but only 1.5x more memory bandwidth. Because LLM decoding is bandwidth-starved ($I \approx 1$), faster ALUs literally cannot do any work.
 **📖 Deep Dive:** [Volume I: Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
 </details>
 

@@ -9,7 +9,7 @@ You are the lead architect at a startup. You need to deploy a **Llama-3-70B** mo
 - **Budget:** You must use the **minimum number of GPUs** possible.
 
 ## The Problem
-A single A100 has 80GB of HBM. A 70B model at FP16 requires 140GB just for weights. 
+A single A100 has 80GB of HBM. A 70B model at FP16 requires 140GB just for weights.
 
 **Your Task:** Create a `solution.yaml` that defines the hardware configuration (nodes, precision, efficiency) to meet the SLA with minimum resources.
 
@@ -34,6 +34,6 @@ If your design fails, the judge will tell you which **Wall** you hit:
 ---
 
 ## 🏆 Leaderboard
-Can you solve this with only 2 GPUs? How about 1 GPU using 4-bit quantization? 
+Can you solve this with only 2 GPUs? How about 1 GPU using 4-bit quantization?
 
 [Submit your solution logic to the Discussions!](https://github.com/harvard-edge/cs249r_book/discussions)

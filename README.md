@@ -28,20 +28,20 @@
 </p>
 
 <p align="center">
-  **[📘 Volume I](https://mlsysbook.ai/vol1/)** •
-  **[📙 Volume II *(Summer 2026)*](https://mlsysbook.ai/vol2/)** •
-  **[🔥 TinyTorch](https://mlsysbook.ai/tinytorch/)** •
-  **[🔮 MLSys·im](https://mlsysbook.ai/mlsysim/)** •
-  **[🌐 Ecosystem](https://mlsysbook.org)**
+  <b><a href="https://mlsysbook.ai/vol1/">📘 Volume I</a></b> •
+  <b><a href="https://mlsysbook.ai/vol2/">📙 Volume II <i>(Summer 2026)</i></a></b> •
+  <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
+  <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
+  <b><a href="https://mlsysbook.org">🌐 Ecosystem</a></b>
 </p>
 
-📚 **Hardcopy edition coming 2026 with MIT Press.**
+<p align="center">📚 <b>Hardcopy edition coming 2026 with MIT Press.</b></p>
 
 </div>
 
 ---
 
-## 🚀 Quick Start for Architects
+## Quick Start for Architects
 
 Are you an AI engineer preparing for a systems design interview or building a production cluster? Start here.
 
@@ -55,27 +55,27 @@ Are you an AI engineer preparing for a systems design interview or building a pr
   </thead>
   <tbody>
     <tr>
-      <td align="center"><b>🚀 Local Audit</b></td>
+      <td align="center"><b>Local Audit</b></td>
       <td>Profile <b>your hardware</b> against the Iron Law instantly.</td>
       <td align="center"><kbd>pip install mlsysim</kbd></td>
     </tr>
     <tr>
-      <td align="center"><b>💼 Interview Hub</b></td>
+      <td align="center"><b>Interview Hub</b></td>
       <td>The <b>Napkin Math</b> for FAANG AI Systems Design.</td>
       <td align="center"><a href="interviews/README.md"><b>View Guide</b></a></td>
     </tr>
     <tr>
-      <td align="center"><b>🗺️ Blueprint</b></td>
+      <td align="center"><b>Blueprint</b></td>
       <td>The <b>AI Engineering Blueprint</b>: Turnkey curricula for educators.</td>
       <td align="center"><a href="instructors/index.qmd"><b>View Hub</b></a></td>
     </tr>
     <tr>
-      <td align="center"><b>👩‍🏫 Foundations</b></td>
+      <td align="center"><b>Foundations</b></td>
       <td>A 12-week path for <b>single-machine</b> AI systems.</td>
       <td align="center"><a href="instructors/foundations-syllabus.qmd"><b>View Syllabus</b></a></td>
     </tr>
     <tr>
-      <td align="center"><b>🚀 Scale</b></td>
+      <td align="center"><b>Scale</b></td>
       <td>A 12-week path for <b>distributed fleets</b> and frontier models.</td>
       <td align="center"><a href="instructors/scale-syllabus.qmd"><b>View Syllabus</b></a></td>
     </tr>
@@ -92,7 +92,7 @@ Are you an AI engineer preparing for a systems design interview or building a pr
   </blockquote>
 </div>
 
-That gap is what I mean by AI engineering.
+That gap is what we mean by AI engineering.
 
 **AI engineering is the discipline of building efficient, reliable, safe, and robust intelligent systems that operate in the real world, not just models in isolation.**
 
@@ -129,7 +129,7 @@ This repository is the open learning stack for AI systems engineering: textbook 
 <table>
   <tbody>
     <tr>
-      <td width="15%" align="center"><b>📖 READ</b></td>
+      <td width="15%" align="center"><b>READ</b></td>
       <td>Start with the <a href="https://mlsysbook.ai/book/">textbook</a>:
         <ul>
           <li><a href="https://mlsysbook.ai/vol1/">Volume I: Foundations</a> covers ML basics, development, and optimization.</li>
@@ -138,7 +138,7 @@ This repository is the open learning stack for AI systems engineering: textbook 
       </td>
     </tr>
     <tr>
-      <td width="15%" align="center"><b>🎯 PRACTICE</b></td>
+      <td width="15%" align="center"><b>PRACTICE</b></td>
       <td>Master the "Silicon Realism" required for frontier AI jobs:
         <ul>
           <li><a href="interviews/README.md">Interview Hub</a>: Interactive flashcards and whiteboard math.</li>
@@ -146,19 +146,19 @@ This repository is the open learning stack for AI systems engineering: textbook 
       </td>
     </tr>
     <tr>
-      <td width="15%" align="center"><b>👩‍🏫 INSTRUCT</b></td>
+      <td width="15%" align="center"><b>INSTRUCT</b></td>
       <td>Adopt the curriculum with the <a href="instructors/index.qmd">AI Engineering Blueprint</a>.</td>
     </tr>
     <tr>
-      <td width="15%" align="center"><b>🔥 BUILD</b></td>
+      <td width="15%" align="center"><b>BUILD</b></td>
       <td>Start TinyTorch with the <a href="https://mlsysbook.ai/tinytorch/getting-started.html">getting started guide</a>. Implement autograd and transformers from scratch.</td>
     </tr>
     <tr>
-      <td width="15%" align="center"><b>📦 DEPLOY</b></td>
+      <td width="15%" align="center"><b>DEPLOY</b></td>
       <td>Pick a <a href="https://mlsysbook.ai/kits/">hardware kit</a> and run the labs on Arduino, Raspberry Pi, or Jetson.</td>
     </tr>
     <tr>
-      <td width="15%" align="center"><b>🔮 SIMULATE</b></td>
+      <td width="15%" align="center"><b>SIMULATE</b></td>
       <td>Explore the <a href="mlsysim/README.md">MLSys·im Engine</a> to calculate the physics of ML infrastructure.</td>
     </tr>
   </tbody>
@@ -174,15 +174,15 @@ We are working toward **1 million learners by 2030**. Every star, share, and con
 
 <div align="center">
 
-*What gets measured gets improved.*
+<i>What gets measured gets improved.</i>
 
 Each star is a learner or supporter who believes AI systems should be engineered with rigor.
 
-[![Stars](https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold)](https://github.com/harvard-edge/cs249r_book/stargazers)
+<a href="https://github.com/harvard-edge/cs249r_book/stargazers"><img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold" alt="Stars"></a>
 
-[![Star History Chart](https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date)](https://star-history.com/#harvard-edge/cs249r_book&Date)
+<a href="https://star-history.com/#harvard-edge/cs249r_book&Date"><img src="https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date" alt="Star History Chart"></a>
 
-100 → 1,000 → **10,000** → 100,000 → **1M learners**
+100 → 1,000 → <b>10,000</b> → 100,000 → <b>1M learners</b>
 
 </div>
 
@@ -192,11 +192,105 @@ Stars are a signal that universities, foundations, and industry partners use to 
 
 <div align="center">
 
-All contributions go to [Open Collective](https://opencollective.com/mlsysbook), a transparent fund that supports educational outreach.
+All contributions go to <a href="https://opencollective.com/mlsysbook">Open Collective</a>, a transparent fund that supports educational outreach.
 
-[![Open Collective](https://img.shields.io/badge/💝%20Support%20AI%20Education-Open%20Collective-blue.svg?style=for-the-badge)](https://opencollective.com/mlsysbook)
+<a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Support%20AI%20Education-Open%20Collective-blue.svg?style=for-the-badge&logo=open-collective" alt="Open Collective"></a>
 
 </div>
+
+---
+
+## Contributing
+
+| I want to... | Go here |
+|--------------|---------|
+| Fix a typo or improve a chapter | [book/docs/CONTRIBUTING.md](book/docs/CONTRIBUTING.md) |
+| Add a TinyTorch module or fix a bug | [tinytorch/CONTRIBUTING.md](tinytorch/CONTRIBUTING.md) |
+| Improve hardware labs | [kits/README.md](kits/README.md) |
+| Report an issue | [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) |
+| Ask a question | [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions) |
+
+---
+
+## Contributors
+
+Thanks goes to these wonderful people who have contributed to making this resource better for everyone!
+
+### Textbook Contributors
+
+<!-- BOOK-CONTRIBUTORS-START -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/Mjrovai"><img src="https://avatars.githubusercontent.com/Mjrovai?v=4?s=50" width="50px;" alt="Marcelo Rovai"/><br /><sub><b>Marcelo Rovai</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/GabrielAmazonas"><img src="https://avatars.githubusercontent.com/GabrielAmazonas?v=4?s=50" width="50px;" alt="Gabriel Amazonas"/><br /><sub><b>Gabriel Amazonas</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/kai4avaya"><img src="https://avatars.githubusercontent.com/kai4avaya?v=4?s=50" width="50px;" alt="Kai Kleinbard"/><br /><sub><b>Kai Kleinbard</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/didier-durand"><img src="https://avatars.githubusercontent.com/didier-durand?v=4?s=50" width="50px;" alt="Didier Durand"/><br /><sub><b>Didier Durand</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/hzeljko"><img src="https://avatars.githubusercontent.com/hzeljko?v=4?s=50" width="50px;" alt="Zeljko Hrcek"/><br /><sub><b>Zeljko Hrcek</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/jasonjabbour"><img src="https://avatars.githubusercontent.com/jasonjabbour?v=4?s=50" width="50px;" alt="Jason Jabbour"/><br /><sub><b>Jason Jabbour</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/uchendui"><img src="https://avatars.githubusercontent.com/uchendui?v=4?s=50" width="50px;" alt="Ikechukwu Uchendu"/><br /><sub><b>Ikechukwu Uchendu</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/Naeemkh"><img src="https://avatars.githubusercontent.com/Naeemkh?v=4?s=50" width="50px;" alt="Naeem Khoshnevis"/><br /><sub><b>Naeem Khoshnevis</b></sub></a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/Sara-Khosravi"><img src="https://avatars.githubusercontent.com/Sara-Khosravi?v=4?s=50" width="50px;" alt="Sara Khosravi"/><br /><sub><b>Sara Khosravi</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/V0XNIHILI"><img src="https://avatars.githubusercontent.com/V0XNIHILI?v=4?s=50" width="50px;" alt="Douwe den Blanken"/><br /><sub><b>Douwe den Blanken</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/18jeffreyma"><img src="https://avatars.githubusercontent.com/18jeffreyma?v=4?s=50" width="50px;" alt="Jeffrey Ma"/><br /><sub><b>Jeffrey Ma</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/shanzehbatool"><img src="https://avatars.githubusercontent.com/shanzehbatool?v=4?s=50" width="50px;" alt="shanzehbatool"/><br /><sub><b>shanzehbatool</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/eliasab16"><img src="https://avatars.githubusercontent.com/eliasab16?v=4?s=50" width="50px;" alt="Elias"/><br /><sub><b>Elias</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/JaredP94"><img src="https://avatars.githubusercontent.com/JaredP94?v=4?s=50" width="50px;" alt="Jared Ping"/><br /><sub><b>Jared Ping</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/ishapira1"><img src="https://avatars.githubusercontent.com/ishapira1?v=4?s=50" width="50px;" alt="Itai Shapira"/><br /><sub><b>Itai Shapira</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/8863743b4f26c1a20e730fcf7ebc3bc0?d=identicon&s=100?v=4?s=50" width="50px;" alt="Maximilian Lam"/><br /><sub><b>Maximilian Lam</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/jaysonzlin"><img src="https://avatars.githubusercontent.com/jaysonzlin?v=4?s=50" width="50px;" alt="Jayson Lin"/><br /><sub><b>Jayson Lin</b></sub></a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/sophiacho1"><img src="https://avatars.githubusercontent.com/sophiacho1?v=4?s=50" width="50px;" alt="Sophia Cho"/><br /><sub><b>Sophia Cho</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/andreamurillomtz"><img src="https://avatars.githubusercontent.com/andreamurillomtz?v=4?s=50" width="50px;" alt="Andrea"/><br /><sub><b>Andrea</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/alxrod"><img src="https://avatars.githubusercontent.com/alxrod?v=4?s=50" width="50px;" alt="Alex Rodriguez"/><br /><sub><b>Alex Rodriguez</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/korneelf1"><img src="https://avatars.githubusercontent.com/korneelf1?v=4?s=50" width="50px;" alt="Korneel Van den Berghe"/><br /><sub><b>Korneel Van den Berghe</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/foundingnimo"><img src="https://avatars.githubusercontent.com/foundingnimo?v=4?s=50" width="50px;" alt="Nimo"/><br /><sub><b>Nimo</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/colbybanbury"><img src="https://avatars.githubusercontent.com/colbybanbury?v=4?s=50" width="50px;" alt="Colby Banbury"/><br /><sub><b>Colby Banbury</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/zishenwan"><img src="https://avatars.githubusercontent.com/zishenwan?v=4?s=50" width="50px;" alt="Zishen Wan"/><br /><sub><b>Zishen Wan</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/mmaz"><img src="https://avatars.githubusercontent.com/mmaz?v=4?s=50" width="50px;" alt="Mark Mazumder"/><br /><sub><b>Mark Mazumder</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/ma3mool"><img src="https://avatars.githubusercontent.com/ma3mool?v=4?s=50" width="50px;" alt="Abdulrahman Mahmoud"/><br /><sub><b>Abdulrahman Mahmoud</b></sub></a></td>
+    </tr>
+  </tbody>
+</table>
+
+<p align="center"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors">View all contributors</a></p>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+<!-- BOOK-CONTRIBUTORS-END -->
+
+### TinyTorch Contributors
+
+<!-- TINYTORCH-CONTRIBUTORS-START -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/kai4avaya"><img src="https://avatars.githubusercontent.com/kai4avaya?v=4?s=50" width="50px;" alt="kai"/><br /><sub><b>kai</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/minhdang26403"><img src="https://avatars.githubusercontent.com/minhdang26403?v=4?s=50" width="50px;" alt="Dang Truong"/><br /><sub><b>Dang Truong</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/didier-durand"><img src="https://avatars.githubusercontent.com/didier-durand?v=4?s=50" width="50px;" alt="Didier Durand"/><br /><sub><b>Didier Durand</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/karthikdani"><img src="https://avatars.githubusercontent.com/karthikdani?v=4?s=50" width="50px;" alt="Karthik Dani"/><br /><sub><b>Karthik Dani</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/avikde"><img src="https://avatars.githubusercontent.com/avikde?v=4?s=50" width="50px;" alt="Avik De"/><br /><sub><b>Avik De</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/Takosaga"><img src="https://avatars.githubusercontent.com/Takosaga?v=4?s=50" width="50px;" alt="Takosaga"/><br /><sub><b>Takosaga</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/rnjema"><img src="https://avatars.githubusercontent.com/rnjema?v=4?s=50" width="50px;" alt="rnjema"/><br /><sub><b>rnjema</b></sub></a></td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/joeswagson"><img src="https://avatars.githubusercontent.com/joeswagson?v=4?s=50" width="50px;" alt="joeswagson"/><br /><sub><b>joeswagson</b></sub></a></td>
+    </tr>
+  </tbody>
+</table>
+
+<p align="center"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors">View all contributors</a></p>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+<!-- TINYTORCH-CONTRIBUTORS-END -->
 
 ---
 
@@ -223,8 +317,8 @@ Dual-licensed: [CC BY-NC-ND 4.0](LICENSE.md) (Textbook) and [Apache 2.0](tinytor
 
 <div align="center">
 
-**[✉️ Subscribe](https://buttondown.email/mlsysbook) • [💬 Join discussions](https://github.com/harvard-edge/cs249r_book/discussions) • [🌐 Visit mlsysbook.ai](https://mlsysbook.ai/)**
+<b><a href="https://buttondown.email/mlsysbook">✉️ Subscribe</a> • <a href="https://github.com/harvard-edge/cs249r_book/discussions">💬 Join discussions</a> • <a href="https://mlsysbook.ai/">🌐 Visit mlsysbook.ai</a></b>
 
-**Made with ❤️ for AI engineers**<br>
-*in the making, around the world* 🌎
+<b>Made with ❤️ for AI engineers</b><br>
+<i>in the making, around the world</i> 🌎
 </div>

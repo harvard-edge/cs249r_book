@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, Any, Annotated
+from typing import Optional, Any, Annotated, List
 from .constants import ureg, Q_, BYTES_FP32, BYTES_FP16, BYTES_INT8, BYTES_INT4, PRECISION_MAP
 from .defaults import HFU_MFU_RATIO
 from .formulas import calc_bottleneck
@@ -25,6 +25,10 @@ class PerformanceProfile(BaseModel):
     mfu: float # Model FLOPs Utilization
     hfu: float # Hardware FLOPs Utilization
     feasible: bool
+    constraint_trace: Optional[List[str]] = Field(
+        default=None,
+        description="A trace of physical constraints evaluated during the solve. If feasible=False, this explains why."
+    )
     # Offload fields — populated when model spills beyond HBM to host memory
     offload_spill_bytes: Optional[Quantity] = None
     offload_effective_bw: Optional[Quantity] = None
@@ -150,6 +154,12 @@ class Engine:
         feasible = memory_footprint <= hardware.memory.capacity
         offload_spill = None
         offload_bw = None
+        constraint_trace = []
+
+        if feasible:
+            constraint_trace.append(f"Memory Wall: Passed. Required {memory_footprint.to('GB'):~P} <= Available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
+        else:
+            constraint_trace.append(f"Memory Wall: FAILED. Required {memory_footprint.to('GB'):~P} > Available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
 
         if not feasible and raise_errors:
             raise OOMError(
@@ -244,6 +254,7 @@ class Engine:
             mfu=mfu,
             hfu=hfu,
             feasible=feasible,
+            constraint_trace=constraint_trace,
             offload_spill_bytes=offload_spill,
             offload_effective_bw=offload_bw,
         )

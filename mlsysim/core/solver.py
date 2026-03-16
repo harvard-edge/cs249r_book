@@ -672,10 +672,17 @@ class ServingModel(BaseModel):
             total_memory_required += draft_model.size_in_bytes(bpp)
         feasible = total_memory_required <= decode_hw.memory.capacity
         
+        constraint_trace = []
+        if feasible:
+            constraint_trace.append(f"Memory Wall: Passed. Required {total_memory_required.to('GB'):~P} (Weights: {model_weights_bytes.to('GB'):~P}, KV Cache: {kv_cache_bytes.to('GB'):~P}) <= Available {decode_hw.memory.capacity.to('GB'):~P} on {decode_hw.name}.")
+        else:
+            constraint_trace.append(f"Memory Wall: FAILED. Required {total_memory_required.to('GB'):~P} (Weights: {model_weights_bytes.to('GB'):~P}, KV Cache: {kv_cache_bytes.to('GB'):~P}) > Available {decode_hw.memory.capacity.to('GB'):~P} on {decode_hw.name}.")
+
         cache_hit_ratio = cached_prefix_len / seq_len if seq_len > 0 else 0.0
 
         return ServingResult(
             feasible=feasible,
+            constraint_trace=constraint_trace,
             ttft=t_prefill,
             itl=t_decode_per_token,
             kv_cache_size=kv_cache_bytes.to("GB"),
@@ -718,7 +725,9 @@ class ContinuousBatchingModel(BaseModel):
         
         if max_memory_for_kv.magnitude <= 0:
             return ContinuousBatchingResult(
-                feasible=False, throughput_tokens_per_sec=0.0, max_active_requests=0,
+                feasible=False, 
+                constraint_trace=[f"Memory Wall: FAILED. Weights ({model_weights_bytes.to('GB'):~P}) exceed available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}."],
+                throughput_tokens_per_sec=0.0, max_active_requests=0,
                 memory_fragmentation_pct=0.0, paged_kv_cache_size=Q_("0 GB"),
                 ttft=t_prefill, itl=Q_("1000000 ms"), speedup_vs_static=1.0
             )
@@ -738,6 +747,12 @@ class ContinuousBatchingModel(BaseModel):
         max_possible_requests = int((max_memory_for_kv / bytes_per_seq).to_base_units().magnitude)
         active_requests = min(max_possible_requests, max_batch_size)
         
+        constraint_trace = []
+        if active_requests > 0:
+            constraint_trace.append(f"Memory Wall: Passed. Can fit {active_requests} concurrent requests (Weights: {model_weights_bytes.to('GB'):~P}, Max KV available: {max_memory_for_kv.to('GB'):~P}) on {hardware.name}.")
+        else:
+            constraint_trace.append(f"Memory Wall: FAILED. Cannot fit even 1 request. Weights ({model_weights_bytes.to('GB'):~P}) exceed or leave no room for KV cache in available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
+
         total_kv_cache = bytes_per_seq * active_requests
         
         # Throughput
@@ -758,6 +773,7 @@ class ContinuousBatchingModel(BaseModel):
             
         return ContinuousBatchingResult(
             feasible=active_requests > 0,
+            constraint_trace=constraint_trace,
             throughput_tokens_per_sec=throughput,
             max_active_requests=active_requests,
             memory_fragmentation_pct=frag_pct,
@@ -807,6 +823,12 @@ class WeightStreamingModel(BaseModel):
         feasible = total_memory_required <= hardware.memory.capacity
         utilization = (total_memory_required / hardware.memory.capacity).magnitude if hardware.memory.capacity.magnitude > 0 else 1.0
         
+        constraint_trace = []
+        if feasible:
+            constraint_trace.append(f"SRAM Wall: Passed. Required {total_memory_required.to('GB'):~P} (KV + 10% Overhead) <= Available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
+        else:
+            constraint_trace.append(f"SRAM Wall: FAILED. Required {total_memory_required.to('GB'):~P} (KV + 10% Overhead) > Available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
+
         # 2. Injection Bottleneck vs Compute Bottleneck per Layer
         layer_params = model.parameters / model.layers
         layer_weight_bytes = layer_params.to(ureg.count).magnitude * bpp.magnitude * ureg.byte
@@ -847,6 +869,7 @@ class WeightStreamingModel(BaseModel):
 
         return WeightStreamingResult(
             feasible=feasible,
+            constraint_trace=constraint_trace,
             throughput_tokens_per_sec=tps,
             bottleneck=bottleneck,
             layer_compute_time=layer_compute_time,

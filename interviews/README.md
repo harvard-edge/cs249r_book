@@ -6,13 +6,13 @@ A community-driven collection of high-stakes systems design questions for AI inf
 
 ## ⚡ The Motivation: Why Systems Engineering?
 
-The traditional software engineering interview has fundamentally changed. 
+The traditional software engineering interview has fundamentally changed.
 
 Using LLMs to generate algorithms or boilerplate code is the new normal. But when it comes to *engineering* AI systems at scale, you are hard-wired by the physics of the data center. **You cannot prompt your way out of a silicon bottleneck.**
 
 An LLM can write a flawless PyTorch training loop, but it cannot intuitively calculate why a 175B parameter model will hit a communication wall across InfiniBand, or why serving a 128k context window will fragment your KV-cache and explode your P99 latency. These are physical constraints, not code syntax.
 
-**The frontier of AI hiring is at the intersection of Machine Learning and Systems Physics.** Companies like Meta, Google, and OpenAI are aggressively seeking engineers who possess *Mechanical Sympathy*—the ability to look past the framework abstractions and understand the hard reality of how to keep 10,000 GPUs fed and 1 million users served. 
+**The frontier of AI hiring is at the intersection of Machine Learning and Systems Physics.** Companies like Meta, Google, and OpenAI are aggressively seeking engineers who possess *Mechanical Sympathy*—the ability to look past the framework abstractions and understand the hard reality of how to keep 10,000 GPUs fed and 1 million users served.
 
 This hub is your playbook for that new frontier.
 
@@ -35,7 +35,7 @@ Every question in this hub is tagged with a mastery level, reflecting the "Funne
 
 Real-world interviews for AI Systems roles are structured around domains of operational responsibility. Our categories mirror the exact rounds you will face at frontier labs.
 
-1.  **[Round 1: Single-Node Systems & Silicon Physics](01_Single_Node_Physics.md)** 
+1.  **[Round 1: Single-Node Systems & Silicon Physics](01_Single_Node_Physics.md)**
     *   *The Focus:* VRAM accounting, Arithmetic Intensity, Roofline models, Memory Bandwidth vs. Compute bounds, and Data Ingestion bottlenecks.
 2.  **[Round 2: Distributed AI Infrastructure](02_Distributed_Infrastructure.md)**
     *   *The Focus:* 3D Parallelism, Bisection bandwidth, NVLink vs. InfiniBand, AllReduce algorithms, and Fault Tolerance.
@@ -50,7 +50,7 @@ Real-world interviews for AI Systems roles are structured around domains of oper
 
 ## 🗳️ Trending Community Scenarios
 
-We use GitHub Issues as a public "Drafting Room" for new questions. 
+We use GitHub Issues as a public "Drafting Room" for new questions.
 
 <!-- TRENDING-QUESTIONS-START -->
 *No trending questions yet. [Submit a question](https://github.com/harvard-edge/cs249r_book/issues/new?template=interview_question.yml) to start the list.*
@@ -70,7 +70,7 @@ We welcome contributions of questions and scenarios from recent AI systems inter
 
 ## 💌 A Note on the Mission
 
-I created this hub to help people learn the true physical realities of building AI systems. My hope is that as you interview and encounter new challenges, you will bring those scenarios back here and contribute them to the community. Together, we can build and train the next generation of AI engineers. 
+I created this hub to help people learn the true physical realities of building AI systems. My hope is that as you interview and encounter new challenges, you will bring those scenarios back here and contribute them to the community. Together, we can build and train the next generation of AI engineers.
 
 Wishing you all the best in your interviews and your engineering journey!
 
