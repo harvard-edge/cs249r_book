@@ -1,0 +1,776 @@
+% =============================================================================
+% Chapter 10: Performance Engineering — ML Systems Lecture Slides (Vol II)
+% =============================================================================
+% IMAGES NEEDED (generate SVGs, convert to PDF):
+%   - memory-wall.pdf          - roofline-model.pdf
+%   - operator-fusion.pdf      - flashattention.pdf
+%   - precision-engineering.pdf - graph-compilation.pdf
+%   - optimization-playbook.pdf - diagnostic-flow.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Volume II},
+  chapter      = {Chapter 10},
+  logo         = {../../assets/img/logo-mlsysbook.png},
+  instlogo     = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Performance Engineering},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\AI}{\ensuremath{I}}  % Arithmetic Intensity
+\newcommand{\ridge}{\ensuremath{I_{\text{ridge}}}}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{%
+        \centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{9}
+
+\title{Performance Engineering}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Performance Engineering}{Match the Software to the Silicon}{cover_optimization.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Walk through objectives. Emphasize that this chapter is about
+closing the gap between theoretical hardware peak and achieved throughput.
+Ask: ``Has anyone profiled a GPU workload and found it was only using 5\%
+of compute?''}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item Analyze the \textbf{Memory Wall} using the \textbf{Roofline Model} and diagnose compute-bound vs.\ memory-bound workloads
+  \item Explain how \textbf{Operator Fusion} and \textbf{Tiling} (FlashAttention) overcome HBM bandwidth limits
+  \item Apply \textbf{Precision Engineering} (FP8, INT4, block-wise quantization) to double effective bandwidth
+  \item Compare \textbf{Graph Compilation} frameworks (torch.compile, XLA, TensorRT)
+  \item Evaluate \textbf{Speculative Decoding} and \textbf{MoE} as algorithmic innovations
+  \item Design an \textbf{optimization sequence} using the profile-optimize-reprofile loop
+  \item Use \textbf{System Profiling} tools to identify the dominant bottleneck
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{Memory Wall}
+% =============================================================================
+
+\begin{frame}{The Memory Wall}
+\note{[3 min] Core insight: an H100 sits 95\% idle during LLM decode because
+it starves for data. The Memory Wall is physics, not engineering. Every
+technique in this chapter attacks the bytes-moved-to-ops-performed ratio.
+Ask: ``If the GPU has 989 TFLOPS, why does LLM decode use only 2\%?''}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{memory-wall.pdf}
+
+\vspace{0.15cm}
+\mlsysalert{Key:}{Moving data costs 1,280$\times$ more energy from HBM than from SRAM. This is physics, not engineering.}
+
+\end{frame}
+
+\begin{frame}{The Widening Gap}
+\note{[3 min] Each GPU generation increases compute faster than bandwidth.
+The ridge point has grown 4x in 7 years. Operations near 200 FLOP/byte
+were compute-bound on V100 but memory-bound on B200.
+Ask: ``What does this mean for your optimization investments?''}
+
+\small
+\renewcommand{\arraystretch}{1.15}
+{\footnotesize
+\begin{tabular}{@{}lrrrr@{}}
+  \toprule
+  \textbf{GPU} & \textbf{Year} & \textbf{FP16 (TFLOPS)} & \textbf{HBM BW (TB/s)} & \textbf{Ridge (FLOP/B)} \\
+  \midrule
+  V100 & 2017 & 125  & 0.9  & 139 \\
+  A100 & 2020 & 312  & 2.0  & 156 \\
+  H100 & 2022 & 989  & 3.35 & 295 \\
+  B200 & 2024 & 4,500 & 8.0  & 563 \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.2cm}
+\begin{mlsyscard}{errorstroke}
+\textbf{36$\times$ compute growth} vs.\ \textbf{8.9$\times$ bandwidth growth} in 7 years.\\
+{\footnotesize More workloads become memory-bound with each generation. Fusion and precision engineering become \emph{more} important, not less.}
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Roofline Model}
+% =============================================================================
+
+\begin{frame}{The Roofline Model}
+\note{[3 min] The roofline gives a quantitative framework. Two ceilings:
+bandwidth (sloped) and compute (flat). The ridge point is where they meet.
+Most transformer inference falls left of the ridge.
+Common error: students think more FLOPS always helps.}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{roofline-model.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Diagnosis:}{If $\AI < \ridge$, you are memory-bound. Faster compute yields zero improvement.}
+
+\end{frame}
+
+\begin{frame}{Where ML Workloads Fall}
+\note{[2 min] Three orders of magnitude separate LLM decode from batched GEMM.
+The key insight is that the SAME model has different bottlenecks depending
+on the operation and batch size.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrll@{}}
+  \toprule
+  \textbf{Operation} & \textbf{AI (FLOP/B)} & \textbf{Regime} & \textbf{Optimization} \\
+  \midrule
+  LLM Decode (batch=1) & $\approx$2 & \textcolor{computestroke}{Deeply mem-bound} & Precision, fusion \\
+  LayerNorm / GELU & $\approx$5 & \textcolor{computestroke}{Memory-bound} & Element-wise fusion \\
+  Attention (naive) & $\approx$10 & \textcolor{computestroke}{Memory-bound} & FlashAttention \\
+  GEMM $4096^2$ FP16 & $\approx$1,365 & \textcolor{errorstroke}{Compute-bound} & Tensor Cores \\
+  Batched GEMM & $>$500 & \textcolor{errorstroke}{Compute-bound} & FP8 compute \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{crimson}
+\textbf{Most transformer inference is memory-bound.} The H100 ridge point is 295 FLOP/byte at FP16. Only large GEMMs exceed it.
+\end{mlsyscard}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: Which Bottleneck Dominates?}
+\note{[2 min] Give students 60 seconds. The answer is memory-bound:
+batch-1 decode has AI $\approx$ 2, far below the ridge of 295.
+Upgrading to a faster GPU (more TFLOPS) would yield zero improvement.}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.5cm}
+{\large A team upgrades from A100 to H100, expecting 3$\times$ faster\\
+LLM inference at batch size 1. They see only 15\% improvement.}
+
+\vspace{0.4cm}
+{\normalsize Why? Which Iron Law term dominates?}
+
+\vspace{0.4cm}
+{\small\textcolor{midgray}{(60 seconds --- write your diagnosis before I reveal)}}
+
+\end{frame}
+
+% =============================================================================
+\section{Operator Fusion}
+% =============================================================================
+
+\begin{frame}{Operator Fusion: Before and After}
+\note{[3 min] Walk through left (unfused) vs right (fused). The key is
+intermediate tensors Z1 and Z2 that the naive path writes to HBM and reads
+back. The fused kernel keeps everything in SRAM.
+Quantify: 32 MB of wasted traffic per layer.}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{operator-fusion.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Impact:}{Fusion reduces HBM transfers from 5 to 2 per layer, saving 32 MB of redundant traffic.}
+
+\end{frame}
+
+\begin{frame}{Fusion Categories}
+\note{[2 min] Three levels of increasing difficulty and impact.
+Element-wise fusion is automatic. Reduction fusion combines normalization.
+Operator-specific fusion (FlashAttention) is the big win but requires
+custom kernel engineering. Cumulative effect: 60-80\% less HBM traffic.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}llrl@{}}
+  \toprule
+  \textbf{Category} & \textbf{Example} & \textbf{Savings} & \textbf{Difficulty} \\
+  \midrule
+  \textbf{Element-wise} & Bias + GELU + Dropout & 64 MB/layer & Automatic \\
+  \textbf{Reduction} & LayerNorm (mean + var) & 48 MB/layer & Moderate \\
+  \textbf{Operator-specific} & FlashAttention & 4 GB/layer & Custom kernel \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize\textbf{CUDA Graphs} eliminate launch overhead:\\
+    30+ kernels $\times$ 70 layers = 15 ms tax $\to$ $<$0.1 ms.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize\textbf{Combined:} Fusion + CUDA Graphs reduce HBM traffic 60--80\% and eliminate non-compute overhead.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{FlashAttention: Tiled Attention}
+\note{[3 min] The key insight: standard attention materializes an NxN matrix
+in HBM (128 MB per head at seq=8192). FlashAttention tiles the computation
+so this matrix never leaves SRAM. Online softmax makes this exact, not
+approximate. Result: 65x reduction in HBM traffic.
+Ask: ``Why can we not just use more HBM?''}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.2cm,keepaspectratio]{flashattention.pdf}
+
+\vspace{0.05cm}
+{\footnotesize\textbf{Key Innovation:} Online softmax computes the \emph{exact} result tile-by-tile, never materializing $N \times N$.}
+
+\end{frame}
+
+% =============================================================================
+\section{Precision}
+% =============================================================================
+
+\begin{frame}{Precision Engineering}
+\note{[3 min] Halving precision doubles effective bandwidth -- the cheapest
+optimization available. Walk through FP16 vs FP8 vs INT4 bit layouts.
+The challenge: LLMs have outlier features that break uniform quantization.
+Four solutions with different trade-offs.}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{precision-engineering.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Principle:}{Fewer bytes per weight = more weights per HBM trip = higher effective bandwidth.}
+
+\end{frame}
+
+\begin{frame}{Quantization Techniques for LLMs}
+\note{[3 min] Four approaches to the outlier problem. LLM.int8() handles
+outliers at runtime. GPTQ uses Hessian for INT4. AWQ is fastest (minutes
+vs hours). SmoothQuant enables W8A8. AWQ is the production default.
+Common error: students think quantization always means quality loss.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lllll@{}}
+  \toprule
+  \textbf{Method} & \textbf{Precision} & \textbf{Approach} & \textbf{Calibration} & \textbf{Use Case} \\
+  \midrule
+  LLM.int8() & W8A-FP16 & Mixed-precision decomp. & Runtime & Safe default \\
+  GPTQ & W4A-FP16 & Hessian-based & Hours & Max compression \\
+  \textbf{AWQ} & W4A-FP16 & Activation-aware & \textbf{Minutes} & \textbf{Production default} \\
+  SmoothQuant & W8A8 & Smooth activations & Offline & Compute-bound \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{PTQ vs.\ QAT:}\\
+    {\scriptsize PTQ first (4 GPU-hours for 70B).\\
+    QAT only if quality fails (3 days on 8$\times$H100).\\
+    QLoRA bridges the gap.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Weight-only vs.\ W+A:}\\
+    {\scriptsize INT4 weight-only at small batch (latency).\\
+    FP8 W+A at large batch (throughput).\\
+    Many systems use both.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Compilation}
+% =============================================================================
+
+\begin{frame}{Graph Compilation Pipeline}
+\note{[3 min] Five stages from Python to optimized kernels. The key insight:
+compilers automate known optimizations. They cannot discover new algorithms
+like FlashAttention or speculative decoding.
+Walk through the pipeline left-to-right.}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{graph-compilation.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Limitation:}{Compilers automate \emph{known} optimizations; human engineers discover \emph{new} ones.}
+
+\end{frame}
+
+\begin{frame}{Three Compilers, Three Contexts}
+\note{[2 min] torch.compile for development (seconds, flexible), XLA for
+large-scale training (minutes, whole-program), TensorRT for production
+inference (30-60 min, maximum throughput). The choice depends on deployment.
+Common error: using TensorRT for research iteration.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  & \textbf{torch.compile} & \textbf{XLA} & \textbf{TensorRT} \\
+  \midrule
+  \textbf{Ecosystem} & PyTorch + GPU & JAX + TPU & NVIDIA inference \\
+  \textbf{Compile time} & Seconds & Minutes & 30--60 min \\
+  \textbf{Speedup} & 10--40\% & 55--65\% MFU & 1.3--1.8$\times$ \\
+  \textbf{Flexibility} & Graph breaks OK & Static graph only & Static shapes \\
+  \textbf{Best for} & Dev \& research & Training at scale & Prod serving \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\mlsysconcept{Trade-off:}{Flexibility $\leftrightarrow$ Performance. More constraints $=$ more optimization opportunity.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Diagnose and Optimize}
+\note{[3 min] Give 90 seconds. Answer: Memory-bound (AI=2, ridge=295).
+Step 1: INT4 quantization (4x BW). Step 2: FlashAttention.
+Step 3: torch.compile. Upgrading FLOPS is useless.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\small\bfseries Diagnose the Bottleneck}
+
+    \vspace{0.1cm}
+    A 70B LLM serves batch-1 decode on an H100:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Arithmetic Intensity $\approx$ 2 FLOP/byte
+      \item H100 ridge point = 295 FLOP/byte
+      \item Achieved BW = 2.8 TB/s (84\% of peak)
+      \item MFU = 2\%
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{1.} Is this compute-bound or memory-bound?\\
+    \textbf{2.} Name the top 3 optimizations \emph{in order}.\\
+    \textbf{3.} Would upgrading to B200 (2$\times$ FLOPS) help?
+
+    {\scriptsize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize\textbf{Solution:}\\[0.05cm]
+    1. \textcolor{computestroke}{\textbf{Memory-bound}} (AI $\ll$ ridge)\\[0.05cm]
+    2. a) INT4 quant (4$\times$ BW)\\
+    \quad b) FlashAttention (65$\times$)\\
+    \quad c) torch.compile (10--40\%)\\[0.05cm]
+    3. B200 has $2\times$ FLOPS but workload is BW-limited. \textbf{No help.}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Algorithmic}
+% =============================================================================
+
+\begin{frame}{Speculative Decoding}
+\note{[3 min] The key insight: LLM decode is memory-bound because each token
+loads the full weight matrix. Speculative decoding uses a small draft model
+to predict k tokens, then the target model verifies all k in one pass.
+The target's weights are loaded once for k tokens instead of once per token.
+Speedup: 1.5-3x. Best at batch=1.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Problem:} Each decode step loads full weights from HBM for \emph{one} token. AI $\approx$ 2 FLOP/byte.
+
+    \vspace{0.1cm}
+    \textbf{Speculative Decoding:}
+    \begin{enumerate}\setlength\itemsep{0pt}
+      \item \textcolor{datastroke}{Draft model} generates $k$ candidates (fast)
+      \item \textcolor{computestroke}{Target model} verifies all $k$ in \textbf{one} pass
+      \item Accepted tokens: mathematically identical output
+      \item Rejected tokens: ``wasted'' compute (but compute is free!)
+    \end{enumerate}
+
+    \vspace{0.05cm}
+    \mlsysconcept{Trade:}{Abundant compute for scarce bandwidth.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize\textbf{Why it works:} Target loads weights \textbf{once} for $k$ tokens instead of once per token. Effective AI increases by $k\times$. Speedup: \textbf{1.5--3$\times$} typical.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize\textbf{Caveat:} Best at batch=1 (memory-bound). At large batches, speculation adds overhead.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Mixture of Experts (MoE)}
+\note{[3 min] MoE decouples model capacity from inference cost. A 1T dense
+model would need 2 TB of memory. An MoE with 370B total but 37B active
+per token achieves similar quality at 27x less compute per token.
+DeepSeek-V3: 671B total, 37B active. Challenge: AllToAll communication
+and load balancing.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Break the capacity-cost link:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Replace FFN with $N$ parallel ``expert'' FFNs
+      \item Lightweight \textbf{router} selects top-$k$ experts/token
+      \item Only $k/N$ of parameters activate per token
+    \end{itemize}
+
+    \vspace{0.05cm}
+    {\scriptsize
+    \renewcommand{\arraystretch}{1.05}
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      & \textbf{Dense 1T} & \textbf{MoE 370B/37B} \\
+      \midrule
+      Total params  & 1,000B & 370B \\
+      Active/token  & 1,000B & 37B \\
+      Memory (FP16) & 2,000 GB & 740 GB \\
+      Compute ratio & 1$\times$ & 27$\times$ less \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize\textbf{DeepSeek-V3:} 671B total, 37B active. 256 experts, top-8 routing. Near GPT-4 quality at fraction of cost.}
+    \end{mlsyscard}
+
+    \vspace{0.08cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize\textbf{System Challenges:}\\
+    $\bullet$ AllToAll communication\\
+    $\bullet$ Load balancing across experts\\
+    $\bullet$ Training instability ($>$64 experts)
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Profiling}
+% =============================================================================
+
+\begin{frame}{System Profiling: Measure First}
+\note{[3 min] The engineer who spent 2 weeks on a CUDA kernel that yielded
+zero improvement because the system was I/O bound. Profiling has four levels.
+The key workflow: app-level to find symptoms, trace-level to find gaps,
+kernel-level to diagnose. Never skip levels.}
+
+\footnotesize
+\textbf{Four-Level Profiling Hierarchy}
+
+\vspace{0.05cm}
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}llp{5cm}@{}}
+  \toprule
+  \textbf{Level} & \textbf{Tool} & \textbf{What It Reveals} \\
+  \midrule
+  Application & Custom metrics & Tokens/s, TTFT, P99 latency \\
+  Distributed & Nsight Systems & Comm patterns, load imbalance \\
+  Trace & PyTorch Profiler & Kernel timeline, GPU idle gaps \\
+  Kernel & Nsight Compute & Achieved BW, occupancy, cache misses \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.05cm}
+\scriptsize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{crimson}
+    {\scriptsize\textbf{Key Metrics:}\\
+    $\bullet$ \textbf{MFU}: training (40--60\% typical)\\
+    $\bullet$ \textbf{MBU}: inference (85\% = near-optimal)\\
+    $\bullet$ \textbf{TTFT}: time-to-first-token ($<$500 ms)\\
+    $\bullet$ \textbf{ITL}: inter-token latency ($<$50 ms)}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize\textbf{MFU misleads for inference.} Decode may show 2\% MFU but 85\% MBU --- the system is near-optimal. Use MBU for inference, MFU for training.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Iron Law Diagnostic Flowchart}
+\note{[3 min] Walk through the flowchart: profile first, classify the
+bottleneck, then apply the right technique. The critical insight: each
+optimization shifts the bottleneck, requiring reprofiling.
+Common error: applying all optimizations without measuring.}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{diagnostic-flow.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{Every optimization shifts the bottleneck. The profile-optimize-reprofile loop never ends.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: The Optimization Trap}
+\note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
+The point: you must reprofile after each step. INT4 may shift the
+bottleneck from memory to compute, making further bandwidth optimization
+useless.}
+
+\centering
+\vspace{0.8cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.5cm}
+{\large A team applies INT4 quantization (4$\times$ bandwidth savings)\\
+to their memory-bound serving system.\\[0.2cm]
+Throughput improves by only 2$\times$, not 4$\times$.}
+
+\vspace{0.4cm}
+\alert{What happened? What should they do next?}
+
+\vspace{0.3cm}
+{\small\textcolor{midgray}{Hint: think about what the bottleneck became \emph{after} quantization.}}
+
+\end{frame}
+
+% =============================================================================
+\section{The Playbook}
+% =============================================================================
+
+\begin{frame}{The Optimization Playbook}
+\note{[3 min] Walk through the five-step sequence. The principle: passive
+optimizations first (compiler, library swaps), active ones last
+(algorithmic changes). Each step validated by reprofiling.
+The order is critical: torch.compile costs 1 line, speculation costs weeks.}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{optimization-playbook.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Principle:}{Passive optimizations first $\to$ active changes last. Reprofile after every step.}
+
+\end{frame}
+
+\begin{frame}{Case Study: 70B LLM Optimization}
+\note{[3 min] Walk through the compounding effects. INT4 frees memory for
+larger batches, which changes arithmetic intensity, which determines the
+next optimization. Emphasize the iterative nature.
+If short: show just the summary table.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lrrrl@{}}
+  \toprule
+  \textbf{Step} & \textbf{Throughput} & \textbf{Latency} & \textbf{Gain} & \textbf{Mechanism} \\
+  \midrule
+  Baseline (FP16) & 80 tok/s & 50 ms ITL & --- & Unoptimized \\
+  + torch.compile & 100 tok/s & 42 ms & 1.25$\times$ & Fusion + kernel select \\
+  + AWQ INT4 & 280 tok/s & 35 ms & 2.8$\times$ & 4$\times$ less weight BW \\
+  + FlashAttention & 350 tok/s & 30 ms & 1.25$\times$ & O(N) attention HBM \\
+  + KV INT8 cache & 600 tok/s & 45 ms & 1.7$\times$ & 2$\times$ batch size \\
+  + Spec.\ decoding & 600 tok/s & 22 ms & lat.\ 2$\times$ & Draft model parallel \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{crimson}
+\textbf{7.5$\times$ total throughput}, \textbf{2.3$\times$ latency reduction} from the same hardware.\\
+{\scriptsize Each optimization shifted the bottleneck. INT4 $\to$ larger batch $\to$ compute-bound $\to$ new optimization target.}
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Three common misconceptions with quantitative evidence.}
+
+\small
+\textbf{Fallacy:} \textit{More FLOPS means faster inference.}\\
+{\footnotesize Most inference is memory-bound. A GPU with 2$\times$ FLOPS but the same bandwidth generates tokens at the same speed. Correct metric: bandwidth, not FLOPS.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{FP8 always halves training time.}\\
+{\footnotesize FP8 doubles peak TFLOPS and effective BW, but only for precision-sensitive operations. Element-wise ops are launch-overhead bound. Communication-bound steps gain nothing.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Graph compilers eliminate manual kernel engineering.}\\
+{\footnotesize FlashAttention required recognizing that attention could be tiled with online softmax --- an insight beyond any compiler's rewrite rules. Compilers automate known optimizations; humans discover new ones.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Four operational pitfalls. Focus on the first two if short on time.}
+
+\scriptsize
+\textbf{Pitfall:} \textit{Optimizing the largest kernel while ignoring the long tail.}\\
+When the GEMM is near-optimal, dozens of smaller ops can consume $>$50\% of time. Graph compilation addresses this tail.
+
+\vspace{0.08cm}
+\textbf{Pitfall:} \textit{Quantizing everything to the lowest precision.}\\
+INT4 weights + INT4 KV + FP8 activations can degrade quality invisibly. Targeted quantization: aggressive for KV cache, conservative for first/last layers.
+
+\vspace{0.08cm}
+\textbf{Pitfall:} \textit{Measuring throughput without measuring quality.}\\
+200 tok/s with 15\% quality loss $\neq$ better than 100 tok/s at full quality. Optimize on the throughput vs.\ quality Pareto frontier.
+
+\vspace{0.08cm}
+\textbf{Pitfall:} \textit{A single profiling run characterizes performance.}\\
+Thermal throttling (10--15\%), fragmentation, and congestion vary. Profile under sustained conditions.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Walk around the room. Do NOT show the next slide yet.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Quantitative anchors:
+295 FLOP/byte ridge, 65x FlashAttention, 4x INT4, 7.5x total in case study.}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{Memory Wall}: Most transformer inference is memory-bound (AI $\ll$ 295 FLOP/byte). Reduce bytes moved, not operations computed.
+  \item \textbf{Roofline Model}: Diagnose compute-bound vs.\ memory-bound \emph{before} optimizing. Wrong-term optimization yields zero improvement.
+  \item \textbf{Operator Fusion}: FlashAttention reduces attention HBM traffic 65$\times$ via tiling + online softmax. CUDA Graphs eliminate launch overhead.
+  \item \textbf{Precision}: INT4 (AWQ) gives 4$\times$ effective bandwidth. Block-wise quantization handles LLM outlier features.
+  \item \textbf{Graph Compilation}: torch.compile (1 line, 10--40\%), XLA (55--65\% MFU), TensorRT (1.3--1.8$\times$).
+  \item \textbf{Algorithmic}: Speculative decoding trades compute for latency (1.5--3$\times$). MoE decouples capacity from cost.
+  \item \textbf{Profile-Optimize-Reprofile}: Every optimization shifts the bottleneck. The iterative loop is the discipline.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Dao+22}{Dao et al. ``FlashAttention: Fast and Memory-Efficient Exact Attention.'' NeurIPS 2022.}
+\mlsysref{Williams+09}{Williams, Waterman, Patterson. ``Roofline: An Insightful Visual Performance Model.'' CACM 2009.}
+\mlsysref{Dettmers+22}{Dettmers et al. ``LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale.'' NeurIPS 2022.}
+\mlsysref{Lin+24}{Lin et al. ``AWQ: Activation-Aware Weight Quantization.'' MLSys 2024.}
+\mlsysref{Leviathan+23}{Leviathan et al. ``Fast Inference from Transformers via Speculative Decoding.'' ICML 2023.}
+\mlsysref{DeepSeek24}{DeepSeek-AI. ``DeepSeek-V3 Technical Report.'' 2024.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Edge Intelligence}
+\note{[1 min] Forward hook. Performance engineering optimizes within the
+datacenter. But what happens when the model must run on devices with
+1,000x less memory and 10,000x less compute? Edge Intelligence brings
+these constraints to the extreme.}
+
+\footnotesize
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\large\bfseries Cloud}\\[0.1cm]
+    {\footnotesize 80 GB HBM\\989 TFLOPS\\700 W}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    {\large\bfseries Edge}\\[0.1cm]
+    {\footnotesize 32 GB LPDDR5\\100 TOPS\\15--40 W}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{errorstroke}
+    {\large\bfseries TinyML}\\[0.1cm]
+    {\footnotesize 384 KB SRAM\\0.5 GFLOPS\\100 mW}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.3cm}
+\centering
+{\normalsize When the model \emph{must} run where the data lives,}\\[0.1cm]
+{\small\textbf{every optimization technique from today becomes a survival skill.}}
+
+\end{frame}
+
+\end{document}

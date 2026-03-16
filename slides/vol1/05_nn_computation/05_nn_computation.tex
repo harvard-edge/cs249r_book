@@ -1,0 +1,904 @@
+% =============================================================================
+% Chapter 5: Neural Network Computation — ML Systems Lecture Slides
+% =============================================================================
+% SVGs needed (all in images/):
+%   - ch05-three-paradigms.pdf    - ch05-neuron-anatomy.pdf
+%   - ch05-activation-functions.pdf - ch05-mnist-architecture.pdf
+%   - ch05-forward-backward.pdf   - ch05-training-memory.pdf
+%   - ch05-inference-pipeline.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume   = {Volume I},
+  chapter  = {Chapter 5},
+  logo = {../../assets/img/logo-mlsysbook.png},
+  instlogo = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Neural Network Computation},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
+\newcommand{\MAC}{\text{MAC}}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{7}
+
+\title{Neural Network Computation}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Neural Network Computation}{The Math Behind the Model}{cover_nn_computation.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Read objectives aloud. Emphasize: this chapter is about the
+\emph{computational workload} that neural networks create, not about how to
+use a framework. Ask: ``How many of you have trained a model but never
+thought about why training uses 4$\times$ more memory than inference?''}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item Explain how the shift from \textbf{rules to arithmetic} creates a 1,092$\times$ compute explosion
+  \item Describe \textbf{neuron}, \textbf{layer}, \textbf{weight}, \textbf{bias}, and \textbf{activation function} as workloads
+  \item Compare \textbf{activation functions} (sigmoid, tanh, ReLU) for hardware cost
+  \item Explain \textbf{forward propagation} as a chain of matrix multiplications
+  \item Explain \textbf{backpropagation} and why it costs $\sim$2$\times$ the forward pass
+  \item Calculate \textbf{training memory} (weights + gradients + optimizer + activations)
+  \item Trace the complete \textbf{inference pipeline} and identify non-model latency
+  \item Connect neural computation to the \textbf{\DAM{} taxonomy}
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{Logic to Arithmetic}
+% =============================================================================
+
+\begin{frame}{The Silicon Contract}
+\note{[2 min] Bridge from prior chapters. The Iron Law (Ch1) established that
+every model makes a computational bargain with hardware. This chapter reveals
+what those computations actually are. The operators inside a neural network
+determine memory consumption, execution time, and energy expenditure.
+Ask: ``If the model code just says `multiply these matrices,' where is the bug?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    The \textbf{Iron Law} (Ch 1) decomposes performance:
+
+    \vspace{0.1cm}
+    $$T = \frac{D_{\text{vol}}}{BW} + \frac{O}{R_{\text{peak}} \cdot \eta} + L_{\text{lat}}$$
+
+    \vspace{0.1cm}
+    Neural networks define \emph{what} fills those terms:
+
+    \vspace{0.1cm}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textcolor{computestroke}{\textbf{O}}: matrix multiplications
+      \item \textcolor{datastroke}{\textbf{D}}: weight + activation traffic
+      \item \textcolor{errorstroke}{\textbf{L}}: pipeline overhead
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \mlsysalert{Key:}{The ``bug'' in neural networks is rarely a syntax error---it is a numerical instability.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{crimson}
+    \textbf{From Logic to Arithmetic}\\[0.1cm]
+    {\footnotesize Rule-based: \texttt{if-then-else}\\
+    Neural net: massive \textbf{multiply-accumulate}\\[0.1cm]
+    The shift changes everything: bugs become gradient explosions, saturating activations, memory exhaustion.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Three Paradigms, One Digit}
+\note{[3 min] This is the chapter's central comparison. Walk through the same
+$28\times28$ digit across three paradigms. The 1,092$\times$ compute explosion
+is the visceral number. Ask: ``Where does each paradigm sit on the Iron Law?''
+Common error: students think more compute is always bad.}
+
+% --- Full-width image ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch05-three-paradigms.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Pattern:}{Each paradigm buys representation power at exponential systems cost.}
+
+\end{frame}
+
+\begin{frame}{The Compute Explosion in Numbers}
+\note{[2 min] Quantitative backing for the diagram. Walk through the table.
+Key insight: memory also jumps---from fitting in L1 cache to exceeding it.
+If short: just emphasize the 1,092$\times$ ratio and the cache threshold.}
+
+\small
+\renewcommand{\arraystretch}{1.2}
+{\footnotesize
+\begin{tabular}{@{}llrrr@{}}
+  \toprule
+  \textbf{Paradigm} & \textbf{Method} & \textbf{Operations} & \textbf{Memory} & \textbf{Hardware} \\
+  \midrule
+  Rule-Based    & Pixel thresholds     & $\sim$100        & 784 B   & Any CPU \\
+  Classical ML  & HOG + SVM            & $\sim$8,000      & $\sim$2 KB  & CPU + SIMD \\
+  Neural Net    & 784-128-64-10 MLP    & \textbf{109,184 MACs} & \textbf{$\sim$427 KB} & GPU / Accel. \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.1cm}
+\mlsysconcept{Compute:}{1,092$\times$ increase (logic $\to$ matrix arithmetic).}
+\hfill
+\mlsysalert{Memory:}{546$\times$ increase (784 B $\to$ 427 KB, exceeds L1 cache).}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: What Is a Neuron Computing?}
+\note{[2 min] Prediction exercise before revealing the neuron. Give students
+60 seconds. Do NOT reveal yet. This primes the MAC concept.
+Ask 2--3 students: ``What mathematical operation does a neuron perform?''}
+
+\centering
+\vspace{0.8cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.5cm}
+{\large A neural network with 784 inputs and 128 neurons\\
+needs 100,352 multiply-accumulate operations.\\[0.2cm]
+\alert{What is each neuron computing?}}
+
+\vspace{0.5cm}
+{\normalsize Write your answer in one equation. \textcolor{midgray}{(60 seconds)}}
+
+\vspace{0.4cm}
+{\small\textcolor{lightgray}{Turn to a neighbor and compare.}}
+
+\end{frame}
+
+% =============================================================================
+\section{NN Fundamentals}
+% =============================================================================
+
+\begin{frame}{Anatomy of a Neuron}
+\note{[3 min] Reveal after prediction. The neuron computes a weighted sum
+plus bias, then applies a nonlinear activation. The MAC is the atomic
+operation. N inputs $\to$ N MACs. Emphasize: this is NOT a biological
+neuron---it is a computational primitive.
+Ask: ``How many memory accesses does one neuron need?''}
+
+% --- Full-width image ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{ch05-neuron-anatomy.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Key:}{$y = f\bigl(\sum_{i=1}^{N} x_i w_i + b\bigr)$ --- N MACs per neuron, M$\times$N MACs per layer.}
+
+\end{frame}
+
+\begin{frame}{Why Depth Matters}
+\note{[2 min] Compositionality: complex patterns decompose into simpler ones.
+Layer 1 learns edges, Layer 2 combines into shapes, Layer 3 into digits.
+The exponential advantage: L layers can represent functions requiring
+exponentially more neurons in a single layer.
+Common error: students think ``deeper = always better.''}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Hierarchical decomposition:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textbf{Layer 1}: Edge detectors (vertical, horizontal, diagonal)
+      \item \textbf{Layer 2}: Shape combos (``7'' top stroke + downstroke)
+      \item \textbf{Layer 3}: Complete digit patterns
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Parameter reuse}: same edge detectors serve all digits.\\
+    Deep: 100K params represent patterns needing millions in a shallow net.
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}lp{3cm}@{}}
+      \toprule
+      & \textbf{Trade-off} \\
+      \midrule
+      \textbf{Deeper} & More expressive, slower, gradient risk \\
+      \textbf{Wider}  & More parallel, less expressive \\
+      \bottomrule
+    \end{tabular}
+
+    \vspace{0.1cm}
+    10 layers $\times$ 100 neurons = same params as 2 layers $\times$ 500 neurons, but very different compute profiles.
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{MNIST Architecture: 784-128-64-10}
+\note{[3 min] Walk through the MNIST running example. Key insight: Layer 1
+contains 92\% of all parameters and MACs. 427 KB exceeds L1 cache.
+This is a small network---imagine GPT-scale!
+Ask: ``Which layer would you optimize first?''}
+
+% --- Full-width image ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch05-mnist-architecture.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Systems insight:}{427 KB exceeds L1 cache ($\sim$64 KB)---every inference forces memory traffic.}
+
+\end{frame}
+
+% =============================================================================
+\section{Activations \& Memory}
+% =============================================================================
+
+\begin{frame}{Activation Functions: Math Meets Silicon}
+\note{[3 min] Three functions, same job (introduce nonlinearity), vastly
+different hardware costs. Sigmoid needs $\sim$10K transistors (exp, division);
+ReLU needs $\sim$10 (one comparison). The 1,000$\times$ gap drove the
+industry shift. Key insight: activation choice is both mathematical and
+architectural. Common error: students think sigmoid is ``better'' because
+it is bounded.}
+
+% --- Full-width image ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{ch05-activation-functions.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Engineering choice:}{ReLU dominates because $\max(0,x)$ is 1,000$\times$ cheaper than $e^{-z}$ on silicon.}
+
+\end{frame}
+
+\begin{frame}{Vanishing Gradients: The Depth Ceiling}
+\note{[2 min] Sigmoid gradient peaks at 0.25. Through 20 layers:
+$0.25^{20} \approx 10^{-12}$---effectively zero. ReLU gradient is 1 for
+positive inputs. This is why deep networks became tractable with ReLU.
+Common error: students think vanishing gradients are a ``bug'' rather than
+a mathematical consequence of activation choice.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Why sigmoid kills deep networks:}
+
+    \vspace{0.15cm}
+    Sigmoid max gradient: $\sigma'(z) = 0.25$
+
+    \vspace{0.1cm}
+    After $L$ layers (chain rule):
+    $$\prod_{l=1}^{L} \sigma'(z_l) \leq 0.25^L$$
+
+    \vspace{0.1cm}
+    At $L = 20$: $0.25^{20} \approx 10^{-12}$
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize Gradients vanish to zero. Loss plateaus. Learning becomes \textbf{mathematically impossible}.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.2cm}
+    \textbf{ReLU solves this:}
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Activation} & \textbf{Gradient} \\
+      \midrule
+      Sigmoid & $\leq 0.25$ \\
+      Tanh    & $\leq 1.0$ \\
+      \textcolor{datastroke}{\textbf{ReLU}} & \textcolor{datastroke}{\textbf{1 or 0}} \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    {\footnotesize ReLU gradient = 1 for positive inputs $\to$ no decay through layers.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Training Memory Breakdown}
+\note{[3 min] This is the ``why 80 GB GPUs'' slide. Walk through:
+Inference needs only weights (427 KB for MNIST, 28 GB for GPT-7B).
+Training adds gradients (1$\times$), Adam state (2$\times$), activations.
+Total: $\sim$4$\times$ more memory. At GPT-7B scale: 84+ GB before activations.
+Ask: ``What happens if your model needs 90 GB but your GPU has 80 GB?''}
+
+% --- Full-width image ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch05-training-memory.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{Inference needs only weights; training adds gradients, optimizer state, and activations.}
+
+\end{frame}
+
+% =============================================================================
+\section{Learning Process}
+% =============================================================================
+
+\mlsysfocus{The Training Loop}{%
+Forward Pass $\to$ Loss $\to$ Backpropagation $\to$ Weight Update\\[0.3cm]
+\normalsize $\hat{y} = f(x; \theta)$ \quad $\mathcal{L} = \text{CrossEntropy}(\hat{y}, y)$ \quad $\theta \leftarrow \theta - \alpha \nabla_\theta \mathcal{L}$%
+}
+
+\begin{frame}{Forward Pass: Prediction}
+\note{[3 min] Walk through the forward pass layer by layer.
+Input (784) $\to$ Linear + ReLU (128) $\to$ Linear + ReLU (64) $\to$ Linear + Softmax (10).
+Each linear layer is a matrix multiplication. The entire forward pass is a chain
+of GEMM + activation. This is why GPUs dominate: GEMM is their sweet spot.
+Ask: ``How many FLOPs for the forward pass of MNIST?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Layer-by-layer computation:}
+
+    \vspace{0.1cm}
+    {\scriptsize
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}llr@{}}
+      \toprule
+      \textbf{Layer} & \textbf{Operation} & \textbf{MACs} \\
+      \midrule
+      $784\!\times\!128$ & $\text{ReLU}(\mathbf{x}\mathbf{W}^{(1)}\!+\!\mathbf{b}^{(1)})$ & 100,352 \\
+      $128\!\times\!64$  & $\text{ReLU}(\mathbf{A}^{(1)}\mathbf{W}^{(2)}\!+\!\mathbf{b}^{(2)})$ & 8,192 \\
+      $64\!\times\!10$   & $\text{Softmax}(\mathbf{A}^{(2)}\mathbf{W}^{(3)}\!+\!\mathbf{b}^{(3)})$ & 640 \\
+      \midrule
+      & \textbf{Total} & \textbf{109,184} \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.2cm}
+    \begin{mlsyscard}{computestroke}
+    \textbf{92\% of MACs} are in Layer 1\\[0.1cm]
+    {\footnotesize The first layer dominates because it connects \emph{every} input pixel to \emph{every} neuron.}
+    \end{mlsyscard}
+
+    \vspace{0.15cm}
+    \mlsysconcept{GEMM:}{Over 90\% of neural network FLOPs are dense matrix multiplications.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Loss Functions: Measuring Error}
+\note{[2 min] Cross-entropy loss for classification. Key properties:
+(1) penalizes confident wrong predictions heavily (log goes to infinity),
+(2) gradient is strongest near the decision boundary where it matters most.
+Contrast with MSE which gives weak gradients near 0 and 1.
+If short: just show the formula and the ``confident wrong = infinite penalty'' insight.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Cross-Entropy Loss} (classification):
+
+    \vspace{0.1cm}
+    $$\mathcal{L} = -\sum_{c=1}^{C} y_c \log(\hat{y}_c)$$
+
+    \vspace{0.1cm}
+    For MNIST ($C = 10$): true label is one-hot,\\
+    so only one term survives: $\mathcal{L} = -\log(\hat{y}_{\text{true}})$
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize A confident \emph{wrong} prediction ($\hat{y}_{\text{true}} \to 0$) produces $\mathcal{L} \to \infty$---strong gradient signal exactly where needed.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.2cm}
+    \renewcommand{\arraystretch}{1.15}
+    {\footnotesize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      $\hat{y}_{\text{true}}$ & Loss \\
+      \midrule
+      0.90 & 0.105 \\
+      0.50 & 0.693 \\
+      0.10 & \textcolor{errorstroke}{\textbf{2.303}} \\
+      0.01 & \textcolor{errorstroke}{\textbf{4.605}} \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    {\footnotesize Wrong $\to$ huge loss $\to$ large gradient $\to$ fast correction.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Forward and Backward Pass}
+\note{[3 min] The central computational diagram. Forward: N ops (one MatMul
+per layer). Backward: $\sim$2N ops (3 gradients per layer: dW, db, dA).
+Total training cost: $\sim$3N per sample. Activations must be cached during
+forward for use in backward---this is why training needs more memory.
+Ask: ``Why can't we just recompute activations instead of storing them?''
+(Answer: we can---gradient checkpointing, covered in later chapters.)}
+
+% --- Full-width image ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch05-forward-backward.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Key distinction:}{Backprop \emph{computes} gradients; gradient descent \emph{applies} updates---they are not the same.}
+
+\end{frame}
+
+\begin{frame}{Gradient Descent: The Update Rule}
+\note{[2 min] Simple formula: $\theta \leftarrow \theta - \alpha \nabla \mathcal{L}$.
+Learning rate $\alpha$ is the single most important hyperparameter.
+Too large: overshoots and diverges. Too small: stuck in local minima.
+Adam maintains per-parameter rates (3$\times$ memory cost).
+If short: focus on the learning rate sensitivity, skip Adam details.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{Weight update:}
+    $$\theta^{(t+1)} = \theta^{(t)} - \alpha \cdot \nabla_\theta \mathcal{L}$$
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \begin{tabular}{@{}ll@{}}
+      $\theta$ & All weights and biases \\
+      $\alpha$ & Learning rate \\
+      $\nabla_\theta \mathcal{L}$ & Gradient from backprop \\
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysalert{Critical:}{$\alpha$ too large $\to$ divergence. $\alpha$ too small $\to$ stagnation.}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \vspace{0.1cm}
+    \textbf{Optimizer memory cost:}
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Optimizer} & \textbf{Memory} \\
+      \midrule
+      SGD   & 1$\times$ params \\
+      Momentum & 2$\times$ params \\
+      \textbf{Adam} & \textbf{3$\times$ params} \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    {\footnotesize Adam stores first \emph{and} second moment estimates per parameter. For 7B params in FP32: \textbf{56 GB} optimizer state alone.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Training Memory Budget}
+\note{[3 min] Give students 90 seconds. Answer: Weights = 1M $\times$ 4B = 4 MB.
+Gradients = 4 MB. Adam = 8 MB. Total = 16 MB minimum.
+Activations add more depending on batch size. The 4$\times$ rule holds.
+If the GPU has 4 GB, the model fits with room to spare for activations.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Calculate Training Memory}
+
+    \vspace{0.2cm}
+    A network has 1 million parameters in FP32 (4 bytes each). You use the Adam optimizer.
+
+    \vspace{0.15cm}
+    \textbf{Calculate} the minimum memory for:
+    \begin{enumerate}
+      \item Weights
+      \item Gradients
+      \item Adam optimizer state
+      \item Total (excluding activations)
+    \end{enumerate}
+
+    {\footnotesize\textcolor{midgray}{(90 seconds---then compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{computestroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    Weights: $10^6 \times 4$ = \textbf{4 MB}\\
+    Gradients: $10^6 \times 4$ = \textbf{4 MB}\\
+    Adam ($m + v$): $2 \times 4$ = \textbf{8 MB}\\[0.1cm]
+    Total: \textbf{16 MB} (4$\times$ inference)\\[0.1cm]
+    \textcolor{computestroke}{$+$ activations (batch-dependent)}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Batch Size: A Systems Lever}
+\note{[2 min] Batch size is not just a statistical choice---it is a systems
+decision. Larger batches: better GPU utilization (matrix parallelism),
+more stable gradients, but more memory. Smaller batches: noisier gradients,
+less memory, potentially better generalization.
+The key insight: batch size moves you along the roofline from memory-bound
+to compute-bound.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Dual purpose of batching:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textbf{Statistical}: averages noise across examples
+      \item \textbf{Systems}: saturates parallel hardware
+    \end{itemize}
+
+    \vspace{0.1cm}
+    {\footnotesize GPUs process 32 inputs with nearly the same latency as 1---MatMul parallelizes across the batch dimension.}
+
+    \vspace{0.1cm}
+    \mlsysalert{Trade-off:}{Doubling batch $\approx$ doubles activation memory---a hardware-memory decision.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      \textbf{Batch} & \textbf{GPU Util.} & \textbf{Memory} \\
+      \midrule
+      1   & Very low    & Minimal \\
+      32  & Moderate    & 32$\times$ act. \\
+      256 & Near peak   & 256$\times$ act. \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    {\footnotesize MNIST batch=1: AI $\sim$0.5 FLOPs/byte (memory-bound). Batch=256: AI $\sim$128 (compute-bound).}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Inference Pipeline}
+% =============================================================================
+
+\begin{frame}{Training vs.\ Inference: Two Contracts}
+\note{[2 min] Training optimizes throughput (large batches, hours of compute).
+Inference optimizes latency (single samples, milliseconds). Same architecture,
+completely different resource profiles. Training: 400--700 W GPUs with cooling.
+Inference: 2--4 W mobile chips, edge devices.
+Ask: ``Why does inference need only half the memory?''}
+
+\small
+\renewcommand{\arraystretch}{1.15}
+{\footnotesize
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  & \textbf{Training} & \textbf{Inference} \\
+  \midrule
+  \textbf{Pass}      & Forward + backward   & Forward only \\
+  \textbf{Batch}     & Large, fixed          & Variable, often 1 \\
+  \textbf{Memory}    & W + grad + optim + act & Weights only \\
+  \textbf{Optimize}  & Throughput (samples/s) & Latency (ms) \\
+  \textbf{Hardware}  & 400--700 W GPU cluster & 2--40 W edge/mobile \\
+  \textbf{Precision} & FP32 / mixed           & INT8 / FP16 \\
+  \textbf{Duration}  & Hours to weeks         & Milliseconds \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{crimson}
+{\footnotesize \textbf{The Silicon Contract shifts}: training bargains for throughput on high-power hardware; inference bargains for latency on constrained devices.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{The Complete Inference Pipeline}
+\note{[3 min] Most important operational slide. The model is 36\% of total
+latency---pre/post-processing are 64\%. At 55 ms total, we exceed a 50 ms
+budget despite 20 ms inference. Teams that optimize only model inference
+miss the majority of latency.
+Ask: ``If you could cut inference to 10 ms, would you meet the budget?''
+(Answer: still 45 ms total, which is barely under.)}
+
+% --- Full-width image ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch05-inference-pipeline.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{The model is not the system---the complete pipeline determines user experience.}
+
+\end{frame}
+
+\begin{frame}{USPS: A Real Deployment Story}
+\note{[3 min] Ground the theory in a real deployment. The USPS digit
+recognition system (LeNet, 1990s) processed handwritten ZIP codes at
+1,000 digits/second with $<$1\% rejection rate. 10--15\% uncertain cases
+routed to humans. The complete pipeline: scanner $\to$ segmentation $\to$
+normalization $\to$ LeNet inference $\to$ confidence check $\to$ routing.
+Ask: ``What would happen without the confidence threshold?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{USPS Digit Recognition (1990s):}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textbf{Task}: Read ZIP codes from mail
+      \item \textbf{Model}: LeNet (early CNN)
+      \item \textbf{Throughput}: 1,000 digits/second
+      \item \textbf{Rejection}: $<$1\% error rate
+      \item \textbf{Human fallback}: 10--15\% uncertain cases
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \mlsysconcept{Systems lesson:}{The confidence threshold was more important than the model accuracy.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.1cm}
+    \textbf{Complete pipeline:}
+
+    \vspace{0.1cm}
+    {\footnotesize
+    1. Scanner captures image\\
+    2. Segment individual digits\\
+    3. Normalize ($28\times28$)\\
+    4. LeNet forward pass\\
+    5. \textcolor{errorstroke}{\textbf{Confidence check}}\\
+    6. Route (machine vs.\ human)
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{routingstroke}
+    {\footnotesize Domain experts set the threshold based on economics, not accuracy metrics.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\mlsyscite{LeCun et al., ``Gradient-Based Learning,'' Proc. IEEE, 1998}
+
+\end{frame}
+
+% =============================================================================
+\section{DAM Revisited}
+% =============================================================================
+
+\begin{frame}{Neural Computation Through the D\raisebox{0.04em}{\tiny$\bullet$}A\raisebox{0.04em}{\tiny$\bullet$}M Lens}
+\note{[3 min] Connect everything back to the Ch1 framework.
+Algorithm: forward/backward pass, activation choice, architecture.
+Data: labeled examples, batch composition, data quality.
+Machine: matrix hardware, memory hierarchy, power envelope.
+The USPS system succeeded because all three aligned.
+Ask: ``For MNIST on a modern GPU, which DAM axis is the bottleneck?''}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lp{6.5cm}l@{}}
+  \toprule
+  \textbf{Axis} & \textbf{Neural Computation Connection} & \textbf{Iron Law} \\
+  \midrule
+  \textcolor{computestroke}{\textbf{Algorithm}} & Architecture (layers, neurons, activations), forward + backward pass, ReLU vs.\ sigmoid (1,000$\times$ cost) & $O$ term \\
+  \textcolor{datastroke}{\textbf{Data}} & 60K labeled MNIST images, batch composition, data quality determines learning success & $D_{\text{vol}}/BW$ \\
+  \textcolor{routingstroke}{\textbf{Machine}} & GEMM $\to$ GPU parallelism, 427 KB $>$ L1 cache, Adam 3$\times$ memory drives GPU capacity & $R_{\text{peak}} \cdot \eta$ \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{crimson}
+{\footnotesize \textbf{Diagnostic:} When performance stalls, ask \emph{where} in D$\cdot$A$\cdot$M is the flow blocked? The USPS system succeeded because all three aligned: LeNet matched the task (A), diverse handwriting captured variation (D), specialized hardware met latency (M).}
+\end{mlsyscard}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Where Is the Bottleneck?}
+\note{[3 min] Turn-and-talk. The answer depends on the scenario.
+MNIST on GPU: memory-bound (arithmetic intensity $\sim$0.5, GPU barely used).
+MNIST on CPU: likely fine (427 KB fits in cache, 109K ops trivial).
+GPT-7B training: compute-bound (massive MatMuls saturate GPU).
+GPT-7B inference: memory-bandwidth bound (autoregressive decoding).
+Cold-call 2--3 pairs.}
+
+\centering
+\vspace{0.8cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.6cm}
+{\large Your team trains MNIST (109K MACs, 427 KB weights)\\
+on an H100 GPU (989 TFLOPS, 3.35 TB/s bandwidth).\\[0.3cm]
+\alert{Which \DAM{} axis is the bottleneck? Why?}}
+
+\vspace{0.6cm}
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}\centering\small\textcolor{datastroke}{\textbf{Data}}\\{\footnotesize Memory traffic?}\end{column}
+  \begin{column}{0.30\textwidth}\centering\small\textcolor{computestroke}{\textbf{Algorithm}}\\{\footnotesize Not enough ops?}\end{column}
+  \begin{column}{0.30\textwidth}\centering\small\textcolor{routingstroke}{\textbf{Machine}}\\{\footnotesize Overkill?}\end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Four common misconceptions with quantitative evidence.
+Focus on the ``black box'' fallacy and the ``deeper = better'' fallacy.}
+
+\footnotesize
+\textbf{Fallacy:} \textit{Neural networks are ``black boxes'' that cannot be understood.}\\
+Activation visualization, saliency maps, and ablation studies make networks interpretable. Teams expecting line-by-line debugging waste 2--4 weeks.
+
+\vspace{0.05cm}
+\textbf{Fallacy:} \textit{Deep learning eliminates the need for domain expertise.}\\
+USPS succeeded because postal engineers set confidence thresholds based on economics. Without domain knowledge: 40\% manual routing instead of 10--15\%.
+
+\vspace{0.05cm}
+\textbf{Fallacy:} \textit{Deeper networks are always more accurate.}\\
+Beyond 152 layers, ResNet showed negligible improvement. EfficientNet: balanced scaling beats depth-only by 2--3 points at the same FLOP cost.
+
+\vspace{0.05cm}
+\textbf{Fallacy:} \textit{More compute automatically means faster training.}\\
+MNIST arithmetic intensity $\sim$0.5 FLOPs/byte (memory-bound). A \$200 CPU matches a \$10,000 GPU for memory-bound workloads.
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Three operational pitfalls. If short: cover just the first two.}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Using neural networks for problems solvable with simpler methods.}\\
+Logistic regression training in 10 ms often matches a neural network requiring 2 hours when data has $<$1,000 examples. 95\% accuracy from a neural net rarely justifies 100--1,000$\times$ longer training over 94\% from logistic regression.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Deploying research models without system constraints.}\\
+Production imposes latency budgets (50--100 ms end-to-end), memory limits (2--4 GB edge), and concurrent loads (100--1,000 RPS). A 20 ms model fails its 50 ms budget when pre/post-processing adds 35 ms.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Training without analyzing data distribution.}\\
+A fraud detector with 99:1 class imbalance achieves 99\% accuracy by always predicting ``not fraud'' while catching zero fraud cases. Cross-entropy optimizes average-case, ignoring rare critical classes.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Do NOT show next slide yet. Walk around the room.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds---no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Emphasize quantitative
+anchors: 1,092$\times$, 1,000$\times$ transistor gap, 3$\times$ Adam memory,
+92\% in Layer 1, 36\% model vs 64\% pipeline.}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{1,092$\times$ compute explosion}: Same digit, rule-based to neural net. Arithmetic replaces logic.
+  \item \textbf{MAC is the atom}: $y = f(\sum x_i w_i + b)$. M$\times$N MACs = one matrix multiply per layer.
+  \item \textbf{Activation choice = hardware decision}: ReLU 1,000$\times$ cheaper than sigmoid. Vanishing gradients ($0.25^{20} \approx 10^{-12}$) killed deep sigmoid nets.
+  \item \textbf{Training costs $\sim$3$\times$ forward}: Backprop computes gradients ($\sim$2N); gradient descent applies updates.
+  \item \textbf{Training memory = 4$\times$ inference}: Weights + gradients + Adam + activations. GPT-7B: 84+ GB before activations.
+  \item \textbf{The model is not the system}: Pre/post = 64\% of pipeline latency. Optimizing only inference misses the majority.
+  \item \textbf{D$\cdot$A$\cdot$M governs success}: Algorithm defines ops, data drives learning, machine executes. All three must align.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{LeCun+98}{LeCun et al. ``Gradient-Based Learning Applied to Document Recognition.'' Proc. IEEE, 1998.}
+\mlsysref{LeCun+15}{LeCun, Bengio, \& Hinton. ``Deep Learning.'' Nature, 2015.}
+\mlsysref{Dalal+05}{Dalal \& Triggs. ``Histograms of Oriented Gradients for Human Detection.'' CVPR, 2005.}
+\mlsysref{Nair+10}{Nair \& Hinton. ``Rectified Linear Units Improve Restricted Boltzmann Machines.'' ICML, 2010.}
+\mlsysref{Kingma+15}{Kingma \& Ba. ``Adam: A Method for Stochastic Optimization.'' ICLR, 2015.}
+\mlsysref{Rumelhart+86}{Rumelhart, Hinton, \& Williams. ``Learning Representations by Back-Propagating Errors.'' Nature, 1986.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Network Architectures}
+\note{[1 min] Forward hook. Fully connected networks treat every input
+independently---images have spatial locality, text has sequences, time
+series has temporal dynamics. Specialized architectures encode this
+structure directly. The question: how do you trade universal flexibility
+for efficiency?}
+
+\footnotesize
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    \centering
+    {\large\bfseries Spatial}\\[0.1cm]
+    {\footnotesize Images have local structure. Nearby pixels matter; distant ones do not.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{datastroke}
+    \centering
+    {\large\bfseries Sequential}\\[0.1cm]
+    {\footnotesize Text has order. Word meaning depends on context and position.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    \centering
+    {\large\bfseries Temporal}\\[0.1cm]
+    {\footnotesize Time series has dynamics. Past patterns predict future states.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.3cm}
+\centering
+{\normalsize Fully connected networks are \emph{structurally blind}.\\[0.1cm]
+\textbf{How do specialized architectures exploit problem structure?}}
+
+\end{frame}
+
+\end{document}

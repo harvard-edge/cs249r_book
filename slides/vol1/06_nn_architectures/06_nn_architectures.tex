@@ -1,0 +1,795 @@
+% =============================================================================
+% Chapter 6: Network Architectures — ML Systems Lecture Slides
+% =============================================================================
+% IMAGES:
+%   - ch06-inductive-bias-spectrum.pdf
+%   - ch06-architecture-bottleneck-map.pdf
+%   - ch06-cnn-weight-sharing.pdf
+%   - ch06-attention-mechanism.pdf
+%   - ch06-transformer-block.pdf
+%   - ch06-rnn-unrolled.pdf
+%   - ch06-architecture-selection-flowchart.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume   = {Volume I},
+  chapter  = {Chapter 6},
+  logo = {../../assets/img/logo-mlsysbook.png},
+  instlogo = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Network Architectures},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation ---
+\setcounter{mlsystotalsections}{7}
+
+\title{Network Architectures}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Network Architectures}{Architecture Is Infrastructure}{cover_dl_arch.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Walk through objectives. Stress that this chapter is about the
+\emph{systems consequences} of architecture choice, not model accuracy.
+Ask: ``When you pick a Transformer, what hardware contract are you signing?''}
+
+\small
+\begin{enumerate}
+  \item Distinguish the \textbf{computational signatures} of MLPs, CNNs, RNNs, Transformers, and DLRM
+  \item Explain how \textbf{inductive biases} encode data structure into computation
+  \item Analyze \textbf{arithmetic intensity} and memory scaling across architectures
+  \item Identify shared \textbf{building blocks} (skip connections, normalization, gating)
+  \item Apply the \textbf{architecture selection framework} to match data, hardware, and constraints
+  \item Evaluate how architecture determines \textbf{Iron Law} bottlenecks ($O$, $D_{\text{vol}}$, $L_{\text{lat}}$)
+  \item Critique common architectural selection \textbf{fallacies} using systems reasoning
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{Inductive Bias}
+% =============================================================================
+
+\begin{frame}{Architecture Is a Contract with Physics}
+\note{[3 min] Open with the chapter thesis. Architecture is not a modeling
+decision --- it is an infrastructure commitment. When you pick a CNN, you commit
+to spatial locality. When you pick a Transformer, you commit to O(N\^{}2) memory.
+Ask: ``Has anyone picked an architecture and later regretted the systems cost?''}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    Choosing an architecture means \alert{signing a contract}:
+
+    \vspace{0.1cm}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textbf{CNN} $\to$ spatial locality, parallel convolutions
+      \item \textbf{Transformer} $\to$ $O(N^2)$ memory, global attention
+      \item \textbf{RNN} $\to$ sequential dependencies, low parallelism
+      \item \textbf{DLRM} $\to$ TB-scale embedding tables
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{crimson}
+    Architecture determines \textbf{Iron Law terms}:
+    Operations ($O$), data movement ($D_{\text{vol}}$), overhead ($L_{\text{lat}}$).
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.15}
+    {\footnotesize
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Choice} & \textbf{Consequence} \\
+      \midrule
+      CNN    & Fits mobile memory \\
+      Transf.& Needs datacenter \\
+      RNN    & 30--50\% GPU util. \\
+      DLRM   & TB of DRAM \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: What Unifies All Architectures?}
+\note{[2 min] Prediction exercise. Give students 60 seconds to write down
+their answer. The reveal will be ``inductive bias'' --- the structural
+assumption each architecture encodes about data. Do NOT reveal yet.}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.6cm}
+{\large MLPs, CNNs, RNNs, and Transformers look very different.\\
+What single concept \emph{unifies} all architecture choices?}
+
+\vspace{0.5cm}
+{\normalsize Write your answer. \textcolor{midgray}{(60 seconds)}}
+
+\vspace{0.5cm}
+{\small\textcolor{lightgray}{Hint: it explains why CNNs use 111$\times$ fewer parameters than MLPs.}}
+
+\end{frame}
+
+\begin{frame}{Inductive Bias: The Unifying Concept}
+\note{[3 min] Reveal after prediction. Walk through the spectrum left to right.
+Key insight: stronger bias = fewer parameters = less flexibility = better hardware
+mapping. The bias determines which Iron Law term dominates.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch06-inductive-bias-spectrum.pdf}
+
+\vspace{0.15cm}
+\mlsysconcept{Definition:}{Inductive bias is a structural constraint that restricts the hypothesis space, encoding domain assumptions directly into the computational graph.}
+
+\end{frame}
+
+% =============================================================================
+\section{Architecture Zoo}
+% =============================================================================
+
+\begin{frame}{Five Lighthouse Models}
+\note{[3 min] Introduce the five recurring models. Each isolates a different
+system bottleneck. They map to the workload archetypes from Ch2.
+Ask: ``Why do we need five, not one?''}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch06-architecture-bottleneck-map.pdf}
+
+\vspace{0.1cm}
+{\small Each lighthouse isolates a \textbf{distinct system bottleneck} --- no single ``best'' architecture exists.}
+
+\end{frame}
+
+\begin{frame}{Arithmetic Intensity Spectrum}
+\note{[3 min] Key quantitative concept. Arithmetic intensity (FLOPs/byte)
+determines whether a workload is compute-bound or memory-bound. ResNet:
+high intensity (GPU-friendly). GPT-2: low intensity (bandwidth-starved).
+MobileNet: efficient but starves datacenter GPUs.}
+
+\small
+\textbf{Arithmetic Intensity} ($I$) = FLOPs per byte of data moved
+
+\vspace{0.15cm}
+\renewcommand{\arraystretch}{1.15}
+{\footnotesize
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Model} & \textbf{Intensity} & \textbf{Regime} & \textbf{Hardware Affinity} \\
+  \midrule
+  \textbf{ResNet-50} & $\sim$40 FLOPs/B & \textcolor{computestroke}{Compute-bound} & GPU/TPU (saturates ALUs) \\
+  \textbf{MobileNet} & $\sim$21 FLOPs/B & Balanced & Mobile NPU \\
+  \textbf{GPT-2 (inf)} & $\sim$0.5 FLOPs/B & \textcolor{datastroke}{Memory-bound} & HBM3 bandwidth \\
+  \textbf{DLRM} & $\ll 1$ FLOPs/B & \textcolor{errorstroke}{Capacity-bound} & TB-scale DRAM \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.2cm}
+\begin{mlsyscard}{crimson}
+{\footnotesize \textbf{Three orders of magnitude} separate ResNet and GPT-2. The architecture determines whether your system needs a faster processor or faster memory.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{MLPs: The Universal Baseline}
+\note{[2 min] MLPs are the simplest architecture: no bias, full connectivity.
+The UAT guarantees they can represent anything, but at enormous cost.
+Key number: 1M params for a single 1024->1024 layer.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Multi-Layer Perceptrons}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\footnotesize \textbf{Bias}: None --- any input relates to any output}
+      \item {\footnotesize \textbf{Data}: Tabular, unstructured features}
+      \item {\footnotesize \textbf{Scaling}: $O(d^2)$ params per layer}
+      \item {\footnotesize \textbf{1024 $\to$ 1024}: 1,048,576 parameters}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize UAT guarantees MLPs \emph{can} represent any function. Catch: ``sufficiently wide'' can mean exponentially many neurons.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.05}
+    {\scriptsize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Property} & \textbf{Value} \\
+      \midrule
+      Bias & None \\
+      Params/layer & $O(d^2)$ \\
+      Parallelism & High \\
+      Utilization & 80--90\% \\
+      Bottleneck & Bandwidth \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \mlsysinsight{Baseline:}{Every other architecture is an MLP + structural constraints.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{CNNs: Spatial Pattern Processing}
+\note{[3 min] Walk through the weight sharing diagram. Key insight: same
+3x3 filter slides across the entire image, yielding 111x fewer parameters
+than an equivalent MLP. This is the power of the locality bias.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{ch06-cnn-weight-sharing.pdf}
+
+\vspace{0.15cm}
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \centering
+    \textcolor{errorstroke}{\textbf{MLP}}: 1,048,576 parameters\\
+    {\footnotesize Every pixel $\to$ every output}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \centering
+    \textcolor{datastroke}{\textbf{CNN}}: 9,408 parameters\\
+    {\footnotesize Shared 3$\times$3 filter slides across image}
+  \end{column}
+\end{columns}
+\vspace{0.1cm}
+\mlsysconcept{Key:}{Weight sharing = 111$\times$ fewer params = fits on mobile devices.}
+
+\end{frame}
+
+\begin{frame}{CNN System Properties}
+\note{[2 min] CNNs achieve high arithmetic intensity because each weight is
+reused many times across spatial positions. This makes them compute-bound
+on GPUs --- the ideal workload for dense matrix units. ResNet-50 achieves
+80-95\% of peak throughput. Mention depthwise separable convolutions
+(MobileNet) as the efficiency variant.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{Why CNNs map well to GPUs:}
+    \begin{itemize}\setlength\itemsep{1pt}
+      \item Weight reuse $\to$ high arithmetic intensity
+      \item Regular memory access $\to$ cache-friendly
+      \item Batch processing $\to$ saturates tensor cores
+      \item \textbf{ResNet-50}: 80--95\% peak throughput
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{MobileNet (Depthwise Separable):}
+    \begin{itemize}\setlength\itemsep{1pt}
+      \item 8--9$\times$ fewer FLOPs for 3$\times$3 kernels
+      \item Fits phones: 14 MB, 300 MFLOPs
+      \item But: \alert{starves datacenter GPUs} (low intensity)
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \renewcommand{\arraystretch}{1.1}
+    {\scriptsize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      & \textbf{ResNet-50} & \textbf{MobileNet} \\
+      \midrule
+      Params     & 25.6 M & 3.5 M \\
+      FLOPs      & 4.1 G  & 300 M \\
+      Memory     & 98 MB  & 14 MB \\
+      Intensity  & $\sim$40  & $\sim$21 \\
+      GPU util.  & 80--95\% & 30--50\% \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{FLOPs $\neq$ speed!} MobileNet uses 14$\times$ fewer FLOPs but can run \emph{slower} on datacenter GPUs.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{RNNs: Sequential Pattern Processing}
+\note{[3 min] Walk through the unrolled RNN. Key insight: sequential
+dependency means each step waits for the previous one. This kills GPU
+parallelism. The vanishing gradient (shown by thinning dashed red line)
+limits what RNNs can learn over long sequences. LSTM and GRU gates
+partially solve this but cannot fix the parallelism problem.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{ch06-rnn-unrolled.pdf}
+
+\vspace{0.1cm}
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \centering
+    \textcolor{routingstroke}{\textbf{Strength}}: $O(1)$ memory per step\\
+    {\footnotesize Constant state size, streaming-friendly}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \centering
+    \textcolor{errorstroke}{\textbf{Weakness}}: Sequential bottleneck\\
+    {\footnotesize 30--50\% GPU utilization, gradient vanishes}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Attention}
+% =============================================================================
+
+\begin{frame}{Attention: Dynamic Processing}
+\note{[3 min] Walk through the QKV attention diagram. Key insight: attention
+computes relevance between ALL pairs of elements, replacing fixed connectivity
+with learned, content-dependent routing. The cost: O(N\^{}2) memory for the
+attention matrix. For 4096 tokens, that is 32 MB per layer per head.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{ch06-attention-mechanism.pdf}
+
+\vspace{0.05cm}
+\mlsysalert{Key:}{Doubling sequence length \textbf{quadruples} attention memory --- $O(N^2)$ is permanent.}
+
+\end{frame}
+
+\mlsysfocus{The Attention Trade-off}{%
+\begin{minipage}{0.8\textwidth}\centering
+\large
+RNN: $O(1)$ memory, $O(N)$ sequential steps\\[0.5cm]
+Transformer: $O(N^2)$ memory, $O(1)$ information depth\\[0.5cm]
+\normalsize\textcolor{white}{Choose your constraint: time or space.}
+\end{minipage}%
+}
+
+\begin{frame}{The Transformer Architecture}
+\note{[3 min] Walk through the Transformer block anatomy. Two sub-layers:
+multi-head attention (33\% FLOPs) and feed-forward MLP (67\% FLOPs).
+Skip connections enable depth. LayerNorm stabilizes activations.
+Emphasize that the FFN is the computational workhorse, not attention.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{ch06-transformer-block.pdf}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{Two sub-layers per block:}
+
+    \vspace{0.15cm}
+    \textcolor{computestroke}{\textbf{Multi-Head Attention}}\\
+    {\footnotesize $\sim$33\% of FLOPs, $O(N^2)$ memory}
+
+    \vspace{0.1cm}
+    \textcolor{routingstroke}{\textbf{Feed-Forward MLP (4$\times$ hidden)}}\\
+    {\footnotesize $\sim$67\% of FLOPs, dense MatMul}
+
+    \vspace{0.1cm}
+    \textcolor{datastroke}{\textbf{Skip + LayerNorm}}\\
+    {\footnotesize Enables training 100+ layer networks}
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{computestroke}
+    {\footnotesize \textbf{Parallelization:} All $N$ tokens processed simultaneously --- vs.\ RNN's $N$ sequential steps.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Attention Memory Budget}
+\note{[3 min] Give students 90 seconds. Answer: 4096\^{}2 * 2 bytes = 32 MB
+per layer per head. With 32 heads and 32 layers: 32 * 32 * 32 MB = 32 GB.
+This exceeds a single GPU's memory for the attention matrix alone.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.58\textwidth}
+    {\small\bfseries Calculate Attention Memory}
+
+    \vspace{0.1cm}
+    A Transformer processes $N = 4{,}096$ tokens.
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Attention matrix: $N \times N$ in FP16 (2 bytes/entry)
+      \item Model: 32 layers, 32 heads per layer
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Calculate:} (1) Memory per attention matrix, (2) Total across all heads/layers
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.38\textwidth}
+    \pause
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Solution:}\\[0.05cm]
+    {\footnotesize
+    Per head: $4096^2 \times 2 = $ \textbf{32 MB}\\[0.05cm]
+    Total: $32 \times 32 \times 32$ MB = \textbf{32 GB}\\[0.05cm]
+    \textcolor{errorstroke}{\textbf{Exceeds a single GPU!}}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Sparse \& RecSys}
+% =============================================================================
+
+\begin{frame}{DLRM: Sparse Architectures}
+\note{[3 min] DLRM is fundamentally different from CNN/Transformer: the
+bottleneck is raw memory capacity, not compute or bandwidth. Embedding
+tables can reach terabytes. Each lookup is a random access, not a dense
+MatMul. This makes DLRM the worst case for GPU caches.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Deep Learning Recommendation Model}
+
+    \vspace{0.05cm}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textbf{Data}: Categorical features (user ID, item ID)
+      \item \textbf{Core op}: Embedding table lookups, not MatMul
+      \item \textbf{Tables}: 25B+ entries, 100+ GB in production
+      \item \textbf{Access}: Random, sparse --- worst case for caches
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    Neither compute nor bandwidth but \alert{raw memory capacity} is the binding constraint.
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.1}
+    {\scriptsize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Property} & \textbf{Value} \\
+      \midrule
+      Embed.\ entries & 25B+ \\
+      Table size & 100+ GB \\
+      Arith.\ intensity & $\ll 1$ \\
+      Access pattern & Random \\
+      GPU utilization & Very low \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Building Blocks}
+% =============================================================================
+
+\begin{frame}{Shared Building Blocks Across Architectures}
+\note{[3 min] Three building blocks transfer across all architectures:
+skip connections, normalization, and gating. Skip connections were born
+in ResNets but appear in every Transformer block. Normalization stabilizes
+training at depth. Gating (LSTM/GRU) controls information flow. These are
+prerequisites, not optimizations.}
+
+\footnotesize
+\textbf{Three primitives that enable deep networks:}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.1}
+{\scriptsize
+\begin{tabular}{@{}lp{3cm}p{3cm}l@{}}
+  \toprule
+  \textbf{Block} & \textbf{What It Does} & \textbf{Why It Matters} & \textbf{Used In} \\
+  \midrule
+  \textbf{Skip Conn.} & $y = F(x) + x$ & Gradient highway, trains 100+ layers & ResNet, Transf. \\
+  \textbf{Norm.} & Rescale activations & Prevents explosion/collapse & All modern nets \\
+  \textbf{Gating} & Learned switches & Selectively retains/forgets state & LSTM, GRU, Transf. \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{datastroke}
+These are \textbf{prerequisites}, not optimizations. Without skip connections, networks cannot train beyond $\sim$20 layers. Born in CNNs/RNNs, they transfer to every modern architecture.
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Computational Primitives}
+\note{[2 min] Three categories of primitives that all architectures reduce to.
+Dense MatMul (CNN, Transformer FFN) maps well to GPUs. Sparse lookups (DLRM)
+are cache-hostile. Reductions (softmax, normalization) are bandwidth-bound.
+The architecture choice determines which primitive dominates.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Primitive} & \textbf{Operation} & \textbf{Bottleneck} & \textbf{Architecture} \\
+  \midrule
+  \textbf{Dense MatMul} & Matrix $\times$ Matrix & Compute & CNN, Transformer FFN \\
+  \textbf{MatVec} & Matrix $\times$ Vector & Bandwidth & RNN, GPT-2 inference \\
+  \textbf{Sparse Lookup} & Embedding gather & Capacity & DLRM \\
+  \textbf{Reduction} & Softmax, LayerNorm & Bandwidth & Transformer attention \\
+  \textbf{Elementwise} & Activation, Add & Bandwidth & All architectures \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\footnotesize
+\mlsysconcept{Mapping rule:}{Dense MatMul achieves 80--95\% GPU utilization. Everything else: 10--50\%.}
+
+\vspace{0.05cm}
+{\footnotesize Maximize time in dense MatMul. CNNs and Transformer FFN achieve highest hardware utilization.}
+
+\end{frame}
+
+% =============================================================================
+\section{Selection}
+% =============================================================================
+
+\begin{frame}{Architecture Selection Framework}
+\note{[3 min] Walk through the flowchart. Two phases: (1) match data type
+to architecture candidate, (2) validate against deployment constraints.
+Failing any constraint means the model has zero utility regardless of accuracy.
+The retry loop forces scaling down or switching architecture.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch06-architecture-selection-flowchart.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Rule:}{A model that violates any deployment constraint has \textbf{zero utility} --- regardless of accuracy.}
+
+\end{frame}
+
+\begin{frame}{Architecture Complexity Comparison}
+\note{[2 min] Side-by-side comparison table. Key insight: there is no single
+``best'' architecture. Each excels at different data types and bottleneck
+regimes. The Transformer is the most flexible but the most expensive.
+Discuss: if you have spatial data and an edge device, Transformer is wrong.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}llllll@{}}
+  \toprule
+  & \textbf{MLP} & \textbf{CNN} & \textbf{RNN} & \textbf{Transformer} & \textbf{DLRM} \\
+  \midrule
+  \textbf{Bias}    & None    & Spatial      & Temporal     & Learned      & Categorical \\
+  \textbf{Params}  & $O(d^2)$  & $O(K^2 C)$ & $O(d^2)$   & $O(d^2)$   & $O(\text{vocab})$ \\
+  \textbf{Memory}  & Linear  & Linear       & $O(1)$/step  & $O(N^2)$     & TB-scale \\
+  \textbf{Parallel}& Full    & Full         & None         & Full         & Full \\
+  \textbf{GPU util.}& 80--90\% & 80--95\%   & 30--50\%     & 50--80\%     & 10--30\% \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\footnotesize
+\begin{mlsyscard}{crimson}
+No single ``best'' architecture. CNNs dominate spatial perception. Transformers master reasoning at quadratic cost. DLRM needs TB-scale memory. \textbf{Match bias to data, validate against constraints.}
+\end{mlsyscard}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Pick the Architecture}
+\note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
+Scenario forces considering constraints, not just accuracy.
+Answer: Transformer is wrong (quadratic memory, exceeds 4 GB). CNN or
+MobileNet variant is the right choice for spatial data on edge device.}
+
+\centering
+\vspace{0.5cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.4cm}
+{\normalsize A startup deploys a vision model on an edge device\\
+with \textbf{4 GB RAM} and a \textbf{100 ms latency} target.\\[0.2cm]
+Their ML team trained a Vision Transformer (ViT)\\
+with 86M parameters requiring 340 MB weights.}
+
+\vspace{0.3cm}
+\alert{Should they deploy this model? If not, what architecture?}
+
+\vspace{0.2cm}
+\begin{columns}[c]
+  \begin{column}{0.20\textwidth}\centering\footnotesize Deploy ViT\end{column}
+  \begin{column}{0.20\textwidth}\centering\footnotesize Switch to CNN\end{column}
+  \begin{column}{0.20\textwidth}\centering\footnotesize Switch to MobileNet\end{column}
+  \begin{column}{0.20\textwidth}\centering\footnotesize Quantize ViT\end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Four common misconceptions with quantitative evidence.}
+
+\footnotesize
+\textbf{Fallacy:} \textit{More complex architectures always perform better.}\\
+CNN: 99\% on MNIST with 420K params. MLP: 98\% with 20M params. Defaulting to Transformers for tabular data wastes 5--10$\times$ resources.
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Architecture performance transfers across hardware.}\\
+Transformer at 50 ms on A100 $\to$ 2,000 ms on mobile SoC (40$\times$ slowdown, no HBM).
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{FLOPs determine inference speed.}\\
+MobileNet: 14$\times$ fewer FLOPs than ResNet but runs \emph{slower} on datacenter GPUs (low intensity starves ALUs).
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{KV cache is a minor serving cost.}\\
+Seq 2,048, 32 layers $\times$ 32 heads: each user needs $\sim$537 MB KV cache. At 4 users, rivals model weights.
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Three operational pitfalls from the chapter.}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Selecting architectures based solely on accuracy.}\\
+Transformers: seq 2,048 needs 16$\times$ more memory than 512. Miss latency SLAs (100 ms $\to$ 500 ms), 25\% GPU efficiency.
+
+\vspace{0.08cm}
+\textbf{Pitfall:} \textit{Combining patterns without profiling interactions.}\\
+Attention + CNN flushes feature maps from cache. ResNet: 250 img/s $\to$ 80 img/s (3$\times$ drop).
+
+\vspace{0.08cm}
+\textbf{Pitfall:} \textit{Designing for training hardware, ignoring deployment.}\\
+8$\times$ A100 cluster (640 GB) $\to$ 4 GB edge device = 160$\times$ gap. Requires architectural changes, not just quantization.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Do NOT show next slide yet. Walk around the room.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Emphasize the quantitative
+anchors: 111x weight sharing, O(N\^{}2), 40x slowdown on mobile, 30-50\%
+RNN utilization.}
+
+\footnotesize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{Inductive bias unifies all architectures}: Locality (CNN), sequence (RNN), global context (Transformer). Bias trades generality for efficiency.
+  \item \textbf{Arithmetic intensity determines bottleneck}: High (CNN) = compute-bound. Low (GPT-2) = memory-bound. 1000$\times$ gap.
+  \item \textbf{$O(N^2)$ is permanent}: Transformer attention scales quadratically. This constrains deployment.
+  \item \textbf{Lighthouses isolate bottlenecks}: ResNet (compute), GPT-2 (bandwidth), DLRM (capacity), MobileNet (latency), KWS (power).
+  \item \textbf{FLOPs $\neq$ speed}: MobileNet uses 14$\times$ fewer FLOPs but runs slower on datacenter GPUs.
+  \item \textbf{Skip connections enable depth}: Prerequisites for networks beyond $\sim$20 layers.
+  \item \textbf{Architecture = deployment}: The model determines memory, latency, power, and cost.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{He+16}{K. He et al. ``Deep Residual Learning for Image Recognition.'' CVPR 2016.}
+\mlsysref{Vaswani+17}{A. Vaswani et al. ``Attention Is All You Need.'' NeurIPS 2017.}
+\mlsysref{Howard+17}{A. Howard et al. ``MobileNets.'' arXiv 2017.}
+\mlsysref{Naumov+19}{M. Naumov et al. ``Deep Learning Recommendation Model (DLRM).'' arXiv 2019.}
+\mlsysref{Radford+19}{A. Radford et al. ``Language Models are Unsupervised Multitask Learners.'' 2019.}
+\mlsysref{Bahdanau+14}{D. Bahdanau et al. ``Neural Machine Translation by Jointly Learning to Align.'' 2014.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: ML Frameworks}
+\note{[1 min] Forward hook. We have the architectural blueprints. Now we need
+the tools to build them. PyTorch, TensorFlow, and JAX translate these
+high-level graphs into low-level kernels that run on silicon.}
+
+\footnotesize
+\centering
+\vspace{0.3cm}
+{\large We have the \textbf{blueprints}. Now we need the \textbf{tools}.}
+
+\vspace{0.4cm}
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\normalsize\bfseries PyTorch}\\[0.1cm]
+    {\scriptsize Eager execution\\Dynamic graphs}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{datastroke}
+    {\normalsize\bfseries TensorFlow}\\[0.1cm]
+    {\scriptsize Graph-based\\Production serving}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    {\normalsize\bfseries JAX}\\[0.1cm]
+    {\scriptsize Functional transforms\\XLA compilation}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.3cm}
+{\normalsize How do frameworks translate architecture graphs\\into the low-level kernels that run on silicon?}\\[0.1cm]
+{\small\textbf{The ``contract with physics'' signed here is enforced by the compiler.}}
+
+\end{frame}
+
+\end{document}

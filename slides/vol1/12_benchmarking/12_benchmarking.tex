@@ -1,0 +1,768 @@
+% =============================================================================
+% Chapter 12: Benchmarking — ML Systems Lecture Slides
+% =============================================================================
+% IMAGES NEEDED (SVG → PDF):
+%   - three-dimensional-framework.pdf   - benchmark-anatomy-pipeline.pdf
+%   - mlperf-scenarios-quadrant.pdf     - latency-distribution-percentiles.pdf
+%   - latency-breakdown-waterfall.pdf   - measurement-methodology.pdf
+%   - benchmark-gaming-antipatterns.pdf - benchmark-granularity.pdf
+%   - benchmark-evolution-timeline.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume   = {Volume I},
+  chapter  = {Chapter 12},
+  logo = {../../assets/img/logo-mlsysbook.png},
+  instlogo = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Benchmarking},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{9}
+
+\title{Benchmarking}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Benchmarking}{Measuring What Matters}{cover_ai_benchmarking.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Walk through objectives. Emphasize that this chapter validates
+everything from Part III. Ask: ``How do you know your optimizations actually
+worked? That is what benchmarking answers.''}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item Explain the \textbf{three-dimensional benchmarking framework} (system, model, data)
+  \item Compare \textbf{training} and \textbf{inference} benchmarking through their distinct metrics
+  \item Select appropriate \textbf{granularity levels} (micro, macro, end-to-end)
+  \item Apply \textbf{MLPerf} standards across training, inference, and power
+  \item Design benchmark protocols with \textbf{statistical rigor} (CI, warm-up, environment control)
+  \item Distinguish \textbf{laboratory results} from production requirements
+  \item Critique benchmark limitations including \textbf{Goodhart's Law} and \textbf{gaming}
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{Why Benchmark?}
+% =============================================================================
+
+\begin{frame}{The Benchmark--Production Gap}
+\note{[3 min] Open with the core problem. Students have spent 3 chapters optimizing
+(data selection, compression, hardware). Now: how do you verify the gains?
+The 2--10x gap is the motivating fact. Ask: ``Has anyone run a model that
+performed great in testing but failed in production?''}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    Preceding chapters promised improvements:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textbf{Data selection}: more efficient training
+      \item \textbf{Model compression}: smaller, faster models
+      \item \textbf{Hardware acceleration}: higher throughput
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{The reality}: The gap is routinely \textbf{2$\times$--10$\times$}.\\[0.05cm]
+    A quantized model may benchmark 2$\times$ faster but show \emph{no improvement} under real traffic.
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    \mlsysconcept{Core question:}{Did optimizations deliver under \emph{realistic} conditions?}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      \textbf{Claim} & \textbf{Lab} & \textbf{Prod.} \\
+      \midrule
+      Latency & 15 ms & 150--200 ms \\
+      Accuracy & 92\% & 78--82\% \\
+      Throughput & 800 QPS & 400--500 QPS \\
+      \bottomrule
+    \end{tabular}
+
+    \vspace{0.15cm}
+    \textcolor{errorstroke}{\textbf{Why?}} Concurrent load, data drift, preprocessing overhead, thermal throttling.
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Three Principles of Rigorous Benchmarking}
+\note{[2 min] Three principles that separate engineering from guesswork.
+Goodhart's Law is the key insight: when a measure becomes a target, it
+ceases to be a good measure. End-to-end emphasis connects to Amdahl's
+from Chapter 1.}
+
+\footnotesize
+\textbf{1.\ Benchmarks are proxies, not truth.}\\
+A system achieving 10,000 samples/s in Offline mode might achieve only 200 QPS with latency constraints. The question is always what the benchmark does \emph{not} measure.
+
+\vspace{0.1cm}
+\textbf{2.\ Goodhart's Law applies everywhere.}\\
+``When a measure becomes a target, it ceases to be a good measure.'' Teams optimizing for benchmark rankings produce systems that excel in evaluation but fail in production.
+
+\vspace{0.1cm}
+\textbf{3.\ End-to-end beats component metrics.}\\
+Vendors report 5--10 ms model inference. Production latency is 50--100 ms total. A 3$\times$ inference speedup yields only 1.3$\times$ end-to-end improvement.
+
+\vspace{0.1cm}
+\begin{mlsyscard}{crimson}
+\textbf{Benchmarking} converts theoretical claims into verified engineering knowledge.
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Historical Foundations}
+% =============================================================================
+
+\begin{frame}{From Whetstone to MLPerf}
+\note{[3 min] Walk through the four eras on the timeline. Key pattern: every
+generation gamed the previous benchmark. Whetstone's floating-point loops
+became a test of compiler optimization, not hardware. SPEC fixed this with
+real workloads. MLPerf synthesizes all lessons. If short: focus on the three
+cumulative lessons at the bottom.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{benchmark-evolution-timeline.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Pattern:}{Each generation of benchmarks solved the gaming problem of its predecessor.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: What Can Go Wrong?}
+\note{[2 min] Prediction exercise before revealing the three-dimensional
+framework. Students write for 60 seconds, then share with a neighbor.
+Do NOT reveal the framework yet --- this primes the next slide.}
+
+\centering
+\vspace{0.8cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.5cm}
+{\large A team reports their compressed model is ``2$\times$ faster\\
+with no accuracy loss'' on their benchmark.\\[0.2cm]
+\alert{List 3 things that could still go wrong in production.}}
+
+\vspace{0.5cm}
+{\normalsize Write down 3 failure modes. \textcolor{midgray}{(60 seconds)}}
+
+\vspace{0.3cm}
+{\small\textcolor{lightgray}{Turn to a neighbor and compare your answers.}}
+
+\end{frame}
+
+% =============================================================================
+\section{Three Dimensions}
+% =============================================================================
+
+\begin{frame}{The Three-Dimensional Framework}
+\note{[3 min] Reveal after prediction. System, Model, and Data are orthogonal
+dimensions. The blind spots are the key insight: system-only misses compression
+damage, model-only misses hardware bottlenecks, data-only misses scale issues.
+Ask: ``Which dimension did your prediction-exercise failures fall into?''}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{three-dimensional-framework.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{Each dimension reveals failures invisible to the others. Passing all three provides deployment confidence.}
+
+\end{frame}
+
+\begin{frame}{Anatomy of a Benchmark}
+\note{[2 min] Four layers of a benchmark, like a protocol stack. A benchmark
+is only as strong as its weakest layer. Each layer can independently
+invalidate results. Connect to the vendor claim decoding from the chapter.
+If short: just emphasize the weakness callout.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{benchmark-anatomy-pipeline.pdf}
+
+\vspace{0.05cm}
+{\small\textbf{Four layers}: Workload $\to$ Metrics $\to$ Methodology $\to$ Reporting. A flaw at \emph{any} layer invalidates the results.}
+
+\end{frame}
+
+% =============================================================================
+\section{Granularity}
+% =============================================================================
+
+\begin{frame}{Benchmarking Granularity}
+\note{[3 min] Three levels answer different questions. The key insight is the
+tradeoff: micro pinpoints but misses interactions; end-to-end validates but
+cannot diagnose. A 3x kernel speedup may yield 0x system speedup if the
+data pipeline cannot keep pace.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{benchmark-granularity.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Design rule:}{Match validation granularity to optimization granularity. Kernel fusion $\to$ micro. Pruning $\to$ macro. Data curation $\to$ end-to-end.}
+
+\end{frame}
+
+\begin{frame}{The Latency Breakdown}
+\note{[3 min] Full-width waterfall chart. Two scenarios: before and after
+TensorRT optimization. The key revelation: after 2.5x model speedup,
+preprocessing becomes the new bottleneck at 43\% of total. This is Amdahl's
+Law from Chapter 1 in action. Ask: ``Where should the team invest next?''}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{latency-breakdown-waterfall.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Amdahl's Law:}{2.5$\times$ model speedup $\to$ only 1.3$\times$ system speedup when preprocessing dominates.}
+
+\end{frame}
+
+% =============================================================================
+\section{Measurement Rigor}
+% =============================================================================
+
+\begin{frame}{Percentiles, Not Averages}
+\note{[3 min] The tail latency problem. Mean of 12 ms hides a p99 of 72 ms.
+At scale (10,000 QPS), 100 requests per second hit the tail. Fan-out makes
+it worse: 63\% of page loads hit at least one tail event with 100 services.
+Production SLOs are defined at p95 or p99, never the mean.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{latency-distribution-percentiles.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Production rule:}{Report p95 and p99, not the mean. At scale, the tail determines the user experience.}
+
+\end{frame}
+
+\begin{frame}{Measurement Methodology}
+\note{[3 min] The three-phase measurement protocol: warm-up (discard), measurement
+window (keep), cool-down. Plus three statistical cards: confidence intervals,
+multiple runs, environment control. The anti-pattern: cherry-picking the best
+of 3 runs is marketing, not benchmarking.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{measurement-methodology.pdf}
+
+\vspace{0.05cm}
+{\small\textbf{Never measure first 10--50 iterations.} Report median with 95\% CI from $\geq$5 independent runs.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: The Statistical Confidence Trap}
+\note{[3 min] Give students 90 seconds to work through the calculation.
+Answer: both 50 and 60 errors fall inside the same confidence interval.
+A 1,000-sample test set cannot reliably detect a 1\% accuracy drop.
+Need approximately 10,000 samples for that precision.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\small\bfseries Can You Detect the Regression?}
+
+    \vspace{0.1cm}
+    An image classifier has \textbf{95\% accuracy}. A compressed version scores \textbf{94\%} on a \textbf{1,000-image} test set.
+
+    \vspace{0.1cm}
+    \textbf{Calculate:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Expected errors at 95\%: $1000 \times 0.05 = ?$
+      \item Std dev: $\sqrt{N \cdot p \cdot (1-p)} = ?$
+      \item 95\% CI: $50 \pm 1.96 \times \sigma = ?$
+    \end{itemize}
+
+    \vspace{0.05cm}
+    Is 60 errors (94\%) outside the CI?
+
+    {\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Solution:}\\[0.05cm]
+    Expected: 50 errors\\
+    $\sigma = \sqrt{1000 \times 0.05 \times 0.95} \approx \mathbf{6.9}$\\
+    95\% CI: $[36, 64]$\\[0.05cm]
+    Both 50 and 60 fall inside!\\[0.05cm]
+    \textcolor{errorstroke}{\textbf{1,000 samples cannot detect 1\% drop.}}\\
+    Need $\approx$\textbf{10,000} samples.
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{MLPerf}
+% =============================================================================
+
+\mlsysfocus{MLPerf}{The industry standard for ML benchmarking:\\[0.2cm]
+Representative workloads $+$ Multi-objective metrics $+$ Integrated system measurement}
+
+\begin{frame}{MLPerf Inference Scenarios}
+\note{[3 min] Four scenarios organized as a 2x2: latency constraint (strict vs relaxed)
+and input concurrency (single vs multiple). SingleStream = mobile, Server = cloud API,
+MultiStream = autonomous vehicles, Offline = batch scoring. The scenario determines
+which metric matters most. Ask: ``Which scenario does your ML project fall into?''}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{mlperf-scenarios-quadrant.pdf}
+
+\vspace{0.05cm}
+{\small The \textbf{scenario} determines the metric: latency for SingleStream, QPS for Server, throughput for Offline.}
+
+\end{frame}
+
+\begin{frame}{MLPerf Training vs.\ Inference}
+\note{[3 min] Key contrast: training measures time-to-quality (how fast you reach
+a target accuracy), inference measures throughput under latency constraints.
+Training optimizes for maximum hardware utilization; inference optimizes for
+SLO compliance. Different metrics, different scenarios, different hardware configs.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  & \textbf{MLPerf Training} & \textbf{MLPerf Inference} \\
+  \midrule
+  \textbf{Primary metric}  & Time-to-quality             & QPS under latency SLO \\
+  \textbf{Goal}             & Reach target accuracy fast  & Serve queries within SLA \\
+  \textbf{Optimization}     & Max hardware utilization    & SLO compliance \\
+  \textbf{Batch size}       & Large (throughput)          & Small--medium (latency) \\
+  \textbf{Precision}        & Mixed (FP16/BF16 + FP32)   & INT8, FP16, even INT4 \\
+  \textbf{Key bottleneck}   & Gradient sync, data loading & Tail latency, preprocessing \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{computestroke}
+    {\footnotesize \textbf{Training}: $T = O/(R_{\text{peak}} \cdot \eta)$ --- compute-dominated}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{datastroke}
+    {\footnotesize \textbf{Inference}: $L = L_{\text{pre}} + L_{\text{model}} + L_{\text{post}}$ --- pipeline-dominated}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{MLPerf Suite Variants}
+\note{[2 min] Four variants, each targeting a different deployment context.
+Training for datacenter, Inference for server/edge, Tiny for MCU/IoT,
+Power as a cross-cutting concern. Emphasize: no single metric characterizes
+a hardware platform. Each variant measures what matters for its deployment.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lllp{3.5cm}@{}}
+  \toprule
+  \textbf{Variant} & \textbf{Domain} & \textbf{Constraints} & \textbf{Metrics} \\
+  \midrule
+  \textbf{Training}  & Datacenter   & Multi-node, high BW       & Time-to-quality, samples/s \\
+  \textbf{Inference}  & Server/Edge  & Latency SLAs, throughput  & QPS, latency percentiles \\
+  \textbf{Tiny}       & MCU / IoT    & $<$1 mW, $<$1 MB memory  & Latency, energy/inference \\
+  \textbf{Power}      & Cross-cutting & Energy budgets, thermal  & Performance/Watt \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\footnotesize
+\begin{mlsyscard}{crimson}
+\textbf{MLPerf design principles}: Representative workloads, full-system measurement, open submission. Vendors must report end-to-end system performance on standardized tasks.
+\end{mlsyscard}
+
+\mlsyscite{Reddi et al., MLPerf Inference, 2020; Mattson et al., MLPerf Training, 2020}
+
+\end{frame}
+
+% =============================================================================
+\section{System Benchmarks}
+% =============================================================================
+
+\begin{frame}{The Fallacy of Peak Performance}
+\note{[3 min] Dave Patterson: peak performance is ``the performance the
+manufacturer guarantees you will not exceed.'' The Memory Wall makes the gap
+especially wide for ML. A GPU advertising 300 TFLOPS might deliver 10 TFLOPS
+on memory-bound transformer inference. Roofline from Ch11 diagnoses this.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Patterson:} ``Peak performance is the performance the manufacturer \emph{guarantees} you will not exceed.''
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.05}
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{Workload} & \textbf{Peak} & \textbf{Achieved} \\
+      \midrule
+      A100 FP16 (Tensor)    & 312 TF   & 90--155 TF \\
+      ResNet-50 (batch 256) & ---      & 85--90\% util. \\
+      BERT (batch 1)        & ---      & $\sim$33\% util. \\
+      DLRM (rec.)           & ---      & $\sim$40\% util. \\
+      \bottomrule
+    \end{tabular}
+
+    \vspace{0.05cm}
+    The gap is 2--3$\times$ even in optimally tuned systems.
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \textbf{Why the gap?}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textcolor{datastroke}{Memory stalls}: data starves the ALU
+      \item \textcolor{computestroke}{Pipeline bubbles}: sequential deps
+      \item \textcolor{routingstroke}{Kernel launch}: dispatch overhead
+      \item \textcolor{errorstroke}{Thermal throttling}: sustained load
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \mlsysconcept{Diagnostic:}{Use the \textbf{Roofline Model} to identify compute-bound vs.\ memory-bound.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Roofline: ResNet vs.\ BERT}
+\note{[3 min] Quantitative contrast. ResNet at batch 256 achieves 300 FLOPs/byte
+(compute-bound, 85--90\% utilization). BERT at batch 1 achieves only ~50
+FLOPs/byte (memory-bound, ~33\% utilization). Batching transforms BERT from
+memory-bound to compute-bound: batch 32 pushes AI to ~1600, crossing the
+ridge point. This is the throughput-latency tradeoff that MLPerf scenarios capture.}
+
+\footnotesize
+\textbf{A100 GPU}: 312 TFLOPS FP16, 2.0 TB/s bandwidth, Ridge $\approx$ 153 FLOPs/byte
+
+\vspace{0.05cm}
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lrrrl@{}}
+  \toprule
+  \textbf{Workload} & \textbf{AI (FLOPs/B)} & \textbf{Regime} & \textbf{Util.} & \textbf{Diagnosis} \\
+  \midrule
+  ResNet-50 (batch 256) & $\sim$300 & Compute-bound & 85--90\% & $\checkmark$ Efficient \\
+  BERT-Base (batch 1)   & $\sim$50  & Memory-bound  & $\sim$33\% & $\times$ Underutilized \\
+  BERT-Base (batch 32)  & $\sim$1600 & Compute-bound & $\sim$85\% & $\checkmark$ Batching helps \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{datastroke}
+\textbf{Batching transforms the regime}: BERT at batch 1 is memory-bound (33\% util.). At batch 32, same weights serve 32$\times$ more compute $\to$ 85\% utilization.
+\textbf{Tradeoff}: Higher throughput but higher latency (must accumulate requests).
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Decoding Vendor Claims}
+\note{[2 min] Practical translation guide. When vendors say ``up to 10,000 images/s,''
+it means peak throughput at max batch size, INT8, without preprocessing.
+``Sub-millisecond latency'' means accelerator compute only. Students should
+always ask: what precision? what batch size? what is excluded?}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lp{6.5cm}@{}}
+  \toprule
+  \textbf{Vendor Claim} & \textbf{What It Often Means} \\
+  \midrule
+  ``Up to 10,000 images/sec'' & Peak throughput at max batch, INT8, no preprocessing \\
+  ``Sub-millisecond latency'' & Accelerator compute only, excluding data transfer \\
+  ``5$\times$ more efficient'' & Per-operation efficiency, not total system efficiency \\
+  ``1000 TOPS'' & At what precision? INT4 TOPS are 4$\times$ INT8 on same HW \\
+  ``2$\times$ faster'' & On which workload? What batch size? What precision? \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\footnotesize
+\textbf{Always ask:} What is measured? (Model-only or end-to-end?) What is excluded? (Memory transfer, throttling?) What conditions? (Batch size, precision, thermal state?)
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Diagnose This Benchmark}
+\note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
+The answer: the system is memory-bandwidth bound (AI < ridge point).
+Adding more TFLOPS will not help. The team should increase batch size
+or use quantization to reduce memory traffic. Cold-call 2--3 pairs.}
+
+\centering
+\vspace{0.6cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.5cm}
+{\large A team benchmarks BERT inference on an H100.\\
+They achieve only \textbf{20\% GPU utilization}.\\[0.3cm]
+\alert{Using the Roofline Model (Ch 11):}}
+
+\vspace{0.4cm}
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}\centering\small Is it compute-bound\\or memory-bound?\end{column}
+  \begin{column}{0.30\textwidth}\centering\small What should they\\optimize first?\end{column}
+  \begin{column}{0.30\textwidth}\centering\small Will buying a\\faster GPU help?\end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Power \& Energy}
+% =============================================================================
+
+\begin{frame}{Power Measurement Techniques}
+\note{[3 min] Energy is a first-class benchmark dimension. INT8 provides 4x
+memory reduction but can deliver 10--20x energy reduction by shifting from
+energy-intensive DRAM access to efficient integer arithmetic. The system
+boundary matters: are you measuring the chip, the board, or the rack?
+MLPerf Power measures across 11 load levels from idle to 100\%.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{Why energy matters:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\footnotesize Cloud: energy cost rivals hardware cost}
+      \item {\footnotesize Edge: 15--40 W thermal envelope}
+      \item {\footnotesize Mobile: 3--5 W battery constraint}
+      \item {\footnotesize TinyML: 100 mW coin-cell budget}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{datastroke}
+    \textbf{INT8 as energy lever}\\
+    {\footnotesize 4$\times$ memory reduction but 10--20$\times$ energy reduction: DRAM access ($\sim$20 pJ/bit) $\to$ SRAM + INT8 ALU ($\sim$1 pJ/bit).}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \textbf{System boundary matters:}
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Boundary} & \textbf{Includes} \\
+      \midrule
+      Chip only   & Accelerator die \\
+      Board       & + memory, VRM \\
+      Server      & + CPU, fans, PSU \\
+      Rack        & + networking, cooling \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    {\footnotesize MLPerf Power measures at server boundary across 11 load levels (0\%--100\% in 10\% steps).}
+
+    \vspace{0.1cm}
+    {\footnotesize\textcolor{midgray}{Idle power matters: real utilization is 20--50\%.}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Benchmark Gaming: Anti-Patterns}
+\note{[2 min] Four common anti-patterns. Cherry-picking best of 3 runs.
+Unfair comparison (tuned vs default). Misleading metric (mean hides tail).
+Narrow workload (one model does not represent production). MLPerf's design
+resists all four by requiring suites, percentiles, and open submission rules.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{benchmark-gaming-antipatterns.pdf}
+
+\vspace{0.05cm}
+{\small MLPerf resists gaming by requiring \textbf{diverse suites}, \textbf{percentile reporting}, and \textbf{open submission rules}.}
+
+\end{frame}
+
+\begin{frame}{Fallacies}
+\note{[2 min] Three fallacies with quantitative rebuttals. The first is the
+most important: benchmark performance does not translate directly. A 92\%
+benchmark model drops to 78--82\% in production. Single-metric evaluation
+hides multi-objective tradeoffs.}
+
+\small
+\textbf{Fallacy:} \textit{Benchmark performance directly translates to production.}\\
+{\footnotesize Language model: 92\% benchmark accuracy $\to$ 78--82\% on user-generated text. Inference: 15 ms mean $\to$ 150--200 ms p99 under load (10$\times$ degradation).}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Single-metric evaluation suffices.}\\
+{\footnotesize Rec.\ model: 94\% accuracy but 180 ms p99 latency. SLO requires p99 $<$ 100 ms. Accurate but \emph{unusable}. Throughput-optimized system: 1,200 QPS at 420 W vs.\ 1,000 QPS at 180 W. For edge: 17\% throughput loss enables 2.3$\times$ longer battery life.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Peak performance predicts deployment.}\\
+{\footnotesize A100: 312 TFLOPS peak, 90--155 TFLOPS sustained (30--50\% MFU). The gap exists even in optimally tuned systems.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Three operational pitfalls. Outdated benchmarks (ImageNet saturated
+at 95\% by 2017). Optimizing for rankings via Goodhart's Law. Using research
+benchmarks for production evaluation. If short: cover the first two.}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Using outdated benchmarks that no longer discriminate.}\\
+ImageNet: 28.2\% error (2010) $\to$ 3.57\% (2015). Competition ended 2017 when 29/38 teams exceeded 95\%. MNIST: 99.8\% with simple models. Further optimization has marginal value. \textbf{Retire saturated benchmarks.}
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Optimizing exclusively for benchmark metrics.}\\
+A team reduces latency from 12 ms to 8 ms via aggressive quantization, climbing 15 positions on MLPerf---while degrading calibration and increasing energy by 40\%. ``Won the leaderboard but destroyed the product.''
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Applying research benchmarks to evaluate production systems.}\\
+Research: 800 QPS isolated. Production: 400--500 QPS under 90\% utilization (38\% degradation). Research reports model inference (5--10 ms); production end-to-end is 50--100 ms. Production requires 99.9\% availability (43 min downtime/month)---research benchmarks ignore this entirely.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Do NOT show next slide yet. Walk around the room.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Emphasize the quantitative
+anchors: 2--10x gap, 1\% detection requires 10K samples, p99 = 6x mean,
+2.5x model speedup = 1.3x system speedup, 10--20x energy from INT8.}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{Three-dimensional framework}: System, model, and data benchmarks each test different failure modes. Full validation requires all three.
+  \item \textbf{Benchmarks are proxies}: Production depends on data distribution, load patterns, and SLA constraints absent from controlled evaluation.
+  \item \textbf{Granularity determines diagnostic power}: Micro pinpoints bottlenecks; macro reveals subsystem issues; end-to-end validates deployment.
+  \item \textbf{The tail determines user experience}: p99 can be 6$\times$ the mean. Report percentiles, not averages.
+  \item \textbf{Amdahl's Law sets the ceiling}: 2.5$\times$ model speedup $\to$ 1.3$\times$ system speedup when preprocessing dominates.
+  \item \textbf{Statistical rigor}: 1,000 samples cannot detect a 1\% accuracy drop. Warm-up, CI, and multiple runs are mandatory.
+  \item \textbf{INT8 is an energy lever}: 4$\times$ memory reduction but 10--20$\times$ energy reduction (DRAM $\to$ SRAM + INT8).
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Reddi+20}{V.\ J.\ Reddi et al. ``MLPerf Inference Benchmark.'' ISCA, 2020.}
+\mlsysref{Mattson+20}{P.\ Mattson et al. ``MLPerf Training Benchmark.'' MLSys, 2020.}
+\mlsysref{Coleman+17}{C.\ Coleman et al. ``DAWNBench: End-to-End Deep Learning Benchmark.'' 2017.}
+\mlsysref{Williams+09}{S.\ Williams et al. ``Roofline: An Insightful Visual Performance Model.'' Comm.\ ACM, 2009.}
+\mlsysref{Henderson+18}{P.\ Henderson et al. ``Deep Reinforcement Learning that Matters.'' AAAI, 2018.}
+\mlsysref{Sculley+15}{D.\ Sculley et al. ``Hidden Technical Debt in ML Systems.'' NeurIPS, 2015.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Model Serving}
+\note{[1 min] Forward hook. We validated optimizations in the lab. Now those
+optimizations meet real traffic: bursts, variable inputs, concurrent users.
+Model serving is where benchmarks become SLAs, and laboratory numbers meet
+production chaos.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\small\bfseries Batching}\\[0.05cm]
+    {\scriptsize Dynamic batching trades latency for throughput}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    {\small\bfseries Load Balancing}\\[0.05cm]
+    {\scriptsize Route requests to minimize tail latency}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{errorstroke}
+    {\small\bfseries SLA Compliance}\\[0.05cm]
+    {\scriptsize Where benchmarks become contracts}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.2cm}
+\centering
+{\normalsize From lab to live: where benchmark numbers become SLAs.}\\[0.05cm]
+{\footnotesize\textbf{Production reality includes traffic bursts, data drift, and cascading failures no static benchmark captures.}}
+
+\end{frame}
+
+\end{document}

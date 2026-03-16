@@ -1,0 +1,704 @@
+% =============================================================================
+% Chapter 6: Collective Communication — ML Systems Lecture Slides (Vol II)
+% =============================================================================
+% IMAGES NEEDED (SVGs converted to PDF):
+%   - compute-comm-timeline.pdf    - alpha-beta-model.pdf
+%   - collective-primitives.pdf    - ring-allreduce.pdf
+%   - hierarchical-allreduce.pdf   - gradient-compression.pdf
+%   - overlap-pipeline.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Volume II},
+  chapter      = {Chapter 6},
+  logo         = {../../assets/img/logo-mlsysbook.png},
+  instlogo     = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Collective Communication},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\alphab}{\ensuremath{\alpha\text{-}\beta}}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{%
+        \centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{7}
+
+\title{Collective Communication}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Collective Communication}{The Traffic Patterns of Distributed ML}{cover_communication_ops.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Walk through objectives. Emphasize that this chapter bridges
+the physical network (Ch5) with the algorithms that run on it. Every concept
+reduces to the alpha-beta model. Ask: ``How long does it take to send 140 GB
+across a datacenter?''}
+
+\small
+\begin{enumerate}
+  \item Apply the \textbf{$\alpha$-$\beta$ model} to quantify when communication dominates training
+  \item Compare \textbf{AllReduce algorithms} (Ring, Tree, Double Binary Tree) and identify crossover points
+  \item Select appropriate \textbf{collective primitives} for different parallelism strategies
+  \item Evaluate \textbf{gradient compression} techniques and their convergence trade-offs
+  \item Design \textbf{topology-aware hierarchical} communication strategies
+  \item Implement \textbf{communication-computation overlap} to hide network latency
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{Comm at Scale}
+% =============================================================================
+
+\begin{frame}{The Communication Bottleneck}
+\note{[3 min] Open with the visceral fact: at scale, GPUs spend most of their
+time waiting for data, not computing. The 70B model example grounds this.
+Ask: ``If compute is cheap but communication is expensive, what should we optimize?''}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    Adding GPUs scales \textbf{compute} linearly.\\
+    Coordinating GPUs scales \textbf{communication} quadratically or worse.
+
+    \vspace{0.1cm}
+    \textbf{Gradient Sync}: 70B model in FP32 $\to$ \textbf{280 GB} gradients per step per GPU.
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    Ring AllReduce across 64 GPUs at 50 GB/s:\\
+    $\approx$ \textbf{11,200 ms} of pure communication per step.
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    Without optimization, comm consumes 40--70\% of training time.
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{compute-comm-timeline.pdf}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The Compute-Communication Timeline}
+\note{[3 min] Walk through the stacked bars. Key transition: from NVLink-dominated
+(8 GPUs, 25\% comm) to InfiniBand-limited (4096 GPUs, 65\% comm + 15\% sync).
+Ask: ``At what point does buying more GPUs stop helping?''}
+
+% --- Layout: FULL-WIDTH IMAGE + annotation ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{compute-comm-timeline.pdf}
+
+\vspace{0.15cm}
+\mlsysinsight{Pattern:}{At 4,096 GPUs, communication + sync consume 80\% of the training step.}
+
+\end{frame}
+
+\begin{frame}{The Physics of Data Movement}
+\note{[2 min] Three physical constraints: speed of light (latency floor),
+bandwidth-distance product, and energy per bit. Emphasize that these are
+not software problems --- they are physics constraints.
+Common error: students think faster NICs solve everything.}
+
+\footnotesize
+\textbf{Three constraints interact multiplicatively:}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lp{4cm}p{4cm}@{}}
+  \toprule
+  \textbf{Constraint} & \textbf{Physics} & \textbf{Impact} \\
+  \midrule
+  \textcolor{errorstroke}{\textbf{Latency}} & Light in fiber: 5 $\mu$s/km. 500 m $\to$ 2.5 $\mu$s RT & 1000s of GPU cycles per msg \\
+  \textcolor{routingstroke}{\textbf{Bandwidth}} & PAM4 limits copper to $\sim$2 m at NDR & Optical cables add cost \\
+  \textcolor{computestroke}{\textbf{Energy}} & SRAM: 0.5 pJ/bit. IB: 20--50 pJ/bit & At 10K GPUs, comm $\approx$ compute power \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{RDMA (GPUDirect) bypasses the kernel: 10--20 $\mu$s $\to$ 1--3 $\mu$s.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: What Determines Communication Cost?}
+\note{[2 min] Prediction exercise before revealing the alpha-beta model.
+Give students 60 seconds. Do NOT reveal the answer yet.
+Ask 2--3 students to share. Most will say ``bandwidth'' --- set up the reveal
+that latency matters too.}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.6cm}
+{\large If you need to send a 4 KB message and a 140 GB message\\
+across the same 50 GB/s network, which takes longer \emph{relative}\\
+to its theoretical minimum?}
+
+\vspace{0.6cm}
+{\normalsize Write your prediction and reasoning. \textcolor{midgray}{(60 seconds)}}
+
+\end{frame}
+
+% =============================================================================
+\section{Alpha-Beta Model}
+% =============================================================================
+
+\mlsysfocus{The $\alpha$-$\beta$ Communication Model}{%
+$T(n) = \underbrace{\alpha}_{\text{Startup latency}} + \underbrace{\dfrac{n}{\beta}}_{\text{Bandwidth term}}$%
+}
+
+\begin{frame}{Two Regimes, One Crossover}
+\note{[3 min] Walk through the alpha-beta model. The critical message size
+n* = alpha * beta separates two regimes. For IB NDR: n* = 100 KB.
+MoE tokens (4 KB) are latency-bound; LLM gradients (140 GB) are bandwidth-bound.
+Ask: ``Which optimization helps MoE but not LLMs?''}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{alpha-beta-model.pdf}
+
+\vspace{0.1cm}
+\small
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \centering
+    \textcolor{errorstroke}{\textbf{Latency-bound}} ($n < n^*$)\\[0.05cm]
+    {\scriptsize Fusion, topology, RDMA}
+  \end{column}
+  \begin{column}{0.10\textwidth}
+    \centering
+    {\footnotesize $n^* \!\approx\! 100$ KB}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \centering
+    \textcolor{datastroke}{\textbf{Bandwidth-bound}} ($n \gg n^*$)\\[0.05cm]
+    {\scriptsize Compression, Ring AllReduce, multi-rail}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Your Turn: Critical Message Size}
+\note{[3 min] Give students 90 seconds. Answer: n* = 2e-6 * 50e9 = 100 KB.
+A 140 GB gradient is 1.4 million times above n*, so bandwidth optimization
+dominates. A 4 KB MoE token is 25x below n*, so latency optimization dominates.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Calculate the Crossover}
+
+    \vspace{0.2cm}
+    InfiniBand NDR 400G:\\
+    $\alpha = 2\ \mu$s, $\beta = 50$ GB/s
+
+    \vspace{0.15cm}
+    \begin{enumerate}
+      \item Calculate $n^* = \alpha \cdot \beta$
+      \item Is a 140 GB LLM gradient latency-bound or bandwidth-bound?
+      \item Is a 4 KB MoE routing token latency-bound or bandwidth-bound?
+    \end{enumerate}
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    $n^* = 2 \times 10^{-6} \times 50 \times 10^{9}$\\
+    $= 100{,}000$ bytes $= 100$ KB\\[0.1cm]
+    140 GB $\gg$ 100 KB: \textcolor{datastroke}{\textbf{bandwidth-bound}}\\
+    4 KB $\ll$ 100 KB: \textcolor{errorstroke}{\textbf{latency-bound}}\\[0.1cm]
+    Wrong optimization = wasted money.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Collective Primitives}
+% =============================================================================
+
+\begin{frame}{The Six Core Primitives}
+\note{[3 min] Walk through all six. Key insight: AllReduce = ReduceScatter + AllGather.
+FSDP exploits this decomposition. AllToAll is the hardest to scale (O(N\^2) connections).
+Ask: ``Why can't we use AllReduce for MoE?''}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{collective-primitives.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Key:}{AllReduce = ReduceScatter + AllGather. FSDP splits these in time.}
+
+\end{frame}
+
+\begin{frame}{Matching Primitives to Parallelism}
+\note{[3 min] This is the ``travel manifest'' --- the parallelism strategy
+determines the communication pattern. Data parallelism = AllReduce (bandwidth-bound).
+MoE = AllToAll (latency + contention). Wrong primitive = wrong scaling ceiling.
+Common error: using AllReduce for everything.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Parallelism} & \textbf{Primitive} & \textbf{Bottleneck} & \textbf{Example} \\
+  \midrule
+  \textbf{Data Parallel}     & AllReduce          & Bandwidth (large grad)     & LLM training \\
+  \textbf{FSDP / ZeRO}       & AllGather + ReduceScatter & BW, high frequency  & Memory-efficient \\
+  \textbf{Tensor Parallel}   & AllReduce          & Latency (NVLink needed)    & Within-node \\
+  \textbf{Pipeline Parallel} & Point-to-Point     & Latency (sequential)       & Cross-node \\
+  \textbf{MoE (Experts)}     & AllToAll           & Latency + contention       & Sparse routing \\
+  \textbf{DLRM (RecSys)}     & AllToAll           & Latency + BW               & Embedding lookup \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{errorstroke}
+{\footnotesize \textbf{AllToAll creates $O(N^2)$ logical connections}. Expert Parallelism and RecSys hit a ``communication wall'' much earlier than dense LLMs using AllReduce.}
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{AllReduce Algorithms}
+% =============================================================================
+
+\begin{frame}{Ring AllReduce: Bandwidth-Optimal}
+\note{[3 min] Walk through the two phases: Scatter-Reduce + AllGather.
+Key property: every link active every step. Bandwidth-optimal but O(N) latency.
+For 10,000 nodes, 20,000 sequential hops is devastating.
+Ask: ``What breaks when N = 10,000?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Two-phase algorithm} on a logical ring:
+
+    \vspace{0.15cm}
+    \textbf{1. Scatter-Reduce:} $N{-}1$ steps,\\
+    chunks accumulate partial sums
+
+    \vspace{0.1cm}
+    \textbf{2. AllGather:} $N{-}1$ steps,\\
+    complete sums circulate to all
+
+    \vspace{0.15cm}
+    $$T_{\text{ring}} = 2(N{-}1)\alpha + 2\frac{N{-}1}{N}\frac{M}{\beta}$$
+
+    \vspace{0.1cm}
+    \textcolor{datastroke}{\textbf{BW:}} Optimal ($\to 2M/\beta$ as $N \to \infty$)\\
+    \textcolor{errorstroke}{\textbf{Latency:}} $O(N)$ --- poor for large clusters
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{ring-allreduce.pdf}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Algorithm Comparison}
+\note{[3 min] Walk through the four algorithms. Ring = BW-optimal but O(N) latency.
+Tree = O(log N) latency but log N BW penalty. Butterfly = best of both but needs N=2\^k.
+Double Binary Tree = NCCL default. Crossover formula determines the winner.
+If short: focus on Ring vs Tree.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lllll@{}}
+  \toprule
+  \textbf{Algorithm} & \textbf{Latency} & \textbf{Bandwidth} & \textbf{BW Optimal?} & \textbf{Best For} \\
+  \midrule
+  \textbf{Ring}        & $O(N)\alpha$      & $2\frac{N-1}{N}\frac{M}{\beta}$ & Yes  & Large gradients \\
+  \textbf{Tree}        & $O(\log N)\alpha$ & $O(\log N)\frac{M}{\beta}$      & No   & Small messages \\
+  \textbf{Butterfly}   & $O(\log N)\alpha$ & $2\frac{N-1}{N}\frac{M}{\beta}$ & Yes  & $N = 2^k$ only \\
+  \textbf{Double Tree}  & $O(\log N)\alpha$ & $\approx\frac{2M}{\beta}$       & Near & NCCL default \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{routingstroke}
+\textbf{Crossover formula:} $M_{\text{crossover}} \approx N \cdot \alpha \cdot \beta$\\[0.05cm]
+{\footnotesize Below $M_{\text{crossover}}$: Tree wins (latency dominates). Above: Ring wins (bandwidth dominates).\\
+For 64 GPUs on IB NDR: $M_{\text{crossover}} \approx 64 \times 2\ \mu\text{s} \times 50\ \text{GB/s} \approx 6.4$ MB.}
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Hierarchical Comm}
+% =============================================================================
+
+\begin{frame}{The Bandwidth Hierarchy}
+\note{[3 min] Real clusters are NOT flat. NVLink is 18x faster than InfiniBand.
+A flat Ring wastes NVLink by routing data over IB when NVLink suffices.
+The 3-phase hierarchical approach confines expensive IB traffic.
+Ask: ``How much does inter-node traffic drop with 8 GPUs per node?''}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{hierarchical-allreduce.pdf}
+
+\vspace{0.1cm}
+\small
+\begin{columns}[T]
+  \begin{column}{0.30\textwidth}
+    \centering\footnotesize
+    \textbf{Phase 1}: Intra-node\\ReduceScatter (NVLink)
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering\footnotesize
+    \textbf{Phase 2}: Inter-node\\AllReduce (InfiniBand)
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering\footnotesize
+    \textbf{Phase 3}: Intra-node\\AllGather (NVLink)
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Hierarchical AllReduce: Worked Example}
+\note{[3 min] Walk through the numbers: flat = 40 ms, hierarchical = 7 ms.
+5.7x speedup from respecting the bandwidth hierarchy. The key: inter-node
+traffic drops by 8x (GPUs per node). This is why NCCL defaults to hierarchical.}
+
+\footnotesize
+\textbf{1 GB gradient, 8 nodes $\times$ 8 GPUs (64 total)}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  \textbf{Phase} & \textbf{Data} & \textbf{BW} & \textbf{Time} \\
+  \midrule
+  \textcolor{errorstroke}{\textbf{Flat Ring}} --- all over IB & 2 GB & 50 GB/s & \textbf{40 ms} \\
+  \midrule
+  \textcolor{datastroke}{\textbf{Hierarchical}} 1. ReduceScatter & 875 MB & 900 GB/s & $\sim$1 ms \\
+  \quad 2. Inter-node AllReduce & 125 MB & 50 GB/s & $\sim$5 ms \\
+  \quad 3. AllGather & 875 MB & 900 GB/s & $\sim$1 ms \\
+  \midrule
+  \quad \textbf{Total} & & & \textbf{7 ms} \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{datastroke}
+\textbf{5.7$\times$ speedup} --- inter-node traffic drops from 1 GB to 125 MB per GPU. Effective IB BW multiplied by $G = 8$.
+\end{mlsyscard}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Discussion ---
+\begin{frame}{Discussion: AllReduce vs.\ AllToAll Scaling}
+\note{[3 min] Turn-and-talk. AllReduce scales gracefully (O(1) per-node BW).
+AllToAll creates O(N\^2) connections --- network contention is the wall.
+This is why MoE hits limits earlier than dense LLMs.
+Cold-call 2--3 pairs.}
+
+\centering
+\vspace{0.8cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.6cm}
+{\large A team trains a dense LLM using AllReduce\\
+and a MoE model using AllToAll on the same 512-GPU cluster.\\[0.3cm]
+\alert{Which model will hit the communication wall first, and why?}}
+
+\vspace{0.5cm}
+{\small \textcolor{midgray}{Hint: Think about how the number of logical connections scales.}}
+
+\end{frame}
+
+% =============================================================================
+\section{Gradient Compression}
+% =============================================================================
+
+\begin{frame}{Gradient Compression Techniques}
+\note{[3 min] When even the fastest wires aren't enough, send fewer bits.
+Walk through the compression spectrum: FP16 (2x), INT8 (4x), Top-K (100x),
+1-bit (32x). Key: always use Error Feedback beyond FP16.
+Ask: ``What happens if you discard 99\% of gradients without error feedback?''}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{gradient-compression.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Rule:}{Always use \textbf{Error Feedback} with any compression beyond FP16.}
+
+\end{frame}
+
+\begin{frame}{Error Feedback: No Information Lost}
+\note{[3 min] Walk through the error feedback mechanism step by step.
+Without EF: small gradients below threshold are permanently lost.
+With EF: residuals accumulate until they cross the threshold.
+Sum(transmitted) + error = true gradient. This is the key mathematical guarantee.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Error Feedback Mechanism:}\\[0.1cm]
+    {\footnotesize $e_{t+1} = (g_t + e_t) - \text{compress}(g_t + e_t)$}
+
+    \vspace{0.15cm}
+    \renewcommand{\arraystretch}{1.1}
+    {\scriptsize
+    \begin{tabular}{@{}rrrrrr@{}}
+      \toprule
+      \textbf{Step} & $g_t$ & $e_t$ & $g_t\!+\!e_t$ & $v_t$ & $e_{t+1}$ \\
+      \midrule
+      1 & 0.4 & 0.0 & 0.4 & 0 & 0.4 \\
+      2 & 0.3 & 0.4 & 0.7 & \textbf{1} & $-$0.3 \\
+      3 & 0.2 & $-$0.3 & $-$0.1 & 0 & $-$0.1 \\
+      4 & 0.4 & $-$0.1 & 0.3 & 0 & 0.3 \\
+      5 & 0.3 & 0.3 & 0.6 & \textbf{1} & $-$0.4 \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    {\footnotesize Sent: \textbf{2}. Error: \textbf{$-$0.4}. True sum: \textbf{1.6}.\\
+    $2 + (-0.4) = 1.6$ \checkmark}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Guarantee:}\\[0.1cm]
+    {\footnotesize
+    $\sum v_t + e_{T+1} = \sum g_t$\\[0.1cm]
+    No information is lost --- it is merely \textbf{delayed}. Small gradients accumulate until they cross the threshold.
+    }
+    \end{mlsyscard}
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize \textbf{Without EF}: Naive compression sends \textbf{0} out of 1.6 --- 100\% information loss.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Overlap}
+% =============================================================================
+
+\begin{frame}{Communication-Computation Overlap}
+\note{[3 min] The final optimization: hide communication behind computation.
+Layer-by-layer overlap launches AllReduce for completed layers while
+earlier layers still compute. Bucket fusion amortizes alpha overhead.
+Walk through the pipelined timeline vs sequential.
+Ask: ``When does overlap fail?''}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{overlap-pipeline.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Full stack:}{Hierarchical AllReduce + topology routing + overlap $\to$ 5--15\% effective overhead.}
+
+\end{frame}
+
+\begin{frame}{Overlap Budget: Worked Example}
+\note{[2 min] 32-layer 7B model: without overlap = 1325 ms, with overlap = 360 ms.
+73\% savings. The remaining exposed comm comes from AllReduce being slower than
+per-layer backward. To eliminate: increase batch size or reduce AllReduce time.}
+
+\footnotesize
+\textbf{32-layer transformer, 7B parameters, 64 GPUs}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lrl@{}}
+  \toprule
+  \textbf{Configuration} & \textbf{Time} & \textbf{Notes} \\
+  \midrule
+  Backward per layer & 15 ms & Compute \\
+  AllReduce per layer & 26 ms & 880 MB, 100 MB buckets \\
+  \midrule
+  \textbf{Sequential} & \textbf{1,325 ms} & $480 + 32 \times 26$ \\
+  \textbf{Pipelined} & \textbf{$\sim$360 ms} & \textbf{73\% savings} \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\mlsysconcept{Overlap works when}{$T_{\text{bwd/layer}} > T_{\text{AR/layer}}$. Here 26 ms $>$ 15 ms leaves 11 ms exposed per layer. Fix: larger batch or faster network.}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Four common misconceptions with quantitative evidence.}
+
+\footnotesize
+\textbf{Fallacy:} \textit{Bandwidth is the only metric that matters.}\\
+For MoE tokens ($\sim$4 KB), \textbf{latency} ($\alpha$) dominates. 400G networking will not help if serialization takes 5 $\mu$s.
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Ring AllReduce is always optimal.}\\
+Ring pays $O(N)$ latency. For 1 MB across 64 GPUs, Tree wins because Ring's 1,260 $\mu$s latency exceeds Tree's BW penalty.
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Async collectives always hide latency.}\\
+LogP overhead $o$ is non-overlappable. If GPU compute $< o$, the GPU still stalls.
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Flat AllReduce is good enough for multi-node.}\\
+Hierarchical achieves 5--6$\times$ speedup on 8-node clusters by cutting inter-node traffic 8$\times$.
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Three operational pitfalls.}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Assuming AllReduce works for everything.}\\
+MoE and DLRM need \textbf{AllToAll} ($O(N^2)$ connections), which hits contention at smaller cluster sizes.
+
+\vspace{0.08cm}
+\textbf{Pitfall:} \textit{Compressing gradients without error feedback.}\\
+Without EF, Top-K discards small gradients permanently, causing 1--3\% accuracy loss.
+
+\vspace{0.08cm}
+\textbf{Pitfall:} \textit{Ignoring rank-to-GPU mapping.}\\
+\texttt{nccl-tests} shows full BW, but training gets 50--60\% if ranks are topology-misaligned.
+
+\vspace{0.08cm}
+\textbf{Pitfall:} \textit{Silent data corruption in the network.}\\
+At 10K nodes, ``rare'' bit flips ($1$ in $10^{15}$) happen multiple times per day.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Do NOT show next slide yet. Walk around the room.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Emphasize quantitative anchors:
+n* = 100 KB, 11s AllReduce, 5.7x hierarchical speedup, 73\% overlap savings.}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{$\alpha$-$\beta$ model}: $n^* = \alpha \cdot \beta$ separates latency-bound from bandwidth-bound. NCCL's effective $\alpha$ is 5--10$\times$ wire-level.
+  \item \textbf{Algorithm crossover}: Ring = BW-optimal, $O(N)$ latency. Tree = $O(\log N)$ latency, BW penalty. Crossover: $M \approx N\alpha\beta$.
+  \item \textbf{Hierarchical AllReduce}: Reduces inter-node traffic by $G\times$ (GPUs/node), achieving 5--6$\times$ speedup.
+  \item \textbf{AllToAll}: $O(N^2)$ connections make MoE/RecSys harder to scale than dense LLMs.
+  \item \textbf{Error Feedback}: Makes lossy compression safe. $\sum v_t + e_{T+1} = \sum g_t$.
+  \item \textbf{Overlap}: Bucket fusion + layer pipelining hides 90--95\% of comm for deep models.
+  \item \textbf{Full stack}: Hierarchical + topology + overlap $\to$ 5--15\% overhead (down from 50--80\%).
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Patarasuk+09}{Patarasuk \& Yuan. ``Bandwidth Optimal All-Reduce Algorithms.'' 2009.}
+\mlsysref{Gibiansky17}{A.\ Gibiansky. ``Bringing HPC Techniques to Deep Learning.'' Baidu, 2017.}
+\mlsysref{Sergeev+18}{Sergeev \& Del Balso. ``Horovod: Fast Distributed Training.'' 2018.}
+\mlsysref{Tang+21}{Tang et al. ``1-bit Adam: Communication Efficient Large-Scale Training.'' 2021.}
+\mlsysref{Stich+18}{Stich et al. ``Sparsified SGD with Memory.'' NeurIPS, 2018.}
+\mlsysref{Rajbhandari+20}{Rajbhandari et al. ``ZeRO: Memory Optimizations.'' SC, 2020.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Fault Tolerance}
+\note{[1 min] Forward hook. The fleet has its traffic patterns, but the roads
+are crumbling. GPUs overheat, networks drop packets, nodes fail mid-training.
+How do we maintain the illusion of a perfect supercomputer on imperfect hardware?}
+
+\footnotesize
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\normalsize\bfseries Checkpointing}\\[0.1cm]
+    {\scriptsize Save state to survive failures}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{errorstroke}
+    {\normalsize\bfseries Recovery}\\[0.1cm]
+    {\scriptsize Resume without losing days of work}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    {\normalsize\bfseries Elastic Training}\\[0.1cm]
+    {\scriptsize Adapt when nodes join or leave}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.3cm}
+\centering
+{\normalsize How do we maintain a \textbf{perfect supercomputer}\\on \textbf{imperfect hardware}?}\\[0.1cm]
+{\small\textbf{At 10,000 GPUs, failure is not exceptional --- it is the steady state.}}
+
+\end{frame}
+
+\end{document}

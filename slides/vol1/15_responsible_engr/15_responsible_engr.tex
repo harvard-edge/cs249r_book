@@ -1,0 +1,709 @@
+% =============================================================================
+% Chapter 15: Responsible Engineering — ML Systems Lecture Slides
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Volume I},
+  chapter      = {Chapter 15},
+  logo         = {../../assets/img/logo-mlsysbook.png},
+  instlogo     = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Responsible Engineering},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{%
+        \centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation ---
+\setcounter{mlsystotalsections}{6}
+
+\title{Responsible Engineering}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Responsible Engineering}{The Full Cost of Optimization}{cover_responsible_systems.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Read through objectives. Emphasize that this is the capstone
+chapter: we now evaluate systems not just by throughput and latency, but by
+who they serve and at what cost. Ask: ``Has anyone deployed a model that
+worked great on benchmarks but failed for real users?''}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item Explain how ML systems can \textbf{optimize correctly while causing harm} through bias amplification and proxy variables
+  \item Apply the \textbf{\DAM{} taxonomy} to diagnose responsibility failures along Data, Algorithm, or Machine axes
+  \item Compute \textbf{fairness metrics} (demographic parity, equal opportunity, equalized odds) from confusion matrices
+  \item Design \textbf{disaggregated evaluation} that detects hidden disparities across demographic groups
+  \item Analyze \textbf{total cost of ownership} including carbon as a first-class engineering metric
+  \item Identify \textbf{governance infrastructure} (model cards, datasheets, audit trails) for compliance
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{Responsibility Gap}
+% =============================================================================
+
+\begin{frame}{When Optimization Succeeds But Systems Fail}
+\note{[3 min] Open with Amazon's recruiting tool. The system worked exactly
+as designed: it identified candidates similar to past hires. But past hires
+were overwhelmingly male. The system penalized ``women's chess club'' and
+all-women's colleges. Key: this is not a bug---it is a specification failure.
+Ask: ``What was the actual objective function?''}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Amazon Recruiting Tool (2014--2017):}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Trained on 10 years of resumes (mostly male)
+      \item Penalized ``women's'' in activities
+      \item Downgraded all-women's colleges
+      \item Removing gender labels \textbf{failed}---proxies reconstructed gender
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \mlsysalert{Specification failure:}{The system optimized \emph{faithfully} for the wrong objective.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.15}
+    {\scriptsize
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Metric} & \textbf{Status} \\
+      \midrule
+      Loss function    & Converged \\
+      Training acc.    & 95\%+ \\
+      Latency SLA      & Met \\
+      Gender fairness  & \textcolor{errorstroke}{\textbf{Failed}} \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    {\scriptsize\textcolor{midgray}{Every technical metric passed.\\The system was \emph{working correctly}.}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{COMPAS: A Different Failure Axis}
+\note{[3 min] Contrast with Amazon. COMPAS was ``calibrated'' (score of 7
+means the same thing for any group), but error rates were skewed: Black
+defendants falsely flagged at 2x the rate. The impossibility theorem means
+you cannot have calibration AND equalized odds when base rates differ.
+Ask: ``Which error is worse in criminal justice?''}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{COMPAS Recidivism Score (ProPublica, 2016):}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Used in US courts for bail/sentencing
+      \item \textbf{Calibrated}: score of 7 = same probability for any group
+      \item \textcolor{errorstroke}{\textbf{FP rate}}: Black 44.9\% vs.\ White 23.5\%
+      \item \textcolor{errorstroke}{\textbf{FN rate}}: White 47.7\% vs.\ Black 28.0\%
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \mlsysalert{Impossibility:}{Calibration + equalized odds cannot both hold when base rates differ.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.2cm}
+    {\scriptsize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Case} & \textbf{\DAM{} Axis} \\
+      \midrule
+      Amazon   & \textcolor{datastroke}{\textbf{Data}} (biased history) \\
+      COMPAS   & \textcolor{computestroke}{\textbf{Algorithm}} (wrong objective) \\
+      Optum    & \textcolor{datastroke}{\textbf{Data}} (proxy variable) \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    {\scriptsize Engineers must choose \emph{which} fairness constraint to enforce for the domain.}
+  \end{column}
+\end{columns}
+\mlsyscite{Angwin et al., ProPublica 2016; Chouldechova 2017}
+
+\end{frame}
+
+\begin{frame}{Silent Failure Modes}
+\note{[2 min] Traditional software crashes loudly. ML systems degrade silently.
+The sepsis model story: hospital changed EHR software, vital signs recorded
+differently, model confidence stayed high, but recommendations were wrong.
+No alarm triggered. Connect to the Degradation Equation from Ch1.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Failure Type} & \textbf{Detection} & \textbf{Scope} & \textbf{Fix} \\
+  \midrule
+  Crash              & Immediate    & Complete      & Immediate \\
+  Perf.\ degradation & Minutes     & Complete      & After fix \\
+  Data quality       & Hours--days  & Partial       & Data correction \\
+  Distribution shift & Days--weeks  & Partial/all   & Retraining \\
+  \textcolor{errorstroke}{\textbf{Fairness violation}} & \textcolor{errorstroke}{\textbf{Weeks--months}} & \textcolor{errorstroke}{\textbf{Subpop.}} & \textcolor{errorstroke}{\textbf{Redesign}} \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\mlsysalert{Key:}{Fairness violations are the slowest to detect and hardest to fix. The system operates \emph{normally} while harming specific populations.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: Where Does the Failure Originate?}
+\note{[2 min] Prediction exercise. Give students 60 seconds. The point is
+to use the D-A-M taxonomy before we formalize fairness metrics. Do NOT
+reveal the answer yet. Ask 2--3 students to share.}
+
+\centering
+\vspace{0.6cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.3cm}
+{\normalsize A healthcare algorithm ranks patients by ``medical need''\\
+using \emph{healthcare spending} as a proxy.\\[0.15cm]
+Black patients at the same sickness level spend \emph{less}\\
+due to systemic access barriers.}
+
+\vspace{0.3cm}
+{\normalsize Using the \DAM{} taxonomy: is this a\\
+\textcolor{datastroke}{\textbf{Data}}, \textcolor{computestroke}{\textbf{Algorithm}}, or \textcolor{routingstroke}{\textbf{Machine}} failure?}
+
+\vspace{0.3cm}
+{\small\textcolor{midgray}{(60 seconds --- then compare with a neighbor)}}
+
+\end{frame}
+
+% =============================================================================
+\section{Fairness Metrics}
+% =============================================================================
+
+\begin{frame}{The Flaw of Averages}
+\note{[2 min] Bridge from silent failures to measurement. The same principle
+that drives tail latency monitoring (p99) applies to fairness: we must
+measure the tails, not the average. A bridge safe ``on average'' kills people.
+An ML system ``accurate on average'' denies loans to qualified minorities.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{Averages hide engineering failures:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item A bridge ``safe on average'' collapses under a heavy truck
+      \item We measure \textbf{p99 latency}, not average latency
+      \item Same principle: measure \textbf{disaggregated accuracy}
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Gender Shades (2018):}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Light-skinned males: 0.8\% error
+      \item Dark-skinned females: 34.7\% error
+      \item \textcolor{errorstroke}{\textbf{43$\times$ disparity}} hidden by aggregate
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \vspace{0.2cm}
+    \mlsysconcept{Engineering principle:}{\textbf{p99 latency} $\leftrightarrow$ \textbf{worst-group accuracy}. The same rigor applied to tail latency must apply to fairness.}
+
+    \vspace{0.15cm}
+    {\scriptsize After Gender Shades, Microsoft reduced worst-case error by \textbf{20$\times$} in one year.}
+  \end{column}
+\end{columns}
+\mlsyscite{Buolamwini \& Gebru, FAccT 2018}
+
+\end{frame}
+
+\begin{frame}{Three Fairness Metrics}
+\note{[3 min] Walk through each metric precisely. Demographic parity = equal
+approval rates. Equal opportunity = equal TPR. Equalized odds = equal TPR
+AND FPR. The impossibility theorem means you cannot have all three.
+Ask: ``For credit decisions, which metric matters most?''}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lp{5.2cm}l@{}}
+  \toprule
+  \textbf{Metric} & \textbf{Requires} & \textbf{Domain} \\
+  \midrule
+  \textbf{Demographic Parity} & Equal \textbf{approval rates}: $P(\hat{Y}\!=\!1|A\!=\!a) = P(\hat{Y}\!=\!1|A\!=\!b)$ & Hiring \\[0.03cm]
+  \textbf{Equal Opportunity} & Equal \textbf{TPR} for qualified: $\text{TPR}_A = \text{TPR}_B$ & Lending \\[0.03cm]
+  \textbf{Equalized Odds} & Equal TPR \textbf{and} FPR across groups & Justice \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\mlsysalert{Impossibility Theorem:}{When base rates differ, calibration + equal opportunity + equalized odds \textbf{cannot all hold}. Engineers must choose (Chouldechova, 2017).}
+
+\end{frame}
+
+\begin{frame}{Loan Approval: What Aggregate Accuracy Conceals}
+\note{[3 min] Full-width diagram. Walk through both matrices. Group A: TPR
+90\%, Group B: TPR 60\%. The 30pp gap means qualified minority applicants
+face 4x higher rejection. Aggregate accuracy is 85\%---looks fine.}
+
+% --- Full-width image ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{confusion-matrix-groups.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Hidden:}{85\% aggregate accuracy conceals a \textbf{30pp} TPR gap --- qualified minority applicants face 4$\times$ higher rejection.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Compute the Fairness Gap}
+\note{[3 min] Give students 90 seconds to compute. Answer: Approval rate
+gap = 55\% - 40\% = 15pp. TPR gap = 90\% - 60\% = 30pp. FPR gap = 0pp.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    {\small\bfseries Compute the Fairness Metrics}
+
+    \vspace{0.1cm}
+    From the confusion matrices:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Group A: TP=4,500 FN=500 FP=1,000 TN=4,000
+      \item Group B: TP=600 FN=400 FP=200 TN=800
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Calculate:}
+    \begin{enumerate}\setlength\itemsep{0pt}
+      \item Approval Rate for each group
+      \item TPR for each group
+      \item Which fairness metric is violated?
+    \end{enumerate}
+
+    {\scriptsize\textcolor{midgray}{(90 seconds --- then compare)}}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \pause
+
+    \vspace{0.2cm}
+    {\scriptsize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{Metric} & \textbf{A} & \textbf{B} \\
+      \midrule
+      Approval Rate & 55\% & 40\% \\
+      TPR           & 90\% & \textcolor{errorstroke}{\textbf{60\%}} \\
+      FPR           & 20\% & 20\% \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    {\scriptsize
+    \textcolor{errorstroke}{\textbf{Equal opportunity violated}} (30pp TPR gap)\\
+    FPR is equal (partial compliance)}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The Fairness--Accuracy Pareto Frontier}
+\note{[3 min] Full-width diagram. Point A = unconstrained (max accuracy,
+high disparity). Point B = sweet spot (92\% accuracy, 5pp gap). Point C =
+strict equality (85\% accuracy, 0 gap). The curve shape is key: large
+fairness gains are possible with small accuracy loss.
+Ask: ``Where would you deploy for credit decisions?''}
+
+% --- Full-width image ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{fairness-accuracy-pareto.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Key insight:}{The Pareto frontier makes trade-offs \textbf{explicit and quantifiable}. Responsible engineering = finding Point B.}
+
+\end{frame}
+
+% =============================================================================
+\section{Explainability}
+% =============================================================================
+
+\begin{frame}{Explainability Requirements by Domain}
+\note{[3 min] Full-width spectrum. Key: high-stakes domains constrain model
+selection toward the interpretable end. Credit requires individual
+explanations. Fraud detection intentionally limits explainability. SHAP adds
+10--100x latency. The Clever Hans effect: Mt.\ Sinai model detected a
+metal token, not pneumonia---saliency maps are quality assurance gates.}
+
+% --- Full-width image ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{explainability-spectrum.pdf}
+
+\vspace{0.1cm}
+\footnotesize
+\mlsysconcept{Trade-off:}{Interpretable $\to$ direct auditability. Black-box $\to$ accuracy but SHAP adds \textbf{10--100$\times$} latency.}
+
+\end{frame}
+
+\begin{frame}{The Regulatory Landscape}
+\note{[2 min] Three key regulations. EU AI Act: up to 35M EUR or 7\% of
+global turnover. GDPR Article 22: right to explanation. US: sectoral.
+Key for engineers: these are architecture specifications, not abstract law.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lp{4.8cm}l@{}}
+  \toprule
+  \textbf{Regulation} & \textbf{Key Requirements} & \textbf{Penalty} \\
+  \midrule
+  \textbf{EU AI Act} & Risk classification, transparency, human oversight, audit trails & 35M EUR / 7\% \\
+  \textbf{GDPR Art.\ 22} & Right to explanation, human review of automated decisions & 20M EUR / 4\% \\
+  \textbf{US (ECOA, HIPAA)} & Adverse action notices, PHI protection, 6-yr audit logs & \$50K/violation \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\mlsysalert{Engineering implication:}{These are \textbf{architecture specifications}. Audit trails, explainability, and human oversight must be designed in from inception.}
+
+\end{frame}
+
+% =============================================================================
+\section{Cost \& Carbon}
+% =============================================================================
+
+\mlsysfocus{Efficiency Is Responsibility}{%
+Inference costs dominate TCO by \textbf{40:1} over training.\\[0.3cm]
+A 20\% latency reduction saves \textbf{\$304K + 8.9 tons CO2}.%
+}
+
+\begin{frame}{The Carbon Cost of Compute}
+\note{[3 min] Full-width two-panel diagram. Left: carbon equation, training
+vs inference split (97\% is inference). GPT-3 = 520t CO2 = 113 cars/year.
+Right: 3-year TCO breakdown. Training 2\%, Inference 73\%, Ops 25\%.}
+
+% --- Full-width image ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{carbon-footprint-tco.pdf}
+
+\vspace{0.1cm}
+\footnotesize
+\mlsysconcept{Carbon equation:}{$\text{Carbon} = \text{Energy} \times \text{Intensity}$. At 0.4 kg/kWh: \textbf{0.16 kg CO2 per GPU-hour}.}
+
+\end{frame}
+
+\begin{frame}{Total Cost of Ownership}
+\note{[3 min] Walk through the TCO breakdown. The surprise: training is only
+2\% of 3-year cost. Inference at 73\% is the ``hidden factory.''
+Ask: ``If you had one week of engineering time, where would you spend it?''}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  \textbf{Category} & \textbf{3-Year Cost} & \textbf{\%} & \textbf{Carbon} \\
+  \midrule
+  Training   & \$38K    & 2\%  & 1.2 t \\
+  Inference   & \$1.52M  & 73\% & 44.5 t \\
+  Operations  & \$510K   & 25\% & --- \\
+  \midrule
+  \textbf{Total}   & \textbf{\$2.07M} & 100\% & \textbf{$\sim$46 t} \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\mlsysconcept{Quantization saves:}{20\% latency reduction $\to$ \$304K + 8.9t CO2 over 3 years.}
+
+\vspace{0.05cm}
+\mlsysalert{Hidden cost:}{Inference-to-training ratio = \textbf{40:1}. Per-query optimization has highest ROI.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Where Should You Optimize?}
+\note{[3 min] Turn-and-talk. The setup: you have one week of engineering
+time and a model serving 10M users daily. Options: A) Reduce training time
+by 50\%, B) Reduce inference latency by 10\%, C) Add fairness monitoring.
+No single right answer. Cold-call 2--3 pairs.}
+
+\centering
+\vspace{0.6cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.4cm}
+{\normalsize You have \textbf{one week} of engineering time.\\
+Your model serves 10M users daily.\\[0.2cm]
+Which investment has the highest ROI?}
+
+\vspace{0.3cm}
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}\centering\small\textcolor{computestroke}{\textbf{A:}} Reduce training\\time by 50\%\end{column}
+  \begin{column}{0.30\textwidth}\centering\small\textcolor{datastroke}{\textbf{B:}} Reduce inference\\latency by 10\%\end{column}
+  \begin{column}{0.30\textwidth}\centering\small\textcolor{errorstroke}{\textbf{C:}} Add fairness\\monitoring\end{column}
+\end{columns}
+
+\vspace{0.2cm}
+{\footnotesize\textcolor{midgray}{Hint: Consider the TCO breakdown you just saw.}}
+
+\end{frame}
+
+% =============================================================================
+\section{Governance}
+% =============================================================================
+
+\begin{frame}{The Responsible Engineering Checklist}
+\note{[2 min] Aviation analogy: pilots follow pre-flight checklists without
+exception. Five phases: Data, Training, Evaluation, Deployment, Monitoring.
+Critical Path items block deployment.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{@{}llp{5.8cm}@{}}
+  \toprule
+  \textbf{Phase} & \textbf{Priority} & \textbf{Key Questions} \\
+  \midrule
+  \textbf{Data}       & Critical & Where did data come from? Who is represented? \\
+  \textbf{Training}   & High     & What are we optimizing? What might we penalize? \\
+  \textbf{Evaluation} & Critical & Does performance hold across user groups? \\
+  \textbf{Deployment} & Critical & Who will this affect? What recourse do users have? \\
+  \textbf{Monitoring} & High     & How will we detect problems? What triggers action? \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\mlsysconcept{Checklist discipline:}{\textbf{Critical} = deployment blocker. \textbf{High} = proceed with documented risk acceptance. Aviation pre-flight: every item, every time.}
+
+\end{frame}
+
+\begin{frame}{Data Governance: Four Pillars}
+\note{[3 min] Full-width diagram. Four pillars: Privacy, Security,
+Compliance, Transparency (keystone). Foundation: Model Cards + Datasheets.
+Scope creep: 40--60\% of models exceed documented scope within 18 months.}
+
+% --- Full-width image ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{governance-framework.pdf}
+
+\vspace{0.1cm}
+\footnotesize
+\mlsysalert{Scope creep:}{40--60\% of models operate outside documented scope within 18 months.}
+
+\end{frame}
+
+\begin{frame}{Model Cards and Datasheets}
+\note{[2 min] Model cards are ``nutrition labels'' for ML models.
+Datasheets do the same for datasets. The key: documentation enables
+accountability but does not guarantee it without technical controls.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{@{}lp{7.2cm}@{}}
+  \toprule
+  \textbf{Section} & \textbf{Example (MobileNetV2 for Edge)} \\
+  \midrule
+  \textbf{Model Details}    & 3.5M params, INT8 quantized, depthwise separable convolutions \\
+  \textbf{Intended Use}     & Real-time classification on mobile, $<$50 ms latency \\
+  \textbf{Factors}          & Performance varies with lighting, blur, object size \\
+  \textbf{Metrics}          & 71.8\% top-1 (quantized); 85\% common objects, 45\% fine-grained \\
+  \textbf{Ethics}           & ImageNet biases; not validated for medical or security screening \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\textbf{Datasheets} (Gebru+, 2018): Provenance, demographics, methodology, known limitations.
+
+\vspace{0.05cm}
+\mlsysalert{Enforcement gap:}{``Not validated for high-stakes decisions'' has no effect without technical access controls.}
+
+\end{frame}
+
+\begin{frame}{Incident Response for ML Systems}
+\note{[2 min] Zillow lost \$304M in one quarter because prediction errors
+went undetected. Five components: Detection, Assessment, Mitigation,
+Communication, Remediation. Plan before failure, not after.}
+
+\scriptsize
+\textbf{Zillow (2021):} Lost \$304M --- model errors went undetected until losses accumulated.
+
+\vspace{0.05cm}
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{@{}lp{7.8cm}@{}}
+  \toprule
+  \textbf{Component} & \textbf{Requirements} \\
+  \midrule
+  \textbf{Detection}     & Anomaly monitoring, fairness alerts, on-call rotation \\
+  \textbf{Assessment}    & Severity classification, impact assessment templates \\
+  \textbf{Mitigation}    & Rollback $<$1 min, fallback systems, kill switches \\
+  \textbf{Communication} & Stakeholder notification, approval chains \\
+  \textbf{Remediation}   & Root cause analysis, change management \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.05cm}
+\mlsysalert{\DAM{} diagnosis:}{\textcolor{datastroke}{\textbf{D}} (pandemic volatility) + \textcolor{computestroke}{\textbf{A}} (no confidence estimation) + \textcolor{routingstroke}{\textbf{M}} (no circuit breaker). Cross-axis failure.}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Three common misconceptions with quantitative evidence.}
+
+\footnotesize
+\textbf{Fallacy:} \textit{Responsibility can be addressed after technical objectives are met.}\\
+{\scriptsize Integrating fairness at inception costs \textbf{weeks}; retrofitting costs \textbf{quarters}. Amazon scrapped the project after years of failed remediation.}
+
+\vspace{0.1cm}
+\textbf{Fallacy:} \textit{Removing sensitive attributes eliminates bias.}\\
+{\scriptsize Models reconstruct protected attributes from proxies with \textbf{70--90\%} accuracy. Amazon's system learned gender from college names despite explicit removal.}
+
+\vspace{0.1cm}
+\textbf{Fallacy:} \textit{Responsible AI is primarily a legal compliance issue.}\\
+{\scriptsize Architecture choices constrain fairness more than late-stage review. Adding demographic tracking after 6 months costs \textbf{3--4$\times$} the initial implementation.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Three operational pitfalls.}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Relying on aggregate metrics to assess fairness.}\\
+{\scriptsize Gender Shades: 43$\times$ error disparity hidden by aggregate accuracy. Loan model: 30pp TPR gap invisible without disaggregated evaluation.}
+
+\vspace{0.1cm}
+\textbf{Pitfall:} \textit{Treating documentation as sufficient accountability.}\\
+{\scriptsize 40--60\% of models exceed documented scope within 18 months. Model cards without \textbf{technical access controls} are historical records.}
+
+\vspace{0.1cm}
+\textbf{Pitfall:} \textit{Measuring environmental impact of training but not inference.}\\
+{\scriptsize Inference-to-training ratio exceeds \textbf{40:1}. Training = 2\% of 3-year TCO; inference = 73\%.}
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Do NOT show next slide yet. Walk around the room.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Quantitative anchors:
+43x disparity, 30pp TPR gap, 40:1 inference ratio, 40--60\% scope creep.}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{Correctness is insufficient}: 95\% accuracy can conceal 43$\times$ error disparity across groups.
+  \item \textbf{Tractable responsibility}: ``Fairness gap $<$5\%'' is actionable; ``be fair'' is not. The \textbf{Pareto frontier} makes trade-offs explicit.
+  \item \textbf{Efficiency = responsibility}: 4$\times$ more efficient $\to$ 4$\times$ less energy. Inference dominates TCO by \textbf{40:1}.
+  \item \textbf{Impossibility theorem}: Calibration + equalized odds cannot both hold when base rates differ.
+  \item \textbf{Checklist discipline}: Aviation-inspired pre-deployment assessment turns abstract concerns into phase-gated questions.
+  \item \textbf{Governance as infrastructure}: Data lineage, audit trails, access controls must be built from inception.
+  \item \textbf{Documentation + enforcement}: Model cards pair with technical controls; documentation alone allows 40--60\% scope creep.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Buolamwini+18}{J. Buolamwini \& T. Gebru. ``Gender Shades.'' FAccT 2018.}
+\mlsysref{Angwin+16}{J. Angwin et al. ``Machine Bias.'' ProPublica 2016.}
+\mlsysref{Mitchell+19}{M. Mitchell et al. ``Model Cards for Model Reporting.'' FAccT 2019.}
+\mlsysref{Gebru+18}{T. Gebru et al. ``Datasheets for Datasets.'' 2018.}
+\mlsysref{Obermeyer+19}{Z. Obermeyer et al. ``Dissecting Racial Bias.'' Science 2019.}
+\mlsysref{Strubell+19}{E. Strubell et al. ``Energy and Policy Considerations.'' ACL 2019.}
+\mlsysref{Sculley+15}{D. Sculley et al. ``Hidden Technical Debt in ML.'' NeurIPS 2015.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Conclusion}
+\note{[1 min] Forward hook. The conclusion assembles every chapter into a
+coherent engineering philosophy. Where this chapter asked ``does the system
+serve everyone fairly?'' the conclusion asks ``what does it mean to build
+ML systems well, in every dimension?''}
+
+\centering
+\vspace{0.8cm}
+{\large\bfseries From Technique to Philosophy}
+
+\vspace{0.4cm}
+{\normalsize Every optimization in this course serves \textbf{two masters}:}
+
+\vspace{0.3cm}
+\begin{columns}[c]
+  \begin{column}{0.40\textwidth}
+    \centering
+    {\large\textcolor{computestroke}{\textbf{Performance}}}\\[0.1cm]
+    {\footnotesize Throughput, latency, accuracy}
+  \end{column}
+  \begin{column}{0.40\textwidth}
+    \centering
+    {\large\textcolor{errorstroke}{\textbf{Responsibility}}}\\[0.1cm]
+    {\footnotesize Fairness, carbon, transparency}
+  \end{column}
+\end{columns}
+
+\vspace{0.4cm}
+{\normalsize The techniques are identical; only the lens changes.}
+
+\vspace{0.2cm}
+{\small\textbf{Ch16: Conclusion} --- What does it mean to build ML systems \emph{well}?}
+
+\end{frame}
+
+\end{document}

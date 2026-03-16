@@ -1,0 +1,837 @@
+% =============================================================================
+% Chapter 11: Edge Intelligence — ML Systems Lecture Slides (Volume II)
+% =============================================================================
+% IMAGES NEEDED (SVGs converted to PDF):
+%   - cloud-vs-edge-learning.pdf    - training-memory-amplifier.pdf
+%   - adaptation-strategies.pdf     - fedavg-protocol.pdf
+%   - edge-device-spectrum.pdf      - federated-systems-challenges.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Volume II},
+  chapter      = {Chapter 11},
+  logo         = {../../assets/img/logo-mlsysbook.png},
+  instlogo     = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Edge Intelligence},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\FedAvg}{\textsc{FedAvg}}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation ---
+\setcounter{mlsystotalsections}{8}
+
+\title{Edge Intelligence}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Edge Intelligence}{On-Device Learning and Federated Coordination}{cover_edge_intelligence.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Read through objectives. Emphasize the shift from datacenter
+assumptions to edge constraints. Ask: ``How many of you have a phone that
+predicts your next word? That model adapts on your device.''}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item Contrast \textbf{cloud training}, \textbf{on-device learning}, and \textbf{federated learning} by data flow and privacy
+  \item Quantify edge training overhead: \textbf{memory} (3--5$\times$), compute (2--3$\times$), energy (10--50$\times$)
+  \item Select \textbf{adaptation strategies} (weight freezing, LoRA, sparse) matched to device constraints
+  \item Apply \textbf{data efficiency techniques} (few-shot, replay) for limited local data
+  \item Design \textbf{federated learning} systems with privacy-preserving aggregation across heterogeneous fleets
+  \item Integrate on-device learning into production MLOps with distributed monitoring
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{Why Edge Learning?}
+% =============================================================================
+
+\begin{frame}{The Edge Learning Paradigm}
+\note{[3 min] Open with the voice assistant example. A model trained on
+millions of generic samples cannot understand a regional accent. The key
+insight: centralized training cannot anticipate every local context.
+Ask: ``What happens to your keyboard predictions if you switch languages?''}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    A voice assistant trained on generic audio struggles with:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Regional accents and vocabulary
+      \item Household-specific names and patterns
+      \item Evolving user behavior over time
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{crimson}
+    {\scriptsize\textbf{Core tension:} Centralized training cannot anticipate every deployment context. Models must adapt \emph{where they operate}.}
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    {\scriptsize Four drivers: \textbf{personalization}, \textbf{latency}, \textbf{privacy}, \textbf{efficiency}.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{cloud-vs-edge-learning.pdf}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{When On-Device Learning is Necessary}
+\note{[2 min] Not every application needs on-device learning. Walk through
+the latency budgets that make cloud round-trips infeasible.
+Common error: teams over-engineer when simpler alternatives suffice.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Simpler alternatives often suffice:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Feature-based personalization (stored prefs)
+      \item Cloud fine-tuning with differential privacy
+      \item User-specific lookup tables + global model
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \mlsysalert{Decision rule:}{On-device learning only when simpler alternatives fail the requirements.}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{Latency makes cloud infeasible:}
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.15}
+    {\scriptsize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Application} & \textbf{Budget} \\
+      \midrule
+      Camera processing  & $<$33 ms \\
+      Voice response     & $<$500 ms \\
+      AR/VR motion-to-photon & $<$20 ms \\
+      Safety-critical control & $<$10 ms \\
+      \midrule
+      \textcolor{errorstroke}{Network round-trip} & \textcolor{errorstroke}{50--200 ms} \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \mlsysconcept{Physics decides:}{When the latency budget $<$ round-trip time, the model \emph{must} run locally.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Real-World Applications}
+\note{[2 min] Survey the application domains. Each domain stresses a
+different constraint. Gboard: first federated learning at billion-device
+scale, 10--20\% accuracy improvement over static models.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lp{3cm}p{2.5cm}p{3cm}@{}}
+  \toprule
+  \textbf{Domain} & \textbf{Example} & \textbf{Driver} & \textbf{Key Constraint} \\
+  \midrule
+  \textbf{Mobile Input} & Gboard (1B+ devices) & Personalization & 200--300 MB memory \\
+  \textbf{Wearables} & Health monitors & Privacy (HIPAA) & Sub-watt power \\
+  \textbf{Voice} & Wake-word detect & Latency ($<$100 ms) & 1 mW always-on \\
+  \textbf{Industrial IoT} & Pipeline monitoring & Connectivity & Offline days/weeks \\
+  \textbf{Vision} & AR/VR, robotics & Latency ($<$20 ms) & Real-time frames \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{datastroke}
+{\scriptsize\textbf{Common pattern:} Deployment variation that centralized training cannot anticipate. Learning under severe resource constraints.}
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Design Constraints}
+% =============================================================================
+
+\begin{frame}{Training is Not Inference}
+\note{[3 min] The most important quantitative slide. Training amplifies
+every constraint. Walk through the table column by column.
+Key: memory goes up 3--5$\times$, energy goes up 10--50$\times$.
+Ask: ``Why is energy amplification so much worse than memory?''}
+
+% --- Layout: FULL-WIDTH table ---
+\small
+\textbf{On-device training amplifies inference constraints multiplicatively:}
+
+\vspace{0.15cm}
+\renewcommand{\arraystretch}{1.15}
+{\scriptsize
+\begin{tabular}{@{}lp{2.8cm}p{3.5cm}p{2.8cm}@{}}
+  \toprule
+  \textbf{Dimension} & \textbf{Inference} & \textbf{Training} & \textbf{Amplification} \\
+  \midrule
+  \textbf{Memory} & Weights + 1 activation map & Weights + activations + gradients + optimizer & \textcolor{errorstroke}{\textbf{3--5$\times$}} \\
+  \textbf{Compute} & Forward pass only & Forward + backward + update & \textcolor{errorstroke}{\textbf{2--3$\times$}} \\
+  \textbf{Bandwidth} & Sequential weight reads & Bidirectional gradient flow & \textcolor{errorstroke}{\textbf{5--10$\times$}} \\
+  \textbf{Energy} & Single inference & Multiple gradient steps & \textcolor{errorstroke}{\textbf{10--50$\times$}} \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\mlsysalert{Consequence:}{A smartphone keyboard uses 25\% of available memory for a \emph{single} training step. Compression is not optional --- it is a survival requirement.}
+
+\end{frame}
+
+\begin{frame}{The Training Memory Amplifier}
+\note{[2 min] Show the bar chart. Emphasize the stacked components:
+activations dominate for larger models. At 100M params, training needs
+3.6 GB vs 400 MB for inference --- a 9$\times$ amplification.
+If short: focus on the 100M example only.}
+
+% --- Layout: FULL-WIDTH image ---
+\centering
+\safeimg[width=0.88\textwidth,height=5.2cm,keepaspectratio]{training-memory-amplifier.pdf}
+
+\vspace{0.1cm}
+{\small At 100M parameters: inference = 400 MB, training = \textbf{3.6 GB}. Activations dominate.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: How Would You Adapt a Model on a Smartwatch?}
+\note{[2 min] Prediction exercise. Give students 60 seconds. Key insight:
+you cannot update all parameters. The answer will be weight freezing or
+bias-only adaptation. Do NOT reveal yet --- primes the adaptation section.}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.5cm}
+{\large A 10M-parameter health model must adapt on a smartwatch\\
+with 500 MB total system memory and 0.5 W power budget.}
+
+\vspace{0.5cm}
+{\normalsize What would you freeze? What would you update?}
+
+\vspace{0.5cm}
+{\small\textcolor{midgray}{Write your strategy in 2 sentences. (60 seconds)}}
+
+\end{frame}
+
+% =============================================================================
+\section{Device Spectrum}
+% =============================================================================
+
+\begin{frame}{The Edge Device Spectrum}
+\note{[3 min] Walk through the four tiers. Key insight: 6+ orders of
+magnitude separate the tiers. Each requires fundamentally different
+adaptation strategies. Connect to Vol1 deployment spectrum.
+Ask: ``Can you use the same LoRA adapter on a smartwatch and a phone?''}
+
+% --- Layout: FULL-WIDTH image ---
+\centering
+\safeimg[width=0.92\textwidth,height=5.5cm,keepaspectratio]{edge-device-spectrum.pdf}
+
+\vspace{0.1cm}
+{\small Each tier demands a different adaptation strategy matched to its resource envelope.}
+
+\end{frame}
+
+\begin{frame}{NPU: The Silicon Dividend}
+\note{[2 min] Mobile NPUs provide 20$\times$ speedup and 50$\times$ energy
+savings over CPU execution. Without the NPU, on-device training drains
+the battery in minutes. The NPU freed thermal headroom for backpropagation.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{NPU vs.\ CPU for MobileNet inference:}
+
+    \vspace{0.15cm}
+    \renewcommand{\arraystretch}{1.2}
+    {\footnotesize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      & \textbf{CPU} & \textbf{NPU} \\
+      \midrule
+      Latency      & 400 ms & 20 ms \\
+      Energy       & 0.8 J  & 0.016 J \\
+      \midrule
+      \textbf{Speedup}    & ---   & \textbf{20$\times$} \\
+      \textbf{Energy gain} & ---  & \textbf{50$\times$} \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysinsight{Insight:}{The NPU does not just make inference faster --- it makes on-device training \emph{feasible}. The 50$\times$ energy gain provides thermal headroom for backpropagation bursts.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{The Mobile Memory Wall}\\[0.1cm]
+    {\footnotesize While NPUs provide raw compute (TOPS), on-device models are \textbf{bandwidth-bound}. The 30--50$\times$ gap between mobile LPDDR5 and datacenter HBM3 makes quantization a mandatory survival strategy.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}lr@{}}
+      Mobile LPDDR5 & 51 GB/s \\
+      H100 HBM3    & 3,350 GB/s \\
+      \textcolor{errorstroke}{\textbf{Gap}} & \textcolor{errorstroke}{\textbf{65$\times$}} \\
+    \end{tabular}
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Model Adaptation}
+% =============================================================================
+
+\mlsysfocus{The Adaptation Principle}{%
+Freeze what works globally.\\[0.3cm]
+Adapt only what matters locally.%
+}
+
+\begin{frame}{Three Adaptation Strategies}
+\note{[3 min] Walk through the progression from lightweight to expressive.
+Each strategy trades expressiveness for resource cost.
+Key: bias-only for microcontrollers, LoRA for smartphones, sparse for edge servers.}
+
+% --- Layout: FULL-WIDTH image ---
+\centering
+\safeimg[width=0.92\textwidth,height=5.2cm,keepaspectratio]{adaptation-strategies.pdf}
+
+\vspace{0.1cm}
+{\small Strategy selection follows device constraints: more resources enable more expressive adaptation.}
+
+\end{frame}
+
+\begin{frame}{Weight Freezing: Bias-Only Adaptation}
+\note{[2 min] The simplest strategy. Freeze all weights, update only biases.
+Reduces trainable parameters by 100--1000$\times$. Show the equation:
+only the bias gradient is non-zero. Works on microcontrollers.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \textbf{Standard layer:} $y = Wx + b$
+
+    \vspace{0.1cm}
+    In bias-only adaptation:
+    $$\frac{\partial \mathcal{L}}{\partial W} = 0, \quad \frac{\partial \mathcal{L}}{\partial b} \neq 0$$
+
+    \vspace{-0.1cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{100--1000$\times$} parameter reduction. Enables training on devices without FP units.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.47\textwidth}
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize\texttt{%
+    \textcolor{midgray}{\# Freeze all parameters}\\
+    for p in model.parameters():\\
+    \hspace{1em}p.requires\_grad = False\\[0.1cm]
+    \textcolor{midgray}{\# Enable bias gradients only}\\
+    for name, p in model.params():\\
+    \hspace{1em}if "bias" in name:\\
+    \hspace{2em}p.requires\_grad = True%
+    }}
+    \end{mlsyscard}
+    {\scriptsize\textcolor{midgray}{PyTorch: 4 lines for 1000$\times$ param reduction.}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{LoRA: Low-Rank Adaptation}
+\note{[3 min] LoRA decomposes weight updates as a low-rank product.
+Instead of updating the full $d \times d$ matrix, we learn two small
+matrices $A$ and $B$ with rank $r \ll d$. Storage savings: 200$\times$
+per user context. This enables 10 user contexts in 42 MB instead of 400 MB.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{Key idea:} Decompose weight updates as low-rank product.
+
+    \vspace{0.05cm}
+    $$W' = W_0 + \Delta W = W_0 + AB$$
+    {\scriptsize where $A \in \mathbb{R}^{d \times r}$, $B \in \mathbb{R}^{r \times d}$, $r \ll d$}
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.05}
+    {\scriptsize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Metric} & \textbf{Value} \\
+      \midrule
+      Rank ($r$)         & 4--64 \\
+      Trainable params   & 1--5\% \\
+      Per-context saving & 200$\times$ \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.05cm}
+    \mlsysconcept{Storage:}{10 contexts = 42 MB (vs.\ 400 MB full).}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize\textbf{Why LoRA works:} Weight updates have low intrinsic rank. Rank-4 captures most adaptation signal with orders-of-magnitude fewer parameters.}
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize\textbf{Trade-off:} Low rank limits expressiveness. Complex domain shifts may need higher rank or sparse updates.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Personalization Storage Budget}
+\note{[3 min] Give students 90 seconds. Answer: Full = 10$\times$40 = 400 MB.
+LoRA = 40 + 10$\times$0.2 = 42 MB. Savings = 400/42 = 9.5$\times$.
+Per-context = 40/0.2 = 200$\times$.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Storage Budget for 10 User Contexts}
+
+    \vspace{0.2cm}
+    A 10M parameter vision model (40 MB in FP32).\\
+    You need 10 user contexts on one phone.
+
+    \vspace{0.15cm}
+    \begin{itemize}
+      \item Full fine-tuning: 10 copies $\times$ 40 MB = ?
+      \item LoRA (rank 64, 50K adapter params): backbone + 10 adapters = ?
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Calculate} total storage and per-context savings.
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    Full: 10 $\times$ 40 = \textbf{400 MB}\\
+    LoRA: 40 + 10 $\times$ 0.2 = \textbf{42 MB}\\[0.1cm]
+    Total savings: \textbf{9.5$\times$}\\
+    Per-context: \textbf{200$\times$}\\[0.1cm]
+    \textcolor{datastroke}{\textbf{Modularity is the only way}} to scale personalization on edge devices.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Data Efficiency}
+% =============================================================================
+
+\begin{frame}{Learning from Limited Local Data}
+\note{[3 min] Edge devices have small, noisy, non-IID datasets.
+Three strategies: few-shot learning, experience replay, data compression.
+Key: prevent catastrophic forgetting while adapting to new patterns.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Edge data is unlike cloud data:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Small: dozens to hundreds of samples
+      \item Non-IID: reflects one user's patterns
+      \item Noisy: real-world sensor data
+      \item Streaming: arrives continuously
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \mlsysalert{Risk:}{\textbf{Catastrophic forgetting} --- new data erases old knowledge.}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \renewcommand{\arraystretch}{1.05}
+    {\scriptsize
+    \begin{tabular}{@{}lp{3.2cm}@{}}
+      \toprule
+      \textbf{Strategy} & \textbf{How It Helps} \\
+      \midrule
+      \textbf{Few-shot} & 5--20 examples via meta-learning \\
+      \textbf{Replay} & Mix old + new examples in training \\
+      \textbf{Contrastive} & Representations without labels \\
+      \textbf{Compression} & Maximize information per bit \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.05cm}
+    \mlsysinsight{Key:}{Combine replay with freezing to preserve global knowledge.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Federated Learning}
+% =============================================================================
+
+\begin{frame}{The Federated Learning Idea}
+\note{[3 min] Motivate with the hospital example: multiple hospitals want
+to train an AI on patient records but cannot share raw data. Federated
+learning moves the compute to the data. Only model updates are shared.
+78$\times$ bandwidth savings vs. raw data upload.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Problem:} 10M devices each with unique data.\\
+    \textbf{Constraint:} Raw data cannot leave the device.
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{crimson}
+    {\scriptsize\textbf{Federated Learning:} Move \emph{compute} to the data. Devices train locally, share only model updates.}
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    {\scriptsize\textbf{Bandwidth savings:}\\
+    Raw data: 195 MB/week | Update: 2.5 MB\\
+    \textcolor{datastroke}{\textbf{78$\times$ reduction}}\\[0.05cm]
+    Gboard: 1B+ devices, 10--20\% accuracy gain.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \safeimg[width=\textwidth,height=4.8cm,keepaspectratio]{fedavg-protocol.pdf}
+  \end{column}
+\end{columns}
+\mlsyscite{McMahan et al., ``Communication-Efficient Learning,'' AISTATS 2017}
+
+\end{frame}
+
+\begin{frame}{FedAvg: The Core Protocol}
+\note{[3 min] Walk through the four phases. Key equation: weighted average
+by local sample count. Emphasize: raw data never leaves the device.
+Common error: students think ``averaging weights'' is trivial --- it is
+not when data is non-IID.}
+
+\footnotesize
+\textbf{Four phases per round:}
+
+\vspace{0.05cm}
+\renewcommand{\arraystretch}{1.05}
+{\scriptsize
+\begin{tabular}{@{}clp{6cm}@{}}
+  \toprule
+  & \textbf{Step} & \textbf{Action} \\
+  \midrule
+  1 & \textcolor{computestroke}{\textbf{Broadcast}} & Server sends global model $\theta^t$ to selected devices \\
+  2 & \textcolor{datastroke}{\textbf{Local Train}} & Each device runs $E$ epochs of SGD on local data \\
+  3 & \textcolor{routingstroke}{\textbf{Upload}} & Devices send updates $\theta_k^t$ (not raw data) \\
+  4 & \textcolor{crimson}{\textbf{Aggregate}} & Server computes weighted average \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.1cm}
+\centering
+$$\theta^{t+1} = \sum_{k \in \mathcal{K}_t} \frac{n_k}{n_{\mathcal{K}_t}} \theta_k^t$$
+
+\vspace{0.05cm}
+{\footnotesize Weighted by local sample count $n_k$. Privacy: \textbf{raw data never leaves the device.}}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Is FedAvg Really Private?}
+\note{[3 min] Turn-and-talk. Key insight: NO --- gradient updates can be
+inverted to reconstruct user data. Differential privacy (epsilon 1--8)
+and secure aggregation are required. The 1--5\% accuracy cost is the
+``privacy tax.'' Cold-call 2--3 pairs.}
+
+\centering
+\vspace{0.8cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.5cm}
+{\large Federated learning keeps raw data on the device.\\[0.2cm]
+\alert{Does this automatically guarantee privacy?}}
+
+\vspace{0.5cm}
+{\normalsize Consider: What can an adversary learn from\\
+the model \emph{updates} alone?}
+
+\vspace{0.5cm}
+{\small\textcolor{lightgray}{Hint: gradient inversion attacks can reconstruct training images.}}
+
+\end{frame}
+
+\begin{frame}{Federated Systems Challenges at Scale}
+\note{[3 min] The algorithmic elegance of FedAvg masks substantial
+systems challenges. Walk through all four: stragglers (20--40\% offline),
+non-IID data (10--50\% accuracy drop), communication constraints,
+and privacy requirements. Each has protocol-level mitigations.}
+
+% --- Layout: FULL-WIDTH image ---
+\centering
+\safeimg[width=0.92\textwidth,height=5.5cm,keepaspectratio]{federated-systems-challenges.pdf}
+
+\vspace{0.1cm}
+{\small Federated learning at scale is a \textbf{systems engineering problem}, not just an algorithm.}
+
+\end{frame}
+
+\begin{frame}{Communication-Efficient Updates}
+\note{[2 min] Bandwidth is the dominant bottleneck. Three techniques:
+gradient quantization (8--32$\times$), sparsification (10--100$\times$),
+split architectures. LTE upload is 5--10 Mbps --- a 50 MB update takes
+40--80 seconds and 2--3\% of battery.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Wireless upload asymmetry:}\\
+    {\scriptsize LTE: 5--10 Mbps up vs.\ 50+ Mbps down}
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.05}
+    {\scriptsize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{Technique} & \textbf{Compress} & \textbf{Acc.\ loss} \\
+      \midrule
+      Quantize (INT8)  & 8--16$\times$ & $<$1\% \\
+      SignSGD (1-bit)   & 32$\times$    & 1--3\% \\
+      Top-$k$ sparse    & 10--100$\times$ & $<$2\% \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.05cm}
+    {\scriptsize 50 MB update over LTE: 40--80s, 2--3\% battery.}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize\textbf{Split architecture:} Shared global backbone + private local head. Sync only the shared part.}
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize\textbf{LoRaWAN:} 50 kbps, 1\% duty cycle. Uncompressed updates are \emph{physically impossible}. Compression is mandatory.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Production Integration}
+% =============================================================================
+
+\begin{frame}{MLOps for On-Device Learning}
+\note{[3 min] Production integration is where theory meets reality.
+Key differences from centralized MLOps: tiered deployment, multi-dimensional
+versioning, distributed monitoring, and resource-aware scheduling.
+20--40\% of devices offline at any time.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Pipeline transforms:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\scriptsize Artifact: static model $\to$ policy + weights + configs}
+      \item {\scriptsize Versioning: linear $\to$ hierarchical (base + adapters)}
+      \item {\scriptsize Monitoring: centralized $\to$ federated analytics}
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Tiered strategy:}\\
+    {\scriptsize
+    MCU $\to$ bias-only | Phone $\to$ LoRA | Edge $\to$ sparse}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{Orchestration:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\scriptsize 20--40\% devices offline per round}
+      \item {\scriptsize Train only when idle + charging + WiFi}
+      \item {\scriptsize Thermal: suspend if device overheats}
+      \item {\scriptsize Battery: $<$5\% per day for training}
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize\textbf{Validation:} Shadow model (frozen baseline vs.\ adapted) detects degradation.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Three common misconceptions with quantitative evidence.}
+
+\small
+\textbf{Fallacy:} \textit{On-device learning matches cloud-based training capabilities.}\\
+{\footnotesize A smartphone with 8 GB RAM and 5 W cannot replicate datacenter systems with TB of memory and kW of power. Training amplifies resource needs 3--10$\times$ over inference.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Federated learning automatically preserves privacy.}\\
+{\footnotesize Gradient inversion attacks can reconstruct training images from model updates. True privacy requires differential privacy ($\varepsilon = 1$--$8$, 1--5\% accuracy cost) and secure aggregation.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Local adaptation always improves over generic models.}\\
+{\footnotesize Adaptation with insufficient or noisy data can \emph{degrade} performance. Systems need fallback to known-good baselines when local data is inadequate.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Two operational pitfalls. Heterogeneity and orchestration
+are the most underestimated challenges.}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Assuming uniform hardware across the deployment fleet.}\\
+Edge capabilities span 6+ orders of magnitude: 32 KB to 16 GB RAM, 48 MHz to 3 GHz, 10 $\mu$W to 5 W. A learning algorithm that works on flagship phones may fail catastrophically on IoT devices. Federated systems must handle \textbf{10,000$\times$} performance differences within a single deployment.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Underestimating orchestration complexity at scale.}\\
+Federated systems must handle intermittent connectivity, version skew across thousands of model variants, participation bias (top 10\% of devices contribute to 50\% of rounds), and devices reconnecting after weeks offline. This is not a scaled-down cloud --- it is a fundamentally different engineering discipline.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Walk around the room.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Emphasize: edge is NOT
+a scaled-down cloud. Quantitative anchors: 3--10$\times$ training
+amplification, 78$\times$ bandwidth savings, 200$\times$ per-context
+storage savings, 20--40\% offline rate.}
+
+\footnotesize
+\begin{itemize}\setlength\itemsep{1pt}
+  \item \textbf{Mobile Memory Wall}: NPUs provide TOPS, but on-device models are bandwidth-bound. The 30--50$\times$ gap between mobile RAM and HBM makes quantization mandatory.
+  \item \textbf{Training $\neq$ Inference}: On-device learning amplifies resource needs 3--10$\times$ due to activations, gradients, and optimizer state.
+  \item \textbf{Three pillars}: Model Adaptation (bias/LoRA/sparse), Data Efficiency (few-shot/replay), Federated Coordination (privacy-preserving aggregation).
+  \item \textbf{Heterogeneity is the default}: Edge spans 6+ orders of magnitude. Federated systems must handle stragglers, participation bias, and 10,000$\times$ capability differences.
+  \item \textbf{Federated learning is a systems problem}: Stragglers, non-IID data, communication constraints, and privacy attacks require protocol-level mitigations.
+  \item \textbf{Edge $\neq$ scaled-down cloud}: Thermal throttling, intermittent connectivity, and battery budgets make edge a fundamentally distinct discipline.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{McMahan+17}{McMahan et al. ``Communication-Efficient Learning of Deep Networks from Decentralized Data.'' AISTATS 2017.}
+\mlsysref{Li+20}{Li et al. ``Federated Learning: Challenges, Methods, and Future Directions.'' IEEE SP Magazine, 2020.}
+\mlsysref{Bonawitz+19}{Bonawitz et al. ``Towards Federated Learning at Scale: A System Design.'' MLSys 2019.}
+\mlsysref{Hu+22}{Hu et al. ``LoRA: Low-Rank Adaptation of Large Language Models.'' ICLR 2022.}
+\mlsysref{Hard+18}{Hard et al. ``Federated Learning for Mobile Keyboard Prediction.'' 2018.}
+\mlsysref{Cai+20}{Cai et al. ``TinyTL: Reduce Memory, Not Parameters for Efficient On-Device Learning.'' NeurIPS 2020.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: ML Ops at Scale}
+\note{[1 min] Forward hook. We pushed intelligence to its physical limits.
+Now: how do we sustain these deployments reliably? Platform engineering,
+monitoring, and lifecycle management for the entire fleet.}
+
+\footnotesize
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\large\bfseries Platform\\Engineering}\\[0.1cm]
+    {\small CI/CD for ML fleets}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    {\large\bfseries Monitoring\\at Scale}\\[0.1cm]
+    {\small Observability across tiers}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{datastroke}
+    {\large\bfseries Lifecycle\\Management}\\[0.1cm]
+    {\small From deploy to retire}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.3cm}
+\centering
+{\normalsize Deploying models is the beginning.\\
+\textbf{Sustaining them at production scale is the real engineering.}}
+
+\end{frame}
+
+\end{document}

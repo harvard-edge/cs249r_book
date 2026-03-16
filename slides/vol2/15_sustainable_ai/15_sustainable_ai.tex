@@ -1,0 +1,783 @@
+% =============================================================================
+% Chapter 15: Sustainable AI — ML Systems Lecture Slides (Volume II)
+% =============================================================================
+% IMAGES NEEDED (SVGs converted to PDF):
+%   - energy-wall.pdf           - carbon-lifecycle.pdf
+%   - pue-breakdown.pdf         - carbon-geography.pdf
+%   - four-ms-framework.pdf     - optimization-stack.pdf
+%   - jevons-paradox.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Volume II},
+  chapter      = {Chapter 15},
+  logo         = {../../assets/img/logo-mlsysbook.png},
+  instlogo     = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Sustainable AI},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\COtwo}{CO\textsubscript{2}}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{7}
+
+\title{Sustainable AI}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Sustainable AI}{Energy as a First-Class Engineering Constraint}{cover_sustainable_ai.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Walk through objectives. Emphasize that this chapter treats energy
+as a hard physical constraint, not a corporate responsibility metric.
+Ask: ``How many of you have ever checked the carbon footprint of a training run?''}
+
+\small
+\begin{enumerate}
+  \item Explain the \textbf{sustainability paradox}: AI compute growth (350,000$\times$) outpaces hardware efficiency gains
+  \item Calculate \textbf{PUE} and \textbf{lifecycle carbon footprints} across training, inference, and manufacturing phases
+  \item Analyze geographic and temporal factors affecting \textbf{carbon intensity} across energy grids
+  \item Evaluate \textbf{pruning, quantization, and distillation} in terms of energy trade-offs
+  \item Design \textbf{carbon-aware scheduling} strategies for 50--80\% emission reductions
+  \item Critique \textbf{carbon offsets} versus actual emissions reduction strategies
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{The Energy Ceiling}
+% =============================================================================
+
+\begin{frame}{The Scale of the Problem}
+\note{[3 min] Open with visceral comparison. Training GPT-3 = 552 transatlantic
+flights worth of carbon. The point: this is industrial-scale environmental impact.
+Ask: ``What other industry produces this much carbon from a single product?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    Training a single frontier model:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textbf{Energy}: 1,287 MWh (GPT-3)
+      \item \textbf{Equivalent}: 122 US homes for one year
+      \item \textbf{Carbon}: 552 metric tons \COtwo{}
+      \item \textbf{Comparison}: 552 transatlantic flights
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    AI compute grew \textbf{350,000$\times$} from 2012--2019.\\
+    Hardware efficiency grew only \textbf{2--5\%/year}.
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \scriptsize
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Activity} & \textbf{kg \COtwo{}} \\
+      \midrule
+      NY--SF flight      & 900 \\
+      Human (1 year avg) & 5,000 \\
+      American (1 year)  & 16,400 \\
+      US car (lifetime)  & 57,150 \\
+      \textcolor{errorstroke}{\textbf{Transformer+NAS}} & \textcolor{errorstroke}{\textbf{284,000}} \\
+      \bottomrule
+    \end{tabular}
+  \end{column}
+\end{columns}
+\mlsyscite{Patterson et al., 2021; Strubell et al., 2019}
+
+\end{frame}
+
+\begin{frame}{The Energy Wall}
+\note{[3 min] The key insight: AI compute scales exponentially while physical
+infrastructure scales linearly. This is the ``Energy Wall'' --- physics, not
+budget, becomes the binding constraint. Ask: ``Which curve can we change?''}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{energy-wall.pdf}
+
+\vspace{0.15cm}
+\mlsysalert{The Sustainability Wall:}{AI logic scales exponentially; energy infrastructure scales linearly. The \textbf{195,000$\times$ gap} cannot be closed by hardware alone.}
+
+\end{frame}
+
+\begin{frame}{Datacenter Energy Projections}
+\note{[2 min] US datacenters tripled from 58 TWh to 176 TWh in 9 years.
+Projected to hit 580 TWh by 2028 (worst case = 12\% of US electricity).
+This is a grid capacity problem, not just a cost problem.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{US Datacenter Electricity (LBNL 2024):}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item 2014: 58 TWh (1.7\% of US)
+      \item 2023: 176 TWh (4.4\% of US)
+      \item 2028 (high): 580 TWh (\textbf{12\% of US})
+    \end{itemize}
+
+    \vspace{0.15cm}
+    AI workloads: 10\% $\to$ 30\%+ of DC power by 2030.
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{crimson}
+    \textbf{Grid capacity} --- not budget --- is the binding constraint on AI scaling.
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \scriptsize
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Sector} & \textbf{\% Global Power} \\
+      \midrule
+      Aviation         & 2.1\% \\
+      Data centers     & 2\% (today) \\
+      Data centers     & \textbf{8\%} (2030) \\
+      Cement           & 4\% \\
+      \bottomrule
+    \end{tabular}
+  \end{column}
+\end{columns}
+\mlsyscite{LBNL 2024; OECD 2023}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: Where Does the Carbon Hide?}
+\note{[2 min] Prediction exercise. Students write for 60 seconds.
+Do NOT reveal the answer yet. This primes the lifecycle analysis.
+Ask 2--3 students to share. Most will say ``training.''}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.5cm}
+{\large A model is trained once, then serves 10M queries/day.\\[0.2cm]
+\alert{Which phase produces more total \COtwo{} over one year?}}
+
+\vspace{0.5cm}
+{\normalsize Write your answer with a rough estimate. \textcolor{midgray}{(60 seconds)}}
+
+\vspace{0.4cm}
+{\small\textcolor{lightgray}{Turn to a neighbor and compare.}}
+
+\end{frame}
+
+% =============================================================================
+\section{Carbon Accounting}
+% =============================================================================
+
+\begin{frame}{Carbon Lifecycle: Three Phases}
+\note{[3 min] Reveal after prediction. Most students guessed training.
+The surprise: inference often exceeds training within DAYS of deployment.
+Walk through the three phases and percentages.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.2cm,keepaspectratio]{carbon-lifecycle.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Surprise:}{At production scale, inference emissions exceed training within \textbf{2 days} of deployment.}
+
+\end{frame}
+
+\begin{frame}{Operational Carbon Calculation}
+\note{[3 min] Walk through the worked example step by step.
+Key: dimensional analysis --- each fraction gives physical units.
+The reveal: geographic choice = 21$\times$ difference.}
+
+\small
+\textbf{Training a 7B model: 64 A100 GPUs, 14 days}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+{\footnotesize
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Step} & \textbf{Calculation} & \textbf{Result} \\
+  \midrule
+  \textcolor{computestroke}{GPU Energy}    & 64 $\times$ 400W $\times$ 336h  & 8,602 kWh \\
+  \textcolor{routingstroke}{Facility (PUE 1.2)} & 8,602 $\times$ 1.2        & 10,322 kWh \\
+  \textcolor{errorstroke}{US Grid (429 g/kWh)} & 10,322 $\times$ 0.429    & \textbf{4,428 kg \COtwo{}} \\
+  \textcolor{datastroke}{Quebec (20 g/kWh)}    & 10,322 $\times$ 0.020    & \textbf{206 kg \COtwo{}} \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{crimson}
+\textbf{Geographic choice alone}: 21$\times$ difference in emissions.\\
+{\footnotesize Same model, same hardware, same training time --- only the grid changed.}
+\end{mlsyscard}
+
+\end{frame}
+
+\mlsysfocus{The Carbon Equation}{%
+$C_{lifecycle} = \underbrace{C_{training}}_{\text{60--80\%}} +
+\underbrace{C_{inference}}_{\text{15--25\%}} +
+\underbrace{C_{embodied}}_{\text{5--15\%}}$%
+}
+
+\begin{frame}{The Geography of Carbon}
+\note{[3 min] The 40$\times$ number is larger than any algorithmic optimization.
+Quebec hydro vs Poland coal. This is why carbon-aware scheduling matters.
+Ask: ``If you could only change one thing, would you optimize the model or move it?''}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.90\textwidth,height=4.5cm,keepaspectratio]{carbon-geography.pdf}
+
+\vspace{0.1cm}
+\small
+\textbf{Site selection is the single highest-leverage sustainability intervention.}
+
+\end{frame}
+
+% =============================================================================
+\section{Power Modeling}
+% =============================================================================
+
+\begin{frame}{CMOS Power Equation}
+\note{[3 min] Ground everything in physics. The quadratic voltage dependence
+is the key: reducing V from 1.0V to 0.8V saves 36\% dynamic power.
+This explains why specialized accelerators win on efficiency.}
+
+\small
+$$P_{total} = \underbrace{\alpha C V^2 f}_{\text{Dynamic}} + \underbrace{V \cdot I_{leak}}_{\text{Static}}$$
+
+\vspace{0.05cm}
+\renewcommand{\arraystretch}{1.05}
+{\footnotesize
+\begin{tabular}{@{}ll@{}}
+  \toprule
+  \textbf{Param} & \textbf{Meaning} \\
+  \midrule
+  $\alpha$ & Switching activity (CPU: 0.1--0.3, Accel: 0.6--0.8) \\
+  $C$      & Load capacitance (scales with transistor count) \\
+  $V$      & Supply voltage (\textbf{quadratic} --- highest lever) \\
+  $f$      & Clock frequency (linear) \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.05cm}
+\mlsysconcept{Key:}{$V^2$ means 20\% voltage reduction saves 36\% power. Specialization wins.}
+
+\end{frame}
+
+\begin{frame}{PUE: The Cost of Cooling}
+\note{[2 min] PUE = Total Facility / IT Power. Industry average 1.58
+means 37\% of power goes to cooling. Google best: 1.08 (8\% overhead).
+For a 2 MW cluster, this gap = 8,400 MWh and \$589K saved per year.}
+
+% --- Layout: FULL-WIDTH IMAGE + compact summary ---
+\centering
+\safeimg[width=0.85\textwidth,height=3.2cm,keepaspectratio]{pue-breakdown.pdf}
+
+\vspace{0.05cm}
+\scriptsize
+$PUE = P_{total\_facility}\;/\;P_{IT\_equipment}$ \quad (ideal = 1.0)
+\renewcommand{\arraystretch}{0.9}
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  \textbf{Facility} & \textbf{PUE} & \textbf{Overhead} & \textbf{2 MW Savings} \\
+  \midrule
+  Industry average & 1.58 & 37\% & --- \\
+  Google best      & 1.08 & 8\%  & 8,409 MWh/yr \\
+  \bottomrule
+\end{tabular}
+
+\end{frame}
+
+\begin{frame}{Energy Per Operation: 4 Orders of Magnitude}
+\note{[2 min] Hardware choice alone spans 1000$\times$ in energy efficiency.
+The pJ/FLOP hierarchy: CPU 100, GPU 10, TPU 1, ASIC 0.1.
+Key insight: right hardware for the workload = free sustainability.}
+
+\small
+\renewcommand{\arraystretch}{1.15}
+{\footnotesize
+\begin{tabular}{@{}lrl@{}}
+  \toprule
+  \textbf{Architecture} & \textbf{pJ/FLOP} & \textbf{Characteristics} \\
+  \midrule
+  \textbf{CPU (general)}     & 100   & Low utilization, high flexibility \\
+  \textbf{GPU (tensor cores)} & 10   & High throughput, parallel \\
+  \textbf{TPU (systolic)}     & 1--2 & Specialized dataflow \\
+  \textbf{ASIC (INT8)}        & 0.1  & Fixed-function, low precision \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.2cm}
+\begin{mlsyscard}{datastroke}
+\textbf{1,000$\times$ efficiency range} across architectures. Choosing the right hardware
+tier for a workload can reduce energy consumption by 100--1,000$\times$ without any
+algorithmic changes.
+\end{mlsyscard}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Lifecycle Carbon Estimation}
+\note{[3 min] Give students 90 seconds. Answer: Operational = 536 tonnes,
+Embodied = 85 tonnes, Total = 621 tonnes.
+Key insight: embodied is 14\% --- significant on clean grids.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.56\textwidth}
+    {\normalsize\bfseries Calculate Total Carbon Footprint}
+
+    \vspace{0.15cm}
+    \textbf{Parameters:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item 2,048 H100 GPUs, 30 days, 700 W TDP
+      \item PUE = 1.3, Grid = 400 g \COtwo{}/kWh
+      \item Embodied: 1,500 kg \COtwo{}/chip
+      \item Hardware lifetime: 3 years
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Calculate}: Operational + Embodied = Total
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.40\textwidth}
+    \pause
+    \begin{mlsyscard}{computestroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    Oper: $2048 \times 0.7 \times 1.3 \times 720$h\\
+    = 1.34M kWh $\times$ 400g\\
+    = \textbf{536 tonnes}\\[0.1cm]
+    Embodied: $\frac{2048 \times 1500}{36}$\\
+    = \textbf{85 tonnes}\\[0.1cm]
+    Total = \textbf{621 tonnes \COtwo{}}\\[0.1cm]
+    \textcolor{routingstroke}{Embodied = 14\%}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Optimization Techniques}
+% =============================================================================
+
+\begin{frame}{The Optimization Toolkit}
+\note{[3 min] Three core techniques: pruning, quantization, distillation.
+All reduce terms in the CMOS power equation. Pruning reduces C,
+quantization reduces C and V, distillation reduces the entire model.
+These are multiplicative when combined.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{optimization-stack.pdf}
+
+\vspace{0.15cm}
+\small
+\textbf{All techniques reduce terms in:} $P = \alpha C V^2 f + V \cdot I_{leak}$
+
+\end{frame}
+
+\begin{frame}{Quantization: The Highest-Leverage Technique}
+\note{[2 min] INT8 = 16$\times$ less energy than FP32 per operation.
+INT4 = 64$\times$. GPTQ enables 4-bit LLMs with only 2\% perplexity increase.
+The savings are multiplicative: reduced compute AND memory movement.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \textbf{Energy savings by precision:}
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{Precision} & \textbf{Energy/Op} & \textbf{Memory} \\
+      \midrule
+      FP32 (baseline) & 1$\times$  & 1$\times$ \\
+      FP16 / BF16     & 4$\times$  & 2$\times$ \\
+      INT8            & 16$\times$ & 4$\times$ \\
+      INT4            & 64$\times$ & 8$\times$ \\
+      \bottomrule
+    \end{tabular}
+  \end{column}
+  \begin{column}{0.46\textwidth}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Why it works:}\\[0.05cm]
+    {\scriptsize
+    Narrower datapaths reduce $C$ (4$\times$)\\
+    Larger noise margins reduce $V$ (2$\times$)\\
+    Simpler control reduces logic (2$\times$)\\[0.1cm]
+    Combined: \textbf{6--10$\times$ per operation}}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \textbf{GPTQ}: 4-bit LLaMA-65B\\
+    130 GB $\to$ 32 GB\\
+    \textcolor{datastroke}{\textbf{Consumer GPU deployment}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Training vs.\ Inference Energy}
+\note{[2 min] Training is the rocket launch; inference is the airline fleet.
+A model serving 10M queries/day exceeds its training carbon in less than
+2 days. Inference optimization is the dominant sustainability lever.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Training}: One-time burst\\[0.05cm]
+    {\footnotesize 1,287 MWh for GPT-3\\
+    4.4 tonnes \COtwo{} (US grid)}
+    \end{mlsyscard}
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Inference}: Continuous drain\\[0.05cm]
+    {\footnotesize 10M queries/day $\times$ 0.001 kWh\\
+    = 10,000 kWh/day = 3,650 MWh/year\\
+    = 1,566 tonnes \COtwo{}/year}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \vspace{0.3cm}
+    \textbf{The Decode Problem:}
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \textbf{Prefill} (compute-bound):\\
+    High arithmetic intensity $\to$ efficient\\[0.1cm]
+    \textbf{Decode} (bandwidth-bound):\\
+    Reads full weights per token $\to$ GPU idles\\[0.1cm]
+    \textcolor{errorstroke}{\textbf{10--50$\times$ less energy-efficient}}\\
+    than batch processing
+    }
+
+    \vspace{0.1cm}
+    \mlsysconcept{Lever:}{Optimize inference, not just training.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Carbon-Aware Scheduling}
+% =============================================================================
+
+\begin{frame}{Carbon-Aware Scheduling}
+\note{[3 min] Grid carbon intensity fluctuates 10$\times$ within a single day
+(e.g., Texas). Carbon-aware scheduling shifts jobs to clean hours/regions.
+Google achieved 40\% carbon reduction this way. No model changes needed.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Grid carbon intensity varies 100$\times$:}
+
+    \vspace{0.05cm}
+    \scriptsize
+    \renewcommand{\arraystretch}{1.0}
+    \begin{tabular}{@{}lrl@{}}
+      \toprule
+      \textbf{Source} & \textbf{g/kWh} & \textbf{Regions} \\
+      \midrule
+      Coal   & 820--1,200 & Poland, W.\ Virginia \\
+      Gas    & 350--500   & Texas \\
+      Solar  & 20--50     & California \\
+      Hydro  & 10--30     & \textcolor{datastroke}{\textbf{Quebec}} \\
+      Nuclear & 5--20     & \textcolor{datastroke}{\textbf{France}} \\
+      \bottomrule
+    \end{tabular}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{Two strategies:}
+    \begin{enumerate}\setlength\itemsep{0pt}
+      \item \textbf{Temporal}: Delay to low-carbon hours
+      \item \textbf{Geographic}: Route to cleaner grids
+    \end{enumerate}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize Google achieved \textbf{40\% carbon reduction} by shifting workloads globally. \textbf{Zero model changes.}}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Jevons Paradox}
+\note{[3 min] Turn-and-talk. Students discuss for 90 seconds.
+Key insight: efficiency makes things cheaper, which increases demand.
+GPT-3 at \$0.06/1K tokens $\to$ \$0.002 (30$\times$ cheaper) triggered
+100$\times$ more queries. Net: 3.3$\times$ MORE total energy.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.90\textwidth,height=4.0cm,keepaspectratio]{jevons-paradox.pdf}
+
+\vspace{0.1cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.2cm}
+{\normalsize\alert{If making AI cheaper increases total consumption, how do we actually reduce emissions?}}
+
+\end{frame}
+
+% =============================================================================
+\section{Google's 4 Ms}
+% =============================================================================
+
+\begin{frame}{Google's ``4 Ms'' Framework}
+\note{[3 min] Model, Machine, Mechanization, Map --- each provides
+multiplicative savings. Combined effect on Transformer: 83$\times$ energy
+reduction, 747$\times$ carbon reduction. The key: these multiply,
+not add. Ask: ``Which M has the largest individual impact?''}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{four-ms-framework.pdf}
+
+\vspace{0.1cm}
+\small
+\textbf{Combined: 83$\times$ energy, 747$\times$ \COtwo{}} (Transformer on TPU in clean region)
+\mlsyscite{Patterson et al., ``Carbon Emissions and Large Neural Networks,'' 2022}
+
+\end{frame}
+
+\begin{frame}{Engineering Guidelines}
+\note{[2 min] Concrete, actionable steps. Emphasize ``measure first'' ---
+you cannot optimize what you don't measure. CodeCarbon wraps training
+in 3 lines of code. Transfer learning = 20-100$\times$ more efficient.}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{1pt}
+  \item \textbf{Measure First}: CodeCarbon tracks emissions in 3 lines of code. Establish baselines before optimizing.
+  \item \textbf{Choose Region Wisely}: Grid carbon varies 20--50$\times$. Hydro/nuclear regions cut emissions immediately.
+  \item \textbf{Optimize the Model}: Pruning (90\% weight removal), quantization (16$\times$ energy/op), distillation (40\% fewer params).
+  \item \textbf{Avoid Retraining}: Transfer learning = 20--100$\times$ more energy-efficient than training from scratch.
+  \item \textbf{Select Efficient Hardware}: TPUs achieve 5--13$\times$ better carbon efficiency than general GPUs.
+  \item \textbf{Full Lifecycle Accounting}: Manufacturing = 5--15\% of total. Extending GPU life from 3 to 5 years saves 40\% embodied carbon.
+\end{enumerate}
+
+\end{frame}
+
+\begin{frame}{Regulatory Landscape}
+\note{[2 min] The EU AI Act classifies models $>10^{25}$ FLOPs as ``systemic
+risk'' requiring energy reporting. CSRD mandates Scope 1-3 disclosure.
+Fines up to 7\% of global revenue. This is no longer optional.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{EU AI Act (2024):}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Models $> 10^{25}$ FLOPs = ``systemic risk''
+      \item Mandatory energy reporting (train + inference)
+      \item Fines: up to \textbf{7\% of global revenue}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{CSRD:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item 50,000+ companies must disclose
+      \item Audited Scope 1, 2, 3 emissions
+      \item Includes GPU manufacturing carbon
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{GHG Protocol Scopes:}
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Scope} & \textbf{Share} \\
+      \midrule
+      1 (Direct)     & 5--15\% \\
+      2 (Grid power) & 60--75\% \\
+      3 (Supply chain) & 15--25\% \\
+      \bottomrule
+    \end{tabular}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize Companies underreport Scope 3 by \textbf{50--70\%}.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Four common misconceptions. Each has quantitative evidence.
+The Jevons Paradox fallacy is the most counterintuitive.}
+
+\small
+\textbf{Fallacy:} \textit{Cloud computing automatically makes AI sustainable.}\\
+{\footnotesize Geographic region dominates: same training run = 21$\times$ difference (US avg vs Quebec). Default cloud regions waste 20--50$\times$ carbon.}
+
+\vspace{0.1cm}
+\textbf{Fallacy:} \textit{Efficiency improvements reduce total environmental impact.}\\
+{\footnotesize Jevons Paradox: GPT-3 became 30$\times$ cheaper per query, triggering 100$\times$ more queries. Net: 3.3$\times$ MORE total energy.}
+
+\vspace{0.1cm}
+\textbf{Fallacy:} \textit{Carbon offsets solve the sustainability problem.}\\
+{\footnotesize 60--90\% of voluntary credits fail to deliver claimed reductions. Direct migration to renewables is 2--3$\times$ cheaper and more effective.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Two operational pitfalls. The embodied carbon pitfall is
+especially surprising: on clean grids, manufacturing dominates.}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Focusing only on operational energy while ignoring embodied carbon.}\\
+A single H100 embodies 164 kg \COtwo{} from manufacturing. On Quebec's clean grid, embodied carbon is \textbf{98\%} of total emissions. Extending hardware life from 3 to 5 years saves \textbf{40\%} --- larger than most algorithmic optimizations.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Optimizing individual components without lifecycle analysis.}\\
+A model pruned 40\% to save training energy but requiring 2$\times$ inference compute increases total emissions if it serves $>$100M queries. Edge deployment saving 60\% datacenter energy but requiring 10,000 devices adds 1,500--2,000 kg embodied carbon (10$\times$ cloud training).
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Do NOT show next slide yet. Walk around the room.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Emphasize the quantitative
+anchors: 350,000$\times$, 40$\times$ geography, 1000$\times$ hardware, Jevons Paradox.}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{Sustainability Paradox}: AI compute grew 350,000$\times$ (2012--2019); hardware efficiency only 2--5\%/year. The gap is physical.
+  \item \textbf{Lifecycle Carbon}: Training (60--80\%), inference (15--25\%), manufacturing (5--15\%). Inference exceeds training within days.
+  \item \textbf{Geography dominates}: Site selection creates 40$\times$ emission differences --- larger than any algorithmic optimization.
+  \item \textbf{CMOS physics}: $P = \alpha C V^2 f + V I_{leak}$. Quantization and pruning reduce $C$ and $V$ directly.
+  \item \textbf{Jevons Paradox}: Efficiency alone increases total consumption. Requires optimization + carbon budgets.
+  \item \textbf{Google's 4 Ms}: Model + Machine + Mechanization + Map = 747$\times$ \COtwo{} reduction (multiplicative).
+  \item \textbf{Regulation}: EU AI Act mandates energy reporting for frontier models. Compliance requirement, not optional.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Patterson+21}{Patterson et al. ``Carbon Emissions and Large Neural Networks.'' 2021.}
+\mlsysref{Patterson+22}{Patterson et al. ``The Carbon Footprint of Machine Learning Training.'' 2022.}
+\mlsysref{Strubell+19}{Strubell et al. ``Energy and Policy Considerations for NLP.'' ACL 2019.}
+\mlsysref{Schwartz+20}{Schwartz et al. ``Green AI.'' CACM 2020.}
+\mlsysref{Hinton+15}{Hinton et al. ``Distilling the Knowledge in a Neural Network.'' 2015.}
+\mlsysref{Sanh+19}{Sanh et al. ``DistilBERT.'' NeurIPS Workshop 2019.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Responsible AI}
+\note{[1 min] Forward hook. We have ensured the fleet is physically viable.
+The final question: whom does it serve? Fairness, governance, and ethical
+guardrails complete the transition from ``how to build'' to ``whom it serves.''}
+
+\footnotesize
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\large\bfseries Fairness}\\[0.1cm]
+    {\scriptsize Bias detection\\Equitable outcomes}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    {\large\bfseries Governance}\\[0.1cm]
+    {\scriptsize Accountability\\Transparency}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{errorstroke}
+    {\large\bfseries Ethics}\\[0.1cm]
+    {\scriptsize Value alignment\\Societal impact}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.3cm}
+\centering
+{\normalsize A system that is technically sound can still cause social harm.}\\[0.1cm]
+{\small\textbf{From \emph{how to build} the machine to \emph{whom it serves}.}}
+
+\end{frame}
+
+\end{document}

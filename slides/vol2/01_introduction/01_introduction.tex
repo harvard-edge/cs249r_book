@@ -1,0 +1,820 @@
+% =============================================================================
+% Volume II, Chapter 1: Introduction — ML Systems at Scale
+% =============================================================================
+% This deck introduces the Fleet concept, the C³ taxonomy, scaling laws,
+% and the constraints that motivate the entire volume.
+%
+% IMAGES (SVG → PDF):
+%   - scale-moment-overview.pdf    - fleet-reliability.pdf
+%   - traditional-vs-fleet.pdf     - c3-taxonomy-triangle.pdf
+%   - fleet-law-visual.pdf         - fleet-stack.pdf
+%   - three-archetypes.pdf         - dam-to-c3.pdf
+%   - scaling-laws-overview.pdf    - iron-law-of-scale.pdf
+%   - cover_introduction.png
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Volume II},
+  chapter      = {Chapter 1},
+  logo         = {../../assets/img/logo-mlsysbook.png},
+  instlogo     = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Introduction},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
+\newcommand{\Ccube}{C$^3$}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation ---
+\setcounter{mlsystotalsections}{7}
+
+\title{Introduction}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Introduction}{The Physics of Scale}{cover_introduction.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Read through objectives. Emphasize that this chapter establishes the
+analytical vocabulary for the entire volume. Ask: ``How many of you have trained
+a model on more than one GPU?''}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item Explain the \textbf{Scale Moment} and the \textbf{Three Fundamental Walls}
+  \item Analyze the \textbf{Law of Distributed Efficiency} to quantify the ``Coordination Tax''
+  \item Differentiate \textbf{Compute-}, \textbf{Memory-}, and \textbf{Communication-bound} regimes
+  \item Apply the \textbf{\Ccube{} Taxonomy} (Computation, Communication, Coordination)
+  \item Apply the \textbf{Fleet Stack} to organize Physical, Operational, and Societal layers
+  \item Analyze why routine failure requires \textbf{Fault Tolerance} as first-class principle
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{The Scale Moment}
+% =============================================================================
+
+\begin{frame}{The Scale Moment}
+\note{[3 min] Open with visceral scale numbers. Each model generation demands
+exponentially larger fleets. Ask: ``What changed between AlexNet and GPT-4 besides
+the algorithm?'' The answer: infrastructure.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{scale-moment-overview.pdf}
+
+\vspace{0.15cm}
+\mlsysinsight{Pattern:}{$10^7\!\times$ compute growth in 10 years. Each generation requires exponentially larger \textbf{fleets}.}
+
+\end{frame}
+
+\begin{frame}{Three Fundamental Walls}
+\note{[3 min] The three walls are the qualitative phase transitions that emerge at scale.
+Emphasize that these are not optimizations --- they are physics. A single-machine
+engineer has never encountered the Network Wall or the Reliability Gap.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \begin{mlsyscard}{computestroke}
+    {\footnotesize\textbf{1. Network Wall}}\\[-2pt]
+    {\scriptsize Bisection BW replaces memory wall as bottleneck.}
+    \end{mlsyscard}
+
+    \vspace{0.02cm}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize\textbf{2. Reliability Gap}}\\[-2pt]
+    {\scriptsize Hardware failure: rare exception $\to$ statistical certainty.}
+    \end{mlsyscard}
+
+    \vspace{0.02cm}
+    \begin{mlsyscard}{routingstroke}
+    {\footnotesize\textbf{3. Energy Wall}}\\[-2pt]
+    {\scriptsize Thermodynamic efficiency becomes first-order constraint.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \renewcommand{\arraystretch}{1.1}
+    {\scriptsize
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      & \textbf{Single} & \textbf{Fleet} \\
+      \midrule
+      \textbf{Bottleneck} & Memory BW & Network BW \\
+      \textbf{Failure} & Rare & Every few hrs \\
+      \textbf{Power} & $<$1 kW & 100 MW \\
+      \textbf{Scale} & 1--8 GPUs & 10K+ GPUs \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{GPT-4: Scale Makes Failure Routine}
+\note{[3 min] Walk through the reliability calculation step by step.
+Key insight: 25,000 GPUs with 8\% annual failure rate means one failure
+every 4.4 hours. The system is always in partial failure.
+Ask: ``Can you manually restart a job every 4 hours for 100 days?''}
+
+\small
+\textbf{Worked Example: GPT-4 Training Reliability}
+
+\vspace{0.15cm}
+\renewcommand{\arraystretch}{1.2}
+{\footnotesize
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Parameter} & \textbf{Value} & \textbf{Calculation} \\
+  \midrule
+  Fleet size & 25,000 A100 GPUs & --- \\
+  Annual failure rate & 8\% per GPU & --- \\
+  Total annual failures & 2,000 failures/year & $25{,}000 \times 0.08$ \\
+  Daily failure rate & $\sim$5.5 failures/day & $2{,}000 / 365$ \\
+  MTBF (cluster) & \textbf{$\sim$4.4 hours} & $24 / 5.5$ \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.2cm}
+\begin{mlsyscard}{errorstroke}
+\textbf{Systems Insight:} The system is \emph{always} in partial failure. Manual recovery
+collapses; the system must be architected for \textbf{Fault Tolerance} as a first-class citizen.
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Fleet Architecture}
+% =============================================================================
+
+\begin{frame}{The Machine Learning Fleet}
+\note{[3 min] Define the Fleet formally. Key distinction from MapReduce:
+synchronous tight coupling. A web server handles isolated requests; the ML Fleet
+requires every GPU to synchronize every few hundred milliseconds.}
+
+\small
+\begin{mlsyscard}{crimson}
+\textbf{Machine Learning Fleet:} A distributed system of thousands of interconnected
+accelerators, storage arrays, and network fabrics designed to operate as a \emph{single
+coherent computer}.
+\end{mlsyscard}
+
+\vspace{0.15cm}
+\textbf{Three defining properties:}
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item \textbf{Iterative Statefulness}: Updates a massive shared state (weights) millions of times
+  \item \textbf{Barrier Synchronization}: 10,000 GPUs wait for the slowest worker every step
+  \item \textbf{Bisection Bandwidth Dominance}: Gigabytes of gradients cross the network every second
+\end{enumerate}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{The datacenter \emph{is} the computer. Network = system bus. Orchestrator = OS.}
+
+\end{frame}
+
+\begin{frame}{MapReduce vs.\ ML Fleet}
+\note{[2 min] Full-width comparison diagram. The key insight is barrier synchronization:
+a 10\% straggler slows the ENTIRE cluster by 10\% in the ML Fleet, but only its own
+partition in MapReduce.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{traditional-vs-fleet.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Consequence:}{ML fleets cannot borrow fault-tolerance strategies from MapReduce.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: What Breaks at Scale?}
+\note{[2 min] Prediction exercise. Give students 60 seconds to write.
+Do NOT reveal the answer yet. This primes the C$^3$ taxonomy and the
+reliability discussion. Ask 2--3 students to share.}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.5cm}
+{\large A model that trains perfectly on 8 GPUs is deployed\\
+on 8,000 GPUs. What new problems emerge?}
+
+\vspace{0.5cm}
+{\normalsize Write down 3 challenges. \textcolor{midgray}{(60 seconds)}}
+
+\vspace{0.5cm}
+{\small\textcolor{lightgray}{Turn to a neighbor and compare your answers.}}
+
+\end{frame}
+
+\begin{frame}{The Reliability Collapse}
+\note{[3 min] Full-width diagram showing the exponential decay of fleet
+availability. At 99.9\% per-node, 1K GPUs gives only 36.8\% fleet health.
+At 10K GPUs, essentially 0\%. Ask: ``What does this mean for recovery strategy?''}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{fleet-reliability.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Engineering Lesson:}{Stop preventing failure. Engineer for \textbf{resilience}: recovery speed $>$ uptime.}
+
+\end{frame}
+
+\begin{frame}{Communication Becomes Dominant}
+\note{[2 min] At small scale, computation dominates. At fleet scale,
+communication can consume 40\% of iteration time. GPT-3: 700 GB gradients
+per AllReduce step. Ask: ``Which is more expensive --- a faster GPU or
+a faster network?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Small scale}: Computation dominates\\
+    {\footnotesize Single GPU spends most time on matrix math.}
+
+    \vspace{0.15cm}
+    \textbf{Fleet scale}: Communication dominates\\
+    {\footnotesize 175B parameters $\to$ $\sim$700 GB gradients per sync.}
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{datastroke}
+    {\footnotesize Ring AllReduce across 1,000 workers on InfiniBand: \textbf{40\% of iteration time} is communication.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.2}
+    {\footnotesize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{Metric} & \textbf{1 GPU} & \textbf{Fleet} \\
+      \midrule
+      Compute \% & 95\% & 47\% \\
+      Comm \% & $<$1\% & 38\% \\
+      Coord \% & 5\% & 15\% \\
+      \midrule
+      \textbf{Bottleneck} & \textbf{Math} & \textbf{Wire} \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysconcept{CI Ratio:}{$\frac{\text{Bytes (network)}}{\text{FLOPs (local)}}$}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Scaling Laws}
+% =============================================================================
+
+\begin{frame}{AI Scaling Laws}
+\note{[3 min] Scaling laws formalize the Bitter Lesson: performance improves
+as a power-law function of compute, data, and parameters. 10$\times$ improvement
+often requires 100--1000$\times$ resources. This drives the transition to
+warehouse-scale clusters.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.2cm,keepaspectratio]{scaling-laws-overview.pdf}
+
+\vspace{0.15cm}
+\mlsysinsight{Implication:}{Scaling laws explain \emph{why} the fleet exists --- and \emph{when} scaling becomes inefficient.}
+
+\end{frame}
+
+\begin{frame}{Compute-Optimal Scaling (Chinchilla)}
+\note{[3 min] Key insight from Chinchilla: for a fixed compute budget,
+there exists an optimal balance between model size and dataset size.
+$D \propto N^{0.74}$. Ask: ``What happens if you double parameters
+but keep the dataset constant?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Chinchilla optimality} (Hoffmann et al., 2022):
+
+    \vspace{0.1cm}
+    $$D \propto N^{0.74}$$
+
+    {\footnotesize Dataset size ($D$) and model size ($N$) must grow
+    in coordinated proportions.}
+
+    \vspace{0.15cm}
+    \textbf{Three resource regimes:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\footnotesize \textcolor{computestroke}{\textbf{Compute-limited}}: Train smaller models longer}
+      \item {\footnotesize \textcolor{datastroke}{\textbf{Data-limited}}: Train larger models fewer steps}
+      \item {\footnotesize \textcolor{routingstroke}{\textbf{Optimal}}: Chinchilla frontier}
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.15}
+    {\footnotesize
+    \begin{tabular}{@{}lrl@{}}
+      \toprule
+      \textbf{Model} & \textbf{Params} & \textbf{FLOPs} \\
+      \midrule
+      GPT-1  & 117M    & $\sim$$10^{18}$ \\
+      GPT-2  & 1.5B    & $\sim$$10^{19}$ \\
+      GPT-3  & 175B    & $\sim$$10^{23}$ \\
+      GPT-4  & $\sim$1T & $\sim$$10^{25}$ \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize \textbf{10$\times$} improvement requires \textbf{100--1000$\times$} more compute.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\mlsyscite{Hoffmann et al., ``Training Compute-Optimal LLMs,'' 2022}
+
+\end{frame}
+
+\begin{frame}{Three Scaling Phases}
+\note{[2 min] Beyond data scaling, there are temporal scaling regimes:
+pre-training, post-training (RLHF, instruction tuning), and test-time
+scaling (chain-of-thought). Each has different infrastructure demands.
+If short: mention the three phases and move on.}
+
+\small
+\textbf{Temporal Scaling Regimes:} \emph{When} to invest compute
+
+\vspace{0.2cm}
+\renewcommand{\arraystretch}{1.25}
+{\footnotesize
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Phase} & \textbf{What} & \textbf{Cost} & \textbf{Infrastructure} \\
+  \midrule
+  \textcolor{computestroke}{\textbf{Pre-training}} & Model + data + compute & Massive & 1000s of GPUs, weeks \\
+  \textcolor{datastroke}{\textbf{Post-training}} & RLHF, fine-tuning & Moderate & 10s--100s GPUs, days \\
+  \textcolor{routingstroke}{\textbf{Test-time}} & CoT, ensembles, search & Per-query & Inference fleet \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.2cm}
+\begin{mlsyscard}{routingstroke}
+\textbf{Key insight:} For resource-constrained deployments, post-training and test-time scaling
+often prove more practical than complete model retraining.
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Constraints of Scale}
+% =============================================================================
+
+\begin{frame}{Why Distribution Is Hard}
+\note{[3 min] Three categories of irreducible constraint: physical (reliability,
+bandwidth), logical (CAP theorem), and societal (governance). These cannot be
+optimized away --- they must be engineered around.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \textbf{Physical Constraints}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\scriptsize \textbf{Reliability Gap}: $(0.999)^{10{,}000} \approx 0\%$}
+      \item {\scriptsize \textbf{Bisection BW Wall}: network congestion}
+      \item {\scriptsize \textbf{Energy Wall}: 100 MW, 15 pJ/bit}
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Logical Constraints}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\scriptsize \textbf{CAP Theorem}: consistency \emph{or} availability}
+      \item {\scriptsize Sync: CP (stalls on failure)}
+      \item {\scriptsize Async: AP (stale gradients)}
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.46\textwidth}
+    \textbf{Societal Constraints}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\scriptsize \textbf{Security}: model extraction, data poisoning}
+      \item {\scriptsize \textbf{Regulatory}: EU AI Act, auditability}
+      \item {\scriptsize \textbf{Responsibility}: bias at scale}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Irreducible:} These constraints cannot be optimized away --- only \emph{engineered around}.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The CAP Theorem in ML}
+\note{[2 min] Quick coverage of CAP in ML context. Synchronous training =
+consistency (all workers see same state, but stalls on failure). Asynchronous =
+availability (continues but stale gradients). Federated = eventual consistency.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{CAP Theorem} (Brewer, 2000): distributed systems provide at most 2 of 3:
+
+    \vspace{0.2cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.25}
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      \textbf{Training} & \textbf{Choice} & \textbf{Trade-off} \\
+      \midrule
+      \textcolor{computestroke}{\textbf{Synchronous}} & C + P & Stalls on failure \\
+      \textcolor{datastroke}{\textbf{Asynchronous}} & A + P & Stale gradients \\
+      \textcolor{routingstroke}{\textbf{Federated}} & A + EC & Days of divergence \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.2cm}
+    \begin{mlsyscard}{crimson}
+    {\footnotesize The choice between consistency and availability is not a bug --- it is a \textbf{fundamental impossibility} of distributed systems.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    {\footnotesize Most frontier models use \textbf{synchronous} training (consistency) and engineer around failures with checkpointing.}
+  \end{column}
+\end{columns}
+\mlsyscite{Brewer, ``CAP Theorem,'' 2000}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Diagnose the Coordination Tax}
+\note{[3 min] Give students 90 seconds. Answer: IB efficiency = 1.2/(1.2+0.28) = 81\%.
+Ethernet efficiency = 1.2/(1.2+0.56) = 68\%. With IB, the fleet spends
+81\% of time computing. With Ethernet, only 68\%.
+Follow-up: ``What happens at 10,000 GPUs?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Calculate Scaling Efficiency}
+
+    \vspace{0.15cm}
+    A GPT-3 training step has:
+    \begin{itemize}
+      \item $T_{\text{compute}}/N$ = 1.2 s per device
+      \item Gradient sync: 700 GB (FP16 Ring AllReduce)
+      \item InfiniBand: 200 Gbps $\to$ 25 GB/s
+      \item Ethernet: 100 Gbps $\to$ 12.5 GB/s
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Calculate} $\eta_{\text{scale}}$ for both networks.
+
+    {\footnotesize\textcolor{midgray}{(90 seconds)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{computestroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    $T_{\text{comm}}^{\text{IB}}$: 700/25 = 28 s $\to$ \\
+    $\eta$ = $\frac{1.2}{1.2+0.28}$ = \textbf{81\%}\\[0.1cm]
+    $T_{\text{comm}}^{\text{ETH}}$: 700/12.5 = 56 s $\to$ \\
+    $\eta$ = $\frac{1.2}{1.2+0.56}$ = \textbf{68\%}\\[0.1cm]
+    \textcolor{computestroke}{\textbf{Network determines efficiency!}}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{The \Ccube{} Taxonomy}
+% =============================================================================
+
+\mlsysfocus{The \Ccube{} Taxonomy}{%
+$T_{\text{step}} = T_{\text{Compute}} + T_{\text{Communication}} + T_{\text{Coordination}}$%
+}
+
+\begin{frame}{The \Ccube{} Taxonomy: Three Irreducible Dimensions}
+\note{[3 min] Full-width diagram of the C$^3$ triangle. Walk through each vertex.
+The key insight is Conservation of Overhead: overhead cannot be eliminated,
+only redistributed. Async training removes barriers but introduces staleness.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{c3-taxonomy-triangle.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Conservation of Overhead:}{Overhead cannot be eliminated --- only redistributed among the three C's.}
+
+\end{frame}
+
+\begin{frame}{From \DAM{} to \Ccube{}: The Projection}
+\note{[3 min] The D-A-M taxonomy (Vol I) describes the workload (nouns).
+The C$^3$ taxonomy (Vol II) describes the execution tax (verbs).
+When you stretch nouns across machines, you pay the verbs.
+Key examples: stretching Algorithm creates AllReduce; Machine failure
+requires fault tolerance.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{dam-to-c3.pdf}
+
+\vspace{0.1cm}
+{\small Vol I optimizes \DAM{} on one node. Vol II pays the \Ccube{} tax to project \DAM{} onto a fleet.}
+
+\end{frame}
+
+\begin{frame}{The Fleet Law}
+\note{[3 min] Walk through each term of the Fleet Law. The efficiency equation
+is the diagnostic instrument: when $\eta_{\text{fleet}} < 0.5$, more than half
+the silicon is idle. The stacked bar at the bottom shows a real GPT-3 breakdown.
+Ask: ``Which C dominates for GPT-3?''}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{fleet-law-visual.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Diagnostic:}{Identify which C dominates $\to$ optimize that dimension.}
+
+\end{frame}
+
+\begin{frame}{The Iron Law of Scale}
+\note{[3 min] Full-width diagram showing the Iron Law of Scale equation
+with the worked GPT-3 example comparing IB and Ethernet.
+Key insight: Amdahl's Law means if 20\% of time is comm,
+no speedup beyond 5$\times$ regardless of GPU count.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{iron-law-of-scale.pdf}
+
+\end{frame}
+
+% =============================================================================
+\section{Fleet Organization}
+% =============================================================================
+
+\begin{frame}{The Fleet Stack: From Silicon to Society}
+\note{[3 min] The Fleet Stack organizes the entire book into four parts.
+Walk through from bottom (Infrastructure) to top (Governance).
+Key: decisions at the bottom constrain possibilities at the top.
+If short on time: show the diagram and briefly name the four layers.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{fleet-stack.pdf}
+
+\vspace{0.1cm}
+{\small Each layer addresses a different \textbf{Scale Impediment}: physical limits $\to$
+coordination tax $\to$ operational economics $\to$ societal impact.}
+
+\end{frame}
+
+\begin{frame}{Six Systems Engineering Principles}
+\note{[2 min] The six principles are the ``Gold Standard'' for design decisions
+throughout the volume. Emphasize that each principle is a response to a
+specific scale constraint. If short: cover just the first three.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lp{4.5cm}l@{}}
+  \toprule
+  \textbf{Principle} & \textbf{Description} & \textbf{Scale Challenge} \\
+  \midrule
+  \textbf{Measure Everything} & Distributed monitoring infrastructure & Observability \\
+  \textbf{Design for 10$\times$} & What works at 1K GPUs must survive 10K & Scalability \\
+  \textbf{Optimize Bottleneck} & Bottleneck shifts: compute $\to$ comm $\to$ coord & Diagnosis \\
+  \textbf{Plan for Failure} & Failure is routine, not exceptional & Resilience \\
+  \textbf{Cost-Conscious} & 1\% utilization = millions of \$ at scale & Efficiency \\
+  \textbf{Co-Design HW/SW} & Network topology = primary design variable & Architecture \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\small
+\mlsysinsight{Pattern:}{Every principle from single-machine ML applies --- but its \emph{manifestation} changes at scale.}
+
+\end{frame}
+
+\begin{frame}{Three Lighthouse Archetypes}
+\note{[3 min] Full-width diagram showing the three archetypes. Each stresses
+a different corner of the C$^3$ taxonomy. These recur in every chapter.
+Ask: ``Why do we need three, not one?'' Because each faces
+qualitatively different constraints.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{three-archetypes.pdf}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Which C Dominates?}
+\note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
+Cold-call 2--3 pairs. No single right answer for the third scenario ---
+the point is reasoning through the C$^3$ framework.}
+
+\centering
+\vspace{0.5cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.4cm}
+{\large For each scenario, identify the \alert{dominant C}:}
+
+\vspace{0.3cm}
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}\centering\small
+    \textbf{Scenario A}\\[0.1cm]
+    Training GPT-4\\on 25K H100s\\with InfiniBand
+  \end{column}
+  \begin{column}{0.30\textwidth}\centering\small
+    \textbf{Scenario B}\\[0.1cm]
+    DLRM serving\\10 TB embeddings\\at 1M QPS
+  \end{column}
+  \begin{column}{0.30\textwidth}\centering\small
+    \textbf{Scenario C}\\[0.1cm]
+    Federated learning\\across 100M phones\\with spotty connectivity
+  \end{column}
+\end{columns}
+
+\vspace{0.4cm}
+{\small\textcolor{lightgray}{A: Communication \quad B: Coordination \quad C: Coordination (different kind)}}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Four common misconceptions. Each has quantitative evidence.}
+
+\footnotesize
+\textbf{Fallacy:} \textit{Focusing on FLOPs while ignoring hardware alignment.}\\
+{\scriptsize Unstructured pruning: 80\% sparsity but \textbf{no speedup} on dense Tensor Cores. Structured pruning at 50\% guarantees 2$\times$.}
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Efficiency optimizations are ``free wins.''}\\
+{\scriptsize INT8 quantization: 4$\times$ memory reduction but 1--2\% accuracy loss. Distillation: 2--4$\times$ compression but expensive teacher.}
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Edge requirements are just ``Cloud Lite.''}\\
+{\scriptsize At 120 km/h, every 100 ms delay = 3.33 m of positional uncertainty. Qualitatively different constraints.}
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Scaling laws predict linearly across all scales.}\\
+{\scriptsize At 100B+ params, coordination overhead consumes 40\% of compute. 2--3$\times$ cost overruns beyond validated thresholds.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Three pitfalls focused on the transition to fleet scale.}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Extrapolating single-machine intuition to fleet scale.}\\
+{\scriptsize Techniques that work for 8 GPUs fail at 8,000 due to the Bisection Bandwidth Wall. Communication overhead grows non-linearly.}
+
+\vspace{0.1cm}
+\textbf{Pitfall:} \textit{Treating the network as ``plumbing.''}\\
+{\scriptsize Network topology determines throughput more than compute. IB vs.\ Ethernet: 81\% vs.\ 46\% scaling efficiency.}
+
+\vspace{0.1cm}
+\textbf{Pitfall:} \textit{Ignoring governance as ``someone else's problem.''}\\
+{\scriptsize When a system serves billions, a technical bug becomes a societal risk. Security and fairness from day one.}
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Do NOT show next slide yet. Walk around the room.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Emphasize the quantitative
+anchors: $10^7\times$ compute, 4.4h MTBF, 36.8\% fleet health, 40\% comm overhead.}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{Scale creates qualitative change}: $10^7\!\times$ compute growth creates three walls (Network, Reliability, Energy).
+  \item \textbf{The ML Fleet}: Not ``more servers'' --- a warehouse-scale computer where the network is the bus.
+  \item \textbf{Failure is the common case}: At 25K GPUs, MTBF $\approx$ 4.4 hours. Engineer for resilience.
+  \item \textbf{\Ccube{} Taxonomy}: Computation, Communication, Coordination --- overhead is redistributed, never eliminated.
+  \item \textbf{Fleet Law}: $T_{\text{step}} = T_{\text{Compute}} + T_{\text{Comm}} + T_{\text{Coord}}$. Dominant C determines strategy.
+  \item \textbf{Scaling laws}: $L(X) \propto X^{-\alpha}$, but 10$\times$ gain demands 100--1000$\times$ resources.
+  \item \textbf{Governance}: Security, privacy, and fairness are invariants, not afterthoughts.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Brown+20}{Brown et al. ``Language Models are Few-Shot Learners.'' NeurIPS 2020.}
+\mlsysref{Hoffmann+22}{Hoffmann et al. ``Training Compute-Optimal LLMs.'' NeurIPS 2022.}
+\mlsysref{Sutton19}{R.\ Sutton. ``The Bitter Lesson.'' 2019.}
+\mlsysref{Kaplan+20}{Kaplan et al. ``Scaling Laws for Neural LMs.'' 2020.}
+\mlsysref{Narayanan+21}{Narayanan et al. ``Efficient Large-Scale LM Training.'' SC 2021.}
+\mlsysref{Barroso+19}{Barroso et al. ``The Datacenter as a Computer.'' 3rd ed., 2019.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Compute Infrastructure}
+\note{[1 min] Forward hook. The requirements of scale are now clear. Next:
+the physical foundation --- silicon, power, cooling, memory hierarchies
+that form the Infrastructure Layer of the Fleet Stack.}
+
+\footnotesize
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\large\bfseries Accelerators}\\[0.1cm]
+    {\footnotesize H100, B200, TPU v4\\TFLOPS and memory BW}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{datastroke}
+    {\large\bfseries Power \& Cooling}\\[0.1cm]
+    {\footnotesize 100 MW datacenters\\Liquid cooling at scale}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    {\large\bfseries Memory}\\[0.1cm]
+    {\footnotesize HBM3, NVLink\\The memory hierarchy}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.25cm}
+\centering
+{\normalsize How do we build the \textbf{physical engine} of the fleet?}\\[0.1cm]
+{\small\textbf{Silicon, power delivery, and cooling determine what the fleet can compute.}}
+
+\end{frame}
+
+\end{document}

@@ -1,0 +1,920 @@
+% =============================================================================
+% Chapter 2: ML Systems — Lecture Slides
+% =============================================================================
+% This deck covers: physical constraints (Light Barrier, Power Wall, Memory
+% Wall), Iron Law & Bottleneck Principle, workload archetypes, lighthouse
+% models, the four deployment paradigms, decision framework, hybrid
+% architectures, and Amdahl's Law.
+%
+% IMAGES NEEDED (SVGs converted to PDF):
+%   - ch02-three-walls.pdf        - ch02-workload-archetypes.pdf
+%   - ch02-lighthouse-models.pdf  - ch02-hybrid-voice-assistant.pdf
+%   - ch02-latency-tower.pdf      - ch02-decision-framework.pdf
+%   - ch02-amdahl-camera-pipeline.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume   = {Volume I},
+  chapter  = {Chapter 2},
+  logo = {../../assets/img/logo-mlsysbook.png},
+  instlogo = {../../assets/img/logo-harvard.png},
+  chaptertitle = {ML Systems},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
+
+% --- Helper: safe image include (compiles even if image missing) ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{7}
+
+\title{ML Systems}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{ML Systems}{Constraints Drive Architecture}{cover_ml_systems.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Read objectives aloud. Emphasize: this chapter answers ``where
+should a model run?'' The answer is physics, not preference. Students already
+know the Iron Law and D-A-M from Ch1; now we apply them to deployment.}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item Explain how \textbf{physical constraints} (Light Barrier, Power Wall, Memory Wall) create the deployment spectrum
+  \item Apply the \textbf{Iron Law} and \textbf{Bottleneck Principle} to classify workloads
+  \item Map \textbf{workload archetypes} to deployment paradigms using \textbf{Lighthouse Models}
+  \item Distinguish the four \textbf{deployment paradigms} (Cloud, Edge, Mobile, TinyML)
+  \item Apply the \textbf{decision framework} to select paradigms (privacy, latency, compute, cost)
+  \item Analyze \textbf{hybrid architectures} that combine paradigms in production
+  \item Identify \textbf{Amdahl's Law} limits on system-level speedup
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{Physical Walls}
+% =============================================================================
+
+\begin{frame}{Why Four Paradigms, Not One?}
+\note{[2 min] Opening hook. Students might think ``just use the cloud.''
+The answer: physics forbids a universal solution. Three walls carve the
+deployment landscape. Ask: ``Can you name one system that must respond
+in under 10 ms?''}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    The deployment spectrum exists because of \textbf{three immutable physical laws}:
+
+    \vspace{0.1cm}
+    \begin{itemize}\setlength\itemsep{1pt}
+      \item \textcolor{routingstroke}{\textbf{Light Barrier}}: Speed of light sets latency floors
+      \item \textcolor{errorstroke}{\textbf{Power Wall}}: Thermodynamics caps computation/watt
+      \item \textcolor{datastroke}{\textbf{Memory Wall}}: Data movement costs more than compute
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{crimson}
+    These are \alert{physics, not engineering}. No optimization can overcome them.
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.2cm}
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Paradigm} & \textbf{Power} \\
+      \midrule
+      Cloud (H100)   & 700 W \\
+      Edge (Orin NX) & 15--40 W \\
+      Mobile         & 3--5 W \\
+      TinyML (Nicla) & 100 mW \\
+      \bottomrule
+    \end{tabular}
+
+    \vspace{0.1cm}
+    \textcolor{errorstroke}{\textbf{Gap:}} $10^{6}\!\times$ in power
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The Three Physical Walls}
+\note{[3 min] Walk through each wall. Light Barrier: 36 ms CA-to-VA minimum.
+Power Wall: doubling frequency = 8x power (Dennard scaling breakdown ~2006).
+Memory Wall: compute grows 1.6x/yr but bandwidth only 1.2x/yr.
+Key insight: each wall creates a deployment paradigm.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch02-three-walls.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Consequence:}{Each wall forces computation closer to the data source.}
+
+\end{frame}
+
+\begin{frame}{The Light Barrier: Latency Floor}
+\note{[2 min] Quantitative detail. The equation is simple: RTT = 2d/c.
+For CA-to-VA, that is ~36 ms before any computation begins. A self-driving
+car needing <10 ms response simply cannot use a distant cloud server.
+Ask: ``What applications need sub-10 ms response?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    $$\text{Latency}_{\min} = \frac{2 \times \text{Distance}}{c_{\text{fiber}}} \approx \frac{2 \times 3{,}600 \text{ km}}{200{,}000 \text{ km/s}}$$
+
+    \vspace{0.15cm}
+    \textbf{CA to VA:} $\approx$ \alert{36 ms minimum}
+
+    \vspace{0.15cm}
+    {\footnotesize
+    \begin{itemize}\setlength\itemsep{1pt}
+      \item Add 60--150 ms software overhead
+      \item Total: 100--200 ms for cloud services
+      \item Sub-10 ms systems \emph{cannot} use distant cloud
+    \end{itemize}
+    }
+
+    \vspace{0.1cm}
+    \mlsysconcept{Creates:}{Edge ML and TinyML paradigms.}
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \vspace{0.3cm}
+    \renewcommand{\arraystretch}{1.15}
+    {\footnotesize
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Application} & \textbf{Budget} \\
+      \midrule
+      AV braking      & $<$ 10 ms \\
+      Robotic control  & $<$ 20 ms \\
+      Game rendering   & $<$ 16 ms \\
+      Voice response   & $<$ 200 ms \\
+      Web search       & $<$ 500 ms \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Power Wall and Memory Wall}
+\note{[3 min] Power Wall: P ~ f\^{}3. Dennard scaling broke ~2006. Mobile
+devices hard-limited to 3--5 W TDP; exceed it and you get thermal throttling
+(60 FPS to 15 FPS in 1 minute). Memory Wall: compute grows 1.33x faster
+than bandwidth each year. Data movement dominates energy cost. If short:
+combine into one slide and hit just the key numbers.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textcolor{errorstroke}{\textbf{Power Wall}}
+
+    \vspace{0.1cm}
+    $$\text{Power} \propto C \times V^2 \times f$$
+    $$V \propto f \implies \text{Power} \propto f^3$$
+
+    \vspace{0.1cm}
+    \begin{itemize}\setlength\itemsep{1pt}
+      \item Dennard scaling broke $\sim$2006
+      \item 2$\times$ frequency $=$ 8$\times$ power
+      \item Mobile TDP: 3--5 W hard limit
+      \item Exceed $\to$ thermal throttling
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \mlsysconcept{Creates:}{Mobile ML paradigm.}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textcolor{datastroke}{\textbf{Memory Wall}}
+
+    \vspace{0.1cm}
+    $$\frac{\text{Compute Growth}}{\text{BW Growth}} \approx \frac{1.6\times\text{/yr}}{1.2\times\text{/yr}} \approx 1.33\times\text{/yr}$$
+
+    \vspace{0.1cm}
+    \begin{itemize}\setlength\itemsep{1pt}
+      \item Compute doubles every 18 months
+      \item Memory BW improves $\sim$20\%/yr
+      \item Data movement is the dominant cost
+      \item TinyML: only 256 KB SRAM
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \mlsysconcept{Creates:}{TinyML memory limits.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: Which Wall Matters Most?}
+\note{[2 min] Prediction exercise. Students think for 60 seconds before
+you show the next slide. No single right answer---the point is that
+different applications hit different walls. Ask 2--3 students to share.}
+
+\centering
+\vspace{0.8cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.5cm}
+{\large A hospital deploys an AI-powered cardiac monitor.\\
+It must detect arrhythmias within 5 ms, run 24/7 on battery,\\
+and keep patient data on-device.}
+
+\vspace{0.4cm}
+{\normalsize Which physical wall is the \alert{binding constraint}?}
+
+\vspace{0.4cm}
+{\small\textcolor{midgray}{Write your answer. (60 seconds)}}
+
+\end{frame}
+
+% =============================================================================
+\section{Analyzing Work}
+% =============================================================================
+
+\begin{frame}{Iron Law Recap: Three Terms}
+\note{[2 min] Quick refresher from Ch1. Students already know the Iron Law.
+The key new insight: the same equation, applied to different hardware,
+gives different dominant terms. Each term resolves to seconds.}
+
+\footnotesize
+$$T = \underbrace{\frac{D_{\text{vol}}}{BW}}_{\text{Data}} + \underbrace{\frac{O}{R_{\text{peak}} \cdot \eta}}_{\text{Compute}} + \underbrace{L_{\text{lat}}}_{\text{Overhead}}$$
+
+\vspace{0.05cm}
+\begin{columns}[T]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{datastroke}{\textbf{Data}} $\frac{D_{\text{vol}}}{BW}$\\[0.05cm]
+    {\scriptsize Bytes / (Bytes/s) = \textbf{s}}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{computestroke}{\textbf{Compute}} $\frac{O}{R_p \cdot \eta}$\\[0.05cm]
+    {\scriptsize FLOPs / (FLOPs/s) = \textbf{s}}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{errorstroke}{\textbf{Overhead}} $L_{\text{lat}}$\\[0.05cm]
+    {\scriptsize Orchestration tax = \textbf{s}}
+  \end{column}
+\end{columns}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{crimson}
+\textbf{New insight:} The \emph{same model} on \emph{different hardware} shifts the dominant term.
+Cloud training: compute-bound. Mobile inference: memory-bound.
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{The Bottleneck Principle}
+\note{[3 min] Key new concept: with pipelined execution, the slowest term
+determines throughput. The Iron Law sum becomes a max. The highway bridge
+analogy: a 6-lane highway through a 2-lane bridge yields 2-lane throughput.
+If a workload is memory-bound, buying faster compute yields 0\% speedup.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    Modern accelerators \textbf{pipeline} data loading with compute:
+
+    \vspace{0.1cm}
+    $$T_{\text{bottleneck}} = \max\!\left(\frac{D_{\text{vol}}}{BW},\; \frac{O}{R_p \cdot \eta}\right) + L_{\text{lat}}$$
+
+    \vspace{0.1cm}
+    \begin{itemize}\setlength\itemsep{1pt}
+      \item \textbf{Memory-bound}: $D/BW > O/(R_p \cdot \eta)$\\
+        Faster compute yields \alert{0\% speedup}
+      \item \textbf{Compute-bound}: $O/(R_p \cdot \eta) > D/BW$\\
+        More bandwidth yields 0\% speedup
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \mlsysalert{Rule:}{Identify the dominant term \emph{before} optimizing.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.2cm}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Analogy:}\\[0.05cm]
+    A 6-lane highway feeding a 2-lane bridge yields 2-lane throughput. Widening the highway is useless until the bridge is widened.
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Four Workload Archetypes}
+\note{[3 min] The D-A-M taxonomy from Ch1 now categorizes workloads by
+dominant bottleneck. Walk through each archetype. Key: the optimization
+strategy is entirely different for each. Wrong-term optimization yields 0\%
+speedup. If short: show the visual and hit just the names + bottleneck terms.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch02-workload-archetypes.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Key rule:}{Identify the archetype before optimizing --- wrong-term optimization yields 0\% speedup.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Classify the Workload}
+\note{[3 min] Give students 90 seconds. Answer: GPT-2 inference is a
+Bandwidth Hog (it reads the full parameter set for each token, but does
+relatively few FLOPs per byte). ResNet-50 training is a Compute Beast.
+DLRM is Sparse Scatter (massive embedding tables, random access).}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Classify the Workload}
+
+    \vspace{0.2cm}
+    For each workload, identify the \textbf{archetype} and the \textbf{dominant Iron Law term}:
+
+    \vspace{0.15cm}
+    \begin{enumerate}\setlength\itemsep{3pt}
+      \item GPT-2 generating text (1 token at a time)
+      \item ResNet-50 training (batch of 256 images)
+      \item Netflix recommendation (100 GB embedding table)
+    \end{enumerate}
+
+    \vspace{0.1cm}
+    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Answers:}\\[0.1cm]
+    {\footnotesize
+    1. \textcolor{datastroke}{\textbf{Bandwidth Hog}} --- $D/BW$\\
+    Reads full params per token\\[0.1cm]
+    2. \textcolor{computestroke}{\textbf{Compute Beast}} --- $O/(R_p \cdot \eta)$\\
+    Dense matrix ops dominate\\[0.1cm]
+    3. \textcolor{routingstroke}{\textbf{Sparse Scatter}} --- Memory capacity\\
+    Random access to embeddings
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Lighthouses}
+% =============================================================================
+
+\begin{frame}{Five Lighthouse Models}
+\note{[3 min] Recap from Ch1 with more depth. Each lighthouse isolates a
+distinct bottleneck and recurs in every chapter. The log-scale range from
+20 MFLOPs (KWS) to 4.1 GFLOPs (ResNet) shows why no single paradigm
+fits all workloads. Ask: ``Why five, not one?''}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{ch02-lighthouse-models.pdf}
+
+\vspace{0.1cm}
+{\small Each lighthouse recurs in every chapter, testing concepts under different constraint regimes.}
+
+\end{frame}
+
+\begin{frame}{Lighthouse Specifications}
+\note{[2 min] Reference table. Students will look back at this throughout the
+course. Emphasize the range: 26K params to 1.5B params, 100 KB to 100+ GB.
+If short: show the table without detailed walk-through.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}llllll@{}}
+  \toprule
+  \textbf{Lighthouse} & \textbf{Archetype} & \textbf{Bottleneck} & \textbf{FLOPs} & \textbf{Params} & \textbf{Size} \\
+  \midrule
+  ResNet-50   & Compute Beast   & $O/(R_p \!\cdot\! \eta)$ & 4.1 GF & 25.6 M & 98 MB \\
+  GPT-2/Llama & BW Hog          & $D_{\text{vol}}/BW$      & varies & 1.5 B  & GB+ \\
+  DLRM        & Sparse Scatter  & Mem.\ capacity           & varies & ---    & 100+ GB \\
+  MobileNetV2 & Efficient       & Latency/power            & 300 MF & 3.4 M  & 14 MB \\
+  KWS DS-CNN  & Tiny Constraint & Energy/inf.              & 20 MF  & 26 K   & 100 KB \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\footnotesize
+\begin{mlsyscard}{crimson}
+\textbf{Range:} 20 MFLOPs $\to$ 4.1 GFLOPs (200$\times$), 100 KB $\to$ 100+ GB ($10^{6}\!\times$).
+No single deployment paradigm fits all workloads.
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Latency Numbers for ML Systems}
+\note{[2 min] Reference slide. Walk through the 8-order-of-magnitude range.
+Key decision rule: if your latency budget is X ms, no operation greater
+than X can appear on the critical path. This determines which paradigm
+is even feasible. If short: focus on the decision rule, not every row.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{ch02-latency-tower.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Decision rule:}{If budget $= X$ ms, no operation $> X$ on the critical path.}
+
+\end{frame}
+
+% =============================================================================
+\section{Cloud \& Edge}
+% =============================================================================
+
+\begin{frame}{Cloud ML: Computational Power}
+\note{[3 min] Cloud ML accepts latency for unlimited compute. H100: 80 GB
+HBM3, 989 TFLOPS FP16, 700 W. Strengths: elastic scaling, massive
+datasets, complex models. Weaknesses: latency (100--1000 ms), no privacy
+guarantees. Ask: ``When is 100 ms latency acceptable?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{Cloud ML} aggregates compute in data centers:
+
+    \vspace{0.15cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Metric} & \textbf{Value} \\
+      \midrule
+      Compute    & 989 TFLOPS (H100 FP16) \\
+      Memory     & 80 GB HBM3 \\
+      Power      & 700 W per GPU \\
+      Latency    & 100--1000+ ms \\
+      Storage    & Petabytes (elastic) \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysconcept{Iron Law:}{Compute term dominates in training.}
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \vspace{0.2cm}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Strengths}\\
+    {\footnotesize Elastic scaling, massive datasets, complex models (GPT-4, DLRM)}
+    \end{mlsyscard}
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Weaknesses}\\
+    {\footnotesize Latency (speed of light), data leaves device, high cost (\$1000s/mo)}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Edge ML: Latency and Privacy}
+\note{[3 min] Edge ML moves compute closer to data. Jetson Orin NX: 32 GB
+LPDDR5, 100 TOPS INT8, 15--40 W. Use cases: factory floors, hospitals,
+retail. Key advantage: data stays on-premises. If short: show table and
+one use case.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{Edge ML} moves computation to local servers:
+
+    \vspace{0.15cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Metric} & \textbf{Value} \\
+      \midrule
+      Compute    & 100 TOPS (Orin NX INT8) \\
+      Memory     & 32 GB LPDDR5 \\
+      Power      & 15--40 W \\
+      Latency    & 10--100 ms \\
+      Privacy    & Data stays on-premises \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysconcept{Iron Law:}{Latency term ($L_{\text{lat}}$) is minimized.}
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \vspace{0.2cm}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Use Cases}\\
+    {\footnotesize Factory quality inspection, hospital patient monitoring, retail analytics}
+    \end{mlsyscard}
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Trade-offs}\\
+    {\footnotesize Limited compute vs.\ cloud, hardware maintenance, network engineering cost}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Where Should This Run?}
+\note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
+Cold-call 2--3 pairs. The camera pipeline spans mobile (low latency) and
+cloud (complex scene understanding). Accept any well-reasoned answer.}
+
+\centering
+\vspace{0.6cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.4cm}
+{\large A smartphone camera app needs to:\\[0.15cm]
+(1) Detect faces in real-time at 30 FPS\\
+(2) Apply artistic style transfer\\
+(3) Upload to cloud for advanced editing}
+
+\vspace{0.35cm}
+\alert{Which paradigm handles each stage? Why?}
+
+\vspace{0.3cm}
+\begin{columns}[c]
+  \begin{column}{0.22\textwidth}\centering\small\textcolor{computestroke}{Cloud}\end{column}
+  \begin{column}{0.22\textwidth}\centering\small\textcolor{datastroke}{Edge}\end{column}
+  \begin{column}{0.22\textwidth}\centering\small\textcolor{routingstroke}{Mobile}\end{column}
+  \begin{column}{0.22\textwidth}\centering\small\textcolor{errorstroke}{TinyML}\end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Mobile \& Tiny}
+% =============================================================================
+
+\begin{frame}{Mobile ML: On-Device Intelligence}
+\note{[3 min] Mobile ML brings inference to smartphones. Key constraint:
+3--5 W TDP, 8 GB RAM, no persistent network needed. Thermal throttling:
+60 FPS drops to 15 FPS after 1 minute of sustained load. MobileNetV2
+achieves similar accuracy to ResNet with 14x fewer FLOPs.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \textbf{Mobile ML} runs on smartphones and tablets:
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Metric} & \textbf{Value} \\
+      \midrule
+      Compute    & 17 TOPS (INT8) \\
+      Memory     & 8 GB LPDDR5 \\
+      Power      & 3--5 W TDP \\
+      Latency    & 5--50 ms \\
+      Battery    & $\sim$15 Wh \\
+      \bottomrule
+    \end{tabular}
+
+    \vspace{0.1cm}
+    \mlsysalert{Throttling:}{60 FPS $\to$ 15 FPS in 1 min.}
+  \end{column}
+  \begin{column}{0.46\textwidth}
+    \vspace{0.1cm}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Key Benefits}\\
+    Offline capable, privacy, low latency
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \textbf{Battery constraint:}\\
+    5 W $\to$ 15 Wh / 5 W = \textbf{3 hours}\\
+    1 W light inference $\to$ \textbf{15 hours}
+
+    \vspace{0.1cm}
+    MobileNetV2: 14$\times$ fewer FLOPs than ResNet-50, similar accuracy
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{TinyML: Ubiquitous Sensing}
+\note{[3 min] TinyML is NOT scaled-down mobile. The differences are
+qualitative: 256 KB vs 8 GB (10,000x), mW vs W (1000x). KWS DS-CNN
+runs at <1 mW on a coin-cell battery for years. Key point: TinyML
+requires entirely different algorithms, not just smaller models.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{TinyML} pushes intelligence to microcontrollers:
+
+    \vspace{0.15cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Metric} & \textbf{Value} \\
+      \midrule
+      Compute    & $\sim$0.5 GFLOPS \\
+      Memory     & 384 KB SRAM \\
+      Power      & $\sim$100 mW \\
+      Latency    & 1--10 ms \\
+      Cost       & \$1--10 per unit \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \mlsysconcept{Binding constraint:}{Energy per inference, not speed.}
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \vspace{0.2cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Not scaled-down Mobile!}\\[0.1cm]
+    {\footnotesize
+    Memory: 256 KB vs.\ 8 GB (10,000$\times$)\\
+    Power: mW vs.\ W (1,000$\times$)\\
+    Params: 10K--100K vs.\ millions\\[0.1cm]
+    Requires \textbf{entirely different algorithms}, not just smaller models.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    {\footnotesize\textbf{KWS DS-CNN:} 26K params, $<$100 KB, always-on wake-word detection at $<$1 mW.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The Deployment Spectrum: Side by Side}
+\note{[2 min] Synthesis slide. Nine orders of magnitude from TinyML to
+Cloud. The inverse relationship: more compute = less privacy.
+If short: show the table and hit the $10^6$ gap number.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{@{}lllllll@{}}
+  \toprule
+  \textbf{Paradigm} & \textbf{Compute} & \textbf{Memory} & \textbf{Power} & \textbf{Latency} & \textbf{Privacy} & \textbf{Connectivity} \\
+  \midrule
+  \textbf{Cloud}  & 989 TF  & 80 GB  & 700 W    & 100--1000 ms & Low     & Required \\
+  \textbf{Edge}   & 100 TOP & 32 GB  & 15--40 W & 10--100 ms   & High    & Intermittent \\
+  \textbf{Mobile} & 17 TOP  & 8 GB   & 3--5 W   & 5--50 ms     & High    & Optional \\
+  \textbf{TinyML} & 0.5 GF  & 384 KB & 100 mW   & 1--10 ms     & Highest & None \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.2cm}
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Inverse relationship:}\\
+    {\footnotesize More compute $\leftrightarrow$ less privacy. Data that stays local cannot be processed at datacenter scale.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{The gap:}\\
+    {\footnotesize $10^{5}\!\times$ memory, $10^{6}\!\times$ compute. Each tier requires fundamentally different engineering.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Selecting}
+% =============================================================================
+
+\begin{frame}{The Decision Framework}
+\note{[3 min] Walk through the four filters top-to-bottom. Each filter is a
+physical constraint, not a preference. Privacy eliminates cloud. Latency
+<10 ms eliminates cloud and edge. Model >100 MB eliminates TinyML. Cost
+analysis selects among remaining options. If short: show the visual and
+walk through one example quickly.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.75\textwidth,height=4.8cm,keepaspectratio]{ch02-decision-framework.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Process:}{Apply filters sequentially. Each eliminates physically impossible paradigms.}
+
+\end{frame}
+
+\begin{frame}{Hybrid Architectures in Production}
+\note{[3 min] Production systems rarely use just one paradigm. Voice
+assistants are the canonical example: TinyML wake-word, Mobile STT,
+Cloud LLM. Three integration patterns: Train-Serve Split, Hierarchical
+Processing, Progressive Deployment. Ask: ``Can you name another hybrid
+system you use daily?''}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{ch02-hybrid-voice-assistant.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Key insight:}{Rarely does one paradigm suffice. Production systems combine them.}
+
+\end{frame}
+
+\begin{frame}{Amdahl's Law: System-Level Speedup}
+\note{[3 min] Even a 10x model speedup yields only 1.37x system speedup
+when ML is 30\% of the pipeline. The smartphone camera example makes it
+vivid: ISP 100 ms + ML 60 ms + Post 40 ms = 200 ms. Speed up ML 10x:
+100 + 6 + 40 = 146 ms = 1.37x. Profile the whole pipeline first.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch02-amdahl-camera-pipeline.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Amdahl's Law:}{10$\times$ model speedup $\to$ only 1.37$\times$ system speedup when ML = 30\% of pipeline.}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Four common misconceptions with quantitative evidence.
+Hit the ``one paradigm'' fallacy first---students most likely to make this
+error. The ``TinyML = small mobile'' fallacy is second most common.}
+
+\footnotesize
+\textbf{Fallacy:} \textit{One deployment paradigm solves all ML problems.}\\
+Cloud: 100--1000 ms latency. TinyML: 1--10 ms. A 100$\times$ gap rooted in physics. AV braking cannot use cloud; LLMs cannot run on MCUs.
+
+\vspace{0.1cm}
+\textbf{Fallacy:} \textit{Model optimization overcomes mobile power limits.}\\
+5 W workload: 15 Wh / 5 W = 3 hours. Plus 40--60\% thermal throttling. Sustained inference cannot exceed 2--3 W.
+
+\vspace{0.1cm}
+\textbf{Fallacy:} \textit{TinyML is scaled-down Mobile ML.}\\
+Memory: 256 KB vs 8 GB (10,000$\times$). Power: mW vs W (1,000$\times$). Requires entirely different algorithms.
+
+\vspace{0.1cm}
+\textbf{Fallacy:} \textit{Model speedup translates linearly to system speedup.}\\
+Amdahl's Law: 10$\times$ faster ML (30\% of pipeline) $\to$ only 1.37$\times$ end-to-end. Max: 1.43$\times$.
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Two operational pitfalls. The TCO pitfall is surprising:
+edge can cost 3x more than cloud when you include network engineering
+and maintenance. The ``more data = better'' pitfall matters for TinyML
+where model capacity is the binding constraint.}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Minimizing compute minimizes total cost.}\\
+Cloud: \$2,000/mo. Edge total (HW + network + maintenance): \$6,000/mo --- 3$\times$ higher. TCO must include dev time, OpEx, and opportunity costs.
+
+\vspace{0.1cm}
+\textbf{Pitfall:} \textit{More training data always improves performance.}\\
+KWS (250K params): 95\% on 50K samples, 96.5\% on 1M --- 0.3\% gain for 5$\times$ data. Model capacity and data quality limit scaling.
+
+\vspace{0.1cm}
+\textbf{Pitfall:} \textit{Deploying the same model binary across all devices.}\\
+HW-specific optimization yields 3--5$\times$ gains. INT8 on NPU: 3--4$\times$ throughput/watt vs.\ FP32 on CPU. Operator fusion halves latency.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Do NOT show the next slide yet. Walk around the room.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Emphasize the quantitative
+anchors: 36 ms light barrier, 1.33x memory wall, 10\^{}6x gap, 1.37x
+Amdahl's, 3x TCO difference.}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{Physical constraints are permanent}: Light ($\sim$36 ms), Power Wall ($f^3$), Memory Wall (1.33$\times$/yr gap) create hard boundaries.
+  \item \textbf{Identify bottlenecks before optimizing}: Iron Law + Bottleneck Principle pinpoint the dominant term. Wrong-term optimization yields 0\%.
+  \item \textbf{Four archetypes}: Compute Beast, Bandwidth Hog, Sparse Scatter, Tiny Constraint --- each maps to different paradigms.
+  \item \textbf{Spectrum spans $10^{6}\!\times$}: Cloud (700 W) to TinyML (100 mW). Each tier needs different engineering.
+  \item \textbf{Decision framework}: Four filters (privacy, latency, compute, cost) eliminate impossible paradigms.
+  \item \textbf{Hybrid architectures}: Train-Serve Split, Hierarchical Processing, Progressive Deployment. Voice assistants span all three.
+  \item \textbf{Amdahl's Law}: 10$\times$ model speedup $\to$ 1.37$\times$ system speedup when ML is 30\% of pipeline.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Wulf+95}{Wulf \& McKee. ``Hitting the Memory Wall.'' ACM Comp.\ Arch.\ News, 1995.}
+\mlsysref{Sculley+15}{Sculley et al. ``Hidden Technical Debt in ML Systems.'' NeurIPS 2015.}
+\mlsysref{Sandler+18}{Sandler et al. ``MobileNetV2.'' CVPR 2018.}
+\mlsysref{Naumov+19}{Naumov et al. ``Deep Learning Recommendation Model.'' 2019.}
+\mlsysref{Banbury+21}{Banbury et al. ``MLPerf Tiny Benchmark.'' NeurIPS 2021.}
+\mlsysref{P\&H21}{Patterson \& Hennessy. \textit{Comp.\ Arch.: A Quantitative Approach}. 6th ed.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: The ML Workflow}
+\note{[1 min] Forward hook. Knowing \emph{where} to deploy is the beginning.
+The next question is \emph{how} to build ML systems systematically: from
+data collection through training, evaluation, deployment, and monitoring.
+The ML Workflow provides the systematic process.}
+
+\small
+\centering
+\vspace{0.5cm}
+
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{datastroke}
+    {\normalsize\bfseries Data}\\[0.1cm]
+    {\footnotesize Collection, cleaning, feature engineering}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\normalsize\bfseries Train}\\[0.1cm]
+    {\footnotesize Model selection, optimization, evaluation}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    {\normalsize\bfseries Deploy}\\[0.1cm]
+    {\footnotesize Serving, monitoring, retraining loop}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.4cm}
+{\normalsize Knowing \emph{where} to deploy is the beginning.}\\[0.1cm]
+{\normalsize\textbf{How do we build ML systems systematically?}}
+
+\vspace{0.3cm}
+{\small The ML Workflow provides the systematic process\\from conception through production.}
+
+\end{frame}
+
+\end{document}

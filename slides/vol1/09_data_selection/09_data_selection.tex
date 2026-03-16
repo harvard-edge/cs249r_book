@@ -1,0 +1,816 @@
+% =============================================================================
+% Chapter 9: Data Selection — ML Systems Lecture Slides
+% =============================================================================
+% IMAGES NEEDED (SVGs converted to PDF):
+%   - ch09-icr-curve.pdf          - ch09-three-stage-pipeline.pdf
+%   - ch09-active-learning-loop.pdf - ch09-curriculum-learning.pdf
+%   - ch09-selection-inequality.pdf - ch09-coreset-economics.pdf
+%   - ch09-dam-data-selection.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume   = {Volume I},
+  chapter  = {Chapter 9},
+  logo = {../../assets/img/logo-mlsysbook.png},
+  instlogo = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Data Selection},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
+\newcommand{\ICR}{\textbf{ICR}}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{7}
+
+\title{Data Selection}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Data Selection}{Curate, Do Not Accumulate}{cover_data_efficiency.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Read through objectives. Emphasize that data selection is the
+highest-leverage optimization in the D-A-M stack. Ask: ``How many of you have
+ever questioned whether all your training data is actually useful?''}
+
+\small
+\begin{enumerate}
+  \item Explain data selection as a systems optimization that reduces \textbf{Total Operations} ($O$) in the \textbf{Iron Law}
+  \item Apply the \textbf{Information-Compute Ratio (ICR)} to evaluate dataset value
+  \item Compare \textbf{coreset selection}, \textbf{deduplication}, and quality pruning for data reduction
+  \item Design \textbf{curriculum learning} and \textbf{active learning} strategies
+  \item Evaluate the \textbf{Selection Inequality} and cost-benefit trade-offs
+  \item Apply the \textbf{D·A·M optimization ordering} to choose the right technique
+  \item Analyze how self-supervised pre-training transforms data economics
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{Fundamentals}
+% =============================================================================
+
+\begin{frame}{The Data Wall}
+\note{[3 min] Open with the key tension. Compute grows 10x/3yr while quality
+data grows 2x/5yr. The internet has already been scraped. This asymmetry
+inverts the optimization priority. Ask: ``If you had unlimited GPUs but
+limited data, what would you optimize?''}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    The dominant strategy was straightforward: \emph{more data, better models}.
+
+    \vspace{0.1cm}
+    A critical asymmetry has emerged:
+
+    \vspace{0.05cm}
+    \renewcommand{\arraystretch}{1.1}
+    {\scriptsize
+    \begin{tabular}{@{}llr@{}}
+      \toprule
+      \textbf{Resource} & \textbf{Growth} & \textbf{Rate} \\
+      \midrule
+      GPU Compute     & Exponential & 10$\times$/3 yr \\
+      Training Data   & Sub-linear  & 2$\times$/5 yr \\
+      Labeled Data    & Linear      & 1.5$\times$/5 yr \\
+      Synthetic Data  & Unbounded   & (quality-limited) \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize The field is now \alert{compute-rich and data-poor}.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.15cm}
+    \mlsysconcept{The Data Wall:}{Compute can process 10T tokens; only 5T high-quality tokens exist.}
+
+    \vspace{0.15cm}
+    \mlsysalert{Consequence:}{Priority inverts from ``get more data'' to ``get more from existing data.''}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{What Is Data Selection?}
+\note{[2 min] Formal definition. Emphasize the distinction from data
+engineering: quality (is it correct?) vs.\ value (is it worth the compute?).
+Common error: students think data selection = data cleaning.}
+
+\small
+\begin{mlsyscard}{crimson}
+\textbf{Data Selection:} Maximizing the \textbf{Information-Compute Ratio} of a training dataset by identifying the smallest subset sufficient to define the decision boundary, reducing the \textbf{Total Operations ($O$)} term in the Iron Law.
+\end{mlsyscard}
+
+\vspace{0.2cm}
+\renewcommand{\arraystretch}{1.2}
+{\footnotesize
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  & \textbf{Data Engineering (Ch.\ 4)} & \textbf{Data Selection (Ch.\ 9)} \\
+  \midrule
+  Focus    & Cleanliness, consistency  & Informativeness, diversity \\
+  Question & Is the data correct?      & Is correct data worth the compute? \\
+  Metric   & Error rate, completeness  & ICR (learning per FLOP) \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\mlsysinsight{Key insight:}{Adding 10$\times$ low-quality data may yield less accuracy than 1.1$\times$ carefully selected high-quality data.}
+
+\end{frame}
+
+\begin{frame}{Data Selection and the Iron Law}
+\note{[3 min] Connect to the Iron Law from Ch.\ 1. Data selection is the only
+technique that reduces the number of passes through the entire equation.
+Model compression reduces O per pass; hardware increases R. Data selection
+reduces the pass count itself. 2x * 2x * 2x = 8x, not 6x.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{ch09-dam-data-selection.pdf}
+
+\vspace{0.1cm}
+\small
+\mlsysconcept{Multiplicative:}{2$\times$ data $\times$ 2$\times$ compression $\times$ 2$\times$ hardware = \textbf{8$\times$} total, not 6$\times$.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: Where Does the Waste Live?}
+\note{[2 min] Prediction exercise. Give students 60 seconds. The answer will
+be revealed with the ICR curve. Most will say ``noisy samples'' --- the
+real answer includes redundant easy samples far from the decision boundary.}
+
+\centering
+\vspace{0.8cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.4cm}
+{\large You have 1 million training samples.\\
+You can only keep 10\%.\\[0.2cm]
+\alert{Which samples do you throw away?}}
+
+\vspace{0.4cm}
+{\normalsize Write down your strategy. \textcolor{midgray}{(60 seconds)}}
+
+\vspace{0.3cm}
+{\small\textcolor{lightgray}{Turn to a neighbor and compare strategies.}}
+
+\end{frame}
+
+% =============================================================================
+\section{ICR \& Data Tax}
+% =============================================================================
+
+\begin{frame}{The Information-Compute Ratio (ICR)}
+\note{[3 min] Reveal after prediction exercise. Walk through the three regions
+of the curve. Key insight: most training time is spent in the flat tail
+where each sample contributes near-zero gradient signal. The knee is where
+you want to operate. ICR = delta performance / delta FLOPs.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch09-icr-curve.pdf}
+
+\vspace{0.1cm}
+\small
+\mlsysalert{The Data Tax:}{10$\times$ more data yields only 2--3 points accuracy at 9$\times$ the compute cost.}
+
+\end{frame}
+
+\begin{frame}{The Three-Stage Pipeline}
+\note{[3 min] Overview of the complete data selection toolkit. Three
+complementary stages applied in order. Pruning before training, selection
+during training, synthesis to fill gaps. Emphasize: stages are complementary,
+not alternatives. If short on time, just cover the overview.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch09-three-stage-pipeline.pdf}
+
+\vspace{0.1cm}
+\small
+\mlsysinsight{Pipeline:}{Pruning reduces \emph{what}, selection focuses \emph{how}, synthesis expands \emph{what}.}
+
+\end{frame}
+
+% =============================================================================
+\section{Static Pruning}
+% =============================================================================
+
+\begin{frame}{The Case for Smaller Datasets}
+\note{[3 min] Counterintuitive finding: 10\% of data can match 100\% accuracy.
+Why? Most samples are redundant --- they sit deep within class clusters
+and contribute near-zero gradient signal. The valuable samples are near
+the decision boundary. This is what coresets exploit.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    A carefully selected \textbf{10\%} of data can match the accuracy of 100\%.
+
+    \vspace{0.1cm}
+    \textbf{Why?} Most samples are redundant:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Sit deep within class clusters
+      \item Contribute near-zero gradient signal
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Valuable samples} live near the \textcolor{errorstroke}{decision boundary} where \textcolor{computestroke}{uncertainty is highest}.
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize 50\% reduction in dataset size saves 50\% of forward/backward passes and gradient updates.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.1}
+    {\scriptsize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Metric} & \textbf{Value} \\
+      \midrule
+      Full dataset     & 1M samples \\
+      Training cost    & 100 GPU-hrs \\
+      Coreset (10\%)   & 100K samples \\
+      Coreset cost     & 10 GPU-hrs \\
+      Accuracy retained & $\sim$95\% \\
+      \midrule
+      \textbf{Savings}  & \textbf{90 GPU-hrs} \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Coreset Selection Algorithms}
+\note{[3 min] Four main approaches. EL2N and GraNd are training-dynamics
+methods that score samples by how the model interacts with them. k-Center
+is purely geometric. Forgetting events track which samples the model forgets
+during training. Key comparison: training-dynamics methods achieve 1.8x
+higher ICR than random.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.85\textwidth,height=3.2cm,keepaspectratio]{ch09-coreset-economics.pdf}
+
+\vspace{0.05cm}
+\scriptsize
+\renewcommand{\arraystretch}{0.95}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Method} & \textbf{Signal} & \textbf{Cost} & \textbf{ICR vs.\ Random} \\
+  \midrule
+  \textbf{EL2N}     & Error L2 norm (10 epochs)   & Low    & 1.8$\times$ \\
+  \textbf{GraNd}    & Gradient norm (early train)  & Low    & 1.8$\times$ \\
+  \textbf{Forgetting} & Re-learned samples         & Medium & 1.5$\times$ \\
+  \textbf{k-Center}  & Geometric coverage          & High   & 1.2$\times$ \\
+  \bottomrule
+\end{tabular}
+
+\end{frame}
+
+\begin{frame}{Data Deduplication}
+\note{[2 min] The ``free lunch'' of data selection. Zero accuracy penalty,
+immediate compute savings. Web-scraped datasets contain 30-50\% near-duplicates.
+GPT-3 and LLaMA training studies confirm benefits. Approach: exact hash
+(cheap) then fuzzy hash (MinHash/SimHash) for near-duplicates.
+Ask: ``Why would duplicates hurt training?''}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{The only ``free lunch'' in data selection:}
+
+    \vspace{0.1cm}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Guaranteed zero accuracy penalty
+      \item Immediate compute savings
+      \item Web-scraped datasets: 30--50\% near-duplicates
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Two-pass approach:}
+    \begin{enumerate}\setlength\itemsep{0pt}
+      \item \textbf{Exact hash}: MD5/SHA-256 (fast, cheap)
+      \item \textbf{Fuzzy hash}: MinHash/SimHash (near-dupes)
+    \end{enumerate}
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize Always deduplicate first --- precede all other selection methods.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.1cm}
+    \mlsysconcept{Why duplicates hurt:}{Model memorizes instead of generalizing. Gradient wasted on redundant updates.}
+
+    \vspace{0.15cm}
+    \mlsysalert{Pitfall:}{Deduplicate train \emph{and} test jointly. 8\% overlap inflates accuracy by 5 pts.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Dynamic Selection}
+% =============================================================================
+
+\begin{frame}{Curriculum Learning: Easy to Hard}
+\note{[3 min] Inspired by human education: start with easy examples, gradually
+increase difficulty. Three phases: easy (basic patterns), medium (refine
+boundaries), hard (edge cases). Reaches target accuracy 20-30\% faster
+than random ordering. Difficulty signals: loss value, confidence, forgetting.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch09-curriculum-learning.pdf}
+
+\vspace{0.1cm}
+\small
+\mlsysinsight{Like human education:}{Start with easy examples, gradually increase difficulty. 20--30\% faster convergence.}
+
+\end{frame}
+
+\begin{frame}{Active Learning: Human-in-the-Loop}
+\note{[3 min] The model selects which samples to label next, directing human
+effort where it matters most. Four-node cycle: train, query, oracle, add.
+Key economics: labels cost \$5-100+ per sample in domains like medical imaging.
+Active learning achieves 10-100x fewer labels. Common error: students assume
+unlimited free labels.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{ch09-active-learning-loop.pdf}
+  \end{column}
+  \begin{column}{0.46\textwidth}
+    \textbf{The model directs labeling effort:}
+
+    \vspace{0.1cm}
+    {\scriptsize
+    \begin{enumerate}\setlength\itemsep{0pt}
+      \item Train on current labeled data
+      \item Query: select uncertain/diverse samples
+      \item Human oracle labels selected batch
+      \item Add to training set, repeat
+    \end{enumerate}
+    }
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize Labels cost \$5--100+ per sample.\\
+    Medical: 500 labels $\times$ \$50 = \$25K.}
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    \mlsysinsight{Savings:}{10--100$\times$ fewer labels needed.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Selection Inequality}
+\note{[3 min] Give students 90 seconds. Answer: Selection + subset = 12.8 hrs,
+which is less than 100 hrs full training. ROI = (100 - 12.8) / 2.8 = 31x.
+The inequality is satisfied. Key: selection overhead is only 2.8\% of
+full training time, well below the 10\% target.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.58\textwidth}
+    {\normalsize\bfseries Calculate the Selection ROI}
+
+    \vspace{0.2cm}
+    A team has a dataset with:
+    \begin{itemize}
+      \item Full training: \textbf{100 GPU-hours} (\$300)
+      \item Coreset scoring: \textbf{2.8 hours}
+      \item Coreset training (10\%): \textbf{10 hours}
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \textbf{1.} Does the Selection Inequality hold?\\
+    \textbf{2.} What is the ROI?
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.38\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    Selection + Subset:\\
+    $2.8 + 10 = 12.8$ hrs\\[0.05cm]
+    Full: $100$ hrs\\[0.05cm]
+    $12.8 < 100$\; \textcolor{datastroke}{\checkmark}\\[0.1cm]
+    Savings: $87.2$ hrs (\$261)\\
+    ROI: $87.2 / 2.8 =$ \textbf{31$\times$}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Synthesis \& SSL}
+% =============================================================================
+
+\begin{frame}{Synthetic Data Generation}
+\note{[3 min] Three approaches: augmentation (transform existing), generative
+(create new), distillation (compress knowledge). Key warning: pure synthetic
+training risks model collapse. Optimal mix is 50-80\% synthetic + 20-50\%
+real. If short on time, focus on the mix ratios.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Three synthesis approaches:}
+
+    \vspace{0.15cm}
+    \textcolor{computestroke}{\textbf{Augmentation}} (transform existing)\\
+    {\footnotesize Flips, crops, color jitter, MixUp, CutMix\\
+    Cheapest; preserves label accuracy}
+
+    \vspace{0.1cm}
+    \textcolor{routingstroke}{\textbf{Generative}} (create new)\\
+    {\footnotesize GANs, diffusion models, LLM paraphrasing\\
+    Fills gaps in distribution coverage}
+
+    \vspace{0.1cm}
+    \textcolor{datastroke}{\textbf{Distillation}} (compress knowledge)\\
+    {\footnotesize Large model $\to$ soft labels for small model\\
+    Transfers decision boundary information}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.3cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Model Collapse Risk}\\[0.1cm]
+    {\footnotesize Pure synthetic: accuracy drops from 95\% to 78\% after 5 generations.\\[0.1cm]
+    \textbf{Optimal mix:}\\
+    50--80\% synthetic\\
+    + 20--50\% real data}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \mlsysalert{Warning:}{Synthetic data is a \emph{supplement}, not a replacement.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Self-Supervised Pre-Training}
+\note{[3 min] The ceiling of data selection: eliminate task-specific labels
+entirely. Foundation models amortize expensive pre-training across many
+downstream tasks. The key economic insight: 1000x labeled-data multiplier.
+Pre-train once, fine-tune many. This is why the paradigm has become
+dominant in production ML.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{The foundation model paradigm:}
+
+    \vspace{0.15cm}
+    \begin{enumerate}\setlength\itemsep{0pt}
+      \item \textbf{Pre-train} on massive unlabeled data
+      \item \textbf{Fine-tune} on small labeled datasets
+      \item \textbf{Amortize} cost across many tasks
+    \end{enumerate}
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Metric} & \textbf{Improvement} \\
+      \midrule
+      Label requirements  & 100$\times$ reduction \\
+      Marginal compute    & 20$\times$ reduction \\
+      Labeled-data multiplier & 1,000$\times$ \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \vspace{0.3cm}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Cost Amortization}\\[0.1cm]
+    {\footnotesize Pre-training: \$1M--\$100M\\
+    Fine-tuning: \$100--\$10K per task\\[0.1cm]
+    Across 100 tasks:\\
+    Per-task cost: \$10K--\$1M\\
+    Without pre-training: \$100K+ each}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \mlsysconcept{Paradigm shift:}{``Train from scratch'' $\to$ ``Pre-train once, fine-tune many.''}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Engineering}
+% =============================================================================
+
+\begin{frame}{The Selection Inequality}
+\note{[3 min] The gating constraint for every data selection technique.
+If selection overhead exceeds savings, the technique has negative ROI.
+Rule of thumb: selection overhead under 10\% of full training time.
+Proxy models and cached embeddings keep selection fast.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch09-selection-inequality.pdf}
+
+\vspace{0.1cm}
+\small
+\mlsysalert{Rule:}{Selection overhead must stay below 10\% of training time. Use proxy models and cached embeddings.}
+
+\end{frame}
+
+\begin{frame}{Cost Modeling: ROI Framework}
+\note{[2 min] Quantitative framework for deciding which techniques to invest
+in. Total data cost includes compute, labeling, storage, and energy.
+Break-even analysis: when does selection pay for itself? Amortization:
+costs paid once multiply savings across N training runs.}
+
+\small
+\textbf{Total Data Cost:} Compute + Labeling + Storage + Energy
+
+\vspace{0.15cm}
+\renewcommand{\arraystretch}{1.15}
+{\footnotesize
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Technique} & \textbf{Selection Cost} & \textbf{Savings/Run} & \textbf{Break-Even} \\
+  \midrule
+  Deduplication     & Low (hashing)        & 30--50\% compute   & 1 run \\
+  Coreset (EL2N)    & 2.8 hrs scoring      & 70--90\% compute   & 1 run \\
+  Curriculum        & Negligible           & 20--30\% time      & 1 run \\
+  Active learning   & Annotation latency   & 10--100$\times$ labels & 1--3 rounds \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{routingstroke}
+{\footnotesize \textbf{Amortization:} Selection costs are one-time; savings multiply across hyperparameter sweeps, retraining runs, and model iterations. A \$10K deduplication infrastructure yields \$500K+ savings across 50 training runs.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Choosing the Right Technique}
+\note{[2 min] Decision framework. Four steps: assess bottleneck, check
+prerequisites, estimate ROI, combine techniques. Data-starved = active
+learning or synthesis. Compute-starved = pruning or coresets. Always
+start with deduplication. If short: just show the decision table.}
+
+\footnotesize
+\textbf{Decision Framework:}
+
+\vspace{0.05cm}
+{\scriptsize
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Bottleneck} & \textbf{Symptom} & \textbf{First Technique} & \textbf{Then} \\
+  \midrule
+  Compute-starved  & Training too long     & Dedup, Coresets  & Curriculum \\
+  Data-starved     & Few labeled samples   & Active learning  & Synthesis \\
+  Quality-limited  & Noisy labels          & Quality pruning  & Dedup \\
+  Budget-limited   & Cannot afford labels  & SSL pre-train    & Fine-tune \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{crimson}
+{\scriptsize \textbf{Always start with deduplication.} Zero accuracy penalty, immediate savings. Precedes all other methods.}
+\end{mlsyscard}
+
+\vspace{0.05cm}
+{\footnotesize\mlsysconcept{Combine:}{Dedup $\to$ coreset $\to$ curriculum $\to$ augment.}}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Which Technique First?}
+\note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
+Cold-call 2--3 pairs. Key insight: depends on the bottleneck. Medical
+imaging = data-starved (active learning). Web-scale LLM = compute-starved
+(dedup + coresets). Mobile deployment = budget-limited (SSL + fine-tune).}
+
+\centering
+\vspace{0.5cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.4cm}
+{\normalsize A medical imaging startup has:\\
+50,000 unlabeled X-rays, 500 expert-labeled X-rays\\
+Budget for 500 more labels\\[0.2cm]
+\alert{Which data selection technique should they use first?}}
+
+\vspace{0.4cm}
+\begin{columns}[c]
+  \begin{column}{0.20\textwidth}\centering\small Dedup\end{column}
+  \begin{column}{0.20\textwidth}\centering\small Coresets\end{column}
+  \begin{column}{0.20\textwidth}\centering\small Curriculum\end{column}
+  \begin{column}{0.20\textwidth}\centering\small Active\\Learning\end{column}
+  \begin{column}{0.20\textwidth}\centering\small SSL +\\Fine-tune\end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Four common misconceptions with quantitative evidence.
+The ``more data is better'' fallacy is the most persistent. Model collapse
+from pure synthetic data is increasingly relevant with LLM-generated
+training data.}
+
+\footnotesize
+\textbf{Fallacy:} \textit{Data is the new oil --- more is always better.}\\
+{\scriptsize Scaling 1M $\to$ 10M samples yields only 4 pts accuracy at 9$\times$ compute. Curated 100K at 92\% beats raw 1M at 88\%.}
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Synthetic data can replace real data.}\\
+{\scriptsize After 5 generations on model-generated data, accuracy drops 95\% $\to$ 78\%. Optimal mix: 50--80\% synthetic + 20--50\% real.}
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Data selection is just data cleaning.}\\
+{\scriptsize A perfectly clean dataset can still be 90\% redundant. EL2N coresets achieve 1.8$\times$ higher ICR than random on clean data.}
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Data selection is only for resource-constrained settings.}\\
+{\scriptsize 10\% efficiency gain on a \$100M run saves \$10M. Frontier labs face the Data Wall most acutely.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Implementation pitfalls. Selection overhead is the most common
+trap. Pruning rare classes is dangerous for safety-critical applications.
+If short: cover just the first two.}
+
+\scriptsize
+\textbf{Pitfall:} \textit{Optimizing selection without measuring overhead.}\\
+10-hr selection for 2-hr training has 5$\times$ overhead (negative ROI). Use proxy models: ResNet-18 for 5 epochs, not ResNet-50 for 100. Keep selection under 10\% of training time.
+
+\vspace{0.08cm}
+\textbf{Pitfall:} \textit{Pruning rare classes into oblivion.}\\
+10\% coreset of 1M samples with 0.1\% rare class retains only $\sim$100 rare examples (below 150 minimum). Use stratified selection with per-class minimums.
+
+\vspace{0.08cm}
+\textbf{Pitfall:} \textit{Deduplicating training but not test data.}\\
+8\% train-test overlap inflates accuracy by 5 points. Always deduplicate train and test sets jointly.
+
+\vspace{0.08cm}
+\textbf{Pitfall:} \textit{Active learning without annotation latency planning.}\\
+With 14-day latency, models drift between rounds. Use larger batches (1,000 vs.\ 100) and diversity sampling.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write for 90 seconds, no notes.
+Do NOT show next slide yet. Walk around the room.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Emphasize quantitative
+anchors: 8x multiplicative savings, 31x ROI, 1000x labeled-data multiplier,
+10\% overhead budget.}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{Data selection is a systems problem}: Reduce total cost (compute, storage, labeling, energy), not just sample count. ICR measures learning per FLOP.
+  \item \textbf{Start with deduplication}: The only technique with guaranteed zero accuracy penalty and immediate savings. Precedes all other methods.
+  \item \textbf{Selection Inequality gates every technique}: $T_{\text{select}} + T_{\text{train}}(\text{subset}) < T_{\text{train}}(\text{full})$. Keep overhead under 10\% of training time.
+  \item \textbf{Dynamic selection adapts as the model learns}: Curriculum (easy$\to$hard) gives 20--30\% faster convergence. Active learning yields 10--100$\times$ label savings.
+  \item \textbf{SSL delivers a 1,000$\times$ labeled-data multiplier}: Pre-train once, fine-tune many. Synthetic supplements (50--80\% mix), not replaces.
+  \item \textbf{Data selection heads the \DAM{} stack}: 2$\times$ data $\times$ 2$\times$ algorithm $\times$ 2$\times$ hardware = 8$\times$ total (multiplicative, not additive).
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Kaplan+20}{Kaplan et al. ``Scaling Laws for Neural Language Models.'' 2020.}
+\mlsysref{Hoffmann+22}{Hoffmann et al. ``Training Compute-Optimal Large Language Models.'' (Chinchilla) 2022.}
+\mlsysref{Paul+21}{Paul et al. ``Deep Learning on a Data Diet.'' (EL2N) NeurIPS 2021.}
+\mlsysref{Bengio+09}{Bengio et al. ``Curriculum Learning.'' ICML 2009.}
+\mlsysref{Settles09}{Settles. ``Active Learning Literature Survey.'' 2009.}
+\mlsysref{Lee+22}{Lee et al. ``Deduplicating Training Data Makes Models Better.'' ACL 2022.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Model Compression}
+\note{[1 min] Forward hook. Data selection reduced the work; now model
+compression reduces the cost per unit of work. Pruning, quantization,
+and distillation make models smaller, faster, and cheaper.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\large\bfseries Pruning}\\[0.1cm]
+    {\footnotesize Remove redundant weights\\
+    50--90\% sparsity\\
+    Same accuracy}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    {\large\bfseries Quantization}\\[0.1cm]
+    {\footnotesize FP32 $\to$ INT8\\
+    4$\times$ memory reduction\\
+    2--4$\times$ speedup}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{datastroke}
+    {\large\bfseries Distillation}\\[0.1cm]
+    {\footnotesize Large $\to$ small model\\
+    Transfer knowledge\\
+    10$\times$ smaller}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.2cm}
+\centering
+{\normalsize Data selection reduced the \textbf{workload}.\\
+Model compression reduces the \textbf{cost per unit of work}.}
+
+\end{frame}
+
+\end{document}

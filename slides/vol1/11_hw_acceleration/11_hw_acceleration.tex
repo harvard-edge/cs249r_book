@@ -1,0 +1,879 @@
+% =============================================================================
+% Chapter 11: Hardware Acceleration — ML Systems Lecture Slides
+% =============================================================================
+% Largest chapter in Vol1 (32 sections). Selective coverage focusing on:
+%   - Why specialization matters (CPU vs GPU die area trade-off)
+%   - Compute primitives (systolic arrays, tensor cores)
+%   - The Memory Wall and Energy Hierarchy (Horowitz numbers)
+%   - Roofline Model (arithmetic intensity, ridge points)
+%   - Kernel fusion and dataflow optimization
+%   - The accelerator spectrum (flexibility vs efficiency)
+%
+% IMAGES:
+%   - cpu-vs-gpu-die.pdf        - memory-hierarchy-energy.pdf
+%   - systolic-array-dataflow.pdf  - roofline-model.pdf
+%   - kernel-fusion-before-after.pdf  - compute-bw-divergence.pdf
+%   - accelerator-spectrum.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Volume I},
+  chapter      = {Chapter 11},
+  logo         = {../../assets/img/logo-mlsysbook.png},
+  instlogo     = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Hardware Acceleration},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\AI}{\text{AI}}
+\newcommand{\flopperbyte}{\text{FLOP/byte}}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{7}
+
+\title{Hardware Acceleration}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Hardware Acceleration}{Moving Data Costs More Than Computing It}{cover_ai_hardware.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Read through objectives. Emphasize that this chapter reveals the
+physical constraints that explain \emph{why} hardware matters --- not just
+``GPUs are fast.'' Ask: ``How many of you have compared GPUs by peak TFLOPS?''}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item Explain why \textbf{systolic arrays} and \textbf{tensor cores} achieve 10--100$\times$ better efficiency than general-purpose processors
+  \item Calculate \textbf{arithmetic intensity} and use the \textbf{Roofline Model} to classify compute-bound vs.\ memory-bound workloads
+  \item Predict bottlenecks by quantifying the \textbf{Memory Wall}: bandwidth, energy, and cache trade-offs
+  \item Select \textbf{dataflow strategies} (weight-stationary, output-stationary) based on workload reuse
+  \item Analyze \textbf{kernel fusion}, \textbf{tiling}, and \textbf{memory planning} for efficient execution
+  \item Evaluate accelerator choices using \textbf{cost-performance} reasoning, not peak FLOPS
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{Why Specialize?}
+% =============================================================================
+
+\begin{frame}{The Central Surprise of Modern Computing}
+\note{[3 min] This is the chapter thesis. Arithmetic is nearly free; moving
+data is expensive. A modern accelerator can compute 1,000 operations in the
+time it takes to fetch one value from DRAM. This inversion explains everything.
+Ask: ``If computation is cheap, why do we need faster hardware?''}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{The Memory Wall}:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item In the time to fetch \textbf{one value} from DRAM, an accelerator performs \textbf{1,000+ operations}
+      \item DRAM access costs \textbf{20,000$\times$} more energy than an INT8 add
+      \item This is not engineering --- it is \textbf{physics}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{crimson}
+    {\footnotesize The question is never ``which chip is fastest?'' but \alert{``which memory system best matches my access patterns?''}}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    {\scriptsize
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Iron Law Term} & \textbf{Target} \\
+      \midrule
+      $D_{\text{vol}}/BW$    & Data selection \\
+      $O/(R_p \cdot \eta)$   & Compression \\
+      $R_p, BW, \eta$        & \textcolor{computestroke}{\textbf{HW Accel.}} \\
+      $L_{\text{lat}}$       & Overhead \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    {\scriptsize Hardware acceleration increases the \textbf{denominators} $R_p$ and $BW$ in the Iron Law.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{CPU vs GPU: The Silicon Area Trade-off}
+\note{[3 min] Walk through the die layouts. CPU: 4 big cores, huge L3 cache,
+only $\sim$5\% compute. GPU: 48+ streaming multiprocessors, $\sim$80\% compute.
+This is the fundamental architectural bet: trade single-thread performance for
+massive parallelism. Ask: ``What did GPUs give up to get 80\% compute?''}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{cpu-vs-gpu-die.pdf}
+
+\vspace{0.1cm}
+\small
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \centering
+    \textcolor{computestroke}{\textbf{CPU}}: ~5\% compute area\\
+    {\footnotesize Optimized for \emph{single-thread latency}}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \centering
+    \textcolor{datastroke}{\textbf{GPU}}: ~80\% compute area\\
+    {\footnotesize Optimized for \emph{parallel throughput}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Amdahl's Law: The Acceleration Ceiling}
+\note{[3 min] Even with infinite GPU speedup, serial bottlenecks cap total gain.
+If data loading is 10\% of total time, max speedup is 10$\times$.
+Walk through the equation. The ``exciting'' accelerator part is capped by the
+``boring'' serial part. Ask: ``If p=0.95 and S=1000, what is the speedup?''}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    $$\text{Speedup} = \frac{1}{(1-p) + \frac{p}{S}}$$
+
+    \vspace{0.05cm}
+    {\scriptsize
+    \begin{tabular}{@{}ll@{}}
+      $p$ & Parallel fraction (matrix math) \\
+      $S$ & Accelerator speedup (100--1000$\times$) \\
+      $1\!-\!p$ & Serial fraction (data loading, Python) \\
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Pitfall:} If data loading is 10\% ($p$=0.9), even $S\!=\!\infty$ yields only \textbf{10$\times$} total speedup.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.46\textwidth}
+    \renewcommand{\arraystretch}{1.1}
+    {\scriptsize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{Workload} & \textbf{$p$} & \textbf{Max Speedup} \\
+      \midrule
+      ResNet-50       & 0.95 & 20$\times$ \\
+      GPT-2 (gen.)    & 0.80 & 5$\times$ \\
+      DLRM (embed)    & 0.60 & 2.5$\times$ \\
+      MobileNet       & 0.70 & 3.3$\times$ \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    {\scriptsize\mlsysconcept{Key:}{ResNet scales better --- more time in parallelizable matrix math.}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: Where Is the Bottleneck?}
+\note{[2 min] Prediction exercise before revealing the Roofline Model.
+Give students 60 seconds to think. Do NOT reveal the answer yet.
+Ask 2--3 students to share.}
+
+\centering
+\vspace{0.8cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.4cm}
+{\large A transformer model runs on an H100 GPU.\\
+\texttt{MatMul} layers hit 280 TFLOPS. \texttt{Softmax} layers hit 6 TFLOPS.\\[0.2cm]
+\alert{Why does the same GPU give such different throughput\\for operations in the same model?}}
+
+\vspace{0.4cm}
+{\normalsize Write your hypothesis. \textcolor{midgray}{(60 seconds)}}
+
+\end{frame}
+
+% =============================================================================
+\section{Compute Primitives}
+% =============================================================================
+
+\begin{frame}{The MAC: Neural Networks' Dominant Operation}
+\note{[2 min] Every neural network layer boils down to multiply-accumulate.
+MACs consume 95\% of execution time. Their regularity is what makes
+hardware specialization possible --- predictable patterns, high data reuse.
+The transition from 100 GFLOPS (CPU) to 100,000+ GFLOPS (accelerator)
+reflects the architectural bet on this single pattern.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \textbf{Three compute primitives} dominate all accelerators:
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.1}
+    {\scriptsize
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      \textbf{Primitive} & \textbf{Example} & \textbf{Hardware} \\
+      \midrule
+      Vector ops  & ReLU, bias add   & SIMD units \\
+      Matrix ops  & Dense, Conv2D    & Tensor Cores \\
+      Special fn  & Softmax, GELU    & SFUs \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \mlsysconcept{Key:}{MACs are 95\%+ of execution time.}
+  \end{column}
+  \begin{column}{0.46\textwidth}
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize \textbf{Dense layer (256$\to$512):}\\[0.05cm]
+    \texttt{for n in batch:}\\
+    \texttt{~~for m in output:}\\
+    \texttt{~~~~sum = bias[m]}\\
+    \texttt{~~~~for k in input:}\\
+    \texttt{~~~~~~sum += x[n,k]*w[k,m]}\\[0.05cm]
+    $32 \times 512 \times 256$ = \textbf{4.2M MACs}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Systolic Arrays: Data Reuse at Scale}
+\note{[3 min] Walk through the systolic array diagram. Inputs flow right,
+weights flow down, partial sums accumulate. The key insight: each weight
+is loaded once and used 256 times in TPUv1's 256$\times$256 array.
+This is a 256$\times$ reduction in memory bandwidth demand.
+Named after the heart's rhythmic pumping.}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{systolic-array-dataflow.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Data reuse:}{TPUv1's 256$\times$256 array = 65,536 MACs. Each weight loaded once, used 256 times.}
+
+\end{frame}
+
+\begin{frame}{Tensor Cores: GPU's Matrix Engine}
+\note{[2 min] NVIDIA's answer to systolic arrays. Each Tensor Core performs
+a 4$\times$4$\times$4 matrix multiply-accumulate per clock. An A100 has 432
+Tensor Cores = 312 TFLOPS at FP16. Key requirement: data must be in FP16/BF16
+format and aligned to specific dimensions. This connects to Ch10's quantization.
+If short: skip and merge with the previous slide.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{NVIDIA Tensor Core} (since Volta, 2017):
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Each core: $4\!\times\!4\!\times\!4$ matrix MAC per clock
+      \item A100: \textbf{432 Tensor Cores} $\to$ 312 TF (FP16)
+      \item H100: \textbf{528 Tensor Cores} $\to$ 989 TF (FP16)
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Peak utilization requires:}
+    {\scriptsize FP16/BF16 inputs, dimensions aligned to 8/16, sufficient batch size.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.1}
+    {\scriptsize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{GPU} & \textbf{Tensor Cores} & \textbf{FP16 TF} \\
+      \midrule
+      V100 & 640  & 125 \\
+      A100 & 432  & 312 \\
+      H100 & 528  & 989 \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{1,000$\times$} growth in one decade (K20X$\to$H100) --- specialization, not clock speed.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{The Memory Wall}
+% =============================================================================
+
+\mlsysfocus{The Memory Wall}{%
+\small Moving data costs \textbf{20,000$\times$} more energy than computing it.\\[0.3cm]
+\normalsize $\underbrace{\text{INT8 Add}}_{\text{0.03 pJ}} \quad\longleftrightarrow\quad \underbrace{\text{DRAM Read}}_{\text{640 pJ}}$\\[0.3cm]
+\small This is physics, not engineering.%
+}
+
+\begin{frame}{The Energy Hierarchy (Horowitz Numbers)}
+\note{[3 min] Walk through the pyramid from registers to host DRAM.
+Each level trades capacity for speed and energy. The key number: DRAM read
+costs 128$\times$ more energy than SRAM and 20,000$\times$ more than an INT8 add.
+This is why all accelerator design is fundamentally about data locality.
+Ask: ``What does this mean for how we design neural network layers?''}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{memory-hierarchy-energy.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Design implication:}{Accelerators must prioritize \emph{data locality} over raw arithmetic throughput.}
+
+\end{frame}
+
+\begin{frame}{The Compute-Bandwidth Divergence}
+\note{[3 min] Compute has grown 8$\times$ from V100 to H100, but bandwidth
+only 3.7$\times$. This means the ridge point (operations per byte needed
+to saturate the chip) has \emph{doubled}. Code that was compute-bound on A100
+may be memory-bound on H100. This is the most counterintuitive result:
+upgrading hardware can shift your bottleneck regime.}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{compute-bw-divergence.pdf}
+
+\vspace{0.1cm}
+\small
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \centering
+    \textcolor{computestroke}{\textbf{Compute:}} 8$\times$ growth (V100$\to$H100)
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \centering
+    \textcolor{routingstroke}{\textbf{Bandwidth:}} 3.7$\times$ growth (V100$\to$H100)
+  \end{column}
+\end{columns}
+\vspace{0.05cm}
+{\small The ridge point doubled: keeping hardware fully utilized gets \textbf{harder} each generation.}
+
+\end{frame}
+
+% =============================================================================
+\section{Roofline Model}
+% =============================================================================
+
+\begin{frame}{Arithmetic Intensity: The Key Metric}
+\note{[3 min] Define arithmetic intensity: FLOPs per byte of memory traffic.
+This single number determines whether an operation is compute-bound or
+memory-bound. Two operations with identical FLOPs but different memory
+patterns have different AIs and different bottlenecks.
+Walk through the equation.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    $$\text{AI} = \frac{\text{FLOPs}}{\text{Bytes Transferred}}$$
+
+    \vspace{0.05cm}
+    \textbf{Which ceiling do you hit?}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Low AI $\to$ \textcolor{errorstroke}{\textbf{memory-bound}}
+      \item High AI $\to$ \textcolor{computestroke}{\textbf{compute-bound}}
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Ridge Point} = $R_{\text{peak}} / BW$
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{crimson}
+    {\scriptsize \textbf{A100:} $312\text{ TF}/2\text{ TB/s}=\textbf{156}$ FLOP/byte\\
+    \textbf{H100:} $989\text{ TF}/3.35\text{ TB/s}=\textbf{296}$ FLOP/byte}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \renewcommand{\arraystretch}{1.05}
+    {\scriptsize
+    \begin{tabular}{@{}lrl@{}}
+      \toprule
+      \textbf{Operation} & \textbf{AI} & \textbf{Regime} \\
+      \midrule
+      Conv2D        & 50--200 & Compute \\
+      Dense MatMul  & 64--256 & Compute \\
+      Depthwise Conv & 10--20 & Memory \\
+      Softmax       & 2--5   & Memory \\
+      LayerNorm     & 5--10  & Memory \\
+      Embedding     & $<$1   & Memory \\
+      ReLU          & 0.125  & Memory \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.05cm}
+    {\footnotesize\textcolor{errorstroke}{\textbf{Most operations are memory-bound!}}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The Roofline Plot}
+\note{[3 min] Walk through the roofline diagram. Two ceilings: the sloped
+bandwidth line and the flat compute line. They meet at the ridge point.
+Point out where each ML operation sits. Most operations cluster to the LEFT
+of the ridge (memory-bound). This is why kernel fusion is the most important
+optimization. ReLU is 2,400$\times$ below the H100 roofline.}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{roofline-model.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Diagnostic power:}{When inference is slow, the Roofline tells you whether to optimize compute, memory, or software.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Roofline Diagnosis}
+\note{[3 min] Give students 90 seconds. Answer: AI = 2$\times$2048$\times$512 /
+((2048$\times$512 + 2048 + 512)$\times$2) $\approx$ 1 FLOP/byte at batch=1.
+This is far below the A100 ridge of 156, so it is deeply memory-bound.
+At batch=64: AI $\approx$ 60 FLOP/byte, still below ridge but much better.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Diagnose This Layer}
+
+    \vspace{0.15cm}
+    Dense layer: 2048 inputs $\to$ 512 outputs, FP16.
+
+    \vspace{0.1cm}
+    \textbf{At batch = 1:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item FLOPs = $2 \times 2048 \times 512$ = 2.1M
+      \item Bytes = $(2048\!\times\!512 + 2048 + 512)\!\times\!2$ = 2.1 MB
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Calculate} the arithmetic intensity.\\
+    Compute-bound or memory-bound on A100 (ridge = 156)?
+
+    {\scriptsize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{Solution:}\\[0.05cm]
+    AI = $2.1\text{M}/2.1\text{M}$ = \textbf{1 FLOP/byte}\\[0.05cm]
+    Ridge = 156 $\to$ \textcolor{errorstroke}{\textbf{Deeply memory-bound!}}\\[0.05cm]
+    GPU achieves $<$1\% utilization.\\[0.05cm]
+    \textbf{Fix:} Increase batch size.\\
+    At batch=64: AI $\approx$ 60 (40$\times$ better)
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Dataflow \& Fusion}
+% =============================================================================
+
+\begin{frame}{Dataflow Strategies: Which Data Stays Local?}
+\note{[3 min] Three strategies for which tensor stays in local memory.
+Weight-stationary: weights stay, inputs/outputs stream (best for CNNs, FC).
+Output-stationary: partial sums stay, minimize write traffic.
+Input-stationary: inputs stay, good for small-batch inference.
+The optimal strategy depends on which tensor is largest relative to local storage.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lp{3.2cm}p{3cm}p{3.2cm}@{}}
+  \toprule
+  & \textbf{Weight-Stationary} & \textbf{Output-Stationary} & \textbf{Input-Stationary} \\
+  \midrule
+  \textbf{Local data}  & Weights in registers & Partial sums local & Inputs cached \\
+  \textbf{From DRAM} & Inputs \& outputs & Weights \& inputs & Weights \& outputs \\
+  \textbf{Best for}    & CNN, FC layers (weights reused across batch) & Large reductions (min write traffic) & Small-batch inference (inputs reused) \\
+  \textbf{Example}  & TPU systolic array & NVDLA & Eyeriss \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{errorstroke}
+{\scriptsize \textbf{Physical constraint:} Data movement costs 100--1,000$\times$ more energy than compute. Optimize for minimal data movement, not minimal FLOPs.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Kernel Fusion: Eliminating Intermediate Writes}
+\note{[3 min] Walk through the before/after diagram. Without fusion: Conv2D
+writes to HBM, BatchNorm reads from HBM, writes again, ReLU reads again.
+Six round-trips. With fusion: one read, all three ops execute in SRAM,
+one write. Result: ResNet-50 inference 47 ms to 8 ms, a 6$\times$ speedup
+from fusion alone. This is the single most important compiler optimization.}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{kernel-fusion-before-after.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Why it works:}{Fusion converts memory-bound ops (low AI individually) into one compute-bound kernel (high AI combined).}
+
+\end{frame}
+
+\begin{frame}{Tiling: Making Data Fit in Fast Memory}
+\note{[2 min] Large matrices do not fit in SRAM. Tiling partitions them into
+blocks that do fit, processes all computations for each tile before moving on.
+Without tiling: random DRAM accesses kill performance.
+With tiling: data stays in SRAM during the inner loop, reducing
+DRAM traffic by orders of magnitude.
+If short on time, cover briefly and move on.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{The problem:} Large matrices (e.g., $4096\times4096$) do not fit in fast SRAM (128 KB).
+
+    \vspace{0.15cm}
+    \textbf{The solution:} Partition into tiles that fit:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Load tile of A, tile of B into SRAM
+      \item Compute \emph{all} operations for this tile
+      \item Write result tile back to DRAM
+      \item Advance to next tile
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \mlsysconcept{Key:}{Process all computations per tile before moving on --- never bounce between tiles.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Impact on Arithmetic Intensity:}\\[0.1cm]
+    {\footnotesize
+    Naive matmul: AI $\approx$ 1 FLOP/byte\\
+    {\footnotesize (reload operands every time)}\\[0.1cm]
+    Tiled matmul: AI $\approx$ 100+ FLOP/byte\\
+    {\footnotesize (reuse data from SRAM)}\\[0.1cm]
+    \textcolor{datastroke}{\textbf{Same math, 100$\times$ higher AI!}}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Fusion or Faster Hardware?}
+\note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
+The answer: fusion is almost always more impactful because most ops are
+memory-bound. A 2$\times$ faster GPU with the same bandwidth barely helps
+memory-bound ops. But fusing three memory-bound ops into one compute-bound
+kernel can give 3--6$\times$ speedup.}
+
+\centering
+\vspace{0.6cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.4cm}
+{\large Your company offers two upgrades:\\[0.15cm]
+\textbf{A:} Upgrade A100 $\to$ H100 (3$\times$ more TFLOPS)\\
+\textbf{B:} Hire a compiler engineer to fuse memory-bound kernels\\[0.2cm]
+\alert{Which gives a bigger speedup for a transformer?}\\[0.15cm]
+{\normalsize \textit{Hint: Where do most ops sit on the Roofline?}}}
+
+\end{frame}
+
+% =============================================================================
+\section{Accelerator Spectrum}
+% =============================================================================
+
+\begin{frame}{The Flexibility-Efficiency Trade-off}
+\note{[3 min] Walk through the spectrum from CPU (most flexible, least efficient)
+to ASIC (least flexible, most efficient). GPUs sit in the middle: flexible
+enough for training, efficient enough for most workloads. TPUs sacrifice
+flexibility for higher efficiency at specific ops. FPGAs are reconfigurable
+but slower. ASICs/NPUs are fastest for fixed workloads.}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{accelerator-spectrum.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Selection rule:}{Match the accelerator's memory system to your workload's access patterns, not its peak FLOPS.}
+
+\end{frame}
+
+\begin{frame}{Cost-Performance: The Right Question}
+\note{[2 min] The real-world question is not ``which is fastest?'' but
+``which gives the best performance per dollar for my workload?''
+A T4 at batch=1 inference gives nearly identical latency to an A100 at
+3--4$\times$ lower cost because both are memory-bound. An H100 only justifies
+its cost for compute-bound training workloads.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Not ``which is fastest?'' but}\\
+    \textbf{``which gives best perf/\$?''}
+
+    \vspace{0.15cm}
+    \renewcommand{\arraystretch}{1.15}
+    {\footnotesize
+    \begin{tabular}{@{}llr@{}}
+      \toprule
+      \textbf{Workload} & \textbf{Best Choice} & \textbf{Why} \\
+      \midrule
+      LLM training     & H100 & Compute-bound \\
+      Batch inference   & A100 & High throughput \\
+      Real-time b=1    & T4   & Memory-bound \\
+      On-device         & NPU  & Power budget \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysalert{Pitfall:}{A100 at batch=1 costs 3--4$\times$ more than T4 for identical latency.}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{crimson}
+    {\scriptsize \textbf{Decision framework:}\\[0.05cm]
+    1. Calculate workload AI\\
+    2. Compare to accelerator ridge point\\
+    3. AI $<$ ridge $\to$ bandwidth-rich GPU\\
+    4. AI $>$ ridge $\to$ invest in TFLOPS\\
+    5. Factor in cost per TFLOP-hour
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Compilers \& Runtime}
+% =============================================================================
+
+\begin{frame}{The ML Compilation Pipeline}
+\note{[3 min] Four stages: graph optimization (fuse ops, eliminate dead code),
+kernel selection (pick the best implementation for each op), memory planning
+(minimize total memory footprint), computation scheduling (overlap compute
+and data movement). The compiler is the bridge between the framework (Ch7)
+and the hardware. Key insight: the compiler turns a high-level graph into
+hardware-specific execution.}
+
+\scriptsize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Four compilation stages:}
+
+    \vspace{0.1cm}
+    \textbf{1. Graph Optimization}\\
+    Operator fusion, constant folding, dead code elimination.
+
+    \vspace{0.05cm}
+    \textbf{2. Kernel Selection}\\
+    Pick best implementation per op: cuBLAS, cuDNN, or auto-tuned.
+
+    \vspace{0.05cm}
+    \textbf{3. Memory Planning}\\
+    Buffer reuse, in-place ops, liveness analysis.
+
+    \vspace{0.05cm}
+    \textbf{4. Computation Scheduling}\\
+    Overlap data movement with compute; pipeline to hide latency.
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize \textbf{Key ML compilers:}\\[0.05cm]
+    \textbf{XLA} (TensorFlow/JAX)\\
+    \textbf{TorchInductor} (PyTorch 2.0)\\
+    \textbf{TVM} (Apache, portable)\\
+    \textbf{TensorRT} (NVIDIA inference)\\[0.05cm]
+    All implement fusion, tiling, memory planning.
+    }
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize \textbf{Runtime:} Dynamic kernel dispatch, memory pools, multi-stream execution.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Four common misconceptions. Each has quantitative evidence.
+The peak FLOPS fallacy is the most common: vendors advertise peak, but
+real-world performance depends on utilization, which is dictated by
+arithmetic intensity and the Roofline.}
+
+\footnotesize
+\textbf{Fallacy:} \textit{More specialized hardware always provides better performance.}\\
+{\scriptsize Softmax (AI=2--5) achieves 3\% utilization on A100 but 80--90\% of a CPU's lower peak. Specialization helps only when workload matches architecture.}
+
+\vspace{0.05cm}
+\textbf{Fallacy:} \textit{Peak FLOPS determine real-world performance.}\\
+{\scriptsize A100: 312 TF advertised. Training: 120--180 TF (40--60\%). Rec.\ models: 10--30 TF (3--10\%).}
+
+\vspace{0.05cm}
+\textbf{Fallacy:} \textit{Acceleration scales linearly with more GPUs.}\\
+{\scriptsize 8-GPU setups achieve 6--7$\times$ (75--87\%) due to sync overhead. Small models: 3--4$\times$ on 8 GPUs.}
+
+\vspace{0.05cm}
+\textbf{Fallacy:} \textit{Faster hardware always speeds up inference.}\\
+{\scriptsize At batch=1, A100 and T4 both achieve $\sim$4 TF (memory-bound). A100 costs 3--4$\times$ more.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Three operational pitfalls. The bandwidth pitfall is the most
+damaging: teams buy expensive GPUs for memory-bound workloads.
+The vendor lock-in pitfall costs 6--12 engineer-months to fix.}
+
+\small
+\textbf{Pitfall:} \textit{Ignoring memory bandwidth when selecting accelerators.}\\
+{\footnotesize An accelerator with 300 TFLOPS and 2 TB/s has ridge point 150. LayerNorm (AI=1.5) achieves 3 TFLOPS (1\% utilization). A cheaper, bandwidth-optimized alternative performs identically.}
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Deploying small-batch inference on high-compute GPUs.}\\
+{\footnotesize Dense layer at batch=1: AI $\approx$ 1 FLOP/byte. Both A100 and T4 achieve $\sim$4 TFLOPS. The T4 costs 3--4$\times$ less.}
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Vendor-specific optimization without portability planning.}\\
+{\footnotesize A codebase with 50+ hand-written CUDA kernels requires 6--12 engineer-months to port. Vendor-specific gains (20--40\%) should be isolated behind hardware abstraction layers.}
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Walk around the room. Do NOT show next slide yet.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Emphasize: the Roofline is
+the single most important diagnostic tool. Most operations are memory-bound.
+Fusion is the most impactful optimization. Hardware selection requires
+matching workload AI to accelerator ridge point.}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{Memory Wall}: Moving data costs 20,000$\times$ more energy than computing. Design is about \emph{data locality}.
+  \item \textbf{Roofline Model}: Arithmetic intensity determines compute-bound vs.\ memory-bound. Most ML ops are memory-bound.
+  \item \textbf{Rising Ridge}: Compute grows $\sim$2$\times$/yr, BW $\sim$1.2$\times$/yr. Ridge points double each generation.
+  \item \textbf{Systolic Arrays}: Data reuse via nearest-neighbor PEs. TPUv1: weight loaded once, used 256 times.
+  \item \textbf{Kernel Fusion}: Eliminates intermediate HBM writes. ResNet-50: 47$\to$8 ms ($\sim$6$\times$) from fusion alone.
+  \item \textbf{Hardware Selection}: Match workload AI to ridge point. Peak FLOPS irrelevant for memory-bound work.
+  \item \textbf{Amdahl's Ceiling}: Serial bottlenecks cap acceleration. $S\!=\!\infty$ gives only $1/(1\!-\!p)$ speedup.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Williams+09}{Williams, Waterman, Patterson. ``Roofline: An Insightful Visual Model.'' Comm.\ ACM, 2009.}
+\mlsysref{Horowitz14}{M. Horowitz. ``Computing's Energy Problem (and what we can do about it).'' ISSCC 2014.}
+\mlsysref{Jouppi+17}{Jouppi et al. ``In-Datacenter Performance Analysis of a Tensor Processing Unit.'' ISCA 2017.}
+\mlsysref{Sze+17}{Sze et al. ``Efficient Processing of Deep Neural Networks: A Tutorial and Survey.'' IEEE 2017.}
+\mlsysref{H\&P21}{Hennessy \& Patterson. \textit{Comp.\ Arch.: A Quantitative Approach}. 6th ed.}
+\mlsysref{Gholami+24}{Gholami et al. ``AI and Memory Wall.'' arXiv 2024.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Benchmarking}
+\note{[1 min] Forward hook. We have optimized the full D-A-M stack:
+data selection, model compression, hardware acceleration.
+But optimization without measurement is guesswork.
+Ch12 teaches how to validate claims against reality using
+the Roofline Model, MLPerf, and statistical methods.}
+
+\small
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\large\bfseries Measure}\\
+    {\footnotesize Theoretical FLOPS $\to$\\measured latency}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{datastroke}
+    {\large\bfseries Validate}\\
+    {\footnotesize Are our optimizations\\real or illusory?}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    {\large\bfseries Compare}\\
+    {\footnotesize Fair comparison\\across hardware}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.3cm}
+\centering
+{\normalsize Optimization without measurement is guesswork.}\\[0.1cm]
+{\small\textbf{From theoretical FLOPs to measured latency --- the Roofline comes to life.}}
+
+\end{frame}
+
+\end{document}

@@ -1,0 +1,813 @@
+% =============================================================================
+% Chapter 3: Network Fabrics — ML Systems Lecture Slides (Volume II)
+% =============================================================================
+% IMAGES NEEDED (SVGs converted to PDF):
+%   - five-level-model.pdf       - bandwidth-hierarchy.pdf
+%   - workload-inversion.pdf     - rdma-data-path.pdf
+%   - alpha-beta-model.pdf       - fat-tree-topology.pdf
+%   - topology-comparison.pdf    - congestion-control.pdf
+%   - superpod-vs-teton.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Volume II},
+  chapter      = {Chapter 3},
+  logo         = {../../assets/img/logo-mlsysbook.png},
+  instlogo     = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Network Fabrics},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\ab}{$\alpha$-$\beta$}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{8}
+
+\title{Network Fabrics}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Network Fabrics}{The Synchronization Backbone}{cover_network_fabrics.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Read through objectives. Emphasize that this chapter is about the
+\emph{physics} of wires and switches, not the algorithms that run on them. The network
+determines whether expensive GPUs compute or sit idle.}
+
+\small
+\begin{enumerate}
+  \item Model network cost using the \textbf{\ab{} framework} and identify bandwidth- vs.\ latency-dominated regimes
+  \item Compare \textbf{RDMA} transport protocols (\textbf{InfiniBand} and \textbf{RoCE}) in terms of latency and lossless guarantees
+  \item Analyze topologies (\textbf{fat-tree}, \textbf{rail-optimized}, \textbf{dragonfly}) by computing \textbf{bisection bandwidth}
+  \item Evaluate congestion control (\textbf{PFC}, \textbf{DCQCN}, \textbf{HPCC}) and their impact on tail latency
+  \item Design network virtualization strategies using \textbf{SR-IOV} and traffic isolation
+  \item Diagnose network bottlenecks using RDMA counters and bandwidth testing tools
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{The Gradient Bus}
+% =============================================================================
+
+\begin{frame}{Why the Network Dominates at Scale}
+\note{[3 min] Open with the core thesis. A single H100 does 989 TFLOPS, but 1,000 GPUs
+must synchronize 350 GB of gradients per step. If the network cannot keep pace, GPUs
+idle. The network IS the bottleneck nobody planned for.
+Ask: ``How long does 350 GB take at 50 GB/s?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    The network is the \alert{synchronization backbone}:
+
+    \vspace{0.15cm}
+    \begin{itemize}\setlength\itemsep{1pt}
+      \item 175B model $\to$ 350 GB gradients per step
+      \item 1,000 GPUs must all exchange before next step
+      \item \textbf{One slow link} idles 999 GPUs
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{crimson}
+    The network is not auxiliary infrastructure. It determines whether a \$300M cluster
+    trains efficiently or wastes millions in idle compute.
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{five-level-model.pdf}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The Bandwidth Cliff}
+\note{[3 min] The key quantitative insight: NVLink delivers 900 GB/s within a node,
+but InfiniBand drops to 50 GB/s across nodes --- an 18x cliff. This ratio has
+persisted across four GPU generations. It is physics, not engineering laziness.
+Ask: ``What changes when you cross a node boundary?''}
+
+% --- Layout: FULL-WIDTH IMAGE + annotation ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.2cm,keepaspectratio]{bandwidth-hierarchy.pdf}
+
+\vspace{0.1cm}
+\small
+\begin{columns}[T]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{datastroke}{\textbf{NVLink}}\\
+    {\footnotesize 900 GB/s (intra-node)}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{errorstroke}{\textbf{18$\times$ cliff}}\\
+    {\footnotesize Node boundary}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{routingstroke}{\textbf{InfiniBand NDR}}\\
+    {\footnotesize 50 GB/s (inter-node)}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The Bandwidth Cliff in Action}
+\note{[2 min] Show the concrete Gantt chart impact. 8-GPU intra-node job: AllReduce is a
+thin sliver at 99.5\% utilization. 64-GPU inter-node: AllReduce balloons to 30 ms,
+dropping utilization to 87\%. Over a months-long training run, this 12-point gap costs
+millions of dollars.}
+
+\small
+\renewcommand{\arraystretch}{1.15}
+{\footnotesize
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  \textbf{Scenario} & \textbf{AllReduce Time} & \textbf{Utilization} & \textbf{Bottleneck} \\
+  \midrule
+  8 GPUs, NVLink (900 GB/s) & 1 ms & \textcolor{datastroke}{\textbf{99.5\%}} & Compute \\
+  64 GPUs, IB NDR (50 GB/s) & 30 ms & \textcolor{errorstroke}{\textbf{87\%}} & Network \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.2cm}
+\begin{mlsyscard}{errorstroke}
+The 12-point utilization gap represents \textbf{millions of dollars} in wasted compute
+over a months-long training run. Network fabric design is the central engineering
+challenge of distributed training.
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Workload Inversion}
+% =============================================================================
+
+\begin{frame}{ML Inverts Datacenter Assumptions}
+\note{[3 min] Traditional datacenter: millions of mice flows, asynchronous, loss-tolerant.
+ML training: few elephant flows, synchronous, loss-INtolerant. Every assumption is
+inverted. This is why standard enterprise Ethernet fails for ML.
+Ask: ``Why can you not just run training over your existing datacenter network?''}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{workload-inversion.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{BSP (Bulk Synchronous Parallel):}{All 1,024 GPUs must finish before \emph{any} can proceed. The slowest link is the bottleneck.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: What Happens to One Dropped Packet?}
+\note{[2 min] Give students 60 seconds to think. Most will guess ``just retransmit.''
+The reveal: RDMA uses Go-Back-N, so one dropped packet retransmits the entire tail.
+A single loss 900 MB into a 1 GB transfer forces 100 MB re-send.}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.5cm}
+{\large In a 1,024-GPU synchronous training job using RDMA,\\
+what happens when a \emph{single packet} is dropped\\
+900 MB into a 1 GB gradient transfer?}
+
+\vspace{0.5cm}
+{\normalsize Write your prediction. \textcolor{midgray}{(60 seconds)}}
+
+\vspace{0.4cm}
+{\small\textcolor{lightgray}{Hint: RDMA does NOT use TCP's Selective Acknowledgement.}}
+
+\end{frame}
+
+% =============================================================================
+\section{Wire \& Transport}
+% =============================================================================
+
+\begin{frame}{Level 1: Wire and Link Physics}
+\note{[2 min] PAM4 signaling packs 2 bits per symbol to achieve 400 Gbps, but the
+voltage margins shrink by 3x, requiring FEC at every hop. FEC adds 100-200 ns per hop,
+which is irreducible. In a 3-tier fat-tree: 6 hops = 600-1200 ns of pure physics tax.
+Mention copper vs optics: DAC <3m intra-rack, AOC 30m+ inter-rack.
+SerDes power: 3,000 links at 25W each = 75 kW, over 10\% of cluster power.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{PAM4 Signaling} (4 voltage levels, 2 bits/symbol):
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Doubles data rate without higher symbol rate
+      \item Voltage margin shrinks 3$\times$ $\to$ \textbf{FEC required}
+      \item FEC adds 100--200 ns per hop (irreducible)
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Medium trade-offs:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textcolor{computestroke}{Copper (DAC)}: $<$3 m, intra-rack
+      \item \textcolor{routingstroke}{Active Optical}: 100+ m, inter-rack
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \mlsysalert{Physics tax:}{3-hop fat-tree $\to$ 600--1,200 ns FEC floor.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.05}
+    {\scriptsize
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      \textbf{Medium} & \textbf{Reach} & \textbf{Use} \\
+      \midrule
+      DAC (copper) & $<$3 m & In-rack \\
+      AOC (fiber) & 30 m & Inter-rack \\
+      SMF & 10+ km & Building \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    {\scriptsize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Component} & \textbf{Power} \\
+      \midrule
+      SerDes + xcvr (400G) & $\sim$25 W \\
+      3,000 links total & 75 kW \\
+      \bottomrule
+    \end{tabular}
+    }
+    {\scriptsize\textcolor{midgray}{$>$10\% of cluster power}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Level 2: RDMA and GPUDirect}
+\note{[3 min] Traditional TCP: 50-100 us latency, 3 memory copies per message.
+RDMA: 1-2 us, zero copies. GPUDirect extends this to GPU memory directly.
+For 350 GB of gradients, this eliminates 700 GB of redundant copies per step.
+Ask: ``Why cannot we just use faster TCP?''}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{rdma-data-path.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Key:}{RDMA bypasses the kernel and CPU entirely --- NIC reads GPU memory directly via PCIe DMA.}
+
+\end{frame}
+
+\begin{frame}{InfiniBand vs.\ RoCE}
+\note{[2 min] Both expose the same Verbs API, but the reliability differs fundamentally.
+IB: hardware-managed credit-based flow control, natively lossless. RoCE: relies on
+Ethernet PFC to approximate losslessness --- fragile under scale.
+Common error: ``RoCE is just IB over Ethernet'' --- no, the guarantees are weaker.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Property} & \textbf{InfiniBand} & \textbf{RoCE (Ethernet)} \\
+  \midrule
+  Lossless & \textcolor{datastroke}{\textbf{Native}} (credit-based) & Approximated (PFC) \\
+  Latency & 1--2 $\mu$s & 3--5 $\mu$s \\
+  Congestion & Hardware adaptive routing & DCQCN / HPCC \\
+  Switch cost & Higher (single vendor) & \textcolor{datastroke}{\textbf{20--40\% lower}} \\
+  Vendor lock-in & \textcolor{errorstroke}{Single} (NVIDIA/Mellanox) & \textcolor{datastroke}{\textbf{Multi-vendor}} \\
+  PFC storm risk & \textcolor{datastroke}{\textbf{Immune}} & \textcolor{errorstroke}{Vulnerable} \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{routingstroke}
+Both deliver 95\%+ line-rate for large transfers. IB wins on tail latency (30--50\% lower).
+RoCE wins on operational flexibility and cost.
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{The $\alpha$-$\beta$ Model}
+% =============================================================================
+
+\mlsysfocus{The Communication Cost Model}{%
+$T(n) = \underbrace{\alpha}_{\text{Startup}} + \underbrace{\dfrac{n}{\beta}}_{\text{Transfer}}$%
+}
+
+\begin{frame}{\ab{} Model: Two Regimes}
+\note{[3 min] alpha = startup latency (switch hops, FEC, software overhead).
+beta = sustained bandwidth. The crossover n* = alpha * beta determines which regime
+dominates. For IB HDR: n* is about 25 KB. Small messages: latency-bound.
+350 GB AllReduce: bandwidth-bound. Topology choice shifts both parameters.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.2cm,keepaspectratio]{alpha-beta-model.pdf}
+
+\vspace{0.1cm}
+\small
+\mlsysconcept{Diagnostic:}{Is your workload above or below $n^*$? That determines whether you optimize for hops (topology) or link speed (bandwidth).}
+
+\end{frame}
+
+\begin{frame}{\ab{} Model: Worked Example}
+\note{[3 min] Walk through the calculation. 10 KB control message on IB HDR vs NDR.
+Despite 2x bandwidth, the latency improvement is tiny because alpha dominates.
+This is the quantitative basis for the ``more bandwidth is not always better'' fallacy.}
+
+\small
+\textbf{Small message: 10 KB control synchronization}
+
+\vspace{0.15cm}
+\renewcommand{\arraystretch}{1.2}
+{\footnotesize
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Link} & \textbf{$\alpha$ ($\mu$s)} & \textbf{$n/\beta$ ($\mu$s)} & \textbf{$T(n)$ ($\mu$s)} \\
+  \midrule
+  IB HDR (200G) & 1.5 & 0.41 & \textbf{1.91} \\
+  IB NDR (400G) & 1.5 & 0.20 & \textbf{1.70} \\
+  \midrule
+  \multicolumn{3}{r}{\textbf{Speedup:}} & \textcolor{errorstroke}{\textbf{only 11\%}} \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.2cm}
+\begin{mlsyscard}{errorstroke}
+\textbf{Diagnosis:} Doubling bandwidth yields only 11\% improvement because
+$\alpha$ dominates for small messages. Upgrading to NDR may add 40\% to transceiver cost
+for negligible benefit in the latency-dominated regime.
+\end{mlsyscard}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Bandwidth- or Latency-Dominated?}
+\note{[3 min] Give students 90 seconds. Answer: n/beta = 350 GB / 50 GB/s = 7 seconds.
+alpha = 1.5 us. T = 7.0000015 s. Clearly bandwidth-dominated. The answer for the
+second question: 2x bandwidth halves the transfer time to 3.5 s, nearly 2x speedup.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.58\textwidth}
+    {\normalsize\bfseries Classify the Regime}
+
+    \vspace{0.2cm}
+    A 175B model AllReduce transfers 350 GB across IB NDR:
+    \begin{itemize}
+      \item $\alpha$ = 1.5 $\mu$s, $\beta$ = 50 GB/s
+      \item $n$ = 350 GB
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{1.} Calculate $T(n)$ and identify the dominant term.\\
+    \textbf{2.} Would doubling bandwidth help here?
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare)}}
+  \end{column}
+  \begin{column}{0.38\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    $n/\beta$ = 350 / 50 = \textbf{7.0 s}\\
+    $\alpha$ = 0.0000015 s\\[0.1cm]
+    \textcolor{computestroke}{\textbf{Bandwidth-dominated!}}\\[0.1cm]
+    Yes --- 2$\times$ BW $\to$ $\sim$2$\times$ speedup.\\
+    (Opposite of the 10 KB case.)
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Topology}
+% =============================================================================
+
+\begin{frame}{Fat-Tree (Clos): The Industry Standard}
+\note{[3 min] Fat-tree provides full bisection bandwidth via hierarchical switch tiers.
+Key formula: N = k cubed / 4 hosts. With k=64: 65,536 GPUs. Non-blocking means every
+AllReduce gets full line-rate. Cost: O(N log N) switches, \$20-100M for 4,096 GPUs.
+Ask: ``Why is full bisection bandwidth critical for AllReduce?''}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.0cm,keepaspectratio]{fat-tree-topology.pdf}
+
+\vspace{0.1cm}
+\small
+\mlsysconcept{Key formula:}{$N = k^3/4$ hosts. Radix $k$=64 $\to$ 65,536 GPUs with full bisection bandwidth.}
+
+\end{frame}
+
+\begin{frame}{Topology Trade-offs}
+\note{[3 min] Fat-tree: flexible, expensive. Rail-optimized: 1-hop tensor parallelism
+but requires topology-aware scheduling. Dragonfly: 50\% less cabling, but 2-4x slowdown
+across groups. No single winner --- the choice depends on workload mix and scale.
+Ask: ``If your entire training job fits in one dragonfly group, which topology do you want?''}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{topology-comparison.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{No free lunch:}{Topology choice is workload-dependent. Fat-trees provide flexibility; dragonflies save cost; rails minimize latency.}
+
+\end{frame}
+
+\begin{frame}{Bisection Bandwidth: Why It Matters}
+\note{[2 min] Bisection bandwidth is the minimum bandwidth across any equal partition
+of the network. A 4:1 oversubscribed spine means AllReduce is 4x slower.
+For a \$300M cluster where sync is 30\% of time, 4:1 oversubscription wastes
+over \$22 million in idle GPU cycles.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Bisection bandwidth}: minimum BW across any equal partition.
+
+    \vspace{0.15cm}
+    \renewcommand{\arraystretch}{1.15}
+    {\footnotesize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{Subscription} & \textbf{Bisection BW} & \textbf{AllReduce} \\
+      \midrule
+      1:1 (non-blocking) & 25.6 TB/s & 13.7 s \\
+      4:1 (oversubscribed) & 6.4 TB/s & 54.7 s \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysalert{Cost of 4:1:}{4$\times$ slower AllReduce $\to$ \$22M+ wasted GPU-hours on a \$300M cluster.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{crimson}
+    {\footnotesize BSP training means \emph{all} GPUs inject simultaneously. Unlike web
+    traffic, there is no statistical multiplexing --- the oversubscription ratio directly
+    multiplies sync time.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Fabric Behavior}
+% =============================================================================
+
+\begin{frame}{Congestion Control: PFC $\to$ DCQCN $\to$ HPCC}
+\note{[3 min] Three levels of congestion control, increasing in precision.
+PFC: reactive, PAUSE frames cascade and can freeze the fabric.
+DCQCN: proactive ECN, 85-90\% utilization, blind to severity.
+HPCC: in-network telemetry, 95\%+ utilization, requires programmable switches.
+Ask: ``Why is 85\% utilization not good enough for training?''}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{congestion-control.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Progression:}{More precise feedback $\to$ higher link utilization $\to$ less wasted GPU time.}
+
+\end{frame}
+
+\begin{frame}{The Incast Problem}
+\note{[2 min] Incast: many-to-one traffic pattern at the end of every AllReduce.
+In a 1,024-GPU job, hundreds of senders target the same receiver port simultaneously.
+This is not rare --- it happens hundreds of times per training step.
+Mitigation: layer-staggered AllReduce, tree-based collectives, deeper buffers.
+Adaptive routing helps distribute paths but cannot solve the destination bottleneck.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Incast}: many-to-one traffic pattern.
+
+    \vspace{0.1cm}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item AllReduce: hundreds of senders $\to$ one receiver
+      \item Buffer overflow even when fabric is uncongested
+      \item \textbf{Deterministic}: happens every training step
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Mitigation:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Layer-staggered AllReduce (overlap)
+      \item Tree-based collective algorithms
+      \item Deeper switch buffers (32--64 MB)
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize In a 1,024-GPU AllReduce, incast occurs \textbf{hundreds of times per step}.
+    A congested port stalls \emph{all} GPUs for 100+ $\mu$s per event.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize Adaptive routing \emph{helps} but cannot \emph{solve} incast --- the destination
+    port is the bottleneck, not the path.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: InfiniBand or Ethernet?}
+\note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
+There is no single right answer. IB: better latency, simpler lossless.
+Ethernet: cheaper, multi-vendor, operational consistency.
+Cold-call 2-3 pairs. Emphasize that the industry is converging.}
+
+\centering
+\vspace{0.6cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.5cm}
+{\large You are building a 10,000-GPU training cluster.\\
+Your budget is \$200M.\\[0.3cm]
+\alert{Do you choose InfiniBand or RoCE (Ethernet)?}}
+
+\vspace{0.5cm}
+\begin{columns}[c]
+  \begin{column}{0.45\textwidth}\centering\small
+    \textcolor{computestroke}{\textbf{InfiniBand}}\\
+    {\footnotesize 30--50\% lower tail latency\\Native lossless\\Single vendor}
+  \end{column}
+  \begin{column}{0.45\textwidth}\centering\small
+    \textcolor{routingstroke}{\textbf{RoCE / Ethernet}}\\
+    {\footnotesize 20--40\% lower switch cost\\Multi-vendor\\Shared infra with serving}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Cluster Design}
+% =============================================================================
+
+\begin{frame}{Production Clusters: SuperPOD vs.\ Grand Teton}
+\note{[3 min] Two philosophies for the same problem. SuperPOD: IB-native, 256 GPUs
+per unit, rail-optimized fat-tree. Grand Teton: RoCE, 16,000+ GPUs, Ethernet fat-tree
+with aggressive DCQCN tuning. Both achieve 95\%+ line-rate for large transfers.
+The choice is operational philosophy, not performance superiority.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{superpod-vs-teton.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Trend:}{NVIDIA Spectrum-4 adds IB-style adaptive routing to Ethernet. The two ecosystems are converging.}
+
+\end{frame}
+
+\begin{frame}{Virtualization: SR-IOV and Multi-Tenancy}
+\note{[2 min] A \$300M cluster that sits 30\% idle is \$90M wasted. SR-IOV lets a
+physical NIC present as multiple virtual functions, each with hardware-isolated queues.
+Less than 2\% latency overhead vs bare metal. But bandwidth is strictly partitioned:
+8 VFs on a 400G NIC = 50G each. No bursting beyond the slice.
+Three isolation dimensions: bandwidth, latency, security.}
+
+\footnotesize
+\textbf{SR-IOV}: NIC presents multiple Virtual Functions (VFs)
+
+\vspace{0.1cm}
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Hardware-isolated DMA queues per VM/container
+      \item Bypasses hypervisor $\to$ $<$2\% latency overhead
+      \item Strict BW partitioning: 8 VFs on 400G = 50G each
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Three isolation dimensions:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Bandwidth guarantees (min throughput)
+      \item Latency determinism (no HoL blocking)
+      \item Security (memory snooping prevention)
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize A \$300M cluster at 30\% idle = \textbf{\$90M waste}. Virtualization shares
+    fabric among training, inference, and preprocessing.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Monitoring}
+% =============================================================================
+
+\begin{frame}{Monitoring and Debugging the Fabric}
+\note{[2 min] Network issues manifest as subtle training slowdowns, not errors.
+A 10\% throughput drop can waste thousands of GPU-hours before anyone notices.
+Three layers of telemetry: link-level (BER, FEC errors), transport (PFC counters,
+RDMA retransmits), bandwidth (ib\_write\_bw baseline).
+Key: never use iperf for RDMA fabrics.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Three telemetry layers:}
+
+    \vspace{0.1cm}
+    \textcolor{computestroke}{\textbf{1. Link-level:}}
+    {\scriptsize Bit Error Rate, FEC corrections, symbol errors.
+    A rising BER predicts transceiver failure 24--48 hrs ahead.}
+
+    \vspace{0.1cm}
+    \textcolor{routingstroke}{\textbf{2. Transport-level:}}
+    {\scriptsize PFC PAUSE frame rates, PortXmitDiscards, RDMA retransmits.
+    Rising PFC counters = ``canary in the coal mine.''}
+
+    \vspace{0.1cm}
+    \textcolor{datastroke}{\textbf{3. Bandwidth validation:}}
+    {\scriptsize Use \texttt{ib\_write\_bw} / \texttt{ib\_read\_lat} from perftest.
+    \alert{Never} use \texttt{iperf} (measures TCP, not RDMA).}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize Network issues are \emph{silent}. A 10\% throughput drop can waste
+    \textbf{thousands of GPU-hours} before detection. Alert on PFC counters and
+    track bandwidth baselines weekly.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    {\scriptsize\textbf{Debug workflow:}\\
+    1. Measure (ib\_write\_bw)\\
+    2. Correlate (PFC + BER)\\
+    3. Isolate (single link test)\\
+    4. Repair + re-baseline}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Three common misconceptions with quantitative evidence.}
+
+\small
+\textbf{Fallacy:} \textit{More bandwidth always means faster training.}\\
+{\footnotesize For a 10 KB message, upgrading from 200G to 400G yields only 11\% improvement.
+The $\alpha$ term dominates small messages. Doubling bandwidth adds 40\% to cost for negligible gain.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Network oversubscription is acceptable if ``most'' traffic is local.}\\
+{\footnotesize BSP training injects simultaneously from \emph{all} nodes. 4:1 oversubscription $\to$ 4$\times$ slower AllReduce. On a \$300M cluster (30\% sync), this wastes \$22M+ in idle GPU-hours.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Adaptive routing eliminates topology-aware placement.}\\
+{\footnotesize Adaptive routing balances traffic but cannot create bandwidth that does not exist. A 1,024-GPU job across oversubscribed spine groups will still be throttled by cross-group links.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Three operational pitfalls.}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Assuming lossless Ethernet is as reliable as InfiniBand.}\\
+RoCE approximates losslessness via PFC. A misconfigured switch can trigger a PFC storm, freezing the entire fabric in 200 ms. InfiniBand's credit-based flow control is immune.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Testing network performance with \texttt{iperf} instead of RDMA tools.}\\
+\texttt{iperf} measures TCP (kernel-based). A link showing 30 Gbps via \texttt{iperf} may deliver 390 Gbps via \texttt{ib\_write\_bw}. Always validate with RDMA-native tools from \texttt{perftest}.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Neglecting PFC and ECN counter monitoring in production.}\\
+A gradual increase in PFC PAUSE frames or PortXmitDiscards is the canary for a failing transceiver or routing imbalance. A 10\% throughput drop can waste thousands of GPU-hours before detection.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Quantitative anchors: 18x cliff,
+25 KB crossover, 95\% HPCC utilization, 4x oversubscription penalty.}
+
+\footnotesize
+\begin{itemize}\setlength\itemsep{1pt}
+  \item \textbf{Network as Computer}: At scale, the interconnect determines performance. The 18$\times$ NVLink-to-IB cliff is the central design challenge.
+  \item \textbf{$\alpha$-$\beta$ Framework}: $T(n) = \alpha + n/\beta$. Messages $<$25 KB are latency-bound; gradients ($>$MB) are bandwidth-bound.
+  \item \textbf{Lossless is Non-Negotiable}: RDMA requires zero packet loss. IB provides natively; Ethernet must approximate via PFC/ECN.
+  \item \textbf{Topology Choice}: Fat-trees provide full bisection BW; rail-optimized minimizes latency; dragonflies reduce cabling at scale.
+  \item \textbf{Congestion Control}: PFC $\to$ DCQCN (85\%) $\to$ HPCC (95\%+). More precise feedback = higher utilization.
+  \item \textbf{Monitor or Waste}: PFC counters, BER trends, and RDMA bandwidth baselines detect silent network degradation.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Leiserson85}{C. Leiserson. ``Fat-Trees: Universal Networks for Hardware-Efficient Supercomputing.'' IEEE Trans.\ Comp., 1985.}
+\mlsysref{Kim+08}{J. Kim, W. Dally et al.\ ``Technology-Driven, Highly-Scalable Dragonfly Topology.'' ISCA 2008.}
+\mlsysref{DCQCN15}{Y. Zhu et al.\ ``Congestion Control for Large-Scale RDMA Deployments.'' SIGCOMM 2015.}
+\mlsysref{HPCC19}{Y. Li et al.\ ``HPCC: High Precision Congestion Control.'' SIGCOMM 2019.}
+\mlsysref{GrandTeton}{Meta. ``Grand Teton: Training Infrastructure at Scale.'' 2023.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Data Storage}
+\note{[1 min] Forward hook. The network now binds compute nodes into a fleet.
+Every byte of gradient and activation flows through it. The fleet also needs to move
+massive datasets and checkpoints. Next chapter: parallel storage systems and data-loading
+architectures that keep the fleet supplied.}
+
+\footnotesize
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    {\large\bfseries\textcolor{computestroke}{Storage}}\\[0.3cm]
+    {\footnotesize Parallel file systems\\NVMe, SSDs\\Checkpointing}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    {\large\bfseries\textcolor{routingstroke}{Data Loading}}\\[0.3cm]
+    {\footnotesize Prefetching pipelines\\Data locality\\I/O bottlenecks}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    {\large\bfseries\textcolor{datastroke}{Checkpoints}}\\[0.3cm]
+    {\footnotesize State preservation\\Fault recovery\\Storage hierarchy}
+  \end{column}
+\end{columns}
+
+\vspace{0.3cm}
+\centering
+{\normalsize The fleet is wired. How do we keep it fed with data?}\\[0.1cm]
+{\small\textbf{Massive datasets and enormous checkpoints need parallel storage.}}
+
+\end{frame}
+
+\end{document}

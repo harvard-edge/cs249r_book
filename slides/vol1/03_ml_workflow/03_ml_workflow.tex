@@ -1,0 +1,921 @@
+% =============================================================================
+% Chapter 3: ML Workflow — ML Systems Lecture Slides
+% =============================================================================
+% This deck covers the ML lifecycle, workflow engineering, and systems thinking.
+%
+% IMAGES NEEDED (generate SVGs, convert to PDF):
+%   - ch03-day150-timeline.pdf     - ch03-dual-pipeline.pdf
+%   - ch03-time-allocation.pdf     - ch03-constraint-propagation.pdf
+%   - ch03-iteration-velocity.pdf  - ch03-iron-law-workflow.pdf
+%   - ch03-lifecycle-circle.pdf    - ch03-systems-thinking-triad.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume   = {Volume I},
+  chapter  = {Chapter 3},
+  logo = {../../assets/img/logo-mlsysbook.png},
+  instlogo = {../../assets/img/logo-harvard.png},
+  chaptertitle = {ML Workflow},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{9}
+
+\title{ML Workflow}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{ML Workflow}{See the Whole Map Before Walking Any Path}{cover_ml_workflow.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Walk through objectives. Emphasize that this chapter provides the
+mental map for the entire course. Ask: ``How many of you have built a model but
+never thought about how it would be deployed?''}
+
+\small
+\begin{enumerate}
+  \item Describe the six \textbf{ML lifecycle stages} and their feedback-driven relationships
+  \item Compare ML workflows to \textbf{traditional software} development
+  \item Apply the \textbf{Constraint Propagation Principle} ($2^{N-1}$ cost escalation)
+  \item Map lifecycle stages to \textbf{Iron Law} terms ($D_{\text{vol}}/BW$, $O/R_p\eta$, $L_{\text{lat}}$)
+  \item Explain why \textbf{iteration velocity} compounds into quality advantages
+  \item Trace how \textbf{multi-scale feedback} loops enable continuous improvement
+  \item Apply \textbf{systems thinking} to anticipate cross-stage failures
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{The Day-150 Disaster}
+% =============================================================================
+
+\begin{frame}{The Day-150 Disaster}
+\note{[3 min] Open with this visceral story. Build suspense: the model was
+excellent. The team was excellent. But 5 months of work was discarded.
+Ask: ``What went wrong?'' Let students guess before revealing.}
+
+% --- Layout: FULL-WIDTH timeline ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{ch03-day150-timeline.pdf}
+
+\vspace{0.15cm}
+\mlsysalert{Key:}{The model's accuracy was excellent. The \emph{workflow} failed.}
+
+\end{frame}
+
+\begin{frame}{What Went Wrong?}
+\note{[2 min] Break down the failure. The tablet's 512 MB memory limit should
+have shaped every decision from Day 1. Instead, the team optimized each
+component in isolation. This motivates the entire chapter.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{The timeline:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Day 1: ``Build a diagnostic model''
+      \item Day 90: 95\% accuracy on test set
+      \item Day 120: 96\% after architecture tuning
+      \item Day 150: Handed to deployment
+      \item Day 151: Model requires \textbf{4 GB} memory
+      \item Day 152: Tablet has \textbf{512 MB}
+      \item Day 153: Five months discarded
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Root cause:}\\[0.05cm]
+    {\scriptsize A deployment constraint ($8\times$ memory violation) that should have shaped Day 1 was discovered on Day 151.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{crimson}
+    {\scriptsize This chapter introduces the \textbf{ML Workflow}: engineering that prevents such failures.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The ML Lifecycle: Definition}
+\note{[2 min] Formal definition. Emphasize two key distinctions: (1) lifecycle
+is WHAT gets traversed, workflow is HOW. (2) Unlike traditional software,
+ML systems degrade through data drift even when code is untouched.
+Ask: ``What degrades in ML but not in traditional software?''}
+
+\footnotesize
+\begin{mlsyscard}{crimson}
+\textbf{Machine Learning Lifecycle:} The continuous engineering discipline of managing
+\textbf{System Entropy} across the Data, Algorithm, and Machine axes.
+\end{mlsyscard}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  & \textbf{Traditional SW} & \textbf{ML System} \\
+  \midrule
+  Degrades via    & Code modification      & Data drift (untouched code) \\
+  Release model   & Ship and maintain      & Continuous retraining loop \\
+  End of lifecycle & Deployment             & \textbf{Beginning} of feedback loop \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\mlsysconcept{Key distinction:}{\textit{Lifecycle} = stages traversed. \textit{Workflow} = how traversal is managed.}
+
+\end{frame}
+
+% =============================================================================
+\section{ML vs.\ Software}
+% =============================================================================
+
+\begin{frame}{Where Time Actually Goes}
+\note{[3 min] This slide shocks students. Most expect model development to
+dominate. Show the stacked bar: 79\% of effort is data-related. Only 4\%
+goes to refining algorithms. Ask: ``Where would you invest your next hour?''}
+
+% --- Layout: FULL-WIDTH image ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch03-time-allocation.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Implication:}{Investment in data engineering yields the highest returns per hour spent.}
+
+\end{frame}
+
+\begin{frame}{ML vs.\ Traditional Software}
+\note{[3 min] Walk through six dimensions of difference. The most critical is
+the last row: feedback loops. Traditional software rarely has later stages
+influence earlier ones. ML systems require it. If short: focus on feedback
+loops and failure modes.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lp{3.5cm}p{5cm}@{}}
+  \toprule
+  \textbf{Dimension} & \textbf{Traditional Software} & \textbf{ML Systems} \\
+  \midrule
+  \textbf{Problem Def}  & Precise specs upfront         & Objectives evolve through exploration \\
+  \textbf{Development}   & Linear feature implementation & Iterative experimentation with data \\
+  \textbf{Testing}       & Deterministic pass/fail       & Statistical validation with uncertainty \\
+  \textbf{Deployment}    & Static until updated          & Drifts as data distributions shift \\
+  \textbf{Maintenance}   & Fix bugs, add features        & Continuous monitoring + retraining \\
+  \textbf{Feedback}      & Minimal; later $\not\to$ earlier & \textcolor{errorstroke}{\textbf{Frequent; deploy $\to$ data}} \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\small
+\mlsysalert{Core difference:}{ML systems require continuous feedback loops that traditional software never needs.}
+
+\end{frame}
+
+\begin{frame}{The Iteration Tax}
+\note{[3 min] Worked example. Two models compete over 6 months. The large
+model starts better but iterates slowly. The small model starts 5\% behind
+but iterates 168$\times$ faster. Ask: ``Which wins?'' Reveal after pause.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{ch03-iteration-velocity.pdf}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{6-month competition:}
+
+    \vspace{0.05cm}
+    \textcolor{computestroke}{\textbf{Large Model}}\\
+    {\scriptsize Start: 95\%, cycle: 1 week, +0.15\%/iter. 26 iters $\to$ \textbf{99\%}}
+
+    \vspace{0.05cm}
+    \textcolor{datastroke}{\textbf{Small Model}}\\
+    {\scriptsize Start: 90\%, cycle: 1 hour, +0.1\%/iter. 100 iters $\to$ \textbf{99\%}}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{Iteration velocity is a feature.}\\
+    10 experiments/day almost always outperforms 1/week.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: What Happens Without Problem Definition?}
+\note{[2 min] Prediction exercise. Give students 60 seconds. Do NOT reveal
+the answer. This primes the Constraint Propagation Principle.
+Ask 2--3 students to share answers.}
+
+\centering
+\vspace{0.6cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.4cm}
+{\large A team builds a highly accurate model (98\%)\\
+but skips the Problem Definition stage entirely.\\[0.2cm]
+\alert{What goes wrong at deployment?}}
+
+\vspace{0.4cm}
+{\normalsize Write down 2 specific failures. \textcolor{midgray}{(60 seconds)}}
+
+\vspace{0.3cm}
+{\small\textcolor{lightgray}{Turn to a neighbor and compare your answers.}}
+
+\end{frame}
+
+% =============================================================================
+\section{Lifecycle Stages}
+% =============================================================================
+
+\begin{frame}{The Six Lifecycle Stages}
+\note{[3 min] Overview diagram. Emphasize the feedback loop from Monitoring
+back to Problem Definition. This is NOT a waterfall. The misconception that
+``lifecycle ends at deployment'' is the most dangerous one.
+If short: just cover the loop, not all 6 stages.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{ch03-lifecycle-circle.pdf}
+
+\vspace{0.15cm}
+\mlsysinsight{Key:}{Deployment is the \emph{beginning} of the feedback loop, not the end.}
+
+\end{frame}
+
+\begin{frame}{The Dual-Pipeline Architecture}
+\note{[3 min] Two parallel pipelines running simultaneously. Data pipeline
+(green, top) and Model pipeline (blue, bottom). The backward feedback arrows
+are what make ML systems fundamentally different from traditional software.
+Ask: ``Which pipeline gets more research attention? Which consumes more time?''}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{ch03-dual-pipeline.pdf}
+
+\vspace{0.1cm}
+\footnotesize
+\textbf{Two pipelines, one system.} Data and model development run in parallel,\\
+unified by continuous feedback loops that have no equivalent in traditional software.
+
+\end{frame}
+
+\begin{frame}{Case Study: DR Screening}
+\note{[2 min] Introduce the running case study. Diabetic retinopathy screening
+seems simple (classify retinal images) but reveals every workflow challenge.
+Key facts: 100M+ affected worldwide, 1 ophthalmologist per 100K+ people in
+rural areas. AI-assisted screening is medically essential.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{Diabetic Retinopathy Screening:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Affects 100M+ people worldwide
+      \item Leading cause of preventable blindness
+      \item 1 ophthalmologist per 100K+ in rural areas
+      \item AI screening: medically essential
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Why this case study?}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Simple surface, deep complexity
+      \item Spans the deployment spectrum
+      \item Well-documented journey to production
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \begin{mlsyscard}{crimson}
+    \textbf{Five competing constraints:}\\[0.05cm]
+    {\scriptsize
+    1. Diagnostic accuracy\\
+    2. Computational efficiency\\
+    3. Workflow integration\\
+    4. Regulatory compliance\\
+    5. Cost-effectiveness}
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    {\scriptsize\textcolor{midgray}{Each constraint tightens the feasible design space for the others.}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Iron Law of Workflow}
+% =============================================================================
+
+\mlsysfocus{The Iron Law of Workflow}{%
+Each lifecycle stage maps to a specific term in:\\[0.3cm]
+$T_{\text{total}} = \underbrace{\dfrac{D_{\text{vol}}}{BW}}_{\text{Data Collection}} +
+\underbrace{\dfrac{O}{R_{\text{peak}} \cdot \eta}}_{\text{Model Dev}} +
+\underbrace{L_{\text{lat}}}_{\text{Deployment}}$%
+}
+
+\begin{frame}{Iron Law of Workflow: Stages Map to Terms}
+\note{[3 min] Bridge the workflow to the Iron Law from Ch1. Each lifecycle
+stage optimizes a specific term. Data Collection determines D\_vol.
+Model Development defines O. Deployment minimizes L\_lat.
+Ask: ``If you only optimize the model (compute term), what happens?''}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch03-iron-law-workflow.pdf}
+
+\vspace{0.1cm}
+\small
+\mlsysconcept{Key insight:}{Workflow management is mathematically equivalent to minimizing the Iron Law.}
+
+\end{frame}
+
+\begin{frame}{Lighthouse Models: Different Workflows}
+\note{[3 min] Same lifecycle stages, different dominant Iron Law terms.
+ResNet-50 is compute-bound. DLRM is I/O-bound. KWS is energy-bound.
+Each requires fundamentally different workflow priorities.
+If short: just contrast ResNet-50 vs KWS.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lp{3.2cm}p{3.2cm}p{3.2cm}@{}}
+  \toprule
+  \textbf{Stage} & \textbf{ResNet-50} \newline\textcolor{computestroke}{Compute Beast} & \textbf{DLRM} \newline\textcolor{datastroke}{Sparse Scatter} & \textbf{KWS} \newline\textcolor{errorstroke}{Tiny Constraint} \\
+  \midrule
+  \textbf{Data}    & Throughput: >80\% GPU utilization  & Feature store: <2 ms lookups & Fit in 256 KB RAM \\
+  \textbf{Train}   & Maximize $\eta$; mixed precision   & Optimize sparse embeddings   & NAS for smallest model \\
+  \textbf{Deploy}  & Batch >128 for throughput          & Strict <10 ms p99 latency    & <1 mW energy budget \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\small
+\mlsysconcept{Key:}{Same workflow stages, different Iron Law terms dominate by archetype.}
+
+\end{frame}
+
+% =============================================================================
+\section{Data \& Models}
+% =============================================================================
+
+\begin{frame}{Stage 2: Data Collection Challenges}
+\note{[3 min] Data collection is the primary engineering activity. For DR
+screening: 128K retinal images, multiple expert annotations, diverse clinic
+equipment. The bandwidth constraint forces edge deployment.
+Common error: students think ``just get more data.''}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{DR Screening Data Challenges:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item $10^5$ retinal photographs needed
+      \item Multiple expert ophthalmologist reviews
+      \item Diverse cameras, lighting, operators
+      \item Rural clinics: limited connectivity
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Bandwidth vs.\ Compute:}\\
+    {\scriptsize 150 patients $\times$ 10 photos $\times$ 5 MB = \textbf{7 GB/day}\\
+    At 2 Mbps = \textbf{25+ hours} to upload (clinic: 8 hours)}
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{Engineering conclusion:} Cloud-only is bandwidth-infeasible. Edge reduces uploads by \textbf{5,000$\times$}.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize \textbf{Lab-to-Field Gap:} Models trained on research images fail on blurry, poorly-lit clinic images.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Stage 3: Model Development}
+\note{[3 min] The DR team has 128K images and a target: >90\% sensitivity on
+edge hardware with <50 ms latency. Key techniques: transfer learning (reuse
+ImageNet representations), model compression. The competition-production gap:
+Netflix Prize ensemble won \$1M but was never deployed.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{DR Model Development:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textbf{Transfer learning}: Reuse ImageNet, fine-tune with domain data
+      \item Result: AUC 0.99, sensitivity 97.5\%
+      \item But: initial model too large for edge
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Accuracy vs.\ Efficiency:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Quantization: FP32 $\to$ INT8
+      \item Pruning: remove redundant connections
+      \item Distillation: large $\to$ small model
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Competition-Production Gap:} Netflix Prize: 800+ model ensemble. \textbf{Never deployed} --- serving complexity exceeded value.}
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize \textbf{Reproducible artifact:} Weights + code + environment + config. ``Works on my machine'' = broken system.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Stage Interface Contracts}
+\note{[2 min] Each lifecycle stage has explicit inputs, outputs, and quality
+invariants. Think of these as API contracts between teams. When a stage
+output fails its contract, costs compound downstream. This is the formal
+mechanism that prevents Day-150 disasters.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lp{3cm}p{3.5cm}p{3.5cm}@{}}
+  \toprule
+  \textbf{Stage} & \textbf{Input Contract} & \textbf{Output Contract} & \textbf{Quality Invariant} \\
+  \midrule
+  \textbf{Problem Def}  & Business requirements & Measurable objectives; deployment paradigm & All criteria quantifiable \\
+  \textbf{Data}          & Objectives; target    & Versioned dataset; validation rules        & Distribution matches production \\
+  \textbf{Model Dev}     & Dataset; constraints  & Trained weights; experiment logs            & Meets accuracy within budget \\
+  \textbf{Evaluation}    & Model; test data      & Metrics across subgroups                   & No subgroup below threshold \\
+  \textbf{Deployment}    & Validated model; SLA  & Serving endpoint; monitoring               & Latency and throughput met \\
+  \textbf{Monitoring}    & Live system; baselines & Drift alerts; retraining triggers          & Degradation caught early \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\small
+\mlsysalert{Violation:}{A missing deployment paradigm at Stage 1 costs $2^{5-1} = 16\times$ to fix at Stage 5.}
+
+\end{frame}
+
+% =============================================================================
+\section{Eval \& Deploy}
+% =============================================================================
+
+\begin{frame}{Stage 4: Evaluation and Validation}
+\note{[3 min] The DR model gets AUC 0.99 on curated data, then sensitivity
+drops to 78\% at a rural clinic with older equipment. Lab success does NOT
+guarantee production value. Walk through the gap between offline and online
+evaluation. Ask: ``Why does a model that works in the lab fail in the field?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{The Lab-to-Field Gap:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item AUC 0.99 on curated research data
+      \item Sensitivity \textbf{drops to 78\%} at rural clinic
+      \item Older camera, untrained technician
+      \item Blurry, poorly-lit, inconsistent framing
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Progressive validation stages:}\\
+    {\footnotesize
+    1. Offline evaluation $\to$ algorithmic issues\\
+    2. Shadow mode $\to$ integration issues\\
+    3. Canary (1--5\% traffic) $\to$ scaling issues\\
+    4. A/B testing $\to$ user-facing issues}
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize \textbf{Lab $\neq$ Production}\\[0.1cm]
+    Medical AI systems experience 10--30\% performance drops in real-world settings. The FDA now requires real-world performance studies.}
+    \end{mlsyscard}
+
+    \vspace{0.15cm}
+    \mlsysconcept{Key:}{Evaluation measures algorithm quality. Validation confirms production readiness.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Stage 5: Deployment Economics}
+\note{[3 min] Quantitative comparison: cloud vs edge for 500 clinics.
+Cloud: \$136K/year OpEx. Edge: \$250K CapEx + \$25K/year. Edge pays back
+in ~1 year and provides better reliability. But: requires tighter model
+optimization. The deployment paradigm selected at Stage 1 determines viability.}
+
+\footnotesize
+\textbf{Cloud vs.\ Edge: 500 Clinics, 50 patients/day}
+
+\vspace{0.05cm}
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  & \textbf{Cloud (AWS)} & \textbf{Edge (Jetson)} \\
+  \midrule
+  Inference cost  & \$0.01/image       & \$0.001/image (electricity) \\
+  Annual OpEx     & \textbf{\$136,000} & \$25,000 maintenance \\
+  CapEx           & ---                & \$250,000 (one-time) \\
+  Latency         & 200+ ms            & \textbf{<50 ms} \\
+  Offline?        & No                 & \textbf{Yes} \\
+  \midrule
+  \textbf{Payback} & --- & \textbf{$\sim$2 years} \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\footnotesize
+\mlsysconcept{Trade-off:}{Edge: better reliability/latency but tighter model optimization and complex updates.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Discussion ---
+\begin{frame}{Discussion: Which Stage Fails First?}
+\note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
+Cold-call 2--3 pairs. The point: all stages are interdependent. A startup
+that skips problem definition discovers constraints at deployment.
+No single right answer --- the point is systems thinking.}
+
+\centering
+\vspace{0.5cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.4cm}
+{\large A startup deploys a DR screening model.\\
+Within 6 months, accuracy drops 15\%.\\[0.2cm]
+\alert{Which lifecycle stage failed?}}
+
+\vspace{0.4cm}
+\begin{columns}[c]
+  \begin{column}{0.16\textwidth}\centering\small Problem\\ Def.\end{column}
+  \begin{column}{0.16\textwidth}\centering\small Data\\ Collection\end{column}
+  \begin{column}{0.16\textwidth}\centering\small Model\\ Dev.\end{column}
+  \begin{column}{0.16\textwidth}\centering\small Evaluation\end{column}
+  \begin{column}{0.16\textwidth}\centering\small Deployment\end{column}
+  \begin{column}{0.16\textwidth}\centering\small \textcolor{errorstroke}{Monitoring}\end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Monitoring}
+% =============================================================================
+
+\begin{frame}{Stage 6: Silent Degradation}
+\note{[3 min] The DR system launches. Six months later, a clinic upgrades
+its cameras. Sensitivity drops 8\%. No code changed. No one made an error.
+The data drifted. This is the structural difference from traditional
+software. Ask: ``How would you detect this without ground truth labels?''}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{Six months after launch:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Clinic upgrades fundus cameras
+      \item Sharper images, different color profiles
+      \item Sensitivity drops \textbf{8\%} at that site
+      \item No code changed. No errors.
+      \item \textcolor{errorstroke}{\textbf{Data drifted.}}
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Monitoring hierarchy:}\\
+    {\scriptsize
+    Operational (seconds) $\to$ Proxy (hours) $\to$ Performance (weeks) $\to$ Drift (months)}
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Production thresholds:}\\
+    Sensitivity: >90\% (alert at 88\%)\\
+    Specificity: >80\% (alert at 78\%)\\
+    Latency P95: <50 ms (alert at 100 ms)\\
+    PSI drift: alert if >0.2}
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    \mlsysconcept{Rule:}{ML systems degrade \emph{silently} through data drift.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Multi-Scale Feedback Loops}
+\note{[2 min] Five timescales of feedback in the DR system. Each catches
+different failures. Fast loops catch operational issues (minutes). Slow
+loops catch strategic issues (quarters). The temporal structure prevents
+both over-reaction and sluggish adaptation.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}llp{5.5cm}@{}}
+  \toprule
+  \textbf{Timescale} & \textbf{Loop} & \textbf{What It Catches} \\
+  \midrule
+  \textcolor{errorstroke}{\textbf{Minutes}}  & Real-time inference  & Misconfigured camera before a day of bad images \\
+  \textcolor{routingstroke}{\textbf{Days}}    & Batch monitoring     & Accuracy drift at a specific clinic site \\
+  \textcolor{computestroke}{\textbf{Weeks}}   & Drift detection      & Equipment upgrade changed pixel distributions \\
+  \textcolor{datastroke}{\textbf{Months}}     & Trend analysis       & Demographic shift requires expanded training data \\
+  \textbf{Quarters}   & Strategic review    & Architecture no longer meets clinical needs \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\small
+\mlsysinsight{Design principle:}{Fast iteration is a \emph{systems feature}, not a convenience.}
+
+\end{frame}
+
+% =============================================================================
+\section{Systems Thinking}
+% =============================================================================
+
+\begin{frame}{Three Patterns of ML Systems Thinking}
+\note{[3 min] Overview of the three structural patterns that recur throughout
+the DR case study. These patterns transform reactive debugging into proactive
+design. Each pattern appeared at every lifecycle stage.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.2cm,keepaspectratio]{ch03-systems-thinking-triad.pdf}
+
+\vspace{0.1cm}
+\small
+\mlsysconcept{Transformation:}{Reactive debugging $\to$ Proactive design.}
+
+\end{frame}
+
+\begin{frame}{Constraint Propagation Principle}
+\note{[3 min] Formalize the Day-150 disaster. Cost grows as 2\^{}(N-1).
+A Stage-5 discovery costs 16x. A Stage-6 discovery costs 32x.
+The deployment paradigm is the Day-1 constraint, not the last step.}
+
+% --- Layout: FULL-WIDTH chart ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.0cm,keepaspectratio]{ch03-constraint-propagation.pdf}
+
+\vspace{0.1cm}
+\small
+\begin{mlsyscard}{crimson}
+$\text{Correction Cost} \approx 2^{(N-1)} \times \text{Base Effort}$\\[0.1cm]
+{\footnotesize Deployment constraints must flow \textbf{backward} to Day 1. The deployment environment is the \textbf{Day-1 constraint}, not the last step.}
+\end{mlsyscard}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Exercise ---
+\begin{frame}{Your Turn: Calculate the Cost}
+\note{[3 min] Give students 90 seconds. Answer: 2\^{}(6-1) = 32x multiplier.
+Must revisit: Data Collection (expand demographics), Model Development
+(retrain), Evaluation (re-validate), Deployment (update). That is 4 stages
+of rework at exponential cost.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Calculate the Cost}
+
+    \vspace{0.15cm}
+    A team discovers during \textbf{Monitoring (Stage 6)} that their DR model fails for patients over 70.
+
+    \vspace{0.1cm}
+    This demographic requirement should have been specified at \textbf{Problem Definition (Stage 1)}.
+
+    \vspace{0.15cm}
+    \textbf{1.} Calculate the cost multiplier using:\\
+    \hspace{1em}$\text{Cost} = 2^{(N-1)}$
+
+    \vspace{0.1cm}
+    \textbf{2.} Which stages must be revisited?
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    $2^{(6-1)} = 2^5 = $ \textbf{32$\times$} base effort\\[0.1cm]
+    \textbf{Stages to revisit:}\\
+    2. Data Collection (expand demographics)\\
+    3. Model Development (retrain)\\
+    4. Evaluation (re-validate)\\
+    5. Deployment (update models)\\[0.1cm]
+    \textcolor{errorstroke}{\textbf{4 stages}} of rework at exponential cost.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Emergent Complexity}
+\note{[2 min] System-level behavior diverges from component-level behavior.
+Individual clinics show stable performance, but system-wide analysis detects
+subtle degradation across demographic groups. A 2\% accuracy improvement
+requires doubling model size, which at 500 clinics means massive CapEx.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{Component vs.\ System behavior:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Individual clinics: stable performance
+      \item System-wide: subtle demographic degradation
+      \item Invisible in single-site monitoring
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \textbf{Non-linear trade-offs:}\\
+    {\footnotesize
+    2\% accuracy gain $\to$ 2$\times$ model size\\
+    $\to$ more powerful edge hardware\\
+    $\to$ at 500 clinics: massive CapEx}
+  \end{column}
+  \begin{column}{0.44\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    {\footnotesize \textbf{ML vs.\ Traditional:}\\[0.1cm]
+    Traditional systems fail via \emph{deterministic} cascades (crashes).\\[0.1cm]
+    ML systems fail via \emph{probabilistic} degradation (drift, bias amplification).\\[0.1cm]
+    Probabilistic degradation lacks obvious error signals.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Four common misconceptions with quantitative evidence.
+Focus on the first two if short on time.}
+
+\footnotesize
+\textbf{Fallacy:} \textit{ML development can follow traditional software workflows.}\\
+{\scriptsize 60--80\% of ML projects never reach production. Projects forced into waterfall miss the 4--8 iteration cycles production requires.}
+
+\vspace{0.05cm}
+\textbf{Fallacy:} \textit{Passing model evaluation means ready for deployment.}\\
+{\scriptsize DR model: AUC 0.99 in lab, sensitivity 78\% in rural clinic. Stage-5 discovery costs $16\times$.}
+
+\vspace{0.05cm}
+\textbf{Fallacy:} \textit{More data always improves performance.}\\
+{\scriptsize Doubling from 500K to 1M often improves accuracy <1\% while doubling costs. 100K clean beats 1M noisy.}
+
+\vspace{0.05cm}
+\textbf{Fallacy:} \textit{Data preparation is a one-time step.}\\
+{\scriptsize Models degrade 5--10\% within months. Emergency retraining costs 3--5$\times$ proactive monitoring.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Three operational pitfalls. If short: cover just the first two.}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Skipping validation to accelerate timelines.}\\
+{\scriptsize Skipping shadow mode causes 10--50$\times$ latency spikes. ``Saving'' 2 weeks costs 6--8 weeks of emergency remediation.}
+
+\vspace{0.08cm}
+\textbf{Pitfall:} \textit{Deferring deployment paradigm selection until after model development.}\\
+{\scriptsize A team develops a 2 GB ensemble, discovers TinyML target with 256 KB. Constraint Propagation: $2^4 = 16\times$ rework.}
+
+\vspace{0.08cm}
+\textbf{Pitfall:} \textit{Treating the model as the sole deliverable.}\\
+{\scriptsize Reproducible artifact = weights + code + environment + config. Without bundling, ``works on my machine'' = broken.}
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write for 90 seconds, no notes.
+Do NOT show next slide yet. Walk around the room.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Emphasize the three
+quantitative anchors: 60--80\% data time, 4--8 iteration cycles, 2\^{}(N-1)
+cost escalation.}
+
+\footnotesize
+\begin{itemize}\setlength\itemsep{1pt}
+  \item \textbf{Two pipelines, one system}: Data and model development run in parallel, unified by continuous feedback loops.
+  \item \textbf{60--80\% of effort is data-related}: Model development is only 10--20\%. Plan accordingly.
+  \item \textbf{Iteration velocity compounds}: 10 experiments/day beats 1/week, even starting 5\% behind (Iteration Tax).
+  \item \textbf{Constraint propagation is exponential}: $\text{Cost} = 2^{(N-1)}$. A Stage-5 discovery costs $16\times$ base effort.
+  \item \textbf{Each stage maps to an Iron Law term}: Data $\to D_{\text{vol}}$, Model $\to O$, Deploy $\to L_{\text{lat}}$.
+  \item \textbf{ML systems degrade silently}: Data drift, not code bugs. Continuous monitoring from day one.
+  \item \textbf{Systems thinking}: Constraint propagation + multi-scale feedback + emergent complexity.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Sculley+15}{Sculley et al. ``Hidden Technical Debt in ML Systems.'' NeurIPS 2015.}
+\mlsysref{CrowdFlower16}{CrowdFlower. ``Data Science Report.'' 2016.}
+\mlsysref{Amershi+19}{Amershi et al. ``Software Engineering for ML.'' ICSE 2019.}
+\mlsysref{Gulshan+16}{Gulshan et al. ``Development of a Deep Learning Algorithm for Detection of Diabetic Retinopathy.'' JAMA 2016.}
+\mlsysref{Paleyes+22}{Paleyes et al. ``Challenges in Deploying ML.'' ACM Comp.\ Surveys 2022.}
+\mlsysref{Boehm81}{B. Boehm. \textit{Software Engineering Economics}. 1981.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Data Engineering}
+\note{[1 min] Forward hook. The workflow framework provides the map. Now we
+need fuel: data. Data engineering is where 60--80\% of the effort goes, and
+where most failures begin. The question: how do you build pipelines that
+feed the right data to the right model at the right time?}
+
+\footnotesize
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{datastroke}
+    {\large\bfseries Data Pipelines}\\[0.1cm]
+    {\footnotesize Collection, cleaning, versioning}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\large\bfseries Feature Eng.}\\[0.1cm]
+    {\footnotesize Transform raw data into ML-ready features}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{errorstroke}
+    {\large\bfseries Data Quality}\\[0.1cm]
+    {\footnotesize Validation, drift detection, monitoring}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.3cm}
+\centering
+{\normalsize The engine needs fuel.}\\[0.1cm]
+{\small\textbf{60--80\% of ML effort is data engineering. That is where we go next.}}
+
+\end{frame}
+
+\end{document}

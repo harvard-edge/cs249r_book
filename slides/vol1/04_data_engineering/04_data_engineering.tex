@@ -1,0 +1,732 @@
+% =============================================================================
+% Chapter 4: Data Engineering — ML Systems Lecture Slides
+% =============================================================================
+% IMAGES NEEDED (generate SVGs, convert to PDF):
+%   - ch04-dataset-compiler.pdf   - ch04-energy-movement.pdf
+%   - ch04-feeding-problem.pdf    - ch04-four-pillars.pdf
+%   - ch04-drift-types.pdf        - ch04-training-serving-skew.pdf
+%   - ch04-storage-hierarchy.pdf  - ch04-data-debt-categories.pdf
+%   - cover_data_engineering.png
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume   = {Volume I},
+  chapter  = {Chapter 4},
+  logo = {../../assets/img/logo-mlsysbook.png},
+  instlogo = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Data Engineering},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{8}
+
+\title{Data Engineering}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Data Engineering}{Data Is the Source Code of ML Systems}{cover_data_engineering.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Walk through objectives. Emphasize that data engineering consumes
+60--80\% of ML project effort. Ask: ``Who here has spent more time cleaning
+data than training models?''}
+
+\small
+\begin{enumerate}
+  \item Explain how \textbf{Data Cascades} propagate errors and apply the \textbf{Four Pillars framework}
+  \item Evaluate \textbf{data acquisition strategies} using cost--quality trade-offs
+  \item Compare \textbf{batch vs.\ streaming} ingestion and \textbf{ETL vs.\ ELT} patterns
+  \item Implement \textbf{training-serving consistency} and operationalize \textbf{drift detection}
+  \item Build \textbf{data labeling systems} balancing accuracy, throughput, and cost
+  \item Evaluate \textbf{storage architectures} and file formats for ML workloads
+  \item Identify \textbf{Data Debt} categories and apply systematic debugging
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{Data as Code}
+% =============================================================================
+
+\begin{frame}{The Dataset Compilation Metaphor}
+\note{[3 min] Core reframe: data engineering is not ``data cleaning'' but
+\emph{dataset compilation}. Walk through each analogy pair. Key insight:
+datasets must be versioned, tested, debugged --- just like code.
+Ask: ``What happens if you delete a training row?''}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch04-dataset-compiler.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Key insight:}{Deleting a row of training data = deleting a line of code. Retraining = recompiling.}
+
+\end{frame}
+
+\begin{frame}{Data Cascades: Upstream Errors Amplify}
+\note{[3 min] Sambasivan et al.\ 2021. Cascade issues take a median of 4 weeks
+to discover. By that point, the only fix is often a complete rebuild.
+This motivates the Four Pillars framework coming next.
+Ask: ``Why are data bugs harder to find than code bugs?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{The failure pattern:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Bad data at collection $\to$ silent propagation
+      \item Errors amplify through every pipeline stage
+      \item 4-week median time to discovery
+      \item Often requires \textbf{complete system rebuild}
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize \textbf{Example:} A zip code field changed from integer to string. Leading zeros lost. The model rejected all applicants from affected regions --- \emph{silently}.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.3cm}
+    \renewcommand{\arraystretch}{1.2}
+    {\footnotesize
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Traditional SW} & \textbf{ML Data} \\
+      \midrule
+      Compile error    & Silent degradation \\
+      Crashes loudly   & Degrades silently \\
+      Debug code       & Debug pipeline \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+\end{columns}
+\mlsyscite{Sambasivan et al., ``Everyone Wants to Do the Model Work,'' CHI 2021}
+
+\end{frame}
+
+% =============================================================================
+\section{Physics of Data}
+% =============================================================================
+
+\begin{frame}{The Energy-Movement Invariant}
+\note{[3 min] Horowitz 2014. Moving a bit costs 100--1000$\times$ more energy
+than computing on it. This is \emph{why} deduplication is the highest-leverage
+optimization. Connect to Iron Law: the Data Term dominates energy.
+If short on time: focus on the 170$\times$ DRAM vs.\ compute gap.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{ch04-energy-movement.pdf}
+
+\vspace{0.15cm}
+\mlsysalert{Systems Implication:}{Pruning 50\% of training data eliminates the \emph{most expensive} stages of the pipeline.}
+
+\end{frame}
+
+\begin{frame}{The Feeding Problem: GPU Starvation}
+\note{[3 min] An A100 can process 40K images/sec but a standard disk delivers
+only 250 MB/s. The GPU sits $>$98\% idle. This is the Iron Law's Data Term
+dominating. Adding more GPUs yields zero speedup.
+Ask: ``If you have \$10K to spend, should you buy another GPU or faster storage?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{ch04-feeding-problem.pdf}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{The mismatch:}
+
+    \vspace{0.15cm}
+    \textcolor{computestroke}{\textbf{A100 GPU capacity}}\\
+    {\footnotesize 40K images/sec $\to$ needs 23 GB/s}
+
+    \vspace{0.1cm}
+    \textcolor{errorstroke}{\textbf{Standard cloud disk}}\\
+    {\footnotesize 250 MB/s actual throughput}
+
+    \vspace{0.2cm}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize \textbf{Feeding Tax:} $>$98\% GPU idle time.\\[0.05cm]
+    Iron Law: $T_{\text{step}} = \max(T_{\text{compute}}, T_{\text{io}})$\\[0.05cm]
+    The \textcolor{datastroke}{Data Term} dominates.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Exercise ---
+\begin{frame}{Your Turn: Calculate the Feeding Tax}
+\note{[3 min] Give students 90 seconds. Answer: Required BW = 500 MB/s.
+Disk provides 100 MB/s. Feeding tax = 80\%. System is I/O bound.
+The fix is faster storage, not a faster GPU.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.56\textwidth}
+    {\small\bfseries Diagnose the I/O Bottleneck}
+
+    \vspace{0.1cm}
+    A training pipeline processes:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item 2,000 images/sec at 250 KB each
+      \item Storage delivers 100 MB/s
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Calculate:} (1) Required bandwidth, (2) Feeding tax, (3) Dominant Iron Law term.
+
+    {\scriptsize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.40\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.05cm]
+    {\footnotesize
+    Required: $2000 \times 250\text{KB} = 500$ MB/s\\
+    Disk: 100 MB/s\\
+    Tax: $1 - 100/500 = $ \textbf{80\%}\\[0.05cm]
+    \textcolor{datastroke}{\textbf{Data-bound!}} Fix: faster storage.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Four Pillars}
+% =============================================================================
+
+% --- ACTIVE LEARNING 2: Predict ---
+\begin{frame}{Predict: What Makes a Reliable Data System?}
+\note{[2 min] Prediction exercise. Give students 60 seconds to write.
+Do NOT reveal the framework yet. This primes the Four Pillars.
+Ask 2--3 students to share answers.}
+
+\centering
+\vspace{1.2cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.6cm}
+{\large A zip code field changes from integer to string.\\
+Your ML model silently rejects all applicants from a region.\\[0.3cm]
+\alert{What system properties would have prevented this?}}
+
+\vspace{0.6cm}
+{\normalsize Write down 3--4 properties. \textcolor{midgray}{(60 seconds)}}
+
+\end{frame}
+
+\begin{frame}{The Four Pillars Framework}
+\note{[3 min] Reveal after prediction exercise. Quality, Reliability,
+Scalability, Governance. Emphasize interdependence: strengthening one
+pillar creates tension with another. This is the organizing framework
+for all data engineering decisions.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch04-four-pillars.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Framework:}{Every pipeline decision is evaluated against all four pillars simultaneously.}
+
+\end{frame}
+
+\begin{frame}{Four Pillars: Trade-off Tensions}
+\note{[2 min] Concrete tension examples. Stricter validation slows throughput
+(Quality vs.\ Scalability). More redundancy means more data copies to govern
+(Reliability vs.\ Governance). No free lunch in pipeline design.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Quality $\leftrightarrow$ Scalability}\\[0.1cm]
+    {\footnotesize Stricter schema validation catches more errors but reduces pipeline throughput. A 100\% label review catches all errors but costs 10--50$\times$ more.}
+
+    \vspace{0.2cm}
+    \textbf{Reliability $\leftrightarrow$ Governance}\\[0.1cm]
+    {\footnotesize Redundant data copies improve fault tolerance but multiply the governance surface. Each copy must be versioned, access-controlled, and tracked.}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{Scalability $\leftrightarrow$ Quality}\\[0.1cm]
+    {\footnotesize Web scraping scales to billions but requires elaborate cleaning. Curated datasets are high-quality but cap at thousands.}
+
+    \vspace{0.2cm}
+    \begin{mlsyscard}{crimson}
+    {\footnotesize \textbf{The engineering discipline:} Navigate these tensions systematically, not ad hoc. Every decision shifts the balance.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Data Acquisition}
+% =============================================================================
+
+\begin{frame}{Data Acquisition Strategies}
+\note{[3 min] Four main strategies, each with different cost--quality trade-offs.
+Use the KWS case study: 23 million audio samples, 50 languages.
+No single approach works alone.
+Ask: ``Which strategy would you use for a medical imaging system?''}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lp{2cm}p{2cm}p{2cm}p{2cm}@{}}
+  \toprule
+  & \textbf{Curated} & \textbf{Crowdsource} & \textbf{Web Scrape} & \textbf{Synthetic} \\
+  \midrule
+  \textbf{Scale}   & 1K--10M & 10K--100M & 1M--1B+ & Unlimited \\
+  \textbf{Quality} & High & Medium & Low (noisy) & Medium \\
+  \textbf{Cost}    & Low (reuse) & Medium & Low (infra) & Medium \\
+  \textbf{Risk}    & Overfitting & Annotator bias & Legal, noise & Model collapse \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{datastroke}
+{\scriptsize \textbf{KWS:} Curated Speech Commands (baseline) + crowdsourced MSWC (50 languages) + synthetic TTS (rare accents) + web-scraped noise. No single source suffices.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Labeling: The Serial Bottleneck}
+\note{[3 min] Labeling is the most expensive stage. The 1000$\times$ Rule:
+labeling costs 1,000--3,000$\times$ more than model training compute.
+KWS: labeling 23M samples at 10 sec each = 65,000 hours = 32 person-years.
+Ask: ``Why can't we just parallelize labeling infinitely?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{The cost hierarchy:}
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.15}
+    {\footnotesize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Label Type} & \textbf{Cost / Example} \\
+      \midrule
+      Classification (crowd)     & \$0.01--0.10 \\
+      Bounding box               & \$0.10--1.00 \\
+      Segmentation mask          & \$1--10 \\
+      Expert (medical)           & \$10--100 \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysalert{The 1,000$\times$ Rule:}{Labeling costs 1,000--3,000$\times$ more than model training compute.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{KWS Scale:}\\[0.1cm]
+    {\footnotesize
+    23M samples $\times$ 10 sec each\\
+    = 65,000 hours\\
+    = \textbf{32 person-years}\\[0.1cm]
+    Budget: \$150K\\
+    Timeline: 6 months\\[0.1cm]
+    \textbf{Solution:} AI-assisted labeling + consensus for ambiguous cases only.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Pipeline Design}
+% =============================================================================
+
+\begin{frame}{Pipeline Architecture: ETL vs.\ ELT}
+\note{[3 min] Two major patterns. ETL: transform before loading (saves storage,
+harder schema changes). ELT: load raw, transform on query (flexible, needs
+governance). Most modern ML pipelines use ELT with data lakes.
+If short: focus on the trade-off row.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  & \textbf{ETL (Extract-Transform-Load)} & \textbf{ELT (Extract-Load-Transform)} \\
+  \midrule
+  \textbf{Transform}  & Before storage           & After storage (on query) \\
+  \textbf{Storage}     & Clean, smaller           & Raw, larger \\
+  \textbf{Flexibility} & Schema changes are hard   & Schema-on-read is easy \\
+  \textbf{Governance}  & Easier (structured)       & Harder (data swamp risk) \\
+  \textbf{ML Use}      & Feature engineering       & Exploratory, training \\
+  \textbf{Cost}        & Higher engineering upfront & Higher storage, lower eng. \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{computestroke}
+{\footnotesize \textbf{The trade-off:} ETL reduces storage footprint at the expense of higher engineering overhead during schema changes. ELT preserves raw data for flexibility but risks ``data swamps'' without governance.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Batch vs.\ Streaming Ingestion}
+\note{[2 min] Batch: high throughput, periodic updates (training).
+Streaming: low latency, continuous updates (serving).
+Most ML systems use both: batch for training, streaming for serving features.
+Ask: ``When would you choose streaming over batch for training?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Batch Ingestion}\\[0.1cm]
+    {\footnotesize
+    \textbf{When:} Periodic, high-volume\\
+    \textbf{Latency:} Minutes to hours\\
+    \textbf{Use:} Training data, feature eng.\\
+    \textbf{Tools:} Spark, Airflow, dbt\\[0.05cm]
+    \textbf{Pro:} Simple, high throughput\\
+    \textbf{Con:} Stale data between runs
+    }
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Stream Ingestion}\\[0.1cm]
+    {\footnotesize
+    \textbf{When:} Continuous, real-time\\
+    \textbf{Latency:} Seconds to minutes\\
+    \textbf{Use:} Feature serving, monitoring\\
+    \textbf{Tools:} Kafka, Flink, Kinesis\\[0.05cm]
+    \textbf{Pro:} Fresh data, low latency\\
+    \textbf{Con:} Complex, expensive ops
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.15cm}
+{\small\mlsysconcept{Most ML systems use both:}{Batch for training pipelines, streaming for serving features.}}
+
+\end{frame}
+
+\begin{frame}{Quality Through Validation Gates}
+\note{[2 min] Every pipeline stage needs validation. Schema validation catches
+structural errors. Statistical monitoring catches distribution drift.
+The self-driving car example: 15\% of LiDAR labels were misaligned by 10--20 cm.
+Schema checks passed; only statistical monitoring caught it.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Two validation layers:}
+
+    \vspace{0.15cm}
+    \textcolor{datastroke}{\textbf{1. Schema Validation}} (\emph{structural})\\
+    {\footnotesize Type checks, range constraints, null detection.\\
+    Catches: format errors, missing fields.\\
+    Misses: semantically wrong but valid data.}
+
+    \vspace{0.15cm}
+    \textcolor{computestroke}{\textbf{2. Statistical Monitoring}} (\emph{distributional})\\
+    {\footnotesize PSI, KL divergence, feature distributions.\\
+    Catches: drift, subtle corruption, bias shifts.\\
+    Requires: historical baseline to compare against.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{War Story:}\\[0.1cm]
+    {\footnotesize 15\% of LiDAR labels misaligned by 10--20 cm at a self-driving company.\\[0.05cm]
+    Every record was \emph{structurally valid}.\\[0.05cm]
+    Persisted for 3 months.\\[0.05cm]
+    Only statistical monitoring caught it.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Drift \& Skew}
+% =============================================================================
+
+\begin{frame}{Three Types of Distribution Drift}
+\note{[3 min] Walk through each panel. Covariate: inputs change (detectable).
+Label: output frequencies change (detectable). Concept: the mapping changes
+(needs ground truth --- hardest to detect). Concept drift is delayed because
+labels arrive late. This is the most dangerous silent failure.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch04-drift-types.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{Concept drift is the most dangerous --- rules change but detection requires ground truth labels that arrive late.}
+
+\end{frame}
+
+\begin{frame}{Training-Serving Skew}
+\note{[3 min] The \#1 cause of ML deployment failures. Different normalization
+in training vs.\ serving causes 20--40\% accuracy drop, \emph{silently}.
+30--40\% of initial deployments at Uber suffered this.
+Solutions: shared code, stored params, feature stores, idempotent transforms.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{ch04-training-serving-skew.pdf}
+
+\vspace{0.1cm}
+\small
+\mlsysconcept{Non-negotiable:}{Any transform applied during training must be applied \emph{identically} during serving.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Which Drift Type Is Hardest?}
+\note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
+Cold-call 2--3 pairs. Point: concept drift is hardest because you cannot
+detect it without ground truth labels, and labels arrive late.
+Covariate shift is easiest because you only need to monitor inputs.}
+
+\centering
+\vspace{0.8cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.6cm}
+{\large A fraud detection model worked perfectly at launch.\\
+Six months later, loss rates have doubled.\\
+No code has changed. No data format errors.\\[0.3cm]
+\alert{Which type of drift is this? How would you detect it?}}
+
+\vspace{0.6cm}
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}\centering\small Covariate\\ Shift\end{column}
+  \begin{column}{0.30\textwidth}\centering\small Label\\ Shift\end{column}
+  \begin{column}{0.30\textwidth}\centering\small Concept\\ Drift\end{column}
+\end{columns}
+
+\end{frame}
+
+\mlsysfocus{The Degradation Equation}{%
+$A(t) = A_0 - \alpha \cdot \Delta(P_{\text{train}},\; P_{\text{live}}(t))$\\[0.3cm]
+\normalsize Drift detection (PSI, KL divergence) operationalizes this equation\\
+into monitoring infrastructure%
+}
+
+% =============================================================================
+\section{Storage \& Debt}
+% =============================================================================
+
+\begin{frame}{ML Storage Hierarchy}
+\note{[3 min] Each tier optimizes for a different access pattern. The 50$\times$
+speed gap between NVMe and S3 determines daily vs.\ weekly iteration cycles.
+KWS: 736 GB on S3 costs \$17/mo, on NVMe costs \$74--221/mo but loads in
+2.5 min vs.\ 2 hours. The throughput gap is the binding constraint on
+iteration velocity.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{ch04-storage-hierarchy.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Iron Law connection:}{Storage hierarchy directly sets $D_{\text{vol}}/BW$ --- the Data Term.}
+
+\end{frame}
+
+\begin{frame}{Storage Systems: Database vs.\ Warehouse vs.\ Lake}
+\note{[2 min] Three architectures for different access patterns. Databases:
+high IOPS for serving. Warehouses: high throughput for analytics. Lakes:
+flexible for raw data. Most ML orgs use all three, orchestrated through
+unified catalogs. If short: just show the table.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lp{2.5cm}p{2.5cm}p{2.5cm}@{}}
+  \toprule
+  & \textbf{Database (OLTP)} & \textbf{Warehouse (OLAP)} & \textbf{Data Lake} \\
+  \midrule
+  \textbf{Optimized for} & High IOPS, low latency & High throughput scans & Capacity, flexibility \\
+  \textbf{Data type}     & Structured              & Structured            & Any (schema-on-read) \\
+  \textbf{ML use}        & Feature serving         & Feature engineering   & Training, raw storage \\
+  \textbf{Access}        & Point lookups (ms)      & Columnar scans (s)    & Sequential reads \\
+  \textbf{Risk}          & Scaling limits           & Schema rigidity       & ``Data swamp'' \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{routingstroke}
+{\scriptsize \textbf{Mature ML organizations use all three:} Databases for real-time serving, warehouses for curated analytics, and data lakes for petabyte-scale raw data. The wrong system for a workload creates order-of-magnitude performance penalties.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Data Debt: The Hidden Iceberg}
+\note{[3 min] 65--95\% of ML failures trace to data, not models. Four categories
+of hidden debt: Freshness, Quality, Schema, Documentation. Unlike code debt
+(slower development), data debt causes lower accuracy even when code is perfect.
+Data debt compounds silently.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{ch04-data-debt-categories.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{Unlike code debt (slower development), data debt causes \emph{lower accuracy} even when code is perfect.}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Three common misconceptions with quantitative evidence.}
+
+\small
+\textbf{Fallacy:} \textit{More data always improves model performance.}\\
+{\footnotesize Beyond a threshold, test loss follows a power law: 10$\times$ more data often reduces error by $<$1 percentage point, while costs scale linearly. Smart selection outperforms naive accumulation.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{High training accuracy indicates production readiness.}\\
+{\footnotesize Training accuracy measures fit to historical data. Training-serving skew, distribution drift, and coverage gaps cause 99\% validation accuracy to fail in deployment.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Synthetic data can fully replace real-world collection.}\\
+{\footnotesize Synthetic data inherits generator biases. A KWS system trained on synthesized speech fails on real accents and background noise. Combine real data for coverage with synthetic for scale.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Three operational pitfalls.}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Treating data preprocessing as a one-time task.}\\
+Data distributions drift continuously. A pipeline validated at launch degrades silently. Production systems require continuous monitoring (PSI, KL divergence) and automated retraining triggers.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Ignoring training-serving skew until deployment.}\\
+Feature computation differences are the leading cause of ML deployment failures. Feature stores and consistency contracts should be architectural requirements from day one.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Neglecting data versioning until model debugging requires it.}\\
+Without versioned snapshots, teams cannot determine whether regression stems from labeling changes, schema errors, or genuine drift. Organizations that defer versioning report 2--4$\times$ longer debugging cycles.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Do NOT show next slide yet. Walk around the room.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Emphasize quantitative
+anchors: 60--80\% effort, $>$98\% feeding tax, 1,000$\times$ labeling cost,
+65--95\% data failures, 50$\times$ storage speed gap.}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{Data is source code}: Datasets must be versioned, tested, debugged. Deleting a row = deleting a line of code.
+  \item \textbf{Data cascades}: Upstream errors amplify through every stage. Four Pillars (Quality, Reliability, Scalability, Governance) organize prevention.
+  \item \textbf{Energy-movement invariant}: Moving a bit costs 100--1,000$\times$ more than computing. Deduplication is the highest-leverage optimization.
+  \item \textbf{Training-serving consistency}: Non-negotiable. Feature stores and shared code prevent the \#1 deployment failure.
+  \item \textbf{Drift detection}: Degradation Equation ($A(t) = A_0 - \alpha \cdot \Delta$) operationalized through PSI and KL monitoring.
+  \item \textbf{Storage hierarchy}: 50$\times$ NVMe vs.\ S3 speed gap determines daily vs.\ weekly iteration. Choose by $D_{\text{vol}}/BW$.
+  \item \textbf{Data debt compounds}: 65--95\% of ML failures trace to data. Allocate sustained engineering capacity.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Sambasivan+21}{Sambasivan et al. ``Everyone Wants to Do the Model Work, Not the Data Work.'' CHI 2021.}
+\mlsysref{Sculley+15}{Sculley et al. ``Hidden Technical Debt in ML Systems.'' NeurIPS 2015.}
+\mlsysref{Horowitz14}{M. Horowitz. ``Computing's Energy Problem.'' ISSCC 2014.}
+\mlsysref{Hestness+17}{Hestness et al. ``Deep Learning Scaling is Predictable, Empirically.'' 2017.}
+\mlsysref{Polyzotis+18}{Polyzotis et al. ``Data Lifecycle Challenges in Production ML.'' SIGMOD 2018.}
+\mlsysref{Northcutt+21}{Northcutt et al. ``Pervasive Label Errors in Test Sets.'' NeurIPS 2021.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Neural Network Computation}
+\note{[1 min] Forward hook. The dataset compiler has produced its output.
+A compiled binary does nothing until it runs on hardware. We turn next to
+the mathematical foundations of learning --- neurons, weights, gradients.}
+
+\centering
+\vspace{0.5cm}
+{\large The dataset compiler has produced its output:}\\[0.1cm]
+{\large a clean, versioned, optimized training set.}
+
+\vspace{0.5cm}
+{\large A compiled binary does nothing until it runs on hardware.}
+
+\vspace{0.5cm}
+
+\begin{mlsyscard}{crimson}
+\centering
+{\large\bfseries What happens when data meets computation?}\\[0.2cm]
+{\normalsize Neurons, weights, gradients, and the math of learning.}
+\end{mlsyscard}
+
+\vspace{0.3cm}
+{\small\textbf{Next:} Ch5 --- Neural Network Computation}
+
+\end{frame}
+
+\end{document}

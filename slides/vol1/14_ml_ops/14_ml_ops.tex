@@ -1,0 +1,880 @@
+% =============================================================================
+% Chapter 14: ML Operations — ML Systems Lecture Slides
+% =============================================================================
+% IMAGES NEEDED (SVGs converted to PDF):
+%   - cicd-pipeline-ml.pdf       - monitoring-dashboard-ml.pdf
+%   - drift-detection-flow.pdf   - canary-deployment.pdf
+%   - maturity-model.pdf         - degradation-equation.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume   = {Volume I},
+  chapter  = {Chapter 14},
+  logo = {../../assets/img/logo-mlsysbook.png},
+  instlogo = {../../assets/img/logo-harvard.png},
+  chaptertitle = {ML Operations},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{8}
+
+\title{ML Operations}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{ML Operations}{Keeping Models Correct in Production}{cover_ml_ops.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Read through objectives. Emphasize: this chapter is about what
+happens AFTER deployment. Ask: ``How many of you have deployed a model and
+checked on it a month later?''}
+
+\small
+\begin{enumerate}
+  \item Explain why \textbf{silent failures} distinguish ML from traditional software
+  \item Analyze \textbf{technical debt} patterns: boundary erosion, correction cascades, data dependencies
+  \item Design \textbf{feature stores} and \textbf{CI/CD pipelines} for training-serving consistency
+  \item Apply the \textbf{retraining staleness model} to optimize retraining intervals
+  \item Quantify \textbf{data drift} using \textbf{PSI} and \textbf{KL divergence}
+  \item Compare \textbf{canary}, \textbf{blue-green}, and \textbf{shadow} deployment strategies
+  \item Implement structured \textbf{incident response} for ML-specific failure modes
+  \item Evaluate organizational \textbf{MLOps maturity levels}
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{The Operational Mismatch}
+% =============================================================================
+
+\begin{frame}{The Operational Mismatch}
+\note{[3 min] Open with the ridesharing example. 94\% accuracy in dev,
+88\% by week 4, no alerts fired. The infrastructure was green the entire time.
+Ask: ``What metrics would have caught this?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    A ridesharing demand model: 94\% accuracy at deploy.
+
+    \vspace{0.15cm}
+    \begin{itemize}\setlength\itemsep{1pt}
+      \item \textbf{Week 1}: Excellent performance
+      \item \textbf{Week 4}: Accuracy drops to 88\%
+      \item \textbf{Week 8}: Driver dispatch is inefficient
+      \item \textbf{All infrastructure metrics}: \textcolor{datastroke}{\textbf{Green}}
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    A competitor launched a promotion that shifted user behavior.
+    The model needed retraining \textbf{6 weeks ago}.
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.2}
+    {\footnotesize
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      & \textbf{DevOps} & \textbf{MLOps} \\
+      \midrule
+      Monitors & Uptime & Accuracy \\
+      Failure & Crash & Drift \\
+      Signal  & Error log & Statistics \\
+      Fix     & Patch code & Retrain \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Why MLOps Exists}
+\note{[2 min] Formalize the definition. Emphasize the feedback loop:
+MLOps closes the gap between model behavior and data reality.
+Common error: students think MLOps = DevOps + a model registry.}
+
+\small
+\begin{mlsyscard}{crimson}
+\textbf{MLOps:} The engineering discipline that closes the feedback loop between
+model behavior and data reality by automating retraining, validation, and
+deployment in response to measurable production drift.
+\end{mlsyscard}
+
+\vspace{0.15cm}
+\textbf{Three Critical Interfaces:}
+
+\vspace{0.1cm}
+{\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Interface} & \textbf{Challenge} & \textbf{Solution} \\
+  \midrule
+  \textcolor{datastroke}{\textbf{Data-Model}}       & Feature consistency     & Feature stores \\
+  \textcolor{computestroke}{\textbf{Model-Infra}}   & Environment parity      & Registries + containers \\
+  \textcolor{routingstroke}{\textbf{Prod-Monitor}}   & Retraining cadence      & Drift detection \\
+  \bottomrule
+\end{tabular}
+}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: What Breaks First?}
+\note{[2 min] Prediction exercise. Students write for 60 seconds.
+Do NOT reveal the answer. This primes the technical debt section.
+Ask 2--3 students to share.}
+
+\centering
+\vspace{0.8cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.4cm}
+{\large You deploy a model with 94\% accuracy.\\
+Six months later, no code has changed.\\[0.2cm]
+\alert{What are the three most likely failure modes?}}
+
+\vspace{0.4cm}
+{\normalsize Write down 3 failure modes. \textcolor{midgray}{(60 seconds)}}
+
+\vspace{0.3cm}
+{\small\textcolor{lightgray}{Turn to a neighbor and compare.}}
+
+\end{frame}
+
+% =============================================================================
+\section{Technical Debt}
+% =============================================================================
+
+\begin{frame}{The 5\% Problem in Production}
+\note{[3 min] Sculley et al.\ 2015. ML code is 5\% of the system.
+The other 95\% is where technical debt accumulates.
+Key insight: debt is data-driven, not code-driven.
+Ask: ``Which of these 95\% components failed in the ridesharing example?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Six ML Debt Patterns:}
+
+    \vspace{0.15cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Pattern} & \textbf{Mechanism} \\
+      \midrule
+      Boundary erosion & CACHE principle \\
+      Correction cascades & Fix $\to$ break \\
+      Feedback loops & Self-reinforcing \\
+      Data debt & Quality drift \\
+      Config debt & Parameter sprawl \\
+      Pipeline debt & Fragile workflows \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysalert{CACHE:}{Change Anything Changes Everything.}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize
+    Manual: 4 hrs/week\\
+    Pipeline: 80 hrs (one-time)\\
+    Break-even: \textbf{20 weeks}\\
+    After 1 yr: \textbf{100\%} maintenance
+    }
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    {\footnotesize Automation is about \textbf{capacity}.}
+  \end{column}
+\end{columns}
+\mlsyscite{Sculley et al., NeurIPS 2015}
+
+\end{frame}
+
+\begin{frame}{Real-World Debt: Case Studies}
+\note{[3 min] Four examples showing different debt patterns.
+Zillow is the most dramatic: \$500M loss.
+If short: focus on Zillow and YouTube.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{@{}llp{4.0cm}l@{}}
+  \toprule
+  \textbf{Company} & \textbf{Debt Type} & \textbf{What Happened} & \textbf{Cost} \\
+  \midrule
+  \textbf{Zillow} & Correction cascade & Overvalued homes; errors fed training & \textcolor{errorstroke}{\$500M+} \\
+  \textbf{YouTube} & Feedback loop & Recs shaped clicks $\to$ training data & Content harm \\
+  \textbf{Tesla} & Undeclared consumer & OTA updates changed subsystems & Safety risk \\
+  \textbf{Facebook} & Config debt & Opaque settings drove ranking & Misalignment \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\small
+\mlsysalert{Lesson:}{Predictable consequences of probabilistic systems without operational infrastructure.}
+
+\end{frame}
+
+% =============================================================================
+\section{Dev Infrastructure}
+% =============================================================================
+
+\begin{frame}{Five Foundational Principles}
+\note{[2 min] Quick overview of the five principles that govern all MLOps decisions.
+Each principle maps to infrastructure. These are the evaluation framework for the rest of the chapter.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lp{4.2cm}l@{}}
+  \toprule
+  \textbf{Principle} & \textbf{Core Insight} & \textbf{Key Metric} \\
+  \midrule
+  \textbf{1. Reproducibility}     & Version all artifacts (code, data, config, env) & Artifact hash \\
+  \textbf{2. Separation}          & Independent layer evolution & Coupling score \\
+  \textbf{3. Consistency}         & Training $=$ Serving & Feature skew rate \\
+  \textbf{4. Observable Degrad.}  & Make silent failures visible & Time to detection \\
+  \textbf{5. Cost-Aware Auto.}    & Optimize total cost & Net retrain value \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.2cm}
+\mlsysconcept{Model Output =}{$f(\text{Code}_v, \text{Data}_v, \text{Config}_v, \text{Environment}_v)$}
+
+\vspace{0.1cm}
+{\footnotesize Missing \textbf{any} version makes the model \textbf{unreproducible}.}
+
+\end{frame}
+
+\begin{frame}{Feature Stores: Eliminating Training-Serving Skew}
+\note{[3 min] The feature store is the central infrastructure concept.
+Without it: scientist computes session\_length in Python for training,
+engineer reimplements in Java for serving. Subtle differences cause 5--15\%
+accuracy loss. Ask: ``How would you detect this skew without a feature store?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{The Problem:}\\
+    {\footnotesize Training computes \texttt{session\_length} with wall-clock time.\\
+    Serving uses processing time. 8\% accuracy drop.}
+
+    \vspace{0.15cm}
+    \textbf{The Solution:}\\
+    {\footnotesize Compute features \textbf{once}, serve to both pipelines.}
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{datastroke}
+    {\footnotesize
+    \textbf{Skew Cost} $=$ Error Rate $\times$ Query Vol $\times$ Impact\\[0.05cm]
+    1\% skew on 1M queries/day $\times$ \$0.10 each\\
+    $=$ \textbf{\$365,000/year} in silent losses
+    }
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Skew Type} & \textbf{Detection} \\
+      \midrule
+      Preprocessing & Stats comparison \\
+      Missing data  & Schema validation \\
+      Time features & Timestamp checks \\
+      Library drift & Env hash compare \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysinsight{Result:}{Feature stores eliminate 5--15\% accuracy loss.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{ML CI/CD Pipelines}
+\note{[3 min] Walk through the diagram. Key insight: ML pipelines are
+3--9x longer than traditional CI/CD because they must validate data and
+model quality, not just code correctness. The fail loop is critical:
+if evaluation fails, reject and go back to data validation.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{cicd-pipeline-ml.pdf}
+
+\vspace{0.1cm}
+\small
+\begin{columns}[T]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{datastroke}{\textbf{Data Validation}}\\
+    {\scriptsize 20--30\% of pipeline time}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{computestroke}{\textbf{Model Training}}\\
+    {\scriptsize 40--60\% of pipeline time}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{routingstroke}{\textbf{Canary Deploy}}\\
+    {\scriptsize Graduated rollout}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Drift \& Monitoring}
+% =============================================================================
+
+\mlsysfocus{The Degradation Equation}{%
+$\text{Acc}(t) \approx \text{Acc}_0 - \lambda \cdot D(P_t \| P_0)$%
+}
+
+\begin{frame}{The Rotting Asset Curve}
+\note{[3 min] Walk through the chart. Orange sawtooth: scheduled retraining
+every 90 days. Dips below SLA. Green: trigger-based, never violates SLA.
+The key equation at bottom. Ask: ``Which strategy would you use for
+a fraud detection model with 10M daily transactions?''}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{degradation-equation.pdf}
+
+\vspace{0.1cm}
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \textcolor{routingstroke}{\textbf{Scheduled}}: Fixed interval, may violate SLA
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \textcolor{datastroke}{\textbf{Trigger-based}}: Adaptive, higher avg accuracy
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Data Drift vs.\ Concept Drift}
+\note{[3 min] Two different diseases with different cures. Data drift:
+input distribution shifts, retrain on fresh data. Concept drift: the
+relationship P(Y|X) changes, need new labels. COVID is the canonical
+concept drift example. Ask: ``Is a new product launch data drift or concept drift?''}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{drift-detection-flow.pdf}
+
+\vspace{0.15cm}
+\mlsysalert{Key:}{Diagnose \emph{which} distribution changed before retraining. Retraining on shifted data entrenches the shift.}
+
+\end{frame}
+
+\begin{frame}{Quantifying Drift: PSI}
+\note{[3 min] PSI is the workhorse metric for drift detection.
+Walk through the formula and the threshold table.
+The PSI example shows that a 3-percentage-point shift in bins
+yields PSI = 0.029, well below the 0.1 warning threshold.
+This prevents false alarms while catching real shifts.}
+
+\small
+\textbf{Population Stability Index (PSI):}
+$$\text{PSI} = \sum_{i=1}^{n} (\text{actual}_i - \text{expected}_i) \times \ln\!\left(\frac{\text{actual}_i}{\text{expected}_i}\right)$$
+
+\vspace{-0.1cm}
+{\footnotesize
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Metric} & \textbf{Threshold} & \textbf{Use Case} \\
+  \midrule
+  \textbf{PSI}             & $> 0.2$ significant & Categorical / binned \\
+  \textbf{KS statistic}    & $> 0.1$ divergent   & Continuous features \\
+  \textbf{KL divergence}   & $> 0.1$ significant & Distribution comparison \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.1cm}
+\mlsysinsight{Key:}{Monitor \textbf{input} features --- input shift precedes output shift by the ground-truth feedback loop length.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Optimal Retraining Interval}
+\note{[3 min] Give students 90 seconds. Answer: $T^* = \sqrt{2 \times 500 / (10{,}000 \times 0.50 \times 0.92 \times 0.003)} \approx \sqrt{1000/13.8} \approx 8.5$ days.
+This means daily retraining would be wasteful, but monthly is too infrequent.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\small\bfseries Calculate $T^*$}
+
+    \vspace{0.1cm}
+    A fraud detection model:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item $C$ = \$500, \; $Q$ = 10,000/day
+      \item $V$ = \$0.50, \; $A_0$ = 0.92
+      \item $\lambda$ = 0.003/day
+    \end{itemize}
+
+    \vspace{0.05cm}
+    $$T^* \approx \sqrt{\frac{2C}{Q \cdot V \cdot A_0 \cdot \lambda}}$$
+
+    {\scriptsize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.40\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.05cm]
+    {\scriptsize
+    $T^* = \sqrt{\frac{1{,}000}{13.8}} = \sqrt{72.5}$\\[0.05cm]
+    $\approx$ \textbf{8.5 days}\\[0.05cm]
+    \textcolor{datastroke}{\textbf{Retrain weekly!}}\\
+    Daily: wasteful. Monthly: SLA violation.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The Uptime Iceberg}
+\note{[2 min] The monitoring dashboard shows the key insight: all three
+panels can be green on service health (99.97\% uptime) while model health
+is below SLA and data drift is approaching threshold. Traditional monitoring
+sees only the tip of the iceberg. If short: just show the image and make the point.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{monitoring-dashboard-ml.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{99.97\% uptime. Model accuracy at 87\%. \textbf{Perfectly available, perfectly wrong.}}
+
+\end{frame}
+
+% =============================================================================
+\section{Deployment Strategies}
+% =============================================================================
+
+\begin{frame}{Deployment Patterns: Risk vs.\ Cost}
+\note{[3 min] Walk through the three deployment strategies. Canary is cheapest
+but needs statistical confidence. Blue-green is instant but 2x cost. Shadow is
+safest but 10--20\% overhead. Ask: ``Which would you choose for a medical
+diagnosis model?'' (Answer: shadow, because the cost of a bad rollout is
+patient harm.)}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{canary-deployment.pdf}
+
+\vspace{0.1cm}
+\footnotesize
+\mlsysconcept{ML-specific:}{Canary needs \textbf{thousands of inferences} for statistical significance, not just uptime checks.}
+
+\end{frame}
+
+\begin{frame}{Rollback Strategies}
+\note{[2 min] Three tiers of rollback with different triggers and infrastructure
+requirements. Key insight: untested rollbacks fail at 3 AM during incidents.
+Monthly fire drills are essential. If short: just cover the table.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Tier} & \textbf{Time} & \textbf{Trigger} & \textbf{Implementation} \\
+  \midrule
+  \textbf{Immediate} & $<$ 1 min  & Serving errors, crashes & Hot standby, instant switch \\
+  \textbf{Rapid}     & $<$ 15 min & Canary metric degradation & Registry-based redeploy \\
+  \textbf{Delayed}   & $<$ 4 hrs  & Business metric decline & Full redeploy + state migrate \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.2cm}
+\begin{mlsyscard}{errorstroke}
+\textbf{The Fire Drill Rule}\\
+{\footnotesize Rollback procedures that have never been tested \textbf{will fail when needed}.
+Monthly fire drills expose configuration gaps, stale caches, and documentation holes
+\textbf{before} the 3:00 AM incident.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{A/B Testing for ML}
+\note{[2 min] Unlike canary (validates stability), A/B tests measure
+business outcomes with statistical confidence. Key challenges: delayed
+feedback, novelty effects, interference. The sample size equation tells
+you how much traffic you need. If short: skip the equation and focus
+on the decision matrix.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \textbf{Sample Size:}
+    $$n = \frac{2(z_{\alpha/2} + z_\beta)^2 \sigma^2}{\delta^2}$$
+
+    {\footnotesize
+    For 2\% lift detection, 5\% baseline:\\
+    $\approx$ \textbf{25,000 users per variant}
+    }
+
+    \vspace{0.1cm}
+    \textbf{ML-Specific Challenges:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\footnotesize Delayed feedback (days, not seconds)}
+      \item {\footnotesize Novelty effects inflate initial results}
+      \item {\footnotesize Interference in ranking systems}
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.46\textwidth}
+    {\scriptsize
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      \textbf{Primary} & \textbf{Guards} & \textbf{Decision} \\
+      \midrule
+      Improved & Pass & Ship \\
+      Improved & Fail & Investigate \\
+      Neutral  & Pass & Keep current \\
+      Degraded & Any  & Do not ship \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{routingstroke}
+    {\footnotesize
+    \textbf{Guardrail metrics} must not degrade even if primary metric improves.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Incident Response}
+% =============================================================================
+
+\begin{frame}{ML Incident Response}
+\note{[3 min] ML incidents are different: they are statistical, not deterministic.
+The debugging tree is the key tool. Walk through the four diagnostic steps.
+P1 = accuracy drop > 10\%, P2 = localized drift, P3 = performance degradation.
+Ask: ``Your model's accuracy dropped 5\%. Where do you start?''}
+
+\footnotesize
+\textbf{The ML Debugging Tree:}
+
+\vspace{0.05cm}
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item \textbf{Is it data?} Check input distributions (PSI, KS). Shifted $\to$ data drift.
+  \item \textbf{Is it skew?} Compare train vs.\ serve distributions. Diverged $\to$ feature store.
+  \item \textbf{Is it config?} Audit recent changes. Found $\to$ config debt.
+  \item \textbf{Is it feedback?} Analyze temporal patterns. Self-reinforcing $\to$ loop.
+\end{enumerate}
+
+\vspace{0.05cm}
+{\scriptsize
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Severity} & \textbf{Criteria} & \textbf{Response} & \textbf{Example} \\
+  \midrule
+  \textbf{P1} & Accuracy drop $>$ 10\% & 30 min & Stale feature data \\
+  \textbf{P2} & Localized drift, PSI $>$ 0.3 & 4 hrs & One feature shifted \\
+  \textbf{P3} & Latency/throughput degrad. & 24 hrs & Batch misconfigured \\
+  \bottomrule
+\end{tabular}
+}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Which Interface Failed?}
+\note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
+No single right answer. The point is that all three interfaces are
+connected. Cold-call 2--3 pairs. If short: do a show-of-hands poll.}
+
+\centering
+\vspace{0.6cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.5cm}
+{\large A recommendation model's accuracy dropped from 94\% to 81\%\\
+over six months. No code changed. Infrastructure metrics were green.\\[0.3cm]
+\alert{Which of the three MLOps interfaces failed?}}
+
+\vspace{0.5cm}
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}\centering\small\textcolor{datastroke}{\textbf{Data-Model}}\\Feature consistency\end{column}
+  \begin{column}{0.30\textwidth}\centering\small\textcolor{computestroke}{\textbf{Model-Infra}}\\Environment parity\end{column}
+  \begin{column}{0.30\textwidth}\centering\small\textcolor{routingstroke}{\textbf{Prod-Monitor}}\\Retraining cadence\end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Layered Monitoring Budget}
+\note{[2 min] Monitoring has a real cost. Walk through the budget:
+1 model, 3 variants, 15 metrics each = 1,800 data points/hr.
+Different SLAs for different layers. The key insight: monitoring
+the wrong layer gives false confidence.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Layer} & \textbf{SLA} & \textbf{Metric Type} & \textbf{Catches} \\
+  \midrule
+  \textbf{Data freshness}   & 15 min & Staleness, completeness & Stale features \\
+  \textbf{Schema}           & 1 hr   & Type/range/null checks  & Pipeline breaks \\
+  \textbf{Feature distrib.} & 4 hrs  & PSI, KS, KL divergence  & Data drift \\
+  \textbf{Model outputs}    & 1 hr   & Accuracy, confidence     & Model degradation \\
+  \textbf{Business metrics}  & 24 hrs & Revenue, engagement     & Downstream impact \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{computestroke}
+{\footnotesize
+\textbf{Budget}: 1 model $\times$ 3 variants $\times$ 15 metrics $\times$ 12 checks/hr\\
+$=$ \textbf{540 data points/hr} per metric layer\\
+Total: $\approx$\textbf{1,800 data points/hr} across all layers
+}
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Maturity Framework}
+% =============================================================================
+
+\begin{frame}{MLOps Maturity Levels}
+\note{[3 min] Walk through the staircase. Level 0: notebooks, manual deploy.
+Level 1: automated training, basic CI/CD. Level 2: full automation with
+feature stores, drift detection, canary deploys. Each transition takes
+3--6 months. The fraud detection example makes it concrete.}
+
+% --- Layout: FULL-WIDTH IMAGE ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{maturity-model.pdf}
+
+\vspace{0.1cm}
+\footnotesize
+\mlsysconcept{Key insight:}{Each transition takes 3--6 months. The gap is \textbf{integration}, not tools.}
+
+\end{frame}
+
+\begin{frame}{ML Test Score}
+\note{[2 min] The ML Test Score from Breck et al.\ 2020 provides a systematic
+rubric. Score 0--5: ad hoc, 5--10: developing, 10--15: mature, 15+: production-grade.
+Most organizations score below 5. Ask: ``Where would your team score?''}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}llp{5cm}@{}}
+  \toprule
+  \textbf{Category} & \textbf{Tests} & \textbf{Example Checks} \\
+  \midrule
+  \textbf{Data Tests}    & Feature expectations, schema validation  & Distributions verified; no training-serving skew \\
+  \textbf{Model Tests}   & Staleness, fairness, performance bounds  & Accuracy within bounds; no subgroup degradation \\
+  \textbf{Infra Tests}   & Reproducibility, pipeline reliability    & Training is deterministic; rollback works \\
+  \textbf{Monitor Tests} & Alerts, dashboards, incident response    & Drift alerts fire; on-call rotation documented \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\small
+\begin{columns}[T]
+  \begin{column}{0.22\textwidth}
+    \centering
+    \textcolor{errorstroke}{\textbf{0--5}}\\{\scriptsize Ad hoc}
+  \end{column}
+  \begin{column}{0.22\textwidth}
+    \centering
+    \textcolor{routingstroke}{\textbf{5--10}}\\{\scriptsize Developing}
+  \end{column}
+  \begin{column}{0.22\textwidth}
+    \centering
+    \textcolor{computestroke}{\textbf{10--15}}\\{\scriptsize Mature}
+  \end{column}
+  \begin{column}{0.22\textwidth}
+    \centering
+    \textcolor{datastroke}{\textbf{15+}}\\{\scriptsize Production-grade}
+  \end{column}
+\end{columns}
+\mlsyscite{Breck et al., ICSE 2020}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Three common misconceptions with quantitative evidence.}
+
+\small
+\textbf{Fallacy:} \textit{MLOps is just applying DevOps to ML models.}\\
+{\footnotesize ML pipelines take 15--45 min vs.\ 2--5 min for traditional software. They require data validation, model evaluation, and drift detection stages absent from standard CI/CD.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Automated retraining ensures optimal performance without oversight.}\\
+{\footnotesize Automated pipelines propagate corrupted training data. A news model retrained on weekend data showed lower engagement because user behavior differs sharply weekday vs.\ weekend.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Training-serving consistency is automatic once pipelines are established.}\\
+{\footnotesize Skew causes 5--15\% accuracy degradation even with established pipelines. An e-commerce model lost 12\% accuracy for 6 weeks from a \texttt{session\_length} computation mismatch.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Three operational pitfalls. If short: cover just the first two.}
+
+\small
+\textbf{Pitfall:} \textit{Treating deployment as a one-time event.}\\
+{\footnotesize A fraud model with PSI = 0.18 at deployment reached PSI = 0.31 within 3 months, dropping from 94\% to 87\% accuracy. Without automated retraining, MTTR averages 5--14 days; with automation, 4--24 hours.}
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Monitoring outputs without validating inputs.}\\
+{\footnotesize A recommendation system tracked CTR but ignored feature staleness. User embeddings were 18 hrs stale, causing 9\% degradation for 3 days before accuracy alerts triggered.}
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Investing in infrastructure while neglecting organizational alignment.}\\
+{\footnotesize A retail company with feature stores and registries still deployed quarterly because data scientists and engineers operated in isolation. Unified teams deploy weekly.}
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Do NOT show next slide yet. Walk around the room.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Quantitative anchors:
+5--15\% skew loss, \$365K/year skew cost, 8.5-day optimal retrain,
+3--6 month maturity transitions.}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{ML systems fail silently}: Degradation Equation $\text{Acc}(t) \approx \text{Acc}_0 - \lambda \cdot D(P_t \| P_0)$ quantifies decay.
+  \item \textbf{Training-serving skew}: Feature stores eliminate 5--15\% accuracy loss by computing features once.
+  \item \textbf{Retraining is an optimization}: $T^* \approx \sqrt{2C/(QVA_0\lambda)}$ --- from intuition to economics.
+  \item \textbf{Graduated rollout}: Canary, blue-green, shadow with tiered rollback ($<$1 min, $<$15 min, $<$4 hrs).
+  \item \textbf{Monitor inputs, not just outputs}: Input drift precedes output degradation.
+  \item \textbf{Five Principles}: Reproducibility, Separation, Consistency, Observable Degradation, Cost-Aware Automation.
+  \item \textbf{Maturity is integration, not tools}: Each level transition takes 3--6 months.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Sculley+15}{Sculley et al. ``Hidden Technical Debt in ML Systems.'' NeurIPS 2015.}
+\mlsysref{Breck+20}{Breck et al. ``The ML Test Score: A Rubric for Production Readiness.'' ICSE 2020.}
+\mlsysref{Amershi+19}{Amershi et al. ``Software Engineering for ML: A Case Study.'' ICSE 2019.}
+\mlsysref{Hermann+17}{Hermann \& Del Balso. ``Meet Michelangelo: Uber's ML Platform.'' 2017.}
+\mlsysref{Paleyes+22}{Paleyes et al. ``Challenges in Deploying ML.'' ACM Comp.\ Surveys, 2022.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Responsible Engineering}
+\note{[1 min] Forward hook. The system can be efficient, scalable, and reliable
+while still causing harm. The final constraint: aligning technical optimization
+with human values. Ask: ``Can a system be perfectly correct and still unfair?''}
+
+\centering
+\vspace{0.5cm}
+{\large We built a system that is \textbf{efficient}, \textbf{scalable}, and \textbf{reliable}.}
+
+\vspace{0.5cm}
+{\normalsize Can it still cause harm?}
+
+\vspace{0.4cm}
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{datastroke}{\Large\bfseries Bias}\\[0.1cm]
+    {\small Amplifying inequality}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{errorstroke}{\Large\bfseries Privacy}\\[0.1cm]
+    {\small Leaking data}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{routingstroke}{\Large\bfseries Trust}\\[0.1cm]
+    {\small Explainability gap}
+  \end{column}
+\end{columns}
+
+\vspace{0.4cm}
+{\normalsize\textbf{The final constraint: aligning optimization with human values.}}
+
+\end{frame}
+
+\end{document}

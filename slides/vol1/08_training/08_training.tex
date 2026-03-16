@@ -1,0 +1,974 @@
+% =============================================================================
+% Chapter 8: Model Training — ML Systems Lecture Slides
+% =============================================================================
+% This deck covers the training systems chapter: Iron Law of Training,
+% memory breakdown, pipeline architecture, optimizations (mixed precision,
+% checkpointing, FlashAttention, gradient accumulation), and scaling.
+%
+% IMAGES (SVGs converted to PDF):
+%   - ch08-iron-law-training.pdf      - ch08-training-pipeline.pdf
+%   - ch08-training-memory-breakdown.pdf
+%   - ch08-mixed-precision-flow.pdf   - ch08-gradient-checkpointing.pdf
+%   - ch08-optimization-walkthrough.pdf
+%   - ch08-data-parallelism.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume   = {Volume I},
+  chapter  = {Chapter 8},
+  logo = {../../assets/img/logo-mlsysbook.png},
+  instlogo = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Model Training},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{7}
+
+\title{Model Training}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Model Training}{The Physics of Learning at Scale}{cover_ai_training.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{[2 min] Read through objectives. Emphasize that this chapter bridges
+framework internals (Ch7) with the physical reality of training at scale.
+Ask: ``How many of you have waited hours for a model to train and wondered
+why it takes so long?''}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item Explain the \textbf{Iron Law of Training Performance} and identify which term each optimization targets
+  \item Calculate \textbf{FLOPs} and \textbf{memory footprints} (activations, optimizer states) for training
+  \item Compare \textbf{SGD}, \textbf{Adam}, and \textbf{AdamW} by convergence speed, memory, and cost
+  \item Apply \textbf{arithmetic intensity analysis} to classify ops as compute-bound or memory-bound
+  \item Apply \textbf{mixed-precision training}, \textbf{checkpointing}, and \textbf{gradient accumulation}
+  \item Construct efficient pipelines using \textbf{data prefetching} and \textbf{pipeline overlapping}
+  \item Analyze when single-machine training becomes infeasible and evaluate \textbf{data parallelism}
+\end{enumerate}
+
+\end{frame}
+
+% =============================================================================
+\section{Training Costs}
+% =============================================================================
+
+\begin{frame}{Why Training Costs Millions}
+\note{[3 min] Open with the cost asymmetry. GPT-2 inference: fraction of a cent.
+GPT-2 training: \$50K. GPT-4 training: \$100M estimated. This million-to-one
+gap governs who can participate in AI. Ask: ``Who can afford to train a
+frontier model?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    Running a model costs \textbf{pennies}.\\
+    Training a model costs \textbf{millions}.
+
+    \vspace{0.2cm}
+    \renewcommand{\arraystretch}{1.2}
+    {\footnotesize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{Model} & \textbf{Inference} & \textbf{Training} \\
+      \midrule
+      GPT-2  & $<$\$0.01 & \$50K (2019) \\
+      GPT-3  & \$0.02/call & \$4.6M (2020) \\
+      GPT-4  & \$0.03/call & $\approx$\$100M (2023) \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{crimson}
+    {\footnotesize \textbf{Million-to-one cost asymmetry:} Training requires billions of forward passes, each paired with a backward pass that costs $\approx$2$\times$ the forward pass.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.2cm}
+    {\footnotesize
+    \textbf{Three scaling challenges:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textcolor{computestroke}{\textbf{Computational intensity}}: Sustained petaFLOPS for days
+      \item \textcolor{datastroke}{\textbf{Memory pressure}}: Weights + gradients + optimizer + activations
+      \item \textcolor{errorstroke}{\textbf{Data dependencies}}: Sequential gradient updates
+    \end{itemize}
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The 3AM Gradient Explosion}
+\note{[2 min] Tell this as a story. A team trains a 7B model for 4 days.
+At 3AM, loss spikes to NaN. They lost 4 days and \$5000. The cause: FP16
+overflow from an outlier batch. The fix: checkpointing, gradient clipping,
+BF16. This motivates the rest of the chapter.}
+
+\scriptsize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Scenario:} Training a 7B LLM. Loss smooth for 4 days.\\
+    \textbf{3:00 AM:} Loss spikes to \textbf{NaN}. Crash. Lost 4 days (\$5K).
+
+    \vspace{0.05cm}
+    \textbf{Physics:} Outlier batch exceeded FP16 range ($>$65,504).\\
+    Gradients $\to$ Inf $\to$ all weights NaN.
+
+    \vspace{0.05cm}
+    \textbf{Systems Fix:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textbf{Checkpointing}: Save hourly (lose 1hr, not 4 days)
+      \item \textbf{Gradient clipping}: Cap gradient norms
+      \item \textbf{BF16}: FP32 range in 16 bits; overflows rare
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Format} & \textbf{Max Value} \\
+      \midrule
+      FP32 & $3.4 \times 10^{38}$ \\
+      FP16 & 65,504 \\
+      BF16 & $3.4 \times 10^{38}$ \\
+      \bottomrule
+    \end{tabular}
+
+    \vspace{0.1cm}
+    \mlsysalert{Key:}{BF16 trades precision for range---FP32 exponent in 16 bits.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Iron Law}
+% =============================================================================
+
+\mlsysfocus{The Iron Law of Training Performance}{%
+$T_{\text{train}} = \dfrac{O}{R_{\text{peak}} \times \eta}$%
+}
+
+\begin{frame}{Iron Law: Three Levers}
+\note{[3 min] Walk through each term. O = total FLOPs. R\_peak = hardware
+throughput (set by procurement and precision). eta = utilization (the
+engineering target). GPT-3 achieved eta = 0.45. Current target: >0.55.
+Ask: ``Which lever is cheapest to improve?''}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch08-iron-law-training.pdf}
+
+\end{frame}
+
+\begin{frame}{Iron Law: Optimization Mapping}
+\note{[2 min] Every technique in this chapter maps to one of the three terms.
+Students should be able to classify any optimization by which term it targets.
+This table is the organizing framework for the rest of the deck.}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}llp{5.5cm}@{}}
+  \toprule
+  \textbf{Technique} & \textbf{Term} & \textbf{Mechanism} \\
+  \midrule
+  \textbf{Mixed Precision} & $R_{\text{peak}}$ $\uparrow$ & Tensor Cores at 16$\times$ higher FLOP/s \\
+  \textbf{Data Prefetching} & $\eta$ $\uparrow$ & Reduces idle time waiting for data \\
+  \textbf{Grad Checkpointing} & $O$ $\uparrow$ & Adds recomputation, enables larger models \\
+  \textbf{Grad Accumulation} & $\eta$ $\uparrow$ & Maintains batch parallelism efficiency \\
+  \textbf{Operator Fusion} & $\eta$ $\uparrow$ & Reduces memory bandwidth bottlenecks \\
+  \textbf{FlashAttention} & $O$ $\downarrow$, $\eta$ $\uparrow$ & IO-aware tiling reduces FLOPs, improves access \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+{\footnotesize\mlsysinsight{Diagnostic discipline:}{Identify which term dominates \emph{before} choosing an optimization.}}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: What Dominates Training Memory?}
+\note{[2 min] Prediction exercise. Give students 60 seconds. Most will guess
+model weights. The surprising answer: optimizer state and activations
+dominate. This primes the memory breakdown slide.}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.6cm}
+{\large A 7B-parameter model in FP16 weighs 14 GB.\\[0.2cm]
+How much total GPU memory does \textbf{training} require?}
+
+\vspace{0.5cm}
+{\normalsize Write your estimate. \textcolor{midgray}{(60 seconds)}}
+
+\vspace{0.5cm}
+{\small\textcolor{lightgray}{Hint: Think about what else must live in GPU memory besides weights.}}
+
+\end{frame}
+
+% =============================================================================
+\section{Memory \& Math}
+% =============================================================================
+
+\begin{frame}{Training vs.\ Inference: The 4$\times$ Multiplier}
+\note{[3 min] Reveal after prediction. The 4x multiplier is the most
+important number: weights (14 GB) + gradients (14 GB) + Adam m (14 GB) +
+Adam v (14 GB) = 56 GB minimum. Plus activations. GPT-2 XL in FP32:
+89 GB total. V100 has 32 GB. This is why optimization matters.
+Common error: students think weights dominate memory.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{ch08-training-memory-breakdown.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{A 7B model that \emph{runs} inference on one GPU requires \emph{multiple} GPUs for training.}
+
+\end{frame}
+
+\begin{frame}{Optimizer Memory: SGD vs.\ Adam}
+\note{[2 min] SGD stores only gradients (1 extra copy). Adam stores m and v
+(3 extra copies). Adam converges in ~1/3 the iterations but costs 3x memory.
+This is a binding constraint for large models.
+Ask: ``When would you choose SGD over Adam?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \renewcommand{\arraystretch}{1.2}
+    {\footnotesize
+    \begin{tabular}{@{}lrrr@{}}
+      \toprule
+      & \textbf{SGD} & \textbf{SGD+M} & \textbf{Adam} \\
+      \midrule
+      Extra state/param & 0 & 1 & 2 \\
+      Memory multiplier & 2$\times$ & 3$\times$ & 4$\times$ \\
+      7B model (FP16+FP32) & 28 GB & 42 GB & 56 GB \\
+      Convergence speed & Slow & Medium & Fast \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.2cm}
+    \begin{mlsyscard}{routingstroke}
+    {\footnotesize \textbf{Adam} converges in $\sim$1/3 the iterations of SGD but requires \textbf{3$\times$} the memory for per-parameter state.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.1cm}
+    {\footnotesize
+    \textbf{Adam update rule:}\\[0.1cm]
+    $m_t = \beta_1 m_{t-1} + (1-\beta_1) g_t$\\
+    $v_t = \beta_2 v_{t-1} + (1-\beta_2) g_t^2$\\
+    $\theta_t = \theta_{t-1} - \alpha \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}$\\[0.2cm]
+    Two state vectors ($m$, $v$) per parameter.\\[0.1cm]
+    \textbf{AdamW} adds weight decay decoupled from the gradient, improving generalization.
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Activation Memory: The Hidden Cost}
+\note{[2 min] Activations scale with batch size and depth. GPT-2: 65 GB
+of activations in FP32 (seq\_len=1024, batch=32, 48 layers). This often
+exceeds optimizer state. Activation checkpointing trades compute for memory
+(covered later). If short: just show the formula and GPT-2 number.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    Activations must be stored from the forward pass for use in the backward pass.
+
+    \vspace{0.15cm}
+    {\footnotesize
+    $$\text{Act. Memory} \propto B \times S \times H \times L$$
+
+    \begin{tabular}{@{}ll@{}}
+      $B$ & batch size \\
+      $S$ & sequence length \\
+      $H$ & hidden dimension \\
+      $L$ & number of layers \\
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \mlsysalert{GPT-2 XL:}{48 layers, batch=32: activations $\approx$ \textbf{65 GB}.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    {\footnotesize
+    \textbf{GPT-2 FP32 breakdown:}
+
+    \vspace{0.05cm}
+    \renewcommand{\arraystretch}{1.05}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Component} & \textbf{Size} \\
+      \midrule
+      Weights & 6 GB \\
+      Gradients & 6 GB \\
+      Adam states & 12 GB \\
+      Activations & 65 GB \\
+      \midrule
+      \textbf{Total} & \textbf{89 GB} \\
+      \bottomrule
+    \end{tabular}
+
+    \vspace{0.1cm}
+    Activations = \textbf{73\%} of total memory.
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Arithmetic Intensity: Compute-Bound vs.\ Memory-Bound}
+\note{[2 min] Arithmetic intensity = FLOPs per byte loaded. If intensity
+is below the ridge point, the operation is memory-bound. Most training ops
+(ReLU, LayerNorm, Softmax) are memory-bound. Only large GEMMs are
+compute-bound. Increasing batch size moves operations rightward.
+This is the roofline model from Ch1 applied to training.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    $$\text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes loaded}}$$
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}lrl@{}}
+      \toprule
+      \textbf{Operation} & \textbf{AI} & \textbf{Regime} \\
+      \midrule
+      ReLU & $<$1 & \textcolor{errorstroke}{Memory-bound} \\
+      LayerNorm & $\sim$5 & \textcolor{errorstroke}{Memory-bound} \\
+      Softmax & $\sim$8 & \textcolor{errorstroke}{Memory-bound} \\
+      GEMM (batch=1) & $\sim$20 & \textcolor{routingstroke}{Transitional} \\
+      GEMM (batch=256) & $>$200 & \textcolor{datastroke}{Compute-bound} \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.2cm}
+    \begin{mlsyscard}{computestroke}
+    {\footnotesize \textbf{Most training ops are memory-bound} except large-batch GEMMs.\\[0.1cm]
+    Increasing batch size moves operations toward compute-bound.}
+    \end{mlsyscard}
+
+    \vspace{0.15cm}
+    {\footnotesize V100 ridge point: 139 FLOPs/byte\\
+    \textcolor{midgray}{Below ridge $\to$ memory-bound}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Pipeline}
+% =============================================================================
+
+\begin{frame}{The Staged Training Pipeline}
+\note{[3 min] Training is a 4-stage pipeline. Data loading (CPU), PCIe
+transfer, forward/backward (GPU), gradient sync (NVLink). Any mismatch
+creates ``accelerator bubbles'' --- idle GPU time. The goal: overlap stages.
+Walk through the naive vs pipelined diagram.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch08-training-pipeline.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Engineering goal:}{Overlap all stages so the GPU never waits for data.}
+
+\end{frame}
+
+\begin{frame}{Four Pipeline Stages}
+\note{[2 min] Detail each stage. Data loading: CPU workers decode from NVMe.
+Transfer: PCIe DMA to GPU memory. Compute: forward + backward on GPU.
+Sync: gradient averaging via NVLink. The slowest stage determines throughput.
+Common error: optimizing GPU compute when data loading is the bottleneck.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Stage} & \textbf{Hardware} & \textbf{Bottleneck} & \textbf{Mitigation} \\
+  \midrule
+  \textbf{1. Data Loading} & CPU / NVMe & Decode + augment & Multi-worker prefetch \\
+  \textbf{2. Host$\to$Device} & PCIe bus & Transfer bandwidth & Pin memory, async DMA \\
+  \textbf{3. Fwd/Bwd Pass} & GPU compute & Matrix ops & Mixed precision, fusion \\
+  \textbf{4. Grad Sync} & NVLink & Communication & Gradient overlap \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.2cm}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize \textbf{Accelerator Bubbles}\\
+    GPU idle while waiting for data = 0\% utilization. The ``Machine'' axis waits for ``Data.''}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{datastroke}
+    {\footnotesize \textbf{Prefetching}\\
+    Load batch $N+1$ while GPU processes batch $N$. Requires async data loaders.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Memory Budget}
+\note{[3 min] Give students 90 seconds. Answer: Weights=2 GB + Grads=2 GB +
+Adam=4 GB + Activations (B*S*H*L*4 bytes). At batch 16, activations are
+roughly 6 GB. Total ~14 GB. Fits on V100 (32 GB). At batch 64, activations
+quadruple to ~24 GB. Total ~32 GB. Barely fits.
+Ask: ``What happens if we increase batch size to 128?''}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Calculate Training Memory}
+
+    \vspace{0.2cm}
+    A model has \textbf{1B parameters} trained with Adam in FP16+FP32:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Weights: 1B $\times$ 2 bytes = ?
+      \item Gradients: 1B $\times$ 2 bytes = ?
+      \item Adam states: 1B $\times$ 4 bytes = ?
+      \item Activations at batch 16 $\approx$ 6 GB
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Calculate} total memory. Does it fit on a V100 (32 GB)?
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    Weights: 2 GB\\
+    Gradients: 2 GB\\
+    Adam (m+v): 4 GB\\
+    Activations: $\sim$6 GB\\[0.1cm]
+    Total $\approx$ \textbf{14 GB}\\[0.1cm]
+    \textcolor{datastroke}{\textbf{Fits on V100!}}\\[0.1cm]
+    At batch 64: activations $\approx$24 GB\\
+    Total $\approx$ 32 GB --- barely fits.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Optimizations}
+% =============================================================================
+
+\begin{frame}{Mixed-Precision Training}
+\note{[3 min] FP16 computation with FP32 accumulation. Walk through the flow:
+FP32 master weights -> cast to FP16 -> forward -> loss scale -> backward ->
+unscale -> FP32 accumulate. Loss scaling prevents gradient underflow in FP16.
+BF16 eliminates the need for loss scaling. Result: ~2x throughput, ~2x memory.}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch08-mixed-precision-flow.pdf}
+
+\end{frame}
+
+\begin{frame}{Mixed Precision: The Numbers}
+\note{[2 min] Quantitative impact. FP16 on V100 Tensor Cores: 125 TFLOPS
+vs 15.7 TFLOPS FP32 = nearly 8x throughput. Memory halved. BF16 simplifies
+the pipeline by matching FP32's dynamic range.
+Common error: enabling mixed precision without loss scaling.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \renewcommand{\arraystretch}{1.2}
+    {\footnotesize
+    \begin{tabular}{@{}lrrr@{}}
+      \toprule
+      \textbf{Metric} & \textbf{FP32} & \textbf{FP16} & \textbf{BF16} \\
+      \midrule
+      V100 TFLOPS & 15.7 & 125 & --- \\
+      Bytes/param & 4 & 2 & 2 \\
+      Dynamic range & $10^{38}$ & 65K & $10^{38}$ \\
+      Loss scaling & No & Yes & No \\
+      Accuracy impact & --- & $<$1\% & $<$1\% \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysconcept{Iron Law target:}{$R_{\text{peak}}$ --- Tensor Cores operate at up to 16$\times$ higher throughput.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.1cm}
+    \begin{mlsyscard}{computestroke}
+    {\footnotesize \textbf{Impact:}\\[0.05cm]
+    $\sim$2$\times$ throughput\\
+    $\sim$2$\times$ memory savings\\
+    $<$1\% accuracy loss\\[0.1cm]
+    BF16 = ``best of both worlds'':\\
+    FP32 range + FP16 speed}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\mlsyscite{Micikevicius et al., ``Mixed Precision Training,'' ICLR 2018}
+
+\end{frame}
+
+\begin{frame}{Gradient Checkpointing}
+\note{[3 min] Standard backprop stores all L layers' activations. Checkpointing
+stores only sqrt(L) and recomputes the rest. Trade: +33\% compute for up to
+10x memory reduction. GPT-2: 48 layers -> 7 checkpoints. Walk through the
+side-by-side comparison. If short: focus on the trade-off numbers.}
+
+% --- Layout: FULL-WIDTH comparison diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch08-gradient-checkpointing.pdf}
+
+\end{frame}
+
+\begin{frame}{FlashAttention: IO-Aware Computation}
+\note{[2 min] Standard attention materializes the full NxN matrix in HBM.
+FlashAttention tiles the computation, keeping partial results in SRAM.
+Never writes the NxN matrix to HBM. Result: 2-4x speedup, 4x longer
+sequences. This is the principle of IO-aware algorithm design.
+Iron Law: reduces O and improves eta.}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Standard Attention:}\\
+    Materializes $n \times n$ matrix in HBM\\
+    Memory: $O(n^2)$ --- 1024 tokens $\to$ 4 MB/head
+
+    \vspace{0.1cm}
+    \textbf{FlashAttention:}\\
+    Tiles computation in SRAM (20 MB)\\
+    Never writes full $n \times n$ to HBM
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Impact:} 2--4$\times$ speedup, 4$\times$ longer sequences.\\
+    Converts attention from \textcolor{errorstroke}{memory-bound} to \textcolor{datastroke}{compute-bound}.
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      & \textbf{Standard} & \textbf{Flash} \\
+      \midrule
+      HBM reads & $O(n^2)$ & $O(n^2/M)$ \\
+      Memory & $O(n^2)$ & $O(n)$ \\
+      Speedup & 1$\times$ & 2--4$\times$ \\
+      Max seq & 1K--2K & 4K--16K \\
+      \bottomrule
+    \end{tabular}
+
+    \vspace{0.1cm}
+    \mlsysconcept{Iron Law:}{$O$ $\downarrow$ and $\eta$ $\uparrow$ (IO-aware tiling).}
+  \end{column}
+\end{columns}
+\mlsyscite{Dao et al., ``FlashAttention,'' NeurIPS 2022}
+
+\end{frame}
+
+\begin{frame}{Gradient Accumulation}
+\note{[2 min] When a large batch doesn't fit in memory, split it into
+micro-batches. Accumulate gradients across micro-batches before updating.
+Physical batch = small (fits in memory). Effective batch = large (good
+convergence). Trades utilization for memory: 5-10\% overhead from multiple
+forward/backward passes per update. If short: just cover the concept.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Problem:} Batch size 256 gives best convergence\\
+    but requires too much activation memory.
+
+    \vspace{0.15cm}
+    \textbf{Solution:} Split into 8 micro-batches of 32:
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \begin{enumerate}\setlength\itemsep{0pt}
+      \item Forward/backward on micro-batch (size 32)
+      \item \emph{Accumulate} gradients (do not update)
+      \item Repeat for all 8 micro-batches
+      \item One optimizer step with averaged gradients
+    \end{enumerate}
+    }
+
+    \vspace{0.1cm}
+    \mlsysconcept{Iron Law target:}{$\eta$ --- maintains effective batch efficiency within memory limits.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.1cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Parameter} & \textbf{Value} \\
+      \midrule
+      Effective batch & 256 \\
+      Physical batch & 32 \\
+      Accumulation steps & 8 \\
+      Memory reduction & $\sim$4$\times$ \\
+      Overhead & 5--10\% \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{routingstroke}
+    {\footnotesize Same convergence as large batch, but \textbf{fits in memory.}}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{GPT-2 Optimization Walkthrough}
+\note{[3 min] Walk through the waterfall: 89 GB baseline -> 51 GB (mixed
+precision) -> 32 GB (checkpointing) -> 28 GB (gradient accumulation).
+V100 has 32 GB. Each step targets a different Iron Law term. The key
+lesson: no single technique is sufficient; they compose.
+Ask: ``Which step had the biggest impact?''}
+
+% --- Layout: FULL-WIDTH waterfall diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch08-optimization-walkthrough.pdf}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Which Term Would You Optimize First?}
+\note{[3 min] Turn-and-talk. A training job takes 10 days. Profiling shows:
+GPU utilization 35\%, FP32 precision, no checkpointing.
+No single right answer, but the diagnostic order matters:
+1. Mixed precision (R\_peak) --- easiest to enable
+2. Profiling shows data loading at 40\% idle (eta) --- add prefetching
+3. Memory pressure --- add checkpointing (O tradeoff)
+Cold-call 2-3 pairs.}
+
+\centering
+\vspace{0.6cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.5cm}
+{\large Your training job takes \textbf{10 days}.\\
+Profiling reveals: GPU utilization = \textbf{35\%},\\
+FP32 precision, no checkpointing.\\[0.3cm]
+\alert{In what order would you apply optimizations?}}
+
+\vspace{0.5cm}
+\begin{columns}[c]
+  \begin{column}{0.22\textwidth}\centering\small Mixed\\Precision\end{column}
+  \begin{column}{0.22\textwidth}\centering\small Data\\Prefetch\end{column}
+  \begin{column}{0.22\textwidth}\centering\small Gradient\\Checkpoint\end{column}
+  \begin{column}{0.22\textwidth}\centering\small Grad\\Accumulation\end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Scaling}
+% =============================================================================
+
+\begin{frame}{Data Parallelism: Replicate Model, Split Data}
+\note{[3 min] Walk through the diagram: mini-batch splits across GPUs.
+Each GPU has a full model copy, processes its shard independently, then
+AllReduce averages gradients. Communication cost: ~2x model size per step.
+NVLink: 4 GPUs gives ~3.6x speedup. PCIe: only ~2.5x.
+Ask: ``Why doesn't 4 GPUs give exactly 4x speedup?''}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{ch08-data-parallelism.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Trade-off:}{Communication overhead grows with model size. Interconnect bandwidth is the binding constraint.}
+
+\end{frame}
+
+\begin{frame}{The Communication Tax}
+\note{[2 min] Show the scaling curves. Ideal = linear. Compute-bound
+workloads (ResNet): ~95\% efficient. Balanced (LLM + NVLink): ~85\%.
+Bandwidth-bound (slow network): ~60\%. The gap is the communication tax.
+Key insight: always exhaust single-machine optimizations before scaling.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\footnotesize
+    Effective speedup with $N$ GPUs:
+    $$S(N) = \frac{N}{1 + (N-1) \cdot r}$$
+    where $r$ = fraction of time spent communicating.
+    }
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.15}
+    {\footnotesize
+    \begin{tabular}{@{}llr@{}}
+      \toprule
+      \textbf{Workload} & \textbf{$r$} & \textbf{4-GPU} \\
+      \midrule
+      Compute-bound (ResNet) & 0.05 & 3.5$\times$ \\
+      Balanced (LLM+NVLink) & 0.15 & 2.8$\times$ \\
+      BW-bound (slow net) & 0.40 & 1.7$\times$ \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize \textbf{Scaling pitfall:}\\
+    Small models on 8 GPUs spend 30--50\% synchronizing gradients.\\[0.1cm]
+    A well-optimized single A100 can \textbf{outperform} a poorly-configured 8-GPU cluster.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \mlsysconcept{Rule:}{Exhaust single-machine optimizations before distributing.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{When to Scale: The Physical Ceiling}
+\note{[2 min] Three signals that single-machine training is exhausted:
+1. Model too large (70B = 140 GB FP16 weights alone).
+2. Training too slow (years on one GPU).
+3. Dataset too large (petabyte scale).
+Multi-GPU adds: aggregate memory, throughput, and I/O bandwidth.
+But also adds: communication overhead, debugging complexity, failure handling.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Three signals to scale out:}
+
+    \vspace{0.15cm}
+    {\footnotesize
+    \textcolor{errorstroke}{\textbf{1. Memory exhaustion}}\\
+    70B model = 140 GB weights (FP16)\\
+    $>$ any single GPU (80 GB max)
+
+    \vspace{0.1cm}
+    \textcolor{routingstroke}{\textbf{2. Unacceptable duration}}\\
+    GPT-2 on 1 GPU: $\sim$months\\
+    On 8 GPUs: $\sim$weeks
+
+    \vspace{0.1cm}
+    \textcolor{computestroke}{\textbf{3. Dataset scale}}\\
+    Petabyte datasets require\\
+    distributed storage bandwidth
+    }
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \vspace{0.2cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Strategy} & \textbf{Splits} \\
+      \midrule
+      Data parallel & Data (replicates model) \\
+      Model parallel & Layers across GPUs \\
+      Pipeline parallel & Stages across GPUs \\
+      Tensor parallel & Ops within a layer \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{crimson}
+    {\footnotesize \textbf{Conservation of Complexity:}\\
+    Eliminating single-machine bottlenecks introduces new communication bottlenecks.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Three common misconceptions with quantitative evidence.}
+
+\small
+\textbf{Fallacy:} \textit{Larger models always yield better performance.}\\
+{\footnotesize A 20B model trained on insufficient data ($<$500M examples) \emph{underperforms} a 7B model by 3--5\% due to overfitting. Model capacity must match dataset size.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Hyperparameters transfer from small-scale to large-scale training.}\\
+{\footnotesize Learning rate at batch 32 does not work at batch 4096. Linear scaling rule: multiply LR by the batch ratio. Ignoring this causes divergence 2--5 days into a multi-week run.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Mixed precision is a simple toggle.}\\
+{\footnotesize FP16 without loss scaling causes gradient underflow. A model training for 72 hours can diverge at step 40K due to accumulated numerical errors. Always validate on representative workloads.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Three operational pitfalls. If short: cover just the first two.}
+
+\small
+\textbf{Pitfall:} \textit{Assuming distributed training automatically accelerates development.}\\
+{\footnotesize Small models on 8 GPUs spend 30--50\% of time synchronizing. A well-optimized single A100 (\textbf{48 hours}) outperforms a poorly-configured 8-GPU cluster (\textbf{36 hours} but 8$\times$ cost). Always exhaust single-machine optimizations first.}
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Optimizing memory and computation independently.}\\
+{\footnotesize Utilization drops from 70\% at batch 256 to 25--35\% at batch 16. Gradient accumulation trades 5--10\% efficiency for 4$\times$ memory reduction. Tuning independently extends training by 15--30\%.}
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Neglecting data pipeline optimization.}\\
+{\footnotesize Data loading creates 20--40\% idle time. Prefetching reduces wall-clock time by 25--35\%. Profile \emph{before} assuming the GPU is the bottleneck.}
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Walk around the room. Do NOT show next slide yet.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Emphasize the Iron Law
+as the diagnostic framework. The 4x memory multiplier. Profile before
+optimize. Compose optimizations systematically.}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{Iron Law}: $T_{\text{train}} = O / (R_{\text{peak}} \times \eta)$. Every optimization targets one of these three terms.
+  \item \textbf{4$\times$ memory multiplier}: Adam adds 3 extra copies per parameter. Activations scale with batch $\times$ depth.
+  \item \textbf{Mixed precision}: 2$\times$ throughput, 2$\times$ memory savings, $<$1\% accuracy impact. BF16 eliminates loss scaling.
+  \item \textbf{FlashAttention}: IO-aware tiling converts attention from memory-bound to compute-bound. 2--4$\times$ speedup.
+  \item \textbf{Gradient checkpointing}: 10$\times$ less activation memory for 33\% more compute.
+  \item \textbf{Profile before optimize}: Diagnose the bottleneck (compute, memory, or data) before choosing a technique.
+  \item \textbf{Scaling trade-off}: Multi-GPU adds communication overhead. Exhaust single-machine optimizations first.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Micikevicius+18}{Micikevicius et al. ``Mixed Precision Training.'' ICLR 2018.}
+\mlsysref{Dao+22}{Dao et al. ``FlashAttention: Fast and Memory-Efficient Exact Attention.'' NeurIPS 2022.}
+\mlsysref{Chen+16}{Chen et al. ``Training Deep Nets with Sublinear Memory Cost.'' arXiv 2016.}
+\mlsysref{Goyal+17}{Goyal et al. ``Accurate, Large Minibatch SGD.'' arXiv 2017.}
+\mlsysref{Kingma+15}{Kingma \& Ba. ``Adam: A Method for Stochastic Optimization.'' ICLR 2015.}
+\mlsysref{Brown+20}{Brown et al. ``Language Models are Few-Shot Learners.'' NeurIPS 2020.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Data Selection}
+\note{[1 min] Forward hook. Training taught us how to execute the optimization
+loop efficiently. But we assumed the training data was given. The next
+question: which data should we train on? Data selection strategies determine
+what the model learns. Not all data is equally valuable.}
+
+\footnotesize
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{datastroke}
+    {\large\bfseries Data Curation}\\[0.1cm]
+    {\small Which examples matter most?}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\large\bfseries Active Learning}\\[0.1cm]
+    {\small Let the model choose its data.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    {\large\bfseries Curriculum Design}\\[0.1cm]
+    {\small Order matters for convergence.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.3cm}
+\centering
+{\normalsize Training taught us \emph{how} to learn efficiently.}\\[0.1cm]
+{\small\textbf{Data Selection asks: what should the model learn \emph{from}?}}
+
+\end{frame}
+
+\end{document}
