@@ -26,7 +26,7 @@ LATEX := xelatex
 LATEX_FLAGS := -interaction=nonstopmode -halt-on-error
 
 # SVG converter
-SVG2PDF := rsvg-convert -f pdf -d 300 -p 300
+SVG2PDF := inkscape --export-type=pdf
 
 # =============================================================================
 # TARGETS
@@ -57,7 +57,7 @@ svgs:
 	@find $(VOL1_SRC) -name "*.svg" | while read svg; do \
 		pdf="$${svg%.svg}.pdf"; \
 		if [ ! -f "$$pdf" ] || [ "$$svg" -nt "$$pdf" ]; then \
-			$(SVG2PDF) "$$svg" -o "$$pdf" && echo "  ✓ $$pdf" || echo "  ✗ $$svg"; \
+			$(SVG2PDF) --export-filename="$$pdf" "$$svg" 2>/dev/null && echo "  ✓ $$pdf" || echo "  ✗ $$svg"; \
 		fi; \
 	done
 	@echo "Done."
