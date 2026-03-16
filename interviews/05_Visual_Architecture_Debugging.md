@@ -1,5 +1,18 @@
 # Round 5: Visual Architecture Debugging 🖼️
 
+<div align="center">
+  <a href="README.md">🏠 Hub Home</a> |
+  <a href="00_The_Architects_Rubric.md">📋 The Rubric</a> |
+  <a href="01_Single_Node_Physics.md">🧱 Round 1</a> |
+  <a href="02_Distributed_Infrastructure.md">🚀 Round 2</a> |
+  <a href="03_Production_Serving.md">⚡ Round 3</a> |
+  <a href="04_Operations_and_Economics.md">💼 Round 4</a> |
+  <a href="05_Visual_Architecture_Debugging.md">🖼️ Round 5</a>
+</div>
+
+---
+
+
 The ultimate test of an AI Systems Engineer is not just reciting formulas, but spotting the bottlenecks in a proposed architecture diagram *before* it gets built. 
 
 In this round, you are presented with systems designs that look plausible on paper but violate the fundamental physics of AI computation. Can you spot the hidden walls?
