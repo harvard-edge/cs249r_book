@@ -166,6 +166,10 @@ def _(COLORS, H100_TDP_W, apply_plotly_theme, go, math, mo, np):
         },
         label="Loan model: 92% accuracy for both groups. Group A base rate 30%, Group B 10%. FPR equal?",
     )
+    return (partA_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partA_pred):
     partA_base_a = mo.ui.slider(start=5, stop=50, value=30, step=5,
                                  label="Group A base rate (%)")
     partA_base_b = mo.ui.slider(start=5, stop=50, value=10, step=5,
@@ -183,6 +187,10 @@ def _(COLORS, H100_TDP_W, apply_plotly_theme, go, math, mo, np):
         },
         label="Apply equalized odds to reduce FPR gap from 15% to 5%. Accuracy loss?",
     )
+    return (partB_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_pred):
     partB_target_gap = mo.ui.slider(start=0, stop=20, value=5, step=1,
                                      label="Target FPR gap (pp)")
     partB_method = mo.ui.dropdown(
@@ -200,6 +208,10 @@ def _(COLORS, H100_TDP_W, apply_plotly_theme, go, math, mo, np):
         },
         label="Loan model has 50 features. How much does SHAP add to inference latency?",
     )
+    return (partC_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_pred):
     partC_features = mo.ui.slider(start=10, stop=200, value=50, step=10,
                                    label="Number of features")
     partC_method = mo.ui.dropdown(
@@ -217,6 +229,10 @@ def _(COLORS, H100_TDP_W, apply_plotly_theme, go, math, mo, np):
         },
         label="Weekly retraining + SHAP for 10% of predictions. Carbon vs baseline?",
     )
+    return (partD_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_pred):
     partD_retrain_freq = mo.ui.dropdown(
         options={"Weekly": 52, "Monthly": 12, "Quarterly": 4, "Once": 1},
         value="Weekly", label="Retraining frequency")

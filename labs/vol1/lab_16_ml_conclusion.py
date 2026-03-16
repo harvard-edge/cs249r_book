@@ -32,10 +32,10 @@ async def _():
     H100_RAM_GB      = mlsysim.Hardware.Cloud.H100.memory.capacity.m_as("GB")
     H100_TDP_W       = mlsysim.Hardware.Cloud.H100.tdp.m_as("W")
 
-    LLAMA2_70B_PARAMS = mlsysim.Models.Llama2_70B.parameters.m_as("count")
-    LLAMA2_70B_LAYERS = mlsysim.Models.Llama2_70B.layers
-    LLAMA2_70B_HIDDEN = mlsysim.Models.Llama2_70B.hidden_dim
-    LLAMA2_70B_HEADS  = mlsysim.Models.Llama2_70B.heads
+    LLAMA2_70B_PARAMS = mlsysim.Models.Language.Llama2_70B.parameters.m_as("count")
+    LLAMA2_70B_LAYERS = mlsysim.Models.Language.Llama2_70B.layers
+    LLAMA2_70B_HIDDEN = mlsysim.Models.Language.Llama2_70B.hidden_dim
+    LLAMA2_70B_HEADS  = mlsysim.Models.Language.Llama2_70B.heads
 
     ledger = DesignLedger()
     return (
@@ -175,6 +175,10 @@ def _(
         },
         label="Llama-2 70B, batch=1, H100, FP16. What fraction of token time is memory?",
     )
+    return (partA_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partA_pred):
     partA_model = mo.ui.dropdown(options={"7B": 7, "13B": 13, "70B": 70}, value="70B",
                                   label="Model size")
     partA_prec = mo.ui.dropdown(
@@ -192,6 +196,10 @@ def _(
         },
         label="You quantized MobileNetV2 to INT8, deployed on mobile. After 6 months without monitoring?",
     )
+    return (partB_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_pred):
     partB_quant = mo.ui.dropdown(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8", "INT4": "int4"},
         value="INT8", label="Quantization level")
@@ -213,6 +221,10 @@ def _(
         value="Memory Wall",
         label="Which invariant do you think you most consistently underestimated?",
     )
+    return (partC_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_pred):
 
     # ── Part D widgets ────────────────────────────────────────────────────────
     partD_pred = mo.ui.radio(
@@ -225,6 +237,10 @@ def _(
         label="4 components: preprocess 35%, inference 40%, postprocess 15%, logging 10%. "
               "Optimize ONE by 5x. Which gives largest end-to-end speedup?",
     )
+    return (partD_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_pred):
     partD_preprocess = mo.ui.slider(start=5, stop=50, value=35, step=5,
                                      label="Preprocessing (%)")
     partD_inference = mo.ui.slider(start=5, stop=60, value=40, step=5,
@@ -250,6 +266,10 @@ def _(
         },
         label="Quantize Llama-2 70B FP16 to INT4 (35 GB < 80 GB HBM). New binding constraint?",
     )
+    return (partE_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, partE_pred):
     partE_int4 = mo.ui.checkbox(label="INT4 Quantization", value=False)
     partE_pruning = mo.ui.checkbox(label="Structured Pruning (50%)", value=False)
     partE_distill = mo.ui.checkbox(label="Knowledge Distillation", value=False)
