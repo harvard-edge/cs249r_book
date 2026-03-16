@@ -1,27 +1,28 @@
 # Round 1: Single-Node Systems & Silicon Physics 🧱
 
 <div align="center">
-  <a href="README.md">🏠 Home</a> ·
-  <a href="00_The_Architects_Rubric.md">📋 Rubric</a> ·
+  <a href="../README.md">🏠 Home</a> ·
+  <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
   <a href="01_Single_Node_Physics.md">🧱 Round 1</a> ·
   <a href="02_Distributed_Infrastructure.md">🚀 Round 2</a> ·
   <a href="03_Production_Serving.md">⚡ Round 3</a> ·
   <a href="04_Operations_and_Economics.md">💼 Round 4</a> ·
-  <a href="05_Visual_Architecture_Debugging.md">🖼️ Round 5</a>
+  <a href="05_Visual_Architecture_Debugging.md">🖼️ Round 5</a> ·
+  <a href="06_Advanced_Systems.md">⚙️ Round 6</a>
 </div>
 
 ---
 
 The domain of the ML Systems Engineer. This round tests your understanding of what happens *inside* a single server chassis: memory hierarchies, compute bounds, and arithmetic intensity.
 
-> **[➕ Add a Flashcard](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/01_Single_Node_Physics.md)** (Edit in Browser) — see [README](README.md#question-format) for the template.
+> **[➕ Add a Flashcard](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/cloud/01_Single_Node_Physics.md)** (Edit in Browser) — see [README](../README.md#question-format) for the template.
 
 ---
 
 ### 📐 Roofline & Compute Analysis
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Profiling Crisis</b> · <code>roofline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Profiling Crisis</b> · <code>roofline</code></summary>
 
 **Interviewer:** "You've deployed a custom recommendation model. The profiling dashboard shows you are achieving 120 TFLOPS out of a possible 300 TFLOPS on your GPU. Your tech lead suggests buying a faster GPU to fix the latency. Why is your tech lead wrong?"
 
@@ -55,7 +56,7 @@ The domain of the ML Systems Engineer. This round tests your understanding of wh
 ### 🔢 Numerical Precision & Quantization
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Underflow Crisis</b> · <code>precision</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Underflow Crisis</b> · <code>precision</code></summary>
 
 **Interviewer:** "We switched our pre-training job from FP32 to FP16 to save memory, but the loss is returning NaNs within the first 100 steps. What numerical property is failing?"
 
@@ -87,7 +88,7 @@ The domain of the ML Systems Engineer. This round tests your understanding of wh
 ### 🧠 Memory Hierarchy & KV-Cache
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Sequence Length Trap</b> · <code>kv-cache</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Sequence Length Trap</b> · <code>kv-cache</code> <code>memory</code></summary>
 
 **Interviewer:** "You need to increase your LLM's context window from 4k to 128k tokens. The model weights fit perfectly in your 80GB VRAM. What hidden memory cost will cause your node to OOM (Out of Memory) during generation?"
 

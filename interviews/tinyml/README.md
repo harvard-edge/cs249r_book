@@ -1,0 +1,54 @@
+# 🔬 TinyML Track — Microcontroller & Ultra-Low-Power AI
+
+<div align="center">
+  <a href="../README.md">🏠 Playbook Home</a> ·
+  <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
+  <a href="../cloud/README.md">☁️ Cloud</a> ·
+  <a href="../edge/README.md">🤖 Edge</a> ·
+  <a href="../mobile/README.md">📱 Mobile</a> ·
+  <b>🔬 TinyML</b>
+</div>
+
+---
+
+The TinyML track covers ML systems running on microcontrollers — where the entire model, runtime, and inference engine must fit in kilobytes of SRAM, execute in microseconds, and run on milliwatts of power.
+
+### The Constraint Regime
+
+| Dimension | TinyML Reality |
+|---|---|
+| **Compute** | MFLOPS (Cortex-M4/M7, RISC-V, ESP32) — often no FPU |
+| **Memory** | 256 KB–2 MB SRAM, 1–16 MB Flash |
+| **Interconnect** | SPI, I2C, UART — kilobytes/second |
+| **Power budget** | 1–100 mW (often battery or energy harvesting) |
+| **Primary bottleneck** | SRAM capacity — the model must fit entirely on-chip |
+| **Failure mode** | Model doesn't fit, misses hard real-time deadline, exceeds power budget |
+
+### What Makes TinyML Different from Everything Else
+
+In the cloud, you optimize for throughput. On mobile, you optimize for battery. In TinyML, you optimize for **existence** — can the model even fit? There is no operating system, no virtual memory, no dynamic allocation. The entire inference pipeline — weights, activations, scratch buffers, and application code — must coexist in a flat memory space measured in kilobytes. Every byte is a design decision.
+
+### Topics That Need Questions
+
+These are the areas where TinyML-specific interview questions would be most valuable. Each maps to real interview scenarios at companies like Arduino, Edge Impulse, Qualcomm (for always-on sensing), or embedded AI teams at larger companies.
+
+| Topic | What TinyML interviews test | Example scenario |
+|---|---|---|
+| **Memory layout** | SRAM partitioning, activation reuse, operator scheduling for peak RAM | "Your model needs 300 KB peak RAM but you only have 256 KB SRAM. How do you fit it without changing the model?" |
+| **Quantization** | INT8, INT4, binary/ternary, fixed-point arithmetic, post-training vs QAT | "Your keyword spotting model loses 8% accuracy going from INT8 to INT4. Is that acceptable? How do you recover it?" |
+| **Integer-only inference** | No floating point — all math in fixed-point, requantization between layers | "Explain how a quantized Conv2D executes on a Cortex-M4 with no FPU." |
+| **Model architecture** | MobileNet, MCUNet, depth-wise separable convolutions, NAS for MCUs | "Why does MobileNetV2 use inverted residuals, and why does that matter on a microcontroller?" |
+| **Power & energy** | Active vs sleep power, duty cycling, energy harvesting budgets | "Your sensor wakes up every 10 seconds, runs inference, and sleeps. What's the average power draw?" |
+| **Compiler & runtime** | TFLite Micro, TVM, CMSIS-NN, ahead-of-time compilation, no dynamic allocation | "Why can't TFLite Micro use malloc? What does it use instead?" |
+| **Sensor pipelines** | Audio (keyword spotting), accelerometer (gesture), image (person detection) | "Your microphone samples at 16 kHz. How do you extract Mel spectrograms in real-time on a Cortex-M4?" |
+
+### The Rounds
+
+| Round | Focus | Questions |
+|---|---|---|
+| [**1. TinyML Systems — Inference at the Edge of Physics**](01_TinyML_Systems.md) | Memory layout, quantization, integer inference, power, CMSIS-NN, sensor pipelines | 9 |
+| [**2. TinyML Advanced**](02_TinyML_Advanced.md) | Compute analysis, latency budgets, optimization, deployment, monitoring, security | 18 |
+
+### Contributing
+
+We need more TinyML questions — especially from engineers at Edge Impulse, Arduino, and embedded AI teams. See the [question format](../README.md#question-format) and submit a PR.

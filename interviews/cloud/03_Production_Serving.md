@@ -1,20 +1,21 @@
 # Round 3: Production ML Systems Design ⚡
 
 <div align="center">
-  <a href="README.md">🏠 Home</a> ·
-  <a href="00_The_Architects_Rubric.md">📋 Rubric</a> ·
+  <a href="../README.md">🏠 Home</a> ·
+  <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
   <a href="01_Single_Node_Physics.md">🧱 Round 1</a> ·
   <a href="02_Distributed_Infrastructure.md">🚀 Round 2</a> ·
   <a href="03_Production_Serving.md">⚡ Round 3</a> ·
   <a href="04_Operations_and_Economics.md">💼 Round 4</a> ·
-  <a href="05_Visual_Architecture_Debugging.md">🖼️ Round 5</a>
+  <a href="05_Visual_Architecture_Debugging.md">🖼️ Round 5</a> ·
+  <a href="06_Advanced_Systems.md">⚙️ Round 6</a>
 </div>
 
 ---
 
 The domain of the MLOps and Deployment Engineer. This round tests your ability to survive unpredictable user traffic: latency constraints, continuous batching, and KV-cache management.
 
-> **[➕ Add a Flashcard](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/03_Production_Serving.md)** (Edit in Browser) — see [README](README.md#question-format) for the template.
+> **[➕ Add a Flashcard](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/cloud/03_Production_Serving.md)** (Edit in Browser) — see [README](../README.md#question-format) for the template.
 
 ---
 
@@ -33,7 +34,7 @@ The domain of the MLOps and Deployment Engineer. This round tests your ability t
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The LLM Metrics</b> · <code>latency</code> <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The LLM Metrics</b> · <code>latency</code> <code>serving</code></summary>
 
 **Interviewer:** "Our users are complaining the LLM feels 'laggy', but our monitoring shows 'Average Latency' is well under our 2-second SLO. What specific generation metrics are we failing to monitor?"
 
@@ -85,7 +86,7 @@ The domain of the MLOps and Deployment Engineer. This round tests your ability t
 ### 🔄 Batching & Scheduling
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Pre-computation Trade-off</b> · <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Pre-computation Trade-off</b> · <code>serving</code></summary>
 
 **Interviewer:** "We are deploying a photo classification model. Running it in real-time on user upload costs us $10,000 a month in GPU compute. How do we reduce costs without losing model accuracy?"
 

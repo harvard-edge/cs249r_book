@@ -3,18 +3,18 @@
 <div align="center">
   <a href="README.md">🏠 Home</a> ·
   <a href="00_The_Architects_Rubric.md">📋 Rubric</a> ·
-  <a href="01_Single_Node_Physics.md">🧱 Round 1</a> ·
-  <a href="02_Distributed_Infrastructure.md">🚀 Round 2</a> ·
-  <a href="03_Production_Serving.md">⚡ Round 3</a> ·
-  <a href="04_Operations_and_Economics.md">💼 Round 4</a> ·
-  <a href="05_Visual_Architecture_Debugging.md">🖼️ Round 5</a>
+  <a href="cloud/01_Single_Node_Physics.md">🧱 Round 1</a> ·
+  <a href="cloud/02_Distributed_Infrastructure.md">🚀 Round 2</a> ·
+  <a href="cloud/03_Production_Serving.md">⚡ Round 3</a> ·
+  <a href="cloud/04_Operations_and_Economics.md">💼 Round 4</a> ·
+  <a href="cloud/05_Visual_Architecture_Debugging.md">🖼️ Round 5</a>
 </div>
 
 ---
 
 How do Principal Engineers grade your system design interviews? They don't look for a single "correct" architecture — they evaluate you across multiple axes of system maturity.
 
-Use this rubric to self-evaluate your proposed designs. For each axis, check where your answer lands: mid-level signals show competence, staff-level signals show mastery.
+Use this rubric to self-evaluate your proposed designs. For each axis, check where your answer lands. The two columns map to the [Mastery Levels](README.md#mastery-levels): **Mid-Level (L4)** tests whether you can *apply* known concepts to diagnose a system, while **Staff-Level (L6+)** tests whether you can *derive* solutions from first principles under novel constraints.
 
 > **[➕ Propose a new Rubric Axis](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/00_The_Architects_Rubric.md)** (Edit in Browser)
 

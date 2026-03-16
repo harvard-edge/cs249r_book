@@ -1,22 +1,23 @@
 # Round 5: Visual Architecture Debugging 🖼️
 
 <div align="center">
-  <a href="README.md">🏠 Home</a> ·
-  <a href="00_The_Architects_Rubric.md">📋 Rubric</a> ·
+  <a href="../README.md">🏠 Home</a> ·
+  <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
   <a href="01_Single_Node_Physics.md">🧱 Round 1</a> ·
   <a href="02_Distributed_Infrastructure.md">🚀 Round 2</a> ·
   <a href="03_Production_Serving.md">⚡ Round 3</a> ·
   <a href="04_Operations_and_Economics.md">💼 Round 4</a> ·
-  <a href="05_Visual_Architecture_Debugging.md">🖼️ Round 5</a>
+  <a href="05_Visual_Architecture_Debugging.md">🖼️ Round 5</a> ·
+  <a href="06_Advanced_Systems.md">⚙️ Round 6</a>
 </div>
 
 ---
 
 The ultimate test of an AI Systems Engineer is not reciting formulas, but spotting the bottlenecks in a proposed architecture diagram *before* it gets built.
 
-In this round, you are presented with systems designs that look plausible on paper but violate the fundamental physics of AI computation. **Can you spot the hidden walls?**
+In this round, you are presented with systems designs that look plausible on paper but violate the fundamental physics of AI computation. Each challenge follows the same structure: **The Scenario** sets the context, a **diagram** shows the proposed architecture, and **The Question** asks you to find the flaw. Try to answer before clicking "Reveal the Bottleneck."
 
-> **[➕ Add a Visual Challenge](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/05_Visual_Architecture_Debugging.md)** (Edit in Browser) — see [README](README.md#question-format) for the template.
+> **[➕ Add a Visual Challenge](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/cloud/05_Visual_Architecture_Debugging.md)** (Edit in Browser) — see [README](../README.md#question-format) for the template.
 
 ---
 
@@ -43,10 +44,15 @@ Training Loop}
     class CPU error;
 ```
 
+**The Question:** This pipeline looks like it has plenty of bandwidth at every stage. But the GPUs are sitting at 0% utilization most of the time. One component in this diagram is the bottleneck — which one, and why?
+
 <details>
 <summary><b>🚨 Reveal the Bottleneck</b></summary>
 
 ### The Transformation Wall (CPU Starvation)
+
+**Common Mistake:** "The 100 Gbps network link to S3 is the bottleneck" or "PCIe is too slow." Both links are fast enough — the chokepoint is compute, not bandwidth.
+
 The bottleneck is the **CPU Host**. While the 100 Gbps network link and PCIe Gen5 bus are extremely fast, decoding and augmenting JPEGs on 32 CPU cores is painfully slow compared to the consumption rate of 8x H100s.
 
 The GPUs will finish their matrix multiplication in 5ms, and then sit completely idle (0% utilization) while waiting for the CPU to finish processing the next batch.
@@ -81,10 +87,15 @@ flowchart LR
     class CoreSwitch error;
 ```
 
+**The Question:** The CTO claims this cluster will train the 70B model at 512× the speed of a single GPU. What fundamental networking constraint makes this architecture dead on arrival?
+
 <details>
 <summary><b>🚨 Reveal the Bottleneck</b></summary>
 
 ### The Communication Wall (Amdahl's Law)
+
+**Common Mistake:** "512 GPUs should give ~512× speedup with Data Parallelism" or "10 Gbps is plenty for gradient sync." Both underestimate the volume of data that must cross the network every training step.
+
 This cluster will experience **near-zero scaling efficiency**. To train a 70B model using Data Parallelism, all 512 GPUs must synchronize their gradients via an AllReduce operation at the end of *every single training step*.
 
 This requires moving hundreds of gigabytes of data across the network simultaneously. The 10 Gbps Ethernet uplinks to the Core Switch will instantly choke, turning a matrix-multiplication workload into a pure network-wait workload.
@@ -119,10 +130,15 @@ Memory-BW Bound]
     class Pool error;
 ```
 
+**The Question:** Users report that their token stream randomly freezes mid-conversation, even though the cluster isn't at full capacity. The diagram shows two phases with fundamentally different resource profiles sharing the same hardware. What is causing the interference, and how do you isolate it?
+
 <details>
 <summary><b>🚨 Reveal the Bottleneck</b></summary>
 
 ### The Prefill-Decode Interference
+
+**Common Mistake:** "Add more GPUs to the pool" or "Rate-limit long prompts." More hardware doesn't fix resource contention, and rate-limiting punishes users instead of fixing the architecture.
+
 The single GPU pool is the problem. **Prefill** (processing the user's prompt) is compute-bound and monopolizes the ALUs. **Decode** (generating tokens one at a time) is memory-bandwidth bound and needs the HBM bus.
 
 When a user sends a long prompt, the prefill phase seizes the GPU's compute units, causing all concurrent decode requests to stall. Users mid-conversation see their token stream freeze every time someone else sends a long prompt.
@@ -158,10 +174,15 @@ Layers 85-96]
     class Batch error;
 ```
 
+**The Question:** The profiler shows GPUs 0–6 are idle most of the time while GPU 7 does all the work. The team is paying for 8 GPUs but getting the throughput of 1. What is the utilization of this pipeline, and how do you fix it without changing the model or the hardware?
+
 <details>
 <summary><b>🚨 Reveal the Bottleneck</b></summary>
 
 ### The Pipeline Bubble
+
+**Common Mistake:** "Switch to Data Parallelism." DP won't work if the model doesn't fit on a single GPU — that's why they used Pipeline Parallelism in the first place.
+
 With a single batch flowing through 8 stages, **only 1 GPU is active at any given time**. The other 7 sit completely idle, waiting for activations from the previous stage. This means your utilization is $1/P = 1/8 = 12.5\%$. You paid for 8 GPUs but are using 1.
 
 The pipeline bubble fraction is $(P-1)/M$ where $P$ is the number of stages and $M$ is the number of microbatches. With $M=1$, the bubble is $(8-1)/1 = 87.5\%$ wasted compute.
@@ -199,10 +220,15 @@ Feature Cache)]
     class Notebook error;
 ```
 
+**The Question:** The model achieves 95% accuracy offline but drops to 70% in production. The model weights are identical. The serving infrastructure is healthy. Where in this diagram is the silent killer hiding?
+
 <details>
 <summary><b>🚨 Reveal the Bottleneck</b></summary>
 
 ### Training-Serving Skew
+
+**Common Mistake:** "The test set isn't representative of production data." Distribution shift is possible, but when the weights are identical and the accuracy gap is this large, the problem is almost always in the feature pipeline, not the data.
+
 The diagram hides a silent killer: the **Jupyter Notebook** computes features using different Python code than the Spark batch job that writes to Redis. The training pipeline reads CSVs with pandas transformations; the serving pipeline reads pre-computed features from Redis written by Spark.
 
 The model achieves 95% accuracy offline but drops to 70% in production — not because the model is bad, but because it sees different feature distributions at serving time than it saw during training. This is Training-Serving Skew, and it's one of the most common production ML failures.
@@ -244,10 +270,15 @@ Actual: 512 tokens]
     class Req1,Req3 waste;
 ```
 
+**The Question:** The system has 40 GB of free VRAM but can only serve 3 concurrent requests before hitting OOM. Request 1 is using only 47 tokens. Look at the allocation pattern — what percentage of memory is being wasted, and what OS concept from the 1960s solves this?
+
 <details>
 <summary><b>🚨 Reveal the Bottleneck</b></summary>
 
 ### KV-Cache Memory Fragmentation
+
+**Common Mistake:** "There must be a memory leak in the serving framework." It's not a leak — the allocation is working exactly as designed. The design itself is the problem.
+
 The system reserves 8192 tokens worth of VRAM per request regardless of actual usage. Request 1 uses only 47 tokens but holds memory for 8192 — **wasting 99.4% of its allocation**. After just 3 requests, the system reports OOM despite having enough physical memory for dozens of short conversations.
 
 This is the same problem that plagued early operating systems before virtual memory: contiguous allocation with massive internal fragmentation.
@@ -290,10 +321,15 @@ flowchart TB
     class O1,O2,O3,O4 error;
 ```
 
+**The Question:** The diagram shows 60 GB of weights fitting comfortably in 80 GB of VRAM. But the system OOMs on the very first training step. The boxes marked "???" are the clue. Calculate the actual memory required per GPU, and explain why every node holds a redundant copy of the problem.
+
 <details>
 <summary><b>🚨 Reveal the Bottleneck</b></summary>
 
 ### The Optimizer State Explosion
+
+**Common Mistake:** "60 GB fits in 80 GB, so the batch size must be too large." Batch size matters, but even with batch size 1, this system OOMs — the hidden cost is the optimizer, not the data.
+
 The diagram shows 60 GB of weights fitting in 80 GB — looks fine, right? But it hides the **Optimizer State**. Adam stores two additional tensors per parameter (first and second moments), each in FP32. The full memory per GPU is:
 
 - Weights (FP16): 60 GB

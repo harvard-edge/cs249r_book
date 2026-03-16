@@ -1,20 +1,21 @@
 # Round 2: Distributed AI Infrastructure 🚀
 
 <div align="center">
-  <a href="README.md">🏠 Home</a> ·
-  <a href="00_The_Architects_Rubric.md">📋 Rubric</a> ·
+  <a href="../README.md">🏠 Home</a> ·
+  <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
   <a href="01_Single_Node_Physics.md">🧱 Round 1</a> ·
   <a href="02_Distributed_Infrastructure.md">🚀 Round 2</a> ·
   <a href="03_Production_Serving.md">⚡ Round 3</a> ·
   <a href="04_Operations_and_Economics.md">💼 Round 4</a> ·
-  <a href="05_Visual_Architecture_Debugging.md">🖼️ Round 5</a>
+  <a href="05_Visual_Architecture_Debugging.md">🖼️ Round 5</a> ·
+  <a href="06_Advanced_Systems.md">⚙️ Round 6</a>
 </div>
 
 ---
 
 The domain of the AI Infrastructure Engineer. This round tests your understanding of what happens when a model exceeds the capacity of a single node: 3D parallelism, network topologies, and fault tolerance.
 
-> **[➕ Add a Flashcard](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/02_Distributed_Infrastructure.md)** (Edit in Browser) — see [README](README.md#question-format) for the template.
+> **[➕ Add a Flashcard](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/cloud/02_Distributed_Infrastructure.md)** (Edit in Browser) — see [README](../README.md#question-format) for the template.
 
 ---
 
@@ -37,7 +38,7 @@ The domain of the AI Infrastructure Engineer. This round tests your understandin
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Pipeline Bubble</b> · <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Pipeline Bubble</b> · <code>parallelism</code></summary>
 
 **Interviewer:** "We implemented Pipeline Parallelism across 8 GPUs. However, our profiler shows the GPUs are only active 50% of the time, sitting idle while waiting for the previous GPU to finish its layer. How do we increase utilization without changing the hardware?"
 
@@ -87,7 +88,7 @@ The domain of the AI Infrastructure Engineer. This round tests your understandin
 ### 🌐 Network Topology & Collectives
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Cross-Rack Stall</b> · <code>network</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Cross-Rack Stall</b> · <code>network</code> <code>parallelism</code></summary>
 
 **Interviewer:** "We tried to scale our 70B model training by spreading Tensor Parallelism (TP) across two server racks connected by 100 Gbps Ethernet. Training speed immediately dropped to zero. What did we misunderstand about network topology?"
 
@@ -133,7 +134,7 @@ The domain of the AI Infrastructure Engineer. This round tests your understandin
 ### 🛡️ Fault Tolerance & Reliability
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Straggler Problem</b> · <code>fault-tolerance</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Straggler Problem</b> · <code>fault-tolerance</code></summary>
 
 **Interviewer:** "99 of our 100 nodes finish their backward pass in 500ms. Node 42 takes 800ms. What is the total step time for the cluster?"
 

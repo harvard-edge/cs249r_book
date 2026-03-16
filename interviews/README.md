@@ -17,7 +17,7 @@ Content may be incomplete or change without notice. The published curriculum liv
 # The ML Systems Interview Playbook
 
 <p align="center">
-  <b>40+ systems design questions for AI infrastructure roles at frontier labs.</b><br>
+  <b>130+ systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
   <i>You cannot prompt your way out of a silicon bottleneck.</i>
 </p>
 
@@ -117,13 +117,14 @@ Pick your level and start drilling:
 
 Each track targets a different deployment regime. Pick the one that matches the roles you're interviewing for — or study multiple tracks to build breadth.
 
-| Track | Focus | Questions | Status |
+| Track | Focus | Questions | Rounds |
 |---|---|---|---|
-| [**☁️ Cloud**](cloud/README.md) | Data center training & serving at scale | 43 | 5 rounds |
-| [**🤖 Edge**](edge/README.md) | Autonomous vehicles, robotics, industrial AI | 9 | 1 round |
-| [**📱 Mobile**](mobile/README.md) | On-device AI for smartphones | 9 | 1 round |
-| [**🔬 TinyML**](tinyml/README.md) | Microcontroller & ultra-low-power AI | 9 | 1 round |
-| [**📋 Rubric**](00_The_Architects_Rubric.md) | Self-evaluation across 6 engineering axes | — | Shared across all tracks |
+| [**☁️ Cloud**](cloud/README.md) | Data center training & serving at scale | 57 | 6 rounds + visual debugging |
+| [**🤖 Edge**](edge/README.md) | Autonomous vehicles, robotics, industrial AI | 27 | 2 rounds |
+| [**📱 Mobile**](mobile/README.md) | On-device AI for smartphones | 27 | 2 rounds |
+| [**🔬 TinyML**](tinyml/README.md) | Microcontroller & ultra-low-power AI | 27 | 2 rounds |
+| [**📋 Rubric**](00_The_Architects_Rubric.md) | Self-evaluation across 6 engineering axes | — | Shared |
+| [**🗺️ Topic Map**](TOPIC_MAP.md) | Master plan — competency areas, gaps, and targets | — | Planning doc |
 
 ---
 
@@ -165,7 +166,7 @@ The levels correspond to real expectations at major tech companies. The titles d
 
 The mastery levels tell you *how deeply* a question tests your reasoning. The deployment track tells you *which physics regime* it lives in. The same fundamental principle — **constraints drive architecture** — applies everywhere, but the constraints themselves are radically different depending on where the silicon sits.
 
-Every question in this playbook is tagged with a deployment track. The current question bank focuses on **Cloud**; the other tracks are on the roadmap.
+Every question in this playbook is tagged with a deployment track. All four tracks now have substantial question banks — see the [Topic Map](TOPIC_MAP.md) for the full coverage matrix and expansion plan.
 
 | Track | Where it runs | Primary constraint | Compute scale | Memory | Power budget |
 |---|---|---|---|---|---|

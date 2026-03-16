@@ -1,20 +1,21 @@
 # Round 4: ML Operations & Economics 💼
 
 <div align="center">
-  <a href="README.md">🏠 Home</a> ·
-  <a href="00_The_Architects_Rubric.md">📋 Rubric</a> ·
+  <a href="../README.md">🏠 Home</a> ·
+  <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
   <a href="01_Single_Node_Physics.md">🧱 Round 1</a> ·
   <a href="02_Distributed_Infrastructure.md">🚀 Round 2</a> ·
   <a href="03_Production_Serving.md">⚡ Round 3</a> ·
   <a href="04_Operations_and_Economics.md">💼 Round 4</a> ·
-  <a href="05_Visual_Architecture_Debugging.md">🖼️ Round 5</a>
+  <a href="05_Visual_Architecture_Debugging.md">🖼️ Round 5</a> ·
+  <a href="06_Advanced_Systems.md">⚙️ Round 6</a>
 </div>
 
 ---
 
 The domain of the ML Leadership and Responsible Engineer. This round tests your ability to maintain system health over time: managing data drift, technical debt, and the Total Cost of Ownership (TCO).
 
-> **[➕ Add a Flashcard](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/04_Operations_and_Economics.md)** (Edit in Browser) — see [README](README.md#question-format) for the template.
+> **[➕ Add a Flashcard](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/cloud/04_Operations_and_Economics.md)** (Edit in Browser) — see [README](../README.md#question-format) for the template.
 
 ---
 
@@ -33,7 +34,7 @@ The domain of the ML Leadership and Responsible Engineer. This round tests your 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Silent Failure</b> · <code>mlops</code> <code>monitoring</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silent Failure</b> · <code>mlops</code> <code>monitoring</code></summary>
 
 **Interviewer:** "Our DevOps dashboard shows 99.99% uptime and 50ms latency. The HTTP error rate is zero. But the business team is furious because our recommendations are completely wrong. How can the system be perfectly healthy but perfectly wrong?"
 
@@ -47,7 +48,7 @@ The domain of the ML Leadership and Responsible Engineer. This round tests your 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Training-Serving Skew</b> · <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Training-Serving Skew</b> · <code>mlops</code></summary>
 
 **Interviewer:** "Our model achieves 95% accuracy in the offline test set, but drops to 70% in production. The model weights are identical. Where is the bug most likely located?"
 
@@ -77,7 +78,7 @@ The domain of the ML Leadership and Responsible Engineer. This round tests your 
 ### 🚀 Deployment Strategies
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Deployment Risk</b> · <code>mlops</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Deployment Risk</b> · <code>mlops</code> <code>deployment</code></summary>
 
 **Interviewer:** "We want to test a brand new recommendation model, but if it performs poorly, it will severely impact our daily revenue. A standard A/B test (sending 10% of users to the new model) is deemed too risky. How do we test it on production traffic without any business risk?"
 
@@ -113,7 +114,7 @@ The domain of the ML Leadership and Responsible Engineer. This round tests your 
 ### 🔒 Security, Privacy & Fairness
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Trust Boundary</b> · <code>security</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Trust Boundary</b> · <code>security</code></summary>
 
 **Interviewer:** "We deployed a customer service LLM. Within a day, users figured out how to trick it into ignoring its system instructions and issuing $500 refunds. Why did standard software security fail here?"
 
