@@ -1,38 +1,53 @@
-# 🚀 mlsysim: The ML Systems Modeling Platform
-
-`mlsysim` is the high-performance, physics-grounded analytical simulator powering the **Machine Learning Systems** textbook ecosystem. It provides a unified "Single Source of Truth" (SSoT) for modeling systems from sub-watt microcontrollers to exaflop-scale global fleets.
+<div align="center">
+  <h1>🚀 MLSys·im: The Modeling Platform</h1>
+  <blockquote>
+    <b>The physics-grounded analytical simulator powering the Machine Learning Systems ecosystem.</b><br>
+    Provides a unified "Single Source of Truth" (SSoT) for modeling systems from sub-watt microcontrollers to exaflop-scale global fleets.
+  </blockquote>
+</div>
 
 ---
 
 ## 🏗 The 5-Layer Analytical Stack
+
 `mlsysim` implements a "Progressive Lowering" architecture, separating high-level workloads from the physical infrastructure that executes them.
 
-### Layer A: Workload Representation (`mlsysim.models`)
-High-level model definitions (`TransformerWorkload`, `CNNWorkload`).
-*   **Math:** FLOPs, parameter counts, and arithmetic intensity.
-*   **Key Models:** `Models.Llama3_70B`, `Models.GPT3`, `Models.ResNet50`.
-
-### Layer B: Hardware Registry (`mlsysim.hardware`)
-Precise, concrete specifications for real-world silicon.
-*   **Cloud:** `Hardware.H100`, `Hardware.H200`, `Hardware.B200`, `Hardware.NVL72`, `Hardware.MI300X`, `Hardware.TPUv5p`.
-*   **Workstation:** `Hardware.DGXSpark`, `Hardware.MacBook`.
-*   **Mobile:** `Hardware.iPhone`, `Hardware.Snapdragon`.
-*   **Edge/Tiny:** `Hardware.Jetson`, `Hardware.ESP32`, `Hardware.Tiny.HimaxWE1`.
-
-### Layer C: Infrastructure & Environment (`mlsysim.infra`)
-Regional grid profiles and datacenter sustainability.
-*   **Math:** PUE, Carbon Intensity (gCO2/kWh), WUE.
-*   **Grids:** `Infra.Quebec`, `Infra.Poland`, `Infra.US_Avg`.
-
-### Layer D: Systems & Topology (`mlsysim.systems`)
-Fleet configurations, network fabrics, and narrative scenarios.
-*   **Scenarios:** `Applications.Doorbell`, `Applications.AutoDrive`, `Applications.Frontier`.
-
-### Layer E: Execution & Resolvers (`mlsysim.core.solver`)
-The 3-tier mathematical engine that resolves the hierarchy of constraints.
-*   **Tier 1: Models (`SingleNodeModel`, `DistributedModel`)**: Forward evaluation of physics ($Y = f(X)$).
-*   **Tier 2: Solvers (`SynthesisSolver`, `SensitivitySolver`)**: Algebraic inversion and diagnostics ($X = f^{-1}(Y)$).
-*   **Tier 3: Optimizers (`ParallelismOptimizer`, `BatchingOptimizer`)**: Design space search ($\max f(X)$).
+<table>
+  <thead>
+    <tr>
+      <th width="20%">Layer</th>
+      <th width="30%">Domain</th>
+      <th width="50%">Key Components</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><b>Layer A</b></td>
+      <td><b>Workload Representation</b><br><code>mlsysim.models</code></td>
+      <td>FLOPs, parameters, and intensity.<br><i>e.g., Llama3_70B, ResNet50</i></td>
+    </tr>
+    <tr>
+      <td align="center"><b>Layer B</b></td>
+      <td><b>Hardware Registry</b><br><code>mlsysim.hardware</code></td>
+      <td>Concrete specs for real-world silicon.<br><i>e.g., H100, TPUv5p, Jetson</i></td>
+    </tr>
+    <tr>
+      <td align="center"><b>Layer C</b></td>
+      <td><b>Infrastructure</b><br><code>mlsysim.infra</code></td>
+      <td>Grid profiles and datacenter sustainability.<br><i>e.g., PUE, Carbon Intensity, WUE</i></td>
+    </tr>
+    <tr>
+      <td align="center"><b>Layer D</b></td>
+      <td><b>Systems & Topology</b><br><code>mlsysim.systems</code></td>
+      <td>Fleet configurations and network fabrics.<br><i>e.g., Doorbell, AutoDrive Scenarios</i></td>
+    </tr>
+    <tr>
+      <td align="center"><b>Layer E</b></td>
+      <td><b>Execution & Resolvers</b><br><code>mlsysim.core.solver</code></td>
+      <td>The 3-tier math engine: Models, Solvers, and Optimizers (Design space search).</td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 
@@ -42,16 +57,12 @@ The 3-tier mathematical engine that resolves the hierarchy of constraints.
 
 ### 1. Explore the Registry (The Zoo)
 Discover built-in hardware, models, and infrastructure without reading source code:
-```bash
-mlsysim zoo hardware
-mlsysim zoo models
-```
+<kbd>mlsysim zoo hardware</kbd><br>
+<kbd>mlsysim zoo models</kbd>
 
 ### 2. Quick Evaluation (CLI Flags)
 Evaluate the physics of a workload on a specific hardware node instantly:
-```bash
-mlsysim eval Llama3_8B H100 --batch-size 32
-```
+<kbd>mlsysim eval Llama3_8B H100 --batch-size 32</kbd>
 
 ### 3. Deep Simulation (Infrastructure as Code)
 Define your entire cluster and SLA constraints in a declarative `mlsys.yaml` file:
@@ -75,9 +86,7 @@ constraints:
 ```
 
 Then compile and evaluate the 3-lens scorecard (Feasibility, Performance, Macro):
-```bash
-mlsysim eval example_cluster.yaml
-```
+<kbd>mlsysim eval example_cluster.yaml</kbd>
 
 ### 4. CI/CD & Agentic Automation
 Every command supports strict, schema-validated JSON output. If an `assert` constraint is violated, the CLI returns a semantic `Exit Code 3`.
@@ -91,13 +100,8 @@ tco=$(mlsysim --output json eval example_cluster.yaml | jq .macro.metrics.tco_us
 
 ### 5. Design Space Search (Optimizers)
 Use the Tier 3 Engineering Engine to automatically find the optimal configuration:
-```bash
-# Find the optimal (TP, PP, DP) split
-mlsysim optimize parallelism example_cluster.yaml
-
-# Find the cheapest, greenest datacenter location
-mlsysim optimize placement example_cluster.yaml --carbon-tax 150
-```
+<kbd>mlsysim optimize parallelism example_cluster.yaml</kbd><br>
+<kbd>mlsysim optimize placement example_cluster.yaml --carbon-tax 150</kbd>
 
 ---
 

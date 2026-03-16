@@ -45,20 +45,52 @@
 
 Are you an AI engineer preparing for a systems design interview or building a production cluster? Start here.
 
-| Asset | What It Is | Link |
-| :--- | :--- | :--- |
-| **🚀 Local Audit** | Profile **your hardware** against the Iron Law instantly. | `pip install mlsysim && mlsysim audit` |
-| **🏆 Challenges** | **LeetCode for AI Systems**: Solve design problems. | [**Start Level 1**](challenges/01_the_memory_wall/README.md) |
-| **💼 Interview Guide** | The **Napkin Math** for FAANG AI Systems Design. | [**View Guide**](interviews/README.md) |
-| **🗺️ Blueprint** | The **AI Engineering Blueprint**: Turnkey curricula for educators. | [**View Hub**](instructors/index.qmd) |
-| **👩‍🏫 Foundations** | A 12-week path for **single-machine** AI systems. | [**View Syllabus**](instructors/foundations-syllabus.qmd) |
-| **🚀 Scale** | A 12-week path for **distributed fleets** and frontier models. | [**View Syllabus**](instructors/scale-syllabus.qmd) |
+<table>
+  <thead>
+    <tr>
+      <th width="25%">Asset</th>
+      <th width="50%">What It Is</th>
+      <th width="25%">Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><b>🚀 Local Audit</b></td>
+      <td>Profile <b>your hardware</b> against the Iron Law instantly.</td>
+      <td align="center"><kbd>pip install mlsysim</kbd></td>
+    </tr>
+    <tr>
+      <td align="center"><b>💼 Interview Hub</b></td>
+      <td>The <b>Napkin Math</b> for FAANG AI Systems Design.</td>
+      <td align="center"><a href="interviews/README.md"><b>View Guide</b></a></td>
+    </tr>
+    <tr>
+      <td align="center"><b>🗺️ Blueprint</b></td>
+      <td>The <b>AI Engineering Blueprint</b>: Turnkey curricula for educators.</td>
+      <td align="center"><a href="instructors/index.qmd"><b>View Hub</b></a></td>
+    </tr>
+    <tr>
+      <td align="center"><b>👩‍🏫 Foundations</b></td>
+      <td>A 12-week path for <b>single-machine</b> AI systems.</td>
+      <td align="center"><a href="instructors/foundations-syllabus.qmd"><b>View Syllabus</b></a></td>
+    </tr>
+    <tr>
+      <td align="center"><b>🚀 Scale</b></td>
+      <td>A 12-week path for <b>distributed fleets</b> and frontier models.</td>
+      <td align="center"><a href="instructors/scale-syllabus.qmd"><b>View Syllabus</b></a></td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 
 ## Mission
 
-**The world is rushing to build AI systems. It is not engineering them.**
+<div align="center">
+  <blockquote>
+    <b>The world is rushing to build AI systems. It is not engineering them.</b>
+  </blockquote>
+</div>
 
 That gap is what I mean by AI engineering.
 
@@ -94,21 +126,43 @@ That gap is what I mean by AI engineering.
 
 This repository is the open learning stack for AI systems engineering: textbook source, TinyTorch, hardware kits, and interactive co-labs.
 
-**READ** Start with the [textbook](https://mlsysbook.ai/book/):
-- [📘 Volume I: Foundations](https://mlsysbook.ai/vol1/) covers ML basics, development, and optimization.
-- [📙 Volume II: At Scale](https://mlsysbook.ai/vol2/) covers distributed training and production fleets.
-
-**PRACTICE** Master the "Silicon Realism" required for frontier AI jobs:
-- [💼 Interview Hub](interviews/README.md): Interactive flashcards and whiteboard math.
-- [🏆 AI Systems Arena](challenges/README.md): High-stakes design challenges judged by physics.
-
-**INSTRUCT** Adopt the curriculum with the [AI Engineering Blueprint](instructors/index.qmd).
-
-**BUILD** Start TinyTorch with the [getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Implement autograd and transformers from scratch.
-
-**DEPLOY** Pick a [hardware kit](https://mlsysbook.ai/kits/) and run the labs on Arduino, Raspberry Pi, or Jetson.
-
-**SIMULATE** Explore the [MLSys·im Engine](mlsysim/README.md) to calculate the physics of ML infrastructure.
+<table>
+  <tbody>
+    <tr>
+      <td width="15%" align="center"><b>📖 READ</b></td>
+      <td>Start with the <a href="https://mlsysbook.ai/book/">textbook</a>:
+        <ul>
+          <li><a href="https://mlsysbook.ai/vol1/">Volume I: Foundations</a> covers ML basics, development, and optimization.</li>
+          <li><a href="https://mlsysbook.ai/vol2/">Volume II: At Scale</a> covers distributed training and production fleets.</li>
+        </ul>
+      </td>
+    </tr>
+    <tr>
+      <td width="15%" align="center"><b>🎯 PRACTICE</b></td>
+      <td>Master the "Silicon Realism" required for frontier AI jobs:
+        <ul>
+          <li><a href="interviews/README.md">Interview Hub</a>: Interactive flashcards and whiteboard math.</li>
+        </ul>
+      </td>
+    </tr>
+    <tr>
+      <td width="15%" align="center"><b>👩‍🏫 INSTRUCT</b></td>
+      <td>Adopt the curriculum with the <a href="instructors/index.qmd">AI Engineering Blueprint</a>.</td>
+    </tr>
+    <tr>
+      <td width="15%" align="center"><b>🔥 BUILD</b></td>
+      <td>Start TinyTorch with the <a href="https://mlsysbook.ai/tinytorch/getting-started.html">getting started guide</a>. Implement autograd and transformers from scratch.</td>
+    </tr>
+    <tr>
+      <td width="15%" align="center"><b>📦 DEPLOY</b></td>
+      <td>Pick a <a href="https://mlsysbook.ai/kits/">hardware kit</a> and run the labs on Arduino, Raspberry Pi, or Jetson.</td>
+    </tr>
+    <tr>
+      <td width="15%" align="center"><b>🔮 SIMULATE</b></td>
+      <td>Explore the <a href="mlsysim/README.md">MLSys·im Engine</a> to calculate the physics of ML infrastructure.</td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 

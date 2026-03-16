@@ -97,16 +97,41 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
 
 ---
 
-## 20 Progressive Modules
+## 🏗️ 20 Progressive Modules
 
 Build your framework through four progressive parts:
 
-| Part | Modules | What You Build |
-|------|---------|----------------|
-| **I. Foundations** | 01-08 | Tensors, activations, layers, losses, dataloader, autograd, optimizers, training |
-| **II. Vision** | 09 | Conv2d, CNNs for image classification |
-| **III. Language** | 10-13 | Tokenization, embeddings, attention, transformers |
-| **IV. Optimization** | 14-20 | Profiling, quantization, compression, acceleration, benchmarking, capstone |
+<table>
+  <thead>
+    <tr>
+      <th width="20%">Part</th>
+      <th width="15%">Modules</th>
+      <th width="65%">What You Build</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><b>I. Foundations</b></td>
+      <td align="center">01-08</td>
+      <td>Tensors, activations, layers, losses, dataloader, autograd, optimizers, training</td>
+    </tr>
+    <tr>
+      <td align="center"><b>II. Vision</b></td>
+      <td align="center">09</td>
+      <td>Conv2d, CNNs for image classification</td>
+    </tr>
+    <tr>
+      <td align="center"><b>III. Language</b></td>
+      <td align="center">10-13</td>
+      <td>Tokenization, embeddings, attention, transformers</td>
+    </tr>
+    <tr>
+      <td align="center"><b>IV. Optimization</b></td>
+      <td align="center">14-20</td>
+      <td>Profiling, quantization, compression, acceleration, benchmarking, capstone</td>
+    </tr>
+  </tbody>
+</table>
 
 Each module asks: **"Can I build this capability from scratch?"**
 
@@ -114,18 +139,51 @@ Each module asks: **"Can I build this capability from scratch?"**
 
 ---
 
-## Historical Milestones
+## 🏆 Historical Milestones
 
 As you progress, unlock recreations of landmark ML achievements:
 
-| Year | Milestone | Your Achievement |
-|------|-----------|------------------|
-| 1958 | Perceptron | Binary classification with gradient descent |
-| 1969 | XOR Crisis | Multi-layer networks solve non-linear problems |
-| 1986 | Backpropagation | Multi-layer network training |
-| 1998 | CNN Revolution | **Image classification with convolutions** |
-| 2017 | Transformer Era | Language generation with self-attention |
-| 2018+ | MLPerf | Production-ready optimization |
+<table>
+  <thead>
+    <tr>
+      <th width="15%">Year</th>
+      <th width="35%">Milestone</th>
+      <th width="50%">Your Achievement</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><b>1958</b></td>
+      <td>Perceptron</td>
+      <td>Binary classification with gradient descent</td>
+    </tr>
+    <tr>
+      <td align="center"><b>1969</b></td>
+      <td>XOR Crisis</td>
+      <td>Multi-layer networks solve non-linear problems</td>
+    </tr>
+    <tr>
+      <td align="center"><b>1986</b></td>
+      <td>Backpropagation</td>
+      <td>Multi-layer network training</td>
+    </tr>
+    <tr>
+      <td align="center"><b>1998</b></td>
+      <td>CNN Revolution</td>
+      <td><b>Image classification with convolutions</b></td>
+    </tr>
+    <tr>
+      <td align="center"><b>2017</b></td>
+      <td>Transformer Era</td>
+      <td>Language generation with self-attention</td>
+    </tr>
+    <tr>
+      <td align="center"><b>2018+</b></td>
+      <td>MLPerf</td>
+      <td>Production-ready optimization</td>
+    </tr>
+  </tbody>
+</table>
 
 **These aren't toy demos** - they're historically significant ML achievements rebuilt with YOUR framework!
 

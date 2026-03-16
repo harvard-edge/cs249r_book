@@ -1,69 +1,84 @@
-# The Blueprint — Instructor Site
+<div align="center">
+  <h1>🗺️ The Blueprint — Instructor Site</h1>
+  <blockquote>
+    <b>Status: Under Active Development</b><br>
+    This site is being actively built and refined. Content, structure, and styling may change frequently. SVG diagrams are placeholder quality and will be professionally refined before launch.
+  </blockquote>
+</div>
 
-> **Status: Under Active Development**
->
-> This site is being actively built and refined. Content, structure, and styling may change frequently. SVG diagrams are placeholder quality and will be professionally refined before launch.
+---
 
-## What This Is
+## 📖 What This Is
 
-"The Blueprint" is the instructor-facing companion site for the [ML Systems textbook](https://mlsysbook.ai). It provides everything needed to teach AI Engineering as a university course:
+"The Blueprint" is the instructor-facing companion site for the [ML Systems textbook](https://mlsysbook.ai). It provides everything needed to teach AI Engineering as a university course.
 
-- **Week-by-week syllabi** for two semesters (Foundations + Scale)
-- **Assessment rubrics** with sample student work
-- **Pedagogy guide** with learning science and facilitation strategies
-- **TA training guide** with grading workflows and common student struggles
-- **Customization guide** for quarters, seminars, and different emphases
-- **FAQ** for adopting instructors
+<table>
+  <tbody>
+    <tr>
+      <td width="15%" align="center"><b>📅 Syllabi</b></td>
+      <td><b>Week-by-week syllabi</b> for two semesters (Foundations + Scale).</td>
+    </tr>
+    <tr>
+      <td width="15%" align="center"><b>⚖️ Assessment</b></td>
+      <td><b>Assessment rubrics</b> with sample student work.</td>
+    </tr>
+    <tr>
+      <td width="15%" align="center"><b>🧠 Pedagogy</b></td>
+      <td><b>Pedagogy guide</b> with learning science and facilitation strategies.</td>
+    </tr>
+    <tr>
+      <td width="15%" align="center"><b>👨‍🏫 TA Guide</b></td>
+      <td><b>TA training guide</b> with grading workflows and common student struggles.</td>
+    </tr>
+    <tr>
+      <td width="15%" align="center"><b>⚙️ Config</b></td>
+      <td><b>Customization guide</b> for quarters, seminars, and different emphases.</td>
+    </tr>
+    <tr>
+      <td width="15%" align="center"><b>❓ FAQ</b></td>
+      <td><b>FAQ</b> for adopting instructors.</td>
+    </tr>
+  </tbody>
+</table>
 
-## Building Locally
+---
 
-```bash
-cd instructors/
-quarto preview
-```
+## 🛠️ Building Locally
+
+<kbd>cd instructors/</kbd>
+<kbd>quarto preview</kbd>
 
 Requires [Quarto](https://quarto.org/) 1.4+.
 
-## File Structure
+---
 
-```
+## 📂 File Structure
+
+```text
 instructors/
 ├── _quarto.yml              # Site configuration
 ├── index.qmd                # Landing page (hero + overview)
 ├── getting-started.qmd      # 8-step adoption checklist
 ├── course-map.qmd           # Integration matrix + SVG diagrams
-├── foundations-syllabus.qmd  # Semester 1: 16-week schedule
+├── foundations-syllabus.qmd # Semester 1: 16-week schedule
 ├── scale-syllabus.qmd       # Semester 2: 16-week schedule
 ├── pedagogy.qmd             # Learning science + facilitation
 ├── assessment.qmd           # Rubrics + sample work
 ├── ta-guide.qmd             # TA training + grading workflows
 ├── customization.qmd        # Quarter/seminar/emphasis variants
 ├── faq.qmd                  # Common instructor questions
-└── assets/
-    ├── images/
-    │   ├── logo.png
-    │   └── svg/              # Diagrams (under development)
-    │       ├── four-pillar-loop.svg
-    │       ├── semester-timeline.svg
-    │       ├── lab-abc-flow.svg
-    │       └── assessment-tiers.svg
-    └── styles/
-        ├── style.scss        # Light mode (ecosystem-aligned)
-        └── dark-mode.scss    # Dark mode overrides
+└── assets/                  # Styles and SVGs
 ```
 
-## SVG Diagrams
+---
 
-The SVG diagrams in `assets/images/svg/` are functional but need visual polish. They follow the textbook's SVG conventions (see `.claude/rules/svg-style.md`) adapted for the Blueprint's indigo accent color.
-
-## Style Conventions
+## 🎨 Style Conventions
 
 This site follows the MLSysBook ecosystem design system:
 
-- **Accent color**: Indigo (`#6366f1` light, `#818cf8` dark)
-- **Callout geometry**: 5px left border, 0.5rem radius, 8% opacity backgrounds
-- **Typography**: Inter (body), Outfit (headings), JetBrains Mono (code)
-- **Navbar**: Dark background (`#0a0a0f`), matching book sites
-- **Callout colors**: Shared semantic palette (info/success/caution/secondary)
+*   **Accent color**: Indigo (`#6366f1` light, `#818cf8` dark)
+*   **Callout geometry**: 5px left border, 0.5rem radius, 8% opacity backgrounds
+*   **Typography**: Inter (body), Outfit (headings), JetBrains Mono (code)
+*   **Navbar**: Dark background (`#0a0a0f`), matching book sites
 
 See `assets/styles/style.scss` for full details.
