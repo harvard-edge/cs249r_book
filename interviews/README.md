@@ -43,6 +43,8 @@ Real-world interviews for AI Systems roles are structured around domains of oper
     *   *The Focus:* Queueing theory (Erlang-C), Tail Latency, KV-Cache memory fragmentation (PagedAttention), and Continuous Batching.
 4.  **[Round 4: ML Operations & Economics](04_Operations_and_Economics.md)**
     *   *The Focus:* Total Cost of Ownership (TCO), The Degradation Equation (Data Drift), Silent Failures, and Technical Debt in ML.
+5.  **[Round 5: Visual Architecture Debugging](05_Visual_Architecture_Debugging.md)** 🖼️
+    *   *The Focus:* Spotting physical bottlenecks in proposed system diagrams before they get built (Data Gravity, Network Topologies).
 
 ---
 
