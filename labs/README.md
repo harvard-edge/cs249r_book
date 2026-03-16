@@ -1,130 +1,128 @@
 <div align="center">
-  <h1>🔬 Labs</h1>
+  <h1>Co-Labs</h1>
   <blockquote>
-    <b>Understanding the Interplay Between Algorithms and Systems</b><br>
-    <i>Status: Coming Summer 2026</i>
+    <b>33 Interactive Labs Powered by MLSys·IM</b><br>
+    <i>Predict → Discover → Explain</i>
   </blockquote>
 </div>
 
 ---
 
-## 🧭 What Are Labs?
+## What Are Co-Labs?
 
-Labs are hands-on interactive notebooks that bridge the gap between **reading about ML systems** (the textbook) and **building them from scratch** (TinyTorch).
+Co-Labs are interactive [Marimo](https://marimo.io) notebooks that bridge the gap between **reading about ML systems** (the textbook) and **building them from scratch** (TinyTorch). Every lab runs in your browser via WebAssembly — no installation required.
 
 ```text
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │                 │     │                 │     │                 │
-│    Textbook     │────▶│      Labs       │────▶│    TinyTorch    │
+│    Textbook     │────▶│    Co-Labs      │────▶│    TinyTorch    │
 │                 │     │                 │     │                 │
-│  Concepts &     │     │  Experiment &   │     │  Build from     │
-│  Theory         │     │  Explore        │     │  Scratch        │
+│  Concepts &     │     │  Predict &      │     │  Build from     │
+│  Theory         │     │  Discover       │     │  Scratch        │
 │                 │     │                 │     │                 │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
       READ                    EXPLORE                  BUILD
 ```
 
-## 🗺️ The Learning Journey
+## How Labs Work
 
-<table>
-  <thead>
-    <tr>
-      <th width="15%">Phase</th>
-      <th width="25%">Resource</th>
-      <th width="60%">What You Do</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center"><b>📖 Understand</b></td>
-      <td align="center"><a href="https://mlsysbook.ai">Textbook</a></td>
-      <td>Learn concepts, theory, and system design principles</td>
-    </tr>
-    <tr>
-      <td align="center"><b>🔬 Experiment</b></td>
-      <td align="center">Labs</td>
-      <td>Explore tradeoffs, tweak parameters, see how decisions ripple through systems</td>
-    </tr>
-    <tr>
-      <td align="center"><b>🔥 Build</b></td>
-      <td align="center"><a href="https://mlsysbook.ai/tinytorch">TinyTorch</a></td>
-      <td>Implement everything from scratch, own every line of code</td>
-    </tr>
-  </tbody>
-</table>
+Each lab follows a consistent structure:
 
-## 🤔 Why Labs?
+1. **Briefing** — Learning objectives, prerequisites, and the core question
+2. **Parts A–E** — Tabbed explorations, each with a prediction lock, interactive instruments, and a reveal
+3. **Synthesis** — Key takeaways, textbook connections, and a pointer to the next lab
 
-ML systems are where algorithms meet hardware. A model that works perfectly in theory can fail in practice due to memory limits, latency constraints, or numerical precision. Labs help you develop intuition for these algorithm-system interactions.
+Every prediction is structured (radio buttons or numeric entry, never free text). You predict first, then explore the instruments to discover whether you were right. The gap between prediction and reality is the learning moment.
 
-*   **See the tradeoffs** — How does batch size affect memory? How does quantization affect accuracy?
-*   **Explore interactively** — Adjust parameters and watch how changes ripple through the system
-*   **Build intuition** — Understand *why* systems behave the way they do, not just *what* they do
-*   **Zero setup** — Run directly in your browser via Google Colab
+## Lab Inventory
 
-## 📝 Example Topics (Planned)
+### Volume I: Foundations (17 labs · Single-machine ML systems)
 
-<table>
-  <tbody>
-    <tr>
-      <td width="30%" align="center"><b>🧠 Memory vs. Compute</b></td>
-      <td>Watch how batch size affects memory footprint and training speed</td>
-    </tr>
-    <tr>
-      <td width="30%" align="center"><b>🗜️ Quantization Effects</b></td>
-      <td>See accuracy degradation as you reduce precision from FP32 → INT8 → INT4</td>
-    </tr>
-    <tr>
-      <td width="30%" align="center"><b>👁️ Attention Visualization</b></td>
-      <td>Explore what transformer attention heads actually learn</td>
-    </tr>
-    <tr>
-      <td width="30%" align="center"><b>📉 Optimization Landscapes</b></td>
-      <td>Navigate loss surfaces with different optimizers</td>
-    </tr>
-    <tr>
-      <td width="30%" align="center"><b>✂️ Pruning Strategies</b></td>
-      <td>Compare structured vs. unstructured pruning on real models</td>
-    </tr>
-  </tbody>
-</table>
+| # | Slug | Title |
+|---|------|-------|
+| 00 | `lab_00_introduction` | The Architect's Portal (orientation) |
+| 01 | `lab_01_ml_intro` | The Magnitude Awakening |
+| 02 | `lab_02_ml_systems` | The Iron Law |
+| 03 | `lab_03_ml_workflow` | The Silent Degradation Loop |
+| 04 | `lab_04_data_engr` | The Data Gravity Trap |
+| 05 | `lab_05_nn_compute` | The Activation Tax |
+| 06 | `lab_06_nn_arch` | The Quadratic Wall |
+| 07 | `lab_07_ml_frameworks` | The Kernel Fusion Dividend |
+| 08 | `lab_08_model_train` | The Training Memory Budget |
+| 09 | `lab_09_data_selection` | The Data Selection Tradeoff |
+| 10 | `lab_10_model_compress` | The Compression Frontier |
+| 11 | `lab_11_hw_accel` | The Roofline |
+| 12 | `lab_12_perf_bench` | The Speedup Ceiling |
+| 13 | `lab_13_model_serving` | The Tail Latency Trap |
+| 14 | `lab_14_ml_ops` | The Silent Degradation Problem |
+| 15 | `lab_15_responsible_engr` | There Is No Free Fairness |
+| 16 | `lab_16_ml_conclusion` | The Architect's Audit (capstone) |
 
-## 📬 Stay Updated
+### Volume II: At Scale (16 labs · Distributed ML systems)
 
-Labs are under active development. To be notified when they launch:
+| # | Slug | Title |
+|---|------|-------|
+| 01 | `lab_01_introduction` | The Scale Illusion |
+| 02 | `lab_02_compute_infra` | The Compute Infrastructure Wall |
+| 03 | `lab_03_communication` | Communication at Scale |
+| 04 | `lab_04_data_storage` | The Data Pipeline Wall |
+| 05 | `lab_05_dist_train` | The Parallelism Puzzle |
+| 06 | `lab_06_fault_tolerance` | When Failure Is Routine |
+| 07 | `lab_07_fleet_orch` | The Scheduling Trap |
+| 08 | `lab_08_inference` | The Inference Economy |
+| 09 | `lab_09_perf_engineering` | The Optimization Trap |
+| 10 | `lab_10_edge_intelligence` | The Edge Thermodynamics Lab |
+| 11 | `lab_11_ops_scale` | The Silent Fleet |
+| 12 | `lab_12_security_privacy` | The Price of Privacy |
+| 13 | `lab_13_robust_ai` | The Robustness Budget |
+| 14 | `lab_14_sustainable_ai` | The Carbon Budget |
+| 15 | `lab_15_responsible_ai` | The Fairness Budget |
+| 16 | `lab_16_fleet_synthesis` | The Fleet Synthesis (capstone) |
 
-*   [Subscribe to updates](https://buttondown.email/mlsysbook)
-*   [Star the repo](https://github.com/harvard-edge/cs249r_book)
-*   [Join discussions](https://github.com/harvard-edge/cs249r_book/discussions)
+## The Design Ledger
+
+Every lab saves your predictions and design decisions to the **Design Ledger** — a persistence layer in your browser's localStorage. Later labs read earlier decisions: Lab 08's training memory budget builds on Lab 05's activation analysis, which builds on Lab 01's magnitude calibration. The capstone labs synthesize your full Design Ledger into a portfolio.
+
+## Running Labs
+
+### In the Browser (Recommended)
+
+Visit the [Co-Labs site](https://mlsysbook.ai/labs/) and click any lab. They run via Marimo + WebAssembly with zero setup.
+
+### Locally
+
+```bash
+pip install mlsysim[labs]
+git clone https://github.com/harvard-edge/cs249r_book.git
+cd cs249r_book/labs
+marimo run vol1/lab_01_ml_intro.py
+```
+
+## Development
+
+See [PROTOCOL.md](PROTOCOL.md) for the lab development specification and [TEMPLATE.md](TEMPLATE.md) for the cell architecture and quality checklist.
+
+### Running Tests
+
+```bash
+pytest tests/test_static.py -v
+```
 
 ---
 
-## 🔗 Related Resources
+## Related Resources
 
-<table>
-  <tbody>
-    <tr>
-      <td width="25%" align="center"><b><a href="https://mlsysbook.ai">Textbook</a></b></td>
-      <td>ML Systems principles and practices</td>
-    </tr>
-    <tr>
-      <td width="25%" align="center"><b><a href="https://mlsysbook.ai/tinytorch">TinyTorch</a></b></td>
-      <td>Build your own ML framework from scratch</td>
-    </tr>
-    <tr>
-      <td width="25%" align="center"><b><a href="https://github.com/harvard-edge/cs249r_book/discussions">Discussions</a></b></td>
-      <td>Ask questions, share feedback</td>
-    </tr>
-  </tbody>
-</table>
+| Resource | Description |
+|----------|-------------|
+| [Textbook](https://mlsysbook.ai) | ML Systems principles and practices |
+| [TinyTorch](https://mlsysbook.ai/tinytorch) | Build your own ML framework from scratch |
+| [Discussions](https://github.com/harvard-edge/cs249r_book/discussions) | Ask questions, share feedback |
 
 ---
 
 ## Contributors
 
 Thanks to these wonderful people who helped build the labs!
-
-**Legend:** 🪲 Bug Hunter · ⚡ Code Warrior · 📚 Documentation Hero · 🎨 Design Artist · 🧠 Idea Generator · 🔎 Code Reviewer · 🧪 Test Engineer · 🛠️ Tool Builder
 
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
@@ -153,6 +151,6 @@ Thanks to these wonderful people who helped build the labs!
 
 <div align="center">
 
-<b>Read. Explore. Build.</b> <i>(Labs coming soon)</i>
+<b>Predict. Discover. Explain.</b>
 
 </div>
