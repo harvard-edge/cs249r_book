@@ -503,6 +503,84 @@ $$W_q = \frac{\rho}{1 - \rho} \cdot \mu^{-1} \qquad \text{where } \rho = \frac{\
 
 \end{frame}
 
+\begin{frame}{War Story: The Tail at Scale}
+\note{
+% -- LINK: What prior concept connects to this slide
+The M/M/1 model showed why high utilization explodes latency for one
+server. This slide extends the insight to fan-out systems with hundreds
+of servers --- the production reality at Google, Meta, and Amazon.
+
+% -- NARRATE: What to SAY while showing this slide
+``Dean and Barroso, 2013: a single server is slow 1\% of the time. With
+100 servers, the probability that at least one is slow is $1 - 0.99^{100}
+= 63\%$. With 1,000 servers: 99.99\%. Your p99 at the component level
+becomes the median at the system level.'' Point to the table: ``At 100
+servers, most requests hit at least one straggler. Hedged requests ---
+sending the same query to two servers and taking the first response ---
+reduce tail latency by 75\%.''
+ANALOGY: ``One slow cashier at a supermarket is an annoyance. One slow
+cashier across 100 checkout lanes means 63\% of shoppers wait.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Your search query fans out to 1,000 shards. Each shard has p99 =
+10 ms. What is the system-level p99?''
+[Expected: much worse than 10 ms --- the slowest shard dominates.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students design for single-server tail latency and forget
+fan-out amplification. Correct framing: at scale, component-level
+percentiles are nearly meaningless --- system-level tail is what users
+experience.
+
+% -- FLEX: [CORE] The Tail at Scale insight is essential for production systems
+[CORE] Connects queuing theory to real-world distributed serving.
+IF AHEAD: ``How do hedged requests interact with utilization?''
+IF SHORT: State the 63\% number and the hedging mitigation.
+}
+
+\footnotesize
+\textbf{Dean \& Barroso (2013): ``The Tail at Scale''}
+
+\vspace{0.1cm}
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    {\scriptsize
+    One server slow 1\% of the time.\\
+    A request touching $N$ servers:
+    $$P(\text{$\geq$1 slow}) = 1 - 0.99^N$$
+    }
+
+    \vspace{-0.1cm}
+    {\scriptsize
+    \renewcommand{\arraystretch}{1.0}
+    \begin{tabular}{@{}rr@{}}
+      \toprule
+      \textbf{Servers} & \textbf{P($\geq$1 slow)} \\
+      \midrule
+      1    & 1\% \\
+      10   & 10\% \\
+      100  & \textbf{63\%} \\
+      1000 & 99.99\% \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Mitigations}\\[0.05cm]
+    {\scriptsize
+    \textbf{Hedged requests:} Send to 2 replicas, take first response. Tail $\downarrow$ 75\%.\\[0.05cm]
+    \textbf{Tied requests:} Second server cancels if first responds. Near-zero overhead.\\[0.05cm]
+    \textbf{Micro-partitioning:} Fine-grained shards for load balance.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.05cm}
+\mlsysalert{At scale:}{Component p99 becomes the system \textbf{median}. Design for the tail, not the average.}
+
+\end{frame}
+
 % --- ACTIVE LEARNING 2: Exercise ---
 \begin{frame}{Your Turn: Capacity Planning}
 \note{[3 min] Give students 90 seconds. Answer: At 200 req/s with 5ms
@@ -703,6 +781,118 @@ This is the key innovation enabling practical LLM serving (vLLM, TGI).}
 
 \end{frame}
 
+\begin{frame}{Node-Level Optimization}
+\note{
+% -- LINK: What prior concept connects to this slide
+Continuous batching and PagedAttention optimize the software layer.
+This slide addresses the hardware layer: how to extract maximum throughput
+from a single GPU node before scaling out.
+
+% -- NARRATE: What to SAY while showing this slide
+``Three techniques that compound: Multi-Instance GPU (MIG) partitions one
+H100 into up to 7 isolated instances --- run different models or batch
+sizes on each. Model parallelism splits a model too large for one GPU
+across 2--4 GPUs within a node using NVLink at 900 GB/s. Speculative
+decoding uses a small draft model to propose tokens, then the large model
+verifies in parallel --- 2--3x decode speedup.''
+ANALOGY: ``MIG is like partitioning a hard drive. Model parallelism is
+like RAID striping. Speculative decoding is like a junior associate
+drafting a brief for a senior partner to review.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``When would you choose MIG over model parallelism?''
+[Expected: MIG for multiple small models; model parallelism for one
+large model that does not fit in one GPU.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students assume model parallelism always helps. Correct
+framing: NVLink bandwidth (900 GB/s) is still 4x slower than HBM3
+(3.35 TB/s). Parallelism adds communication overhead --- only use it
+when the model does not fit.
+
+% -- FLEX: [OPTIONAL] Deepens the single-node picture before scaling out
+[OPTIONAL] Supplements the core LLM serving content.
+IF AHEAD: ``What is the communication overhead of tensor parallelism?''
+IF SHORT: Name the three techniques with one sentence each, move on.
+}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lp{3.5cm}p{3.5cm}@{}}
+  \toprule
+  \textbf{Technique} & \textbf{How It Works} & \textbf{When to Use} \\
+  \midrule
+  \textbf{MIG} & Partition 1 GPU into 7 instances & Multiple small models / right-size GPU slices \\
+  \textbf{Tensor Parallelism} & Split layers across 2--8 GPUs via NVLink (900 GB/s) & Model $>$ 1 GPU memory \\
+  \textbf{Speculative Decode} & Small draft model proposes, large model verifies & Decode-bound LLMs (2--3$\times$ speedup) \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\mlsysconcept{Key:}{Exhaust single-node optimizations \textbf{before} scaling to multiple nodes. NVLink (900 GB/s) $\gg$ network (400 Gbps = 50 GB/s).}
+
+\end{frame}
+
+% --- Bridge slide: Batching to LLM Serving ---
+\begin{frame}{From Fixed to Variable: Why LLMs Change Everything}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just learned batching strategies for fixed-size inputs (images).
+This slide bridges to LLM serving where outputs are variable-length.
+
+% -- NARRATE: What to SAY while showing this slide
+``Everything we said about batching assumed fixed-size inputs and outputs.
+A ResNet batch of 8 images: 8 identical forward passes, done. An LLM
+batch of 8 prompts: each generates a different number of tokens. Request
+A finishes in 50 tokens; Request H needs 500. Static batching wastes
+90\% of compute waiting for the longest request.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If one request in a batch of 8 generates 10x more tokens than
+the others, what fraction of GPU time is wasted?''
+[Expected: roughly 7/8 of compute is idle for most of the batch duration.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students apply image-batching intuition to LLMs. Correct
+framing: variable output lengths fundamentally change the batching
+calculus --- continuous batching exists to solve this specific problem.
+
+% -- FLEX: [CORE] Essential bridge between batching and LLM serving
+[CORE] Without this bridge, students will not understand why continuous
+batching is necessary. IF SHORT: State the key contrast in 30 seconds.
+}
+
+\centering
+\vspace{0.3cm}
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.46\textwidth}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Fixed-Size Inference}\\[0.1cm]
+    {\scriptsize
+    ResNet: batch of 8 images.\\
+    All 8 finish simultaneously.\\
+    GPU utilization: \textbf{high}.\\
+    Batching strategy: straightforward.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.46\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Variable-Length Generation}\\[0.1cm]
+    {\scriptsize
+    LLM: batch of 8 prompts.\\
+    Request A: 50 tokens. Request H: 500.\\
+    GPU wastes \textbf{$\sim$90\%} waiting.\\
+    Static batching: catastrophic waste.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.2cm}
+\mlsysalert{The problem:}{Variable output lengths break fixed batching. \textbf{Continuous batching} fills slots as requests finish --- the key innovation for practical LLM serving.}
+
+\end{frame}
+
 % --- ACTIVE LEARNING 3: Discussion ---
 \begin{frame}{Discussion: The Decode Bottleneck}
 \note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
@@ -721,6 +911,81 @@ You upgrade to a GPU with 2$\times$ compute but same memory bandwidth.\\[0.2cm]
 
 \vspace{0.3cm}
 {\normalsize Hint: Is decode compute-bound or memory-bandwidth-bound?}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 4: Quantitative Exercise ---
+\begin{frame}{Your Turn: Llama-3-70B Decode Throughput}
+\note{
+% -- LINK: What prior concept connects to this slide
+The discussion established that decode is memory-bandwidth bound. This
+exercise forces students to calculate the exact throughput limit.
+
+% -- NARRATE: What to SAY while showing this slide
+``Llama-3-70B at FP16: 140 GB of weights. The H100 has 3.35 TB/s HBM3
+bandwidth. Decode reads the FULL model per token. At batch=1: 140 GB /
+3.35 TB/s = 41.8 ms per token = 23.9 tok/s. At batch=8: still 41.8 ms
+per token generation step, but you produce 8 tokens per step = 191
+tok/s aggregate. The model weights are read once per step regardless of
+batch size --- batching amortizes the bandwidth cost.''
+
+% -- ENGAGE: Peer Instruction Protocol
+Present problem (30s). Individual calculation (60s). If 30--70\%
+correct: pair discussion (90s), re-vote.
+[Expected errors: students multiply bandwidth by batch size, or forget
+that batch=8 still reads weights only once per step.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think batch=8 requires 8x the bandwidth. Correct
+framing: all 8 tokens share the same weight read. Batching increases
+arithmetic intensity without increasing bandwidth demand.
+
+% -- FLEX: [CORE] The quantitative centerpiece of LLM serving
+[CORE] The 23.9 tok/s number anchors Key Takeaways and cost analysis.
+IF AHEAD: ``At what batch size does this become compute-bound?''
+IF SHORT: Show the solution directly, skip peer discussion.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\small\bfseries LLM Decode Throughput}
+
+    \vspace{0.1cm}
+    Llama-3-70B at FP16:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Model weights: 70B $\times$ 2 B = \textbf{140 GB}
+      \item H100 HBM3 bandwidth: \textbf{3.35 TB/s}
+      \item Decode reads full model per token step
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Calculate:}
+    \begin{enumerate}\setlength\itemsep{0pt}
+      \item Max tok/s at batch=1?
+      \item Max tok/s at batch=8?
+      \item Why does batching help?
+    \end{enumerate}
+
+    {\scriptsize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{computestroke}
+    \textbf{Solution:}\\[0.05cm]
+    {\scriptsize
+    \textbf{Batch=1:}\\
+    $140\text{ GB} / 3.35\text{ TB/s} = 41.8$ ms/step\\
+    $= $ \textbf{23.9 tok/s}\\[0.08cm]
+    \textbf{Batch=8:}\\
+    Same 41.8 ms/step, but 8 tokens/step\\
+    $= $ \textbf{191 tok/s} aggregate\\[0.08cm]
+    \textcolor{datastroke}{\textbf{Why:}} Weights read once per step.\\
+    Batch amortizes bandwidth cost.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
 
 \end{frame}
 
@@ -1016,6 +1281,94 @@ Use if students struggle with the queuing theory calculations.\\small Service ti
 \note{Use for additional depth or if students need alternative explanation.}
 \small
 Use if students want deeper understanding of vLLM.\\small Static batching: all requests start and end together. Wasted compute on padding.\\ Continuous batching: when a request finishes, its slot is immediately filled.\\ PagedAttention: KV cache stored in fixed-size pages (like OS virtual memory).\\ Combined: 2--4$\times$ throughput improvement over naive batching.
+\end{frame}
+
+\begin{frame}{Backup: Cold Start --- The Problem}
+\note{
+% -- NARRATE: Expanded cold start timeline for deeper discussion
+Walk through each phase: container pull, weight deserialization, graph
+compilation (often the longest), memory pre-allocation, warmup inference.
+The total can exceed 2 minutes for large LLMs.
+
+% -- FLEX: [OPTIONAL] Pull if students want more detail on cold start
+[OPTIONAL] Use when the main Cold Start slide felt too compressed.
+}
+\small
+\textbf{Cold Start Timeline (Llama-3-70B on H100):}
+
+\vspace{0.1cm}
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lrl@{}}
+  \toprule
+  \textbf{Phase} & \textbf{Time} & \textbf{Bottleneck} \\
+  \midrule
+  Container pull + startup & 10--30 s & Network + CPU \\
+  Weight deserialization (140 GB) & 5--15 s & PCIe / NVLink \\
+  Graph compilation (TensorRT) & 30--120 s & CPU \\
+  KV cache pre-allocation & 2--5 s & GPU memory \\
+  Warmup inference (compile kernels) & 3--10 s & GPU \\
+  \midrule
+  \textbf{Total} & \textbf{50--180 s} & \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{Graph compilation is often the longest phase --- not weight loading. Serialized engines (TensorRT plan files) skip this step entirely.}
+\end{frame}
+
+\begin{frame}{Backup: Cold Start --- The Solutions}
+\note{
+% -- NARRATE: Mitigation strategies organized by effectiveness
+Pre-warming keeps instances hot. Model caching avoids re-downloading.
+Serialized engines skip compilation. Keep-alive prevents scale-to-zero.
+
+% -- FLEX: [OPTIONAL] Pull alongside the Cold Start Problem slide
+[OPTIONAL] Pair with the previous backup for a complete cold start module.
+}
+\small
+\textbf{Cold Start Mitigations:}
+
+\vspace{0.1cm}
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lp{4cm}r@{}}
+  \toprule
+  \textbf{Strategy} & \textbf{How It Works} & \textbf{Savings} \\
+  \midrule
+  \textbf{Pre-warming} & Keep $N$ instances always hot & 100\% (no cold start) \\
+  \textbf{Model caching} & Cache weights on local NVMe SSD & 80\% of load time \\
+  \textbf{Serialized engines} & Pre-compiled TensorRT plans & Skip 30--120 s compile \\
+  \textbf{Keep-alive} & Never scale to zero & 100\% (no cold start) \\
+  \textbf{Predictive scaling} & Scale up before traffic spike & Depends on prediction \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\mlsysconcept{Trade-off:}{Pre-warming and keep-alive eliminate cold start but cost money during idle periods. Model caching is the best compromise for bursty traffic.}
+\end{frame}
+
+\begin{frame}{Backup: Tail at Scale --- Hedged Requests Worked Example}
+\note{
+% -- NARRATE: Concrete hedged request calculation
+Service time: 5 ms (p50), 50 ms (p99). Without hedging: p99 = 50 ms.
+With hedging (send to 2 replicas): p99 = $P(\text{both slow}) = 0.01^2
+= 0.0001$. Effective p99 drops from 50 ms to approximately 10 ms.
+Cost: 2x requests but 5x better tail.
+
+% -- FLEX: [OPTIONAL] Pull for deeper Tail at Scale discussion
+[OPTIONAL] Use if the war story generated strong student interest.
+}
+\small
+Use if students want to calculate hedged request improvements.\\
+\footnotesize
+\textbf{Without hedging:}\\
+$P(\text{slow}) = 0.01$. p99 = 50 ms.\\[0.1cm]
+\textbf{With hedging (2 replicas):}\\
+$P(\text{both slow}) = 0.01^2 = 0.0001$\\
+Effective p99.99 = 50 ms. Effective p99 $\approx$ 10 ms.\\[0.1cm]
+\textbf{Cost:} 2$\times$ requests. \textbf{Benefit:} 5$\times$ better tail latency.\\
+Net: hedging is almost always worth it when tail latency matters.
 \end{frame}
 
 \end{document}

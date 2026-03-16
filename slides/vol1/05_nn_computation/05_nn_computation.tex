@@ -52,6 +52,11 @@
 % --- Section count for navigation (must match actual \section{} count) ---
 \setcounter{mlsystotalsections}{7}
 
+% --- Photo attribution ---
+% nvidia-gpu-die.jpg — NVIDIA GPU die shot (Wikimedia Commons)
+% ch05-backprop-memory-accounting.pdf — Backprop memory for 4-layer MLP
+% ch05-activation-comparison.pdf — ReLU vs Sigmoid vs GELU cost comparison
+
 \title{Neural Network Computation}
 \author{Vijay Janapa Reddi}
 \institute{Harvard University}
@@ -149,6 +154,58 @@ Throughout this course, colors carry meaning:
 % =============================================================================
 \section{Logic to Arithmetic}
 % =============================================================================
+
+\begin{frame}{Why Hardware Matters for Neural Computation}
+\note{
+% -- LINK: Students learned the Iron Law and DAM taxonomy in earlier chapters.
+% This slide grounds the transition from abstract equations to physical silicon.
+
+% -- NARRATE: Point to the GPU die photo.
+``This is a GPU die---billions of transistors organized into streaming
+multiprocessors. When you write a neural network, every multiply-accumulate
+operation maps to these physical structures. The die layout determines what
+is fast (dense MatMul) and what is slow (random memory access).''
+
+% -- ENGAGE: ``How many transistors does an H100 have?'' Cold-call.
+% [Expected answer: 80 billion. That is more than 10x a human brain's synapses.]
+
+% -- WARN: Students think of GPUs as abstract ``fast math boxes.''
+% Correct framing: the physical die layout---memory controllers, cache
+% hierarchy, tensor cores---determines which operations are efficient.
+
+% -- FLEX: [OPTIONAL] Sets the visual tone for the chapter.
+% IF SHORT: Show for 20 seconds with one sentence; move to the Silicon Contract.
+}
+
+\begin{columns}[T]
+  \begin{column}{0.40\textwidth}
+    \centering
+    \safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{nvidia-gpu-die.jpg}
+
+    \vspace{0.05cm}
+    {\scriptsize NVIDIA GPU die shot}
+  \end{column}
+  \begin{column}{0.56\textwidth}
+    \footnotesize
+    \textbf{Neural computation is physical computation.}
+
+    \vspace{0.1cm}
+    Every operation maps to silicon:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textbf{Tensor Cores}: Dense MatMul at peak throughput
+      \item \textbf{CUDA Cores}: Element-wise ops (ReLU, add)
+      \item \textbf{HBM Controllers}: Weight and activation traffic
+      \item \textbf{L2 Cache}: Reuse between layers
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{crimson}
+    {\scriptsize The die layout determines what is fast (dense MatMul: 80--95\% util.) and what is slow (random access: $<$10\%).}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
 
 \begin{frame}{The Silicon Contract}
 \note{
@@ -422,18 +479,48 @@ Ask: ``Which layer would you optimize first?''}
 % =============================================================================
 
 \begin{frame}{Activation Functions: Math Meets Silicon}
-\note{[3 min] Three functions, same job (introduce nonlinearity), vastly
-different hardware costs. Sigmoid needs $\sim$10K transistors (exp, division);
-ReLU needs $\sim$10 (one comparison). The 1,000$\times$ gap drove the
-industry shift. Key insight: activation choice is both mathematical and
-architectural. Common error: students think sigmoid is ``better'' because
-it is bounded.}
+\note{
+% -- LINK: Students just saw the MNIST architecture. Activations are the
+% nonlinear switches between layers---their cost determines hardware efficiency.
+
+% -- NARRATE: Walk through the diagram, then point to the cost table.
+``Three functions, same job: introduce nonlinearity. But wildly different
+hardware costs. Sigmoid requires exponentiation and division---about 10,000
+transistors. ReLU is a single comparison: 10 transistors. That 1,000x gap
+drove the industry shift from sigmoid to ReLU.''
+
+% -- ENGAGE: ``If GELU costs 14x more FLOPs than ReLU, why do Transformers
+% use GELU?'' Give 15 seconds. [Expected answer: GELU has smoother gradients
+% near zero, which matters for attention---the cost is paid because the
+% accuracy benefit justifies it for compute-bound Transformer workloads.]
+
+% -- WARN: Students think sigmoid is ``better'' because it is bounded [0,1].
+% Correct framing: bounded activations cause vanishing gradients in deep
+% networks (next slide). The unbounded positive range of ReLU is a feature.
+
+% -- FLEX: [CORE] Activation cost comparison is quantitative and foundational.
+% IF SHORT: Focus on the ReLU vs sigmoid cost gap; skip GELU detail.
+}
 
 % --- Full-width image ---
 \centering
-\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{ch05-activation-functions.pdf}
+\safeimg[width=0.88\textwidth,height=3.2cm,keepaspectratio]{ch05-activation-functions.pdf}
 
-\vspace{0.1cm}
+\vspace{0.05cm}
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}llrrll@{}}
+  \toprule
+  \textbf{Function} & \textbf{Formula} & \textbf{FLOPs/elem} & \textbf{Transistors} & \textbf{Gradient} & \textbf{Used In} \\
+  \midrule
+  \textbf{Sigmoid} & $1/(1+e^{-z})$ & $\sim$7 & $\sim$10K & $\leq 0.25$ & Legacy \\
+  \textbf{Tanh} & $(e^z - e^{-z})/(e^z + e^{-z})$ & $\sim$7 & $\sim$10K & $\leq 1.0$ & RNNs \\
+  \textcolor{datastroke}{\textbf{ReLU}} & $\max(0, z)$ & \textcolor{datastroke}{\textbf{1}} & \textcolor{datastroke}{\textbf{$\sim$10}} & 0 or 1 & CNNs \\
+  \textbf{GELU} & $z \cdot \Phi(z)$ & $\sim$14 & $\sim$5K & smooth & Transformers \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.05cm}
 \mlsysconcept{Engineering choice:}{ReLU dominates because $\max(0,x)$ is 1,000$\times$ cheaper than $e^{-z}$ on silicon.}
 
 \end{frame}
@@ -618,6 +705,60 @@ Ask: ``Why can't we just recompute activations instead of storing them?''
 
 \vspace{0.1cm}
 \mlsysinsight{Key distinction:}{Backprop \emph{computes} gradients; gradient descent \emph{applies} updates---they are not the same.}
+
+\end{frame}
+
+\begin{frame}{Backprop Memory Accounting: MNIST MLP}
+\note{
+% -- LINK: Students just saw the forward/backward diagram. This slide makes
+% the memory cost concrete with exact numbers for the MNIST 4-layer MLP.
+
+% -- NARRATE: Walk through each row of the table.
+``Let us account for every byte. Forward pass stores activations at each
+layer boundary: 128 neurons times 4 bytes = 512 bytes for Layer 1 output.
+Across all layers: 808 bytes of activations. Backward pass needs these
+activations plus the gradients for each weight matrix. Total: 427 KB
+weights plus 427 KB gradients plus 808 bytes activations. At batch 32,
+activations scale to 25 KB---still small. But at GPT-2 scale, activations
+dominate at 73\% of total memory.''
+
+% -- ENGAGE: ``What happens to activation memory if we double the batch
+% size from 32 to 64?'' Give 10 seconds.
+% [Expected answer: activation memory doubles---it scales linearly with batch.]
+
+% -- WARN: Students think weights dominate memory. For small networks they
+% do. For deep networks (GPT-2: 48 layers), activations dwarf weights.
+% This scaling shift is the key insight.
+
+% -- FLEX: [CORE] Concrete memory accounting prepares students for Ch8.
+% IF SHORT: Show the table; emphasize the batch-size scaling rule.
+}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\textbf{Memory accounting for MNIST MLP (784-128-64-10), batch=1, FP32:}
+
+\vspace{0.1cm}
+\begin{tabular}{@{}llrrr@{}}
+  \toprule
+  \textbf{Component} & \textbf{What} & \textbf{Elements} & \textbf{Bytes} & \textbf{Scaling} \\
+  \midrule
+  Weights (Layer 1) & $784 \times 128 + 128$ & 100,480 & 401,920 & Fixed \\
+  Weights (Layer 2) & $128 \times 64 + 64$ & 8,256 & 33,024 & Fixed \\
+  Weights (Layer 3) & $64 \times 10 + 10$ & 650 & 2,600 & Fixed \\
+  \midrule
+  \textbf{Total weights} & & \textbf{109,386} & \textbf{$\sim$427 KB} & Fixed \\
+  Gradients (all) & Same shape as weights & 109,386 & $\sim$427 KB & Fixed \\
+  Activations (fwd) & $128 + 64 + 10$ & 202 & 808 B & $\times$ batch \\
+  \midrule
+  \textbf{Training total} & batch=1 & & \textbf{$\sim$855 KB} & \\
+  \textbf{Training total} & batch=32 & & \textbf{$\sim$880 KB} & \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\footnotesize
+\mlsysinsight{Scaling rule:}{Activations scale with batch size. At MNIST scale, weights dominate. At GPT scale, activations are 73\% of memory.}
 
 \end{frame}
 
@@ -824,6 +965,70 @@ Ask: ``If you could cut inference to 10 ms, would you meet the budget?''
 
 \vspace{0.1cm}
 \mlsysalert{Key:}{The model is not the system---the complete pipeline determines user experience.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: Quantitative Exercise ---
+\begin{frame}{Your Turn: MobileNetV2 Inference Analysis}
+\note{
+% -- LINK: Students just saw the inference pipeline and that the model is
+% only 36\% of total latency. This exercise tests whether they can diagnose
+% the compute vs memory bottleneck for a real model.
+
+% -- NARRATE: Present the problem (30s). Individual work (60s).
+``MobileNetV2: 300 million MACs, batch=1. H100 at 989 TFLOPS peak FP16.
+What is the theoretical inference time? Why is actual time 100x slower?''
+
+% -- ENGAGE: Students calculate individually (60s), then compare.
+% Theoretical: 300M MACs / 989 TFLOPS = 0.3 $\mu$s. Actual: ~30 $\mu$s.
+% The gap: MobileNetV2 has arithmetic intensity ~2 FLOPs/byte. The H100
+% ridge point is ~295 FLOPs/byte. MobileNetV2 is deeply memory-bound---
+% the GPU waits for data, not math.
+
+% -- WARN: Students will divide FLOPs by peak throughput and declare victory.
+% Correct framing: peak throughput assumes compute-bound. MobileNetV2 is
+% memory-bound, so bandwidth (3.35 TB/s) is the constraint, not TFLOPS.
+% IF STUCK: ``What is MobileNetV2's arithmetic intensity?''
+
+% -- FLEX: [CORE] This exercise connects inference to the roofline model.
+% IF AHEAD: ``What batch size would make MobileNetV2 compute-bound on H100?''
+% IF SHORT: Show the solution immediately; emphasize the memory-bound insight.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\small\bfseries Diagnose the Bottleneck}
+
+    \vspace{0.15cm}
+    \textbf{MobileNetV2}: 300M MACs, batch=1\\
+    \textbf{H100}: 989 TFLOPS (FP16), 3.35 TB/s HBM3
+
+    \vspace{0.1cm}
+    \textbf{Calculate:}
+    \begin{enumerate}\setlength\itemsep{0pt}
+      \item Theoretical inference time from peak TFLOPS
+      \item Arithmetic intensity (FLOPs/byte)
+      \item Is MobileNetV2 compute-bound or memory-bound?
+    \end{enumerate}
+
+    {\footnotesize\textcolor{midgray}{(60 seconds --- then compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Solution:}\\[0.05cm]
+    {\footnotesize
+    Peak: $300\text{M} / 989\text{T} = $ \textbf{0.3 $\mu$s}\\
+    Actual: $\sim$\textbf{30 $\mu$s} (100$\times$ slower!)\\[0.05cm]
+    AI $\approx 2$ FLOPs/byte\\
+    H100 ridge: 295 FLOPs/byte\\[0.05cm]
+    \textcolor{errorstroke}{\textbf{Deeply memory-bound:}}\\
+    GPU starves waiting for data.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
 
 \end{frame}
 
@@ -1094,6 +1299,67 @@ Use if students want to verify the MNIST MAC count.\\small Layer 1 ($784 \times 
 \note{Use for additional depth or if students need alternative explanation.}
 \small
 Use if students ask ``can we recompute activations instead of storing them?''\\small Yes --- gradient checkpointing saves activations only at $\sqrt{L}$ layer boundaries. Recomputes the rest during backward pass.\\ Trade: $\sim$33\% more compute for up to 10$\times$ memory reduction.\\ Covered in detail in the Training chapter.
+\end{frame}
+
+\begin{frame}{Backup: The 2012 ImageNet Moment}
+\note{
+% -- NARRATE: War story connecting neural computation to industry impact.
+% Use when students question ``why does this matter?''
+
+% -- FLEX: [OPTIONAL] Motivational backup for skeptical audiences.
+}
+\footnotesize
+\textbf{War Story: How Neural Computation Changed an Industry}
+
+\vspace{0.1cm}
+In 2012, AlexNet won ImageNet with 15.3\% error (vs.\ 26.2\% for the runner-up). The compute budget: 2 GTX 580 GPUs training for 5--6 days.
+
+\vspace{0.05cm}
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  \textbf{Year} & \textbf{Model} & \textbf{Error} & \textbf{GPU-Days} \\
+  \midrule
+  2011 & SIFT + SVM & 26.2\% & 0 (CPU only) \\
+  2012 & AlexNet & 15.3\% & $\sim$12 \\
+  2015 & ResNet-152 & 3.6\% & $\sim$200 \\
+  2020 & ViT-L/16 & 1.8\% & $\sim$2,500 \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.05cm}
+\footnotesize
+\begin{mlsyscard}{crimson}
+{\scriptsize Every 10$\times$ improvement in error required $\sim$100$\times$ more compute. The 1,092$\times$ explosion was just the beginning.}
+\end{mlsyscard}
+\end{frame}
+
+\begin{frame}{Backup: Numerical Instability Zoo}
+\note{
+% -- NARRATE: Reference table for common training failures.
+% Use when students encounter NaN/Inf during assignments.
+
+% -- FLEX: [OPTIONAL] Debugging reference for lab sessions.
+}
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lllp{4cm}@{}}
+  \toprule
+  \textbf{Symptom} & \textbf{Cause} & \textbf{Layer} & \textbf{Fix} \\
+  \midrule
+  Loss $\to$ NaN & Gradient overflow & Any & Gradient clipping, BF16 \\
+  Loss plateaus & Vanishing gradients & Deep sigmoid & Switch to ReLU \\
+  Weights $\to$ 0 & Dead neurons & ReLU layers & Leaky ReLU, lower LR \\
+  Loss oscillates & LR too high & Optimizer & Reduce $\alpha$ by 10$\times$ \\
+  OOM crash & Activation memory & Large batch & Reduce batch, checkpointing \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{errorstroke}
+{\footnotesize \textbf{Debugging rule}: Neural network bugs are silent---the code runs, the math fails. Always monitor loss curves and gradient norms during training.}
+\end{mlsyscard}
 \end{frame}
 
 \end{document}

@@ -779,35 +779,32 @@ IF SHORT: Focus on the in-place pitfall---it is the most common bug.
 
 \end{frame}
 
-\begin{frame}{Autograd: Code Walkthrough}
+\begin{frame}{Autograd: Worked Example $y = x^2 + 3x$}
 \note{
 % -- LINK: What prior concept connects to this slide
 The previous slide showed the tape mechanism visually. This slide
-traces it through concrete PyTorch code.
+traces a richer function through the computation graph with concrete values.
 
 % -- NARRATE: What to SAY while showing this slide
-Point to the code: ``Three lines build the tape: \texttt{x} with
-\texttt{requires\_grad=True}, then \texttt{y = x * 2} records
-MulBackward, then \texttt{z = y + 1} records AddBackward. Calling
-\texttt{z.backward()} traverses in reverse: $\partial z / \partial y = 1$,
-$\partial y / \partial x = 2$, so $\partial z / \partial x = 2$.''
-Point to the table: ``Each step stores a value and computes a gradient.
-After backward, the tape is destroyed and memory freed.''
+``We compute $y = x^2 + 3x$ at $x = 2$. The tape records: \texttt{a = x * x}
+(PowBackward), \texttt{b = 3 * x} (MulBackward), \texttt{y = a + b}
+(AddBackward). Forward: $a = 4$, $b = 6$, $y = 10$. Backward traverses
+in reverse: $\partial y/\partial a = 1$, $\partial a/\partial x = 2x = 4$.
+$\partial y/\partial b = 1$, $\partial b/\partial x = 3$. Total:
+$\partial y/\partial x = 4 + 3 = 7$. Verify: $dy/dx = 2x + 3 = 7$.''
 
 % -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``If we change the code to \texttt{y = x * 3} and \texttt{z = y + 5},
-what is \texttt{x.grad}?'' Give 15 seconds.
-[Expected answer: 3---the chain rule gives $\partial z / \partial x = 3$.]
+Ask: ``What is x.grad if we change to $y = x^3 + 2x$ at $x = 2$?''
+Give 15 seconds. [Expected answer: $3x^2 + 2 = 14$.]
 
 % -- WARN: What students will get wrong on THIS topic
 Common error: students think the tape persists across iterations.
 Correct framing: the tape is rebuilt every forward pass and destroyed
-after every backward pass. This is why PyTorch is ``define-by-run''---
-the graph can change every iteration.
+after every backward pass. This is ``define-by-run.''
 
-% -- FLEX: [OPTIONAL] Reinforces the tape with a concrete example.
-[OPTIONAL] If students already understand the tape, move quickly.
-IF SHORT: Show the code for 30 seconds; state that the tape is transient.
+% -- FLEX: [CORE] This concrete trace makes autograd tangible.
+[CORE] Students must trace through at least one example before assignments.
+IF SHORT: Show the code; emphasize that the result matches calculus exactly.
 }
 
 \small
@@ -815,39 +812,42 @@ IF SHORT: Show the code for 30 seconds; state that the tape is transient.
   \begin{column}{0.48\textwidth}
     \textbf{Forward: Build tape}
     \begin{mlsyscode}
-x = torch.tensor([1.0],
+x = torch.tensor([2.0],
     requires\_grad=True)
-y = x * 2  \textrm{\textcolor{midgray}{\footnotesize MulBackward}}
-z = y + 1  \textrm{\textcolor{midgray}{\footnotesize AddBackward}}
+a = x * x     \textrm{\textcolor{midgray}{\scriptsize PowBackward}}
+b = 3 * x     \textrm{\textcolor{midgray}{\scriptsize MulBackward}}
+y = a + b     \textrm{\textcolor{midgray}{\scriptsize AddBackward}}
     \end{mlsyscode}
 
-    \vspace{0.15cm}
+    \vspace{0.1cm}
     \textbf{Backward: Traverse}
     \begin{mlsyscode}
-z.backward()
-print(x.grad)  \textrm{\textcolor{midgray}{\footnotesize tensor([2.])}}
+y.backward()
+print(x.grad) \textrm{\textcolor{midgray}{\scriptsize tensor([7.])}}
     \end{mlsyscode}
+
+    \vspace{0.05cm}
+    {\footnotesize Verify: $\frac{dy}{dx} = 2x + 3 = 2(2) + 3 = 7$ \checkmark}
   \end{column}
   \begin{column}{0.48\textwidth}
-    \vspace{0.2cm}
+    \vspace{0.1cm}
     {\footnotesize
-    \renewcommand{\arraystretch}{1.15}
-    \begin{tabular}{@{}lll@{}}
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}llll@{}}
       \toprule
-      \textbf{Step} & \textbf{Value} & \textbf{Grad} \\
+      \textbf{Node} & \textbf{Fwd} & \textbf{Local $\partial$} & \textbf{Chain} \\
       \midrule
-      $x$     & 1.0 & --- \\
-      $y = x \times 2$  & 2.0 & --- \\
-      $z = y + 1$ & 3.0 & 1.0 \\
-      $\partial z/\partial y$ & --- & 1.0 \\
-      $\partial z/\partial x$ & --- & \textbf{2.0} \\
+      $x$       & 2.0 & --- & \textbf{7.0} \\
+      $a = x^2$ & 4.0 & $2x = 4$ & $1 \times 4$ \\
+      $b = 3x$  & 6.0 & $3$ & $1 \times 3$ \\
+      $y = a+b$ & 10.0 & $1, 1$ & seed \\
       \bottomrule
     \end{tabular}
     }
 
-    \vspace{0.15cm}
+    \vspace{0.1cm}
     \begin{mlsyscard}{datastroke}
-    {\footnotesize Tape destroyed after \texttt{backward()}---memory freed for next iteration.}
+    {\scriptsize Tape destroyed after \texttt{backward()}. Rebuilt next iteration---graph can change dynamically.}
     \end{mlsyscard}
   \end{column}
 \end{columns}
@@ -1162,6 +1162,82 @@ class MLP(nn.Module):
 
 model = MLP()
     \end{mlsyscode}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{nn.Module Tree: ResNet-18}
+\note{
+% -- LINK: Students just saw the three nn.Module principles. This slide
+% shows what the module tree looks like for a real architecture---ResNet-18.
+
+% -- NARRATE: Walk through the tree structure.
+``ResNet-18 has a root module containing 4 sequential blocks, each with
+2 BasicBlock sub-modules, each with 2 Conv2d layers plus BatchNorm and
+a skip connection. Total: 60 sub-modules, 11.7M parameters.
+When you call \texttt{model.parameters()}, the framework recursively
+traverses this tree and returns all 11.7M parameters in one call.''
+
+% -- ENGAGE: ``How many lines of code would it take to manually list
+% all 60 sub-modules?'' Give 10 seconds.
+% [Expected answer: at least 60 lines. The tree structure automates this.]
+
+% -- WARN: Students think nn.Module is just a container.
+% Correct framing: it is a recursive tree with automatic parameter
+% discovery, mode switching, and serialization. The tree structure is
+% what makes frameworks scalable to models with thousands of layers.
+
+% -- FLEX: [OPTIONAL] Concrete example of the module tree pattern.
+% IF SHORT: Show the table for 20 seconds; emphasize the recursive discovery.
+}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.0}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{ResNet-18 Module Tree:}
+
+    \vspace{0.1cm}
+    \begin{mlsyscode}
+ResNet
+├── conv1 (9,408 params)
+├── bn1 (128 params)
+├── layer1 [BasicBlock x2]
+│   ├── conv1 (36,864)
+│   ├── bn1 (128)
+│   ├── conv2 (36,864)
+│   └── bn2 (128)
+├── layer2 [BasicBlock x2]
+├── layer3 [BasicBlock x2]
+├── layer4 [BasicBlock x2]
+└── fc (5,130 params)
+    \end{mlsyscode}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \vspace{0.2cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Component} & \textbf{Params} \\
+      \midrule
+      conv1 + bn1 & 9,536 \\
+      layer1 (2 blocks) & 147,968 \\
+      layer2 (2 blocks) & 525,568 \\
+      layer3 (2 blocks) & 2,099,712 \\
+      layer4 (2 blocks) & 8,394,752 \\
+      fc & 5,130 \\
+      \midrule
+      \textbf{Total} & \textbf{11.7M} \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize \textbf{72\% of params} in layer4. Deeper layers dominate---just like MNIST Layer 1.}
+    \end{mlsyscard}
   \end{column}
 \end{columns}
 
@@ -1714,20 +1790,71 @@ a new tensor and records the AddBackward node).
 Use if students encounter in-place operation errors.\\small In-place ops (\texttt{x += 1}) modify the tensor without creating a new node on the tape.\\ The backward pass cannot compute the correct gradient because the original value is lost.\\ Fix: use \texttt{x = x + 1} (creates a new tensor and records the AddBackward node).
 \end{frame}
 
-\begin{frame}{Backup: Compilation Benefit Extended Example}
+\begin{frame}{Backup: Eager vs Graph Mode Breakeven}
 \note{
-% -- NARRATE: Use if students want more practice with the compilation formula.
-Benefit $= \frac{N_{\text{prod}} \times (T_{\text{eager}} - T_{\text{compiled}})}{T_{\text{compile}} + N_{\text{dev}} \times T_{\text{compile}}}$.
-When Benefit $> 1$: compile. When $< 1$: stay eager.
-Research (many code changes, few images): stay eager.
-Production (few changes, millions of images): compile.
+% -- NARRATE: Use for additional quantitative practice with dispatch overhead.
 
-% -- FLEX: [OPTIONAL] Backup slide for additional compilation practice.
+% -- FLEX: [OPTIONAL] Backup exercise for students who want more practice.
 }
-\small
-Use if students want more practice with the compilation formula.\\small Benefit $= \frac{N_{\text{prod}} \times (T_{\text{eager}} - T_{\text{compiled}})}{T_{\text{compile}} + N_{\text{dev}} \times T_{\text{compile}}}$
+\footnotesize
+\textbf{Exercise:} Eager mode runs 1000 ops with 0.1 ms overhead each.
+Graph mode: 50 ms compile + 1000 ops at 0.01 ms each.
 
- When Benefit $> 1$: compile. When $< 1$: stay eager.\\ Research (many code changes, few images): stay eager.\\ Production (few changes, millions of images): compile.
+\vspace{0.1cm}
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Per iteration:}\\
+    Eager: $1000 \times 0.1 = $ \textbf{100 ms}\\
+    Graph: $1000 \times 0.01 = $ \textbf{10 ms}\\
+    Savings per iteration: \textbf{90 ms}
+
+    \vspace{0.1cm}
+    \textbf{Breakeven:}\\
+    $50\text{ ms} / 90\text{ ms} = 0.56$ iterations\\
+    \textbf{Graph mode wins after just 1 iteration!}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize But if code changes 10$\times$ (recompiles):\\
+    Cost: $10 \times 50 = 500$ ms\\
+    Breakeven: $500 / 90 \approx 6$ iterations\\[0.1cm]
+    \textbf{Key:} Recompilation cost grows linearly with code changes.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Backup: Theano to PyTorch --- The Framework Shift}
+\note{
+% -- NARRATE: War story about framework migration.
+% Use when students ask ``why did the industry switch frameworks?''
+
+% -- FLEX: [OPTIONAL] Historical context for framework evolution.
+}
+\footnotesize
+\textbf{War Story: How Define-by-Run Won}
+
+\vspace{0.1cm}
+In 2016, most ML research used TensorFlow 1.x (static graphs). Debugging required \texttt{tf.Session}, \texttt{tf.placeholder}, and opaque graph errors. PyTorch launched with eager execution: standard Python debugging, \texttt{pdb} breakpoints, print statements.
+
+\vspace{0.1cm}
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lrr@{}}
+  \toprule
+  & \textbf{2017 (NeurIPS papers)} & \textbf{2023 (NeurIPS papers)} \\
+  \midrule
+  TensorFlow & 75\% & 15\% \\
+  PyTorch & 20\% & 80\% \\
+  JAX & 0\% & 5\% \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\footnotesize
+\begin{mlsyscard}{crimson}
+{\scriptsize \textbf{Lesson}: Developer productivity (debugging speed) beat execution performance. TensorFlow 2.0 adopted eager mode---validating PyTorch's design choice.}
+\end{mlsyscard}
 \end{frame}
 
 \end{document}

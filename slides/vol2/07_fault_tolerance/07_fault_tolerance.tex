@@ -9,7 +9,8 @@
 %   - young-daly-tradeoff.pdf     - checkpoint-timeline.pdf
 %   - elastic-training.pdf        - training-vs-serving-ft.pdf
 %   - graceful-degradation.pdf    - circuit-breaker-states.pdf
-%   - observability-pillars.pdf
+%   - observability-pillars.pdf   - fault-taxonomy.pdf
+%   - bathtub-curve.pdf           - opt175b-failure-timeline.pdf
 % =============================================================================
 \documentclass[aspectratio=169, 12pt]{beamer}
 \usepackage{../../assets/beamerthememlsys}
@@ -53,7 +54,7 @@
 }
 
 % --- Section count for navigation ---
-\setcounter{mlsystotalsections}{8}
+\setcounter{mlsystotalsections}{9}
 
 \title{Fault Tolerance and Reliability}
 \author{Vijay Janapa Reddi}
@@ -193,6 +194,88 @@ IF AHEAD: ``What monitoring signal would catch silent corruption?''
 
 \vspace{0.15cm}
 \mlsysinsight{Key:}{Hard failures are easy. Silent data corruption is the real threat at scale.}
+
+\end{frame}
+
+\begin{frame}{Hardware Fault Taxonomy}
+\note{
+% -- LINK: What prior concept connects to this slide
+The failure spectrum gave three broad categories. This slide expands the hardware fault taxonomy into four precise types with quantitative fault rates.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the table: ``Transient faults: cosmic ray bit flips, 1 per 10K GPU-hours. They vanish on retry but corrupt results silently. Permanent faults: dead GPU, dead NIC --- obvious and detectable. Intermittent faults: the worst --- a GPU that works 99\% of the time but produces wrong results under thermal stress. Byzantine faults: a component that lies --- sends incorrect data while appearing healthy. At scale, all four types occur daily.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``At 10,000 GPUs, how many transient faults per day?'' Expected: 10,000 / 10,000 = ~1 per hour, or ~24 per day.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think transient means harmless. A single bit flip in a gradient accumulator can cause a NaN that propagates through the entire model within minutes.
+
+% -- FLEX: [CORE] Establishes precise vocabulary for the rest of the chapter.
+IF SHORT: Focus on transient and intermittent only; skip Byzantine.
+}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}llrl@{}}
+  \toprule
+  \textbf{Fault Type} & \textbf{Behavior} & \textbf{Rate} & \textbf{Detection} \\
+  \midrule
+  \textbf{Transient}    & Vanishes on retry (bit flip)         & 1 per 10K GPU-h  & \textcolor{errorstroke}{Silent} \\
+  \textbf{Permanent}    & Component dead (GPU, NIC, disk)      & 1 per 50K GPU-h  & \textcolor{datastroke}{ECC/heartbeat} \\
+  \textbf{Intermittent} & Works 99\% of the time                & 1 per 25K GPU-h  & \textcolor{errorstroke}{Very hard} \\
+  \textbf{Byzantine}    & Sends incorrect data while ``healthy'' & 1 per 100K GPU-h & \textcolor{errorstroke}{Requires voting} \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{errorstroke}
+{\footnotesize At \textbf{10K GPUs}: $\sim$24 transient faults/day, $\sim$5 permanent/day, $\sim$10 intermittent/day. Every category occurs \textbf{daily} at scale.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Software Faults and the Bathtub Curve}
+\note{
+% -- LINK: What prior concept connects to this slide
+Hardware faults are physics. Software faults are engineering --- and they cause 30--40\% of all ML training interruptions.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the bathtub curve: ``Left: infant mortality --- configuration errors, library version mismatches, driver bugs. These dominate the first 24--48 hours of a new training run. Middle: the stable period with random hardware failures. Right: wear-out --- memory leaks, log file accumulation, thermal degradation. The economic question: at what point does fault tolerance investment pay for itself? If your cluster costs \$10M/month and 30\% of time is wasted on failures, fault tolerance worth \$3M/month in recovered compute.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which phase of the bathtub curve do most student projects experience?'' Expected: infant mortality --- most projects never run long enough to see wear-out.
+
+% -- WARN: What students will get wrong on THIS topic
+Students focus exclusively on hardware. Software faults (OOM from batch accumulation, NCCL timeout from network jitter, checkpoint corruption from race conditions) are more common and harder to reproduce.
+
+% -- FLEX: [OPTIONAL] Supplements the hardware taxonomy.
+IF SHORT: State ``software causes 30--40\% of failures'' and skip the bathtub curve.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \safeimg[width=\textwidth,height=3.8cm,keepaspectratio]{bathtub-curve.pdf}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \textbf{Failure causes in production:}
+    \vspace{0.05cm}
+    {\footnotesize
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Software bugs: \textbf{30--40\%}
+      \item Config errors: \textbf{20--30\%}
+      \item Hardware: \textbf{15--25\%}
+      \item Network: \textbf{10--15\%}
+    \end{itemize}
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize\textbf{Economic case:} \$10M/month cluster $\times$ 30\% downtime = \textbf{\$3M/month} recoverable via fault tolerance.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
 
 \end{frame}
 
@@ -652,6 +735,60 @@ IF SHORT: Give only 45 seconds, then reveal immediately.
     Every 60 min: $\approx$13\% overhead\\
     Every 15 min: $\approx$36\% overhead\\
     Every 49 min: \textcolor{datastroke}{\textbf{8\% overhead}}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: Young-Daly at Scale ---
+\begin{frame}{Your Turn: Young-Daly at 10K GPUs}
+\note{
+% -- LINK: What prior concept connects to this slide
+The previous exercise used 1,000 GPUs. This exercise pushes to 10K GPUs where the math becomes more dramatic.
+
+% -- NARRATE: What to SAY while showing this slide
+``A 10K-GPU cluster with per-GPU MTBF of 50,000 hours. System MTBF is 50,000/10,000 = 5 hours = 300 minutes. Checkpoint takes 5 minutes. Young-Daly: sqrt(2 * 5 * 300) = sqrt(3000) = 55 minutes. Wasted fraction: T\_w/(2 * tau) + tau/(2 * MTBF) = 5/110 + 55/600 = 4.5\% + 9.2\% = 13.7\%.'' Then: ``Nearly 14\% of your \$10M/month cluster is wasted on fault tolerance overhead. That is \$1.4M/month.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+After revealing 13.7\%, ask: ``How would you reduce this?'' Expected: reduce T\_w (async checkpointing: 5 min to 100 ms pause) or increase system MTBF (redundancy, better cooling).
+
+% -- WARN: What students will get wrong on THIS topic
+Students will forget to convert system MTBF from hours to minutes. Also, they often compute overhead as just T\_w/tau and miss the rework term tau/(2*MTBF).
+
+% -- FLEX: [CORE] This exercise quantifies the real cost of fault tolerance at scale.
+IF SHORT: Show the solution immediately with emphasis on the 13.7\% and \$1.4M numbers.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Young-Daly at Datacenter Scale}
+
+    \vspace{0.15cm}
+    \textbf{Setup:} 10,000 GPUs. Per-GPU MTBF: 50,000 h.\\
+    Checkpoint write: 5 minutes.
+
+    \vspace{0.1cm}
+    \begin{enumerate}
+      \item System MTBF? \textcolor{midgray}{(MTBF/N)}
+      \item Optimal checkpoint interval $\tau$?
+      \item What fraction of time is wasted?
+    \end{enumerate}
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- then I will cold-call)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    MTBF$_{\text{sys}}$ = 50K/10K = \textbf{5 h} = 300 min\\
+    $\tau = \sqrt{2 \times 5 \times 300} = $ \textbf{55 min}\\[0.05cm]
+    Waste = $\frac{5}{110} + \frac{55}{600} = $ \textbf{13.7\%}\\[0.1cm]
+    At \$10M/month:\\
+    \textcolor{errorstroke}{\textbf{\$1.4M/month in FT overhead}}
     }
     \end{mlsyscard}
   \end{column}
@@ -1170,7 +1307,8 @@ IF SHORT: Focus on async checkpointing win (12\% to 3\%).
     \begin{itemize}\setlength\itemsep{0pt}
       \item 992 A100 GPUs, 2 months
       \item 35+ significant hardware failures
-      \item System MTBF $<$ 24 hours
+      \item System MTBF $\approx$ \textbf{3 hours}
+      \item Failure every $\sim$3 h on average
     \end{itemize}
 
     \vspace{0.1cm}
@@ -1257,6 +1395,44 @@ recovery strategy.
     \mlsysconcept{Lesson:}{Software masks hardware volatility.}
   \end{column}
 \end{columns}
+
+\end{frame}
+
+\begin{frame}{War Story: Inside the OPT-175B Failure Log}
+\note{
+% -- LINK: What prior concept connects to this slide
+The case study showed OPT-175B's headline numbers. This slide dives into the actual failure log to show what training at scale really looks like.
+
+% -- NARRATE: What to SAY while showing this slide
+``Meta published the full training log for OPT-175B --- one of the most transparent accounts of large-scale training ever released. Here is what happened week by week.'' Walk through the timeline: ``Week 1: 3 GPU failures, 2 loss spikes requiring rollback. Week 2: NaN gradients from suspected bit flip --- rolled back to last known good checkpoint. Week 3: NCCL timeout from network switch failure --- 8 hours of lost training. Week 4: manual learning rate intervention to stabilize a diverging run. Across 2 months: 112 manual interventions by on-call engineers.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Would you want to be the on-call engineer for this training run?'' Then: ``What would have reduced the 112 manual interventions?'' Expected: automated loss spike detection, automated checkpoint rollback, circuit breakers for NaN propagation.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think large-scale training is automated end-to-end. OPT-175B required 24/7 human babysitting. Automation of fault detection and recovery is still an active research area.
+
+% -- FLEX: [CORE] Makes the cost of fault tolerance viscerally real.
+IF SHORT: Show the summary numbers and the timeline diagram only.
+}
+
+\centering
+\safeimg[width=0.92\textwidth,height=3.8cm,keepaspectratio]{opt175b-failure-timeline.pdf}
+
+\vspace{0.1cm}
+\footnotesize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lrl@{}}
+  \toprule
+  \textbf{Failure Type} & \textbf{Count} & \textbf{Avg Recovery} \\
+  \midrule
+  GPU hardware failures    & 35+   & 15--30 min (checkpoint rollback) \\
+  Loss spikes / NaN        & 20+   & 1--4 h (manual LR adjustment) \\
+  NCCL timeouts            & 15+   & 30--60 min (restart) \\
+  Manual interventions     & \textbf{112} & Human-in-the-loop 24/7 \\
+  \bottomrule
+\end{tabular}
+\mlsyscite{Zhang et al., ``OPT: Open Pre-trained Transformers,'' 2022}
 
 \end{frame}
 
@@ -1511,12 +1687,7 @@ Key insight: halving T\_w reduces interval by sqrt(2) = 1.4x, not 2x.
 
 \begin{frame}{Backup: Async Checkpointing Deep Dive}
 \note{
-% -- NARRATE: What to SAY while showing this slide
-Three-phase async checkpoint: snapshot to pinned CPU memory (ms),
-background write to NVMe/PFS (seconds), async replication to remote
-(minutes). Training pause is Phase 1 only --- under 100 ms.
-OPT-175B: async reduced overhead from 12\% to 3\%.
-
+% -- NARRATE: Three-phase async checkpoint with OPT-175B numbers.
 % -- FLEX: [OPTIONAL] Use if students ask about async implementation details.
 }
 
@@ -1534,6 +1705,35 @@ OPT-175B: async reduced overhead from 12\% to 3\%.
 \vspace{0.1cm}
 \begin{mlsyscard}{datastroke}
 {\footnotesize OPT-175B: Async reduced checkpoint overhead from \textbf{12\% to 3\%} of training time.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Backup: Failure Detection Strategies}
+\note{
+% -- NARRATE: Comparison of failure detection mechanisms at scale.
+% -- FLEX: [OPTIONAL] Use when students ask about monitoring implementation.
+}
+
+\footnotesize
+\textbf{Detection latency determines recovery cost:}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}llrl@{}}
+  \toprule
+  \textbf{Method} & \textbf{Detects} & \textbf{Latency} & \textbf{Limitation} \\
+  \midrule
+  Heartbeat       & Hard failure    & 5--30 s   & Misses silent corruption \\
+  Gradient checksum & Bit flips     & Per-step  & 1--3\% compute overhead \\
+  Loss monitoring  & Training divergence & Minutes & Requires baseline \\
+  Peer voting      & Byzantine faults & Per-step & Requires 3$\times$ redundancy \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{routingstroke}
+{\scriptsize\textbf{OPT-175B used:} 5-minute heartbeat + manual loss monitoring. Llama 3 added automated gradient anomaly detection, reducing human interventions from 112 to $\sim$30 for a larger run.}
 \end{mlsyscard}
 
 \end{frame}

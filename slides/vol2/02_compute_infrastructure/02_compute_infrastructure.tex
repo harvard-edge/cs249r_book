@@ -54,7 +54,7 @@
 }
 
 % --- Section count for navigation ---
-\setcounter{mlsystotalsections}{7}
+\setcounter{mlsystotalsections}{8}
 
 \title{Compute Infrastructure}
 \author{Vijay Janapa Reddi}
@@ -337,6 +337,60 @@ IF SHORT: Highlight the NVLink and TF/W columns only.
 \begin{mlsyscard}{errorstroke}
 {\footnotesize \textbf{The Efficiency Wall}: Raw TFLOPS grew \textbf{236$\times$} (P100$\to$B200), but TFLOPS/Watt grew only \textbf{70$\times$}. The gap is what cooling and power infrastructure must absorb.}
 \end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Beyond GPUs: TPUs, Wafer-Scale, and Selection}
+\note{
+% -- LINK: GPU evolution showed NVIDIA's trajectory; this slide broadens the
+accelerator landscape to include the major alternatives students will encounter.
+
+% -- NARRATE: What to SAY while showing this slide
+``GPUs are dominant but not the only option. TPU v4: Google's custom ASIC, 275 TFLOPS
+BF16, connected via proprietary ICI at 4,800 Gbps --- 6x InfiniBand. Cerebras CS-2:
+an entire wafer as one chip, 850,000 cores, eliminates inter-chip communication
+entirely. Graphcore IPU: designed for sparse and dynamic graphs.''
+Point to the selection matrix: ``Choice depends on workload: dense LLM training
+favors GPUs/TPUs. Sparse models may benefit from IPUs. If your workload is
+entirely within one chip, Cerebras eliminates the network problem.''
+
+% -- ENGAGE: ``Why do most labs still choose GPUs despite alternatives?''
+Expected: ecosystem (CUDA, PyTorch), flexibility, and supply chain.
+
+% -- WARN: Students assume GPU is always optimal. Correct: for specific workloads
+(e.g., Google's internal models), TPUs achieve higher MFU due to ICI bandwidth.
+
+% -- FLEX: [OPTIONAL] Broadens perspective but is not load-bearing.
+IF SHORT: Name the three alternatives, state the ecosystem lock-in point.
+}
+
+\small
+\renewcommand{\arraystretch}{1.15}
+{\footnotesize
+\begin{tabular}{@{}lrrlr@{}}
+  \toprule
+  \textbf{Accelerator} & \textbf{BF16 TF} & \textbf{Mem BW} & \textbf{Interconnect} & \textbf{TDP} \\
+  \midrule
+  H100 (NVIDIA)  & 1,979  & 3,350 GB/s & NVLink: 900 GB/s  & 700 W \\
+  TPU v4 (Google) & 275   & 1,200 GB/s & ICI: 4,800 Gbps   & 170 W \\
+  CS-2 (Cerebras) & 1,840 & 20 PB/s (on-chip) & N/A (single wafer) & 23 kW \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.1cm}
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize \textbf{Selection criteria:} (1) Workload pattern (dense vs sparse), (2) Ecosystem (CUDA vs JAX vs custom), (3) Interconnect topology, (4) Supply chain and cost.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize \textbf{Lock-in risk:} GPU/CUDA dominates because of ecosystem, not hardware superiority. TPU ICI is 6$\times$ IB bandwidth.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
 
 \end{frame}
 
@@ -833,7 +887,8 @@ Answer: NVLink 900 GB/s vs IB 50 GB/s. Tensor parallelism must stay intra-node.
 {\Large\bfseries Quick Check}
 
 \vspace{0.6cm}
-{\large What is the 18$\\times$ bandwidth cliff,\\and why does it matter for parallelism?}
+{\large What is the 18$\times$ bandwidth cliff,}\\
+{\large and why does it matter for parallelism?}
 
 \vspace{0.5cm}
 {\normalsize\textcolor{midgray}{15 seconds --- then I will cold-call.}}
@@ -1022,6 +1077,66 @@ $$\eta_{\text{scale}} = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{
 
 \vspace{0.1cm}
 \mlsysalert{Amdahl at scale:}{The first 100 GPUs provide near-linear speedup. Beyond 2,000--4,000, marginal benefit per GPU approaches zero.}
+
+\end{frame}
+
+\begin{frame}{Your Turn: Node Memory Budget}
+\note{
+% -- LINK: Scaling efficiency showed diminishing returns; this exercise reveals
+WHY --- the per-GPU memory budget determines what fits on each node.
+
+% -- NARRATE: ``90 seconds. A 70B model with Adam optimizer. Calculate the memory
+per GPU.'' After pause: ``Parameters (FP16): 70B $\times$ 2 bytes = 140 GB.
+Gradients (FP16): 140 GB. Adam states (FP32): 70B $\times$ 12 bytes = 840 GB.
+Total: 1,120 GB. With 8 GPUs per node at 80 GB each = 640 GB. Does NOT fit
+on one node even with all 8 GPUs. Need at least 2 nodes (16 GPUs) or memory
+sharding (ZeRO). Activations add another 30--50 GB depending on batch size.''
+
+% -- ENGAGE: This IS the active learning moment.
+After revealing: ``What is the minimum number of 80 GB GPUs?'' Answer: 14 GPUs
+minimum (1,120 / 80), but you need headroom for activations, so 16--32 in practice.
+
+% -- WARN: Students forget Adam optimizer states (12 bytes/param) and gradients.
+They calculate only parameter memory (140 GB) and think 2 GPUs suffice.
+
+% -- FLEX: [CORE] Memory budgeting is the first step in any parallelism design.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Memory Budget: 70B Model}
+
+    \vspace{0.15cm}
+    Calculate per-node memory:
+    \begin{itemize}\setlength\itemsep{1pt}
+      \item {\footnotesize Parameters: 70B $\times$ 2 bytes (FP16)}
+      \item {\footnotesize Gradients: same as parameters}
+      \item {\footnotesize Adam optimizer: $m$ + $v$ + FP32 copy = 12 bytes/param}
+      \item {\footnotesize Activations: batch-dependent}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Does it fit on one 8-GPU node (640 GB)?}
+
+    \vspace{0.05cm}
+    {\footnotesize\textcolor{midgray}{(90 seconds)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Solution:}\\
+    Params: 140 GB\\
+    Gradients: 140 GB\\
+    Adam: 840 GB\\
+    \textbf{Total: 1,120 GB}\\[0.1cm]
+    8 GPUs $\times$ 80 GB = 640 GB\\
+    \textcolor{errorstroke}{\textbf{Does NOT fit!}}\\[0.05cm]
+    Need 16+ GPUs or ZeRO sharding.\\
+    + 30--50 GB activations.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
 
 \end{frame}
 
@@ -1416,33 +1531,36 @@ IF SHORT: State the central question and dismiss.
 \note{
 % -- NARRATE: Backup --- extended Roofline examples for different workloads.
 Use if students want more practice with arithmetic intensity classification.
-
 % -- FLEX: [OPTIONAL] Only show if time permits or students request it.
 }
 
 \footnotesize
+\textbf{Roofline Workload Placement Exercise:}
+
+\vspace{0.15cm}
 \renewcommand{\arraystretch}{1.15}
 \begin{tabular}{@{}lrrrl@{}}
   \toprule
-  \textbf{Workload} & \textbf{AI} & \textbf{H100 \%} & \textbf{B200 \%} & \textbf{Regime Shift?} \\
+  \textbf{Workload} & \textbf{AI (FLOP/byte)} & \textbf{H100 \%} & \textbf{B200 \%} & \textbf{Regime} \\
   \midrule
-  Embedding lookup  & 0.5   & $<$0.1\% & $<$0.1\% & No (always mem-bound) \\
-  Attention (B=1)   & 2     & 0.7\%    & 0.4\%    & No \\
-  Conv2D (ResNet)   & 150   & 51\%     & 27\%     & \textcolor{errorstroke}{\textbf{Yes}} \\
-  GEMM (4096$^2$)   & 1,365 & 100\%    & 100\%    & No (always compute-bound) \\
+  Embedding lookup  & 0.5   & $<$0.1\% & $<$0.1\% & Memory-bound (always) \\
+  Attention (B=1)   & 2     & 0.7\%    & 0.4\%    & Memory-bound \\
+  Conv2D (ResNet)   & 150   & 51\%     & 27\%     & \textcolor{errorstroke}{\textbf{Shifts!}} \\
+  GEMM (4096$^2$)   & 1,365 & 100\%    & 100\%    & Compute-bound (always) \\
   \bottomrule
 \end{tabular}
 
 \vspace{0.15cm}
-{\footnotesize Conv2D shifts from compute-bound on H100 to memory-bound on B200 as the ridge point rises.}
+{\footnotesize Conv2D shifts from compute-bound on H100 to memory-bound on B200 as the ridge point rises. Ridge point = $R_{\text{peak}} / \text{BW}_{\text{mem}}$.}
+
+\vspace{0.1cm}
+{\footnotesize \textbf{Exercise:} Place these three workloads on the H100 Roofline: attention (B=1), GEMM (B=256), embedding lookup. Which is memory-bound? Calculate arithmetic intensity for each.}
 
 \end{frame}
 
-\begin{frame}{Backup: HBM Generations Compared}
+\begin{frame}{Backup: HBM Generations and Memory Budget Reference}
 \note{
-% -- NARRATE: Backup --- HBM generation comparison. Use if students ask about
-the trajectory of memory bandwidth improvements across generations.
-
+% -- NARRATE: Backup --- HBM generation comparison and memory budget formulas.
 % -- FLEX: [OPTIONAL] Reference table only.
 }
 
@@ -1459,8 +1577,13 @@ the trajectory of memory bandwidth improvements across generations.
   \bottomrule
 \end{tabular}
 
-\vspace{0.15cm}
-{\footnotesize Each generation roughly doubles bandwidth while improving energy efficiency by 20--30\%.}
+\vspace{0.2cm}
+\textbf{Training Memory Budget (per GPU, no sharding):}\\
+{\footnotesize
+Params (FP16): $2N$ bytes \;\textbar\;
+Gradients (FP16): $2N$ bytes \;\textbar\;
+Adam ($m$+$v$+FP32): $12N$ bytes\\
+\textbf{Total: $16N$ bytes} + activations (batch-dependent, 30--100 GB for large models)}
 
 \end{frame}
 

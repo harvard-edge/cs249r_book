@@ -6,6 +6,7 @@
 %   - slurm-vs-k8s.pdf            - topology-hierarchy.pdf
 %   - elastic-training.pdf        - cost-optimization.pdf
 %   - scheduling-objectives.pdf   - ml-schedulers.pdf
+%   - hybrid-slurm-k8s.pdf        - queue-utilization-curve.pdf
 % =============================================================================
 \documentclass[aspectratio=169, 12pt]{beamer}
 \usepackage{../../assets/beamerthememlsys}
@@ -689,6 +690,48 @@ IF SHORT: Point to the crimson card and state the hybrid conclusion.
 
 \end{frame}
 
+\begin{frame}{Hybrid Architectures in Practice}
+\note{
+% -- LINK: What prior concept connects to this slide
+The comparison concluded with ``most organizations run both.'' This slide shows how hybrid Slurm+K8s actually works in production.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the diagram: ``Training jobs submit to Slurm via sbatch. Serving endpoints deploy on Kubernetes. The bridge is shared storage: trained models write checkpoints to a parallel file system or object store. A model registry tracks versions. K8s serving pods pull the latest checkpoint. The key challenge: resource partitioning. Training needs guaranteed, exclusive GPU access. Serving needs elastic autoscaling. Most organizations statically partition their cluster: 70\% Slurm (training), 30\% K8s (serving), with overflow policies.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What happens when the training partition is idle but serving needs more GPUs?'' Expected: without a bridge, those GPUs sit idle. Advanced setups use Slurm's ``power save'' mode or K8s cluster autoscaler to dynamically rebalance.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think you must choose one. In practice, the two systems serve fundamentally different workload patterns (batch vs. request-response) and coexist on the same physical cluster.
+
+% -- FLEX: [OPTIONAL] Extends the Slurm-vs-K8s comparison.
+IF SHORT: State the 70/30 partition pattern and shared storage bridge.
+}
+
+\centering
+\safeimg[width=0.92\textwidth,height=4.2cm,keepaspectratio]{hybrid-slurm-k8s.pdf}
+
+\vspace{0.1cm}
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \centering
+    \textbf{Slurm partition} (70\%)\\
+    {\scriptsize Batch training, gang scheduling,\\topology-aware placement}
+  \end{column}
+  \begin{column}{0.10\textwidth}
+    \centering
+    {\footnotesize Shared\\Storage}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \centering
+    \textbf{K8s partition} (30\%)\\
+    {\scriptsize Model serving, autoscaling,\\canary deployments}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
 % =============================================================================
 \section{Topology-Aware Scheduling}
 % =============================================================================
@@ -793,6 +836,59 @@ IF SHORT: Skip; the hierarchy slide is sufficient.
 
     \vspace{0.15cm}
     {\footnotesize Rail-optimized topologies further improve cross-rack AllReduce by dedicating each GPU rank to a specific spine switch.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: Topology Placement Exercise ---
+\begin{frame}{Your Turn: Topology-Aware vs.\ Random Placement}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just learned the bandwidth hierarchy and anti-pattern. This exercise makes them calculate the concrete cost of poor placement using the alpha-beta model.
+
+% -- NARRATE: What to SAY while showing this slide
+Read the problem. Give 90 seconds. Solution: ``Same pod: 8 AllReduce calls at 900 GB/s NVLink. Time = 8 * (alpha + 2GB/900) = 8 * 2.2 ms = 17.6 ms. Cross-pod: 8 AllReduce calls but at 12 GB/s cross-rack Ethernet. Time = 8 * (alpha + 2GB/12) = 8 * 167 ms = 1,336 ms. Ratio: 1,336/17.6 = 76x slower. Even with hierarchical AllReduce reducing inter-pod data, the 75x bandwidth gap between NVLink and cross-rack Ethernet is devastating for tensor-parallel workloads.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+After revealing the answer, ask: ``Would you accept a 2-hour queue wait to get same-pod placement vs. immediate cross-pod allocation?'' Expected: yes for training runs longer than a few hours, since the 76x communication penalty compounds.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will use InfiniBand (50 GB/s) for cross-pod. In many clusters, cross-rack traffic uses Ethernet (12 GB/s), not InfiniBand.
+
+% -- FLEX: [CORE] Quantifies the topology placement penalty.
+IF SHORT: Show the solution immediately and state the 76x number.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Calculate Placement Cost}
+
+    \vspace{0.15cm}
+    A 64-GPU job with 8-way tensor parallelism.\\
+    Each TP group does 8 AllReduce ops per step (2 GB each).
+
+    \vspace{0.1cm}
+    \begin{enumerate}
+      \item \textbf{Same pod}: All TP groups on NVLink (900 GB/s)
+      \item \textbf{Cross-pod}: TP groups span racks (12 GB/s)
+      \item What is the communication time ratio?
+    \end{enumerate}
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- use the $\alpha$-$\beta$ model)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    Same pod: $8 \times 2.2$ ms $=$ \textbf{17.6 ms}\\
+    Cross-pod: $8 \times 167$ ms $=$ \textbf{1,336 ms}\\[0.1cm]
+    Ratio: \textcolor{errorstroke}{\textbf{76$\times$ slower}}\\[0.1cm]
+    The scheduler's placement decision is worth more than any kernel optimization.
+    }
+    \end{mlsyscard}
   \end{column}
 \end{columns}
 
@@ -1519,46 +1615,57 @@ engineering ensures those resources are used effectively.''
 
 \appendix
 
-\begin{frame}{Backup: Extended Reference}
+\begin{frame}{Backup: Scheduling Algorithm Comparison}
 \note{
-% -- NARRATE: What to SAY while showing this slide
-Backup with extended reference material. Point students to the
-textbook for complete derivations.
-
-% -- FLEX: [OPTIONAL] Use if students request additional resources.
+% -- NARRATE: Four ML-specific schedulers compared on key metrics.
+% -- FLEX: [OPTIONAL] Use when discussing advanced scheduling in office hours.
 }
 
 \footnotesize
-This slide provides extended reference material for students who want to go deeper.
-Refer to the textbook chapter for complete derivations and additional worked examples.
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lp{2.5cm}rp{3.5cm}@{}}
+  \toprule
+  \textbf{Scheduler} & \textbf{Key Insight} & \textbf{JCT Gain} & \textbf{Limitation} \\
+  \midrule
+  \textbf{Tiresias}  & MLFQ without runtime estimates & 40\% & No topology awareness \\
+  \textbf{Gandiva}   & Time-slicing + migration & 50\% & Migration overhead for large models \\
+  \textbf{Pollux}    & Co-adaptive batch size + allocation & 60\% & Requires convergence oracle \\
+  \textbf{Themis}    & Finish-time fairness & 35\% & Assumes honest reporting \\
+  \bottomrule
+\end{tabular}
 
-\vspace{0.3cm}
-\begin{mlsyscard}{crimson}
-\textbf{Key equations and frameworks from this chapter} are collected in the
-textbook's summary tables. Use them as a quick reference during problem sets.
+\vspace{0.1cm}
+\begin{mlsyscard}{routingstroke}
+{\scriptsize\textbf{Practical note:} Most production clusters use Slurm FIFO + priority queues with topology constraints. Research schedulers are not yet widely deployed due to integration complexity.}
 \end{mlsyscard}
 
 \end{frame}
 
-\begin{frame}{Backup: Further Reading}
+\begin{frame}{Backup: Spot Instance Decision Framework}
 \note{
-% -- NARRATE: What to SAY while showing this slide
-Additional resources beyond the references slide. Textbook, problem
-sets, open-source implementations, and office hours.
-
-% -- FLEX: [OPTIONAL] Use if students ask about going deeper.
+% -- NARRATE: When to use spot vs on-demand for ML workloads.
+% -- FLEX: [OPTIONAL] Use for cost optimization discussions.
 }
 
 \footnotesize
-\textbf{For deeper exploration:}
+\textbf{When is spot cost-effective for ML training?}
 
-\vspace{0.15cm}
-\begin{itemize}\setlength\itemsep{2pt}
-  \item The textbook chapter contains 2--3 additional worked examples
-  \item Problem sets apply these concepts to real-world scenarios
-  \item The course website links to open-source implementations
-  \item Office hours: bring your toughest questions
-\end{itemize}
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Factor} & \textbf{Spot-Friendly} & \textbf{On-Demand Only} \\
+  \midrule
+  Checkpoint overhead & $<$5\% of step time & $>$15\% of step time \\
+  Preemption rate     & $<$10\% per hour    & $>$25\% per hour \\
+  Job duration        & $<$24 hours         & $>$1 week \\
+  Resumability        & Full checkpoint/resume & Stateful long-running \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+{\footnotesize\textbf{Net savings formula:} $\text{Savings} = \text{Discount} - \text{Preemption overhead} - \text{Checkpoint cost}$.\\
+Typical: 65\% discount $-$ 25\% overhead $-$ 12\% checkpoint = \textbf{28\% net savings}.}
 
 \end{frame}
 

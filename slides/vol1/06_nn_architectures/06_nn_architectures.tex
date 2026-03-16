@@ -842,6 +842,81 @@ IF SHORT: Show the solution immediately and walk through the arithmetic.
 
 \end{frame}
 
+\begin{frame}{Transformer Compute Cost}
+\note{
+% -- LINK: Students just saw the Transformer block anatomy (33\% attention,
+% 67\% FFN). This slide derives the exact FLOP count so students can
+% calculate training and inference costs for any Transformer configuration.
+
+% -- NARRATE: Walk through the formula.
+``The total FLOPs for a Transformer forward pass scale as $12 \times L
+\times H^2 \times S$ where $L$ is layers, $H$ is hidden dimension, and
+$S$ is sequence length. For GPT-2 (12 layers, 768 hidden, 1024 tokens):
+$\sim$7 GFLOPs per forward pass. GPT-3 (96 layers, 12288 hidden, 2048
+tokens): $\sim$314 TFLOPs per forward pass. That is a 45,000$\times$
+gap from GPT-2 to GPT-3.''
+
+% -- ENGAGE: ``GPT-3 has 100$\times$ more parameters than GPT-2.
+% Why is the FLOP count 45,000$\times$ more, not 100$\times$?''
+% Give 15 seconds. [Expected answer: FLOPs scale with $H^2$, so doubling
+% hidden dimension quadruples FLOPs. Plus longer sequences.]
+
+% -- WARN: Students will confuse parameter count with FLOP count.
+% Parameters scale as $O(H^2)$, FLOPs scale as $O(H^2 \times S)$.
+% Sequence length is the multiplicative factor students forget.
+
+% -- FLEX: [CORE] Quantitative FLOP analysis for Transformers.
+% IF SHORT: Show the formula and the GPT-2 vs GPT-3 comparison only.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Transformer forward pass FLOPs:}
+
+    \vspace{0.1cm}
+    {\small $\text{FLOPs} \approx 12 \times L \times H^2 \times S$}
+
+    \vspace{0.1cm}
+    {\scriptsize
+    \begin{tabular}{@{}ll@{}}
+      $L$ & Number of layers \\
+      $H$ & Hidden dimension \\
+      $S$ & Sequence length \\
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \textbf{Training} adds $\sim$2$\times$ (backward pass):
+    $$\text{Train FLOPs} \approx 6 \times N \times D$$
+    {\scriptsize where $N$ = parameters, $D$ = tokens processed.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.1}
+    {\scriptsize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      & \textbf{GPT-2} & \textbf{GPT-3} \\
+      \midrule
+      Layers & 12 & 96 \\
+      Hidden & 768 & 12,288 \\
+      Seq len & 1,024 & 2,048 \\
+      Params & 117M & 175B \\
+      Fwd FLOPs & $\sim$7G & $\sim$314T \\
+      \textbf{Ratio} & \multicolumn{2}{c}{\textbf{45,000$\times$}} \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize FLOPs scale with $H^2 \times S$. Doubling hidden dimension \textbf{quadruples} compute.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
 % =============================================================================
 \section{Sparse \& RecSys}
 % =============================================================================
@@ -915,6 +990,70 @@ IF SHORT: Cover the capacity bottleneck; skip the random access detail.
     }
   \end{column}
 \end{columns}
+
+\end{frame}
+
+\begin{frame}{DLRM at Meta: Production Numbers}
+\note{
+% -- LINK: Students just learned DLRM's architectural properties. This slide
+% grounds them with real production numbers from Meta's recommendation system.
+
+% -- NARRATE: Walk through the numbers.
+``Meta's DLRM serves billions of recommendations per day. The embedding
+tables total 10+ TB across the fleet. Each inference touches 50--100 tables.
+A single recommendation requires reading scattered rows from TB-scale
+tables---the antithesis of dense MatMul.''
+
+% -- ENGAGE: ``If each recommendation reads 100 embedding rows of 128
+% floats each, how much data is accessed per inference?''
+% Give 10 seconds. [Expected answer: 100 $\times$ 128 $\times$ 4 = 50 KB.
+% But scattered across TB of memory, defeating all caching.]
+
+% -- WARN: Students will try to apply GPU optimization strategies (batching,
+% fusion) to DLRM. These help the dense MLP part but not the embedding
+% lookups---the dominant cost.
+
+% -- FLEX: [OPTIONAL] Concrete production numbers for DLRM.
+% IF SHORT: Show the table for 20 seconds; emphasize the TB-scale challenge.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Meta DLRM Production System:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\scriptsize Serves \textbf{billions} of recommendations/day}
+      \item {\scriptsize Embedding tables: \textbf{10+ TB} across fleet}
+      \item {\scriptsize Each inference: 50--100 table lookups}
+      \item {\scriptsize DLRM accounts for \textbf{$>$50\%} of Meta's AI training compute}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize \textbf{System design:} Distributed across 100s of machines. SSD-backed embedding tables. Custom hardware (ZionEX) with high-bandwidth memory pooling.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.05}
+    {\scriptsize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Metric} & \textbf{Value} \\
+      \midrule
+      Daily inferences & Billions \\
+      Total embed.\ size & 10+ TB \\
+      Tables per query & 50--100 \\
+      Latency budget & $<$50 ms \\
+      \% of AI compute & $>$50\% \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \mlsysalert{Key:}{Recommendation is the largest AI workload at Meta---not LLMs.}
+  \end{column}
+\end{columns}
+\mlsyscite{Naumov et al., ``Deep Learning Recommendation Model,'' 2019}
 
 \end{frame}
 
@@ -1013,24 +1152,21 @@ IF SHORT: Show the table for 30 seconds; state the mapping rule; move on.
 
 \scriptsize
 \renewcommand{\arraystretch}{1.05}
-\begin{tabular}{@{}llll@{}}
+\begin{tabular}{@{}lllrl@{}}
   \toprule
-  \textbf{Primitive} & \textbf{Operation} & \textbf{Bottleneck} & \textbf{Architecture} \\
+  \textbf{Primitive} & \textbf{Operation} & \textbf{Bottleneck} & \textbf{FLOPs/B} & \textbf{GPU Util.} \\
   \midrule
-  \textbf{Dense MatMul} & Matrix $\times$ Matrix & Compute & CNN, Transformer FFN \\
-  \textbf{MatVec} & Matrix $\times$ Vector & Bandwidth & RNN, GPT-2 inference \\
-  \textbf{Sparse Lookup} & Embedding gather & Capacity & DLRM \\
-  \textbf{Reduction} & Softmax, LayerNorm & Bandwidth & Transformer attention \\
-  \textbf{Elementwise} & Activation, Add & Bandwidth & All architectures \\
+  \textbf{Dense MatMul} & Matrix $\times$ Matrix & Compute & 200+ & 80--95\% \\
+  \textbf{MatVec} & Matrix $\times$ Vector & Bandwidth & $\sim$2 & 10--30\% \\
+  \textbf{Sparse Lookup} & Embedding gather & Capacity & $\ll 1$ & $<$10\% \\
+  \textbf{Reduction} & Softmax, LayerNorm & Bandwidth & 5--8 & 15--30\% \\
+  \textbf{Elementwise} & ReLU, Add & Bandwidth & 0.1 & $<$5\% \\
   \bottomrule
 \end{tabular}
 
 \vspace{0.1cm}
 \footnotesize
-\mlsysconcept{Mapping rule:}{Dense MatMul achieves 80--95\% GPU utilization. Everything else: 10--50\%.}
-
-\vspace{0.05cm}
-{\footnotesize Maximize time in dense MatMul. CNNs and Transformer FFN achieve highest hardware utilization.}
+\mlsysconcept{Mapping rule:}{Dense MatMul achieves 80--95\% GPU utilization. Everything else: 10--50\%. Maximize time in dense MatMul.}
 
 \end{frame}
 
@@ -1130,6 +1266,75 @@ IF SHORT: Point to the CNN and Transformer columns only; move to Discussion.
 \begin{mlsyscard}{crimson}
 No single ``best'' architecture. CNNs dominate spatial perception. Transformers master reasoning at quadratic cost. DLRM needs TB-scale memory. \textbf{Match bias to data, validate against constraints.}
 \end{mlsyscard}
+
+\end{frame}
+
+% --- Quantitative Exercise ---
+\begin{frame}{Your Turn: Jetson Orin Throughput}
+\note{
+% -- LINK: Students just saw the selection framework and comparison table.
+% This exercise forces them to apply quantitative reasoning to a real
+% deployment constraint.
+
+% -- NARRATE: Present the problem (30s). Individual work (60s).
+``You need to process 1000 images per second on a Jetson Orin NX (100 TOPS
+INT8). ResNet-50 takes 5 ms per image. ViT-B takes 12 ms. Which fits?
+What batch size is needed?''
+
+% -- ENGAGE: Students calculate individually (60s), then compare.
+% ResNet-50: 1/5ms = 200 img/s per stream. Need 1000/200 = 5 parallel
+% streams. At batch=5: 5$\times$5ms = 25ms per batch of 5 = 200 batches/s
+% = 1000 img/s. Fits!
+% ViT-B: 1/12ms = 83 img/s. Need 1000/83 = 12 streams. But 12$\times$340MB
+% = 4 GB weights alone. 32 GB RAM, activations scale too. Tight.
+
+% -- WARN: Students will divide peak TOPS by model FLOPs.
+% Correct framing: use measured latency, not theoretical peak.
+% Real utilization on edge is 30--50\% of peak TOPS.
+
+% -- FLEX: [CORE] Practical deployment calculation.
+% IF SHORT: Show the solution immediately; emphasize the memory constraint.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\small\bfseries Edge Deployment Calculation}
+
+    \vspace{0.1cm}
+    \textbf{Target}: 1,000 images/sec on \textbf{Jetson Orin NX}\\
+    (100 TOPS INT8, 32 GB LPDDR5)
+
+    \vspace{0.1cm}
+    Measured inference latency (batch=1):
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item ResNet-50: \textbf{5 ms/image}
+      \item ViT-B: \textbf{12 ms/image}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Calculate:} Which model meets the target?\\
+    What batch size is needed?
+
+    {\footnotesize\textcolor{midgray}{(60 seconds --- then compare)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.05cm]
+    {\scriptsize
+    ResNet: $1/5\text{ms} = 200$ img/s\\
+    Need batch $\geq 5$ for 1000 img/s\\
+    Memory: $5 \times 98$ MB = 490 MB\\
+    \textcolor{datastroke}{\textbf{Fits easily!}}\\[0.1cm]
+    ViT-B: $1/12\text{ms} = 83$ img/s\\
+    Need batch $\geq 12$ for 1000 img/s\\
+    Memory: $12 \times 340$ MB = 4 GB\\
+    \textcolor{routingstroke}{\textbf{Tight on 32 GB}}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
 
 \end{frame}
 
@@ -1445,15 +1650,74 @@ Use if students want to understand the KV cache scaling.\\small Per layer, per h
 \begin{frame}{Backup: Why FLOPs Do Not Predict Speed}
 \note{
 % -- NARRATE: Use if students question the MobileNet paradox.
-MobileNet: 300 MFLOPs but low arithmetic intensity ($\sim$21 FLOPs/byte).
-ResNet-50: 4.1 GFLOPs but high intensity ($\sim$40 FLOPs/byte).
-On datacenter GPUs, ResNet saturates tensor cores; MobileNet starves them.
-Result: MobileNet can be slower despite 14x fewer FLOPs.
 
 % -- FLEX: [OPTIONAL] Backup slide for the FLOPs paradox.
 }
 \small
-Use if students question the MobileNet paradox.\\small MobileNet: 300 MFLOPs but low arithmetic intensity ($\sim$21 FLOPs/byte).\\ ResNet-50: 4.1 GFLOPs but high intensity ($\sim$40 FLOPs/byte).\\ On datacenter GPUs, ResNet saturates tensor cores; MobileNet starves them.\\ Result: MobileNet can be \emph{slower} despite 14$\times$ fewer FLOPs.
+Use if students question the MobileNet paradox.\\
+MobileNet: 300 MFLOPs but low arithmetic intensity ($\sim$21 FLOPs/byte).\\
+ResNet-50: 4.1 GFLOPs but high intensity ($\sim$40 FLOPs/byte).\\
+On datacenter GPUs, ResNet saturates tensor cores; MobileNet starves them.\\
+Result: MobileNet can be \emph{slower} despite 14$\times$ fewer FLOPs.
+\end{frame}
+
+\begin{frame}{Backup: The Architecture Arms Race}
+\note{
+% -- NARRATE: War story about architecture selection gone wrong.
+% Use when students ask ``does architecture choice really matter in practice?''
+
+% -- FLEX: [OPTIONAL] Motivational backup for industry context.
+}
+\footnotesize
+\textbf{War Story: When Architecture Meets Production}
+
+\vspace{0.1cm}
+In 2020, a major cloud provider migrated their image classification pipeline from ResNet-50 to ViT-B, expecting accuracy gains. Results:
+
+\vspace{0.05cm}
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lrr@{}}
+  \toprule
+  & \textbf{ResNet-50} & \textbf{ViT-B} \\
+  \midrule
+  Accuracy & 76.1\% & 77.9\% (+1.8\%) \\
+  Latency (A100) & 3.2 ms & 8.7 ms \\
+  Memory/request & 98 MB & 340 MB \\
+  Serving cost & \$1.00 & \$2.70 \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.05cm}
+\footnotesize
+\begin{mlsyscard}{errorstroke}
+{\scriptsize \textbf{Lesson}: 1.8\% accuracy gain cost 2.7$\times$ more to serve. The team reverted to ResNet-50 with better data augmentation, achieving 77.5\% accuracy at the original cost.}
+\end{mlsyscard}
+\end{frame}
+
+\begin{frame}{Backup: Architecture Memory Cheat Sheet}
+\note{
+% -- NARRATE: Quick reference for architecture memory scaling.
+% -- FLEX: [OPTIONAL] Reference slide for assignments and projects.
+}
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lllll@{}}
+  \toprule
+  \textbf{Architecture} & \textbf{Weight Memory} & \textbf{Activation Memory} & \textbf{Total (batch=32)} & \textbf{Fits On} \\
+  \midrule
+  MLP (784-1024-10) & 3.2 MB & 128 KB $\times$ B & $\sim$7 MB & Any \\
+  ResNet-50 & 98 MB & 2 MB $\times$ B & $\sim$162 MB & Mobile \\
+  GPT-2 (117M) & 468 MB & 50 MB $\times$ B & $\sim$2 GB & Edge GPU \\
+  GPT-2 XL (1.5B) & 6 GB & 200 MB $\times$ B & $\sim$12 GB & Datacenter \\
+  DLRM (production) & 100+ GB & Minimal & 100+ GB & Fleet \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{crimson}
+{\scriptsize \textbf{Rule of thumb}: Weights determine if the model \emph{fits}. Activations determine if a \emph{batch} fits. Architecture determines both.}
+\end{mlsyscard}
 \end{frame}
 
 \end{document}

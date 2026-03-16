@@ -50,7 +50,7 @@
 }
 
 % --- Section count for navigation (must match actual \section{} count) ---
-\setcounter{mlsystotalsections}{7}
+\setcounter{mlsystotalsections}{8}
 
 \title{Data Selection}
 \author{Vijay Janapa Reddi}
@@ -327,6 +327,68 @@ IF SHORT: Show diagram, state the 8x result, move on.
 \vspace{0.1cm}
 \small
 \mlsysconcept{Multiplicative:}{2$\times$ data $\times$ 2$\times$ compression $\times$ 2$\times$ hardware = \textbf{8$\times$} total, not 6$\times$.}
+
+\end{frame}
+
+\begin{frame}{Cross-Layer Interactions}
+\note{
+% -- LINK: The Iron Law showed data selection reduces total passes; now show it interacts with compression and hardware
+Students saw the D-A-M multiplicative argument. This slide reveals that
+data selection does not operate in isolation --- it interacts with model
+compression (Ch.\ 10) and hardware acceleration (Ch.\ 11).
+
+% -- NARRATE: Walk through the three cross-layer interactions
+Point to each row: ``Data selection determines what the model trains on.
+That affects which weights are important --- which changes pruning outcomes.
+A coreset-trained model may have different sensitivity to quantization than
+a full-data model.'' Then: ``Hardware imposes minimum batch sizes, which
+constrain how small a selected subset can be.''
+
+% -- ENGAGE: Ask about unexpected interactions
+Ask: ``If you train on a 10\% coreset, will pruning remove the same weights
+as on the full dataset?'' Give 20 seconds.
+Expected: No --- the model learns different features on different subsets.
+
+% -- WARN: Students treat D-A-M techniques as independent
+Common error: selecting data, compressing, and tuning hardware in isolation.
+Correct framing: each technique changes the optimization landscape for the
+others. Always validate end-to-end after composing techniques.
+
+% -- FLEX: [CORE] Sets up systems thinking across Ch.\ 9--11
+[CORE] Essential for the D-A-M integration that follows in later chapters.
+IF AHEAD: ``Which interaction is most dangerous to ignore?''
+IF SHORT: State the three interactions, skip the engagement question.
+}
+
+\scriptsize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Data selection interacts with every layer:}
+
+    \vspace{0.05cm}
+    \renewcommand{\arraystretch}{0.95}
+    \begin{tabular}{@{}lp{5.0cm}@{}}
+      \toprule
+      \textbf{Interaction} & \textbf{Consequence} \\
+      \midrule
+      Data $\times$ Compression & Coreset-trained models have different pruning sensitivity; quantization error shifts with distribution \\
+      Data $\times$ Hardware & Min batch size constrains subset size; memory hierarchy favors certain orderings \\
+      Data $\times$ Serving & Subset bias affects production accuracy differently than benchmark accuracy \\
+      \bottomrule
+    \end{tabular}
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Pitfall:} 10\% coreset + INT8 lost 4.2\% accuracy vs.\ 1.1\% when composed independently.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \mlsysconcept{Systems view:}{D-A-M techniques are not independent. Always validate end-to-end.}
+
+    \vspace{0.1cm}
+    \mlsysalert{Rule:}{Validate the \emph{composed} pipeline, not individual techniques in isolation.}
+  \end{column}
+\end{columns}
 
 \end{frame}
 
@@ -700,6 +762,70 @@ real. If short on time, focus on the mix ratios.}
 
 \end{frame}
 
+\begin{frame}{Synthetic Data: The Generation Pipeline}
+\note{
+% -- LINK: Three synthesis approaches were introduced; now show the concrete feedback loop
+The previous slide listed augmentation, generative, and distillation approaches.
+This slide shows the concrete pipeline and the quality feedback loop that
+prevents model collapse.
+
+% -- NARRATE: Walk through the four-stage pipeline
+Point to each stage: ``1.\ Generate candidates using a teacher model or
+augmentation engine. 2.\ Filter by quality score (perplexity, classifier
+confidence). 3.\ Validate against a held-out real data sample --- compare
+distributions. 4.\ Mix with real data at the optimal 50--80\% ratio.''
+Then the red card: ``Without the filter stage, quality degrades each
+generation --- this is model collapse.''
+
+% -- ENGAGE: What happens if you skip the filter stage?
+Ask: ``What happens if you skip quality filtering?'' Give 20 seconds.
+Expected: model collapse --- each generation amplifies biases and noise
+from the previous generation. Accuracy drops from 95\% to 78\% in 5 cycles.
+
+% -- WARN: Students think more synthetic data is always good
+Common error: generating unlimited synthetic data without quality checks.
+Correct framing: the generator's output distribution drifts from real data.
+Filtering anchors it.
+
+% -- FLEX: [OPTIONAL] Adds depth to the synthesis section
+[OPTIONAL] The feedback loop concept is the key takeaway.
+IF AHEAD: ``How do you measure distribution drift between synthetic and real?''
+IF SHORT: Skip this slide, keep the three-approach overview.
+}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{@{}clp{4.2cm}l@{}}
+  \toprule
+  \textbf{Stage} & \textbf{Step} & \textbf{Action} & \textbf{Quality Gate} \\
+  \midrule
+  1 & Generate    & Teacher model or augmentation engine produces candidates & --- \\
+  2 & Filter      & Score by perplexity, classifier confidence, or embedding distance & Drop bottom 30\% \\
+  3 & Validate    & Compare synthetic distribution to real holdout set & KL divergence $< \tau$ \\
+  4 & Mix         & Combine with real data at 50--80\% synthetic ratio & End-to-end accuracy \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Without filtering (model collapse):}\\
+    Gen 1: 95\% $\to$ Gen 2: 91\% $\to$ Gen 3: 85\% $\to$ Gen 5: 78\%\\
+    Each generation amplifies biases from the previous one.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{With quality-filtered pipeline:}\\
+    Gen 1--5: 95\% $\to$ 94.2\% (stable)\\
+    Real data anchor prevents drift.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
 \begin{frame}{Self-Supervised Pre-Training}
 \note{[3 min] The ceiling of data selection: eliminate task-specific labels
 entirely. Foundation models amortize expensive pre-training across many
@@ -833,6 +959,148 @@ start with deduplication. If short: just show the decision table.}
 
 \vspace{0.05cm}
 {\footnotesize\mlsysconcept{Combine:}{Dedup $\to$ coreset $\to$ curriculum $\to$ augment.}}
+
+\end{frame}
+
+% =============================================================================
+\section{Distributed Selection}
+% =============================================================================
+
+\begin{frame}{Selection at Scale: Distributed Pipelines}
+\note{
+% -- LINK: Engineering section covered single-machine selection; production operates at web scale
+Students just saw cost modeling and the Selection Inequality for single-machine
+settings. Production data selection operates on billions of samples across
+distributed storage --- dedup alone requires sharded processing.
+
+% -- NARRATE: Walk through the MapReduce-style pipeline
+Point to the table: ``At web scale, datasets are too large for single-machine
+processing. Deduplication requires sharded MinHash across 1,000+ workers.
+Coreset scoring distributes proxy model inference. Quality filtering uses
+MapReduce-style pipelines.'' Then the numbers: ``C4 dataset: 365M documents,
+dedup removed 40\%, reducing 750B tokens to 450B usable tokens.''
+
+% -- ENGAGE: Why can't you just run dedup on one machine?
+Ask: ``Why can't you run MinHash dedup on a single machine for 10 TB of text?''
+Give 20 seconds. Expected: memory --- storing all hashes requires hundreds of
+GB. Must shard by hash bucket across workers.
+
+% -- WARN: Students underestimate the engineering cost of distributed selection
+Common error: assuming selection is a simple filter step. Correct framing:
+at web scale, the selection pipeline is itself a distributed system with
+its own failure modes, coordination overhead, and storage costs.
+
+% -- FLEX: [CORE] Bridges single-machine theory to production practice
+[CORE] Students deploying at scale need this framing.
+IF AHEAD: ``How do you handle dedup across streaming data that arrives continuously?''
+IF SHORT: Cover the C4 numbers and the sharded dedup concept only.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Web-scale selection requires distributed pipelines:}
+
+    \vspace{0.1cm}
+    {\scriptsize
+    \renewcommand{\arraystretch}{1.05}
+    \begin{tabular}{@{}llr@{}}
+      \toprule
+      \textbf{Technique} & \textbf{Distribution} & \textbf{Workers} \\
+      \midrule
+      Exact dedup      & Hash-partitioned shards & 100+ \\
+      Fuzzy dedup       & Sharded MinHash/LSH     & 1,000+ \\
+      Quality scoring   & Parallel classifier inference & 100+ \\
+      Coreset selection & Distributed proxy model & 50+ \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{C4 Dataset:} 365M documents. Dedup removed 40\%. 750B tokens $\to$ 450B usable tokens. Processing: 8 hours on 256 workers.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.2cm}
+    \mlsysconcept{Key:}{At scale, the selection pipeline is itself a distributed system with coordination overhead.}
+
+    \vspace{0.15cm}
+    \mlsysalert{Rule:}{Selection overhead must stay under 10\% of training time --- even at distributed scale.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Your Turn: ICR Efficiency Comparison}
+\note{
+% -- LINK: Distributed selection showed scale; now apply ICR quantitatively
+Students saw ICR defined earlier and distributed pipelines. This exercise
+forces them to calculate ICR for two competing datasets and make an
+engineering decision.
+
+% -- NARRATE: Present problem, then reveal after pause
+``Dataset A: 10M samples, 85\% accuracy, 1000 GPU-hrs. Dataset B: 1M curated,
+83\% accuracy, 100 GPU-hrs. Calculate ICR for each. Which is more efficient
+per accuracy point?'' Wait 90 seconds. Solution: ``A: 85/1000 = 0.085
+acc/GPU-hr. B: 83/100 = 0.83 acc/GPU-hr. B is 9.8x more efficient per
+GPU-hour despite lower absolute accuracy.''
+
+% -- ENGAGE: Peer instruction protocol
+Present (30s). Individual work (60s). If 30--70\% correct: pair discussion
+(90s), re-vote. Key insight: ICR makes the efficiency vs.\ accuracy trade-off
+explicit and quantitative.
+
+% -- WARN: Students confuse absolute accuracy with efficiency
+Common error: ``A is better because 85\% > 83\%.'' Correct framing: ICR
+accounts for cost. At 10x the compute, 2 extra points may not be worth it.
+
+% -- FLEX: [CORE] This is the chapter's central quantitative exercise
+[CORE] ICR calculation is the chapter's core skill.
+IF AHEAD: ``At what accuracy threshold does Dataset A become the better choice?''
+IF SHORT: Show solution immediately, walk through the division.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Compare Dataset Efficiency}
+
+    \vspace{0.15cm}
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      & \textbf{Dataset A} & \textbf{Dataset B} \\
+      \midrule
+      Samples       & 10M         & 1M (curated) \\
+      Accuracy      & 85\%        & 83\% \\
+      Training cost & 1,000 GPU-hrs & 100 GPU-hrs \\
+      \bottomrule
+    \end{tabular}
+
+    \vspace{0.15cm}
+    \textbf{Calculate:}
+    \begin{enumerate}\setlength\itemsep{-1pt}
+      \item ICR (accuracy per GPU-hour) for each
+      \item Which is more efficient per accuracy point?
+    \end{enumerate}
+
+    {\scriptsize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{Solution:}\\[0.05cm]
+    A: $85/1000 = \textbf{0.085}$ acc/GPU-hr\\
+    B: $83/100 = \textbf{0.83}$ acc/GPU-hr\\[0.05cm]
+    B is \textcolor{datastroke}{\textbf{9.8$\times$}} more efficient\\
+    per GPU-hour of training.\\[0.05cm]
+    2 accuracy points cost\\
+    900 extra GPU-hrs (\$2,700).\\[0.05cm]
+    \textbf{ICR makes the trade-off explicit.}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
 
 \end{frame}
 
@@ -1030,10 +1298,52 @@ Model compression reduces the \textbf{cost per unit of work}.}
 Use if students want to understand how EL2N scores work.\\small Train for 10 epochs. For each sample, compute $\|p_{\text{model}} - y_{\text{true}}\|_2$.\\ Average across the 10 epochs. High EL2N = hard/informative sample.\\ Low EL2N = easy/redundant sample (already learned).\\ Keep the top 10--30\% by EL2N score for training.
 \end{frame}
 
+\begin{frame}{Backup: Distributed Deduplication Architecture}
+\note{
+% -- NARRATE: Extended dedup architecture for large-scale pipelines
+Sharded MinHash: partition documents by hash bucket, compute MinHash
+signatures within each shard, then compare across shards for near-duplicates.
+C4: 256 shards, each processing ~1.4M documents. Cross-shard comparison
+uses locality-sensitive hashing (LSH) with 128 bands of 8 rows each.
+Total: 8 hours on 256 workers vs.\ estimated 85 days on one machine.
+
+% -- FLEX: [OPTIONAL] Deploy when students ask about production dedup
+[OPTIONAL] Backup for distributed selection questions.
+}
+\small
+Use if students ask about dedup at scale.\\[0.1cm]
+{\footnotesize
+\textbf{Sharded MinHash:} Partition by hash bucket, compute signatures per shard, compare across shards via LSH (128 bands $\times$ 8 rows).\\[0.05cm]
+\textbf{C4:} 256 shards $\times$ 1.4M docs each. 8 hours on 256 workers vs.\ 85 days single-machine.\\[0.05cm]
+\textbf{Key insight:} Dedup is embarrassingly parallel for exact hashing but requires coordination for fuzzy matching.
+}
+\end{frame}
+
 \begin{frame}{Backup: Active Learning Budget Planning}
 \note{Use for additional depth or if students need alternative explanation.}
 \small
 Use if students ask about practical active learning cycles.\\small With 14-day annotation latency, use 5--10 rounds max.\\ Batch size: 500--1{,}000 samples per round (not 50--100).\\ Diversity sampling prevents collapse to one decision boundary region.\\ Total budget: 5{,}000--10{,}000 labels to match 100{,}000 random labels.
+\end{frame}
+
+\begin{frame}{Backup: Synthetic Data Quality Metrics}
+\note{
+% -- NARRATE: Extended quality metrics for synthetic data validation
+Three metrics for validating synthetic data quality: (1) FID (Frechet Inception
+Distance) for images --- lower is better, target < 50. (2) Perplexity ratio
+for text --- synthetic/real perplexity should be 0.8--1.2. (3) Downstream
+accuracy delta --- synthetic-trained vs real-trained should be within 2\%.
+
+% -- FLEX: [OPTIONAL] Deploy when students ask about measuring synthetic quality
+[OPTIONAL] Backup for synthetic data questions.
+}
+\small
+Use if students ask how to measure synthetic data quality.\\[0.1cm]
+{\footnotesize
+\textbf{FID (images):} Measures distribution distance. Target: $< 50$. Above 100: low quality.\\[0.05cm]
+\textbf{Perplexity ratio (text):} Synthetic/real perplexity. Target: 0.8--1.2. Above 2.0: distribution drift.\\[0.05cm]
+\textbf{Downstream delta:} Accuracy(synthetic-trained) vs Accuracy(real-trained). Target: within 2\%.\\[0.05cm]
+\textbf{Rule:} Monitor all three --- no single metric captures all quality dimensions.
+}
 \end{frame}
 
 \end{document}

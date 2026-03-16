@@ -5,6 +5,7 @@
 %   - cloud-vs-edge-learning.pdf    - training-memory-amplifier.pdf
 %   - adaptation-strategies.pdf     - fedavg-protocol.pdf
 %   - edge-device-spectrum.pdf      - federated-systems-challenges.pdf
+%   - sparse-update-strategies.pdf  - centralized-vs-decentralized.pdf
 % =============================================================================
 \documentclass[aspectratio=169, 12pt]{beamer}
 \usepackage{../../assets/beamerthememlsys}
@@ -809,6 +810,99 @@ IF SHORT: Give 45 seconds and reveal quickly.
 
 \end{frame}
 
+\begin{frame}{Sparse Update Strategies}
+\note{
+% -- LINK: What prior concept connects to this slide
+LoRA adapts all targeted layers uniformly. Sparse updates take a more selective approach: only update the layers that matter most for the new task.
+
+% -- NARRATE: What to SAY while showing this slide
+``Three sparse update strategies. Layer Selection: freeze all but the last N layers. Works because early layers learn general features that transfer well. Selective neurons: use Fisher Information to identify the most task-relevant neurons and update only those. Structured pruning during adaptation: remove unimportant connections during fine-tuning, simultaneously adapting and compressing.'' Walk through the comparison table: ``Layer selection is simplest but least expressive. Fisher-based is most precise but requires a calibration pass. The memory savings compound with LoRA: use LoRA on the selected layers only.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If early layers are general, why not always freeze the first 50\%?'' Expected: the optimal freeze point depends on the task. A domain shift (medical imaging) may need to update early layers. A style transfer may need only the last layer.
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume sparse updates and LoRA are alternatives. They are complementary: apply LoRA only to the layers selected by Fisher Information for maximum memory savings.
+
+% -- FLEX: [OPTIONAL] Extends the adaptation strategy toolkit.
+IF SHORT: State the three strategies and their memory savings; skip the comparison table.
+}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrrp{3.5cm}@{}}
+  \toprule
+  \textbf{Strategy} & \textbf{Params Updated} & \textbf{Memory} & \textbf{Best For} \\
+  \midrule
+  \textbf{Last-N layers} & 10--30\%  & 1.5--2$\times$ & Similar domains \\
+  \textbf{Fisher selection} & 5--15\% & 1.2--1.5$\times$ & Task-specific adaptation \\
+  \textbf{Sparse + LoRA}  & 1--3\%   & 1.05--1.1$\times$ & Extreme memory constraints \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{datastroke}
+{\footnotesize\textbf{Combining strategies:} Fisher-selected layers + LoRA rank-4 achieves 97\% of full fine-tuning quality with $<$2\% of the memory overhead. Critical for edge servers with 4--8 GB RAM.}
+\end{mlsyscard}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: LoRA on Smartwatch Exercise ---
+\begin{frame}{Your Turn: Can LoRA Fit on a Smartwatch?}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students learned LoRA storage math for phones. This exercise pushes to the extreme: can we adapt a model on a 512 MB smartwatch?
+
+% -- NARRATE: What to SAY while showing this slide
+Read the problem. Give 90 seconds. Solution: ``Model weights in INT4: 7B * 0.5 bytes = 3.5 GB. Does not fit in 512 MB --- need a smaller model. Try 1B model: 500 MB in INT4. Leaves 12 MB for LoRA. LoRA rank-4 on a 1B model: 2 * d * r * (layers targeted) * 2 bytes. For d=2048, r=4, targeting 25\% of 24 layers = 6 layers: 2 * 2048 * 4 * 6 * 2 = 196 KB. Fits easily. Minimum rank for 7B: impossible --- the base model itself exceeds RAM. Quantization to INT2 gives 1.75 GB, still too large.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+After revealing, ask: ``What is the largest model that fits on a smartwatch in INT4?'' Expected: 512 MB / 0.5 bytes/param = 1B parameters, with almost no memory left for LoRA or activations.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will forget that LoRA requires both the frozen model AND the adapter matrices AND activation memory for the forward pass. The frozen model is the dominant cost.
+
+% -- FLEX: [CORE] Quantitative exercise that tests the limits of on-device learning.
+IF SHORT: Show the solution immediately and state the impossibility result for 7B.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries LoRA on a Smartwatch?}
+
+    \vspace{0.15cm}
+    \textbf{Setup:} Smartwatch with 512 MB RAM.\\
+    Target model: 7B parameters.
+
+    \vspace{0.1cm}
+    \begin{enumerate}
+      \item 7B model in INT4: how much memory?
+      \item Does it fit in 512 MB?
+      \item What is the largest model that fits?
+      \item How much memory for LoRA rank-4?
+    \end{enumerate}
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- show your work)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    7B in INT4: \textbf{3.5 GB} --- does not fit.\\[0.05cm]
+    Max model: $512\text{M} / 0.5 = $ \textbf{1B params}\\[0.05cm]
+    LoRA r=4 on 1B model:\\
+    $\sim$196 KB adapter --- fits easily.\\[0.1cm]
+    \textcolor{errorstroke}{\textbf{7B is impossible.}}\\
+    On-device = smaller models only.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
 % =============================================================================
 \section{Data Efficiency}
 % =============================================================================
@@ -1124,6 +1218,46 @@ IF SHORT: State the upload asymmetry and the 32x SignSGD compression.
 
 \end{frame}
 
+\begin{frame}{Centralized vs.\ Decentralized Training}
+\note{
+% -- LINK: What prior concept connects to this slide
+FedAvg is the centralized federated approach: a server coordinates all clients. But what if there is no central server? This slide compares the two architectures quantitatively.
+
+% -- NARRATE: What to SAY while showing this slide
+``Centralized federated learning has a parameter server that orchestrates rounds. Advantages: simple aggregation, easy to add differential privacy, well-understood convergence. Disadvantage: single point of failure, communication bottleneck at the server. Decentralized (peer-to-peer) gossip protocols eliminate the server. Each device communicates with K neighbors. Advantages: no SPOF, scales naturally. Disadvantages: slower convergence (O(N) rounds vs O(1) for centralized), harder to guarantee privacy.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``When would you choose decentralized over centralized?'' Expected: when no trusted server exists (competing organizations), when the server is a bottleneck (millions of devices), or when network topology is mesh-like (IoT sensors).
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume decentralized is always better because it removes the SPOF. But centralized converges faster and is easier to secure with DP. The choice depends on trust, topology, and scale.
+
+% -- FLEX: [OPTIONAL] Extends the federated learning framework.
+IF SHORT: Show the comparison table and state the convergence difference.
+}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Dimension} & \textbf{Centralized (FedAvg)} & \textbf{Decentralized (Gossip)} \\
+  \midrule
+  Coordinator       & Parameter server      & None (peer-to-peer) \\
+  Convergence       & $O(1)$ rounds/epoch   & $O(N)$ rounds/epoch \\
+  Communication     & Server bottleneck     & $K$ neighbors each \\
+  Privacy           & DP at server          & Harder to enforce \\
+  Fault tolerance   & Server = SPOF         & No SPOF \\
+  Best for          & $<$10K devices         & $>$100K devices, no trust \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{routingstroke}
+{\scriptsize\textbf{Hybrid:} Hierarchical FedAvg --- devices aggregate within local clusters (decentralized), cluster heads report to central server (centralized). Combines fast convergence with reduced server load.}
+\end{mlsyscard}
+
+\end{frame}
+
 % =============================================================================
 \section{Production Integration}
 % =============================================================================
@@ -1400,45 +1534,61 @@ management for the entire fleet.''
 
 \appendix
 
-\begin{frame}{Backup: Extended Reference}
+\begin{frame}{Backup: Adaptation Strategy Decision Tree}
 \note{
-% -- NARRATE: What to SAY while showing this slide
-Backup with extended reference material and textbook pointers.
-
-% -- FLEX: [OPTIONAL] Use if students request additional resources.
+% -- NARRATE: Which adaptation strategy to use based on device constraints.
+% -- FLEX: [OPTIONAL] Use during labs or problem sets.
 }
 
 \footnotesize
-This slide provides extended reference material for students who want to go deeper.
-Refer to the textbook chapter for complete derivations and additional worked examples.
+\textbf{Choose adaptation strategy based on device resources:}
 
-\vspace{0.3cm}
-\begin{mlsyscard}{crimson}
-\textbf{Key equations and frameworks from this chapter} are collected in the
-textbook's summary tables. Use them as a quick reference during problem sets.
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lllr@{}}
+  \toprule
+  \textbf{Device Class} & \textbf{RAM} & \textbf{Strategy} & \textbf{Params Updated} \\
+  \midrule
+  MCU (Arduino Nicla)    & 384 KB  & Bias-only / lookup table & $<$0.01\% \\
+  Wearable (smartwatch)  & 512 MB  & Quantized 1B + LoRA r=4  & 0.1\% \\
+  Phone (flagship)       & 8 GB    & INT4 7B + LoRA r=16       & 1--2\% \\
+  Edge server (Jetson)   & 32 GB   & FP16 7B + Sparse updates  & 5--15\% \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{datastroke}
+{\scriptsize\textbf{Rule of thumb:} Device RAM determines the largest model that fits. Adaptation strategy fills whatever memory remains. If $<$1 MB remains, use bias-only.}
 \end{mlsyscard}
 
 \end{frame}
 
-\begin{frame}{Backup: Further Reading}
+\begin{frame}{Backup: Federated Learning at Google Scale}
 \note{
-% -- NARRATE: What to SAY while showing this slide
-Additional resources: textbook worked examples, problem sets,
-open-source implementations, office hours.
-
-% -- FLEX: [OPTIONAL] Use if students ask about going deeper.
+% -- NARRATE: Google's production federated learning system numbers.
+% -- FLEX: [OPTIONAL] Use when students ask about real-world federated deployments.
 }
 
 \footnotesize
-\textbf{For deeper exploration:}
+\textbf{Google Gboard: Federated Learning in Production (2019--present)}
 
-\vspace{0.15cm}
-\begin{itemize}\setlength\itemsep{2pt}
-  \item The textbook chapter contains 2--3 additional worked examples
-  \item Problem sets apply these concepts to real-world scenarios
-  \item The course website links to open-source implementations
-  \item Office hours: bring your toughest questions
-\end{itemize}
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lr@{}}
+  \toprule
+  \textbf{Metric} & \textbf{Value} \\
+  \midrule
+  Devices participating per round      & 100--500 \\
+  Total eligible devices               & $>$1 billion \\
+  Rounds per model update              & 500--2,000 \\
+  Communication per round (compressed) & 1--10 MB/device \\
+  Training time per model              & 3--7 days \\
+  Privacy guarantee                    & $(\epsilon=6, \delta=10^{-6})$-DP \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+{\footnotesize Key insight: only 0.00005\% of eligible devices participate per round. Selection criteria: charging, Wi-Fi, idle. This extreme subsampling provides natural privacy amplification.}
 
 \end{frame}
 

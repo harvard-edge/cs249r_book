@@ -6,6 +6,7 @@
 %   - serving-hierarchy.pdf        - batching-strategies.pdf
 %   - kv-cache-wall.pdf            - paged-attention.pdf
 %   - power-of-two-choices.pdf     - cold-start-timeline.pdf
+%   - queuing-theory-llm.pdf       - serving-dimensions.pdf
 % =============================================================================
 \documentclass[aspectratio=169, 12pt]{beamer}
 \usepackage{../../assets/beamerthememlsys}
@@ -620,6 +621,69 @@ IF SHORT: Focus on the 60--80\% waste problem and the 2--4x result.
 
 \end{frame}
 
+\begin{frame}{Queuing Theory for Batched Inference}
+\note{
+% -- LINK: What prior concept connects to this slide
+Continuous batching increased throughput. But how do we model the interaction between arrival rate, batch size, and latency? Queuing theory provides the framework.
+
+% -- NARRATE: What to SAY while showing this slide
+``LLM serving is an M/G/c/K queue: Poisson arrivals (M), general service time distribution (G) because generation lengths vary, c GPU replicas, and K maximum queue depth. The key result: utilization above 70\% causes P99 latency to explode exponentially. For GPT-3 at 100 QPS on 8 H100s: mean service time is 200 ms with batch=8, utilization is 100*0.2/8 = 0.25 --- comfortable. But at 400 QPS: utilization hits 1.0 and the queue grows unboundedly.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``At what QPS does P99 latency double for this setup?'' Expected: around 280--300 QPS (utilization ~0.7), where the queuing delay hockey stick begins.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think latency scales linearly with QPS. It scales exponentially above 70\% utilization. This is why production systems target 50--60\% GPU utilization.
+
+% -- FLEX: [OPTIONAL] Mathematical foundation for capacity planning.
+IF SHORT: State the 70\% utilization threshold and skip the queuing model details.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \textbf{M/G/c/K Queuing Model:}
+
+    \vspace{0.1cm}
+    {\scriptsize
+    \begin{tabular}{@{}ll@{}}
+      $\lambda$ & Arrival rate (QPS) \\
+      $\mu$ & Service rate per GPU ($1/T_{\text{gen}}$) \\
+      $c$ & Number of GPU replicas \\
+      $\rho = \lambda / (c \cdot \mu)$ & Utilization \\
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize At $\rho > 0.7$: P99 latency explodes.\\
+    Production target: \textbf{50--60\% utilization}.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.46\textwidth}
+    \textbf{GPT-3 at 100 QPS, 8$\times$ H100:}
+
+    \vspace{0.1cm}
+    {\scriptsize
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      Mean service time & 200 ms \\
+      Service rate $\mu$ & 5 req/s/GPU \\
+      Utilization $\rho$ & $100/(8 \times 5) = 0.25$ \\
+      P99 latency & $\sim$400 ms \\
+      \midrule
+      \textbf{At 400 QPS:} & \\
+      Utilization $\rho$ & $\to 1.0$ \\
+      P99 latency & $\to \infty$ \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
 % =============================================================================
 \section{KV Cache}
 % =============================================================================
@@ -944,6 +1008,44 @@ IF SHORT: State the rule --- TP within node, PP across nodes.
 
 \end{frame}
 
+\begin{frame}{Serving Architecture Dimensions}
+\note{
+% -- LINK: What prior concept connects to this slide
+Sharding and batching are individual techniques. This slide presents the full decision space for serving architecture design as a structured framework.
+
+% -- NARRATE: What to SAY while showing this slide
+``Four dimensions define your serving architecture. Scheduling policy: FCFS for fairness, preemptive for SLO compliance. Deployment topology: single-GPU for small models, tensor-parallel for latency, pipeline for throughput. State management: stateless for simple scaling, stateful for KV cache reuse across turns. Compute allocation: dedicated GPUs for predictable latency, shared for cost efficiency.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``For a chatbot with multi-turn conversations, which state management model would you choose?'' Expected: stateful, because KV cache from previous turns can be reused, avoiding redundant prefill.
+
+% -- WARN: What students will get wrong on THIS topic
+Students default to stateless because it is simpler to scale. But stateful serving with KV cache persistence can reduce prefill cost by 60--80\% for multi-turn conversations.
+
+% -- FLEX: [OPTIONAL] Framework for serving architecture decisions.
+IF SHORT: Point to the table and state the key trade-off.
+}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lp{3.5cm}p{4.5cm}@{}}
+  \toprule
+  \textbf{Dimension} & \textbf{Options} & \textbf{Trade-off} \\
+  \midrule
+  \textbf{Scheduling} & FCFS, Preemptive, Priority & Fairness vs.\ SLO compliance \\
+  \textbf{Topology}   & Single-GPU, TP, PP, TP+PP & Latency vs.\ throughput vs.\ cost \\
+  \textbf{State}      & Stateless, Stateful (KV reuse) & Scaling simplicity vs.\ cache efficiency \\
+  \textbf{Compute}    & Dedicated, Shared, Spot & Predictability vs.\ cost \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{routingstroke}
+{\scriptsize\textbf{Multi-turn chatbot:} Stateful + TP + Preemptive. KV cache reuse saves 60--80\% prefill cost across conversation turns.}
+\end{mlsyscard}
+
+\end{frame}
+
 % =============================================================================
 \section{Load Balancing}
 % =============================================================================
@@ -1037,6 +1139,61 @@ $E[\text{max queue}] = \Theta(\log \log n)$
 {\scriptsize \textbf{Why:} Random routing occasionally picks busy servers; mistakes compound. Two choices avoids worst picks --- $(d/n)^2$ decay.}
 \end{mlsyscard}
 \mlsyscite{Mitzenmacher, ``Power of Two Choices,'' 2001}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: Power of Two Choices Exercise ---
+\begin{frame}{Your Turn: Power of Two Choices at Scale}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just saw the P2C math. This exercise makes them compute the concrete improvement for a realistic serving fleet.
+
+% -- NARRATE: What to SAY while showing this slide
+Read the problem. Give 90 seconds. Solution: ``Random: expected max load = log(1000)/log(log(1000)) = 6.9/1.93 = 3.6 requests above average. P2C: expected max load = log(log(1000)) = log(6.9) = 1.93 above average. Improvement: 3.6/1.93 = 1.9x reduction in max load. For P99 with 50 ms mean: random P99 = 50 * 3.6 = 180 ms. P2C P99 = 50 * 1.93 = 97 ms. Nearly 2x improvement from one extra probe.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+After revealing, ask: ``Would power of three choices be worth the extra probe?'' Expected: marginal --- P2C captures most of the benefit. Each additional choice gives diminishing returns.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will try to compute exact P99 values. The log/log-log expressions give the scaling behavior, not exact percentiles. Emphasize the ratio, not the absolute numbers.
+
+% -- FLEX: [CORE] Quantitative exercise applying P2C to a real serving scenario.
+IF SHORT: Show the solution and state the 1.9x improvement.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Compute P2C Improvement}
+
+    \vspace{0.15cm}
+    \textbf{Setup:} 1,000 requests across 100 servers.\\
+    Mean service time: 50 ms.
+
+    \vspace{0.1cm}
+    \begin{enumerate}
+      \item Expected max load with random routing?
+      \item Expected max load with P2C?
+      \item P99 latency improvement factor?
+    \end{enumerate}
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- use the formulas from the previous slide)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    Random: $\frac{\log 1000}{\log\log 1000} \approx$ \textbf{3.6}\\
+    P2C: $\log\log 1000 \approx$ \textbf{1.9}\\[0.05cm]
+    P99 ratio: \textbf{1.9$\times$ improvement}\\[0.1cm]
+    Random P99: $\sim$180 ms\\
+    P2C P99: $\sim$97 ms\\[0.05cm]
+    \textcolor{datastroke}{\textbf{One extra probe = 2$\times$ tail latency reduction.}}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
 
 \end{frame}
 
@@ -1429,11 +1586,7 @@ reduces KV heads from 64 to 8, saving 8x cache.
 
 \begin{frame}{Backup: Continuous vs Static Batching}
 \note{
-% -- NARRATE: What to SAY while showing this slide
-Worked example: 4 requests with generation lengths 10, 50, 20, 100.
-Static pads all to 100: 55\% waste. Continuous fills slots as they
-free: under 5\% waste, 2--4x throughput.
-
+% -- NARRATE: Worked example comparing static and continuous batching.
 % -- FLEX: [OPTIONAL] Use for students wanting detailed batching comparison.
 }
 
@@ -1455,6 +1608,40 @@ free: under 5\% waste, 2--4x throughput.
 
 \vspace{0.1cm}
 {\footnotesize Static batching pads all requests to the longest generation, wasting 55\% of compute.}
+
+\end{frame}
+
+\begin{frame}{Backup: Speculative Decoding Math}
+\note{
+% -- NARRATE: Acceptance probability and expected speedup for speculative decoding.
+% -- FLEX: [OPTIONAL] Use when students ask about the speculative decoding acceptance rate.
+}
+
+\footnotesize
+\textbf{Speculative Decoding Speedup Formula:}
+
+\vspace{0.1cm}
+Draft model generates $K$ candidate tokens. Target model verifies all $K$ in one forward pass.
+
+\vspace{0.1cm}
+{\small
+$$\text{Speedup} = \frac{K + 1}{1 + (1 - p_{\text{accept}}) \cdot K \cdot c}$$
+}
+
+\vspace{0.05cm}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  \textbf{Acceptance Rate} & \textbf{K=4} & \textbf{K=8} & \textbf{Effective Speedup} \\
+  \midrule
+  90\% (easy text) & 3.6 tokens/step & 7.2 tokens/step & 2.5--3$\times$ \\
+  70\% (general)    & 2.8 tokens/step & 5.6 tokens/step & 1.8--2.2$\times$ \\
+  50\% (creative)   & 2.0 tokens/step & 4.0 tokens/step & 1.3--1.5$\times$ \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+{\footnotesize\textbf{Key insight:} Speedup depends on draft--target agreement. Easy tasks (code completion) see higher acceptance than creative tasks (story writing).}
 
 \end{frame}
 

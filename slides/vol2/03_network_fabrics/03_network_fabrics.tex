@@ -50,7 +50,7 @@
 }
 
 % --- Section count for navigation (must match actual \section{} count) ---
-\setcounter{mlsystotalsections}{8}
+\setcounter{mlsystotalsections}{9}
 
 \title{Network Fabrics}
 \author{Vijay Janapa Reddi}
@@ -500,6 +500,63 @@ RoCE wins on operational flexibility and cost.
 
 \end{frame}
 
+\begin{frame}{PFC Deadlock: When Lossless Goes Wrong}
+\note{
+% -- LINK: IB vs RoCE mentioned PFC storm risk; this slide unpacks the failure mode
+
+% -- NARRATE: What to SAY while showing this slide
+``PFC (Priority Flow Control) approximates losslessness on Ethernet by sending
+PAUSE frames when buffers fill. The problem: PAUSE propagates backwards, hop by hop.
+A single congested port can freeze an entire subnet in under 200 ms. This is called
+a PFC storm or head-of-line blocking cascade.''
+Walk through the scenario: ``Switch A congests. Sends PAUSE to Switch B. Switch B
+fills its buffer, sends PAUSE to Switch C. Within 200 ms, the entire spine is frozen.
+All traffic --- not just the congested flow --- is blocked.''
+
+% -- ENGAGE: ``Why does InfiniBand not have this problem?''
+Expected: IB uses credit-based flow control --- each link grants credits independently.
+No PAUSE propagation. Congestion stays local.
+
+% -- WARN: Students assume PFC problems are rare. At Meta and Microsoft scale,
+PFC storms were a leading cause of training job failures before mitigations.
+
+% -- FLEX: [OPTIONAL] Important for RoCE environments but not universal.
+IF SHORT: State the 200 ms cascade number and the IB immunity, skip the diagram.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{PFC Storm Cascade:}
+
+    \vspace{0.1cm}
+    \begin{enumerate}\setlength\itemsep{1pt}
+      \item {\footnotesize Port congests $\to$ buffer fills}
+      \item {\footnotesize PAUSE frame sent upstream}
+      \item {\footnotesize Upstream buffer fills $\to$ PAUSE propagates}
+      \item {\footnotesize \textbf{Entire subnet frozen in $<$200 ms}}
+    \end{enumerate}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Head-of-line blocking}: ALL traffic through the congested switch is stopped, not just the offending flow. One bad actor freezes the fabric.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \textbf{Mitigation strategies:}
+    \begin{itemize}\setlength\itemsep{1pt}
+      \item {\footnotesize \textcolor{datastroke}{\textbf{Watchdog}}: Detect PAUSE duration $>$ threshold, disable PFC on that port}
+      \item {\footnotesize \textcolor{routingstroke}{\textbf{DCQCN}}: ECN marking before buffers fill}
+      \item {\footnotesize \textcolor{computestroke}{\textbf{Separate VLANs}}: Isolate training traffic from storage traffic}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    {\scriptsize InfiniBand: \textbf{immune} (credit-based, no PAUSE propagation).}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
 % =============================================================================
 \section{The $\alpha$-$\beta$ Model}
 % =============================================================================
@@ -600,7 +657,8 @@ $n^* = 2 \times 10^{-6} \times 50 \times 10^9 = 100$ KB. Since 50 KB $<$ 100 KB:
 {\Large\bfseries Quick Check}
 
 \vspace{0.6cm}
-{\large A message is 50 KB on IB NDR ($\\alpha=2\\,\\mu$s, $\\beta=50$ GB/s).\\Latency-bound or bandwidth-bound?}
+{\large A message is 50 KB on IB NDR ($\alpha=2\,\mu$s, $\beta=50$ GB/s).}\\
+{\large Latency-bound or bandwidth-bound?}
 
 \vspace{0.5cm}
 {\normalsize\textcolor{midgray}{15 seconds --- then I will cold-call.}}
@@ -699,6 +757,59 @@ non-blocking (1:1 subscription) fat-trees do. Oversubscribed trees lose bandwidt
 \vspace{0.1cm}
 \small
 \mlsysconcept{Key formula:}{$N = k^3/4$ hosts. Radix $k$=64 $\to$ 65,536 GPUs with full bisection bandwidth.}
+
+\end{frame}
+
+\begin{frame}{Rail-Optimized Topology}
+\note{
+% -- LINK: Fat-tree is the general-purpose standard; rail-optimized is the
+specialized alternative designed specifically for tensor parallelism.
+
+% -- NARRATE: What to SAY while showing this slide
+``NVIDIA SuperPOD uses a rail-optimized design. Each GPU in a node connects to a
+different leaf switch --- 8 GPUs, 8 rails. Tensor parallelism happens within the
+node via NVLink (900 GB/s). Data parallelism goes across rails via IB (50 GB/s per
+rail). Key advantage: TP traffic never touches the fabric. Key constraint: jobs
+MUST be topology-aware --- a job placed across two pods pays a 2--4x penalty.''
+
+% -- ENGAGE: ``Why does each GPU connect to a DIFFERENT leaf switch?''
+Expected: to distribute DP AllReduce traffic across 8 independent paths.
+
+% -- WARN: Students assume any topology works for TP. Correct: rail-optimized
+REQUIRES that TP stays intra-node. Violating this constraint collapses performance.
+
+% -- FLEX: [CORE] Rail-optimized is the dominant production topology for LLM training.
+IF SHORT: State the design principle and the topology-aware constraint.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Rail-Optimized Design (SuperPOD):}
+
+    \vspace{0.1cm}
+    \begin{itemize}\setlength\itemsep{1pt}
+      \item {\footnotesize 8 GPUs per node $\to$ 8 independent ``rails''}
+      \item {\footnotesize Each GPU connects to a \emph{different} leaf switch}
+      \item {\footnotesize TP: intra-node via NVLink (900 GB/s)}
+      \item {\footnotesize DP: across rails via IB (50 GB/s $\times$ 8 = 400 GB/s aggregate)}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{Advantage}: TP traffic never touches the fabric. 8 independent DP paths maximize aggregate bandwidth.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize \textbf{Constraint}: Jobs must be \emph{topology-aware}. Cross-pod placement: 2--4$\times$ slower.\\[0.1cm]
+    Requires: topology-aware scheduler, contiguous GPU allocation, NVLink for TP.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    {\scriptsize Used by: NVIDIA DGX SuperPOD, Meta Grand Teton (variant).}
+  \end{column}
+\end{columns}
 
 \end{frame}
 
@@ -1068,6 +1179,95 @@ IF SHORT: State the ``silent degradation'' problem and the iperf warning.
 
 \end{frame}
 
+% --- ACTIVE LEARNING: Ring AllReduce Crossover Exercise ---
+\begin{frame}{Your Turn: Ring AllReduce Latency Crossover}
+\note{
+% -- LINK: Alpha-beta model showed two regimes; this exercise applies it to
+Ring AllReduce at real fleet scale to find where latency dominates.
+
+% -- NARRATE: ``A 70B model on 256 GPUs. 90 seconds. Compute the alpha-beta
+time for Ring AllReduce over IB NDR. At what GPU count does latency dominate?''
+After pause: ``Ring AllReduce time: $T = 2(N-1)/N \times M/\beta + (N-1) \times \alpha$.
+M = 280 GB (70B $\times$ 4 bytes mixed precision gradients). $\beta$ = 50 GB/s (IB NDR).
+$\alpha$ = 5 $\mu$s per hop. At N=256: bandwidth term = 2 $\times$ 255/256 $\times$ 280/50
+= 11.2 s. Latency term = 255 $\times$ 5 $\mu$s = 1.3 ms. Bandwidth dominates by 8,600$\times$.
+Latency dominates when $M < N \times \alpha \times \beta$ = 256 $\times$ 5$\mu$s $\times$ 50 GB/s
+= 64 KB. For small control messages ($<$64 KB), topology (hops) matters more than link speed.''
+
+% -- ENGAGE: This IS the active learning moment.
+After: ``At 4,096 GPUs, the latency term grows to 20 ms. Still small vs 11.2 s.
+At what message size does latency = bandwidth?'' This is the crossover $n^*$.
+
+% -- WARN: Students forget the $2(N-1)/N$ factor in Ring AllReduce.
+
+% -- FLEX: [CORE] This is the chapter's quantitative exercise.
+IF SHORT: Give 60 seconds, show the solution, emphasize the 8,600x ratio.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Ring AllReduce: $\alpha$-$\beta$ Analysis}
+
+    \vspace{0.1cm}
+    {\footnotesize $T_{\text{Ring}} = \underbrace{2\frac{N\!-\!1}{N} \cdot \frac{M}{\beta}}_{\text{bandwidth}} + \underbrace{(N\!-\!1) \cdot \alpha}_{\text{latency}}$}
+
+    \vspace{0.15cm}
+    \textbf{Given:} 70B model, 256 GPUs
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\footnotesize $M$ = 280 GB (mixed precision gradients)}
+      \item {\footnotesize $\beta$ = 50 GB/s (IB NDR)}
+      \item {\footnotesize $\alpha$ = 5 $\mu$s per hop}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Calculate:} Total time and crossover point.
+
+    {\footnotesize\textcolor{midgray}{(90 seconds)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize \textbf{Solution:}\\
+    BW term: $2 \times 255/256 \times 280/50$\\
+    = \textbf{11.2 s}\\
+    Latency term: $255 \times 5\mu$s\\
+    = \textbf{1.3 ms}\\[0.1cm]
+    BW dominates by 8,600$\times$!\\[0.1cm]
+    Crossover at $M < 64$ KB:\\
+    Below 64 KB: optimize \textbf{hops}\\
+    Above 64 KB: optimize \textbf{link speed}}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Fabric Diagnostic Flowchart}
+\note{
+% -- LINK: Monitoring showed the three telemetry layers; this flowchart
+synthesizes them into a diagnostic procedure.
+
+% -- NARRATE: ``When training slows down mysteriously, follow this flowchart.
+Step 1: Check ib\_write\_bw baseline --- has bandwidth degraded? Step 2: Check PFC
+counters --- is the fabric under congestion? Step 3: Check BER --- is a transceiver
+failing? Step 4: Correlate with training throughput timeline. The root cause is
+usually: (a) bad transceiver (replace), (b) PFC storm (isolate offending flow),
+or (c) topology mismatch (topology-aware placement).''
+
+% -- FLEX: [OPTIONAL] Reference slide for operational debugging.
+IF SHORT: Show the flowchart, name the three root causes, move on.
+}
+
+\centering
+\safeimg[width=0.88\textwidth,height=4.2cm,keepaspectratio]{fabric-diagnostic-flowchart.pdf}
+
+\vspace{0.1cm}
+\small
+\mlsysconcept{Diagnostic order:}{Bandwidth baseline $\to$ PFC counters $\to$ BER trends $\to$ correlate with training throughput.}
+
+\end{frame}
+
 % =============================================================================
 \section{Wrap-Up}
 % =============================================================================
@@ -1237,40 +1437,57 @@ IF SHORT: State the central question and dismiss.
 
 \appendix
 
-\begin{frame}{Backup: Extended Reference}
+\begin{frame}{Backup: $\alpha$-$\beta$ Quick Reference}
 \note{
-% -- NARRATE: Backup --- extended reference. Use if students want more detail.
-% -- FLEX: [OPTIONAL] Only show if specifically requested.
+% -- NARRATE: Backup reference for alpha-beta calculations.
+% -- FLEX: [OPTIONAL] Only show if requested.
 }
 
 \footnotesize
-This slide provides extended reference material for students who want to go deeper.
-Refer to the textbook chapter for complete derivations and additional worked examples.
+\textbf{Communication Cost Models:}
 
-\vspace{0.3cm}
-\begin{mlsyscard}{crimson}
-\textbf{Key equations and frameworks from this chapter} are collected in the
-textbook's summary tables. Use them as a quick reference during problem sets.
-\end{mlsyscard}
+\vspace{0.15cm}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}ll@{}}
+  \toprule
+  \textbf{Model} & \textbf{Formula} \\
+  \midrule
+  Point-to-point & $T(n) = \alpha + n/\beta$ \\
+  Ring AllReduce & $T = 2\frac{N-1}{N} \cdot \frac{M}{\beta} + (N-1) \cdot \alpha$ \\
+  Tree AllReduce & $T = 2\log_2(N) \cdot (\alpha + M/(2\beta))$ \\
+  Crossover ($n^*$) & $n^* = \alpha \cdot \beta$ \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\textbf{Canonical $\alpha$ values:} IB HDR/NDR: 1.5 $\mu$s. RoCE: 3--5 $\mu$s.\\
+\textbf{Canonical $\beta$ values:} IB HDR: 25 GB/s. IB NDR: 50 GB/s. NVLink 4.0: 900 GB/s.
 
 \end{frame}
 
-\begin{frame}{Backup: Further Reading}
+\begin{frame}{Backup: PFC Deadlock and Congestion Control Reference}
 \note{
-% -- NARRATE: Backup --- additional resources for deeper exploration.
-% -- FLEX: [OPTIONAL] Only show if time permits.
+% -- NARRATE: Extended reference for congestion control mechanisms.
+% -- FLEX: [OPTIONAL] Use if students want to understand DCQCN vs HPCC deeply.
 }
 
 \footnotesize
-\textbf{For deeper exploration:}
+\textbf{Congestion Control Progression:}
 
 \vspace{0.15cm}
-\begin{itemize}\setlength\itemsep{2pt}
-  \item The textbook chapter contains 2--3 additional worked examples
-  \item Problem sets apply these concepts to real-world scenarios
-  \item The course website links to open-source implementations
-  \item Office hours: bring your toughest questions
-\end{itemize}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}llrl@{}}
+  \toprule
+  \textbf{Mechanism} & \textbf{Signal} & \textbf{Utilization} & \textbf{Risk} \\
+  \midrule
+  PFC (reactive) & PAUSE frames & 70--80\% & PFC storm cascade \\
+  DCQCN (proactive) & ECN marking & 85--90\% & Blind to severity \\
+  HPCC (telemetry) & In-network INT & 95\%+ & Requires programmable switches \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+{\footnotesize \textbf{PFC Storm Prevention:} Watchdog timers (disable PFC on stuck port), separate VLANs for training vs storage, DCQCN to prevent buffer filling.}
 
 \end{frame}
 

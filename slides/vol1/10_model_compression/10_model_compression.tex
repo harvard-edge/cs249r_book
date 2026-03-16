@@ -58,7 +58,7 @@
 }
 
 % --- Section count for navigation ---
-\setcounter{mlsystotalsections}{7}
+\setcounter{mlsystotalsections}{9}
 
 \title{Model Compression}
 \author{Vijay Janapa Reddi}
@@ -702,6 +702,79 @@ IF SHORT: Highlight just the Hardware row and the Conservation card.
 
 \end{frame}
 
+\begin{frame}{Case Study: DistilBERT in Production}
+\note{
+% -- LINK: Distillation was abstract; this shows a real deployment story
+Students learned the distillation mechanism and the pruning-vs-distillation
+comparison. This slide grounds it with a real production deployment.
+
+% -- NARRATE: Walk through the DistilBERT numbers as a war story
+``Hugging Face needed BERT for real-time NLP serving. BERT-Base: 110M params,
+440 MB, 6.5 ms per query. Too slow for mobile and too expensive for
+high-QPS servers.'' Point to the table: ``DistilBERT: 66M params, 260 MB,
+2.5 ms. 40\% fewer params, 60\% faster, retains 97\% of teacher accuracy
+on GLUE.'' Then: ``The key: distillation produced a \emph{dense} model
+that runs on any hardware without sparse kernel support.''
+
+% -- ENGAGE: Would you deploy DistilBERT or pruned BERT?
+Ask: ``For a mobile keyboard prediction app, would you use DistilBERT or
+pruned BERT?'' Give 20 seconds. Expected: DistilBERT --- dense model runs
+on any mobile hardware; pruned BERT needs sparse kernels.
+
+% -- WARN: Students may think 97\% accuracy is always acceptable
+Common error: ``3\% loss is fine.'' Correct framing: for safety-critical
+tasks (medical, legal), 3\% can be catastrophic. Always validate on
+the specific downstream task, not the generic benchmark.
+
+% -- FLEX: [OPTIONAL] Concrete war story deepens understanding
+[OPTIONAL] The numbers are memorable; skip if short on time.
+IF AHEAD: ``What about TinyBERT (4x smaller than DistilBERT)?''
+IF SHORT: State the three headline numbers and move on.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{The problem:} BERT-Base too slow for real-time NLP.
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.1}
+    {\scriptsize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      & \textbf{BERT-Base} & \textbf{DistilBERT} \\
+      \midrule
+      Parameters  & 110M      & 66M (\textbf{40\% fewer}) \\
+      Size (FP32) & 440 MB    & 260 MB \\
+      Latency     & 6.5 ms    & \textbf{2.5 ms} \\
+      GLUE score  & 79.6      & 77.0 (\textbf{97\%}) \\
+      Hardware    & Any       & Any (dense) \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \mlsysconcept{Key:}{Dense output runs on \emph{any} hardware --- no sparse kernel dependency.}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \vspace{0.1cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{Production impact:}\\[0.05cm]
+    $\bullet$ 2.6$\times$ faster inference\\
+    $\bullet$ Enables on-device NLP\\
+    $\bullet$ Serving cost: 60\% reduction\\
+    $\bullet$ No accuracy-critical regression\\[0.05cm]
+    Used by 10,000+ applications on Hugging Face Hub.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \mlsysalert{Caveat:}{97\% GLUE retention $\neq$ 97\% on \emph{your} task. Always validate downstream.}
+  \end{column}
+\end{columns}
+\mlsyscite{Sanh et al., 2019}
+
+\end{frame}
+
 \begin{frame}{Quick Check}
 \note{
 % -- NARRATE: Pause and let students retrieve before moving to quantization
@@ -1000,6 +1073,155 @@ IF SHORT: Show the diagram, state ``10--30\% free,'' move on.
 
 \vspace{0.05cm}
 \mlsysinsight{Rule:}{Operator fusion is \textbf{always} first. Zero accuracy cost, immediate latency gain.}
+
+\end{frame}
+
+% =============================================================================
+\section{Efficiency Measurement}
+% =============================================================================
+
+\begin{frame}{Pareto Efficiency for Compression}
+\note{
+% -- LINK: Students know individual techniques; now formalize how to compare them
+Students learned pruning, distillation, and quantization as separate tools.
+This slide introduces Pareto efficiency as the formal framework for
+evaluating which compression configurations are worth pursuing.
+
+% -- NARRATE: Walk through the Pareto frontier concept with concrete points
+``Plot accuracy on the y-axis, latency (or model size) on the x-axis.
+Each compression configuration is a point. The Pareto frontier is the
+set of points where you cannot improve one metric without worsening the
+other.'' Point to the table: ``Configuration C (INT8 + channel pruning)
+dominates B (INT8 only) --- same accuracy, lower latency. B is \emph{not}
+on the Pareto frontier.'' Then: ``Only configurations on the frontier are
+worth deploying. Everything else is dominated.''
+
+% -- ENGAGE: Identify the dominated configuration
+Ask: ``Which configuration in the table is dominated?'' Give 20 seconds.
+Expected: B (INT8 only) --- C achieves the same accuracy at lower latency.
+
+% -- WARN: Students compare techniques on a single metric
+Common error: ``INT4 is best because it has the smallest model.'' Correct
+framing: INT4 sacrifices accuracy. Whether that trade-off is acceptable
+depends on the deployment requirement. Pareto analysis makes this explicit.
+
+% -- FLEX: [CORE] Pareto efficiency frames the decision framework next
+[CORE] Students need this to evaluate compression pipelines rationally.
+IF AHEAD: ``How does the Pareto frontier change with different hardware?''
+IF SHORT: State the frontier concept and the dominated-point example.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{Pareto frontier:} No metric improves without another worsening.
+
+    \vspace{0.1cm}
+    {\scriptsize
+    \renewcommand{\arraystretch}{1.05}
+    \begin{tabular}{@{}llrr@{}}
+      \toprule
+      & \textbf{Config} & \textbf{Acc.} & \textbf{Latency} \\
+      \midrule
+      A & FP32 baseline        & 76.2\% & 15 ms \\
+      B & INT8 only            & 76.0\% & 8 ms \\
+      C & INT8 + channel prune & 76.0\% & 5 ms \\
+      D & INT4 + distillation  & 74.5\% & 3 ms \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{B is dominated by C:} Same accuracy, lower latency. B is \emph{not} on the Pareto frontier.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \vspace{0.1cm}
+    \begin{mlsyscard}{crimson}
+    {\scriptsize \textbf{Pareto frontier (A, C, D):}\\[0.05cm]
+    A: Highest accuracy (no compression)\\
+    C: Best accuracy-latency trade-off\\
+    D: Lowest latency (accuracy sacrifice)\\[0.05cm]
+    Only frontier points are worth deploying.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \mlsysinsight{Rule:}{If another config matches your accuracy at lower cost, your config is \textbf{dominated}.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Your Turn: Pruning Arithmetic}
+\note{
+% -- LINK: Pareto analysis showed how to compare; now calculate concrete pruning numbers
+Students just learned to evaluate compression configurations. This exercise
+forces them to calculate the concrete impact of pruning on parameters and FLOPs.
+
+% -- NARRATE: Present problem, then reveal after pause
+``ResNet-50: 25.6M params. At 90\% unstructured sparsity, how many non-zero
+params remain? At 50\% structured pruning (channels), what is the FLOP
+reduction?'' Wait 90 seconds. Solution: ``Unstructured: 2.56M non-zero params
+(memory savings if sparse format used). Structured: roughly 75\% FLOP
+reduction (halving channels in each layer reduces FLOPs quadratically
+for conv layers because both input and output channels shrink).''
+
+% -- ENGAGE: Peer instruction protocol
+Present (30s). Individual work (60s). If 30--70\% correct: pair discussion.
+The key insight: structured pruning gives \emph{real} speedup because the
+resulting model is a smaller dense network. Unstructured gives memory savings
+but needs sparse hardware for speedup.
+
+% -- WARN: Students assume 50\% channel pruning gives 50\% FLOP reduction
+Common error: linear scaling assumption. Correct framing: conv FLOPs scale
+with both input and output channels. Halving both gives $\sim$75\% reduction
+($0.5 \times 0.5 = 0.25$ of original).
+
+% -- FLEX: [CORE] Quantitative exercise for pruning section
+[CORE] Central calculation connecting pruning to hardware impact.
+IF AHEAD: ``What accuracy loss would you expect at 50\% channel pruning?''
+IF SHORT: Show solution immediately, walk through the quadratic argument.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Calculate Pruning Impact}
+
+    \vspace{0.15cm}
+    ResNet-50: \textbf{25.6M} parameters, \textbf{4.1 GFLOPs}.
+
+    \vspace{0.1cm}
+    \textbf{1.} At 90\% \textit{unstructured} sparsity:\\
+    \hspace{0.3cm} How many non-zero params remain?
+
+    \vspace{0.05cm}
+    \textbf{2.} At 50\% \textit{structured} pruning (channels):\\
+    \hspace{0.3cm} What is the approximate FLOP reduction?
+
+    \vspace{0.05cm}
+    \textbf{3.} Which gives real speedup on a phone GPU?
+
+    \vspace{0.1cm}
+    {\scriptsize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize \textbf{Solution:}\\[0.05cm]
+    1.\ $25.6\text{M} \times 0.1 = \textbf{2.56M}$ non-zero\\
+    \hspace{0.3cm}(memory: 100 MB $\to$ 10 MB if sparse)\\[0.05cm]
+    2.\ Conv FLOPs $\propto C_{\text{in}} \times C_{\text{out}}$\\
+    \hspace{0.3cm}$0.5 \times 0.5 = 0.25$ remaining\\
+    \hspace{0.3cm}$\approx$ \textbf{75\% FLOP reduction}\\[0.05cm]
+    3.\ \textcolor{datastroke}{\textbf{Structured}} --- smaller\\
+    \hspace{0.3cm}dense network, any hardware.\\
+    \hspace{0.3cm}Unstructured needs sparse kernels.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
 
 \end{frame}
 
@@ -1427,6 +1649,53 @@ activations to avoid this.
 }
 \small
 Use if students ask about going below INT8.\\small ResNet-50 accuracy by precision:\\ FP32: 76.2\%. INT8: 76.1\% ($-$0.1\%). INT4: 71--73\% ($-$3--5\%). Binary: 51\% (catastrophic).\\ The ``cliff'' occurs because 4 bits cannot represent the dynamic range of activation outliers.\\ LLMs use mixed INT4 weights + FP16 activations to avoid this.
+\end{frame}
+
+\begin{frame}{Backup: PTQ vs QAT Decision Tree}
+\note{
+% -- NARRATE: Decision tree for choosing PTQ vs QAT
+Start with PTQ (always). If accuracy drop < 1\%: ship PTQ. If 1--3\% drop:
+try QAT with the same training data. If > 3\% drop: the model architecture
+may not tolerate quantization --- consider distillation or mixed precision.
+For LLMs: GPTQ (PTQ variant) dominates because full QAT is prohibitively expensive.
+
+% -- FLEX: [OPTIONAL] Deploy when students ask which to choose
+[OPTIONAL] Backup for PTQ/QAT questions.
+}
+\small
+Use if students need a decision framework for PTQ vs QAT.\\[0.1cm]
+{\footnotesize
+\textbf{Step 1:} Always try PTQ first (one function call, no training).\\
+\textbf{Step 2:} Measure accuracy drop on your validation set.\\
+$\bullet$ Drop $< 1\%$: Ship PTQ. Done.\\
+$\bullet$ Drop 1--3\%: Try QAT (requires training data + GPU budget).\\
+$\bullet$ Drop $> 3\%$: Architecture may not tolerate quantization. Consider distillation or mixed precision (INT8 weights + FP16 activations).\\[0.05cm]
+\textbf{LLMs:} GPTQ (PTQ variant) dominates --- full QAT at 70B+ params is prohibitively expensive (\$100K+).
+}
+\end{frame}
+
+\begin{frame}{Backup: Pareto Frontier Construction}
+\note{
+% -- NARRATE: How to build a Pareto frontier in practice
+1. Generate N compression configurations (vary pruning ratio, quantization
+level, distillation temperature). 2. Measure accuracy and latency for each
+on target hardware. 3. Sort by accuracy descending. 4. Walk the list: keep
+a config only if its latency is lower than all previously kept configs.
+5. The kept configs form the Pareto frontier.
+
+% -- FLEX: [OPTIONAL] Deploy during the Pareto efficiency discussion
+[OPTIONAL] Practical algorithm for frontier construction.
+}
+\small
+Use if students ask how to construct a Pareto frontier.\\[0.1cm]
+{\footnotesize
+\textbf{1.} Generate $N$ compression configs (vary pruning \%, quant bits, distill temp).\\
+\textbf{2.} Measure accuracy and latency on \emph{target hardware} for each.\\
+\textbf{3.} Sort by accuracy descending.\\
+\textbf{4.} Walk the sorted list: keep a config only if its latency is strictly lower than all previously kept configs.\\
+\textbf{5.} Kept configs = Pareto frontier.\\[0.05cm]
+\textbf{Tip:} The frontier changes with hardware. Re-evaluate when switching deployment targets.
+}
 \end{frame}
 
 \begin{frame}{Backup: Compression Pipeline Order}

@@ -50,7 +50,7 @@
 }
 
 % --- Section count for navigation ---
-\setcounter{mlsystotalsections}{8}
+\setcounter{mlsystotalsections}{9}
 
 \title{Distributed Training Systems}
 \author{Vijay Janapa Reddi}
@@ -542,6 +542,74 @@ IF SHORT: State the $B^*$ definition and the three empirical values.
 
 \end{frame}
 
+\begin{frame}{Learning Rate Scaling: The Warmup Protocol}
+\note{
+% -- LINK: Critical batch size showed WHEN parallelism stops helping; this slide
+shows HOW to adjust the learning rate when scaling up workers.
+
+% -- NARRATE: What to SAY while showing this slide
+``When you double the batch size, you must adjust the learning rate. Two rules:
+Linear scaling (Goyal et al.): LR $\propto k$ when batch $\propto k$. Square root
+scaling: LR $\propto \sqrt{k}$ when batch $>$ $B^*$. Both require warmup: start at
+base LR and linearly ramp over 5--10\% of training steps. Without warmup, large
+batches diverge in the first few hundred steps.''
+Walk through the table: ``8 workers, LR = 0.1, linear. 64 workers: still below
+$B^*$, LR = 0.8, linear. 1,024 workers: above $B^*$, switch to $\sqrt{k}$.
+Without warmup at 1,024: divergence probability $>$50\%.''
+
+% -- ENGAGE: ``Why does the rule change at $B^*$?''
+Expected: below $B^*$, gradient noise decreases linearly with batch size.
+Above $B^*$, noise is already below signal --- further reduction has no benefit,
+but the larger LR destabilizes training.
+
+% -- WARN: Students apply linear scaling beyond $B^*$ and wonder why training diverges.
+
+% -- FLEX: [CORE] LR scaling is the most common failure mode when scaling up.
+IF SHORT: State the two rules and the warmup requirement.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Two learning rate scaling rules:}
+
+    \vspace{0.15cm}
+    {\footnotesize
+    \textbf{Below $B^*$} (linear regime):\\
+    $\text{LR}_k = k \times \text{LR}_{\text{base}}$\\[0.1cm]
+    \textbf{Above $B^*$} (diminishing returns):\\
+    $\text{LR}_k = \sqrt{k} \times \text{LR}_{\text{base}}$
+    }
+
+    \vspace{0.15cm}
+    \textbf{Warmup is mandatory:}\\
+    {\footnotesize Linearly ramp LR over 5--10\% of training.\\
+    Without warmup at $k > 64$: divergence probability $>$50\%.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.15}
+    {\footnotesize
+    \begin{tabular}{@{}rll@{}}
+      \toprule
+      \textbf{Workers} & \textbf{LR Rule} & \textbf{LR} \\
+      \midrule
+      8   & Linear ($k$)    & 0.1 $\times$ 8 = 0.8 \\
+      64  & Linear ($k$)    & 0.1 $\times$ 64 = 6.4 \\
+      1,024 & $\sqrt{k}$ & 0.1 $\times$ 32 = 3.2 \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize At 1,024 workers, linear scaling gives LR = 102.4 --- \textbf{diverges immediately}. Switch to $\sqrt{k}$ at $B^*$.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
 % =============================================================================
 \section{ZeRO \& FSDP}
 % =============================================================================
@@ -793,16 +861,16 @@ a 96-layer model with per-layer AllReduce will spend 90\%+ of time in communicat
 \textbf{The Jeff Dean Test:} If you attempt \textbf{Tensor Parallelism} across server racks connected by standard Ethernet, your training will stall.
 \end{mlsyscard}
 
-\vspace{0.15cm}
+\vspace{0.1cm}
 \renewcommand{\arraystretch}{1.15}
-{\footnotesize
-\begin{tabular}{@{}llll@{}}
+{\scriptsize
+\begin{tabular}{@{}lllll@{}}
   \toprule
-  \textbf{Strategy} & \textbf{Comm.\ per Step} & \textbf{BW Need} & \textbf{Placement} \\
+  \textbf{Strategy} & \textbf{Comm.\ per Step} & \textbf{BW Need} & \textbf{Latency (70B)} & \textbf{Placement} \\
   \midrule
-  Tensor Par. & AllReduce per \emph{layer} & 600--900 GB/s & \textcolor{computestroke}{\textbf{Intra-node (NVLink)}} \\
-  Pipeline Par. & P2P per \emph{stage boundary} & 25--50 GB/s & \textcolor{datastroke}{\textbf{Inter-node (InfiniBand)}} \\
-  Data Par. & AllReduce per \emph{step} & 50--200 GB/s & \textcolor{routingstroke}{\textbf{Across replicas}} \\
+  Tensor Par. & AllReduce per \emph{layer} & 600--900 GB/s & \textbf{0.3 ms/layer} (NVLink) & \textcolor{computestroke}{\textbf{Intra-node}} \\
+  Pipeline Par. & P2P per \emph{stage boundary} & 25--50 GB/s & \textbf{5--10 ms/stage} (IB) & \textcolor{datastroke}{\textbf{Inter-node}} \\
+  Data Par. & AllReduce per \emph{step} & 50--200 GB/s & \textbf{2--5 s/step} (IB) & \textcolor{routingstroke}{\textbf{Across replicas}} \\
   \bottomrule
 \end{tabular}
 }
@@ -983,6 +1051,123 @@ IF SHORT: Show the memory table, state the DPO simplification, move on.
     No generation phase\\
     2$\times$ higher MFU (40--55\%)
     }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Convergence Guarantees: BSP vs SSP vs ASP}
+\note{
+% -- LINK: RLHF showed multi-model complexity; this slide formalizes the three
+synchronization models and their convergence properties.
+
+% -- NARRATE: What to SAY while showing this slide
+``Three synchronization models, each with different convergence guarantees.
+BSP (Bulk Synchronous Parallel): all workers sync every step. Strongest guarantee ---
+equivalent to serial SGD with larger batch. But slowest worker determines throughput.
+SSP (Stale Synchronous Parallel): workers proceed but no more than $s$ steps ahead.
+Bounded staleness: convergence proven for $s \leq \sqrt{N}$. ASP (Asynchronous):
+no barrier. Fastest throughput but gradients can be stale by dozens of steps.
+Convergence: only guaranteed for convex objectives or with gradient clipping.''
+
+% -- ENGAGE: ``Most frontier labs use BSP despite the straggler cost. Why?''
+Expected: convergence quality matters more than throughput for trillion-token runs.
+A 1\% accuracy loss from staleness costs more than the straggler overhead.
+
+% -- WARN: Students assume ASP is always better because it eliminates barriers.
+Correct: 15--30\% quality degradation in practice. The wasted compute from
+lower-quality gradients exceeds the straggler savings.
+
+% -- FLEX: [OPTIONAL] Deepens the synchronization discussion.
+IF SHORT: State BSP is dominant, give the staleness quality number, move on.
+}
+
+\small
+\renewcommand{\arraystretch}{1.2}
+{\footnotesize
+\begin{tabular}{@{}lllrl@{}}
+  \toprule
+  \textbf{Model} & \textbf{Barrier} & \textbf{Staleness} & \textbf{Quality} & \textbf{Throughput} \\
+  \midrule
+  \textcolor{computestroke}{\textbf{BSP}} & Every step & 0 & \textcolor{datastroke}{\textbf{Optimal}} & Slowest worker \\
+  \textcolor{routingstroke}{\textbf{SSP}} & Bounded ($s$ steps) & $\leq s$ & $\sim$5--15\% loss & Medium \\
+  \textcolor{errorstroke}{\textbf{ASP}} & None & Unbounded & $\sim$15--30\% loss & \textcolor{datastroke}{\textbf{Fastest}} \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize \textbf{BSP dominates production}: Frontier labs accept straggler cost because convergence quality on trillion-token runs is worth more than throughput.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Staleness tax}: At 25K GPUs, ASP gradients can be 50+ steps stale. The wasted compute from low-quality gradients exceeds straggler savings.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ZeRO Memory Exercise for 175B ---
+\begin{frame}{Your Turn: ZeRO Memory for GPT-3 (175B)}
+\note{
+% -- LINK: ZeRO exercise showed 7B; now students scale to 175B across 64 GPUs
+and discover the limits of memory sharding.
+
+% -- NARRATE: ``90 seconds. 175B parameters, Adam optimizer (16 bytes/param baseline),
+64 GPUs with ZeRO Stages 1, 2, and 3. Calculate memory per GPU at each stage.''
+After pause: ``Baseline (DDP): 175B $\times$ 16 = 2,800 GB. Stage 1 (shard optimizer):
+2M + 2M + 12M/64 = 4M + 0.1875M per param... Simplified: 175B $\times$ (4 + 12/64)
+= 175B $\times$ 4.1875 bytes = 732.8 GB. Stage 2: 175B $\times$ (2 + 14/64) = 175B
+$\times$ 2.219 = 388.3 GB. Stage 3: 175B $\times$ 16/64 = 43.75 GB. Plus activations
+($\sim$50 GB). Stage 3 fits on 80 GB GPUs! But communication overhead: 10--25\%.''
+
+% -- ENGAGE: This IS the active learning moment.
+``At what stage does 175B first fit on 64 $\times$ 80 GB GPUs?'' Answer: Stage 3.
+
+% -- WARN: Students forget activations. ZeRO-3 gives 43.75 GB but activations
+add 30--50 GB, pushing total to $\sim$94 GB --- tight on 80 GB GPUs.
+
+% -- FLEX: [CORE] Quantitative capstone connecting memory, sharding, and limits.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries ZeRO Memory: 175B on 64 GPUs}
+
+    \vspace{0.1cm}
+    {\footnotesize Memory per param (baseline): 16 bytes\\
+    (2B params + 2B grads + 4B FP32 + 4B $m$ + 4B $v$)}
+
+    \vspace{0.1cm}
+    \textbf{Calculate per-GPU memory at each stage:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\footnotesize ZeRO-1: Shard optimizer only}
+      \item {\footnotesize ZeRO-2: + shard gradients}
+      \item {\footnotesize ZeRO-3: + shard parameters}
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Does it fit on 80 GB GPUs?}\\
+    {\footnotesize\textcolor{midgray}{(90 seconds)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize \textbf{Solution (per GPU):}\\
+    DDP: 2,800 GB (impossible)\\
+    ZeRO-1: $\sim$733 GB (\textcolor{errorstroke}{no})\\
+    ZeRO-2: $\sim$388 GB (\textcolor{errorstroke}{no})\\
+    ZeRO-3: $\sim$44 GB (\textcolor{datastroke}{\textbf{yes!}})\\[0.1cm]
+    + activations: $\sim$94 GB total\\
+    \textcolor{errorstroke}{\textbf{Tight!}} Need activation\\
+    checkpointing or TP to fit.}
     \end{mlsyscard}
   \end{column}
 \end{columns}

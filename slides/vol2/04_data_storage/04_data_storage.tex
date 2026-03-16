@@ -664,7 +664,8 @@ Answer: HBM 3.35 TB/s vs NVMe 7 GB/s. Pipelining and prefetching hide it.
 {\Large\bfseries Quick Check}
 
 \vspace{0.6cm}
-{\large What is the 500$\\times$ storage-compute gap,\\and what technique hides it?}
+{\large What is the 500$\times$ storage-compute gap,}\\
+{\large and what technique hides it?}
 
 \vspace{0.5cm}
 {\normalsize\textcolor{midgray}{15 seconds --- then I will cold-call.}}
@@ -1037,6 +1038,125 @@ IF SHORT: State the 4.5 PB vs 3 TB contrast and the checkpoint dominance insight
 
 \end{frame}
 
+\begin{frame}{Checkpoint Coordination: Sync vs Async}
+\note{
+% -- LINK: Checkpoint staging showed the write path; this slide addresses WHEN
+to checkpoint --- the coordination dimension.
+
+% -- NARRATE: What to SAY while showing this slide
+``Synchronous checkpointing: all workers pause, write state, resume. Simple but
+expensive. 175B model checkpoint takes 60--120 seconds. At 10-minute intervals,
+that is 10--20\% overhead. Asynchronous: write to local NVMe while training
+continues. Background replication to PFS. Key risk: if a failure occurs during
+async replication, the latest checkpoint may be incomplete. Solution: keep the
+PREVIOUS checkpoint until replication confirms.''
+
+% -- ENGAGE: ``What happens if async replication is slower than the checkpoint interval?''
+Expected: checkpoints queue up and eventually overflow local NVMe. Must size
+local storage for at least 2$\times$ checkpoint size.
+
+% -- WARN: Students implement async without the two-checkpoint safety buffer.
+If only one checkpoint exists and replication has not finished when failure
+strikes, you lose ALL progress since the last completed checkpoint.
+
+% -- FLEX: [CORE] Checkpoint coordination directly impacts training efficiency.
+IF SHORT: State the 10--20\% overhead number and the async solution.
+}
+
+\small
+\renewcommand{\arraystretch}{1.2}
+{\footnotesize
+\begin{tabular}{@{}llrl@{}}
+  \toprule
+  \textbf{Strategy} & \textbf{Impact on Training} & \textbf{Overhead} & \textbf{Recovery Risk} \\
+  \midrule
+  \textbf{Synchronous} & All workers pause & 10--20\% & None (consistent) \\
+  \textbf{Async (local)} & Write NVMe, train continues & 1--3\% & Incomplete if NVMe fails \\
+  \textbf{Async (staged)} & NVMe + background PFS & 2--5\% & \textcolor{datastroke}{\textbf{Safe}} (keep $n-1$) \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Sync overhead}: 175B model, 60--120s per checkpoint, every 10 min = \textbf{10--20\% of training time} lost to I/O.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{Async rule}: Always keep the \emph{previous} completed checkpoint on PFS until the current one is fully replicated.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: Prefetch Buffer Design Exercise ---
+\begin{frame}{Your Turn: Design the Prefetch Buffer}
+\note{
+% -- LINK: Pipeline equation showed bandwidth requirements; this exercise applies it
+to a concrete I/O hiding problem.
+
+% -- NARRATE: ``90 seconds. Your training job reads 10 TB of images. NVMe delivers
+7 GB/s, network delivers 25 Gbps (3.125 GB/s). Design the prefetch buffer to
+hide I/O latency.'' After pause: ``GPU processes one batch in 0.5 s. Batch size:
+200 MB. Required throughput: 200 MB / 0.5 s = 400 MB/s. NVMe delivers 7 GB/s ---
+easily sufficient. Network at 3.125 GB/s --- also sufficient. But the question is
+buffer size: you need enough to absorb P99 latency spikes. If P99 is 500 ms and
+throughput is 400 MB/s, you need 200 MB buffer minimum. In practice: 2--4$\times$
+margin = 400--800 MB buffer. For the full 10 TB dataset: stream from NVMe with
+4 worker threads, prefetch 2$\times$ batch size ahead.''
+
+% -- ENGAGE: This IS the active learning moment.
+After: ``What if NVMe was only 1 GB/s (spinning disk)? Buffer = 400 MB/s $\times$ 3 s
+latency = 1.2 GB. Slower storage demands larger buffers.''
+
+% -- WARN: Students size the buffer for average latency, not P99. Tail latency
+is what causes stalls --- the 500 ms spikes drain the buffer.
+
+% -- FLEX: [CORE] I/O hiding is the most practical skill from this chapter.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Prefetch Buffer Design}
+
+    \vspace{0.15cm}
+    \textbf{Given:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\footnotesize Training data: 10 TB of images}
+      \item {\footnotesize NVMe throughput: 7 GB/s}
+      \item {\footnotesize Network throughput: 25 Gbps (3.125 GB/s)}
+      \item {\footnotesize Batch processing time: 0.5 s}
+      \item {\footnotesize Batch size: 200 MB}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Design:} Buffer size to hide I/O latency.\\
+    {\footnotesize\textcolor{midgray}{(90 seconds)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{Solution:}\\
+    Required: 200 MB / 0.5 s = 400 MB/s\\
+    NVMe: 7 GB/s $\gg$ 400 MB/s \checkmark\\
+    Network: 3.125 GB/s $\gg$ 400 MB/s \checkmark\\[0.1cm]
+    \textbf{Buffer for P99 spikes:}\\
+    P99 = 500 ms stall\\
+    Buffer = 400 MB/s $\times$ 0.5 s\\
+    = \textbf{200 MB minimum}\\
+    Practice: 2--4$\times$ = \textbf{400--800 MB}\\[0.05cm]
+    \textcolor{datastroke}{\textbf{Size for tail latency!}}}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
 % =============================================================================
 \section{Wrap-Up}
 % =============================================================================
@@ -1218,39 +1338,49 @@ tensor parallelism, pipeline parallelism, and expert parallelism.''
 
 \appendix
 
-\begin{frame}{Backup: Extended Reference}
+\begin{frame}{Backup: Storage Equations Quick Reference}
 \note{
-% -- NARRATE: Backup --- extended reference for deeper study.
-% -- FLEX: [OPTIONAL] Only show if specifically requested.
+% -- NARRATE: Backup --- key equations for problem sets.
+% -- FLEX: [OPTIONAL] Only show if requested.
 }
 
 \footnotesize
-This slide provides extended reference material for students who want to go deeper.
-Refer to the textbook chapter for complete derivations and additional worked examples.
+\textbf{Key Storage Equations:}
 
-\vspace{0.3cm}
-\begin{mlsyscard}{crimson}
-\textbf{Key equations and frameworks from this chapter} are collected in the
-textbook's summary tables. Use them as a quick reference during problem sets.
-\end{mlsyscard}
+\vspace{0.15cm}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}ll@{}}
+  \toprule
+  \textbf{Metric} & \textbf{Formula} \\
+  \midrule
+  Pipeline BW required & $BW = N_{\text{GPUs}} \times U_{\text{target}} \times S_{\text{batch}} / T_{\text{iter}}$ \\
+  Data stall ratio & $R_{\text{stall}} = \max(0, 1 - BW_{\text{storage}} / BW_{\text{required}})$ \\
+  Checkpoint size & $C = N_{\text{GPUs}} \times (16M_{\text{params}} + A_{\text{activations}})$ \\
+  Total checkpoint I/O & $V = C \times N_{\text{ckpts}} \times (1 + R_{\text{replicas}})$ \\
+  Prefetch buffer & $B \geq \text{throughput} \times P99_{\text{latency}} \times 2$ \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+{\footnotesize \textbf{175B model checkpoint}: 1,050 GB. At 10-min intervals over 30 days: $\sim$4.5 PB total I/O.}
 
 \end{frame}
 
-\begin{frame}{Backup: Further Reading}
+\begin{frame}{Backup: Emerging Storage Technologies}
 \note{
-% -- NARRATE: Backup --- additional resources for deeper exploration.
-% -- FLEX: [OPTIONAL] Only show if time permits.
+% -- NARRATE: Emerging technologies that may change the storage landscape.
+% -- FLEX: [OPTIONAL] Forward-looking reference.
 }
 
 \footnotesize
-\textbf{For deeper exploration:}
+\textbf{Technologies reshaping ML storage (2025--2030):}
 
 \vspace{0.15cm}
 \begin{itemize}\setlength\itemsep{2pt}
-  \item The textbook chapter contains 2--3 additional worked examples
-  \item Problem sets apply these concepts to real-world scenarios
-  \item The course website links to open-source implementations
-  \item Office hours: bring your toughest questions
+  \item \textbf{CXL Memory Pooling}: Disaggregated memory via CXL 3.0. Adds a tier between DRAM and NVMe at $\sim$50 GB/s. Could absorb checkpoint writes without NVMe.
+  \item \textbf{Computational Storage}: NVMe drives with embedded compute for decompression, augmentation. Offloads CPU bottleneck in data pipelines.
+  \item \textbf{GPU Direct Storage 2.0}: Direct NVMe-to-GPU DMA without CPU involvement. 4$\times$ latency reduction, frees CPU cores for augmentation.
+  \item \textbf{Object Storage Tiering}: S3 Express One Zone: 10$\times$ lower latency than standard S3. May eliminate the need for PFS warm tier.
 \end{itemize}
 
 \end{frame}

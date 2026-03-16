@@ -48,7 +48,7 @@
 }
 
 % --- Section count for navigation (must match actual \section{} count) ---
-\setcounter{mlsystotalsections}{8}
+\setcounter{mlsystotalsections}{9}
 
 \title{ML Operations}
 \author{Vijay Janapa Reddi}
@@ -575,6 +575,81 @@ IF SHORT: Skip the skew type table, keep the story and the cost card.
 
 \end{frame}
 
+\begin{frame}{Feature Store Architecture}
+\note{
+% -- LINK: From the skew problem to the infrastructure that solves it
+The previous slide showed why skew costs \$365K/year. This slide shows
+the architecture that prevents it: the feature store.
+
+% -- NARRATE: Walk through the three-layer architecture
+``The feature store has three layers. The offline store computes features
+in batch from raw data --- daily or hourly jobs. The online store serves
+pre-computed features at low latency for real-time inference --- typically
+Redis or DynamoDB with sub-millisecond reads. The feature registry is the
+catalog: what features exist, how they are computed, who owns them.
+The key invariant: both training and serving read from the SAME store.''
+Point to the tools: ``Feast (open-source), Tecton (managed), Hopsworks.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why not just have the serving pipeline compute features on the fly?''
+[Expected: latency (compute is slow), consistency (different code paths
+produce different results), and cost (redundant computation).]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think a feature store is just a database. Correct
+framing: a feature store enforces a contract --- the same transformation
+logic produces features for both pipelines. The database is the
+implementation; the contract is the value.
+
+% -- FLEX: [CORE] Feature stores are central to the Data-Model interface
+[CORE] The architecture explains WHY consistency is achievable.
+IF AHEAD: ``What happens when a feature definition changes?''
+IF SHORT: Show the three layers and the consistency invariant.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{Three-Layer Architecture:}
+
+    \vspace{0.1cm}
+    {\scriptsize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}lp{3.8cm}@{}}
+      \toprule
+      \textbf{Layer} & \textbf{Purpose} \\
+      \midrule
+      \textcolor{datastroke}{\textbf{Offline Store}} & Batch feature computation (daily/hourly) \\
+      \textcolor{computestroke}{\textbf{Online Store}} & Low-latency serving ($<$5 ms reads) \\
+      \textcolor{routingstroke}{\textbf{Feature Registry}} & Catalog: definitions, owners, lineage \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysconcept{Invariant:}{Training and serving read from the \textbf{same store}. One computation, two consumers.}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Tools}\\[0.05cm]
+    {\scriptsize
+    \textbf{Feast:} Open-source, Kubernetes-native\\
+    \textbf{Tecton:} Managed, streaming support\\
+    \textbf{Hopsworks:} Full platform\\
+    \textbf{Vertex AI FS:} GCP-native}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize\textbf{Without a feature store:}\\
+    2 code paths, 2 languages,\\
+    2 bug surfaces = \textbf{skew}.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
 \begin{frame}{ML CI/CD Pipelines}
 \note{
 % -- LINK: From feature stores (one component) to the full pipeline
@@ -825,6 +900,76 @@ IF SHORT: Show the formula and answer directly, skip peer discussion.
     $\approx$ \textbf{8.5 days}\\[0.05cm]
     \textcolor{datastroke}{\textbf{Retrain weekly!}}\\
     Daily: wasteful. Monthly: SLA violation.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: PSI Drift Cost Exercise ---
+\begin{frame}{Your Turn: PSI Drift Cost Analysis}
+\note{
+% -- LINK: From retraining interval to the economic impact of drift
+The $T^*$ formula balanced retraining cost. This exercise adds the
+PSI dimension: when drift is detected, what is the cost of NOT acting?
+
+% -- NARRATE: Walk through the solution after the reveal
+``Accuracy drops from 92\% to 88\% = 4pp loss. At 1M predictions/day,
+4\% more errors = 40,000 additional errors/day. At \$0.50 per error
+impact, that is \$20,000/day in lost value. Over 3 months (90 days)
+= \$1.8M. Retraining costs \$5,000. ROI of retraining: 360:1.
+The PSI of 0.25 should have triggered retraining immediately.''
+
+% -- ENGAGE: Peer Instruction Protocol
+Present problem (30s). Individual calculation (60s). If 30--70\%
+correct: pair discussion (90s), re-vote.
+[Expected errors: students forget to multiply by days, or compute
+per-day cost but not cumulative cost.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students compare retraining cost to per-day loss and
+conclude retraining is obvious. Correct framing: the real question is
+detection time --- the PSI threshold determines how quickly you act.
+
+% -- FLEX: [CORE] Connects PSI thresholds to economic consequences
+[CORE] The 360:1 ROI anchors the ``monitor inputs'' takeaway.
+IF AHEAD: ``What PSI threshold would you set to trigger retraining?''
+IF SHORT: Show the solution directly, skip peer discussion.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\small\bfseries PSI Drift Cost Analysis}
+
+    \vspace{0.1cm}
+    A recommendation model:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Accuracy drops: 92\% $\to$ 88\% over 3 months
+      \item PSI of key feature: \textbf{0.25} (major shift)
+      \item Query volume: 1M predictions/day
+      \item Impact per error: \$0.50
+      \item Retraining cost: \$5,000
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Calculate:} (1) daily error cost, (2) 3-month cumulative cost, (3) ROI of immediate retraining
+
+    {\scriptsize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.05cm]
+    {\scriptsize
+    4\% more errors $\times$ 1M/day\\
+    $=$ 40,000 errors/day\\
+    $\times$ \$0.50 $=$ \textbf{\$20,000/day}\\[0.08cm]
+    3 months: $90 \times \$20K$\\
+    $=$ \textbf{\$1.8M} cumulative loss\\[0.08cm]
+    ROI: \$1.8M / \$5K $=$ \textbf{360:1}\\
+    \textcolor{errorstroke}{PSI 0.25 should trigger immediately.}
     }
     \end{mlsyscard}
   \end{column}
@@ -1285,6 +1430,78 @@ IF AHEAD: ``Pick one category and design a test suite for it.''
 \end{frame}
 
 % =============================================================================
+\section{Case Studies}
+% =============================================================================
+
+\begin{frame}{War Story: Oura Ring --- MLOps on the Wrist}
+\note{
+% -- LINK: From maturity framework to a real-world MLOps success story
+The maturity levels are abstract. Oura Ring shows what Level 2 looks
+like in practice for a constrained wearable device.
+
+% -- NARRATE: Tell the Oura story as an MLOps case study
+``Oura Ring runs sleep staging models on a wearable with 32 MB RAM and
+a Cortex-M4 processor. The MLOps challenge: models must update OTA to
+millions of rings, but a bad update cannot be rolled back easily ---
+users are literally wearing the device. Their solution: shadow
+deployment on 1\% of fleet, 2-week validation window, automatic
+rollback if sleep score distribution shifts (PSI $>$ 0.15).''
+Key numbers: ``3 models (sleep, readiness, activity), retrained monthly,
+validated on 50K users before fleet-wide push.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What makes OTA model updates harder than cloud deployment?''
+[Expected: no instant rollback, constrained compute for A/B testing,
+battery life impact of running two models simultaneously.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students assume edge MLOps is just cloud MLOps on smaller
+hardware. Correct framing: the deployment strategy must account for
+devices that cannot run two models simultaneously, users who may not
+update, and the inability to monitor in real-time.
+
+% -- FLEX: [OPTIONAL] Motivational case study, not structurally required
+[OPTIONAL] Grounds the maturity framework in a real product.
+IF SHORT: State the key constraint (no instant rollback) and the PSI
+threshold approach.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Oura Ring: Edge MLOps at Scale}
+
+    \vspace{0.1cm}
+    {\scriptsize
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textbf{Device:} 32 MB RAM, Cortex-M4, battery-powered
+      \item \textbf{Models:} Sleep staging, readiness, activity (3 models)
+      \item \textbf{Retrain:} Monthly, validated on 50K users
+      \item \textbf{Deploy:} OTA to millions of rings
+      \item \textbf{Rollback:} 2-week shadow on 1\% of fleet
+    \end{itemize}
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize\textbf{Validation gate:} PSI $>$ 0.15 on sleep score distribution $\to$ automatic rollback. No bad model reaches the full fleet.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Edge MLOps Constraints}\\[0.05cm]
+    {\scriptsize
+    \textbf{No instant rollback:} Users wear the device 24/7.\\[0.05cm]
+    \textbf{No A/B on-device:} Cannot run 2 models simultaneously.\\[0.05cm]
+    \textbf{No real-time monitoring:} Data syncs when phone connects.\\[0.05cm]
+    \textbf{Battery budget:} Model update must not drain battery.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
 \section{Wrap-Up}
 % =============================================================================
 
@@ -1519,6 +1736,68 @@ generated confusion about parameter sensitivity.
 }
 \small
 Use if students want more practice with the $T^*$ formula.\\small $$T^* \approx \sqrt{\frac{2C}{Q \cdot V \cdot A_0 \cdot \lambda}}$$\\ High retraining cost ($C$ large): retrain less often.\\ High query volume ($Q$ large): retrain more often.\\ Fast drift ($\lambda$ large): retrain more often.\\ The formula balances retraining cost against accuracy loss cost.
+\end{frame}
+
+\begin{frame}{Backup: ML Test Score Self-Assessment}
+\note{
+% -- NARRATE: Walk through the 28-point rubric as a self-assessment
+The ML Test Score (Breck et al., 2020) has 28 specific checks across
+four categories. Use this as a team self-assessment tool.
+
+% -- FLEX: [OPTIONAL] Pull for project work or exam review
+[OPTIONAL] Use if students want to score their own projects.
+}
+\small
+\textbf{Breck et al.\ 28-Point ML Test Score (abbreviated):}
+
+\vspace{0.1cm}
+\scriptsize
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{@{}lp{5.5cm}r@{}}
+  \toprule
+  \textbf{Category} & \textbf{Sample Checks} & \textbf{Points} \\
+  \midrule
+  \textbf{Data Tests} & Feature expectations documented? Schema enforced? No training-serving skew? & 0--7 \\
+  \textbf{Model Tests} & Accuracy bounds per subgroup? Staleness check? Fairness metrics? & 0--7 \\
+  \textbf{Infra Tests} & Training reproducible? Pipeline idempotent? Rollback tested? & 0--7 \\
+  \textbf{Monitor Tests} & Drift alerts configured? On-call rotation? Incident playbook? & 0--7 \\
+  \midrule
+  \textbf{Total} & & \textbf{0--28} \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\mlsysconcept{Scoring:}{0--5 ad hoc $|$ 5--10 developing $|$ 10--15 mature $|$ 15+ production-grade. Most teams score $<$5.}
+\end{frame}
+
+\begin{frame}{Backup: Feature Store Comparison}
+\note{
+% -- NARRATE: Compare feature store options for different contexts
+Feast for open-source Kubernetes environments. Tecton for managed
+streaming. Vertex AI for GCP-native. Hopsworks for full platform.
+
+% -- FLEX: [OPTIONAL] Pull if students ask about specific tools
+[OPTIONAL] Practical reference for project work.
+}
+\small
+Use if students want to evaluate feature store options.
+
+\vspace{0.1cm}
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lllll@{}}
+  \toprule
+  \textbf{Tool} & \textbf{Type} & \textbf{Streaming} & \textbf{Online Latency} & \textbf{Best For} \\
+  \midrule
+  Feast & Open-source & Limited & $<$10 ms & Kubernetes teams \\
+  Tecton & Managed & Yes & $<$5 ms & Real-time ML \\
+  Vertex AI FS & Managed & Yes & $<$10 ms & GCP-native \\
+  Hopsworks & Platform & Yes & $<$5 ms & Full MLOps stack \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\mlsysinsight{Key:}{The feature store choice matters less than the discipline of using one. Any store eliminates training-serving skew.}
 \end{frame}
 
 \end{document}

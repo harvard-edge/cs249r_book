@@ -5,7 +5,8 @@
 %   - compute-comm-timeline.pdf    - alpha-beta-model.pdf
 %   - collective-primitives.pdf    - ring-allreduce.pdf
 %   - hierarchical-allreduce.pdf   - gradient-compression.pdf
-%   - overlap-pipeline.pdf
+%   - overlap-pipeline.pdf         - double-binary-tree.pdf
+%   - logp-nccl-gap.pdf            - llama70b-comm-budget.pdf
 % =============================================================================
 \documentclass[aspectratio=169, 12pt]{beamer}
 \usepackage{../../assets/beamerthememlsys}
@@ -50,7 +51,7 @@
 }
 
 % --- Section count (must match actual \section{} count) ---
-\setcounter{mlsystotalsections}{7}
+\setcounter{mlsystotalsections}{8}
 
 \title{Collective Communication}
 \author{Vijay Janapa Reddi}
@@ -552,6 +553,89 @@ For 64 GPUs on IB NDR: $M_{\text{crossover}} \approx 64 \times 2\ \mu\text{s} \t
 
 \end{frame}
 
+\begin{frame}{Double Binary Tree: Best of Both Worlds}
+\note{
+% -- LINK: What prior concept connects to this slide
+The comparison table listed Double Binary Tree as ``near optimal in both'' latency and bandwidth. This slide explains how it achieves that.
+
+% -- NARRATE: What to SAY while showing this slide
+``NCCL's default is a Double Binary Tree AllReduce. Instead of one tree with a log-N bandwidth penalty, it runs two overlapping binary trees simultaneously. Each tree handles half the data. Result: O(log N) latency like Tree, but 2M/beta bandwidth like Ring.'' Point to the diagram: ``Tree A handles even chunks, Tree B handles odd chunks. Both run in parallel. The combined bandwidth is 2 times M/(2 beta) = M/beta per tree, totaling 2M/beta.''
+ANALOGY: ``One tree has half the lanes of a highway. Two parallel trees give you the full highway width.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why not triple or quadruple trees?'' Expected: diminishing returns --- two trees already achieve near-optimal bandwidth, and more trees add coordination overhead.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think Double Binary Tree is always better than Ring. For very large messages on small clusters, Ring's simplicity wins because the O(log N) vs O(N) latency gap is small when N is small.
+
+% -- FLEX: [OPTIONAL] Supplements the algorithm comparison table.
+IF SHORT: State ``NCCL default, O(log N) latency, near-optimal BW'' and move on.
+}
+
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{double-binary-tree.pdf}
+
+\vspace{0.1cm}
+\small
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \centering
+    \textbf{Two overlapping binary trees}\\[0.05cm]
+    {\footnotesize Each tree handles half the data.\\Combined BW $\approx 2M/\beta$.}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \centering
+    \textbf{NCCL default since v2.7}\\[0.05cm]
+    {\footnotesize $O(\log N)$ latency + near-optimal BW.\\Best general-purpose algorithm.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The LogP Model and the NCCL Reality Gap}
+\note{
+% -- LINK: What prior concept connects to this slide
+The alpha-beta model is a first approximation. Real NCCL performance differs because of software overhead, GPU kernel launch latency, and protocol negotiation.
+
+% -- NARRATE: What to SAY while showing this slide
+``The alpha-beta model assumes two parameters. The LogP model adds two more: overhead o (CPU time per message that cannot overlap) and gap g (minimum inter-message spacing). In NCCL, the effective alpha is 5--10x the wire-level latency due to kernel launch, PCIe traversal, and protocol negotiation.'' Point to the table: ``Wire alpha is 1--2 microseconds. NCCL alpha is 10--20 microseconds. This gap explains why nccl-tests benchmarks show 30--50\% of theoretical peak for small messages.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If NCCL alpha is 10x wire alpha, what happens to the crossover point n*?'' Expected: n* shifts 10x higher, meaning more messages are latency-bound in practice than the alpha-beta model predicts.
+
+% -- WARN: What students will get wrong on THIS topic
+Students use wire-level alpha in calculations and get overly optimistic results. Always use the NCCL-measured alpha (from nccl-tests) for real system planning.
+
+% -- FLEX: [OPTIONAL] Deepens understanding of alpha-beta model limitations.
+IF SHORT: State ``NCCL alpha is 5--10x wire alpha'' and skip the LogP details.
+}
+
+\footnotesize
+\textbf{LogP extends $\alpha$-$\beta$ with two additional terms:}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}llp{5.5cm}@{}}
+  \toprule
+  \textbf{Parameter} & \textbf{Meaning} & \textbf{Impact} \\
+  \midrule
+  $L$ (Latency)   & Network latency       & Wire-speed: 1--2 $\mu$s \\
+  $o$ (Overhead)   & CPU time per msg       & Non-overlappable with compute \\
+  $g$ (Gap)        & Min inter-msg spacing  & Limits pipelining depth \\
+  $P$ (Processors) & GPU count              & Determines algorithm choice \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{errorstroke}
+\textbf{The NCCL Reality Gap:}\\[0.05cm]
+{\scriptsize Wire $\alpha$: 1--2 $\mu$s. \quad NCCL $\alpha$: 10--20 $\mu$s (5--10$\times$ higher).\\
+Cause: kernel launch + PCIe traversal + protocol negotiation.\\
+Small-message throughput: 30--50\% of theoretical peak.}
+\end{mlsyscard}
+
+\end{frame}
+
 % =============================================================================
 \section{Hierarchical Comm}
 % =============================================================================
@@ -597,26 +681,26 @@ IF SHORT: State the three phases and the 1/G reduction; skip the detailed bandwi
 
 \end{frame}
 
-\begin{frame}{Hierarchical AllReduce: Worked Example}
+\begin{frame}{Llama 70B Communication Budget}
 \note{
 % -- LINK: What prior concept connects to this slide
-The hierarchy concept was introduced abstractly. This worked example puts concrete numbers to each phase and shows a 5.7x speedup.
+The hierarchy concept was introduced abstractly. This worked example uses the Llama 70B model --- the most widely deployed open LLM --- to quantify real communication costs.
 
 % -- NARRATE: What to SAY while showing this slide
-Walk through the table: ``Flat Ring sends 2 GB over InfiniBand at 50 GB/s: 40 ms. Hierarchical: Phase 1, ReduceScatter sends 875 MB over NVLink at 900 GB/s: about 1 ms. Phase 2, inter-node AllReduce sends only 125 MB over IB: about 5 ms. Phase 3, AllGather sends 875 MB over NVLink: about 1 ms. Total: 7 ms. That is a 5.7x speedup just from respecting the bandwidth hierarchy.''
+``Llama 70B has 70 billion FP16 parameters: 140 GB of gradients per step. On 64 GPUs across 8 nodes with 8 GPUs each.'' Walk through the table: ``Flat Ring across 64 GPUs over IB: the bandwidth term alone is 2 times 140 GB / 50 GB/s = 5,600 ms. Hierarchical: Phase 1, intra-node ReduceScatter sends 122.5 GB over 900 GB/s NVLink: 136 ms. Phase 2, inter-node AllReduce sends only 17.5 GB (140/8) over IB: 700 ms. Phase 3, intra-node AllGather: another 136 ms. Total: 972 ms vs 5,600 ms --- a 5.8x speedup.''
 
 % -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Where did the 125 MB come from?'' Expected answer: 1 GB divided by 8 GPUs per node. Each node reduces locally first, so only the reduced shard crosses the network.
+Ask: ``Where did the 17.5 GB come from?'' Expected answer: 140 GB divided by 8 GPUs per node. Each node reduces locally first, so only 1/G of the data crosses the network.
 
 % -- WARN: What students will get wrong on THIS topic
-Students forget that the inter-node data volume shrinks by 1/G. They apply the original 1 GB to the IB bandwidth and get the wrong answer. Emphasize: local reduction is the key step.
+Students forget that the inter-node data volume shrinks by 1/G. They apply the original 140 GB to the IB bandwidth and get the wrong answer. Emphasize: local reduction is the key step.
 
 % -- FLEX: [CORE] This slide is essential --- do not skip.
-IF AHEAD: Ask ``What happens with 16 GPUs per node instead of 8?'' (Answer: inter-node traffic drops to 62.5 MB, further speedup.)
+IF AHEAD: Ask ``What happens with 16 GPUs per node (DGX B200)?'' (Answer: inter-node traffic drops to 8.75 GB.)
 }
 
 \footnotesize
-\textbf{1 GB gradient, 8 nodes $\times$ 8 GPUs (64 total)}
+\textbf{Llama 70B: 140 GB gradients (FP16), 8 nodes $\times$ 8 GPUs = 64 total}
 
 \vspace{0.1cm}
 \renewcommand{\arraystretch}{1.1}
@@ -624,19 +708,19 @@ IF AHEAD: Ask ``What happens with 16 GPUs per node instead of 8?'' (Answer: inte
   \toprule
   \textbf{Phase} & \textbf{Data} & \textbf{BW} & \textbf{Time} \\
   \midrule
-  \textcolor{errorstroke}{\textbf{Flat Ring}} --- all over IB & 2 GB & 50 GB/s & \textbf{40 ms} \\
+  \textcolor{errorstroke}{\textbf{Flat Ring}} --- all over IB & 280 GB & 50 GB/s & \textbf{5,600 ms} \\
   \midrule
-  \textcolor{datastroke}{\textbf{Hierarchical}} 1. ReduceScatter & 875 MB & 900 GB/s & $\sim$1 ms \\
-  \quad 2. Inter-node AllReduce & 125 MB & 50 GB/s & $\sim$5 ms \\
-  \quad 3. AllGather & 875 MB & 900 GB/s & $\sim$1 ms \\
+  \textcolor{datastroke}{\textbf{Hierarchical}} 1. ReduceScatter & 122.5 GB & 900 GB/s & 136 ms \\
+  \quad 2. Inter-node AllReduce & 17.5 GB & 50 GB/s & 700 ms \\
+  \quad 3. AllGather & 122.5 GB & 900 GB/s & 136 ms \\
   \midrule
-  \quad \textbf{Total} & & & \textbf{7 ms} \\
+  \quad \textbf{Total} & & & \textbf{972 ms} \\
   \bottomrule
 \end{tabular}
 
 \vspace{0.1cm}
 \begin{mlsyscard}{datastroke}
-\textbf{5.7$\times$ speedup} --- inter-node traffic drops from 1 GB to 125 MB per GPU. Effective IB BW multiplied by $G = 8$.
+\textbf{5.8$\times$ speedup} --- inter-node traffic drops from 140 GB to 17.5 GB. IB becomes the bottleneck at 72\% of total time.
 \end{mlsyscard}
 
 \end{frame}
@@ -702,30 +786,40 @@ and a MoE model using AllToAll on the same 512-GPU cluster.\\[0.3cm]
 \section{Gradient Compression}
 % =============================================================================
 
-\begin{frame}{Gradient Compression Techniques}
+\begin{frame}{Gradient Compression: Quantitative Comparison}
 \note{
 % -- LINK: What prior concept connects to this slide
 Hierarchical AllReduce minimizes wasted bandwidth. But when even the fastest wires are not enough, the next strategy is to send fewer bits per gradient element.
 
 % -- NARRATE: What to SAY while showing this slide
-Walk through the diagram left-to-right: ``FP16 gives 2x compression with almost no quality loss --- this is the baseline. INT8 gives 4x. Top-K sparsification sends only the largest 1\% of gradients for 100x compression. 1-bit quantization sends only the sign of each gradient for 32x compression.'' Then point to the rule: ``Beyond FP16, always use Error Feedback. Without it, small gradients below the threshold are permanently lost, causing 1--3\% accuracy degradation.''
+Walk through the table: ``FP16 gives 2x compression with under 0.1\% accuracy loss --- this is the universal baseline. INT8 gives 4x with 0.1--0.5\% loss. Top-K at 0.1\% sparsity gives 1000x compression but 1--3\% loss without Error Feedback. 1-bit quantization gives 32x with 0.5--1\% loss. PowerSGD gives 100--200x via low-rank projection with only 0.3--0.8\% loss --- the best ratio/quality trade-off for large models.''
 
 % -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``What happens if you discard 99\% of gradients without error feedback?'' Expected answer: small but persistent gradients are permanently lost, causing the model to converge to a worse optimum (1--3\% accuracy loss).
+Ask: ``Which technique would you choose for a 70B model on a bandwidth-constrained cluster?'' Expected: PowerSGD, because it achieves 100--200x compression with sub-1\% accuracy loss, better than Top-K's quality penalty.
 
 % -- WARN: What students will get wrong on THIS topic
-Students assume ``99\% compression with only 1\% accuracy loss'' is free. The accuracy loss compounds over training --- 1\% on a benchmark can mean significantly worse real-world performance. Error Feedback is the mechanism that makes aggressive compression safe.
+Students assume compression ratio is the only metric. The accuracy--compression Pareto frontier matters: PowerSGD dominates Top-K at similar compression ratios because low-rank projection preserves gradient structure.
 
 % -- FLEX: [CORE] This slide is essential --- do not skip.
-IF AHEAD: Discuss how PowerSGD achieves better compression ratios than Top-K by projecting gradients into a low-rank subspace.
+IF AHEAD: Ask students to calculate the communication time savings of PowerSGD (200x) vs FP16 (2x) for the Llama 70B example.
 }
 
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{gradient-compression.pdf}
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}llrrl@{}}
+  \toprule
+  \textbf{Technique} & \textbf{Method} & \textbf{Compression} & \textbf{Accuracy Loss} & \textbf{Error Feedback?} \\
+  \midrule
+  \textbf{FP16}      & Half precision           & 2$\times$       & $<$0.1\%   & Not needed \\
+  \textbf{INT8}      & Uniform quantization     & 4$\times$       & 0.1--0.5\% & Recommended \\
+  \textbf{Top-K}     & Sparsify to top 0.1\%    & 1000$\times$    & 1--3\%     & \textcolor{errorstroke}{\textbf{Required}} \\
+  \textbf{1-bit}     & Sign of gradient         & 32$\times$      & 0.5--1\%   & \textcolor{errorstroke}{\textbf{Required}} \\
+  \textbf{PowerSGD}  & Low-rank projection      & 100--200$\times$ & 0.3--0.8\% & Built-in \\
+  \bottomrule
+\end{tabular}
 
 \vspace{0.1cm}
-\mlsysalert{Rule:}{Always use \textbf{Error Feedback} with any compression beyond FP16.}
+\mlsysalert{Rule:}{Always use \textbf{Error Feedback} with any compression beyond FP16. Without it, Top-K loses 100\% of small gradients.}
 
 \end{frame}
 
@@ -861,6 +955,62 @@ IF SHORT: State the 73\% savings result and the condition T_bwd/layer > T_AR/lay
 
 \vspace{0.1cm}
 \mlsysconcept{Overlap works when}{$T_{\text{bwd/layer}} > T_{\text{AR/layer}}$. Here 26 ms $>$ 15 ms leaves 11 ms exposed per layer. Fix: larger batch or faster network.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Exercise ---
+\begin{frame}{Your Turn: Overlap Budget Calculation}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just saw the overlap worked example. This exercise tests their ability to calculate exposed communication time for a different scenario.
+
+% -- NARRATE: What to SAY while showing this slide
+Read the problem aloud. Give 90 seconds. After the pause, walk through the solution: ``Total AllReduce without overlap: 128 GPUs on Ring AllReduce with 140 GB gradients at 50 GB/s takes approximately 5,600 ms. Your overlap covers 60\%, so 40\% is exposed: 2,240 ms. Per training step with 800 ms compute, total is 800 + 2,240 = 3,040 ms. Communication fraction: 2,240/3,040 = 74\%. Still dominated by communication.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students calculate exposed communication time. After solving, ask: ``What would reduce the 74\% to under 50\%?'' Expected: hierarchical AllReduce (cuts inter-node traffic 8x) or gradient compression (100x with PowerSGD).
+
+% -- WARN: What students will get wrong on THIS topic
+Students will calculate 60\% savings and assume the problem is solved. 40\% of 5,600 ms is still 2,240 ms --- more than the compute time. Overlap alone is insufficient without hierarchical AllReduce.
+
+% -- FLEX: [CORE] Quantitative exercise combining overlap with alpha-beta model.
+IF SHORT: Show the solution immediately and narrate.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Calculate Exposed Communication}
+
+    \vspace{0.2cm}
+    \textbf{Setup:} Llama 70B, 128 GPUs, Ring AllReduce.\\
+    Overlap covers 60\% of communication.\\
+    Compute per step: 800 ms.
+
+    \vspace{0.15cm}
+    \begin{enumerate}
+      \item Total AllReduce time (no overlap)?
+      \item Exposed communication (40\%)?
+      \item What fraction of the step is communication?
+    \end{enumerate}
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    AllReduce $\approx$ 5,600 ms\\
+    Exposed: $0.4 \times 5{,}600 = $ \textbf{2,240 ms}\\
+    Total step: $800 + 2{,}240 =$ \textbf{3,040 ms}\\
+    Comm fraction: $2{,}240/3{,}040 =$ \textbf{74\%}\\[0.1cm]
+    \textcolor{errorstroke}{\textbf{Overlap alone is not enough.}}\\
+    Need hierarchical + compression.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
 
 \end{frame}
 
@@ -1063,40 +1213,61 @@ Say: ``The fleet has its traffic patterns, but the roads are crumbling. GPUs ove
 
 \appendix
 
-\begin{frame}{Backup: Extended Reference}
+\begin{frame}{Backup: Algorithm Selection Quick Reference}
 \note{
-% -- NARRATE: Backup slide with additional reference material.
-% -- FLEX: [OPTIONAL] Use only if students request deeper material.
+% -- NARRATE: Decision tree for choosing the right AllReduce algorithm.
+% -- FLEX: [OPTIONAL] Use during problem sets or office hours.
 }
 
 \footnotesize
-This slide provides extended reference material for students who want to go deeper.
-Refer to the textbook chapter for complete derivations and additional worked examples.
+\textbf{Which AllReduce algorithm should I use?}
 
-\vspace{0.3cm}
-\begin{mlsyscard}{crimson}
-\textbf{Key equations and frameworks from this chapter} are collected in the
-textbook's summary tables. Use them as a quick reference during problem sets.
-\end{mlsyscard}
+\vspace{0.15cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}p{3.5cm}lp{4.5cm}@{}}
+  \toprule
+  \textbf{Scenario} & \textbf{Algorithm} & \textbf{Why} \\
+  \midrule
+  LLM gradients, $<$64 GPUs    & Ring             & BW-optimal, low N makes latency tolerable \\
+  LLM gradients, $>$256 GPUs   & Hierarchical     & Confines IB traffic to 1/G of data \\
+  Small messages ($<$1 MB)      & Tree             & $O(\log N)$ latency dominates \\
+  General purpose               & Double Binary Tree & NCCL default; near-optimal in both \\
+  MoE routing tokens            & Latency-optimized & $n < n^*$; reduce hops, not bandwidth \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+{\footnotesize\textbf{Key formula:} $M_{\text{crossover}} = N \cdot \alpha \cdot \beta$. Below: latency-optimal. Above: bandwidth-optimal.}
 
 \end{frame}
 
-\begin{frame}{Backup: Further Reading}
+\begin{frame}{Backup: NCCL Tuning Cheat Sheet}
 \note{
-% -- NARRATE: Backup slide pointing to additional resources.
-% -- FLEX: [OPTIONAL] Use only if students request further reading.
+% -- NARRATE: Practical NCCL environment variables for tuning.
+% -- FLEX: [OPTIONAL] Use when students start hands-on cluster work.
 }
 
 \footnotesize
-\textbf{For deeper exploration:}
+\textbf{Critical NCCL environment variables:}
 
-\vspace{0.15cm}
-\begin{itemize}\setlength\itemsep{2pt}
-  \item The textbook chapter contains 2--3 additional worked examples
-  \item Problem sets apply these concepts to real-world scenarios
-  \item The course website links to open-source implementations
-  \item Office hours: bring your toughest questions
-\end{itemize}
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lp{6.5cm}@{}}
+  \toprule
+  \textbf{Variable} & \textbf{Effect} \\
+  \midrule
+  \texttt{NCCL\_ALGO}           & Force Ring, Tree, or CollNetDirect \\
+  \texttt{NCCL\_MIN\_NCHANNELS} & Increase parallelism (default 2; try 4--8) \\
+  \texttt{NCCL\_BUFFSIZE}       & Pipelining buffer (default 4 MB; try 8--16 MB) \\
+  \texttt{NCCL\_NET\_GDR\_LEVEL} & GPUDirect RDMA scope (LOC, PHB, SYS) \\
+  \texttt{NCCL\_IB\_HCA}        & Pin to specific InfiniBand HCA for multi-rail \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{routingstroke}
+{\scriptsize\textbf{Debugging:} \texttt{NCCL\_DEBUG=INFO} shows algorithm selection, channel count, and transport type for every collective. Start here when performance is below expected.}
+\end{mlsyscard}
 
 \end{frame}
 

@@ -6,6 +6,7 @@
 %   - operator-fusion.pdf      - flashattention.pdf
 %   - precision-engineering.pdf - graph-compilation.pdf
 %   - optimization-playbook.pdf - diagnostic-flow.pdf
+%   - cuda-graphs.pdf           - kv-cache-compression.pdf
 % =============================================================================
 \documentclass[aspectratio=169, 12pt]{beamer}
 \usepackage{../../assets/beamerthememlsys}
@@ -528,6 +529,46 @@ IF SHORT: State ``exact, 65x HBM reduction via tiling + online softmax.''
 
 \end{frame}
 
+\begin{frame}{CUDA Graphs: Eliminating Launch Overhead}
+\note{
+% -- LINK: What prior concept connects to this slide
+FlashAttention eliminates memory round-trips. But even with fused kernels, each kernel launch costs 5--15 microseconds of CPU-side overhead. For small decode batches, launch overhead can exceed kernel execution time.
+
+% -- NARRATE: What to SAY while showing this slide
+``A single LLM decode step launches 30--100 kernels. At 10 microseconds each, that is 300--1000 microseconds of pure overhead --- comparable to the compute itself at batch=1. CUDA Graphs capture the entire kernel sequence once, then replay it as a single GPU operation. Launch overhead drops from 300--1000 microseconds to under 10 microseconds.'' Point to the comparison: ``Before: CPU dispatches each kernel sequentially with gaps. After: the entire graph replays as one unit with no gaps.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``When does CUDA Graph overhead matter most?'' Expected: at batch=1 decode, where kernels are small and launch overhead dominates. At batch=256, kernels are large enough that launch overhead is negligible.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think CUDA Graphs speed up the kernels themselves. They do not --- they eliminate the gaps between kernels. The speedup is proportional to the ratio of gap time to kernel time.
+
+% -- FLEX: [OPTIONAL] Complements FlashAttention with a different optimization target.
+IF SHORT: State the 30--100 kernel launches and the 10 microsecond replay result.
+}
+
+\centering
+\safeimg[width=0.88\textwidth,height=3.8cm,keepaspectratio]{cuda-graphs.pdf}
+
+\vspace{0.1cm}
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize\textbf{Without CUDA Graphs:}\\
+    30--100 launches $\times$ 10 $\mu$s = 300--1000 $\mu$s overhead per decode step.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize\textbf{With CUDA Graphs:}\\
+    Single graph replay: $<$10 $\mu$s total. \textbf{30--100$\times$} launch overhead reduction.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
 % =============================================================================
 \section{Precision}
 % =============================================================================
@@ -624,6 +665,44 @@ IF SHORT: Focus on AWQ as production default; skip the PTQ/QAT card.
     \end{mlsyscard}
   \end{column}
 \end{columns}
+
+\end{frame}
+
+\begin{frame}{KV Cache Compression vs.\ Weight-Only Quantization}
+\note{
+% -- LINK: What prior concept connects to this slide
+Weight quantization reduces model memory. But for long-context serving, the KV cache can exceed the model weights. This slide distinguishes the two quantization targets.
+
+% -- NARRATE: What to SAY while showing this slide
+``Weight-only quantization (INT4) reduces the 140 GB Llama 70B to 35 GB --- a 4x saving on static memory. But the KV cache at batch=16, seq=4K consumes 21 GB and grows linearly with batch and sequence. KV cache compression (INT8 or FP8) cuts cache memory 2x, enabling either 2x batch size or 2x sequence length. The key insight: for serving, KV cache quantization often matters more than weight quantization because it determines maximum concurrency.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which quantization target gives you more throughput?'' Expected: KV cache, because freeing KV memory allows larger batch sizes, directly increasing throughput. Weight quantization frees static memory but does not change the per-request bottleneck.
+
+% -- WARN: What students will get wrong on THIS topic
+Students apply the same quantization precision everywhere. KV cache tolerates more aggressive quantization (INT4 with minimal quality loss) because it stores intermediate activations, not learned weights.
+
+% -- FLEX: [OPTIONAL] Distinguishes two quantization targets with different impacts.
+IF SHORT: State ``KV INT8 = 2x batch size = 2x throughput'' and move on.
+}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lp{2.3cm}rl@{}}
+  \toprule
+  \textbf{Target} & \textbf{What It Saves} & \textbf{Reduction} & \textbf{Throughput Impact} \\
+  \midrule
+  \textbf{Weight-Only} (INT4) & Static model memory   & 4$\times$   & Enables fitting on fewer GPUs \\
+  \textbf{KV Cache} (INT8)    & Per-request memory    & 2$\times$   & 2$\times$ batch $\to$ 2$\times$ throughput \\
+  \textbf{KV Cache} (INT4)    & Per-request memory    & 4$\times$   & 4$\times$ batch (with quality risk) \\
+  \textbf{W+A} (FP8)          & Both weights + activations & 2$\times$ & Compute-bound speedup \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{datastroke}
+{\scriptsize\textbf{For long-context serving:} KV cache is the variable bottleneck. At seq=32K, KV cache can be 3$\times$ the model weights. Quantize KV first.}
+\end{mlsyscard}
 
 \end{frame}
 
@@ -1142,6 +1221,61 @@ IF SHORT: Show the summary table and the 7.5x result.
 
 \end{frame}
 
+% --- ACTIVE LEARNING: FlashAttention Arithmetic Intensity Exercise ---
+\begin{frame}{Your Turn: FlashAttention Changes the Roofline}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students learned the roofline model and FlashAttention separately. This exercise connects them by showing how FlashAttention moves attention from memory-bound to compute-bound.
+
+% -- NARRATE: What to SAY while showing this slide
+Read the problem. Give 90 seconds. Solution: ``Naive attention: 2 reads of N-by-N matrix (Q*K and softmax*V) = 2 * 2048^2 * 2 bytes = 16 MB. Compute: 2 * 2048^2 * 128 FLOPs = 1.07 GFLOP. AI = 1.07G / 16M = 67 FLOP/byte --- memory-bound on H100 (ridge at 200). FlashAttention: tiles fit in SRAM, only reads Q, K, V once = 3 * 2048 * 128 * 2 = 1.5 MB. Same compute. AI = 1.07G / 1.5M = 713 FLOP/byte --- compute-bound. The same operation moved from below to above the ridge point.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+After revealing, ask: ``What happens to this analysis at sequence length 8192?'' Expected: naive AI stays similar (N^2 reads scale with N^2 compute), but FlashAttention AI grows linearly with N because reads scale as N while compute scales as N^2.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will forget to count both the QK^T and softmax*V reads in naive attention. Each is an N-by-N matrix read from HBM.
+
+% -- FLEX: [CORE] This exercise unifies the chapter's two key concepts: roofline and FlashAttention.
+IF SHORT: Show the solution and emphasize the regime change.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Calculate AI Before and After FlashAttention}
+
+    \vspace{0.15cm}
+    \textbf{Setup:} Sequence length $N = 2048$, head dim $d = 128$, FP16.
+
+    \vspace{0.1cm}
+    \begin{enumerate}
+      \item \textbf{Naive:} HBM reads? Compute? AI?
+      \item \textbf{FlashAttention:} HBM reads? AI?
+      \item H100 ridge point: $\sim$200 FLOP/byte.\\Which regime is each in?
+    \end{enumerate}
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- use the roofline model)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.05cm]
+    {\scriptsize
+    \textbf{Naive:} 16 MB reads, 1.07 GFLOP\\
+    AI = 67 FLOP/byte: \textcolor{errorstroke}{\textbf{memory-bound}}\\[0.05cm]
+    \textbf{Flash:} 1.5 MB reads, 1.07 GFLOP\\
+    AI = 713 FLOP/byte: \textcolor{datastroke}{\textbf{compute-bound}}\\[0.1cm]
+    Same operation, same compute.\\
+    \textbf{10.6$\times$ higher AI} from tiling.\\
+    FlashAttention crosses the ridge.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
 % =============================================================================
 \section{Wrap-Up}
 % =============================================================================
@@ -1358,45 +1492,62 @@ the extreme. Every technique from today becomes a survival skill.''
 
 \appendix
 
-\begin{frame}{Backup: Extended Reference}
+\begin{frame}{Backup: Roofline Quick Reference}
 \note{
-% -- NARRATE: What to SAY while showing this slide
-Backup with extended reference material and textbook pointers.
-
-% -- FLEX: [OPTIONAL] Use if students request additional resources.
+% -- NARRATE: Roofline classification for common ML operations.
+% -- FLEX: [OPTIONAL] Use during problem sets or profiling exercises.
 }
 
 \footnotesize
-This slide provides extended reference material for students who want to go deeper.
-Refer to the textbook chapter for complete derivations and additional worked examples.
+\textbf{Where common operations sit on the H100 roofline:}
 
-\vspace{0.3cm}
-\begin{mlsyscard}{crimson}
-\textbf{Key equations and frameworks from this chapter} are collected in the
-textbook's summary tables. Use them as a quick reference during problem sets.
-\end{mlsyscard}
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrll@{}}
+  \toprule
+  \textbf{Operation} & \textbf{AI (FLOP/byte)} & \textbf{Regime} & \textbf{Optimization} \\
+  \midrule
+  LLM Decode (B=1) & $\sim$2     & \textcolor{errorstroke}{Deeply mem-bound}  & Quantization, batching \\
+  Embedding lookup  & $\sim$1     & \textcolor{errorstroke}{Deeply mem-bound}  & Caching, INT8 \\
+  Attention (naive) & $\sim$10    & \textcolor{errorstroke}{Memory-bound}      & FlashAttention \\
+  Attention (Flash) & $\sim$700+  & \textcolor{datastroke}{Compute-bound}     & Tensor cores \\
+  GEMM (B=256)      & $\sim$500   & \textcolor{datastroke}{Compute-bound}     & Already efficient \\
+  LayerNorm         & $\sim$3     & \textcolor{errorstroke}{Memory-bound}      & Kernel fusion \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+{\footnotesize\textbf{H100 ridge point:} $\sim$200 FLOP/byte (FP16). Operations below this are memory-bound; optimizing compute will not help.}
 
 \end{frame}
 
-\begin{frame}{Backup: Further Reading}
+\begin{frame}{Backup: MoE Efficiency Analysis}
 \note{
-% -- NARRATE: What to SAY while showing this slide
-Additional resources: textbook worked examples, problem sets,
-open-source implementations, office hours.
-
-% -- FLEX: [OPTIONAL] Use if students ask about going deeper.
+% -- NARRATE: Quantified MoE efficiency gains from Mixtral 8x7B.
+% -- FLEX: [OPTIONAL] Use when discussing algorithmic optimizations in depth.
 }
 
 \footnotesize
-\textbf{For deeper exploration:}
+\textbf{Mixtral 8x7B: Decoupling Capacity from Cost}
 
-\vspace{0.15cm}
-\begin{itemize}\setlength\itemsep{2pt}
-  \item The textbook chapter contains 2--3 additional worked examples
-  \item Problem sets apply these concepts to real-world scenarios
-  \item The course website links to open-source implementations
-  \item Office hours: bring your toughest questions
-\end{itemize}
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrr@{}}
+  \toprule
+  & \textbf{Dense (Llama 70B)} & \textbf{MoE (Mixtral 8$\times$7B)} \\
+  \midrule
+  Total parameters    & 70B         & 46.7B (8$\times$7B shared) \\
+  Active per token    & 70B         & \textbf{12.9B} (2 of 8 experts) \\
+  FLOPs per token     & 140 GFLOP   & \textbf{25 GFLOP} (5.6$\times$ less) \\
+  Memory (weights)    & 140 GB      & 93 GB (all experts loaded) \\
+  Quality (MMLU)      & 69.8\%      & 70.6\% (comparable) \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{routingstroke}
+{\scriptsize\textbf{Systems challenge:} All 93 GB of weights must be in memory even though only 25\% are active per token. MoE trades compute efficiency for memory inefficiency.}
+\end{mlsyscard}
 
 \end{frame}
 
