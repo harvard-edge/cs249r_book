@@ -153,6 +153,6 @@ Thanks to these wonderful people who helped build the labs!
 
 <div align="center">
 
-**Read. Explore. Build.** *(Labs coming soon)*
+<b>Read. Explore. Build.</b> <i>(Labs coming soon)</i>
 
 </div>

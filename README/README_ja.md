@@ -28,17 +28,14 @@
 </p>
 
 <p align="center">
-
-  <!-- Reader Navigation -->
-  **[📖 オンラインで読む](https://mlsysbook.ai)** •
-  **[Tiny🔥Torch](https://mlsysbook.ai/tinytorch)** •
-  **[📄 PDF ダウンロード](https://mlsysbook.ai/assets/downloads/Machine-Learning-Systems.pdf)** •
-  **[📓 EPUB ダウンロード](https://mlsysbook.ai/epub)** •
-  **[🌐 エコシステムを探検](https://mlsysbook.org)**
-
+  <b><a href="https://mlsysbook.ai/vol1/">📘 Volume I</a></b> •
+  <b><a href="https://mlsysbook.ai/vol2/">📙 Volume II <i>(Summer 2026)</i></a></b> •
+  <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
+  <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
+  <b><a href="https://mlsysbook.org">🌐 エコシステム</a></b>
 </p>
 
-📚 **2026年にMIT Pressからハードカバー版が出版予定**
+<p align="center">📚 <b>2026年にMIT Pressからハードカバー版が出版予定</b></p>
 
 </div>
 
@@ -303,8 +300,8 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 <div align="center">
 
-**[⭐ GitHubでスターを付ける](https://github.com/harvard-edge/cs249r_book#support-this-work) • [✉️ 購読する](https://buttondown.email/mlsysbook) • [💬 ディスカッションに参加](https://github.com/harvard-edge/cs249r_book/discussions) • [🌐 mlsysbook.ai を訪問](https://mlsysbook.ai)**
+<b><a href="https://buttondown.email/mlsysbook">✉️ 購読する</a> • <a href="https://github.com/harvard-edge/cs249r_book/discussions">💬 ディスカッションに参加</a> • <a href="https://mlsysbook.ai/">🌐 mlsysbook.ai を訪問</a></b>
 
-*MLSysBook コミュニティの献身によって作られました。*
+<i>MLSysBook コミュニティの献身によって作られました。</i>
 
 </div>

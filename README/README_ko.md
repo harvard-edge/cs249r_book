@@ -28,17 +28,14 @@
 </p>
 
 <p align="center">
-
-  <!-- Reader Navigation -->
-  **[📖 온라인 읽기](https://mlsysbook.ai)** •
-  **[Tiny🔥Torch](https://mlsysbook.ai/tinytorch)** •
-  **[📄 PDF 다운로드](https://mlsysbook.ai/assets/downloads/Machine-Learning-Systems.pdf)** •
-  **[📓 EPUB 다운로드](https://mlsysbook.ai/epub)** •
-  **[🌐 생태계 탐험](https://mlsysbook.org)**
-
+  <b><a href="https://mlsysbook.ai/vol1/">📘 Volume I</a></b> •
+  <b><a href="https://mlsysbook.ai/vol2/">📙 Volume II <i>(Summer 2026)</i></a></b> •
+  <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
+  <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
+  <b><a href="https://mlsysbook.org">🌐 생태계</a></b>
 </p>
 
-📚 **2026년 MIT Press에서 하드커버 출판 예정**
+<p align="center">📚 <b>2026년 MIT Press에서 하드커버 출판 예정</b></p>
 
 </div>
 
@@ -303,8 +300,8 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 <div align="center">
 
-**[⭐ GitHub에 별 달기](https://github.com/harvard-edge/cs249r_book#support-this-work) • [✉️ 구독하기](https://buttondown.email/mlsysbook) • [💬 토론 참여](https://github.com/harvard-edge/cs249r_book/discussions) • [🌐 mlsysbook.ai 방문](https://mlsysbook.ai)**
+<b><a href="https://buttondown.email/mlsysbook">✉️ 구독하기</a> • <a href="https://github.com/harvard-edge/cs249r_book/discussions">💬 토론 참여</a> • <a href="https://mlsysbook.ai/">🌐 mlsysbook.ai 방문</a></b>
 
-*MLSysBook 커뮤니티의 헌신으로 만들어졌습니다.*
+<i>MLSysBook 커뮤니티의 헌신으로 만들어졌습니다.</i>
 
 </div>

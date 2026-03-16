@@ -385,8 +385,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**[📖 Full Documentation](https://mlsysbook.ai/tinytorch)** ・ **[💬 Discussions](https://github.com/harvard-edge/cs249r_book/discussions)** ・ **[🌐 ML Systems Book](https://mlsysbook.ai)**
+<b><a href="https://mlsysbook.ai/tinytorch">Full Documentation</a></b> ・ <b><a href="https://github.com/harvard-edge/cs249r_book/discussions">Discussions</a></b> ・ <b><a href="https://mlsysbook.ai">ML Systems Book</a></b>
 
-**Start Small. Go Deep. Build ML Systems.**
+<b>Start Small. Go Deep. Build ML Systems.</b>
 
 </div>

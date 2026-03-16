@@ -28,17 +28,14 @@
 </p>
 
 <p align="center">
-
-  <!-- Reader Navigation -->
-  **[📖 在线阅读](https://mlsysbook.ai)** •
-  **[Tiny🔥Torch](https://mlsysbook.ai/tinytorch)** •
-  **[📄 下载 PDF](https://mlsysbook.ai/assets/downloads/Machine-Learning-Systems.pdf)** •
-  **[📓 下载 EPUB](https://mlsysbook.ai/epub)** •
-  **[🌐 探索生态系统](https://mlsysbook.org)**
-
+  <b><a href="https://mlsysbook.ai/vol1/">📘 Volume I</a></b> •
+  <b><a href="https://mlsysbook.ai/vol2/">📙 Volume II <i>(Summer 2026)</i></a></b> •
+  <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
+  <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
+  <b><a href="https://mlsysbook.org">🌐 生态系统</a></b>
 </p>
 
-📚 **2026 年 MIT Press 将出版纸质版**
+<p align="center">📚 <b>2026 年 MIT Press 将出版纸质版</b></p>
 
 </div>
 
@@ -303,8 +300,8 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 <div align="center">
 
-**[⭐ 在 GitHub 上给我们加星](https://github.com/harvard-edge/cs249r_book#support-this-work) • [✉️ 订阅更新](https://buttondown.email/mlsysbook) • [💬 参与讨论](https://github.com/harvard-edge/cs249r_book/discussions) • [🌐 访问 mlsysbook.ai](https://mlsysbook.ai)**
+<b><a href="https://buttondown.email/mlsysbook">✉️ 订阅更新</a> • <a href="https://github.com/harvard-edge/cs249r_book/discussions">💬 参与讨论</a> • <a href="https://mlsysbook.ai/">🌐 访问 mlsysbook.ai</a></b>
 
-*本教材由 MLSysBook 社区倾情打造。*
+<i>本教材由 MLSysBook 社区倾情打造。</i>
 
 </div>
