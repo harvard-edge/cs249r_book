@@ -72,10 +72,27 @@
 % LEARNING OBJECTIVES
 % =============================================================================
 \begin{frame}{Learning Objectives}
-\note{[2 min] Read through objectives. Emphasize that this chapter bridges
-framework internals (Ch7) with the physical reality of training at scale.
-Ask: ``How many of you have waited hours for a model to train and wondered
-why it takes so long?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+Ch7 taught how frameworks translate models into hardware execution.
+This chapter bridges framework internals with the physical reality of
+training at scale---where memory, compute, and time become binding
+constraints.
+
+% -- NARRATE: What to SAY while showing this slide
+Read through objectives. ``This chapter answers the question every ML
+engineer faces: why does training take so long, and what can I do about
+it? We will build a systematic toolkit grounded in the Iron Law.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``How many of you have waited hours for a model to train and
+wondered why it takes so long?'' Show of hands. ``By the end of today,
+you will know exactly where that time goes.''
+
+% -- FLEX: [CORE] Sets the framing for the entire lecture.
+[CORE] Emphasize that training is where most compute dollars are spent.
+IF SHORT: Read objectives 1, 3, and 5 aloud; let students read the rest.
+}
 
 \footnotesize
 \begin{enumerate}\setlength\itemsep{0pt}
@@ -91,8 +108,14 @@ why it takes so long?''}
 \end{frame}
 
 \begin{frame}{Visual Language}
-\note{[1 min] Explain the semantic color system used throughout the course.
-These colors are consistent across all diagrams and slides.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Same color system as Ch6 and Ch7. Blue = compute, green = data,
+orange = scheduling, red = bottleneck. You know the drill.''
+
+% -- FLEX: [CORE] Brief reinforcement---30 seconds max.
+[CORE] Students have seen this twice before; do not dwell.
+}
 
 \small
 Throughout this course, colors carry meaning:
@@ -130,10 +153,38 @@ Throughout this course, colors carry meaning:
 % =============================================================================
 
 \begin{frame}{Why Training Costs Millions}
-\note{[3 min] Open with the cost asymmetry. GPT-2 inference: fraction of a cent.
-GPT-2 training: \$50K. GPT-4 training: \$100M estimated. This million-to-one
-gap governs who can participate in AI. Ask: ``Who can afford to train a
-frontier model?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+Ch7 showed how frameworks execute individual forward/backward passes.
+This slide reveals the scale: training requires \emph{billions} of those
+passes, creating a million-to-one cost asymmetry between inference and
+training.
+
+% -- NARRATE: What to SAY while showing this slide
+``Running a model costs pennies. Training a model costs millions. GPT-2
+inference: fraction of a cent. GPT-2 training: \$50K. GPT-4 training:
+an estimated \$100M. This million-to-one gap governs who can participate
+in AI research and deployment.''
+Point to the three scaling challenges: ``Sustained petaFLOPS for days
+(compute). Weights plus gradients plus optimizer plus activations (memory).
+Sequential gradient updates that cannot be trivially parallelized
+(data dependencies).''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Who can afford to train a frontier model?'' Let 2 students
+respond. [Expected answer: only large companies with datacenter-scale
+budgets. This motivates optimization.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think training cost is dominated by GPU purchase
+price. Correct framing: electricity, cooling, and engineering time
+often exceed hardware cost for large runs. A 10-day run on 1000 GPUs
+at \$2/GPU-hr costs \$480K in compute alone.
+
+% -- FLEX: [CORE] Establishes the economic motivation for every optimization.
+[CORE] The cost numbers ground the entire chapter.
+IF AHEAD: ``How does the cost scale with model size? Linearly? Quadratically?''
+}
 
 \small
 \begin{columns}[T]
@@ -176,10 +227,39 @@ frontier model?''}
 \end{frame}
 
 \begin{frame}{The 3AM Gradient Explosion}
-\note{[2 min] Tell this as a story. A team trains a 7B model for 4 days.
-At 3AM, loss spikes to NaN. They lost 4 days and \$5000. The cause: FP16
-overflow from an outlier batch. The fix: checkpointing, gradient clipping,
-BF16. This motivates the rest of the chapter.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Training costs millions. Losing a run to a numerical failure wastes
+those resources entirely. This story motivates the safety techniques
+covered later (checkpointing, gradient clipping, BF16).
+
+% -- NARRATE: What to SAY while showing this slide
+Tell this as a story: ``A team trains a 7B model for 4 days. Everything
+looks smooth. At 3AM, an outlier batch produces a gradient that exceeds
+FP16's maximum value of 65,504. The gradient overflows to infinity.
+Infinity times any weight equals NaN. Within one step, every parameter
+is NaN. The run crashes. Four days and \$5,000 lost.''
+Point to the systems fix: ``Three defenses. Checkpointing: save hourly,
+lose 1 hour instead of 4 days. Gradient clipping: cap gradient norms
+before they overflow. BF16: matches FP32's dynamic range in 16 bits,
+making overflow extremely rare.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why does BF16 solve the overflow problem while FP16 does not?''
+Give 10 seconds. [Expected answer: BF16 has the same 8-bit exponent as
+FP32 (range up to $10^{38}$), while FP16 has only a 5-bit exponent
+(max 65,504).]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think gradient explosions are rare edge cases.
+Correct framing: at scale (billions of tokens), outlier batches are
+statistically guaranteed. Without safeguards, every long run will
+eventually hit one.
+
+% -- FLEX: [CORE] Motivates checkpointing, clipping, and BF16 covered later.
+[CORE] The FP16/BF16 comparison is referenced in the mixed-precision section.
+IF SHORT: Tell the story in 60 seconds; skip the table, keep the three fixes.
+}
 
 \scriptsize
 \begin{columns}[T]
@@ -227,10 +307,37 @@ $T_{\text{train}} = \dfrac{O}{R_{\text{peak}} \times \eta}$%
 }
 
 \begin{frame}{Iron Law: Three Levers}
-\note{[3 min] Walk through each term. O = total FLOPs. R\_peak = hardware
-throughput (set by procurement and precision). eta = utilization (the
-engineering target). GPT-3 achieved eta = 0.45. Current target: >0.55.
-Ask: ``Which lever is cheapest to improve?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+The focus frame just presented the Iron Law equation. This slide unpacks
+the three terms and shows how each maps to a class of optimizations.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through each term in the diagram: ``$O$ = total FLOPs for the
+training run. Set by model size, dataset size, and number of epochs.
+$R_{\text{peak}}$ = hardware throughput---set by GPU procurement and
+numerical precision. $\eta$ = utilization---the fraction of peak
+throughput actually achieved. This is the engineering target.''
+``GPT-3 achieved $\eta = 0.45$. Current target for well-optimized runs:
+above 0.55. That gap is where optimization lives.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which of the three levers is cheapest to improve?'' Give 15
+seconds. [Expected answer: $\eta$---utilization is pure engineering.
+$O$ requires algorithmic changes, $R_{\text{peak}}$ requires hardware
+purchases.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students focus on $R_{\text{peak}}$ (buy faster GPUs)
+instead of $\eta$ (use existing GPUs better). Correct framing: most
+training runs achieve 30--50\% utilization. Doubling $\eta$ from 0.3
+to 0.6 is equivalent to buying 2x more hardware.
+
+% -- FLEX: [CORE] The Iron Law is the organizing framework for the entire chapter.
+[CORE] Every optimization slide maps back to one of these three terms.
+IF SHORT: Name the three terms and the GPT-3 utilization number; skip
+the procurement discussion.
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -239,9 +346,37 @@ Ask: ``Which lever is cheapest to improve?''}
 \end{frame}
 
 \begin{frame}{Iron Law: Optimization Mapping}
-\note{[2 min] Every technique in this chapter maps to one of the three terms.
-Students should be able to classify any optimization by which term it targets.
-This table is the organizing framework for the rest of the deck.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The previous slide defined the three levers. This table shows which
+optimization targets which lever---the organizing framework for the
+rest of the deck.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to each row: ``Mixed precision increases $R_{\text{peak}}$---Tensor
+Cores at 16x higher FLOP/s. Data prefetching increases $\eta$---reduces
+idle time. Gradient checkpointing increases $O$ (adds recomputation) but
+enables larger models. FlashAttention both reduces $O$ and improves
+$\eta$ through IO-aware tiling.''
+``The diagnostic discipline: identify which term dominates \emph{before}
+choosing an optimization. Do not apply mixed precision if your bottleneck
+is data loading.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If your GPU profiler shows 40\% idle time waiting for data, which
+column should you target?'' Give 10 seconds.
+[Expected answer: $\eta$---data prefetching to eliminate idle time.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students apply optimizations in random order without
+diagnosing the bottleneck first.
+Correct framing: always profile first. If the bottleneck is data loading
+($\eta$), mixed precision ($R_{\text{peak}}$) will not help.
+
+% -- FLEX: [CORE] This table is the roadmap for all remaining slides.
+[CORE] Students should be able to classify any optimization by its term.
+IF SHORT: Cover mixed precision and data prefetching rows; skip the rest.
+}
 
 \scriptsize
 \renewcommand{\arraystretch}{1.1}
@@ -265,9 +400,28 @@ This table is the organizing framework for the rest of the deck.}
 
 % --- ACTIVE LEARNING 1: Predict ---
 \begin{frame}{Predict: What Dominates Training Memory?}
-\note{[2 min] Prediction exercise. Give students 60 seconds. Most will guess
-model weights. The surprising answer: optimizer state and activations
-dominate. This primes the memory breakdown slide.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The Iron Law identified $O$, $R_{\text{peak}}$, and $\eta$ as the three
+levers. Memory is the hidden constraint that determines how much of each
+lever is achievable. This prediction primes the memory breakdown reveal.
+
+% -- NARRATE: What to SAY while showing this slide
+``A 7B-parameter model in FP16 weighs 14 GB. How much total GPU memory
+does \emph{training} require? Write your estimate---60 seconds.''
+Do NOT reveal the answer yet. Most students will guess close to 14 GB
+(just the weights).
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students write individually for 60 seconds. Cold-call 3 students to
+share their estimates. Record the guesses on the board.
+[Expected range: most will say 14--28 GB. The actual answer (56+ GB)
+will surprise them.]
+
+% -- FLEX: [CORE] The prediction must happen before the memory breakdown reveal.
+[CORE] The surprise motivates the entire memory and optimization section.
+IF SHORT: Reduce to 30 seconds; skip recording guesses.
+}
 
 \centering
 \vspace{1.0cm}
@@ -290,11 +444,35 @@ How much total GPU memory does \textbf{training} require?}
 % =============================================================================
 
 \begin{frame}{Training vs.\ Inference: The 4$\times$ Multiplier}
-\note{[3 min] Reveal after prediction. The 4x multiplier is the most
-important number: weights (14 GB) + gradients (14 GB) + Adam m (14 GB) +
-Adam v (14 GB) = 56 GB minimum. Plus activations. GPT-2 XL in FP32:
-89 GB total. V100 has 32 GB. This is why optimization matters.
-Common error: students think weights dominate memory.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just predicted training memory. This slide reveals the answer:
+the 4x multiplier from optimizer state, plus activations on top.
+
+% -- NARRATE: What to SAY while showing this slide
+``Reveal time. Weights: 14 GB. Gradients: another 14 GB. Adam first
+moment ($m$): 14 GB. Adam second moment ($v$): 14 GB. That is 56 GB
+minimum---4x the weight memory. And we have not counted activations yet.
+GPT-2 XL in FP32: 89 GB total. A V100 has 32 GB. This is why
+optimization matters---a model that runs inference on one GPU needs
+multiple GPUs for training.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Compare students' earlier predictions to the actual 56+ GB number.
+Ask: ``How many of you predicted less than 30 GB?'' [Most hands.]
+``That gap between expectation and reality is why this chapter exists.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think weights dominate training memory.
+Correct framing: optimizer state (Adam's $m$ and $v$) doubles the
+non-activation memory. Activations can add another 3--4x on top.
+Weights are often the \emph{smallest} component.
+
+% -- FLEX: [CORE] The 4x multiplier is the most important number in this chapter.
+[CORE] Referenced in every subsequent optimization slide.
+IF AHEAD: ``What if we used SGD instead of Adam? How would the multiplier
+change?'' [Answer: 2x instead of 4x.]
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -306,10 +484,36 @@ Common error: students think weights dominate memory.}
 \end{frame}
 
 \begin{frame}{Optimizer Memory: SGD vs.\ Adam}
-\note{[2 min] SGD stores only gradients (1 extra copy). Adam stores m and v
-(3 extra copies). Adam converges in ~1/3 the iterations but costs 3x memory.
-This is a binding constraint for large models.
-Ask: ``When would you choose SGD over Adam?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+The 4x multiplier comes from Adam's two extra state vectors per parameter.
+This slide compares optimizer memory costs to explain that multiplier.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the table: ``SGD: weights + gradients = 2x memory. SGD with
+momentum: add one momentum buffer = 3x. Adam: add two buffers ($m$ and
+$v$) = 4x. For a 7B model in mixed precision: SGD needs 28 GB, Adam
+needs 56 GB.''
+``Adam converges in roughly 1/3 the iterations of SGD, but costs 3x
+the memory for per-parameter state. This is a binding constraint for
+large models.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``When would you choose SGD over Adam?'' Give 15 seconds.
+[Expected answer: when memory is the binding constraint---e.g., a very
+large model that barely fits with SGD but overflows with Adam. Accept
+slower convergence for the ability to train at all.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students always default to Adam because it converges faster.
+Correct framing: Adam's faster convergence is irrelevant if the model
+does not fit in memory. Memory is a hard constraint; convergence speed
+is a soft preference.
+
+% -- FLEX: [CORE] Explains the 4x multiplier and the memory-convergence trade-off.
+[CORE] Students must know the memory cost of each optimizer for the exercise.
+IF SHORT: Cover the table and the 4x number; skip AdamW detail.
+}
 
 \small
 \begin{columns}[T]
@@ -349,10 +553,35 @@ Ask: ``When would you choose SGD over Adam?''}
 \end{frame}
 
 \begin{frame}{Activation Memory: The Hidden Cost}
-\note{[2 min] Activations scale with batch size and depth. GPT-2: 65 GB
-of activations in FP32 (seq\_len=1024, batch=32, 48 layers). This often
-exceeds optimizer state. Activation checkpointing trades compute for memory
-(covered later). If short: just show the formula and GPT-2 number.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Optimizer state gives the 4x multiplier. Activations add even more---
+often exceeding optimizer state for deep models.
+
+% -- NARRATE: What to SAY while showing this slide
+``Activations must be stored from the forward pass for use in the
+backward pass (the autograd tape from Ch7). Memory scales with batch
+size times sequence length times hidden dimension times layers.
+GPT-2 XL: 48 layers, batch 32---activations alone are 65 GB. That
+is 73\% of total training memory. Activations, not weights, are the
+dominant cost.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If you halve the batch size, how does activation memory change?''
+Give 10 seconds. [Expected answer: it halves---activation memory is
+linear in batch size.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think reducing model parameters is the primary
+way to reduce training memory.
+Correct framing: activations scale with batch size and depth, not just
+parameters. Reducing batch size or applying checkpointing are often
+more effective than shrinking the model.
+
+% -- FLEX: [CORE] Activations as 73\% of memory motivates checkpointing later.
+[CORE] The GPT-2 breakdown is the key quantitative reference.
+IF SHORT: Show the formula and the 73\% number; skip the full table.
+}
 
 \small
 \begin{columns}[T]
@@ -402,8 +631,15 @@ exceeds optimizer state. Activation checkpointing trades compute for memory
 \end{frame}
 
 \begin{frame}{Quick Check}
-\note{[0.5 min] Micro-retrieval. Give students 30 seconds to recall.
-This distributed practice improves retention (Roediger \& Karpicke, 2006).}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Quick check---no peeking. What fraction of GPU memory do activations
+consume for GPT-2 training? 30 seconds.'' After 30 seconds, take one
+answer. [Expected answer: 73\%.]
+
+% -- FLEX: [OPTIONAL] Micro-retrieval for spaced practice.
+[OPTIONAL] If running behind, skip and move to arithmetic intensity.
+}
 
 \centering
 \Large\bfseries Quick check --- no peeking.\\[0.5cm]
@@ -414,11 +650,37 @@ This distributed practice improves retention (Roediger \& Karpicke, 2006).}
 
 
 \begin{frame}{Arithmetic Intensity: Compute-Bound vs.\ Memory-Bound}
-\note{[2 min] Arithmetic intensity = FLOPs per byte loaded. If intensity
-is below the ridge point, the operation is memory-bound. Most training ops
-(ReLU, LayerNorm, Softmax) are memory-bound. Only large GEMMs are
-compute-bound. Increasing batch size moves operations rightward.
-This is the roofline model from Ch1 applied to training.}
+\note{
+% -- LINK: What prior concept connects to this slide
+We know the memory breakdown. Arithmetic intensity tells us whether
+each operation is limited by compute or by memory bandwidth---the
+roofline model from Ch1 applied specifically to training operations.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the table: ``ReLU: less than 1 FLOP/byte---deeply memory-bound.
+LayerNorm, Softmax: still below the ridge point. Only large GEMMs at
+batch 256+ cross into compute-bound territory. Most training ops are
+memory-bound.''
+``Increasing batch size moves operations rightward on the roofline---
+from memory-bound toward compute-bound. This is why larger batches
+improve GPU utilization.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If most training ops are memory-bound, why does increasing batch
+size help?'' Give 15 seconds.
+[Expected answer: larger batches increase the matrix dimensions in GEMMs,
+raising arithmetic intensity above the ridge point.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think all operations benefit equally from larger
+batch size. Correct framing: batch size helps GEMMs (increases matrix
+dimensions) but does not change element-wise ops like ReLU (still 0.125
+FLOPs/byte regardless of batch size).
+
+% -- FLEX: [CORE] Connects the roofline model to training-specific operations.
+[CORE] The V100 ridge point (139 FLOPs/byte) is the decision threshold.
+IF SHORT: Show the table; state that most ops are memory-bound; move on.
+}
 
 \small
 \begin{columns}[T]
@@ -461,10 +723,37 @@ This is the roofline model from Ch1 applied to training.}
 % =============================================================================
 
 \begin{frame}{The Staged Training Pipeline}
-\note{[3 min] Training is a 4-stage pipeline. Data loading (CPU), PCIe
-transfer, forward/backward (GPU), gradient sync (NVLink). Any mismatch
-creates ``accelerator bubbles'' --- idle GPU time. The goal: overlap stages.
-Walk through the naive vs pipelined diagram.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Memory and arithmetic intensity set the per-step constraints. The
+pipeline determines how those steps are orchestrated over time---and
+where idle ``accelerator bubbles'' waste GPU cycles.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the diagram: ``Training is a 4-stage pipeline. Stage 1:
+data loading on CPU. Stage 2: PCIe transfer to GPU. Stage 3: forward
+and backward pass on GPU. Stage 4: gradient synchronization over NVLink.
+Any mismatch creates accelerator bubbles---the GPU sits idle waiting
+for data.''
+``The naive approach runs stages sequentially. The optimized approach
+overlaps them: load batch $N+1$ while the GPU processes batch $N$.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which stage do you think is most often the bottleneck in practice?''
+Give 10 seconds. [Expected answer: data loading---many teams optimize
+GPU compute but neglect the data pipeline, leaving the GPU idle 20--40\%
+of the time.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students assume the GPU is always the bottleneck because
+it is the most expensive component.
+Correct framing: data loading and transfer frequently dominate wall-clock
+time. Profile before assuming the GPU is the constraint.
+
+% -- FLEX: [CORE] The pipeline model explains where utilization is lost.
+[CORE] Motivates prefetching and the profiling-first discipline.
+IF SHORT: Show the diagram; state the overlap principle; skip details.
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -476,10 +765,37 @@ Walk through the naive vs pipelined diagram.}
 \end{frame}
 
 \begin{frame}{Four Pipeline Stages}
-\note{[2 min] Detail each stage. Data loading: CPU workers decode from NVMe.
-Transfer: PCIe DMA to GPU memory. Compute: forward + backward on GPU.
-Sync: gradient averaging via NVLink. The slowest stage determines throughput.
-Common error: optimizing GPU compute when data loading is the bottleneck.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The diagram showed the pipeline visually. This slide details each stage
+with its hardware, bottleneck, and mitigation.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to each row: ``Stage 1: CPU workers decode images from NVMe,
+apply augmentations. Bottleneck: decode throughput. Fix: multi-worker
+prefetch. Stage 2: PCIe DMA copies tensors to GPU. Fix: pin memory
+for async DMA. Stage 3: forward and backward on GPU. Fix: mixed
+precision, kernel fusion. Stage 4: gradient averaging via NVLink
+or PCIe. Fix: overlap communication with the next forward pass.''
+``The slowest stage determines throughput---like the slowest station
+on an assembly line.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If data loading takes 50 ms and GPU compute takes 30 ms, what
+is the throughput of the non-overlapped pipeline?'' Give 10 seconds.
+[Expected answer: 1 / 80 ms = 12.5 steps/sec. With overlap:
+1 / 50 ms = 20 steps/sec---the slower stage dominates.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students optimize GPU compute when data loading is the
+bottleneck, seeing no improvement.
+Correct framing: always profile to find the slowest stage. Optimizing
+a non-bottleneck stage yields zero throughput improvement.
+
+% -- FLEX: [CORE] The four stages are the complete training pipeline model.
+[CORE] Each stage maps to a specific optimization technique.
+IF SHORT: Cover stages 1 and 3 only; mention 2 and 4 in passing.
+}
 
 \footnotesize
 \renewcommand{\arraystretch}{1.15}
@@ -514,15 +830,37 @@ Common error: optimizing GPU compute when data loading is the bottleneck.}
 
 % --- ACTIVE LEARNING 2: Exercise ---
 \begin{frame}{Your Turn: Memory Budget}
-\note{[3 min] Give students 90 seconds. Answer: Weights=2 GB + Grads=2 GB +
-Adam=4 GB + Activations (B*S*H*L*4 bytes). At batch 16, activations are
-roughly 6 GB. Total ~14 GB. Fits on V100 (32 GB). At batch 64, activations
-quadruple to ~24 GB. Total ~32 GB. Barely fits.
-Ask: ``What happens if we increase batch size to 128?''
-PEER INSTRUCTION PROTOCOL:
-1. Present problem (30s). 2. Individual vote (60s).
-3. If 30-70\% correct: pair discussion (90s), then re-vote.
-4. Reveal and explain.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students learned the 4x multiplier and activation memory scaling.
+This exercise asks them to calculate a concrete memory budget and
+determine whether a model fits on a specific GPU.
+
+% -- NARRATE: What to SAY while showing this slide
+``A 1B parameter model trained with Adam in mixed precision. Calculate
+each component and the total. Does it fit on a V100 (32 GB)?''
+Present the problem (30s). Individual work (60s). Use peer instruction:
+if 30--70\% correct, pair discussion (90s), then re-vote. Reveal.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Weights: 1B * 2 bytes = 2 GB. Gradients: 2 GB. Adam states (m+v in
+FP32): 1B * 4 bytes = 4 GB. Activations at batch 16: ~6 GB.
+Total: ~14 GB. Fits on V100 (32 GB).
+Follow-up: ``What happens at batch 64?'' Activations quadruple to ~24 GB.
+Total ~32 GB---barely fits.
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students compute Adam states in FP16 instead of FP32.
+Adam's $m$ and $v$ must be in FP32 for numerical stability in mixed
+precision training---this is a common implementation detail.
+IF STUCK: ``What precision are Adam states stored in?'' [FP32.]
+
+% -- FLEX: [CORE] This exercise applies the memory breakdown to a real scenario.
+[CORE] The batch-size scaling question previews gradient accumulation.
+IF AHEAD: ``What happens at batch 128?'' [OOM---need checkpointing or
+gradient accumulation.]
+IF SHORT: Show the solution immediately; walk through the arithmetic.
+}
 
 \small
 \begin{columns}[T]
@@ -568,10 +906,39 @@ PEER INSTRUCTION PROTOCOL:
 % =============================================================================
 
 \begin{frame}{Mixed-Precision Training}
-\note{[3 min] FP16 computation with FP32 accumulation. Walk through the flow:
-FP32 master weights -> cast to FP16 -> forward -> loss scale -> backward ->
-unscale -> FP32 accumulate. Loss scaling prevents gradient underflow in FP16.
-BF16 eliminates the need for loss scaling. Result: ~2x throughput, ~2x memory.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The Iron Law mapping showed mixed precision targets $R_{\text{peak}}$.
+This slide explains the mechanism: FP16 computation with FP32
+accumulation, mediated by loss scaling.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the flow diagram: ``FP32 master weights are cast to FP16
+for the forward pass. Loss is scaled up (multiplied by a large factor)
+before backward to prevent gradient underflow in FP16. After backward,
+gradients are unscaled and accumulated into FP32 master weights.''
+``BF16 simplifies this: it matches FP32's dynamic range, so loss scaling
+is unnecessary. Same speed benefit, simpler code.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why do we keep FP32 master weights instead of doing everything
+in FP16?'' Give 10 seconds.
+[Expected answer: small gradient updates ($10^{-5}$) would round to zero
+in FP16. FP32 master weights accumulate these small updates correctly.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students enable mixed precision without loss scaling and
+get silently wrong gradients that only manifest as divergence after
+thousands of steps.
+Correct framing: FP16 gradients of $10^{-8}$ underflow to zero without
+loss scaling. Always use loss scaling with FP16, or switch to BF16
+which does not need it.
+
+% -- FLEX: [CORE] Mixed precision is the single most impactful optimization.
+[CORE] ~2x throughput, ~2x memory savings with <1\% accuracy impact.
+IF SHORT: Show the diagram for 30 seconds; state the key numbers on the
+next slide.
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -580,10 +947,36 @@ BF16 eliminates the need for loss scaling. Result: ~2x throughput, ~2x memory.}
 \end{frame}
 
 \begin{frame}{Mixed Precision: The Numbers}
-\note{[2 min] Quantitative impact. FP16 on V100 Tensor Cores: 125 TFLOPS
-vs 15.7 TFLOPS FP32 = nearly 8x throughput. Memory halved. BF16 simplifies
-the pipeline by matching FP32's dynamic range.
-Common error: enabling mixed precision without loss scaling.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The flow diagram showed the mechanism. This slide provides the
+quantitative impact.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the table: ``FP16 on V100 Tensor Cores: 125 TFLOPS vs 15.7
+TFLOPS in FP32---nearly 8x throughput increase. Memory halved because
+each parameter is 2 bytes instead of 4. BF16 matches FP32's dynamic
+range ($10^{38}$) in 16 bits, eliminating the need for loss scaling.
+Accuracy impact: less than 1\% across all major benchmarks.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If FP16 gives 8x more TFLOPS, why do we not see 8x faster
+training?'' Give 15 seconds.
+[Expected answer: not all operations use Tensor Cores. Memory-bound ops
+(ReLU, LayerNorm) do not benefit from faster compute. The actual
+speedup is ~2x, not 8x, because the workload is mixed.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students expect the full 8x throughput improvement.
+Correct framing: the 8x applies only to Tensor Core operations (large
+GEMMs). The overall training speedup is ~2x because many operations
+are memory-bound and do not benefit from faster compute.
+
+% -- FLEX: [CORE] The quantitative impact justifies mixed precision as default.
+[CORE] The ~2x throughput and ~2x memory numbers are key takeaways.
+IF SHORT: State the three numbers (8x Tensor Cores, ~2x actual, <1\%
+accuracy); skip the BF16 detail.
+}
 
 \small
 \begin{columns}[T]
@@ -623,10 +1016,37 @@ Common error: enabling mixed precision without loss scaling.}
 \end{frame}
 
 \begin{frame}{Gradient Checkpointing}
-\note{[3 min] Standard backprop stores all L layers' activations. Checkpointing
-stores only sqrt(L) and recomputes the rest. Trade: +33\% compute for up to
-10x memory reduction. GPT-2: 48 layers -> 7 checkpoints. Walk through the
-side-by-side comparison. If short: focus on the trade-off numbers.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Activations consume 73\% of GPT-2's training memory. Gradient
+checkpointing is the technique that trades compute for activation
+memory reduction.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the side-by-side diagram: ``Left: standard backprop stores
+all $L$ layers' activations---65 GB for GPT-2. Right: checkpointing
+stores only $\sqrt{L}$ layers (7 checkpoints for 48 layers) and
+recomputes the rest during backward. Trade: +33\% more compute for up
+to 10x memory reduction.''
+``This is the compute-memory trade-off in its purest form. You pay in
+time to save in space.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Would you accept 33\% longer training to fit a model that is
+10x too large for your GPU?'' Give 10 seconds.
+[Expected answer: yes---without checkpointing, you cannot train the
+model at all. 33\% slowdown is far better than being unable to train.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think checkpointing reduces total compute.
+Correct framing: checkpointing \emph{increases} total compute (by ~33\%)
+but dramatically reduces peak memory. It targets the $O$ term in the
+Iron Law (increases it) to enable training within memory constraints.
+
+% -- FLEX: [CORE] Checkpointing is essential for large model training.
+[CORE] The 33\% compute / 10x memory trade-off is a key quantitative anchor.
+IF SHORT: State the trade-off numbers; skip the diagram walkthrough.
+}
 
 % --- Layout: FULL-WIDTH comparison diagram ---
 \centering
@@ -635,11 +1055,37 @@ side-by-side comparison. If short: focus on the trade-off numbers.}
 \end{frame}
 
 \begin{frame}{FlashAttention: IO-Aware Computation}
-\note{[2 min] Standard attention materializes the full NxN matrix in HBM.
-FlashAttention tiles the computation, keeping partial results in SRAM.
-Never writes the NxN matrix to HBM. Result: 2-4x speedup, 4x longer
-sequences. This is the principle of IO-aware algorithm design.
-Iron Law: reduces O and improves eta.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Standard attention materializes the full $N \times N$ matrix in HBM
+(O(N\^{}2) memory from Ch6). FlashAttention avoids this by tiling the
+computation to fit in SRAM.
+
+% -- NARRATE: What to SAY while showing this slide
+``Standard attention: read Q, K from HBM, compute the $N \times N$
+matrix, write it back to HBM, then read it again to multiply by V.
+FlashAttention: tile the computation so that partial results stay in
+SRAM (20 MB on A100). The full $N \times N$ matrix is never written
+to HBM. Result: 2--4x speedup and 4x longer sequences.''
+``This is IO-aware algorithm design: same math, different memory access
+pattern, dramatically different performance.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``FlashAttention does the same math as standard attention. Where
+does the speedup come from?'' Give 10 seconds.
+[Expected answer: fewer HBM reads/writes. The compute is identical;
+the memory traffic is reduced by keeping intermediates in SRAM.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think FlashAttention uses an approximation.
+Correct framing: FlashAttention computes \emph{exact} attention. The
+speedup comes entirely from IO-aware tiling, not from approximating
+the math. It converts attention from memory-bound to compute-bound.
+
+% -- FLEX: [CORE] FlashAttention is the most important attention optimization.
+[CORE] Connects Ch6's O(N\^{}2) analysis to a concrete solution.
+IF SHORT: State ``same math, less memory traffic'' and the 2--4x number.
+}
 
 \footnotesize
 \begin{columns}[T]
@@ -681,11 +1127,40 @@ Iron Law: reduces O and improves eta.}
 \end{frame}
 
 \begin{frame}{Gradient Accumulation}
-\note{[2 min] When a large batch doesn't fit in memory, split it into
-micro-batches. Accumulate gradients across micro-batches before updating.
-Physical batch = small (fits in memory). Effective batch = large (good
-convergence). Trades utilization for memory: 5-10\% overhead from multiple
-forward/backward passes per update. If short: just cover the concept.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The memory budget exercise showed that large batch sizes cause OOM.
+Gradient accumulation solves this by splitting the effective batch into
+smaller micro-batches that fit in memory.
+
+% -- NARRATE: What to SAY while showing this slide
+``Problem: batch size 256 gives best convergence but requires too much
+activation memory. Solution: split into 8 micro-batches of 32. Run
+forward/backward on each micro-batch, accumulate gradients without
+updating, then do one optimizer step with the averaged gradients.
+Physical batch = 32 (fits in memory). Effective batch = 256 (good
+convergence). Overhead: 5--10\% from multiple forward/backward passes
+per update step.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Is gradient accumulation mathematically equivalent to training
+with the full batch?'' Give 10 seconds.
+[Expected answer: yes for SGD. For Adam, nearly equivalent---the running
+statistics $m$ and $v$ see the same averaged gradient. The only difference
+is batch normalization statistics, which see the micro-batch.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think gradient accumulation is free.
+Correct framing: each micro-batch requires a separate forward and backward
+pass. With 8 micro-batches, you do 8x the kernel launches per update,
+adding 5--10\% overhead from dispatch and synchronization.
+
+% -- FLEX: [CORE] Gradient accumulation is the standard solution for OOM.
+[CORE] Completes the optimization toolkit alongside mixed precision and
+checkpointing.
+IF SHORT: State the concept and the 5--10\% overhead; skip the enumerated
+steps.
+}
 
 \small
 \begin{columns}[T]
@@ -736,11 +1211,38 @@ forward/backward passes per update. If short: just cover the concept.}
 \end{frame}
 
 \begin{frame}{GPT-2 Optimization Walkthrough}
-\note{[3 min] Walk through the waterfall: 89 GB baseline -> 51 GB (mixed
-precision) -> 32 GB (checkpointing) -> 28 GB (gradient accumulation).
-V100 has 32 GB. Each step targets a different Iron Law term. The key
-lesson: no single technique is sufficient; they compose.
-Ask: ``Which step had the biggest impact?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students have learned four optimizations individually. This slide shows
+how they compose on GPT-2: each step reduces memory, and together they
+bring 89 GB down to 28 GB---fitting on a V100.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the waterfall diagram: ``Baseline: 89 GB in FP32.
+Step 1: mixed precision cuts weights and activations roughly in half---
+down to 51 GB. Step 2: gradient checkpointing reduces activation memory
+by ~10x---down to 32 GB. Step 3: gradient accumulation shrinks the
+physical batch, reducing remaining activations---down to 28 GB.
+V100 has 32 GB. We went from impossible to feasible.''
+``Each step targets a different Iron Law term. No single technique is
+sufficient; they compose.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which step had the biggest impact?'' Give 10 seconds.
+[Expected answer: mixed precision (38 GB reduction) or checkpointing
+(19 GB reduction). Accept either---the point is that both are needed.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students apply optimizations in random order or stop after
+one technique.
+Correct framing: optimizations compose multiplicatively. Mixed precision
+alone is not enough (51 GB > 32 GB). Checkpointing alone on FP32 is
+not enough. You need the combination.
+
+% -- FLEX: [CORE] The waterfall is the chapter's culminating example.
+[CORE] Shows that optimization is systematic composition, not ad hoc tuning.
+IF SHORT: State the four numbers (89, 51, 32, 28) and the punchline.
+}
 
 % --- Layout: FULL-WIDTH waterfall diagram ---
 \centering
@@ -750,13 +1252,37 @@ Ask: ``Which step had the biggest impact?''}
 
 % --- ACTIVE LEARNING 3: Discussion ---
 \begin{frame}{Discussion: Which Term Would You Optimize First?}
-\note{[3 min] Turn-and-talk. A training job takes 10 days. Profiling shows:
-GPU utilization 35\%, FP32 precision, no checkpointing.
+\note{
+% -- LINK: What prior concept connects to this slide
+The GPT-2 walkthrough showed optimizations in a specific order.
+This exercise asks students to apply the diagnostic discipline to
+a different scenario---choosing the optimization order based on
+profiling data.
+
+% -- NARRATE: What to SAY while showing this slide
+``Turn and talk---90 seconds. Your training job takes 10 days. Profiling
+shows GPU utilization at 35\%, FP32 precision, no checkpointing. In what
+order would you apply optimizations?''
+After 90 seconds, cold-call 2--3 pairs.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
 No single right answer, but the diagnostic order matters:
-1. Mixed precision (R\_peak) --- easiest to enable
-2. Profiling shows data loading at 40\% idle (eta) --- add prefetching
-3. Memory pressure --- add checkpointing (O tradeoff)
-Cold-call 2-3 pairs.}
+1. Mixed precision ($R_{\text{peak}}$)---easiest to enable, ~2x speedup.
+2. Profile shows data loading at 40\% idle ($\eta$)---add prefetching.
+3. Memory pressure ($O$ trade-off)---add checkpointing.
+The key insight: profile first, then target the dominant term.
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students jump to distributed training (more GPUs) without
+exhausting single-machine optimizations.
+Correct framing: a well-optimized single A100 can outperform a poorly
+configured 8-GPU cluster. Always optimize single-machine first.
+
+% -- FLEX: [CORE] This is the chapter's primary application exercise.
+[CORE] Must complete before moving to Wrap-Up.
+IF SHORT: Do a show-of-hands poll (30s) on ``which optimization first''
+instead of full turn-and-talk.
+}
 
 \centering
 \vspace{0.6cm}
@@ -783,11 +1309,36 @@ FP32 precision, no checkpointing.\\[0.3cm]
 % =============================================================================
 
 \begin{frame}{Data Parallelism: Replicate Model, Split Data}
-\note{[3 min] Walk through the diagram: mini-batch splits across GPUs.
-Each GPU has a full model copy, processes its shard independently, then
-AllReduce averages gradients. Communication cost: ~2x model size per step.
-NVLink: 4 GPUs gives ~3.6x speedup. PCIe: only ~2.5x.
-Ask: ``Why doesn't 4 GPUs give exactly 4x speedup?''}
+\note{
+% -- LINK: What prior concept connects to this slide
+Single-machine optimizations have a ceiling: one GPU has finite memory
+and compute. Data parallelism is the simplest multi-GPU strategy---
+replicate the model, split the data.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the diagram: ``Each GPU holds a full copy of the model.
+The mini-batch splits across GPUs---each processes its shard independently.
+After the backward pass, AllReduce averages the gradients across all
+GPUs. Communication cost: approximately 2x model size per step.
+NVLink with 4 GPUs gives ~3.6x speedup. PCIe: only ~2.5x because of
+lower bandwidth.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why doesn't 4 GPUs give exactly 4x speedup?'' Give 15 seconds.
+[Expected answer: AllReduce communication takes time. The gradient sync
+step is pure overhead that does not exist in single-GPU training.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students expect linear scaling (4 GPUs = 4x speedup).
+Correct framing: communication overhead grows with model size and number
+of GPUs. The speedup is always sub-linear: $S(N) < N$ because of the
+AllReduce step.
+
+% -- FLEX: [CORE] Data parallelism is the most common multi-GPU strategy.
+[CORE] The sub-linear scaling motivates the ``exhaust single-machine first'' rule.
+IF AHEAD: ``When does data parallelism break down completely?''
+[Answer: when the model does not fit on a single GPU---need model parallelism.]
+}
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
@@ -799,10 +1350,37 @@ Ask: ``Why doesn't 4 GPUs give exactly 4x speedup?''}
 \end{frame}
 
 \begin{frame}{The Communication Tax}
-\note{[2 min] Show the scaling curves. Ideal = linear. Compute-bound
-workloads (ResNet): ~95\% efficient. Balanced (LLM + NVLink): ~85\%.
-Bandwidth-bound (slow network): ~60\%. The gap is the communication tax.
-Key insight: always exhaust single-machine optimizations before scaling.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Data parallelism introduces communication overhead. This slide quantifies
+that tax and shows when it becomes prohibitive.
+
+% -- NARRATE: What to SAY while showing this slide
+``Effective speedup formula: $S(N) = N / (1 + (N-1) \cdot r)$ where
+$r$ is the fraction of time spent communicating. For a compute-bound
+workload like ResNet ($r = 0.05$), 4 GPUs give 3.5x---nearly ideal.
+For a balanced LLM workload on NVLink ($r = 0.15$): 2.8x. For a
+bandwidth-bound workload on slow network ($r = 0.40$): only 1.7x.''
+Point to the card: ``Small models on 8 GPUs spend 30--50\% of time
+synchronizing. A well-optimized single A100 can outperform a poorly
+configured 8-GPU cluster.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``At what communication fraction $r$ does adding a second GPU
+provide zero benefit?'' Give 15 seconds.
+[Expected answer: when $r = 1$, $S(2) = 2/2 = 1$---no speedup.
+In practice, $r > 0.5$ makes multi-GPU counterproductive for 2 GPUs.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students assume more GPUs always helps.
+Correct framing: if $r$ is high (small model, slow interconnect),
+adding GPUs can actually reduce throughput per dollar because you pay
+for idle GPUs during synchronization.
+
+% -- FLEX: [CORE] The communication tax justifies ``single-machine first.''
+[CORE] The $r$-dependent speedup formula is the key quantitative tool.
+IF SHORT: State the formula and the three-regime table; skip the pitfall card.
+}
 
 \small
 \begin{columns}[T]
@@ -843,12 +1421,41 @@ Key insight: always exhaust single-machine optimizations before scaling.}
 \end{frame}
 
 \begin{frame}{When to Scale: The Physical Ceiling}
-\note{[2 min] Three signals that single-machine training is exhausted:
-1. Model too large (70B = 140 GB FP16 weights alone).
-2. Training too slow (years on one GPU).
-3. Dataset too large (petabyte scale).
-Multi-GPU adds: aggregate memory, throughput, and I/O bandwidth.
-But also adds: communication overhead, debugging complexity, failure handling.}
+\note{
+% -- LINK: What prior concept connects to this slide
+The communication tax argues for single-machine optimization first.
+This slide identifies when you have genuinely hit the single-machine
+ceiling and multi-GPU becomes necessary.
+
+% -- NARRATE: What to SAY while showing this slide
+``Three signals that single-machine training is exhausted.
+Signal 1: memory exhaustion. A 70B model is 140 GB in FP16---larger
+than any single GPU (80 GB max). The model physically does not fit.
+Signal 2: unacceptable duration. GPT-2 on 1 GPU: months. On 8 GPUs:
+weeks. Time-to-result matters for iteration speed.
+Signal 3: dataset scale. Petabyte datasets require distributed storage
+bandwidth that one machine cannot provide.''
+Point to the Conservation of Complexity card: ``Eliminating single-machine
+bottlenecks introduces new communication bottlenecks. Complexity does
+not disappear---it moves.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which of the four parallelism strategies would you use for a 70B
+model that does not fit on one GPU?'' Give 10 seconds.
+[Expected answer: model parallelism or tensor parallelism---data
+parallelism requires a full model copy per GPU, which does not solve
+the memory problem.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think data parallelism solves all scaling problems.
+Correct framing: data parallelism replicates the entire model on each
+GPU. If the model does not fit on one GPU, data parallelism alone cannot
+help. You need model, pipeline, or tensor parallelism.
+
+% -- FLEX: [CORE] Defines the boundary between single-machine and distributed.
+[CORE] The three signals are the diagnostic criteria for scaling decisions.
+IF SHORT: Cover signals 1 and 2; mention signal 3 briefly.
+}
 
 \small
 \begin{columns}[T]
@@ -903,7 +1510,26 @@ But also adds: communication overhead, debugging complexity, failure handling.}
 % =============================================================================
 
 \begin{frame}{Fallacies}
-\note{[2 min] Three common misconceptions with quantitative evidence.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students applied Iron Law diagnostics in the discussion exercise.
+These fallacies show common reasoning errors in training optimization.
+
+% -- NARRATE: What to SAY while showing this slide
+Read each fallacy: ``Fallacy 1: larger models always perform better.
+A 20B model trained on insufficient data underperforms a 7B model by
+3--5\% due to overfitting. Model capacity must match dataset size.''
+``Fallacy 2: hyperparameters transfer across scales. Learning rate at
+batch 32 does not work at batch 4096---you must apply the linear scaling
+rule. Ignoring this causes divergence 2--5 days into a multi-week run.''
+``Fallacy 3: mixed precision is a simple toggle. FP16 without loss
+scaling causes gradient underflow. A 72-hour run can diverge at step
+40K due to accumulated numerical errors.''
+
+% -- FLEX: [CORE] Fallacies reinforce quantitative reasoning about training.
+[CORE] Each maps to a specific Iron Law concept.
+IF SHORT: Cover fallacies 1 and 3; skip fallacy 2.
+}
 
 \small
 \textbf{Fallacy:} \textit{Larger models always yield better performance.}\\
@@ -920,7 +1546,26 @@ But also adds: communication overhead, debugging complexity, failure handling.}
 \end{frame}
 
 \begin{frame}{Pitfalls}
-\note{[2 min] Three operational pitfalls. If short: cover just the first two.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Fallacies are wrong beliefs; pitfalls are operational mistakes.
+These three map to scaling, optimization independence, and data pipeline.
+
+% -- NARRATE: What to SAY while showing this slide
+``Pitfall 1: assuming distributed training automatically helps. Small
+models on 8 GPUs spend 30--50\% synchronizing. A single well-optimized
+A100 at 48 hours outperforms an 8-GPU cluster at 36 hours but 8x cost.''
+``Pitfall 2: optimizing memory and computation independently. Utilization
+drops from 70\% at batch 256 to 25--35\% at batch 16. Gradient
+accumulation trades 5--10\% efficiency for 4x memory reduction.''
+``Pitfall 3: neglecting data pipeline. Data loading creates 20--40\%
+idle time. Prefetching reduces wall-clock by 25--35\%. Profile before
+assuming the GPU is the bottleneck.''
+
+% -- FLEX: [CORE] Operational pitfalls from real training practice.
+[CORE] Each pitfall reinforces a diagnostic discipline.
+IF SHORT: Cover pitfalls 1 and 3; skip pitfall 2.
+}
 
 \small
 \textbf{Pitfall:} \textit{Assuming distributed training automatically accelerates development.}\\
@@ -938,9 +1583,16 @@ But also adds: communication overhead, debugging complexity, failure handling.}
 
 
 \begin{frame}{Muddiest Point}
-\note{[1 min] One-minute paper. Collect responses (physical or digital).
-Use responses to open the NEXT lecture with targeted clarification.
-Angelo \& Cross (1993) --- powerful diagnostic tool.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``One-minute paper. Write down the muddiest point from today. I will
+address the top muddiest points at the start of the next lecture on
+data selection.''
+
+% -- FLEX: [CORE] Diagnostic for the instructor.
+[CORE] Collect responses to open the next lecture with targeted clarification.
+IF SHORT: Ask students to submit digitally after class.
+}
 
 \centering
 \Large\bfseries One-minute paper\\[0.5cm]
@@ -951,8 +1603,16 @@ Angelo \& Cross (1993) --- powerful diagnostic tool.}
 
 % --- RETRIEVAL PRACTICE ---
 \begin{frame}{What Were the Key Ideas?}
-\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
-Walk around the room. Do NOT show next slide yet.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Close your notes. Write down the four most important concepts from
+today. 90 seconds, no peeking.'' Walk around the room. Do NOT show the
+Key Takeaways slide yet.
+
+% -- FLEX: [CORE] Retrieval practice is the highest-impact learning activity.
+[CORE] Students must write before seeing the answer slide.
+IF SHORT: Reduce to 60 seconds.
+}
 
 \centering
 \vspace{1.5cm}
@@ -967,9 +1627,27 @@ Walk around the room. Do NOT show next slide yet.}
 \end{frame}
 
 \begin{frame}{Key Takeaways}
-\note{[2 min] Reveal. Walk through each bullet. Emphasize the Iron Law
-as the diagnostic framework. The 4x memory multiplier. Profile before
-optimize. Compose optimizations systematically.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just did retrieval practice. This slide reveals the answers.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through each bullet: ``Iron Law: $T = O / (R \times \eta)$.
+Every optimization targets one term.''
+``4x memory multiplier: Adam adds 3 extra copies. Activations scale
+with batch times depth.''
+``Mixed precision: 2x throughput, 2x memory, <1\% accuracy. BF16
+eliminates loss scaling.''
+``FlashAttention: IO-aware tiling, 2--4x speedup, same exact math.''
+``Gradient checkpointing: 10x less memory for 33\% more compute.''
+``Profile before optimize: find the bottleneck first.''
+``Scaling: communication overhead makes multi-GPU sub-linear. Exhaust
+single-machine first.''
+
+% -- FLEX: [CORE] Consolidates the lecture.
+[CORE] Read all bullets; emphasize the Iron Law as the organizing framework.
+IF SHORT: Read bullets 1, 2, and 6; let students read the rest.
+}
 
 \scriptsize
 \begin{itemize}\setlength\itemsep{0pt}
@@ -985,7 +1663,16 @@ optimize. Compose optimizations systematically.}
 \end{frame}
 
 \begin{frame}{References}
-\note{[1 min] Point students to canonical papers.}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Canonical papers: Micikevicius et al.\ for mixed precision, Dao et al.\
+for FlashAttention, Chen et al.\ for gradient checkpointing, Goyal et al.\
+for large-batch training. Read the FlashAttention paper---it is a
+masterclass in IO-aware algorithm design.''
+
+% -- FLEX: [OPTIONAL] Reference slides are for student self-study.
+[OPTIONAL] Do not read citations aloud; point students to the slide.
+}
 
 \small
 \mlsysref{Micikevicius+18}{Micikevicius et al. ``Mixed Precision Training.'' ICLR 2018.}
@@ -998,10 +1685,21 @@ optimize. Compose optimizations systematically.}
 \end{frame}
 
 \begin{frame}{Next Lecture: Data Selection}
-\note{[1 min] Forward hook. Training taught us how to execute the optimization
-loop efficiently. But we assumed the training data was given. The next
-question: which data should we train on? Data selection strategies determine
-what the model learns. Not all data is equally valuable.}
+\note{
+% -- LINK: What prior concept connects to this slide
+Training taught us how to execute the optimization loop efficiently.
+But we assumed the training data was given. The next chapter asks:
+which data should we train on?
+
+% -- NARRATE: What to SAY while showing this slide
+``Training taught us \emph{how} to learn efficiently. Data Selection
+asks: what should the model learn \emph{from}? Not all data is equally
+valuable. Data curation, active learning, and curriculum design
+determine what the model learns---and therefore what it can do.''
+
+% -- FLEX: [CORE] Forward hook must connect to the next chapter.
+[CORE] Keep to 1 minute. End on ``what should the model learn from?''
+}
 
 \footnotesize
 \begin{columns}[c]
@@ -1042,13 +1740,29 @@ what the model learns. Not all data is equally valuable.}
 \appendix
 
 \begin{frame}{Backup: Mixed Precision --- Loss Scaling Walkthrough}
-\note{Use for additional depth or if students need alternative explanation.}
+\note{
+% -- NARRATE: Use if students ask why FP16 needs loss scaling.
+FP16 max value: 65,504. Gradients of $10^{-8}$ underflow to zero.
+Loss scaling multiplies loss by $2^{16}$ before backward, then divides
+gradients by $2^{16}$ after. BF16 has FP32's exponent range ($10^{38}$),
+eliminating the need for loss scaling.
+
+% -- FLEX: [OPTIONAL] Backup slide for loss scaling questions.
+}
 \small
 Use if students ask why FP16 needs loss scaling.\\small FP16 max value: 65{,}504. Gradients of $10^{-8}$ underflow to zero.\\ Loss scaling multiplies loss by $2^{16}$ before backward, then divides gradients by $2^{16}$ after.\\ BF16 has FP32's exponent range ($10^{38}$), eliminating the need for loss scaling.
 \end{frame}
 
 \begin{frame}{Backup: Data Parallelism Communication Cost}
-\note{Use for additional depth or if students need alternative explanation.}
+\note{
+% -- NARRATE: Use if students want to quantify the AllReduce overhead.
+AllReduce transfers $\sim$2$\times$ model size per step.
+7B model in FP16: $2 \times 14$ GB = 28 GB per step.
+NVLink at 600 GB/s: 47 ms. PCIe at 64 GB/s: 438 ms.
+At 500 ms/step compute: NVLink adds 9\%, PCIe adds 88\%.
+
+% -- FLEX: [OPTIONAL] Backup slide for AllReduce quantification.
+}
 \small
 Use if students want to quantify the AllReduce overhead.\\small AllReduce transfers $\sim$2$\times$ model size per step.\\ 7B model in FP16: $2 \times 14$ GB = 28 GB per step.\\ NVLink at 600 GB/s: 47 ms. PCIe at 64 GB/s: 438 ms.\\ At 500 ms/step compute: NVLink adds 9\%, PCIe adds 88\%.
 \end{frame}

@@ -68,9 +68,18 @@
 % LEARNING OBJECTIVES
 % =============================================================================
 \begin{frame}{Learning Objectives}
-\note{[2 min] Read through objectives. Emphasize that this chapter bridges the
-physical fleet (Part I) with algorithmic scaling. Ask: ``How many GPUs did it take
-to train GPT-3?'' (answer: $\sim$10,000 V100s for weeks).}
+\note{
+% -- LINK: Ch2--4 built the physical fleet; this chapter bridges to algorithmic scaling
+Students have compute, network, and storage. Now: the algorithms that use them.
+
+% -- NARRATE: ``This chapter bridges the physical fleet with algorithmic scaling.
+By the end, you will design a 3D parallelism configuration for any model size.''
+
+% -- ENGAGE: ``How many GPUs did it take to train GPT-3?''
+Expected: about 10,000 V100s for weeks. That is the scale we must parallelize across.
+
+% -- FLEX: [CORE] Sets expectations. IF SHORT: Read objectives quickly.
+}
 
 \small
 \begin{enumerate}
@@ -86,8 +95,10 @@ to train GPT-3?'' (answer: $\sim$10,000 V100s for weeks).}
 \end{frame}
 
 \begin{frame}{Visual Language}
-\note{[1 min] Explain the semantic color system used throughout the course.
-These colors are consistent across all diagrams and slides.}
+\note{
+% -- NARRATE: Same color system. Point briefly and move on.
+% -- FLEX: [OPTIONAL] Skip if students have seen this four times.
+}
 
 \small
 Throughout this course, colors carry meaning:
@@ -126,9 +137,24 @@ Throughout this course, colors carry meaning:
 % =============================================================================
 
 \begin{frame}{The Single-GPU Wall}
-\note{[3 min] Open with the impossibility argument. GPT-3 on one V100 = 355 years.
-The physics forces distribution. Ask: ``What are the three signals that force you
-to go distributed?'' Memory, time, and data scale.}
+\note{
+% -- LINK: Infrastructure is complete; now the impossibility of single-GPU training
+Students built the fleet. This slide shows why distribution is physically necessary.
+
+% -- NARRATE: ``GPT-3 on a single V100: 355 years. The physics forces distribution.
+Three signals: memory (350 GB does not fit in 80 GB), time (355 years is unacceptable),
+data (multi-TB datasets exceed single-machine storage).''
+Point to the Coordination Tax: ``The art is managing the synchronization overhead
+that grows with scale.''
+
+% -- ENGAGE: ``What are the three signals that force you to go distributed?''
+Expected: memory, time, and data scale.
+
+% -- WARN: Students think distribution is optional and about speed. Correct: for
+frontier models, it is physically impossible to train on a single device.
+
+% -- FLEX: [CORE] The impossibility argument motivates the entire chapter.
+}
 
 \small
 \begin{columns}[T]
@@ -165,9 +191,23 @@ to go distributed?'' Memory, time, and data scale.}
 \end{frame}
 
 \begin{frame}{The Iron Law of Scale}
-\note{[3 min] Connect to the Fleet Stack from Ch1. The step time equation governs
-everything. Walk through each term. The CCR determines whether you have a
-supercomputer or a collection of idling heaters.}
+\note{
+% -- LINK: Single-GPU wall showed WHY to distribute; the Iron Law shows the COST
+Students know distribution is necessary. Now: the equation that governs its efficiency.
+
+% -- NARRATE: Walk through each term: ``Compute/N: scales perfectly. Comm(N): grows
+with scale. Overlap: communication hidden behind computation.''
+Point to the CCR card: ``The Communication-Computation Ratio determines whether
+your cluster is a supercomputer or a collection of idling heaters.''
+
+% -- ENGAGE: ``If communication is 30\% of step time, what is the maximum speedup
+from adding more GPUs?'' Expected: about 3.3x (Amdahl bound = 1/0.3).
+
+% -- WARN: Students assume $T_{\text{compute}}/N$ means perfect linear scaling.
+Correct: $T_{\text{comm}}(N)$ grows and eventually dominates.
+
+% -- FLEX: [CORE] The step time equation governs all parallelism decisions.
+}
 
 \small
 $$T_{\text{step}}(N) = \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) - T_{\text{overlap}}$$
@@ -199,9 +239,22 @@ The \textbf{\CCR{}} ($T_{\text{comm}}/T_{\text{compute}}$) determines whether yo
 \end{frame}
 
 \begin{frame}{The 3D Parallelism Cube}
-\note{[3 min] This is the conceptual framework for the entire chapter. Three
-orthogonal axes, each independent. Total GPUs = d $\times$ t $\times$ p.
-Ask: ``Which axis would you use first and why?''}
+\note{
+% -- LINK: Iron Law showed the cost; 3D parallelism shows the three ways to pay it
+Students know communication is the tax. Now: three orthogonal axes to distribute work.
+
+% -- NARRATE: Point to each axis: ``Data (d): replicate model, split data. Tensor (t):
+split operations within layers. Pipeline (p): split layers across stages.
+Total GPUs = d times t times p. Each axis maps to a different interconnect tier.''
+
+% -- ENGAGE: ``Which axis would you use first and why?''
+Expected: data parallelism --- simplest, no model changes, works until memory limit.
+
+% -- WARN: Students treat the axes as interchangeable. Correct: each has different
+communication patterns and hardware requirements (NVLink vs IB).
+
+% -- FLEX: [CORE] The 3D cube is the organizing framework for the chapter.
+}
 
 % --- Full-width image ---
 \centering
@@ -234,9 +287,21 @@ Ask: ``Which axis would you use first and why?''}
 % =============================================================================
 
 \begin{frame}{Data Parallelism: The Default Strategy}
-\note{[3 min] Simplest approach: replicate the model, split the data. Walk through
-the five stages. Key insight: gradient averaging is mathematically equivalent to
-single-GPU training with a larger batch. The bottleneck is AllReduce.}
+\note{
+% -- LINK: 3D cube introduced data parallelism as the first axis; now the details
+Students know DP replicates the model. Now: the five-stage workflow.
+
+% -- NARRATE: Walk through the diagram: ``Stage 1: replicate model. Stage 2: split data.
+Stage 3: independent forward/backward. Stage 4: AllReduce gradients. Stage 5: update.
+The critical synchronization point is Stage 4: AllReduce must complete before ANY
+GPU updates parameters. Gradient averaging is mathematically equivalent to single-GPU
+training with batch size $N \times B$.''
+
+% -- WARN: Students think DP introduces approximation. Correct: DP is mathematically
+equivalent to single-GPU training --- gradient averaging preserves SGD semantics.
+
+% -- FLEX: [CORE] DP is the default strategy and the baseline for all comparisons.
+}
 
 % --- Full-width image ---
 \centering
@@ -248,9 +313,20 @@ single-GPU training with a larger batch. The bottleneck is AllReduce.}
 \end{frame}
 
 \begin{frame}{Data Parallelism: The Math}
-\note{[2 min] Walk through the gradient equivalence proof. This is why DP works:
-linearity of expectation. Each GPU computes gradients independently, and averaging
-them is the same as computing on the combined batch.}
+\note{
+% -- LINK: DP workflow showed the stages; this proves WHY it works mathematically
+Students saw the stages. Now: the gradient equivalence proof.
+
+% -- NARRATE: ``Each GPU computes local gradients on its batch $B_k$. The global
+update averages local gradients. By linearity of expectation, this equals computing
+on the combined batch $B_{\text{total}}$. DP does not approximate --- it is exact.''
+
+% -- WARN: Students from statistics backgrounds may worry about gradient variance.
+Correct: the mean is identical. Variance decreases with $N$ (more workers = less noise).
+
+% -- FLEX: [OPTIONAL] The math is reassuring but not required for the rest of the chapter.
+IF SHORT: State ``gradient averaging = mathematically equivalent'' and move on.
+}
 
 \footnotesize
 \textbf{Gradient averaging preserves SGD equivalence:}
@@ -270,8 +346,19 @@ $$g_{\text{global}} = \frac{1}{N} \sum_{k=1}^N g_k = \frac{1}{|B_{\text{total}}|
 
 % --- ACTIVE LEARNING 1: Predict ---
 \begin{frame}{Predict: Where Does DP Break?}
-\note{[2 min] Prediction exercise. Give students 60 seconds to identify the three
-ceilings. Do NOT reveal yet. This primes the Communication Wall discussion.}
+\note{
+% -- LINK: DP math showed it works; this prediction asks WHERE it breaks
+Students know DP works. Now they discover its three hard ceilings.
+
+% -- NARRATE: ``60 seconds. Data parallelism replicates the entire model on each GPU.
+What are the three hard ceilings that limit this strategy? Write down 3 failure modes.''
+
+% -- ENGAGE: This IS the active learning moment. Do NOT reveal yet.
+Listen for: memory (model too large), communication (AllReduce too slow),
+batch size (diminishing returns). These prime the next three sections.
+
+% -- FLEX: [CORE] This prediction creates knowledge gaps for the rest of the chapter.
+}
 
 \centering
 \vspace{1.0cm}
@@ -290,9 +377,19 @@ What are the \alert{three hard ceilings} that limit this strategy?}
 \end{frame}
 
 \begin{frame}{The Three Ceilings of Data Parallelism}
-\note{[3 min] Reveal after prediction. Memory wall: 175B model needs 1+ TB per GPU.
-Bandwidth wall: AllReduce dominates at scale. Batch size trap: critical batch size
-means diminishing returns. These three ceilings motivate the rest of the chapter.}
+\note{
+% -- LINK: Students predicted failure modes; now the reveal with numbers
+% -- NARRATE: ``Memory Wall: 175B model needs 1+ TB per GPU (16 bytes/param with Adam).
+Bandwidth Wall: AllReduce consumes 50\%+ of step time at 1,024 GPUs.
+Batch Size Trap: beyond the critical batch size (8K for ResNet, 4M tokens for LLMs),
+doubling GPUs doubles cost without convergence speedup.''
+Emphasize: ``Data parallelism alone cannot train frontier models.''
+
+% -- WARN: Students think the memory wall is the only ceiling. Correct: all three
+interact. Even if you fit the model, communication and batch size limit scaling.
+
+% -- FLEX: [CORE] The three ceilings motivate ZeRO, TP, and PP sections.
+}
 
 \footnotesize
 \renewcommand{\arraystretch}{1.15}
@@ -318,9 +415,21 @@ means diminishing returns. These three ceilings motivate the rest of the chapter
 % =============================================================================
 
 \begin{frame}{The Scaling Tax}
-\note{[3 min] Walk through the scaling tax figure. Compute-bound models (ResNet)
-scale well. Bandwidth-bound models (LLMs) hit a communication wall.
-The gap between ideal and actual is the ``tax'' you pay for coordination.}
+\note{
+% -- LINK: Three ceilings introduced bandwidth wall qualitatively; scaling tax quantifies it
+Students know communication limits DP. Now: the visual proof.
+
+% -- NARRATE: Point to the figure: ``Compute-bound models (ResNet) scale well ---
+the gap between ideal and actual is small. Bandwidth-bound models (LLMs) hit the
+communication wall early. The formula: Speedup(N) = N / (1 + (N-1) times r),
+where r is the communication fraction.''
+
+% -- WARN: Students see the ResNet curve and assume all models scale similarly.
+Correct: LLMs have much higher communication-to-computation ratios.
+
+% -- FLEX: [CORE] The scaling tax figure is the visual anchor for efficiency analysis.
+IF SHORT: Show the figure, state the formula, point to the LLM vs ResNet gap.
+}
 
 % --- Full-width image ---
 \centering
@@ -336,10 +445,24 @@ $\text{Efficiency}(N) = \dfrac{1}{1 + \dfrac{N(T_{\text{comm}} - T_{\text{overla
 }
 
 \begin{frame}{Synchronization Models: BSP, SSP, Async}
-\note{[3 min] Three choices for when workers synchronize. BSP is the default
-(mathematically equivalent to single-GPU). SSP allows bounded staleness.
-Async maximizes throughput but degrades convergence. The trade-off is
-consistency vs.\ throughput.}
+\note{
+% -- LINK: Scaling tax showed the cost grows with N; sync models determine WHEN to pay it
+Students know communication is expensive. Now: three choices for when to synchronize.
+
+% -- NARRATE: Walk through each row: ``BSP: all workers barrier every step. Mathematically
+equivalent to single-GPU but the slowest worker delays everyone. SSP: bounded staleness,
+higher throughput, near-equivalent convergence. Async: maximum throughput but 15--30\%
+convergence degradation.''
+
+% -- ENGAGE: ``Which model would you choose for a final production training run?''
+Expected: BSP --- convergence guarantees matter most for expensive final runs.
+
+% -- WARN: Students think async is ``better'' because no barriers. Correct: async
+degrades convergence and wastes compute on stale gradient updates.
+
+% -- FLEX: [CORE] Sync model choice is a fundamental design decision.
+IF SHORT: Cover BSP and Async only, skip SSP.
+}
 
 \footnotesize
 \renewcommand{\arraystretch}{1.15}
@@ -372,9 +495,21 @@ consistency vs.\ throughput.}
 \end{frame}
 
 \begin{frame}{Critical Batch Size: When Does Parallelism Hurt?}
-\note{[2 min] The critical batch size is where gradient noise equals signal.
-Below it: linear scaling works. Above it: diminishing returns. Three orders
-of magnitude variation across tasks. This limits how many GPUs you can usefully add.}
+\note{
+% -- LINK: Sync models addressed WHEN to sync; batch size limits HOW MANY workers help
+Students chose sync models. Now: the fundamental limit on data parallelism degree.
+
+% -- NARRATE: ``$B^*$ is where gradient noise equals signal strength. Below $B^*$:
+doubling batch halves iterations --- linear scaling. Above $B^*$: diminishing returns.
+ResNet: 8K--16K. BERT: 32K--65K. GPT-3 scale: 1M--4M tokens. Adding workers beyond
+$B^*/b$ wastes compute without reducing training time.''
+
+% -- WARN: Students assume they can always add more GPUs. Correct: beyond $B^*$,
+each additional GPU provides zero convergence benefit.
+
+% -- FLEX: [CORE] Critical batch size is the hard ceiling on data parallelism.
+IF SHORT: State the $B^*$ definition and the three empirical values.
+}
 
 \small
 \begin{columns}[T]
@@ -412,10 +547,21 @@ of magnitude variation across tasks. This limits how many GPUs you can usefully 
 % =============================================================================
 
 \begin{frame}{ZeRO: Progressive Memory Sharding}
-\note{[3 min] Walk through the three stages. ZeRO-1 shards optimizer (4x savings),
-ZeRO-2 adds gradients (8x), ZeRO-3 adds parameters (Nx linear). The trade-off
-is always more communication for less memory. Use the 7B model example:
-112 GB baseline drops to 1.75 GB with ZeRO-3 on 64 GPUs.}
+\note{
+% -- LINK: Critical batch size limited DP scaling; ZeRO addresses the memory wall
+Students hit the memory ceiling. ZeRO shards state to fit larger models.
+
+% -- NARRATE: Walk through the diagram: ``ZeRO-1: shard optimizer (4x savings).
+ZeRO-2: add gradient sharding (8x). ZeRO-3: add parameter sharding (Nx linear).
+7B model: 112 GB baseline drops to 1.75 GB with ZeRO-3 on 64 GPUs.''
+Emphasize: ``The trade-off is always more communication for less memory.
+Each stage adds a communication round to gather the sharded state.''
+
+% -- WARN: Students assume ZeRO is free. Correct: ZeRO-3 adds 10--25\%
+communication overhead. Use the minimum stage that fits your memory budget.
+
+% -- FLEX: [CORE] ZeRO/FSDP is the most widely used memory optimization.
+}
 
 % --- Full-width image ---
 \centering
@@ -428,7 +574,11 @@ is always more communication for less memory. Use the 7B model example:
 
 % --- ACTIVE LEARNING: Micro-Retrieval Cue ---
 \begin{frame}{Quick Check}
-\note{[1 min] Answer: 1120/80 = 14 GPUs minimum. Plus activations, so ~16-20.}
+\note{
+% -- NARRATE: ``1,120 GB / 80 GB = 14 GPUs minimum for static state. Plus activations,
+realistically 16--20 GPUs.''
+% -- FLEX: [CORE] Reinforces ZeRO memory calculation.
+}
 
 \centering
 \vspace{1.0cm}
@@ -446,9 +596,22 @@ is always more communication for less memory. Use the 7B model example:
 
 % --- ACTIVE LEARNING 2: Exercise ---
 \begin{frame}{Your Turn: ZeRO Memory Budget}
-\note{[3 min] Give students 90 seconds. Answer: 175B $\times$ 16 bytes = 2,800 GB.
-With 64 GPUs: 2,800/64 = 43.75 GB per GPU. Plus 50 GB activations = 93.75 GB.
-Exceeds 80 GB. Pure DP fails even with ZeRO-3.}
+\note{
+% -- LINK: ZeRO showed memory sharding; this exercise tests whether it is enough for 175B
+Students know ZeRO-3 shards everything. Is it enough for GPT-3 on 64 GPUs?
+
+% -- NARRATE: ``90 seconds. 175B parameters, 16 bytes each, 64 GPUs with ZeRO-3. Does it fit?''
+After pause: ``Static: 175B times 16 = 2,800 GB. Per-GPU: 2,800/64 = 43.75 GB.
+Plus 50 GB activations = 93.75 GB. Exceeds 80 GB. Pure DP fails even with ZeRO-3.
+You need Tensor Parallelism.''
+
+% -- ENGAGE: This IS the active learning moment. The failure of ZeRO-3 motivates TP.
+
+% -- WARN: Students forget activations. Without activations, 43.75 GB fits in 80 GB.
+With activations, it does not. Activations are the hidden memory consumer.
+
+% -- FLEX: [CORE] This exercise is the bridge from DP/ZeRO to Tensor Parallelism.
+}
 
 \footnotesize
 \begin{columns}[T]
@@ -493,10 +656,22 @@ Exceeds 80 GB. Pure DP fails even with ZeRO-3.}
 % =============================================================================
 
 \begin{frame}{Pipeline Parallelism: Splitting Depth}
-\note{[3 min] Walk through the pipeline schedule. Forward passes cascade diagonally,
-backward passes follow in reverse. The gray blocks are ``bubbles'' --- idle GPU time.
-The bubble fraction is (P-1)/(P-1+M). With 4 stages, 4 microbatches: 43\% idle.
-Ask: ``How do you shrink the bubble?''}
+\note{
+% -- LINK: ZeRO exercise showed DP is not enough; PP splits depth across devices
+Students need more parallelism. Pipeline parallelism splits layers across stages.
+
+% -- NARRATE: Walk through the schedule: ``Forward passes cascade diagonally. Backward
+passes follow in reverse. Gray blocks are bubbles --- idle GPU time. Bubble fraction:
+$(P-1)/(P-1+M)$. With P=8, M=32: only 18\% idle. Key: $M \gg P$.''
+
+% -- ENGAGE: ``How do you shrink the bubble?''
+Expected: increase M (more microbatches) relative to P (fewer stages).
+
+% -- WARN: Students forget that bubbles are IDLE compute --- GPUs doing nothing but
+consuming power. 48\% idle with P=16, M=16 means half your cluster is a space heater.
+
+% -- FLEX: [CORE] Pipeline parallelism is essential for models that exceed one node.
+}
 
 % --- Full-width image ---
 \centering
@@ -508,10 +683,21 @@ Ask: ``How do you shrink the bubble?''}
 \end{frame}
 
 \begin{frame}{Pipeline Parallelism: Communication Advantage}
-\note{[2 min] The key advantage: only activation tensors cross device boundaries.
-For hidden dim 8192 in BF16 with micro-batch 1, that is 16 KB per boundary.
-Compare to GB-scale gradient AllReduce in data parallelism. This is why PP
-works across nodes on InfiniBand.}
+\note{
+% -- LINK: PP schedule showed the timing; this slide shows the communication advantage
+Students know PP has bubbles. The compensation: minimal communication volume.
+
+% -- NARRATE: ``Only activation tensors cross device boundaries. Hidden dim 8192 in BF16
+with micro-batch 1: 16 KB per boundary. Compare to GB-scale AllReduce in DP.
+This is why PP works across nodes on InfiniBand --- it communicates 1,000x less.''
+Point to the bubble cost card: ``The trade-off is bubbles (idle time) for low
+communication. P=8, M=32: 18\% bubble. P=16, M=16: 48\% --- a bad trade.''
+
+% -- WARN: Students overlook the 1F1B schedule at the bottom. Correct: 1F1B interleaves
+forward/backward to reduce peak memory from $O(M \times P)$ to $O(P)$.
+
+% -- FLEX: [CORE] The communication advantage explains why PP maps to inter-node IB.
+}
 
 \small
 \begin{columns}[T]
@@ -558,11 +744,23 @@ works across nodes on InfiniBand.}
 % =============================================================================
 
 \begin{frame}{Tensor Parallelism: Splitting Operations}
-\note{[3 min] Walk through the Megatron-LM column+row splitting pattern.
-Column-parallel splits the first linear, activation is local (no comm needed),
-row-parallel computes partial results, then AllReduce combines them. The critical
-constraint: AllReduce on EVERY layer requires NVLink bandwidth. Never run TP
-across racks.}
+\note{
+% -- LINK: PP split depth across stages; TP splits width within layers
+Students saw inter-layer splitting. TP splits the matrices within each layer.
+
+% -- NARRATE: Walk through the diagram: ``Column-parallel splits the first linear ---
+activation is local, no communication needed. Row-parallel computes partial results,
+then AllReduce combines them. The critical constraint: AllReduce on EVERY layer
+requires 600--900 GB/s NVLink. Never run TP across racks.''
+
+% -- ENGAGE: ``How many AllReduce operations per forward pass for a 96-layer Transformer?''
+Expected: 96 (one per layer) --- that is why NVLink bandwidth is non-negotiable.
+
+% -- WARN: Students try to run TP across nodes. Correct: 50 GB/s IB is 18x too slow
+for per-layer AllReduce. TP is strictly intra-node.
+
+% -- FLEX: [CORE] TP is the third axis of 3D parallelism.
+}
 
 % --- Full-width image ---
 \centering
@@ -574,9 +772,21 @@ across racks.}
 \end{frame}
 
 \begin{frame}{The Jeff Dean Test}
-\note{[2 min] A practical rule: if you attempt tensor parallelism across racks,
-your training will stall. The communication volume per layer demands NVLink-class
-bandwidth. For cross-rack scaling, use pipeline or data parallelism.}
+\note{
+% -- LINK: TP diagram showed the per-layer AllReduce; this table formalizes the placement rule
+Students know TP needs NVLink. The Jeff Dean Test makes the constraint memorable.
+
+% -- NARRATE: ``The Jeff Dean Test: if you attempt tensor parallelism across server racks,
+your training will stall. Period.'' Walk through the table: ``TP: AllReduce per layer,
+600--900 GB/s, intra-node only. PP: P2P per stage, 25--50 GB/s, inter-node is fine.
+DP: AllReduce per step, 50--200 GB/s, across replicas.''
+Emphasize: ``Match communication frequency to interconnect bandwidth.''
+
+% -- WARN: Students with limited hardware try TP across Ethernet. At 25 GB/s Ethernet,
+a 96-layer model with per-layer AllReduce will spend 90\%+ of time in communication.
+
+% -- FLEX: [CORE] The placement rule is the single most important operational guidance.
+}
 
 \small
 \begin{mlsyscard}{crimson}
@@ -607,10 +817,21 @@ bandwidth. For cross-rack scaling, use pipeline or data parallelism.}
 % =============================================================================
 
 \begin{frame}{Hybrid 3D Parallelism}
-\note{[3 min] This is how frontier models are actually trained. Walk through the
-example: GPT-4 scale on 8,192 H100s. TP=8 (within node), PP=16 (across node groups),
-DP=64 (replicas). Total = 8,192 GPUs. The key is matching each parallelism dimension
-to the right interconnect tier.}
+\note{
+% -- LINK: Three axes defined independently; hybrid 3D combines them for frontier models
+Students know TP, PP, and DP. Now: how they compose for real training runs.
+
+% -- NARRATE: Point to the diagram: ``GPT-4 scale on 8,192 H100s. TP=8 within each node
+(NVLink). PP=16 across node groups (InfiniBand). DP=64 replicas across the cluster.
+Total: 8 times 16 times 64 = 8,192 GPUs.''
+Emphasize: ``Communication frequency: TP (kHz, every layer) > PP (MHz, every microbatch)
+> DP (Hz, every step). Match frequency to bandwidth.''
+
+% -- WARN: Students try to increase TP beyond 8 (the node size). Correct: TP is bounded
+by GPUs per node. To scale further, use PP and DP.
+
+% -- FLEX: [CORE] Hybrid 3D is how every frontier model is trained in practice.
+}
 
 % --- Full-width image ---
 \centering
@@ -622,9 +843,21 @@ to the right interconnect tier.}
 \end{frame}
 
 \begin{frame}{Parallelism Decision Tree}
-\note{[2 min] Simplified but useful. First question: does the model fit in one GPU?
-If yes, data parallelism. If no, does it fit in one node? If yes, TP+DP. If no,
-full 3D parallelism. The decision is driven by constraints, not preference.}
+\note{
+% -- LINK: Hybrid 3D showed the composition; the decision tree operationalizes it
+Students saw a specific configuration. Now: a general algorithm for choosing one.
+
+% -- NARRATE: ``Step 1: fits in one GPU? Data parallelism. Step 2: fits in one node?
+TP within node plus DP across. Step 3: exceeds one node? Full 3D with PP.
+Step 4: ZeRO/FSDP can extend each regime before escalating.''
+Point to the production card: ``Llama 3 (405B): TP=8, PP=16, DP=varies. MFU: 40--46\%.
+Over 50\% of peak is never achieved --- that is the state of the art.''
+
+% -- WARN: Students optimize for the wrong variable. Common mistake: maximize TP
+because it is ``the fastest.'' Correct: use the minimum parallelism that fits in memory.
+
+% -- FLEX: [CORE] The decision tree is the operational takeaway of the chapter.
+}
 
 \small
 \begin{columns}[T]
@@ -657,9 +890,23 @@ full 3D parallelism. The decision is driven by constraints, not preference.}
 
 % --- ACTIVE LEARNING 3: Discussion ---
 \begin{frame}{Discussion: Design a Training Config}
-\note{[3 min] Turn-and-talk. Students design a 3D config for a 70B model
-on 64 A100s. No single right answer. The point is reasoning about constraints.
-Cold-call 2--3 pairs. Possible answers: TP=8, PP=2, DP=4 or TP=8, PP=4, DP=2.}
+\note{
+% -- LINK: Decision tree gave the algorithm; now students apply it
+Students know the framework. This forces them to design a real configuration.
+
+% -- NARRATE: ``Turn to your neighbor. 64 A100 GPUs (80 GB each) across 8 nodes.
+Train a 70B model. Design (t, p, d). 90 seconds.'' Cold-call 2--3 pairs.
+Possible answers: TP=8, PP=2, DP=4 or TP=8, PP=4, DP=2. Both are valid.
+
+% -- ENGAGE: This IS the active learning moment.
+Push for justification: ``Why that specific configuration? What constraint drove it?''
+
+% -- WARN: Students may propose configs where $t \times p \times d \neq 64$.
+Remind: total must equal available GPUs. Also: TP must divide 8 (node size).
+
+% -- FLEX: [CORE] This is the capstone exercise of the chapter.
+IF SHORT: Pose to whole class, take 2 answers, discuss trade-offs.
+}
 
 \centering
 \vspace{0.8cm}
@@ -685,10 +932,24 @@ You must train a \textbf{70B parameter} model.\\[0.3cm]
 % =============================================================================
 
 \begin{frame}{Multi-Model Training: RLHF}
-\note{[3 min] RLHF breaks the single-model assumption. PPO requires 4 models:
-policy (training), reference (inference), reward (inference), value (training).
-The aggregate memory dwarfs standard pre-training. DPO simplifies to 2 models,
-halving GPU requirements.}
+\note{
+% -- LINK: 3D parallelism handled single-model training; RLHF requires multiple models
+Students mastered single-model parallelism. RLHF breaks that assumption.
+
+% -- NARRATE: ``PPO requires 4 concurrent models: policy (training, 1,120 GB), reference
+(inference, 140 GB), reward (inference, 26 GB), value (training, 208 GB). Total: 1,494 GB.
+DPO simplifies to 2 models (1,260 GB) with 48\% less memory and 2x higher MFU.''
+
+% -- ENGAGE: ``Why is DPO's higher MFU not just about fewer models?''
+Expected: DPO eliminates the generation phase (pure forward/backward, no sampling),
+which is the most memory-bound and hardest to parallelize part of PPO.
+
+% -- WARN: Students assume RLHF is just ``another training run.'' Correct: multi-model
+training requires co-scheduling 4 models on shared GPUs --- a scheduling nightmare.
+
+% -- FLEX: [OPTIONAL] RLHF extends the parallelism framework but is not load-bearing.
+IF SHORT: Show the memory table, state the DPO simplification, move on.
+}
 
 \small
 \begin{columns}[T]
@@ -733,7 +994,12 @@ halving GPU requirements.}
 % =============================================================================
 
 \begin{frame}{Fallacies}
-\note{[2 min] Four common misconceptions. Each has quantitative evidence.}
+\note{
+% -- NARRATE: Four fallacies with numbers. Spend extra time on the FSDP fallacy:
+``7B model on 80 GB GPUs: DDP = 145 samples/s vs FSDP = 118 samples/s --- 19\% slower
+when memory is not the bottleneck. Do not add sharding overhead you do not need.''
+% -- FLEX: [CORE] IF SHORT: Cover the linear speedup and FSDP fallacies.
+}
 
 \footnotesize
 \textbf{Fallacy:} \textit{Linear speedup is achievable with sufficient engineering effort.}\\
@@ -754,7 +1020,13 @@ Beyond the critical batch size ($\sim$8K ResNet, $\sim$4M tokens LLMs), doubling
 \end{frame}
 
 \begin{frame}{Pitfalls}
-\note{[2 min] Three operational pitfalls. If short: cover just the first two.}
+\note{
+% -- NARRATE: Three pitfalls. The LR scaling pitfall is the most common: ``A team
+training ResNet-50 at batch 32K with linear scaling got 74.8\% vs 76.2\% at batch 256.
+The linear rule breaks above critical batch size --- use $\sqrt{k}$ scaling instead.''
+The gradient accumulation pitfall surprises: FP16 overflow after 16-step accumulation.
+% -- FLEX: [CORE] IF SHORT: Cover the LR scaling pitfall only.
+}
 
 \footnotesize
 \textbf{Pitfall:} \textit{Hyperparameters tuned on small clusters transfer to large-scale training.}\\
@@ -774,9 +1046,10 @@ Accumulated FP16 gradients risk overflow when summing hundreds of tensors. A tea
 
 % --- MUDDIEST POINT ---
 \begin{frame}{Muddiest Point}
-\note{[2 min] Quick anonymous poll. Students write on a slip of paper or submit
-digitally. Collect and scan for patterns. Address the top 2--3 confusions in the
-next lecture's opening. This closes the feedback loop.}
+\note{
+% -- NARRATE: ``Write the one concept you found most confusing. Anonymous. One sentence.''
+% -- FLEX: [CORE] Address top 2--3 confusions in next lecture's opening.
+}
 
 \centering
 \vspace{1.0cm}
@@ -791,8 +1064,11 @@ next lecture's opening. This closes the feedback loop.}
 \end{frame}
 
 \begin{frame}{What Were the Key Ideas?}
-\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
-Walk around the room.}
+\note{
+% -- NARRATE: ``Close your notes. Write four key concepts. 90 seconds.''
+Walk around. Do NOT show Key Takeaways yet.
+% -- FLEX: [CORE] Retrieval practice.
+}
 
 \centering
 \vspace{1.5cm}
@@ -807,8 +1083,12 @@ Walk around the room.}
 \end{frame}
 
 \begin{frame}{Key Takeaways}
-\note{[2 min] Reveal. Walk through each bullet. Emphasize quantitative anchors:
-355 years single-GPU, 18\% bubble tax, 50\% MFU ceiling, Nx ZeRO savings.}
+\note{
+% -- LINK: Students wrote their own list; now compare.
+% -- NARRATE: ``Did you capture: 355 years single-GPU, 18\% bubble tax (P=8, M=32),
+50\% MFU ceiling, Nx ZeRO memory savings, and the TP-intra-node constraint?''
+% -- FLEX: [CORE] Official summary. Read every bullet.
+}
 
 \scriptsize
 \begin{itemize}\setlength\itemsep{0pt}
@@ -824,7 +1104,11 @@ Walk around the room.}
 \end{frame}
 
 \begin{frame}{References}
-\note{[1 min] Point students to canonical papers.}
+\note{
+% -- NARRATE: ``Start with Goyal et al. for LR scaling rules and Rajbhandari for ZeRO.
+Narayanan for Megatron-LM 3D parallelism. Zhao for PyTorch FSDP.''
+% -- FLEX: [OPTIONAL] Skip if running short.
+}
 
 \small
 \mlsysref{Goyal+17}{Goyal et al. ``Accurate, Large Minibatch SGD.'' arXiv:1706.02677, 2017.}
@@ -837,9 +1121,14 @@ Walk around the room.}
 \end{frame}
 
 \begin{frame}{Next Lecture: Collective Communication}
-\note{[1 min] Forward hook. We defined the logical traffic patterns. Next chapter
-opens the black box of AllReduce, AllGather, ReduceScatter --- the actual algorithms
-that move bytes through rings, trees, and rails.}
+\note{
+% -- LINK: This chapter defined what to communicate; next chapter shows how to route it.
+% -- NARRATE: ``We defined the logical traffic patterns: AllReduce for DP, P2P for PP,
+AllReduce per layer for TP. Next chapter opens the black box: how do Ring AllReduce,
+Tree AllReduce, and hierarchical collectives actually move bytes? From the logic
+of what to send to the mechanics of how to route it.''
+% -- FLEX: [CORE] Forward hook. IF SHORT: State the central question and dismiss.
+}
 
 \footnotesize
 \begin{columns}[c]
@@ -878,7 +1167,11 @@ that move bytes through rings, trees, and rails.}
 \appendix
 
 \begin{frame}{Backup: ZeRO Memory Calculation Reference}
-\note{Backup: Extended ZeRO memory calculation.}
+\note{
+% -- NARRATE: Backup --- extended ZeRO memory calculation reference table.
+Use if students want to verify the 7B example at each ZeRO stage.
+% -- FLEX: [OPTIONAL] Only show if requested.
+}
 
 \footnotesize
 \textbf{Memory per GPU with ZeRO stages (N GPUs, M parameters):}
@@ -902,7 +1195,12 @@ that move bytes through rings, trees, and rails.}
 \end{frame}
 
 \begin{frame}{Backup: Pipeline Schedule Comparison}
-\note{Backup: GPipe vs 1F1B comparison.}
+\note{
+% -- NARRATE: Backup --- GPipe vs 1F1B schedule comparison. Use if students ask about
+the memory difference between pipeline schedules. Key: 1F1B reduces peak memory
+from $O(M \times P)$ to $O(P)$ with the same bubble fraction.
+% -- FLEX: [OPTIONAL] Only show if requested.
+}
 
 \footnotesize
 \renewcommand{\arraystretch}{1.15}
