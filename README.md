@@ -32,6 +32,7 @@
   <b><a href="https://mlsysbook.ai/vol2/">📙 Volume II <i>(Summer 2026)</i></a></b> •
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
   <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
+  <b><a href="interviews/README.md">💼 Interview Playbook</a></b> •
   <b><a href="https://mlsysbook.org">🌐 Ecosystem</a></b>
 </p>
 
@@ -68,21 +69,20 @@ This repository is the open learning stack for AI systems engineering. Read the 
                               │  Reasoning + Case Studies  │
                               └─────────────┬─────────────┘
                                             │
-                  ┌─────────────────────────┼─────────────────────────┐
-                  │                         │                         │
-                  ▼                         ▼                         ▼
-   ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
-   │    TINYTORCH          │  │    HARDWARE KITS      │  │    MLSYS-IM           │
-   │                       │  │                       │  │                       │
-   │  Build an ML framework│  │  Deploy models to     │  │  Simulate the physics │
-   │  from scratch using   │  │  Arduino, Raspberry   │  │  of ML infrastructure │
-   │  only NumPy           │  │  Pi, and edge devices  │  │  from chip to fleet   │
-   │                       │  │                       │  │                       │
-   │  20 progressive       │  │  Face real memory,    │  │  Iron Law, roofline,  │
-   │  modules              │  │  power, and latency   │  │  TCO, and carbon      │
-   │                       │  │  constraints          │  │  analysis             │
-   └──────────────────────┘  └──────────────────────┘  └──────────────────────┘
-         BUILD                      DEPLOY                    SIMULATE
+          ┌──────────────────┬──────────────┼──────────────┬──────────────────┐
+          │                  │              │              │                  │
+          ▼                  ▼              ▼              ▼                  ▼
+   ┌─────────────┐  ┌──────────────┐ ┌────────────┐ ┌────────────┐ ┌──────────────┐
+   │  TINYTORCH   │  │ HARDWARE     │ │  MLSYS-IM  │ │   LABS     │ │  INTERVIEW   │
+   │              │  │ KITS         │ │            │ │            │ │  PLAYBOOK    │
+   │  Build an ML │  │ Deploy to    │ │ Simulate   │ │ Interactive│ │ 43 systems   │
+   │  framework   │  │ Arduino, Pi, │ │ ML infra   │ │ notebooks  │ │ design Qs    │
+   │  from scratch│  │ edge devices │ │ physics    │ │ for algo-  │ │ for AI roles │
+   │              │  │              │ │            │ │ system     │ │ at frontier  │
+   │  20 modules  │  │ Real HW      │ │ Chip to    │ │ exploration│ │ labs         │
+   │              │  │ constraints  │ │ fleet      │ │            │ │              │
+   └─────────────┘  └──────────────┘ └────────────┘ └────────────┘ └──────────────┘
+       BUILD             DEPLOY         SIMULATE       PRACTICE        INTERVIEW
 ```
 
 <table>
@@ -118,6 +118,11 @@ This repository is the open learning stack for AI systems engineering. Read the 
       <td><b>Labs</b></td>
       <td>Interactive notebooks for algorithm-system exploration</td>
       <td><i>Coming Summer 2026</i></td>
+    </tr>
+    <tr>
+      <td><b>Interview Playbook</b></td>
+      <td>43 systems design questions for AI infrastructure roles</td>
+      <td><a href="interviews/README.md">Start drilling</a></td>
     </tr>
     <tr>
       <td><b>Instructor Hub</b></td>
@@ -218,8 +223,8 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
       <td>Explore the <a href="mlsysim/README.md">MLSys·im Engine</a> to calculate the physics of ML infrastructure.</td>
     </tr>
     <tr>
-      <td width="15%" align="center"><b>PRACTICE</b></td>
-      <td>Prepare for AI systems design interviews with the <a href="interviews/README.md">Interview Hub</a>.</td>
+      <td width="15%" align="center"><b>INTERVIEW</b></td>
+      <td>Drill 43 systems design questions across 5 rounds with the <a href="interviews/README.md">ML Systems Interview Playbook</a>. Covers silicon physics, distributed infra, production serving, and ML operations.</td>
     </tr>
     <tr>
       <td width="15%" align="center"><b>INSTRUCT</b></td>
