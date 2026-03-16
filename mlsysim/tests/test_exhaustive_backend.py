@@ -16,4 +16,4 @@ def test_exhaustive_backend():
     
     assert res.feasible is True
     assert res.best_configuration["optimal_variable"] == 42.0
-    assert "scipy.optimize.brute" in res.solver_name
+    assert "exhaustive_grid" in res.solver_name
