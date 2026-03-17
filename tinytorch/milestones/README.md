@@ -12,14 +12,61 @@ After completing a set of modules, you unlock the ability to run a milestone. Ea
 
 ## Available Milestones
 
-| ID | Name | Year | Required Modules | What You'll Do |
-|----|------|------|------------------|----------------|
-| 01 | Perceptron | 1958 | 01-03 | Build Rosenblatt's first neural network (forward pass) |
-| 02 | XOR Crisis | 1969 | 01-03 | Experience the XOR limitation that triggered AI Winter |
-| 03 | MLP Revival | 1986 | 01-08 | Train MLPs to solve XOR + recognize digits |
-| 04 | CNN Revolution | 1998 | 01-09 | Build LeNet for image recognition |
-| 05 | Transformer Era | 2017 | 01-08, 11-13 | Build attention and generate text |
-| 06 | MLPerf Benchmarks | 2018 | 01-08, 14-19 | Optimize and benchmark your neural networks |
+<table>
+  <thead>
+    <tr>
+      <th width="5%">ID</th>
+      <th width="15%">Name</th>
+      <th width="8%">Year</th>
+      <th width="20%">Required Modules</th>
+      <th width="52%">What You'll Do</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>01</td>
+      <td><b>Perceptron</b></td>
+      <td>1958</td>
+      <td>01-03</td>
+      <td>Build Rosenblatt's first neural network (forward pass)</td>
+    </tr>
+    <tr>
+      <td>02</td>
+      <td><b>XOR Crisis</b></td>
+      <td>1969</td>
+      <td>01-03</td>
+      <td>Experience the XOR limitation that triggered AI Winter</td>
+    </tr>
+    <tr>
+      <td>03</td>
+      <td><b>MLP Revival</b></td>
+      <td>1986</td>
+      <td>01-08</td>
+      <td>Train MLPs to solve XOR + recognize digits</td>
+    </tr>
+    <tr>
+      <td>04</td>
+      <td><b>CNN Revolution</b></td>
+      <td>1998</td>
+      <td>01-09</td>
+      <td>Build LeNet for image recognition</td>
+    </tr>
+    <tr>
+      <td>05</td>
+      <td><b>Transformer Era</b></td>
+      <td>2017</td>
+      <td>01-08, 11-13</td>
+      <td>Build attention and generate text</td>
+    </tr>
+    <tr>
+      <td>06</td>
+      <td><b>MLPerf Benchmarks</b></td>
+      <td>2018</td>
+      <td>01-08, 14-19</td>
+      <td>Optimize and benchmark your neural networks</td>
+    </tr>
+  </tbody>
+</table>
 
 ## Running Milestones
 

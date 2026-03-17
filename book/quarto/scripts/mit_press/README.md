@@ -20,12 +20,20 @@ python3 scripts/mit_press/figure_list_for_press.py --vol 1 --format csv -o scrip
 
 ### Output Fields
 
-| Field | Description |
-|-------|-------------|
-| Figure Number | Chapter.Figure format (e.g., 1.1, 2.3) |
-| Label | Source reference (e.g., fig-ai-timeline) |
-| Caption | Full caption text |
-| Alt-Text | Accessibility description |
+<table>
+<thead>
+<tr>
+<th width="25%"><b>Field</b></th>
+<th width="75%">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>Figure Number</b></td><td>Chapter.Figure format (e.g., 1.1, 2.3)</td></tr>
+<tr><td><b>Label</b></td><td>Source reference (e.g., fig-ai-timeline)</td></tr>
+<tr><td><b>Caption</b></td><td>Full caption text</td></tr>
+<tr><td><b>Alt-Text</b></td><td>Accessibility description</td></tr>
+</tbody>
+</table>
 
 ## Generated Files
 

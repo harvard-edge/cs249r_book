@@ -46,46 +46,196 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
 
 ### Volume I: Foundations (17 labs · Single-machine ML systems)
 
-| # | Slug | Title |
-|---|------|-------|
-| 00 | `lab_00_introduction` | The Architect's Portal (orientation) |
-| 01 | `lab_01_ml_intro` | The Magnitude Awakening |
-| 02 | `lab_02_ml_systems` | The Iron Law |
-| 03 | `lab_03_ml_workflow` | The Silent Degradation Loop |
-| 04 | `lab_04_data_engr` | The Data Gravity Trap |
-| 05 | `lab_05_nn_compute` | The Activation Tax |
-| 06 | `lab_06_nn_arch` | The Quadratic Wall |
-| 07 | `lab_07_ml_frameworks` | The Kernel Fusion Dividend |
-| 08 | `lab_08_model_train` | The Training Memory Budget |
-| 09 | `lab_09_data_selection` | The Data Selection Tradeoff |
-| 10 | `lab_10_model_compress` | The Compression Frontier |
-| 11 | `lab_11_hw_accel` | The Roofline |
-| 12 | `lab_12_perf_bench` | The Speedup Ceiling |
-| 13 | `lab_13_model_serving` | The Tail Latency Trap |
-| 14 | `lab_14_ml_ops` | The Silent Degradation Problem |
-| 15 | `lab_15_responsible_engr` | There Is No Free Fairness |
-| 16 | `lab_16_ml_conclusion` | The Architect's Audit (capstone) |
+<table>
+  <thead>
+    <tr>
+      <th width="5%">#</th>
+      <th width="25%">Slug</th>
+      <th width="70%">Title</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>00</td>
+      <td><code>lab_00_introduction</code></td>
+      <td>The Architect's Portal (orientation)</td>
+    </tr>
+    <tr>
+      <td>01</td>
+      <td><code>lab_01_ml_intro</code></td>
+      <td>The Magnitude Awakening</td>
+    </tr>
+    <tr>
+      <td>02</td>
+      <td><code>lab_02_ml_systems</code></td>
+      <td>The Iron Law</td>
+    </tr>
+    <tr>
+      <td>03</td>
+      <td><code>lab_03_ml_workflow</code></td>
+      <td>The Silent Degradation Loop</td>
+    </tr>
+    <tr>
+      <td>04</td>
+      <td><code>lab_04_data_engr</code></td>
+      <td>The Data Gravity Trap</td>
+    </tr>
+    <tr>
+      <td>05</td>
+      <td><code>lab_05_nn_compute</code></td>
+      <td>The Activation Tax</td>
+    </tr>
+    <tr>
+      <td>06</td>
+      <td><code>lab_06_nn_arch</code></td>
+      <td>The Quadratic Wall</td>
+    </tr>
+    <tr>
+      <td>07</td>
+      <td><code>lab_07_ml_frameworks</code></td>
+      <td>The Kernel Fusion Dividend</td>
+    </tr>
+    <tr>
+      <td>08</td>
+      <td><code>lab_08_model_train</code></td>
+      <td>The Training Memory Budget</td>
+    </tr>
+    <tr>
+      <td>09</td>
+      <td><code>lab_09_data_selection</code></td>
+      <td>The Data Selection Tradeoff</td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td><code>lab_10_model_compress</code></td>
+      <td>The Compression Frontier</td>
+    </tr>
+    <tr>
+      <td>11</td>
+      <td><code>lab_11_hw_accel</code></td>
+      <td>The Roofline</td>
+    </tr>
+    <tr>
+      <td>12</td>
+      <td><code>lab_12_perf_bench</code></td>
+      <td>The Speedup Ceiling</td>
+    </tr>
+    <tr>
+      <td>13</td>
+      <td><code>lab_13_model_serving</code></td>
+      <td>The Tail Latency Trap</td>
+    </tr>
+    <tr>
+      <td>14</td>
+      <td><code>lab_14_ml_ops</code></td>
+      <td>The Silent Degradation Problem</td>
+    </tr>
+    <tr>
+      <td>15</td>
+      <td><code>lab_15_responsible_engr</code></td>
+      <td>There Is No Free Fairness</td>
+    </tr>
+    <tr>
+      <td>16</td>
+      <td><code>lab_16_ml_conclusion</code></td>
+      <td>The Architect's Audit (capstone)</td>
+    </tr>
+  </tbody>
+</table>
 
 ### Volume II: At Scale (16 labs · Distributed ML systems)
 
-| # | Slug | Title |
-|---|------|-------|
-| 01 | `lab_01_introduction` | The Scale Illusion |
-| 02 | `lab_02_compute_infra` | The Compute Infrastructure Wall |
-| 03 | `lab_03_communication` | Communication at Scale |
-| 04 | `lab_04_data_storage` | The Data Pipeline Wall |
-| 05 | `lab_05_dist_train` | The Parallelism Puzzle |
-| 06 | `lab_06_fault_tolerance` | When Failure Is Routine |
-| 07 | `lab_07_fleet_orch` | The Scheduling Trap |
-| 08 | `lab_08_inference` | The Inference Economy |
-| 09 | `lab_09_perf_engineering` | The Optimization Trap |
-| 10 | `lab_10_edge_intelligence` | The Edge Thermodynamics Lab |
-| 11 | `lab_11_ops_scale` | The Silent Fleet |
-| 12 | `lab_12_security_privacy` | The Price of Privacy |
-| 13 | `lab_13_robust_ai` | The Robustness Budget |
-| 14 | `lab_14_sustainable_ai` | The Carbon Budget |
-| 15 | `lab_15_responsible_ai` | The Fairness Budget |
-| 16 | `lab_16_fleet_synthesis` | The Fleet Synthesis (capstone) |
+<table>
+  <thead>
+    <tr>
+      <th width="5%">#</th>
+      <th width="25%">Slug</th>
+      <th width="70%">Title</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>01</td>
+      <td><code>lab_01_introduction</code></td>
+      <td>The Scale Illusion</td>
+    </tr>
+    <tr>
+      <td>02</td>
+      <td><code>lab_02_compute_infra</code></td>
+      <td>The Compute Infrastructure Wall</td>
+    </tr>
+    <tr>
+      <td>03</td>
+      <td><code>lab_03_communication</code></td>
+      <td>Communication at Scale</td>
+    </tr>
+    <tr>
+      <td>04</td>
+      <td><code>lab_04_data_storage</code></td>
+      <td>The Data Pipeline Wall</td>
+    </tr>
+    <tr>
+      <td>05</td>
+      <td><code>lab_05_dist_train</code></td>
+      <td>The Parallelism Puzzle</td>
+    </tr>
+    <tr>
+      <td>06</td>
+      <td><code>lab_06_fault_tolerance</code></td>
+      <td>When Failure Is Routine</td>
+    </tr>
+    <tr>
+      <td>07</td>
+      <td><code>lab_07_fleet_orch</code></td>
+      <td>The Scheduling Trap</td>
+    </tr>
+    <tr>
+      <td>08</td>
+      <td><code>lab_08_inference</code></td>
+      <td>The Inference Economy</td>
+    </tr>
+    <tr>
+      <td>09</td>
+      <td><code>lab_09_perf_engineering</code></td>
+      <td>The Optimization Trap</td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td><code>lab_10_edge_intelligence</code></td>
+      <td>The Edge Thermodynamics Lab</td>
+    </tr>
+    <tr>
+      <td>11</td>
+      <td><code>lab_11_ops_scale</code></td>
+      <td>The Silent Fleet</td>
+    </tr>
+    <tr>
+      <td>12</td>
+      <td><code>lab_12_security_privacy</code></td>
+      <td>The Price of Privacy</td>
+    </tr>
+    <tr>
+      <td>13</td>
+      <td><code>lab_13_robust_ai</code></td>
+      <td>The Robustness Budget</td>
+    </tr>
+    <tr>
+      <td>14</td>
+      <td><code>lab_14_sustainable_ai</code></td>
+      <td>The Carbon Budget</td>
+    </tr>
+    <tr>
+      <td>15</td>
+      <td><code>lab_15_responsible_ai</code></td>
+      <td>The Fairness Budget</td>
+    </tr>
+    <tr>
+      <td>16</td>
+      <td><code>lab_16_fleet_synthesis</code></td>
+      <td>The Fleet Synthesis (capstone)</td>
+    </tr>
+  </tbody>
+</table>
 
 ## The Design Ledger
 
@@ -120,11 +270,28 @@ pytest tests/test_static.py -v
 
 ## Related Resources
 
-| Resource | Description |
-|----------|-------------|
-| [Textbook](https://mlsysbook.ai) | ML Systems principles and practices |
-| [TinyTorch](https://mlsysbook.ai/tinytorch) | Build your own ML framework from scratch |
-| [Discussions](https://github.com/harvard-edge/cs249r_book/discussions) | Ask questions, share feedback |
+<table>
+  <thead>
+    <tr>
+      <th width="30%">Resource</th>
+      <th width="70%">Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b><a href="https://mlsysbook.ai">Textbook</a></b></td>
+      <td>ML Systems principles and practices</td>
+    </tr>
+    <tr>
+      <td><b><a href="https://mlsysbook.ai/tinytorch">TinyTorch</a></b></td>
+      <td>Build your own ML framework from scratch</td>
+    </tr>
+    <tr>
+      <td><b><a href="https://github.com/harvard-edge/cs249r_book/discussions">Discussions</a></b></td>
+      <td>Ask questions, share feedback</td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 

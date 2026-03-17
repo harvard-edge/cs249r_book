@@ -11,44 +11,97 @@
 
 ---
 
-The Mobile track covers ML systems running on smartphones and tablets — where the model must coexist with the operating system, other apps, and a battery that the user expects to last all day.
+The Mobile track covers ML systems deployed on smartphones and tablets — the most constrained high-performance computing environment in the world. Every phone is a shared-resource system where your ML model competes with the camera, the display, the cellular modem, and the user's other apps for memory, compute, and battery.
 
 ### The Constraint Regime
 
-| Dimension | Mobile Reality |
-|---|---|
-| **Compute** | TOPS shared across CPU, GPU, and NPU (Snapdragon, Apple ANE, MediaTek APU, Samsung NPU) |
-| **Memory** | 6–12 GB shared with OS and apps — no dedicated VRAM |
-| **Interconnect** | On-chip NoC, no external accelerator bus |
-| **Power budget** | 3–5W total device, ML workload gets a fraction |
-| **Primary bottleneck** | Battery life and thermal throttling |
-| **Failure mode** | Draining the battery, heating the device, jank in the UI thread |
+<table>
+  <thead>
+    <tr>
+      <th width="25%">Dimension</th>
+      <th width="75%">Mobile Reality</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Compute</b></td>
+      <td>TOPS (Apple ANE, Qualcomm Hexagon, Google Tensor TPU), shared with GPU and CPU</td>
+    </tr>
+    <tr>
+      <td><b>Memory</b></td>
+      <td>6–12 GB DRAM, shared with OS, apps, camera ISP</td>
+    </tr>
+    <tr>
+      <td><b>Interconnect</b></td>
+      <td>On-chip NoC (NPU↔CPU↔GPU), UFS flash</td>
+    </tr>
+    <tr>
+      <td><b>Power budget</b></td>
+      <td>3–5W total device power (ML gets a fraction)</td>
+    </tr>
+    <tr>
+      <td><b>Primary bottleneck</b></td>
+      <td>Battery life and shared resource contention</td>
+    </tr>
+    <tr>
+      <td><b>Failure mode</b></td>
+      <td>App killed by OS for memory pressure, thermal throttling, jank</td>
+    </tr>
+  </tbody>
+</table>
 
 ### What Makes Mobile Different from Edge
 
-Edge devices are dedicated to their ML workload. A smartphone is not. The NPU shares silicon and power with the cellular modem, display controller, camera ISP, and whatever else the user is running. Mobile ML is a **resource negotiation problem** — you're always competing for compute, memory, and thermal headroom with the rest of the system.
-
-### Topics That Need Questions
-
-These are the areas where mobile-specific interview questions would be most valuable. Each maps to real interview scenarios at companies like Apple, Google (Android/Pixel), Qualcomm, Samsung, or mobile-first AI startups.
-
-| Topic | What mobile interviews test | Example scenario |
-|---|---|---|
-| **NPU delegation** | Which ops run on CPU vs GPU vs NPU, operator compatibility | "Your model has 95% NPU-compatible ops but 5% fall back to CPU. What happens to latency?" |
-| **Memory pressure** | Model must fit in shared RAM, memory-mapped weights, app lifecycle | "iOS kills your app's background process. How do you handle model reload without a cold-start spike?" |
-| **Battery impact** | Energy per inference, sustained vs burst workloads, thermal governors | "Your on-device LLM drains 15% battery per hour. The PM wants 5%. What are your levers?" |
-| **Model formats** | CoreML, TFLite, ONNX, QNN — format conversion and operator coverage | "Your PyTorch model uses a custom attention op. How do you get it running on the Apple Neural Engine?" |
-| **On-device training** | Federated learning, personalization, differential privacy on-device | "How do you fine-tune a language model on user data without the data leaving the device?" |
-| **Latency budgets** | 16ms frame budget (60 FPS), interaction latency, async inference | "Your camera filter model takes 25ms. How do you hit 60 FPS without dropping frames?" |
-| **Model delivery** | App size limits, on-demand model download, model versioning | "Your model is 500 MB. The App Store limit is 200 MB for cellular download. What do you do?" |
+Edge devices are dedicated to ML — the entire system exists to run inference. Mobile devices are general-purpose computers where ML is one of dozens of competing workloads. Your model must coexist with the camera app, the browser, and the OS itself. The user can switch away at any moment, and the OS will kill your process to reclaim memory. Battery life is the ultimate constraint — no user will tolerate an app that drains their phone.
 
 ### The Rounds
 
-| Round | Focus | Questions |
-|---|---|---|
-| [**1. Mobile Systems & On-Device Inference**](01_Mobile_Systems.md) | NPU delegation, memory pressure, battery, model formats, latency budgets | 9 |
-| [**2. Mobile Advanced**](02_Mobile_Advanced.md) | Compute analysis, memory architecture, precision, optimization, deployment, privacy | 18 |
+<table>
+  <thead>
+    <tr>
+      <th width="35%">Round</th>
+      <th width="45%">Focus</th>
+      <th width="20%">Questions</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b><a href="01_Mobile_Systems.md">1. Mobile Systems & On-Device Physics</a></b></td>
+      <td>NPU delegation, thermal throttling, memory pressure, app lifecycle</td>
+      <td>9</td>
+    </tr>
+    <tr>
+      <td><b><a href="02_Mobile_Constraints.md">2. Constraints & Trade-offs</a></b></td>
+      <td>Compute analysis, memory, quantization, architecture, latency, power, NPU delegation, LLMs</td>
+      <td>17</td>
+    </tr>
+    <tr>
+      <td><b><a href="03_Mobile_Ops_and_Deployment.md">3. Operations & Deployment</a></b></td>
+      <td>Model optimization, app store delivery, monitoring, privacy, platform design</td>
+      <td>10</td>
+    </tr>
+    <tr>
+      <td><b><a href="04_Mobile_Visual_Debugging.md">4. Visual Architecture Debugging</a></b></td>
+      <td>Spot the bottleneck in mobile ML system diagrams</td>
+      <td>7</td>
+    </tr>
+    <tr>
+      <td><b><a href="05_Mobile_Advanced.md">5. Advanced Mobile Systems</a></b></td>
+      <td>On-device LLMs, cross-platform deployment, federated learning, NAS, personalization</td>
+      <td>9</td>
+    </tr>
+    <tr>
+      <td><b>Total</b></td>
+      <td></td>
+      <td><b>52</b></td>
+    </tr>
+  </tbody>
+</table>
+
+### Who This Track Is For
+
+Engineers interviewing at Apple (Core ML, ANE), Google (TFLite, Pixel), Qualcomm (Hexagon, QNN), Samsung (Exynos NPU), Meta (on-device AI), and any company shipping ML features in mobile apps. Also valuable for mobile developers adding ML capabilities to existing apps.
 
 ### Contributing
 
-We need more mobile questions — especially from engineers at Apple, Google, Qualcomm, and Samsung. See the [question format](../README.md#question-format) and submit a PR.
+We need more mobile questions — especially from engineers at Apple, Google, and Qualcomm. See the [question format](../README.md#question-format) and submit a PR.

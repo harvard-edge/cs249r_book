@@ -15,39 +15,92 @@ The Edge track covers ML systems deployed on dedicated hardware at the point of 
 
 ### The Constraint Regime
 
-| Dimension | Edge Reality |
-|---|---|
-| **Compute** | TOPS (Jetson Orin, Hailo-8, Intel Movidius, Google Coral) |
-| **Memory** | 8–32 GB DRAM, shared with sensor pipelines |
-| **Interconnect** | PCIe, MIPI CSI (camera), CAN bus (automotive) |
-| **Power budget** | 15–75W per module |
-| **Primary bottleneck** | Thermal envelope and real-time deadlines |
-| **Failure mode** | Missing a hard real-time deadline, thermal throttling under sustained load |
+<table>
+  <thead>
+    <tr>
+      <th width="25%">Dimension</th>
+      <th width="75%">Edge Reality</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Compute</b></td>
+      <td>TOPS (Jetson Orin, Hailo-8, Intel Movidius, Google Coral)</td>
+    </tr>
+    <tr>
+      <td><b>Memory</b></td>
+      <td>8–32 GB DRAM, shared with sensor pipelines</td>
+    </tr>
+    <tr>
+      <td><b>Interconnect</b></td>
+      <td>PCIe, MIPI CSI (camera), CAN bus (automotive)</td>
+    </tr>
+    <tr>
+      <td><b>Power budget</b></td>
+      <td>15–75W per module</td>
+    </tr>
+    <tr>
+      <td><b>Primary bottleneck</b></td>
+      <td>Thermal envelope and real-time deadlines</td>
+    </tr>
+    <tr>
+      <td><b>Failure mode</b></td>
+      <td>Missing a hard real-time deadline, thermal throttling under sustained load</td>
+    </tr>
+  </tbody>
+</table>
 
 ### What Makes Edge Different from Cloud
 
 In the cloud, you can always add more GPUs. At the edge, the hardware is fixed and the environment is hostile. An autonomous vehicle running object detection at 30 FPS cannot drop frames when the sun angle changes. A robotic arm running pose estimation cannot pause for garbage collection. The physics of edge is the physics of **hard constraints under uncertainty**.
 
-### Topics That Need Questions
-
-These are the areas where edge-specific interview questions would be most valuable. Each maps to a real interview scenario at companies like Tesla, Waymo, Boston Dynamics, or industrial AI startups.
-
-| Topic | What edge interviews test | Example scenario |
-|---|---|---|
-| **Roofline** | Integer-only roofline on NPUs, understanding TOPS vs TOPS/W | "Your Jetson Orin hits 50% of peak INT8 TOPS. Is it compute-bound or memory-bound?" |
-| **Real-time inference** | Worst-case execution time (WCET), frame budgets, pipeline scheduling | "Your perception stack must run at 30 FPS. You have 33ms per frame. How do you partition detection, tracking, and planning?" |
-| **Quantization** | INT8/INT4 for thermal headroom, quantization-aware training | "Quantizing to INT4 saves 15W but drops mAP by 3%. How do you decide?" |
-| **Sensor fusion** | Multi-modal pipelines (camera + LiDAR + radar), synchronization | "Your camera and LiDAR timestamps drift by 50ms. What happens to your 3D bounding boxes?" |
-| **Thermal management** | Sustained vs burst performance, thermal throttling curves | "Your edge box runs at 200 TOPS for 30 seconds, then throttles to 80 TOPS. How do you design for steady state?" |
-| **Functional safety** | Graceful degradation, redundancy, fail-safe vs fail-operational | "Your primary model crashes mid-inference. What does the fallback path look like?" |
-| **Model update** | OTA updates, A/B model deployment on constrained devices | "How do you deploy a new model to 10,000 edge devices without bricking any of them?" |
-
 ### The Rounds
 
-| Round | Focus | Questions |
-|---|---|---|
-| [**1. Edge Systems & Real-Time Physics**](01_Edge_Systems.md) | Roofline, real-time deadlines, thermal management, sensor fusion, OTA | 9 |
-| [**2. Edge Advanced**](02_Edge_Advanced.md) | Memory management, architecture selection, optimization, deployment, security | 18 |
+<table>
+  <thead>
+    <tr>
+      <th width="35%">Round</th>
+      <th width="45%">Focus</th>
+      <th width="20%">Questions</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b><a href="01_Edge_Systems.md">1. Edge Systems & Real-Time Physics</a></b></td>
+      <td>Roofline, real-time deadlines, thermal management, sensor fusion, OTA</td>
+      <td>9</td>
+    </tr>
+    <tr>
+      <td><b><a href="02_Edge_Constraints.md">2. Constraints & Trade-offs</a></b></td>
+      <td>Compute analysis, memory budgets, quantization, architecture, latency, power, edge LLMs</td>
+      <td>19</td>
+    </tr>
+    <tr>
+      <td><b><a href="03_Edge_Ops_and_Deployment.md">3. Operations & Deployment</a></b></td>
+      <td>Model optimization, fleet management, monitoring, security, economics</td>
+      <td>13</td>
+    </tr>
+    <tr>
+      <td><b><a href="04_Edge_Visual_Debugging.md">4. Visual Architecture Debugging</a></b></td>
+      <td>Spot the bottleneck in edge system diagrams</td>
+      <td>7</td>
+    </tr>
+    <tr>
+      <td><b><a href="05_Edge_Advanced.md">5. Advanced Edge Systems</a></b></td>
+      <td>Safety certification, multi-sensor fusion, privacy, long-term reliability, edge-cloud hybrid</td>
+      <td>9</td>
+    </tr>
+    <tr>
+      <td><b>Total</b></td>
+      <td></td>
+      <td><b>57</b></td>
+    </tr>
+  </tbody>
+</table>
+
+### Who This Track Is For
+
+Engineers interviewing at autonomous vehicle companies (Tesla, Waymo, Cruise), robotics firms (Boston Dynamics, Agility), industrial AI startups, and edge computing platforms (NVIDIA, Qualcomm, Hailo). Also valuable for anyone deploying ML to devices that must operate reliably in the physical world.
 
 ### Contributing
 

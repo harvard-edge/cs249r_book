@@ -21,19 +21,28 @@ Character-level transformer models for text generation:
 
 **Run after Module 13** (Complete transformer stack)
 
-| Module | Component | What It Provides |
-|--------|-----------|------------------|
-| Module 01 | Tensor | YOUR data structure with autograd |
-| Module 02 | Activations | YOUR ReLU/GELU activations |
-| Module 03 | Layers | YOUR Linear layers |
-| Module 04 | Losses | YOUR CrossEntropyLoss |
-| Module 05 | DataLoader | YOUR data batching |
-| Module 06 | Autograd | YOUR automatic differentiation |
-| Module 07 | Optimizers | YOUR Adam optimizer |
-| **Module 10** | **Tokenization** | **YOUR CharTokenizer** |
-| **Module 11** | **Embeddings** | **YOUR token + positional embeddings** |
-| **Module 12** | **Attention** | **YOUR multi-head self-attention** |
-| **Module 13** | **Transformers** | **YOUR LayerNorm + TransformerBlock + GPT** |
+<table>
+<thead>
+<tr>
+<th width="25%"><b>Module</b></th>
+<th width="25%">Component</th>
+<th width="50%">What It Provides</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>Module 01</b></td><td>Tensor</td><td>YOUR data structure with autograd</td></tr>
+<tr><td><b>Module 02</b></td><td>Activations</td><td>YOUR ReLU/GELU activations</td></tr>
+<tr><td><b>Module 03</b></td><td>Layers</td><td>YOUR Linear layers</td></tr>
+<tr><td><b>Module 04</b></td><td>Losses</td><td>YOUR CrossEntropyLoss</td></tr>
+<tr><td><b>Module 05</b></td><td>DataLoader</td><td>YOUR data batching</td></tr>
+<tr><td><b>Module 06</b></td><td>Autograd</td><td>YOUR automatic differentiation</td></tr>
+<tr><td><b>Module 07</b></td><td>Optimizers</td><td>YOUR Adam optimizer</td></tr>
+<tr><td><b>Module 10</b></td><td>Tokenization</td><td>YOUR CharTokenizer</td></tr>
+<tr><td><b>Module 11</b></td><td>Embeddings</td><td>YOUR token + positional embeddings</td></tr>
+<tr><td><b>Module 12</b></td><td>Attention</td><td>YOUR multi-head self-attention</td></tr>
+<tr><td><b>Module 13</b></td><td>Transformers</td><td>YOUR LayerNorm + TransformerBlock + GPT</td></tr>
+</tbody>
+</table>
 
 ## Milestone Structure
 
@@ -87,10 +96,21 @@ This milestone uses **progressive difficulty** with 3 scripts:
 
 ## Expected Results
 
-| Script | Task | Context Length | Success Criteria | Training Time |
-|--------|------|----------------|------------------|---------------|
-| 01 (Q&A) | Answer questions | 128 chars | Loss < 1.5, sensible word choices | 3-5 min |
-| 02 (Dialogue) | Multi-turn chat | 128 chars | Maintains topic coherence, loss < 1.5 | 3-5 min |
+<table>
+<thead>
+<tr>
+<th width="20%"><b>Script</b></th>
+<th width="20%">Task</th>
+<th width="15%">Context Length</th>
+<th width="35%">Success Criteria</th>
+<th width="10%">Training Time</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>01 (Q&A)</b></td><td>Answer questions</td><td>128 chars</td><td>Loss < 1.5, sensible word choices</td><td>3-5 min</td></tr>
+<tr><td><b>02 (Dialogue)</b></td><td>Multi-turn chat</td><td>128 chars</td><td>Maintains topic coherence, loss < 1.5</td><td>3-5 min</td></tr>
+</tbody>
+</table>
 
 ## Key Learning: Why Attention Revolutionized AI
 

@@ -84,12 +84,37 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
 
 ## Current Status
 
-| Ready | In Progress | Coming Soon |
-|-------|-------------|-------------|
-| ✅ All 20 modules implemented | 🔧 Documentation polish | 📅 NBGrader integration |
-| ✅ Complete test suite (600+ tests) | 🔧 Edge case handling | 📅 Community leaderboard |
-| ✅ `tito` CLI for workflows | 🔧 Instructor resources | 📅 Binder/Colab support |
-| ✅ Historical milestone scripts | | |
+<table>
+  <thead>
+    <tr>
+      <th width="33%">Ready</th>
+      <th width="33%">In Progress</th>
+      <th width="34%">Coming Soon</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>✅ All 20 modules implemented</td>
+      <td>🔧 Documentation polish</td>
+      <td>📅 NBGrader integration</td>
+    </tr>
+    <tr>
+      <td>✅ Complete test suite (600+ tests)</td>
+      <td>🔧 Edge case handling</td>
+      <td>📅 Community leaderboard</td>
+    </tr>
+    <tr>
+      <td>✅ <code>tito</code> CLI for workflows</td>
+      <td>🔧 Instructor resources</td>
+      <td>📅 Binder/Colab support</td>
+    </tr>
+    <tr>
+      <td>✅ Historical milestone scripts</td>
+      <td></td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
 
 **Want to explore the code?** [Browse the repository structure](#repository-structure) to see how modules are organized.
 
@@ -213,11 +238,28 @@ model.fit(X, y)  # Magic happens
 
 ## Documentation
 
-| Audience | Resources |
-|----------|-----------|
-| **Students** | [Course Website](https://mlsysbook.ai/tinytorch) ・ [Getting Started](site/getting-started.md) |
-| **Instructors** | [Instructor Guide](INSTRUCTOR.md) |
-| **Contributors** | [Contributing Guide](CONTRIBUTING.md) |
+<table>
+  <thead>
+    <tr>
+      <th width="25%">Audience</th>
+      <th width="75%">Resources</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Students</b></td>
+      <td><a href="https://mlsysbook.ai/tinytorch">Course Website</a> ・ <a href="site/getting-started.md">Getting Started</a></td>
+    </tr>
+    <tr>
+      <td><b>Instructors</b></td>
+      <td><a href="INSTRUCTOR.md">Instructor Guide</a></td>
+    </tr>
+    <tr>
+      <td><b>Contributors</b></td>
+      <td><a href="CONTRIBUTING.md">Contributing Guide</a></td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 

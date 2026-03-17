@@ -18,32 +18,142 @@ Volume I content is **complete and undergoing final editorial polish.** It is re
 
 ## What You Will Learn
 
-| Part | Focus | What You Will Learn |
-|------|-------|---------------------|
-| **I. Foundations** | Core concepts | How ML systems differ from traditional software, the Iron Law framework, data engineering at scale |
-| **II. Development** | Building blocks | Neural computation, model architectures, framework internals, training systems |
-| **III. Optimization** | Making it fast | Data selection, model compression, hardware acceleration, benchmarking methodology |
-| **IV. Deployment** | Making it work | Model serving, MLOps, responsible engineering |
+<table>
+  <thead>
+    <tr>
+      <th width="20%">Part</th>
+      <th width="20%">Focus</th>
+      <th width="60%">What You Will Learn</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>I. Foundations</b></td>
+      <td>Core concepts</td>
+      <td>How ML systems differ from traditional software, the Iron Law framework, data engineering at scale</td>
+    </tr>
+    <tr>
+      <td><b>II. Development</b></td>
+      <td>Building blocks</td>
+      <td>Neural computation, model architectures, framework internals, training systems</td>
+    </tr>
+    <tr>
+      <td><b>III. Optimization</b></td>
+      <td>Making it fast</td>
+      <td>Data selection, model compression, hardware acceleration, benchmarking methodology</td>
+    </tr>
+    <tr>
+      <td><b>IV. Deployment</b></td>
+      <td>Making it work</td>
+      <td>Model serving, MLOps, responsible engineering</td>
+    </tr>
+  </tbody>
+</table>
 
 ## Chapter Map
 
-| # | Chapter | Directory | Core Question |
-|---|---------|-----------|---------------|
-| 1 | Introduction | `introduction/` | What are ML systems and why do they need engineering? |
-| 2 | ML Systems | `ml_systems/` | How do deployment constraints shape system design? |
-| 3 | ML Workflow | `ml_workflow/` | What does the end-to-end ML pipeline look like? |
-| 4 | Data Engineering | `data_engineering/` | How do you build data pipelines that feed ML? |
-| 5 | Neural Computation | `nn_computation/` | How does math become silicon operations? |
-| 6 | Architectures | `nn_architectures/` | How do CNNs, RNNs, and Transformers differ as systems? |
-| 7 | Frameworks | `frameworks/` | How do PyTorch and TensorFlow actually work inside? |
-| 8 | Training | `training/` | How do you train models efficiently on real hardware? |
-| 9 | Data Selection | `data_selection/` | How do you choose the right data for training? |
-| 10 | Model Compression | `optimizations/` | How do you shrink models without losing accuracy? |
-| 11 | HW Acceleration | `hw_acceleration/` | How do GPUs, TPUs, and accelerators execute neural networks? |
-| 12 | Benchmarking | `benchmarking/` | How do you measure and compare ML system performance? |
-| 13 | Model Serving | `model_serving/` | How do you deploy models to serve real users? |
-| 14 | MLOps | `ml_ops/` | How do you keep ML systems running in production? |
-| 15 | Responsible Engineering | `responsible_engr/` | How do you build ML systems that are fair, safe, and trustworthy? |
+<table>
+  <thead>
+    <tr>
+      <th width="5%">#</th>
+      <th width="20%">Chapter</th>
+      <th width="20%">Directory</th>
+      <th width="55%">Core Question</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td><b>Introduction</b></td>
+      <td><code>introduction/</code></td>
+      <td>What are ML systems and why do they need engineering?</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><b>ML Systems</b></td>
+      <td><code>ml_systems/</code></td>
+      <td>How do deployment constraints shape system design?</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><b>ML Workflow</b></td>
+      <td><code>ml_workflow/</code></td>
+      <td>What does the end-to-end ML pipeline look like?</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><b>Data Engineering</b></td>
+      <td><code>data_engineering/</code></td>
+      <td>How do you build data pipelines that feed ML?</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td><b>Neural Computation</b></td>
+      <td><code>nn_computation/</code></td>
+      <td>How does math become silicon operations?</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td><b>Architectures</b></td>
+      <td><code>nn_architectures/</code></td>
+      <td>How do CNNs, RNNs, and Transformers differ as systems?</td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td><b>Frameworks</b></td>
+      <td><code>frameworks/</code></td>
+      <td>How do PyTorch and TensorFlow actually work inside?</td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td><b>Training</b></td>
+      <td><code>training/</code></td>
+      <td>How do you train models efficiently on real hardware?</td>
+    </tr>
+    <tr>
+      <td>9</td>
+      <td><b>Data Selection</b></td>
+      <td><code>data_selection/</code></td>
+      <td>How do you choose the right data for training?</td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td><b>Model Compression</b></td>
+      <td><code>optimizations/</code></td>
+      <td>How do you shrink models without losing accuracy?</td>
+    </tr>
+    <tr>
+      <td>11</td>
+      <td><b>HW Acceleration</b></td>
+      <td><code>hw_acceleration/</code></td>
+      <td>How do GPUs, TPUs, and accelerators execute neural networks?</td>
+    </tr>
+    <tr>
+      <td>12</td>
+      <td><b>Benchmarking</b></td>
+      <td><code>benchmarking/</code></td>
+      <td>How do you measure and compare ML system performance?</td>
+    </tr>
+    <tr>
+      <td>13</td>
+      <td><b>Model Serving</b></td>
+      <td><code>model_serving/</code></td>
+      <td>How do you deploy models to serve real users?</td>
+    </tr>
+    <tr>
+      <td>14</td>
+      <td><b>MLOps</b></td>
+      <td><code>ml_ops/</code></td>
+      <td>How do you keep ML systems running in production?</td>
+    </tr>
+    <tr>
+      <td>15</td>
+      <td><b>Responsible Engineering</b></td>
+      <td><code>responsible_engr/</code></td>
+      <td>How do you build ML systems that are fair, safe, and trustworthy?</td>
+    </tr>
+  </tbody>
+</table>
 
 ## Prerequisites
 
@@ -63,10 +173,33 @@ If you spot an error, find an explanation that could be clearer, or have a sugge
 
 ## Links
 
-| Resource | Link |
-|----------|------|
-| Read online | [mlsysbook.ai/vol1](https://mlsysbook.ai/vol1/) |
-| Volume II | [book/quarto/contents/vol2/](../vol2/) |
-| Main README | [Repository root](../../../../README.md) |
-| Full textbook | [mlsysbook.ai/book](https://mlsysbook.ai/book/) |
-| Discussions | [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions) |
+<table>
+  <thead>
+    <tr>
+      <th width="25%">Resource</th>
+      <th width="75%">Link</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Read online</b></td>
+      <td><a href="https://mlsysbook.ai/vol1/">mlsysbook.ai/vol1</a></td>
+    </tr>
+    <tr>
+      <td><b>Volume II</b></td>
+      <td><a href="../vol2/">book/quarto/contents/vol2/</a></td>
+    </tr>
+    <tr>
+      <td><b>Main README</b></td>
+      <td><a href="../../../../README.md">Repository root</a></td>
+    </tr>
+    <tr>
+      <td><b>Full textbook</b></td>
+      <td><a href="https://mlsysbook.ai/book/">mlsysbook.ai/book</a></td>
+    </tr>
+    <tr>
+      <td><b>Discussions</b></td>
+      <td><a href="https://github.com/harvard-edge/cs249r_book/discussions">GitHub Discussions</a></td>
+    </tr>
+  </tbody>
+</table>

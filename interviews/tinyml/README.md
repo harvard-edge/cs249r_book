@@ -15,14 +15,40 @@ The TinyML track covers ML systems running on microcontrollers — where the ent
 
 ### The Constraint Regime
 
-| Dimension | TinyML Reality |
-|---|---|
-| **Compute** | MFLOPS (Cortex-M4/M7, RISC-V, ESP32) — often no FPU |
-| **Memory** | 256 KB–2 MB SRAM, 1–16 MB Flash |
-| **Interconnect** | SPI, I2C, UART — kilobytes/second |
-| **Power budget** | 1–100 mW (often battery or energy harvesting) |
-| **Primary bottleneck** | SRAM capacity — the model must fit entirely on-chip |
-| **Failure mode** | Model doesn't fit, misses hard real-time deadline, exceeds power budget |
+<table>
+  <thead>
+    <tr>
+      <th width="25%">Dimension</th>
+      <th width="75%">TinyML Reality</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Compute</b></td>
+      <td>MFLOPS (Cortex-M4/M7, RISC-V, ESP32) — often no FPU</td>
+    </tr>
+    <tr>
+      <td><b>Memory</b></td>
+      <td>256 KB–2 MB SRAM, 1–16 MB Flash</td>
+    </tr>
+    <tr>
+      <td><b>Interconnect</b></td>
+      <td>SPI, I2C, UART — kilobytes/second</td>
+    </tr>
+    <tr>
+      <td><b>Power budget</b></td>
+      <td>1–100 mW (often battery or energy harvesting)</td>
+    </tr>
+    <tr>
+      <td><b>Primary bottleneck</b></td>
+      <td>SRAM capacity — the model must fit entirely on-chip</td>
+    </tr>
+    <tr>
+      <td><b>Failure mode</b></td>
+      <td>Model doesn't fit, misses hard real-time deadline, exceeds power budget</td>
+    </tr>
+  </tbody>
+</table>
 
 ### What Makes TinyML Different from Everything Else
 
@@ -32,22 +58,76 @@ In the cloud, you optimize for throughput. On mobile, you optimize for battery. 
 
 These are the areas where TinyML-specific interview questions would be most valuable. Each maps to real interview scenarios at companies like Arduino, Edge Impulse, Qualcomm (for always-on sensing), or embedded AI teams at larger companies.
 
-| Topic | What TinyML interviews test | Example scenario |
-|---|---|---|
-| **Memory layout** | SRAM partitioning, activation reuse, operator scheduling for peak RAM | "Your model needs 300 KB peak RAM but you only have 256 KB SRAM. How do you fit it without changing the model?" |
-| **Quantization** | INT8, INT4, binary/ternary, fixed-point arithmetic, post-training vs QAT | "Your keyword spotting model loses 8% accuracy going from INT8 to INT4. Is that acceptable? How do you recover it?" |
-| **Integer-only inference** | No floating point — all math in fixed-point, requantization between layers | "Explain how a quantized Conv2D executes on a Cortex-M4 with no FPU." |
-| **Model architecture** | MobileNet, MCUNet, depth-wise separable convolutions, NAS for MCUs | "Why does MobileNetV2 use inverted residuals, and why does that matter on a microcontroller?" |
-| **Power & energy** | Active vs sleep power, duty cycling, energy harvesting budgets | "Your sensor wakes up every 10 seconds, runs inference, and sleeps. What's the average power draw?" |
-| **Compiler & runtime** | TFLite Micro, TVM, CMSIS-NN, ahead-of-time compilation, no dynamic allocation | "Why can't TFLite Micro use malloc? What does it use instead?" |
-| **Sensor pipelines** | Audio (keyword spotting), accelerometer (gesture), image (person detection) | "Your microphone samples at 16 kHz. How do you extract Mel spectrograms in real-time on a Cortex-M4?" |
+<table>
+  <thead>
+    <tr>
+      <th width="22%">Topic</th>
+      <th width="28%">What TinyML interviews test</th>
+      <th width="50%">Example scenario</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Memory layout</b></td>
+      <td>SRAM partitioning, activation reuse, operator scheduling for peak RAM</td>
+      <td>"Your model needs 300 KB peak RAM but you only have 256 KB SRAM. How do you fit it without changing the model?"</td>
+    </tr>
+    <tr>
+      <td><b>Quantization</b></td>
+      <td>INT8, INT4, binary/ternary, fixed-point arithmetic, post-training vs QAT</td>
+      <td>"Your keyword spotting model loses 8% accuracy going from INT8 to INT4. Is that acceptable? How do you recover it?"</td>
+    </tr>
+    <tr>
+      <td><b>Integer-only inference</b></td>
+      <td>No floating point — all math in fixed-point, requantization between layers</td>
+      <td>"Explain how a quantized Conv2D executes on a Cortex-M4 with no FPU."</td>
+    </tr>
+    <tr>
+      <td><b>Model architecture</b></td>
+      <td>MobileNet, MCUNet, depth-wise separable convolutions, NAS for MCUs</td>
+      <td>"Why does MobileNetV2 use inverted residuals, and why does that matter on a microcontroller?"</td>
+    </tr>
+    <tr>
+      <td><b>Power & energy</b></td>
+      <td>Active vs sleep power, duty cycling, energy harvesting budgets</td>
+      <td>"Your sensor wakes up every 10 seconds, runs inference, and sleeps. What's the average power draw?"</td>
+    </tr>
+    <tr>
+      <td><b>Compiler & runtime</b></td>
+      <td>TFLite Micro, TVM, CMSIS-NN, ahead-of-time compilation, no dynamic allocation</td>
+      <td>"Why can't TFLite Micro use malloc? What does it use instead?"</td>
+    </tr>
+    <tr>
+      <td><b>Sensor pipelines</b></td>
+      <td>Audio (keyword spotting), accelerometer (gesture), image (person detection)</td>
+      <td>"Your microphone samples at 16 kHz. How do you extract Mel spectrograms in real-time on a Cortex-M4?"</td>
+    </tr>
+  </tbody>
+</table>
 
 ### The Rounds
 
-| Round | Focus | Questions |
-|---|---|---|
-| [**1. TinyML Systems — Inference at the Edge of Physics**](01_TinyML_Systems.md) | Memory layout, quantization, integer inference, power, CMSIS-NN, sensor pipelines | 9 |
-| [**2. TinyML Advanced**](02_TinyML_Advanced.md) | Compute analysis, latency budgets, optimization, deployment, monitoring, security | 18 |
+<table>
+  <thead>
+    <tr>
+      <th width="45%">Round</th>
+      <th width="40%">Focus</th>
+      <th width="15%">Questions</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b><a href="01_TinyML_Systems.md">1. TinyML Systems — Inference at the Edge of Physics</a></b></td>
+      <td>Memory layout, quantization, integer inference, power, CMSIS-NN, sensor pipelines</td>
+      <td>9</td>
+    </tr>
+    <tr>
+      <td><b><a href="02_TinyML_Advanced.md">2. TinyML Advanced</a></b></td>
+      <td>Compute analysis, latency budgets, optimization, deployment, monitoring, security</td>
+      <td>18</td>
+    </tr>
+  </tbody>
+</table>
 
 ### Contributing
 
