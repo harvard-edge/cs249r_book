@@ -26,7 +26,8 @@ Content may be incomplete or change without notice. The published curriculum liv
   <a href="edge/README.md">🤖 Edge</a> ·
   <a href="mobile/README.md">📱 Mobile</a> ·
   <a href="tinyml/README.md">🔬 TinyML</a> ·
-  <a href="00_The_Architects_Rubric.md">📋 Self-Eval Rubric</a>
+  <a href="NUMBERS.md">📊 Numbers</a> ·
+  <a href="00_The_Architects_Rubric.md">📋 Rubric</a>
 </p>
 
 ---
@@ -36,233 +37,6 @@ Content may be incomplete or change without notice. The published curriculum liv
 Students often ask me: *"How do I prepare for ML systems interviews?"* They can write a training loop, but they can't explain why a 175B parameter model will hit a communication wall across InfiniBand, or why serving a 128k context window will fragment the KV-cache and blow up P99 latency. These are **physical constraints**, not code syntax, and they're exactly what companies like Meta, Google, and OpenAI test for.
 
 The industry calls it *Mechanical Sympathy*: seeing past framework abstractions to reason about the physics of keeping 10,000 GPUs fed and 1 million users served. This playbook organizes that knowledge into something you can actually study.
-
----
-
-## Numbers Every ML Systems Engineer Should Know
-
-Adapted from the textbook's [Machine Foundations](https://mlsysbook.ai/vol1/) appendix. **Memorize the ratios; they're physics. Use the absolute numbers as sanity checks.** All hardware values sourced from [`mlsysim/core/constants.py`](../mlsysim/core/constants.py), the single source of truth for the book.
-
-### The Invariants (Physics — Will Not Change)
-
-<table>
-  <thead>
-    <tr>
-      <th width="35%">Relationship</th>
-      <th width="25%">Ratio</th>
-      <th width="40%">Why it's stable</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><b>DRAM access vs FP16 compute</b></td>
-      <td><b>~580×</b> more energy</td>
-      <td>Wire capacitance scales with distance</td>
-    </tr>
-    <tr>
-      <td><b>FP32 vs INT8 energy</b></td>
-      <td>~18×</td>
-      <td>Bit width determines switching energy</td>
-    </tr>
-    <tr>
-      <td><b>FP32 vs FP16 energy</b></td>
-      <td>~3.4×</td>
-      <td>Halving bits roughly halves energy</td>
-    </tr>
-    <tr>
-      <td><b>HBM vs L1 cache latency</b></td>
-      <td>~300× slower</td>
-      <td>On-chip vs off-chip</td>
-    </tr>
-    <tr>
-      <td><b>SSD vs L1 cache latency</b></td>
-      <td>~100,000× slower</td>
-      <td>Electrical vs flash</td>
-    </tr>
-    <tr>
-      <td><b>Network vs local memory</b></td>
-      <td>~17× slower</td>
-      <td>Speed of light + switching</td>
-    </tr>
-    <tr>
-      <td><b>Light in fiber</b></td>
-      <td>~200 km/ms</td>
-      <td>Cross-country US ≈ 40ms RTT</td>
-    </tr>
-  </tbody>
-</table>
-
-### Scaling Rules (Arithmetic — Hardware Independent)
-
-These formulas let you estimate memory, compute, and cache requirements from a model's parameter count. "7B" means a model with 7 billion parameters.
-
-<table>
-  <thead>
-    <tr>
-      <th width="35%">What you're estimating</th>
-      <th width="35%">Formula</th>
-      <th width="30%">Example</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><b>Inference memory (FP16)</b></td>
-      <td>2 bytes × params</td>
-      <td>7B params × 2 bytes = <b>14 GB</b></td>
-    </tr>
-    <tr>
-      <td><b>Inference memory (INT8)</b></td>
-      <td>1 byte × params</td>
-      <td>7B params × 1 byte = <b>7 GB</b></td>
-    </tr>
-    <tr>
-      <td><b>Training memory (Adam, FP16+FP32)</b></td>
-      <td><b>16 bytes × params</b></td>
-      <td>7B params × 16 bytes = <b>112 GB</b></td>
-    </tr>
-    <tr>
-      <td><b>Inference compute (transformer)</b></td>
-      <td>~2 FLOPs × params per token</td>
-      <td>7B → ~<b>14 GFLOPs/token</b></td>
-    </tr>
-    <tr>
-      <td><b>Training compute</b></td>
-      <td>~6 FLOPs × params × tokens</td>
-      <td>7B on 1T tokens → <b>4×10²² FLOPs</b></td>
-    </tr>
-    <tr>
-      <td><b>KV-cache per token (all layers)</b></td>
-      <td>2 × layers × heads × head_dim × 2 bytes</td>
-      <td>Llama 70B, 128k tokens → <b>~335 GB</b></td>
-    </tr>
-  </tbody>
-</table>
-
-### Current Hardware Snapshot (2024–2025)
-
-<table>
-  <thead>
-    <tr>
-      <th width="20%">Category</th>
-      <th width="35%">Metric</th>
-      <th width="45%">Value</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><b>Compute</b></td>
-      <td>A100 FP16 Tensor Core</td>
-      <td>312 TFLOPS</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>H100 FP16 Tensor Core</td>
-      <td>989 TFLOPS</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>H100 FP8 Tensor Core</td>
-      <td>1,979 TFLOPS</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>B200 FP16 Tensor Core</td>
-      <td>2,250 TFLOPS</td>
-    </tr>
-    <tr>
-      <td><b>Memory BW</b></td>
-      <td>A100 HBM2e</td>
-      <td>2.0 TB/s</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>H100 HBM3</td>
-      <td>3.35 TB/s</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>B200 HBM3e</td>
-      <td>8.0 TB/s</td>
-    </tr>
-    <tr>
-      <td><b>Interconnect</b></td>
-      <td>NVLink 4.0 (H100)</td>
-      <td>900 GB/s</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>NVLink 5.0 (B200)</td>
-      <td>1,800 GB/s</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>InfiniBand NDR</td>
-      <td>400 Gbps (50 GB/s)</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>PCIe Gen5 x16</td>
-      <td>64 GB/s</td>
-    </tr>
-    <tr>
-      <td><b>Roofline Ridge</b></td>
-      <td>A100 (FP16)</td>
-      <td>~153 Ops/Byte</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>H100 (FP16)</td>
-      <td>~295 Ops/Byte</td>
-    </tr>
-    <tr>
-      <td><b>Power</b></td>
-      <td>A100 TDP</td>
-      <td>400 W</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>H100 TDP</td>
-      <td>700 W</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>B200 TDP</td>
-      <td>1,000 W</td>
-    </tr>
-    <tr>
-      <td><b>Latency</b></td>
-      <td>L1 / Register</td>
-      <td>~1 ns</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>L2 Cache</td>
-      <td>~4 ns</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>HBM3</td>
-      <td>~300 ns</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>PCIe Gen5</td>
-      <td>~1 μs</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>InfiniBand</td>
-      <td>~5 μs</td>
-    </tr>
-    <tr>
-      <td></td>
-      <td>NVMe SSD</td>
-      <td>~100 μs</td>
-    </tr>
-  </tbody>
-</table>
-
-> **Source:** All values from the textbook's `constants.py`. When hardware generations change, update the constants file and every calculation in the book (and this playbook) updates automatically.
 
 ---
 
@@ -305,210 +79,56 @@ Pick your level and start drilling:
 
 ## Choose Your Track
 
-Each track targets a different deployment regime. Pick the one that matches the roles you're interviewing for, or study multiple tracks to build breadth.
+Each track targets a different deployment regime — different physics, different constraints, different interview questions. Pick the one that matches the roles you're interviewing for, or study multiple tracks to build breadth.
 
 <table>
   <thead>
     <tr>
-      <th width="20%">Track</th>
-      <th width="35%">Focus</th>
-      <th width="15%">Questions</th>
-      <th width="30%">Rounds</th>
+      <th width="15%">Track</th>
+      <th width="25%">Focus</th>
+      <th width="20%">Primary Constraint</th>
+      <th width="10%">Questions</th>
+      <th width="15%">Rounds</th>
+      <th width="15%">Scale</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td><b><a href="cloud/README.md">☁️ Cloud</a></b></td>
-      <td>Data center training & serving at scale</td>
+      <td>Data center training & serving</td>
+      <td>Memory bandwidth / network</td>
       <td>57</td>
-      <td>6 rounds + visual debugging</td>
+      <td>6 + visual</td>
+      <td>PFLOPS, 80 GB HBM</td>
     </tr>
     <tr>
       <td><b><a href="edge/README.md">🤖 Edge</a></b></td>
-      <td>Autonomous vehicles, robotics, industrial AI</td>
-      <td>27</td>
-      <td>2 rounds</td>
+      <td>Autonomous vehicles, robotics</td>
+      <td>Thermal envelope / real-time</td>
+      <td>57</td>
+      <td>5</td>
+      <td>TOPS, 8–32 GB</td>
     </tr>
     <tr>
       <td><b><a href="mobile/README.md">📱 Mobile</a></b></td>
       <td>On-device AI for smartphones</td>
-      <td>27</td>
-      <td>2 rounds</td>
+      <td>Battery life / shared resources</td>
+      <td>45</td>
+      <td>5</td>
+      <td>TOPS, 6–12 GB</td>
     </tr>
     <tr>
       <td><b><a href="tinyml/README.md">🔬 TinyML</a></b></td>
-      <td>Microcontroller & ultra-low-power AI</td>
-      <td>27</td>
-      <td>2 rounds</td>
-    </tr>
-    <tr>
-      <td><b><a href="00_The_Architects_Rubric.md">📋 Rubric</a></b></td>
-      <td>Self-evaluation across 6 engineering axes</td>
-      <td>—</td>
-      <td>Shared</td>
-    </tr>
-    <tr>
-      <td><b><a href="TOPIC_MAP.md">🗺️ Topic Map</a></b></td>
-      <td>Master plan — competency areas, gaps, and targets</td>
-      <td>—</td>
-      <td>Planning doc</td>
-    </tr>
-  </tbody>
-</table>
-
----
-
-## Mastery Levels
-
-Every question is tagged with a mastery level. These levels mirror engineering ladders at major tech companies (Google, Meta, etc.) but represent **cognitive thresholds**: each level tests a different kind of reasoning, mapped to [Bloom's taxonomy](https://en.wikipedia.org/wiki/Bloom%27s_taxonomy) and the **scope of ownership** expected at that career stage.
-
-### The Framework
-
-<table>
-  <thead>
-    <tr>
-      <th width="15%">Level</th>
-      <th width="15%">Scope</th>
-      <th width="20%">Cognitive Skill</th>
-      <th width="50%">What the interviewer hears</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>🟢 <b>L3 — The Screen</b></td>
-      <td>Own a <b>task</b></td>
-      <td><b>Recall & Define</b></td>
-      <td>"The Roofline model relates compute to memory bandwidth."</td>
-    </tr>
-    <tr>
-      <td>🔵 <b>L4 — The Practitioner</b></td>
-      <td>Own a <b>component</b></td>
-      <td><b>Apply & Identify</b></td>
-      <td>"This workload is memory-bound because its arithmetic intensity is below the ridge point."</td>
-    </tr>
-    <tr>
-      <td>🟡 <b>L5 — The Architect</b></td>
-      <td>Own a <b>system</b></td>
-      <td><b>Analyze & Predict</b></td>
-      <td>"Switching from A100 to H100 won't help because the ridge point shifts right while our intensity stays at ~1."</td>
-    </tr>
-    <tr>
-      <td>🔴 <b>L6+ — The Lead</b></td>
-      <td>Own the <b>architecture</b></td>
-      <td><b>Synthesize & Derive</b></td>
-      <td>"Let me derive the optimal parallelism dimensions from the NVLink topology, memory capacity, and pipeline bubble cost."</td>
-    </tr>
-  </tbody>
-</table>
-
-### The Transitions
-
-- **L3→L4:** You stop reciting and start diagnosing. You can look at a system and correctly classify what's happening: identify the bottleneck, name the failure mode, apply the right formula.
-- **L4→L5:** You stop diagnosing and start predicting. You can reason about what happens when a constraint changes (a hardware upgrade, a traffic spike, a precision change) and explain *why* the system behaves differently.
-- **L5→L6+:** You stop predicting known patterns and start deriving solutions from first principles. You can stand at a whiteboard with incomplete information and work backward from physics to architecture.
-
-### How This Maps to Industry
-
-The levels correspond to real expectations at major tech companies. The titles differ, but the cognitive bar is consistent.
-
-<table>
-  <thead>
-    <tr>
-      <th width="10%">Level</th>
-      <th width="15%">Google</th>
-      <th width="15%">Meta</th>
-      <th width="15%">Amazon</th>
-      <th width="45%">What systems interviews test</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><b>L3</b></td>
-      <td>L3 (SWE II)</td>
-      <td>E3 (IC3)</td>
-      <td>SDE I</td>
-      <td>Can you define the concepts? Do you know the vocabulary of ML systems?</td>
-    </tr>
-    <tr>
-      <td><b>L4</b></td>
-      <td>L4 (SWE III)</td>
-      <td>E4 (IC4)</td>
-      <td>SDE II</td>
-      <td>Given a broken system, can you diagnose the root cause?</td>
-    </tr>
-    <tr>
-      <td><b>L5</b></td>
-      <td>L5 (Senior)</td>
-      <td>E5 (IC5)</td>
-      <td>Senior SDE</td>
-      <td>Given a working system and a changing constraint, can you predict what breaks?</td>
-    </tr>
-    <tr>
-      <td><b>L6+</b></td>
-      <td>L6 (Staff)</td>
-      <td>E6 (Staff)</td>
-      <td>Principal</td>
-      <td>Given a blank whiteboard and a set of requirements, can you derive the architecture from physics?</td>
-    </tr>
-  </tbody>
-</table>
-
-> **For question contributors:** When writing a new question, ask yourself: *"What scope of reasoning does this require?"* If the answer is "name the concept," it's L3. If it's "diagnose this system," it's L4. If it's "predict what happens when X changes," it's L5. If it's "derive the solution from constraints," it's L6+.
-
----
-
-## Deployment Tracks
-
-The mastery levels tell you *how deeply* a question tests your reasoning. The deployment track tells you *which physics regime* it lives in. The core principle, **constraints drive architecture**, applies everywhere, but the constraints themselves differ sharply depending on where the silicon sits.
-
-Every question in this playbook is tagged with a deployment track. All four tracks now have substantial question banks — see the [Topic Map](TOPIC_MAP.md) for the full coverage matrix and expansion plan.
-
-<table>
-  <thead>
-    <tr>
-      <th width="12%">Track</th>
-      <th width="25%">Where it runs</th>
-      <th width="22%">Primary constraint</th>
-      <th width="12%">Compute scale</th>
-      <th width="14%">Memory</th>
-      <th width="15%">Power budget</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><b>☁️ Cloud</b></td>
-      <td>Data center (H100, TPU, InfiniBand)</td>
-      <td>Memory bandwidth / network</td>
-      <td>PFLOPS</td>
-      <td>80 GB HBM</td>
-      <td>700W per chip</td>
-    </tr>
-    <tr>
-      <td><b>🤖 Edge</b></td>
-      <td>Autonomous vehicles, robotics, CCTV, industrial</td>
-      <td>Thermal envelope / real-time deadlines</td>
-      <td>TOPS</td>
-      <td>8–32 GB DRAM</td>
-      <td>15–75W per module</td>
-    </tr>
-    <tr>
-      <td><b>📱 Mobile</b></td>
-      <td>Smartphones (Snapdragon NPU, Apple ANE)</td>
-      <td>Battery life / shared resources</td>
-      <td>TOPS (shared)</td>
-      <td>6–12 GB shared</td>
-      <td>3–5W total device</td>
-    </tr>
-    <tr>
-      <td><b>🔬 TinyML</b></td>
-      <td>Microcontrollers (Cortex-M, RISC-V)</td>
+      <td>Microcontroller & ultra-low-power</td>
       <td>SRAM capacity / hard real-time</td>
-      <td>MFLOPS</td>
-      <td>256 KB–2 MB SRAM</td>
-      <td>1–100 mW</td>
+      <td>47</td>
+      <td>5</td>
+      <td>MFLOPS, 256 KB–2 MB</td>
     </tr>
   </tbody>
 </table>
+
+> **📊 [Numbers Every ML Systems Engineer Should Know](NUMBERS.md)** — The physics constants, scaling rules, and hardware specs behind every question in this playbook.
 
 ### How the Same Topic Changes Across Tracks
 
@@ -563,7 +183,100 @@ The physics is universal. The numbers are not.
   </tbody>
 </table>
 
-When submitting a question, tag it with both a **mastery level** (L3–L6+) and a **deployment track** (Cloud, Edge, Mobile, TinyML). See each track's README for the specific topics that need questions.
+---
+
+## Mastery Levels
+
+Every question is tagged with a mastery level. These levels mirror engineering ladders at major tech companies (Google, Meta, etc.) but represent **cognitive thresholds**: each level tests a different kind of reasoning, mapped to [Bloom's taxonomy](https://en.wikipedia.org/wiki/Bloom%27s_taxonomy) and the **scope of ownership** expected at that career stage.
+
+<table>
+  <thead>
+    <tr>
+      <th width="15%">Level</th>
+      <th width="15%">Scope</th>
+      <th width="20%">Cognitive Skill</th>
+      <th width="50%">What the interviewer hears</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>🟢 <b>L3 — The Screen</b></td>
+      <td>Own a <b>task</b></td>
+      <td><b>Recall & Define</b></td>
+      <td>"The Roofline model relates compute to memory bandwidth."</td>
+    </tr>
+    <tr>
+      <td>🔵 <b>L4 — The Practitioner</b></td>
+      <td>Own a <b>component</b></td>
+      <td><b>Apply & Identify</b></td>
+      <td>"This workload is memory-bound because its arithmetic intensity is below the ridge point."</td>
+    </tr>
+    <tr>
+      <td>🟡 <b>L5 — The Architect</b></td>
+      <td>Own a <b>system</b></td>
+      <td><b>Analyze & Predict</b></td>
+      <td>"Switching from A100 to H100 won't help because the ridge point shifts right while our intensity stays at ~1."</td>
+    </tr>
+    <tr>
+      <td>🔴 <b>L6+ — The Lead</b></td>
+      <td>Own the <b>architecture</b></td>
+      <td><b>Synthesize & Derive</b></td>
+      <td>"Let me derive the optimal parallelism dimensions from the NVLink topology, memory capacity, and pipeline bubble cost."</td>
+    </tr>
+  </tbody>
+</table>
+
+### The Transitions
+
+- **L3→L4:** You stop reciting and start diagnosing. You can look at a system and correctly classify what's happening: identify the bottleneck, name the failure mode, apply the right formula.
+- **L4→L5:** You stop diagnosing and start predicting. You can reason about what happens when a constraint changes (a hardware upgrade, a traffic spike, a precision change) and explain *why* the system behaves differently.
+- **L5→L6+:** You stop predicting known patterns and start deriving solutions from first principles. You can stand at a whiteboard with incomplete information and work backward from physics to architecture.
+
+### How This Maps to Industry
+
+<table>
+  <thead>
+    <tr>
+      <th width="10%">Level</th>
+      <th width="15%">Google</th>
+      <th width="15%">Meta</th>
+      <th width="15%">Amazon</th>
+      <th width="45%">What systems interviews test</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>L3</b></td>
+      <td>L3 (SWE II)</td>
+      <td>E3 (IC3)</td>
+      <td>SDE I</td>
+      <td>Can you define the concepts? Do you know the vocabulary of ML systems?</td>
+    </tr>
+    <tr>
+      <td><b>L4</b></td>
+      <td>L4 (SWE III)</td>
+      <td>E4 (IC4)</td>
+      <td>SDE II</td>
+      <td>Given a broken system, can you diagnose the root cause?</td>
+    </tr>
+    <tr>
+      <td><b>L5</b></td>
+      <td>L5 (Senior)</td>
+      <td>E5 (IC5)</td>
+      <td>Senior SDE</td>
+      <td>Given a working system and a changing constraint, can you predict what breaks?</td>
+    </tr>
+    <tr>
+      <td><b>L6+</b></td>
+      <td>L6 (Staff)</td>
+      <td>E6 (Staff)</td>
+      <td>Principal</td>
+      <td>Given a blank whiteboard and a set of requirements, can you derive the architecture from physics?</td>
+    </tr>
+  </tbody>
+</table>
+
+> **For question contributors:** When writing a new question, ask yourself: *"What scope of reasoning does this require?"* If the answer is "name the concept," it's L3. If it's "diagnose this system," it's L4. If it's "predict what happens when X changes," it's L5. If it's "derive the solution from constraints," it's L6+.
 
 ---
 
@@ -732,23 +445,29 @@ We welcome questions from recent AI systems interviews.
 
 ### Question Format
 
-Every question follows this structure. Not all fields are required; use **Common Mistake** and **Napkin Math** where they add value.
+Every question follows this structure. The **Interviewer** prompt is visible as the question; the answer is hidden behind a "Reveal Answer" fold so readers can quiz themselves. Not all fields are required; use **Common Mistake** and **Napkin Math** where they add value.
 
 ```markdown
 <details>
-<summary><b>[LEVEL BADGE]: [Question Title]</b> · <code>topic-tag</code> · <code>☁️ cloud</code></summary>
+<summary><b>[LEVEL BADGE]: [Question Title]</b> · <code>topic-tag</code></summary>
 
-**Interviewer:** [The scenario or crisis]
+- **Interviewer:** [The scenario or crisis]
 
-**Common Mistake:** [What most people say wrong — creates the "aha" moment]
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
 
-**Realistic Solution:** [The physics/logic behind the correct answer]
+  **Common Mistake:** [What most people say wrong — creates the "aha" moment]
 
-> **Napkin Math:** [Quick back-of-envelope calculation with real numbers]
+  **Realistic Solution:** [The physics/logic behind the correct answer]
 
-> **Key Equation:** $[The formula to memorize]$
+  > **Napkin Math:** [Quick back-of-envelope calculation with real numbers]
 
-**📖 Deep Dive:** [Link to the relevant textbook chapter]
+  > **Key Equation:** $[The formula to memorize]$
+
+  📖 **Deep Dive:** [Link to the relevant textbook chapter]
+
+  </details>
+
 </details>
 ```
 
