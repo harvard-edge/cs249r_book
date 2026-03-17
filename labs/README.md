@@ -28,17 +28,9 @@ Content may be incomplete or change without notice. The published curriculum liv
 
 Co-Labs are interactive [Marimo](https://marimo.io) notebooks that bridge the gap between **reading about ML systems** (the textbook) and **building them from scratch** (TinyTorch). Every lab runs in your browser via WebAssembly — no installation required.
 
-```text
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│                 │     │                 │     │                 │
-│    Textbook     │────▶│    Co-Labs      │────▶│    TinyTorch    │
-│                 │     │                 │     │                 │
-│  Concepts &     │     │  Predict &      │     │  Build from     │
-│  Theory         │     │  Discover       │     │  Scratch        │
-│                 │     │                 │     │                 │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-      READ                    EXPLORE                  BUILD
-```
+<p align="center">
+  <img src="labs-flow.svg" alt="Textbook to Co-Labs to TinyTorch learning flow" width="600">
+</p>
 
 ## How Labs Work
 

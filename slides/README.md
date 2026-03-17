@@ -16,7 +16,7 @@ Content may be incomplete or change without notice. The published curriculum liv
 
 # ML Systems Lecture Slides
 
-Beamer slide decks for the ML Systems textbook lecture series.
+Beamer slide decks for the ML Systems textbook. One deck per chapter, ready to drop into your course.
 
 ## Quick Start
 
@@ -25,52 +25,54 @@ cd slides/vol1/01_introduction
 xelatex 01_introduction.tex   # Compile (run twice for navigation)
 ```
 
+## Coverage
+
+<table>
+  <thead>
+    <tr>
+      <th width="25%">Volume</th>
+      <th width="15%">Chapters</th>
+      <th width="60%">Topics</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Volume I</b></td>
+      <td align="center">17 decks</td>
+      <td>Course overview, Introduction through Responsible Engineering, Conclusion</td>
+    </tr>
+    <tr>
+      <td><b>Volume II</b></td>
+      <td align="center">9 decks</td>
+      <td>Course overview, Compute Infrastructure through Inference</td>
+    </tr>
+  </tbody>
+</table>
+
 ## Structure
+
+Each chapter is **self-contained**. All images live in `<chapter>/images/`. The only shared assets are the Beamer theme and logos.
 
 ```
 slides/
-├── README.md                   # This file
 ├── assets/
-│   ├── beamerthememlsys.sty    # Shared Beamer theme (DO NOT MODIFY per-chapter)
-│   ├── beamerthememlsys-midnight.sty  # Dark mode variant
-│   ├── beamerthememlsys-minimal.sty   # Ultra-clean variant
-│   ├── beamerthememlsys-nature.sty    # Earth tones variant
-│   └── img/
-│       ├── logo-mlsysbook.png  # Shared logos
-│       └── logo-harvard.png
-├── _build/
-│   ├── vol1/                   # Compiled PDFs
-│   └── theme-previews/         # Theme comparison PDFs
-├── vol1/                       # Volume I decks (16 chapters)
+│   ├── beamerthememlsys.sty    # Beamer theme (Crimson)
+│   └── img/                    # Shared logos
+├── vol1/                       # Volume I decks (17 chapters)
 │   ├── 01_introduction/
 │   │   ├── 01_introduction.tex
-│   │   └── images/             # All images for this deck
+│   │   └── images/
 │   └── ...
-└── vol2/                       # Volume II decks (future)
+└── vol2/                       # Volume II decks (9 chapters)
+    ├── 01_introduction/
+    └── ...
 ```
 
-**Key rule**: Each chapter is **self-contained**. All images live in `<chapter>/images/`.
-The only shared assets are the Beamer theme and logos. `\graphicspath` should be `{images/}` only.
+## Theme
 
-## Theme Variants
+The default theme is **Crimson**: Harvard crimson accents, white background, branded footer. All decks share a common API (`\mlsystitle`, `\mlsysfocus`, `\mlsyscard`, etc.).
 
-Swap themes by changing one line in the `.tex` file:
-
-| Theme | File | Character |
-|:------|:-----|:----------|
-| **Crimson** (default) | `beamerthememlsys.sty` | Harvard crimson, white bg, branded footer |
-| **Midnight** | `beamerthememlsys-midnight.sty` | Dark navy bg, cyan accents |
-| **Minimal** | `beamerthememlsys-minimal.sty` | No header, steel blue, maximum content space |
-| **Nature** | `beamerthememlsys-nature.sty` | Forest green accents, warm earth tones |
-
-All themes share the same API (`\mlsystitle`, `\mlsysfocus`, `\mlsyscard`, etc.).
-
-## Visual Assets
-
-Each chapter's `images/` folder contains all visual assets for that deck:
-- **SVG-derived PDFs** — custom diagrams following the book's SVG style guide
-- **Photos** — real-world hardware, data centers, devices (CC-licensed)
-- **Book figures** — copied into the chapter folder (self-contained)
+Adopting instructors who want a different look can create their own variant by copying `beamerthememlsys.sty` and adjusting the color definitions. The API stays the same, so no `.tex` files need to change.
 
 ## Contributing
 

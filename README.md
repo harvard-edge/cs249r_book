@@ -28,8 +28,8 @@
 </p>
 
 <p align="center">
-  <b><a href="https://mlsysbook.ai">📘 Volume I</a></b> •
-  <b>📙 Volume II <i>(Summer 2026)</i></b> •
+  <b><a href="https://mlsysbook.ai">📘 Textbook (current edition)</a></b> •
+  <b>📙 Vol I + Vol II <i>(Summer 2026)</i></b> •
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
   <b><a href="mlsysim/README.md">🔮 MLSys·im <i>(dev)</i></a></b> •
   <b><a href="interviews/README.md">💼 Interview Playbook <i>(dev)</i></a></b> •
@@ -60,9 +60,13 @@ That gap is what we mean by AI engineering.
 
 ## Why One Repository
 
-I designed this as a single integrated curriculum, not a collection of independent projects. The textbook teaches the theory. TinyTorch makes you build the internals. The hardware kits force you to confront real constraints. The simulator lets you reason about infrastructure you can't afford to rent. Each piece exists because I found that students who only read don't internalize, and students who only code don't generalize.
+I designed this as a single integrated curriculum, not a collection of independent projects. The textbook teaches the theory. TinyTorch makes you *build* the internals. The hardware kits force you to confront *real* constraints. The simulator lets you reason about infrastructure you can't afford to rent. Each piece exists because I found that students who only read don't internalize, and students who only code don't generalize.
 
-The repository is the curriculum.
+<div align="center">
+  <blockquote>
+    <b>The repository is the curriculum.</b>
+  </blockquote>
+</div>
 
 A growing community of contributors helps improve every part of it: fixing errors, sharpening explanations, testing on new hardware. Their work makes this better for everyone, and I'm grateful for every pull request.
 
@@ -92,7 +96,7 @@ Every component connects. The textbook gives you the mental models. The labs let
       <td align="center">📖</td>
       <td><b>Textbook</b></td>
       <td>Two-volume MIT Press textbook. The theory, the mental models, and the quantitative reasoning that everything else builds on.</td>
-      <td><a href="https://mlsysbook.ai">Volume I</a> · Volume II <i>(Summer 2026)</i></td>
+      <td><a href="https://mlsysbook.ai">Current edition</a> · Vol I + II <i>(Summer 2026)</i></td>
     </tr>
     <tr>
       <td align="center">🔬</td>
@@ -110,7 +114,7 @@ Every component connects. The textbook gives you the mental models. The labs let
       <td align="center">🛠️</td>
       <td><b>Hardware Kits</b></td>
       <td>Deploy ML to Arduino, Raspberry Pi, and Jetson. Real memory limits, real power budgets, real latency.</td>
-      <td><a href="kits/README.md">Browse labs</a> <i>(dev)</i></td>
+      <td><a href="https://mlsysbook.ai/kits">Browse labs</a></td>
     </tr>
     <tr>
       <td align="center">🔮</td>
@@ -231,11 +235,11 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
   <tbody>
     <tr>
       <td width="10%" align="center"><b>1</b></td>
-      <td><b>Read the textbook.</b> Start with <a href="https://mlsysbook.ai">Volume I</a>. It's the foundation for everything else.</td>
+      <td><b>Read the textbook.</b> Start with the <a href="https://mlsysbook.ai">current edition</a>. It's the foundation for everything else.</td>
     </tr>
     <tr>
       <td width="10%" align="center"><b>2</b></td>
-      <td><b>Pick a hands-on path.</b> <a href="https://mlsysbook.ai/tinytorch/">Build a framework</a> (TinyTorch), <a href="labs/README.md">explore trade-offs</a> (Labs), or <a href="kits/README.md">deploy to real hardware</a> (Kits).</td>
+      <td><b>Pick a hands-on path.</b> <a href="https://mlsysbook.ai/tinytorch/">Build a framework</a> (TinyTorch), <a href="labs/README.md">explore trade-offs</a> (Labs), or <a href="https://mlsysbook.ai/kits">deploy to real hardware</a> (Kits).</td>
     </tr>
     <tr>
       <td width="10%" align="center"><b>3</b></td>
@@ -255,57 +259,67 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
 > [!NOTE]
 > **You are on the `dev` branch.** Active development happens here. For the last stable release, see the [`main` branch](https://github.com/harvard-edge/cs249r_book/tree/main).
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          BRANCH STRUCTURE                               │
-├─────────────────────────────────────────────────────────────────────────┤
-│   main (live at mlsysbook.ai)                                           │
-│   └── Single-volume textbook (what readers see today)                   │
-│                                                                         │
-│   dev (default branch, you are here)                                    │
-│   ├── Volume I: Introduction to Machine Learning Systems                │
-│   │      Status: Content complete, undergoing editorial polish          │
-│   ├── Volume II: Machine Learning Systems at Scale                      │
-│   │      Status: Active development, chapters being written             │
-│   ├── TinyTorch, Hardware Kits, MLSys·im, Labs, Interview Playbook     │
-│   │      Status: In development, not yet on the live site               │
-│   └── Two-volume split replaces the single-volume edition at launch     │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+<table>
+  <thead>
+    <tr>
+      <th width="20%">Branch</th>
+      <th width="45%">What's on it</th>
+      <th width="35%">Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b><code>main</code></b><br><a href="https://mlsysbook.ai">mlsysbook.ai</a></td>
+      <td>Single-volume textbook</td>
+      <td>Live. This is what readers see today.</td>
+    </tr>
+    <tr>
+      <td><b><code>dev</code></b> ← you are here</td>
+      <td>
+        Volume I (two-volume split)<br>
+        Volume II: At Scale<br>
+        Tiny🔥Torch, Hardware Kits, MLSys·im, Labs, Interview Playbook
+      </td>
+      <td>
+        Content complete, editorial polish<br>
+        Active development<br>
+        Tiny🔥Torch and Hardware Kits are live; MLSys·im, Labs, Interview Playbook in development
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<p><i>The two-volume split replaces the single-volume edition at launch.</i></p>
 
 ---
 
 ## Support This Work
 
-We are working toward **1 million learners by 2030**. Every star, share, and contribution helps move this effort forward.
-
-### Why GitHub Stars Matter
-
 <div align="center">
-
-<i>What gets measured gets improved.</i>
-
-Each star is a learner or supporter who believes AI systems should be engineered with rigor.
 
 <a href="https://github.com/harvard-edge/cs249r_book/stargazers"><img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold" alt="Stars"></a>
-
-<a href="https://star-history.com/#harvard-edge/cs249r_book&Date"><img src="https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date" alt="Star History Chart"></a>
-
-100 → 1,000 → <b>10,000</b> → 100,000 → <b>1M learners</b>
+&nbsp;&nbsp;
+<a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Fund-Open%20Collective-blue.svg?style=for-the-badge&logo=open-collective" alt="Open Collective"></a>
 
 </div>
 
-Stars are a signal that universities, foundations, and industry partners use to fund workshops and hardware kits for underserved classrooms.
-
-### Fund the Mission
-
-<div align="center">
-
-All contributions go to <a href="https://opencollective.com/mlsysbook">Open Collective</a>, a transparent fund that supports educational outreach.
-
-<a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Support%20AI%20Education-Open%20Collective-blue.svg?style=for-the-badge&logo=open-collective" alt="Open Collective"></a>
-
-</div>
+<table>
+  <tbody>
+    <tr>
+      <td width="50%" align="center">
+        <b>Star the repo</b><br>
+        Stars signal to universities and foundations that this work matters. They directly fund workshops and hardware kits for underserved classrooms.<br><br>
+        <a href="https://star-history.com/#harvard-edge/cs249r_book&Date"><img src="https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date" alt="Star History Chart" width="400"></a><br>
+        100 → 1,000 → <b>10,000</b> → 100,000 → <b>1M learners by 2030</b>
+      </td>
+      <td width="50%" align="center">
+        <b>Fund the mission</b><br>
+        All contributions go to <a href="https://opencollective.com/mlsysbook">Open Collective</a>, a transparent fund for educational outreach. Every dollar goes to reaching more students.<br><br>
+        <a href="https://opencollective.com/mlsysbook"><img src="https://opencollective.com/mlsysbook/tiers/badge.svg" alt="Open Collective"></a>
+      </td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 
