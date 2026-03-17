@@ -1,17 +1,20 @@
-# Round 2: Edge Advanced — Memory, Architecture & Deployment 🏭
+# Round 2: Constraints & Trade-offs ⚖️
 
 <div align="center">
   <a href="../README.md">🏠 Home</a> ·
   <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
-  <a href="01_Edge_Systems.md">🤖 Edge Round 1</a> ·
-  <a href="02_Edge_Advanced.md">🏭 Edge Round 2</a>
+  <a href="01_Edge_Systems.md">🤖 Round 1</a> ·
+  <a href="02_Edge_Constraints.md">⚖️ Round 2</a> ·
+  <a href="03_Edge_Ops_and_Deployment.md">🚀 Round 3</a> ·
+  <a href="04_Edge_Visual_Debugging.md">🖼️ Round 4</a> ·
+  <a href="05_Edge_Advanced.md">🔬 Round 5</a>
 </div>
 
 ---
 
-This round expands the Edge track into memory management under shared DRAM, architecture selection for real-time vision, model optimization ladders, deployment and OTA, and security against physical-world adversarial attacks.
+Every edge system is a negotiation between competing constraints: memory budgets, thermal envelopes, quantization accuracy, architecture choices, latency deadlines, and power caps. This round tests whether you can reason about these trade-offs quantitatively — not just name them, but calculate the consequences.
 
-> **[➕ Add a Flashcard](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/edge/02_Edge_Advanced.md)** (Edit in Browser) — see [README](../README.md#question-format) for the template.
+> **[➕ Add a Flashcard](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/edge/02_Edge_Constraints.md)** (Edit in Browser) — see [README](../README.md#question-format) for the template.
 
 ---
 
@@ -43,6 +46,22 @@ This round expands the Edge track into memory management under shared DRAM, arch
 **Realistic Solution:** The Hailo-8 is a dataflow architecture — it maps the entire model graph onto a spatial pipeline of physical compute units. Activations flow between stages through on-chip buffers without ever touching external DRAM. The Orin NX is a GPU — it executes layers sequentially, reading weights and activations from LPDDR5 between each layer. For YOLOv8-S (arithmetic intensity ~516 Ops/Byte), the Orin is memory-bandwidth bound: its 102.4 GB/s LPDDR5 limits effective throughput to ~50 TOPS. The Hailo eliminates the DRAM bottleneck entirely, so its 26 TOPS are nearly fully utilized. Effective throughput: Hailo ~24 TOPS (92%) vs Orin ~35 TOPS (35%). The dataflow architecture changes the shape of the roofline itself — there is no memory wall.
 
 > **Napkin Math:** Hailo-8: 26 TOPS peak, ~92% utilization (no DRAM stalls) = 24 TOPS effective. Per-frame: 28.4 GFLOPs / 24 TOPS = 1.18ms → ~28 FPS with overhead. Orin NX: 100 TOPS peak, bandwidth-limited to ~50 TOPS, 35% utilization = 35 TOPS effective. Per-frame: 28.4G / 35T = 0.81ms compute + ~28ms memory stalls → ~35 FPS. Power: Hailo at 2.5W = 11.2 FPS/W. Orin at 15W = 2.3 FPS/W. The Hailo is **4.9× more power-efficient** for this workload.
+
+**📖 Deep Dive:** [Volume I: HW Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The DLA vs GPU Partition</b> · <code>roofline</code></summary>
+
+**Interviewer:** "The Jetson Orin has both a GPU and two DLA (Deep Learning Accelerator) engines. Your colleague runs the entire YOLOv8-S model on the GPU and gets 35 FPS. You suggest splitting the model: backbone on the DLA, detection head on the GPU. Your colleague says 'that's more complex for no benefit — the GPU is faster.' Is your colleague right?"
+
+**Common Mistake:** "The GPU is always faster because it has more TOPS." This ignores that the DLA and GPU can run in parallel.
+
+**Realistic Solution:** Your colleague is right that the GPU alone is faster for a *single model*. But the DLA and GPU can execute concurrently — they are independent compute engines, though they share the same LPDDR5 memory bus and MMU. If you run the backbone on the DLA (15ms) while the GPU runs a tracking model (8ms), both execute in parallel. The detection head then runs on the GPU (5ms) after the DLA finishes. The caveat: because DLA and GPU share memory bandwidth, running both simultaneously increases individual latencies by 10-20% due to DRAM contention. Adjusted: DLA backbone ~17ms (parallel with GPU tracker ~9ms) + GPU head 5ms = 22ms. Still much better than sequential GPU: 28 + 8 = 36ms. The DLA/GPU split gives **~1.6× higher pipeline throughput** by exploiting hardware parallelism, even accounting for bandwidth contention. The benefit is largest when at least one workload is compute-bound rather than memory-bound.
+
+> **Napkin Math:** GPU-only pipeline: detection 28ms + tracking 8ms = 36ms → 27 FPS. DLA+GPU pipeline (with ~15% bandwidth contention): DLA backbone 17ms (parallel with GPU tracker 9ms) + GPU head 5ms = 22ms → 45 FPS. Speedup: 1.6×. Power: DLA at 5W + GPU at 15W = 20W vs GPU-only at 15W for 36ms. Energy per frame: DLA+GPU = 20W × 22ms = 0.44J. GPU-only = 15W × 36ms = 0.54J. The split is **19% more energy-efficient**.
+
+> **Key Equation:** $t_{\text{pipeline}} = \max(t_{\text{DLA}} \times (1 + \text{contention}), t_{\text{GPU\_parallel}} \times (1 + \text{contention})) + t_{\text{GPU\_sequential}}$
 
 **📖 Deep Dive:** [Volume I: HW Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
 </details>
@@ -179,6 +198,74 @@ This round expands the Edge track into memory management under shared DRAM, arch
 **📖 Deep Dive:** [Volume I: Benchmarking](https://mlsysbook.ai/vol1/benchmarking.html)
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Resolution-Accuracy Pareto</b> · <code>architecture</code></summary>
+
+**Interviewer:** "Your edge camera system needs to detect people at distances from 5m to 100m. Your 4K camera (3840×2160) feeds a YOLOv8-M detector, but running at full 4K resolution takes 85ms — far over your 33ms budget. Your colleague says 'just resize to 640×640.' What critical information does resizing destroy, and how do you design a system that meets the deadline while preserving long-range detection?"
+
+**Common Mistake:** "Resize to 640×640 and accept the accuracy loss." This treats resolution as a single knob when it's actually a spatial information budget.
+
+**Realistic Solution:** Resizing 4K to 640×640 is a 6× downscale. A person at 100m occupies roughly 20 pixels tall in 4K. After resizing: 20/6 ≈ 3 pixels — below the minimum receptive field for any detector. You've made long-range detection physically impossible. The fix is a **multi-scale tiling strategy**: (1) run a lightweight classifier on the full 4K frame at low resolution to identify regions of interest (ROIs), (2) crop and run the full detector only on the ROIs at native resolution. For a scene with 3 ROIs: 3 × 640×640 crops × 20ms each = 60ms sequential, but you can batch them: 3 crops in one batch = ~25ms on TensorRT. Alternative: use a fixed tiling scheme — divide 4K into 6 overlapping 1280×720 tiles, run detection on each, merge with NMS. At 12ms per tile (smaller than full 4K): 6 × 12ms = 72ms sequential, but with 2-tile batching on the GPU: 3 batches × 15ms = 45ms. Still over budget. The real solution: run tiles on the DLA and GPU in parallel — 3 tiles on DLA (45ms) + 3 tiles on GPU (45ms) = 45ms total with full parallelism. Add a temporal skip: only re-tile every 3rd frame, using tracking to interpolate. Effective rate: 45ms / 3 = 15ms amortized → 66 FPS equivalent.
+
+> **Napkin Math:** Person at 100m in 4K: ~20 pixels tall. After 6× resize: ~3 pixels → undetectable. With tiling (6 × 1280×720): person stays at ~10 pixels in each tile → detectable. Compute: 6 tiles × 12ms = 72ms sequential. With DLA+GPU parallel: 36ms. With temporal skip (every 3rd frame): 12ms amortized. Accuracy: ~95% of full-4K detection at 1/7th the compute.
+
+**📖 Deep Dive:** [Volume I: Network Architectures](https://mlsysbook.ai/vol1/nn_architectures.html)
+</details>
+
+---
+
+### 🧠 Edge LLM & Generative AI
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Edge LLM Memory Wall</b> · <code>memory</code> <code>kv-cache</code></summary>
+
+**Interviewer:** "You're deploying a 3B parameter small language model (Phi-3-mini) on a Jetson Orin NX with 8 GB DRAM. The model weights in INT4 are 1.5 GB. Your colleague says 'plenty of room — we have 6.5 GB free.' The first few conversation turns work fine, but at turn 15 the system crashes with an OOM error. What's consuming the memory?"
+
+**Common Mistake:** "The model is leaking memory" or "Activations are too large." The weights are static and activations are small for a single-token decode step. The growing cost is something else.
+
+**Realistic Solution:** The KV-cache. During autoregressive generation, the model stores the key and value tensors for every token generated so far, across every layer. For Phi-3-mini (32 layers, 32 heads, head_dim=96): KV-cache per token = 2 (K+V) × 32 layers × 32 heads × 96 dim × 2 bytes (FP16) = 393 KB per token. At turn 15 of a conversation with ~2000 tokens of context: 2000 × 393 KB = **786 MB**. Add the model weights (1.5 GB), OS and sensor overhead (~3.5 GB on the 8 GB Orin NX), and you're at 5.8 GB — dangerously close to the 8 GB limit. By turn 20 (~3000 tokens): KV-cache = 1.15 GB, total = 6.2 GB. A spike in OS memory usage (camera ISP burst) pushes you over the edge.
+
+Fixes: (1) **KV-cache quantization** — quantize the KV-cache to INT4 (4× reduction): 786 MB → 196 MB. Accuracy impact is minimal for most conversational tasks. (2) **Sliding window attention** — only keep the last N tokens in the KV-cache (e.g., N=1024). Older context is summarized into a compressed representation. (3) **Context length limit** — hard-cap at 2048 tokens and force conversation summarization before hitting the limit. (4) **Memory-mapped KV-cache** — spill older KV entries to NVMe SSD and page them back on demand, trading latency for memory.
+
+> **Napkin Math:** Phi-3-mini KV-cache: 393 KB/token. At 2048 tokens: 786 MB. At 4096 tokens: 1.57 GB. With INT4 KV quantization: 196 MB at 2048 tokens. Memory budget on 8 GB Orin NX: 8 GB - 3.5 GB (OS) - 1.5 GB (weights) = 3 GB for KV-cache. Max tokens without quantization: 3 GB / 393 KB = ~7,800 tokens. With INT4 KV: ~31,000 tokens. KV quantization is mandatory for edge LLMs.
+
+> **Key Equation:** $\text{KV-cache (bytes)} = 2 \times L \times H \times d_h \times n_{\text{tokens}} \times \text{bytes per element}$
+
+**📖 Deep Dive:** [Volume I: Model Serving](https://mlsysbook.ai/vol1/model_serving.html)
+</details>
+
+---
+
+### 📷 Sensor & ISP Pipeline
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The First-Frame Latency</b> · <code>latency</code> <code>sensor-fusion</code></summary>
+
+**Interviewer:** "Your smart doorbell camera triggers on motion and runs person detection. The ML model takes 30ms. But users complain that the system misses the first 500ms of action — by the time the first detection fires, the person is already at the door. The model is fast enough. Where is the 470ms going?"
+
+**Common Mistake:** "The model needs to be faster." At 30ms, the model is not the bottleneck. The delay is upstream.
+
+**Realistic Solution:** The 500ms delay is the **ISP (Image Signal Processor) convergence time**. When the camera wakes from low-power sleep mode, the ISP must:
+
+(1) **Sensor power-up and clock stabilization:** ~50ms for the CMOS sensor to stabilize its PLL and begin outputting valid pixel data.
+
+(2) **Auto-Exposure (AE) convergence:** The ISP adjusts exposure time and gain based on scene brightness. Starting from default settings, AE typically needs 3-5 frames to converge. At 30 FPS: 5 × 33ms = **165ms**. During convergence, frames are either too dark or too bright for reliable detection.
+
+(3) **Auto-White Balance (AWB) convergence:** Color correction needs 2-3 frames after AE stabilizes: ~100ms.
+
+(4) **Auto-Focus (AF):** If the lens has AF, it needs 100-200ms to find focus. Many edge cameras use fixed-focus to avoid this.
+
+(5) **First valid frame to ML pipeline:** After ISP convergence, the first usable frame enters the detection pipeline: 30ms inference + 10ms post-processing = 40ms.
+
+Total: 50 + 165 + 100 + 40 = **355ms** minimum. With AF: 555ms.
+
+Fixes: (1) **Circular buffer with always-on sensor** — keep the camera running at low resolution (320×240, minimal power) continuously. On motion trigger, the last 1 second of low-res frames is already in the buffer. Run detection on the buffered frames immediately while the ISP converges to full resolution. (2) **Pre-configured ISP** — store the last-known AE/AWB settings and apply them on wake-up. Convergence drops from 5 frames to 1-2 frames. (3) **Low-power motion detection** — use a separate low-power PIR sensor or always-on low-res camera for motion detection, keeping the main camera in a warm standby (ISP powered, sensor streaming but not processing) that reduces wake time to ~50ms.
+
+> **Napkin Math:** Full cold start: 50ms (sensor) + 165ms (AE) + 100ms (AWB) + 40ms (inference) = 355ms. With pre-configured ISP: 50ms + 33ms (1 frame AE) + 33ms (1 frame AWB) + 40ms = 156ms. With warm standby: 0ms (sensor) + 33ms (AE fine-tune) + 40ms (inference) = 73ms. With circular buffer: first detection available from buffered frame in 40ms, full-res detection in 156ms.
+
+**📖 Deep Dive:** [Volume I: Data Engineering](https://mlsysbook.ai/vol1/data_engineering.html)
+</details>
+
 ---
 
 ### ⏱️ Latency & Throughput
@@ -265,94 +352,16 @@ The controller monitors per-frame inference time with an exponential moving aver
 **📖 Deep Dive:** [Volume II: Sustainable AI](https://mlsysbook.ai/vol2/sustainable_ai.html)
 </details>
 
----
-
-### 🔧 Model Optimization
-
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Optimization Ladder</b> · <code>optimization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Solar-Powered Edge Budget</b> · <code>thermal</code> <code>power</code></summary>
 
-**Interviewer:** "Your YOLOv8-S runs at 15 FPS on a Jetson Orin NX. You need 30 FPS. Your team immediately starts designing a custom smaller architecture. Why is this the wrong first step?"
+**Interviewer:** "You're designing an edge AI wildlife monitoring station powered by a 20W solar panel and a 100Wh battery. The station runs a bird species classifier on a Google Coral (4 TOPS, 2W) with a camera. The system must operate 24/7 in a remote forest with 5 hours of usable sunlight per day. Design the power budget and determine the maximum inference rate you can sustain."
 
-**Common Mistake:** "We need a smaller model — let's try YOLOv8-N or train a custom architecture." Architecture changes are the most expensive optimization and should be the last resort.
+**Common Mistake:** "20W panel × 5 hours = 100Wh, which exactly matches the battery — we can run continuously." This ignores system overhead, solar conversion losses, and seasonal variation.
 
-**Realistic Solution:** Follow the optimization ladder — a prioritized sequence from cheapest to most expensive:
+**Realistic Solution:** Start from the energy budget. Solar input: 20W × 5h × 0.8 (panel efficiency loss from angle, clouds, dirt) = **80Wh/day**. System consumers: (1) Coral TPU during inference: 2W, (2) camera module: 0.5W, (3) Raspberry Pi host: 3W idle / 5W active, (4) cellular modem (burst uploads): 3W for 10 min/day = 0.5Wh, (5) system overhead (voltage regulator, watchdog): 0.5W constant = 12Wh/day. Fixed daily cost: 12Wh (overhead) + 0.5Wh (modem) = 12.5Wh. Remaining for compute: 80 - 12.5 = **67.5Wh**. Active power (camera + Pi + Coral): 0.5 + 5 + 2 = 7.5W. Idle power (Pi sleep + watchdog): 0.5 + 0.5 = 1W. Maximum active hours: solve $7.5 \times t_{active} + 1 \times (24 - t_{active}) = 67.5$. $6.5 \times t_{active} = 43.5$. $t_{active} = 6.7$ hours/day. At 10 inferences/second during active hours: 6.7h × 3600s × 10 = **241,200 inferences/day**. But birds are most active at dawn and dusk (~4 hours). Schedule active periods to match: 4h active (dawn/dusk) + 2.7h active (midday sampling) = 6.7h. Reserve 20% battery for cloudy days: effective active time = 5.4h → **194,000 inferences/day**.
 
-**Step 1: TensorRT with FP16** (effort: minutes). Export your PyTorch model to ONNX, compile with TensorRT. Layer fusion, kernel auto-tuning, and FP16 Tensor Core utilization typically give 1.5-2× speedup for free. 15 FPS → 22-30 FPS.
+> **Napkin Math:** Solar: 80Wh/day. Fixed overhead: 12.5Wh. Compute budget: 67.5Wh. Active power: 7.5W. Max active time: 6.7h. At 10 inf/s: 241K inferences/day. With 20% reserve: 194K/day. Battery can sustain ~13h of active operation without sun (100Wh / 7.5W), providing 1.5 cloudy days of buffer.
 
-**Step 2: INT8 quantization** (effort: hours). Calibrate with 1000 representative images. Another 1.5-2× on top of FP16. 22 FPS → 33-44 FPS.
-
-**Step 3: Input resolution reduction** (effort: minutes). Drop from 640×640 to 512×512 or 480×480. FLOPs scale quadratically with resolution: (480/640)² = 0.56× FLOPs. Accuracy drops ~1-2% mAP.
-
-**Step 4: Structured pruning** (effort: days). Remove channels with lowest L1-norm. 20-40% channel reduction for 1-2% mAP loss. Requires fine-tuning.
-
-**Step 5: Architecture change** (effort: weeks-months). Only if steps 1-4 are insufficient. Design or adopt a smaller architecture (YOLOv8-N, EfficientDet-Lite).
-
-Most teams jump straight to Step 5, leaving 3-4× of free performance on the table from Steps 1-2.
-
-> **Napkin Math:** Baseline (PyTorch FP32): 15 FPS. After Step 1 (TensorRT FP16): 15 × 1.8 = 27 FPS. After Step 2 (INT8): 27 × 1.7 = 46 FPS. Already 1.5× over target — no need for Steps 3-5. Engineering time: 2 hours vs 2 months for a custom architecture.
-
-**📖 Deep Dive:** [Volume I: Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
-</details>
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Pruning Paradox</b> · <code>optimization</code></summary>
-
-**Interviewer:** "You structured-pruned 40% of channels from your detection model. FLOPs dropped 40%. But when you benchmark on the Hailo-8, latency only dropped 10%. On the Jetson Orin, it dropped 35%. Why does the same pruning give wildly different speedups on different hardware?"
-
-**Common Mistake:** "The Hailo's compiler isn't optimized for pruned models." The compiler is fine — the issue is architectural.
-
-**Realistic Solution:** Edge accelerators have fundamentally different execution models. The **Jetson Orin (GPU)** executes layers as CUDA kernels with configurable thread blocks. Fewer channels = fewer threads = proportional speedup (with some overhead). The **Hailo-8 (dataflow)** maps the model onto a fixed spatial pipeline at compile time. Each layer is assigned physical compute units based on its original shape. When you prune a layer from 64 to 38 channels, the Hailo's compiler must still allocate compute units in multiples of its native SIMD width (typically 8 or 16). A 38-channel layer executes as if it had 48 channels (rounded up to the next multiple of 16), wasting 21% of the allocated compute. Across many layers, these rounding penalties accumulate, eroding the theoretical 40% FLOP reduction to a 10% latency reduction. Fix: use **hardware-aware pruning** that constrains channel counts to multiples of the target hardware's native width. Prune from 64 to 32 channels (50% reduction, but hardware-aligned) instead of 64 to 38 (41% reduction, but misaligned).
-
-> **Napkin Math:** 10 layers, each pruned from 64 to 38 channels. Hailo SIMD width = 16. Effective channels per layer: 48 (rounded up). Effective FLOP reduction: (64-48)/64 = 25%, not 40%. With hardware-aware pruning to 32 channels: effective reduction = 50%, and every channel is utilized. Latency improvement: Hailo ~45% (vs 10% naive), Orin ~48% (vs 35% naive).
-
-**📖 Deep Dive:** [Volume I: Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
-</details>
-
----
-
-### 🚀 Deployment
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The A/B Partition Scheme</b> · <code>deployment</code></summary>
-
-**Interviewer:** "You manage 10,000 edge cameras deployed across a city. You need to update the detection model on all of them. Your colleague says 'just SSH in and copy the new model file.' What are the four ways this can catastrophically fail, and what is the correct deployment architecture?"
-
-**Common Mistake:** "OTA updates are just file copies — what could go wrong?" Everything.
-
-**Realistic Solution:** Four failure modes of naive OTA: (1) **Power loss during write** — the camera loses power mid-copy. The old model is partially overwritten, the new model is incomplete. The device boots to a corrupted model and is bricked. No one can physically access a camera on a pole 30 feet up. (2) **Storage exhaustion** — the new model must coexist with the old model during the copy. If storage is 80% full with video buffer, there's no room for both. (3) **Runtime incompatibility** — the new model was compiled for TensorRT 8.6 but the device runs 8.5. Inference crashes or produces garbage. (4) **Fleet-wide failure** — pushing to all 10,000 devices simultaneously means a bad model bricks the entire fleet at once.
-
-The correct architecture is **A/B partitioning**: the device has two model slots (A and B). The running system uses slot A. The new model is written to slot B while A continues serving. After the write completes, the device runs a validation check — inference on a test image with a known-good output hash. Only if validation passes does the bootloader atomically switch the active pointer to B. If validation fails, or if the device fails to boot from B (watchdog timeout), it automatically reverts to A. Roll out in waves: 1% → 10% → 50% → 100%, with automatic rollback if >5% of any wave reports failure.
-
-> **Napkin Math:** Model: 12 MB. A/B slots: 24 MB reserved. OTA over LTE (5 Mbps): 12 MB × 8 / 5 Mbps = 19.2 seconds per device. Wave 1 (100 devices): 20s transfer + 10 min validation. Wave 2 (900): 20s + 10 min. Wave 3 (4000): 20s + 10 min. Wave 4 (5000): 20s. Total safe rollout: ~40 minutes. Naive push to all 10,000: 20 seconds — but one bad model = 10,000 bricked cameras.
-
-**📖 Deep Dive:** [Volume I: ML Operations](https://mlsysbook.ai/vol1/ml_ops.html)
-</details>
-
----
-
-### 🔒 Security
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Adversarial Patch Attack</b> · <code>security</code></summary>
-
-**Interviewer:** "Your autonomous vehicle's camera-based detection system correctly identifies stop signs 99.9% of the time. A security researcher demonstrates that a carefully designed sticker (an adversarial patch) placed on a stop sign causes your model to classify it as a speed limit sign with 95% confidence. Your model is state-of-the-art. How do you defend against this?"
-
-**Common Mistake:** "Retrain the model with adversarial examples" or "Add input preprocessing to detect patches." Adversarial training helps but is an arms race — new patches can always be designed. Input preprocessing is easily circumvented.
-
-**Realistic Solution:** Defense in depth — no single layer is sufficient:
-
-(1) **Multi-sensor fusion** — LiDAR and radar see a physical object at the stop sign's location regardless of the visual patch. If camera says "speed limit" but LiDAR says "vertical planar object at expected stop sign height," the fusion layer flags a conflict.
-
-(2) **Temporal consistency** — a real stop sign doesn't change classification frame-to-frame. If the sign is "stop" for 28 frames, "speed limit" for 2 frames, then "stop" again, the temporal filter rejects the transient misclassification.
-
-(3) **HD map priors** — the map database says there's a stop sign at this GPS coordinate. If the model disagrees with the map, trust the map for safety-critical decisions and flag the discrepancy for review.
-
-(4) **Ensemble disagreement** — run two architecturally different models (e.g., CNN and ViT). Adversarial patches are typically crafted for a specific architecture. If the two models disagree, escalate to the safety system.
-
-(5) **Behavioral safety** — regardless of classification, if the vehicle is approaching an intersection, reduce speed. The sign classification informs behavior but doesn't override geometric safety rules.
-
-> **Napkin Math:** Single-model vulnerability: 1 adversarial patch defeats 1 model. With 2 independent models: attacker must defeat both simultaneously — success rate drops from ~95% to ~5% (assuming independent failure). With map prior: attacker must also spoof GPS or compromise the map database. With temporal filter (majority vote over 30 frames): attacker must sustain misclassification for >15 consecutive frames — much harder with a physical patch that only works at specific viewing angles.
-
-**📖 Deep Dive:** [Volume II: Robust AI](https://mlsysbook.ai/vol2/robust_ai.html)
+**📖 Deep Dive:** [Volume II: Sustainable AI](https://mlsysbook.ai/vol2/sustainable_ai.html)
 </details>

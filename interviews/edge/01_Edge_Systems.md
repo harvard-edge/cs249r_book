@@ -3,8 +3,11 @@
 <div align="center">
   <a href="../README.md">🏠 Home</a> ·
   <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
-  <a href="01_Edge_Systems.md">🤖 Edge Round 1</a> ·
-  <a href="02_Edge_Advanced.md">🏭 Edge Round 2</a>
+  <a href="01_Edge_Systems.md">🤖 Round 1</a> ·
+  <a href="02_Edge_Constraints.md">⚖️ Round 2</a> ·
+  <a href="03_Edge_Ops_and_Deployment.md">🚀 Round 3</a> ·
+  <a href="04_Edge_Visual_Debugging.md">🖼️ Round 4</a> ·
+  <a href="05_Edge_Advanced.md">🔬 Round 5</a>
 </div>
 
 ---

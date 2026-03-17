@@ -1,17 +1,20 @@
-# Round 2: Mobile Advanced — Architecture, Optimization & Privacy 🔋
+# Round 2: Mobile Constraints — Architecture, Precision & Power ⚖️
 
 <div align="center">
   <a href="../README.md">🏠 Home</a> ·
   <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
-  <a href="01_Mobile_Systems.md">📱 Mobile Round 1</a> ·
-  <a href="02_Mobile_Advanced.md">🔋 Mobile Round 2</a>
+  <a href="01_Mobile_Systems.md">📱 Round 1</a> ·
+  <a href="02_Mobile_Constraints.md">⚖️ Round 2</a> ·
+  <a href="03_Mobile_Ops_and_Deployment.md">🚀 Round 3</a> ·
+  <a href="04_Mobile_Visual_Debugging.md">🖼️ Round 4</a> ·
+  <a href="05_Mobile_Advanced.md">🔬 Round 5</a>
 </div>
 
 ---
 
-This round expands the Mobile track into compute analysis across heterogeneous SoCs, memory management under app lifecycle pressure, numerical precision during format conversion, architecture selection for on-device models, model optimization for NPU delegation, deployment through app stores, monitoring without ground truth, and privacy-preserving on-device learning.
+This round digs into the constraints that define mobile ML engineering: compute analysis across heterogeneous SoCs, memory management under app lifecycle pressure, numerical precision during format conversion, architecture selection for on-device models, latency budgets under UI thread pressure, and power/thermal trade-offs on battery-powered devices.
 
-> **[➕ Add a Flashcard](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/mobile/02_Mobile_Advanced.md)** (Edit in Browser) — see [README](../README.md#question-format) for the template.
+> **[➕ Add a Flashcard](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/mobile/02_Mobile_Constraints.md)** (Edit in Browser) — see [README](../README.md#question-format) for the template.
 
 ---
 
@@ -315,104 +318,64 @@ The result: for the specific operations the NPU supports (Conv2D, MatMul, poolin
 **📖 Deep Dive:** [Volume I: HW Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Battery Drain Attribution</b> · <code>power</code></summary>
+
+**Interviewer:** "Your ML-powered photo editing app is getting 1-star reviews for battery drain. The PM says 'optimize the model.' You run a power profile and find the model uses 0.3W during inference. The app's total power draw is 3.5W. Where is the other 3.2W going, and how do you attribute battery drain to the correct component?"
+
+**Common Mistake:** "The ML model is the most computationally expensive component, so it must be the power hog." Compute intensity does not equal power draw — peripheral power often dominates.
+
+**Realistic Solution:** Use **differential power profiling** — measure total system power with each component enabled/disabled. Typical breakdown for a photo editing app: Display (OLED, high brightness): 1.2W (34%). Camera ISP (preview + capture): 0.8W (23%). GPU (rendering UI + preview): 0.5W (14%). NPU (ML inference): 0.3W (9%). Cellular modem (uploading results): 0.4W (11%). CPU (app logic, OS): 0.2W (6%). Misc: 0.1W (3%).
+
+The ML model is only 9% of power draw. The biggest levers: (1) Dim the display during editing (save 0.4W), (2) Stop camera preview when editing a captured photo (save 0.8W), (3) Batch uploads instead of streaming (save 0.3W). These three changes save 1.5W — a 43% reduction — without touching the model.
+
+On Android, use `dumpsys batterystats` and the Battery Historian tool. On iOS, use Xcode's Energy Impact gauge and Instruments' Energy Log.
+
+> **Napkin Math:** iPhone 15 battery: 12.8 Wh. At 3.5W: 3.66 hours of editing. After optimization (2.0W): 6.4 hours — 75% longer. Model optimization from 0.3W to 0.15W: saves 0.15W → only 4% improvement. The display and camera are 10× more impactful than the model.
+
+**📖 Deep Dive:** [Volume II: Sustainable AI](https://mlsysbook.ai/vol2/sustainable_ai.html)
+</details>
+
 ---
 
-### 🔧 Model Optimization
+### 📡 NPU Delegation
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Single-Op Delegation Fix</b> · <code>optimization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The NPU Delegation Failure Modes</b> · <code>compute</code> <code>optimization</code></summary>
 
-**Interviewer:** "Your TFLite model runs in 4ms when fully delegated to the Snapdragon NPU. After adding a single custom GELU activation layer, inference jumps to 38ms. The GELU itself takes <0.1ms on CPU. Why did one tiny op cause a 9.5× slowdown, and how do you fix it?"
+**Interviewer:** "You convert your PyTorch model to TFLite and enable the Qualcomm QNN delegate for the Hexagon NPU. The delegate reports '87% of ops delegated.' Your colleague says 'close enough — the remaining 13% will run on CPU, no big deal.' Why is 87% delegation potentially worse than 0% delegation?"
 
-**Common Mistake:** "The GELU op is slow on CPU." It's not — the op itself is trivial. The cost is in what it does to the execution graph.
+**Common Mistake:** "87% delegation means 87% of compute runs on the NPU." Delegation percentage counts ops, not compute time. And partial delegation creates expensive partition boundaries.
 
-**Realistic Solution:** NPU delegation is all-or-nothing per subgraph. When TFLite encounters an op the NPU delegate doesn't support, it **partitions the graph** at that point. The supported prefix runs on the NPU, then the intermediate tensor is copied back to CPU RAM for the unsupported op, and the remaining ops may or may not return to the NPU. One incompatible op in the middle of the graph shatters it into three segments with two expensive data transfers across the on-chip NoC.
+**Realistic Solution:** The 13% undelegated ops are scattered throughout the graph, not clustered at the end. Each undelegated op creates a partition boundary: NPU→CPU→NPU. If there are 8 undelegated ops in the middle of the graph, you get 9 NPU subgraphs with 8 round-trip data transfers. Each transfer costs 1-3ms. Total transfer overhead: 8 × 2ms = 16ms — potentially more than the entire model would take on CPU alone.
 
-Fixes, in order of preference: (1) **Replace with a supported approximation** — GELU(x) ≈ x × σ(1.702x). Sigmoid is NPU-supported. The approximation error is <0.01 for all practical input ranges. The entire graph stays on the NPU: 4ms. (2) **Move the unsupported op to the end** — restructure the model so GELU is the last operation. Only the tail falls back to CPU, and there's only one NPU→CPU transfer instead of two. (3) **Custom NPU kernel** — if the SoC vendor provides a custom op API (Qualcomm QNN SDK), implement GELU as a native NPU op. High effort but zero overhead. (4) **Use a different runtime** — ONNX Runtime's QNN execution provider may support GELU natively where TFLite's delegate doesn't.
+Other failure categories: (1) **Op variant mismatch** — NPU supports Conv2D but not Conv2D with dilation > 1. (2) **Shape constraints** — NPU requires dimensions to be multiples of 4 or 8. (3) **Quantization mismatch** — NPU expects per-channel symmetric INT8 but model uses per-tensor asymmetric. (4) **Layout incompatibility** — NPU operates in NHWC but model expects NCHW.
 
-> **Napkin Math:** Fully delegated: 4ms (all on NPU). With GELU partition: 2ms (NPU prefix) + 1.5ms (NPU→CPU transfer) + 0.1ms (GELU on CPU) + 1.5ms (CPU→NPU transfer) + 2ms (NPU suffix) + overhead = 7.1ms minimum. But the partition also breaks NPU graph optimizations (layer fusion, buffer reuse), inflating the NPU segments from 2+2ms to 15+15ms. Total: ~38ms. With sigmoid approximation: 4ms (no partition). **9.5× speedup from changing one activation function.**
+The fix: use vendor profiling tools (Snapdragon Profiler, Xcode Instruments) to inspect the *actual* execution plan. Target 100% delegation or cluster all undelegated ops at the end.
+
+> **Napkin Math:** Full NPU delegation: 4ms. 87% delegation with 8 partition boundaries: 9 NPU segments (3.5ms) + 8 CPU ops (0.8ms) + 8 transfers (16ms) + lost optimizations (2ms) = **22.3ms**. Full CPU fallback: 15ms. Partial delegation is **1.5× slower than no delegation at all**.
 
 **📖 Deep Dive:** [Volume I: ML Frameworks](https://mlsysbook.ai/vol1/frameworks.html)
 </details>
 
 ---
 
-### 🚀 Deployment
+### 🧠 On-Device LLM
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The App Size Limit</b> · <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Mobile LLM KV-Cache Squeeze</b> · <code>memory</code> <code>kv-cache</code></summary>
 
-**Interviewer:** "Your model is 500 MB (FP32 weights). The App Store allows up to 200 MB for cellular downloads — anything larger requires WiFi. Your PM wants the app to work immediately after download, even on cellular. What are your options?"
+**Interviewer:** "You're running a 3B parameter LLM (Phi-3-mini, INT4) on an iPhone 15 Pro with 8 GB RAM. The model weights take 1.5 GB. Short conversations work fine, but after 10+ back-and-forth turns, the app gets killed by iOS. The model weights haven't changed. What's growing?"
 
-**Common Mistake:** "Compress the model file with zip." Model weights don't compress well — they're essentially random floating-point numbers. Zip might save 5-10%.
+**Common Mistake:** "There's a memory leak in the inference engine." The memory growth is by design, not a bug.
 
-**Realistic Solution:** Four strategies, from simplest to most complex:
+**Realistic Solution:** The KV-cache. During autoregressive generation, the model stores key and value tensors for every token in the conversation history. For Phi-3-mini (32 layers, 32 heads, head_dim=96, FP16 KV): KV-cache per token = 2 × 32 × 32 × 96 × 2 bytes = 393 KB. After 10 turns (~2000 tokens): 2000 × 393 KB = **786 MB**. Add model weights (1.5 GB), iOS overhead (~3 GB), and app runtime (~200 MB): total = 5.5 GB. iOS jetsam threshold is ~6 GB for foreground apps. By turn 15 (~3000 tokens): KV-cache = 1.15 GB, total = 5.85 GB — jetsam kills the app.
 
-(1) **Quantize to INT8** — 500 MB FP32 → 125 MB INT8. Fits under 200 MB. Accuracy loss: typically <1% for classification, <2% for detection. This is the first thing to try.
+Fixes: (1) **Quantize KV-cache to INT8** — halves KV memory. (2) **Sliding window attention** — keep only the last 1024 tokens. (3) **Grouped-Query Attention (GQA)** — Phi-3 uses 8 KV heads instead of 32, reducing KV-cache by 4×: 786 MB → 196 MB. (4) **Hard context limit** with auto-summarization.
 
-(2) **Ship a small model in the bundle, download the full model on WiFi** — include a MobileNet-V3-Small (~8 MB) in the app bundle for immediate functionality. On first WiFi connection, download the full 500 MB model in the background. The user gets instant (lower quality) results that upgrade transparently.
+> **Napkin Math:** Phi-3-mini with GQA (8 KV heads): KV per token = 2 × 32 × 8 × 96 × 2 = 98 KB. At 2048 tokens: 196 MB. With INT8 KV: 98 MB. Total: 1.5 GB + 98 MB + 200 MB + 3 GB = 4.8 GB. Safe on 8 GB device.
 
-(3) **On-demand model download** — use Apple's On-Demand Resources (ODR) or Android's Play Asset Delivery (PAD) to stream model chunks after install. The model is not in the initial download. First inference triggers a download of the required model shard.
+> **Key Equation:** $\text{KV-cache} = 2 \times L \times H_{kv} \times d_h \times n_{\text{tokens}} \times \text{bytes}$
 
-(4) **Knowledge distillation** — train a smaller student model (~50 MB) that mimics the 500 MB teacher. Ship the student in the bundle. This requires ML engineering effort but produces a permanently smaller model.
-
-> **Napkin Math:** FP32: 500 MB (over limit). INT8: 125 MB ✓ (under 200 MB). INT4: 62.5 MB ✓. Distilled student: ~50 MB ✓. Bundle + background download: 8 MB initial + 500 MB on WiFi. Cellular download at 10 Mbps: 200 MB = 160 seconds. 500 MB = 400 seconds (requires WiFi). User experience: INT8 is the best trade-off — immediate, no WiFi dependency, minimal accuracy loss.
-
-**📖 Deep Dive:** [Volume I: Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
-</details>
-
----
-
-### 📊 Monitoring & Reliability
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silent Accuracy Degradation</b> · <code>monitoring</code></summary>
-
-**Interviewer:** "Your on-device image classification model was deployed 6 months ago. Users haven't complained, but your A/B test shows the new model version improves engagement by 15%. This suggests the old model has silently degraded. You have no server-side ground truth labels for on-device predictions. How do you detect model degradation without ground truth?"
-
-**Common Mistake:** "Monitor accuracy using a held-out test set." You don't have labels for on-device predictions — there's no test set.
-
-**Realistic Solution:** Four proxy signals that detect degradation without ground truth:
-
-(1) **Confidence distribution shift** — track the distribution of the model's softmax confidence scores over time. A healthy model has a bimodal distribution (high confidence for easy inputs, low for hard). If the distribution shifts toward uniform confidence (the model becomes "confused"), it's seeing out-of-distribution data. Use KL divergence between the current week's confidence distribution and the baseline.
-
-(2) **User implicit feedback** — track behavioral proxies: if the model powers a photo search feature, monitor search refinement rate (user searches again immediately = bad result), feature abandonment rate, and time-to-action after a prediction. A 15% engagement improvement from the new model implies the old model's predictions were increasingly irrelevant.
-
-(3) **Lightweight anomaly detector** — deploy a small autoencoder (~1 MB) alongside the main model. Train it on the same distribution as the main model. If reconstruction error exceeds a threshold, the input is OOD. Track the OOD rate over time — a rising rate indicates distribution drift.
-
-(4) **Federated evaluation** — periodically sample a small subset of users, send them a labeled evaluation batch (e.g., 100 images with known labels), and compare the model's predictions. This gives you direct accuracy measurement without collecting user data. Privacy-preserving: the evaluation data comes from you, not from users.
-
-> **Napkin Math:** Confidence monitoring: ~0.1 KB per inference (just the max softmax score). 1000 inferences/day × 30 days = 30,000 data points. KL divergence computation: trivial. Storage: 30 KB/month. Anomaly detector: 1 MB model, 0.5ms per inference. Federated evaluation: 100 labeled images × 4 evaluations/year = 400 labeled predictions per user per year. With 10,000 users: 4M labeled predictions — statistically powerful.
-
-**📖 Deep Dive:** [Volume I: ML Operations](https://mlsysbook.ai/vol1/ml_ops.html)
-</details>
-
----
-
-### 🔒 Security & Privacy
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Federated Keyboard</b> · <code>privacy</code></summary>
-
-**Interviewer:** "You're building a next-word prediction model for a mobile keyboard. The model must improve from user typing patterns, but you cannot collect user keystrokes on your servers — that's a privacy violation and a regulatory risk. How do you train the model?"
-
-**Common Mistake:** "Anonymize the data before uploading." Anonymization is insufficient — keystroke patterns can re-identify users, and regulators (GDPR, CCPA) consider this personal data regardless of anonymization.
-
-**Realistic Solution:** **Federated Learning with Differential Privacy (DP-FedAvg):**
-
-(1) **Local training:** Each phone fine-tunes a local copy of the model on the user's recent typing data. Training happens on-device during charging (to avoid battery drain). The phone computes a gradient update (the difference between the local model and the global model).
-
-(2) **Gradient clipping:** Before sending anything, clip the gradient to a maximum L2 norm $C$. This bounds the influence of any single user's data on the global model.
-
-(3) **Noise injection:** Add calibrated Gaussian noise $\mathcal{N}(0, \sigma^2 C^2 I)$ to the clipped gradient. This provides differential privacy — mathematically guaranteeing that the server cannot determine whether any specific user participated in training.
-
-(4) **Secure aggregation:** The server collects noised gradients from thousands of phones and averages them. Individual gradients are encrypted so the server only sees the aggregate. The noise cancels out in the average (law of large numbers), but protects individual contributions.
-
-(5) **Privacy budget:** The privacy guarantee is measured by $\epsilon$ (epsilon). Lower $\epsilon$ = stronger privacy but more noise = slower learning. Typical production values: $\epsilon = 8$ per training round, with a total budget of $\epsilon = 100$ per year. At these levels, accuracy loss vs non-private training is ~2%.
-
-> **Napkin Math:** 10,000 phones per round. Each sends a 5 MB gradient update (clipped + noised). Server bandwidth: 50 GB per round. Noise per phone: σ = 1.0, C = 1.0. After averaging 10,000 updates: effective noise = σ/√10,000 = 0.01 — negligible. Privacy: ε = 2 per round (strong). 50 rounds/year: total ε = 100 (within budget). Accuracy: ~2% worse than centralized training, but zero user data leaves the device.
-
-> **Key Equation:** $\tilde{g}_{\text{user}} = \text{clip}(g, C) + \mathcal{N}(0, \sigma^2 C^2 I)$
-
-**📖 Deep Dive:** [Volume II: Security & Privacy](https://mlsysbook.ai/vol2/security_privacy.html)
+**📖 Deep Dive:** [Volume I: Model Serving](https://mlsysbook.ai/vol1/model_serving.html)
 </details>

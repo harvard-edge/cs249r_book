@@ -3,8 +3,11 @@
 <div align="center">
   <a href="../README.md">🏠 Home</a> ·
   <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
-  <a href="01_Mobile_Systems.md">📱 Mobile Round 1</a> ·
-  <a href="02_Mobile_Advanced.md">🔋 Mobile Round 2</a>
+  <a href="01_Mobile_Systems.md">📱 Round 1</a> ·
+  <a href="02_Mobile_Constraints.md">⚖️ Round 2</a> ·
+  <a href="03_Mobile_Ops_and_Deployment.md">🚀 Round 3</a> ·
+  <a href="04_Mobile_Visual_Debugging.md">🖼️ Round 4</a> ·
+  <a href="05_Mobile_Advanced.md">🔬 Round 5</a>
 </div>
 
 ---
