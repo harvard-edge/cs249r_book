@@ -56,9 +56,9 @@ The domain of the MLOps and Deployment Engineer. This round tests your ability t
 
 **Realistic Solution:** The Tail Latency Explosion. As system utilization ($\rho$) passes the "Knee" at ~70%, request queue lengths grow exponentially, not linearly (per Erlang-C / Little's Law). The system spends more time managing context switches than doing useful work. You must run clusters with 40-60% headroom or implement aggressive load-shedding to survive traffic spikes.
 
-> **Napkin Math:** At $\rho = 0.5$ (50% util): avg queue length ≈ 1. At $\rho = 0.9$ (90% util): avg queue length ≈ 9. At $\rho = 0.99$: avg queue length ≈ 99. The relationship is $L_q \approx \rho/(1-\rho)$ — it's a hyperbola that goes to infinity as utilization approaches 100%.
+> **Napkin Math:** At $\rho = 0.5$ (50% util): avg requests in system ≈ 1. At $\rho = 0.9$ (90% util): avg requests in system ≈ 9. At $\rho = 0.99$: avg requests in system ≈ 99. The relationship is $L = \rho/(1-\rho)$ — it's a hyperbola that goes to infinity as utilization approaches 100%.
 
-> **Key Equation:** $L_q = \frac{\rho^2}{1 - \rho}$ (M/M/1 queue length) and $W = \frac{L_q}{\lambda}$ (Little's Law)
+> **Key Equation:** $L = \frac{\rho}{1 - \rho}$ (M/M/1 total requests in system) and $W = \frac{L}{\lambda}$ (Little's Law)
 
 **📖 Deep Dive:** [Volume I: Model Serving](https://mlsysbook.ai/vol1/model_serving.html)
 </details>
@@ -154,7 +154,7 @@ The domain of the MLOps and Deployment Engineer. This round tests your ability t
 
 **Realistic Solution:** Speculative Decoding. You use a tiny, fast "draft" model to guess the next $K$ tokens. You then pass these $K$ tokens to your massive target model in a *single forward pass*. The large model verifies the guesses in parallel (trading spare ALU compute capacity to save memory fetches). All correct tokens are accepted, maintaining identical output distributions but yielding 2-3x speedups.
 
-> **Napkin Math:** Normal decode: 1 token per forward pass, each pass loads all 140 GB of weights from HBM. 100 tokens = 100 weight loads = $100 \times 140\text{GB} / 3.35\text{TB/s} = 4.2$ seconds. Speculative decode with $K=5$ and 80% acceptance: ~100 tokens in ~25 forward passes = $25 \times 140\text{GB} / 3.35\text{TB/s} = 1.04$ seconds. **4× speedup**.
+> **Napkin Math:** Normal decode: 1 token per forward pass, each pass loads all 140 GB of weights from HBM. 100 tokens = 100 weight loads = $100 \times 140\text{GB} / 3.35\text{TB/s} = 4.2$ seconds. Speculative decode with $K=5$ and an average of 4 tokens accepted per pass: ~100 tokens in 25 forward passes = $25 \times 140\text{GB} / 3.35\text{TB/s} = 1.04$ seconds. **4× speedup**.
 
 **📖 Deep Dive:** [Volume I: Model Serving](https://mlsysbook.ai/vol1/model_serving.html)
 </details>

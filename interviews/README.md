@@ -33,15 +33,15 @@ Content may be incomplete or change without notice. The published curriculum liv
 
 ## Why This Exists
 
-Students often ask me: *"How do I prepare for ML systems interviews?"* They can write a training loop, but they can't explain why a 175B parameter model will hit a communication wall across InfiniBand, or why serving a 128k context window will fragment the KV-cache and explode P99 latency. These are **physical constraints**, not code syntax — and they're exactly what companies like Meta, Google, and OpenAI test for.
+Students often ask me: *"How do I prepare for ML systems interviews?"* They can write a training loop, but they can't explain why a 175B parameter model will hit a communication wall across InfiniBand, or why serving a 128k context window will fragment the KV-cache and blow up P99 latency. These are **physical constraints**, not code syntax, and they're exactly what companies like Meta, Google, and OpenAI test for.
 
-The industry calls it *Mechanical Sympathy* — the ability to see past framework abstractions and reason about the hard physics of keeping 10,000 GPUs fed and 1 million users served. This playbook is my attempt to organize that knowledge into something you can actually study.
+The industry calls it *Mechanical Sympathy*: seeing past framework abstractions to reason about the physics of keeping 10,000 GPUs fed and 1 million users served. This playbook organizes that knowledge into something you can actually study.
 
 ---
 
 ## Numbers Every ML Systems Engineer Should Know
 
-Adapted from the textbook's [Machine Foundations](https://mlsysbook.ai/vol1/) appendix. **Memorize the ratios — they're physics. Use the absolute numbers as sanity checks.** All hardware values sourced from [`mlsysim/core/constants.py`](../mlsysim/core/constants.py), the single source of truth for the book.
+Adapted from the textbook's [Machine Foundations](https://mlsysbook.ai/vol1/) appendix. **Memorize the ratios; they're physics. Use the absolute numbers as sanity checks.** All hardware values sourced from [`mlsysim/core/constants.py`](../mlsysim/core/constants.py), the single source of truth for the book.
 
 ### The Invariants (Physics — Will Not Change)
 
@@ -262,7 +262,7 @@ These formulas let you estimate memory, compute, and cache requirements from a m
   </tbody>
 </table>
 
-> **Source:** All values from the textbook's `constants.py`. When hardware generations change, update the constants file — every calculation in the book (and this playbook) updates automatically.
+> **Source:** All values from the textbook's `constants.py`. When hardware generations change, update the constants file and every calculation in the book (and this playbook) updates automatically.
 
 ---
 
@@ -288,15 +288,15 @@ Pick your level and start drilling:
     </tr>
     <tr>
       <td><b>Targeting Senior (L5)</b></td>
-      <td>🟡 Yellow-tagged questions + [Round 1](cloud/01_Single_Node_Physics.md) & [Round 3](cloud/03_Production_Serving.md)</td>
+      <td>🟡 Yellow-tagged questions + <a href="cloud/01_Single_Node_Physics.md">Round 1</a> & <a href="cloud/03_Production_Serving.md">Round 3</a></td>
     </tr>
     <tr>
       <td><b>Targeting Staff+ (L6+)</b></td>
-      <td>🔴 Red-tagged questions + [Round 5: Visual Debugging](cloud/05_Visual_Architecture_Debugging.md)</td>
+      <td>🔴 Red-tagged questions + <a href="cloud/05_Visual_Architecture_Debugging.md">Round 5: Visual Debugging</a></td>
     </tr>
     <tr>
       <td><b>Mock interview practice</b></td>
-      <td>[The Architect's Rubric](00_The_Architects_Rubric.md) — grade your own designs</td>
+      <td><a href="00_The_Architects_Rubric.md">The Architect's Rubric</a> — grade your own designs</td>
     </tr>
   </tbody>
 </table>
@@ -305,7 +305,7 @@ Pick your level and start drilling:
 
 ## Choose Your Track
 
-Each track targets a different deployment regime. Pick the one that matches the roles you're interviewing for — or study multiple tracks to build breadth.
+Each track targets a different deployment regime. Pick the one that matches the roles you're interviewing for, or study multiple tracks to build breadth.
 
 <table>
   <thead>
@@ -360,7 +360,7 @@ Each track targets a different deployment regime. Pick the one that matches the 
 
 ## Mastery Levels
 
-Every question is tagged with a mastery level. These levels are modeled on engineering ladders at major tech companies (Google, Meta, etc.) but represent **cognitive thresholds** — each level tests a fundamentally different kind of thinking, mapped to [Bloom's taxonomy](https://en.wikipedia.org/wiki/Bloom%27s_taxonomy) and the **scope of ownership** expected at that career stage.
+Every question is tagged with a mastery level. These levels mirror engineering ladders at major tech companies (Google, Meta, etc.) but represent **cognitive thresholds**: each level tests a different kind of reasoning, mapped to [Bloom's taxonomy](https://en.wikipedia.org/wiki/Bloom%27s_taxonomy) and the **scope of ownership** expected at that career stage.
 
 ### The Framework
 
@@ -403,9 +403,9 @@ Every question is tagged with a mastery level. These levels are modeled on engin
 
 ### The Transitions
 
-- **L3→L4:** You stop reciting and start diagnosing. You can look at a system and correctly classify what's happening — identify the bottleneck, name the failure mode, apply the right formula.
-- **L4→L5:** You stop diagnosing and start predicting. You can reason about what happens when a constraint changes — a hardware upgrade, a traffic spike, a precision change — and explain *why* the system behaves differently.
-- **L5→L6+:** You stop predicting known patterns and start deriving novel solutions from first principles. You can stand at a whiteboard with incomplete information and work backward from physics to architecture.
+- **L3→L4:** You stop reciting and start diagnosing. You can look at a system and correctly classify what's happening: identify the bottleneck, name the failure mode, apply the right formula.
+- **L4→L5:** You stop diagnosing and start predicting. You can reason about what happens when a constraint changes (a hardware upgrade, a traffic spike, a precision change) and explain *why* the system behaves differently.
+- **L5→L6+:** You stop predicting known patterns and start deriving solutions from first principles. You can stand at a whiteboard with incomplete information and work backward from physics to architecture.
 
 ### How This Maps to Industry
 
@@ -459,7 +459,7 @@ The levels correspond to real expectations at major tech companies. The titles d
 
 ## Deployment Tracks
 
-The mastery levels tell you *how deeply* a question tests your reasoning. The deployment track tells you *which physics regime* it lives in. The same fundamental principle — **constraints drive architecture** — applies everywhere, but the constraints themselves are radically different depending on where the silicon sits.
+The mastery levels tell you *how deeply* a question tests your reasoning. The deployment track tells you *which physics regime* it lives in. The core principle, **constraints drive architecture**, applies everywhere, but the constraints themselves differ sharply depending on where the silicon sits.
 
 Every question in this playbook is tagged with a deployment track. All four tracks now have substantial question banks — see the [Topic Map](TOPIC_MAP.md) for the full coverage matrix and expansion plan.
 
@@ -732,7 +732,7 @@ We welcome questions from recent AI systems interviews.
 
 ### Question Format
 
-Every question follows this structure. Not all fields are required — use **Common Mistake** and **Napkin Math** where they add value.
+Every question follows this structure. Not all fields are required; use **Common Mistake** and **Napkin Math** where they add value.
 
 ```markdown
 <details>

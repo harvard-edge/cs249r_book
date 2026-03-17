@@ -122,9 +122,24 @@ These are the areas where TinyML-specific interview questions would be most valu
       <td>9</td>
     </tr>
     <tr>
-      <td><b><a href="02_TinyML_Advanced.md">2. TinyML Advanced</a></b></td>
-      <td>Compute analysis, latency budgets, optimization, deployment, monitoring, security</td>
+      <td><b><a href="02_TinyML_Constraints.md">2. Constraints & Trade-offs</a></b></td>
+      <td>Compute analysis, memory systems, numerical representation, architecture costs, latency, power</td>
       <td>18</td>
+    </tr>
+    <tr>
+      <td><b><a href="03_TinyML_Ops_and_Deployment.md">3. Operations & Deployment</a></b></td>
+      <td>FOTA updates, SRAM overflow, bootloader design, watchdog timers, security, fleet management, power profiling</td>
+      <td>11</td>
+    </tr>
+    <tr>
+      <td><b><a href="04_TinyML_Visual_Debugging.md">4. Visual Architecture Debugging</a></b></td>
+      <td>Mermaid diagram challenges: spot the flaw in TinyML system designs</td>
+      <td>7</td>
+    </tr>
+    <tr>
+      <td><b><a href="05_TinyML_Advanced.md">5. Advanced TinyML Systems</a></b></td>
+      <td>NAS for MCUs, energy harvesting, multi-sensor fusion, compiler design, federated learning, always-on detection</td>
+      <td>9</td>
     </tr>
   </tbody>
 </table>

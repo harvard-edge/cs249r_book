@@ -46,9 +46,9 @@ The domain of the AI Infrastructure Engineer. This round tests your understandin
 
 **Realistic Solution:** You need to implement microbatching. By splitting the global batch into smaller microbatches, GPU 1 can process microbatch 2 while GPU 2 processes microbatch 1. This overlaps computation and reduces the "Pipeline Bubble" fraction.
 
-> **Napkin Math:** Bubble fraction = $(P-1)/M$ where $P$ = pipeline stages, $M$ = microbatches. With $P=8$ and $M=1$: bubble = 87.5%. With $M=32$: bubble = 21.9%. With $M=64$: bubble = 10.9%. You need $M \gg P$ to keep GPUs busy.
+> **Napkin Math:** Bubble fraction = $(P-1)/(M+P-1)$ where $P$ = pipeline stages, $M$ = microbatches. With $P=8$ and $M=1$: bubble = 87.5%. With $M=32$: bubble = 17.9%. With $M=64$: bubble = 9.8%. You need $M \gg P$ to keep GPUs busy.
 
-> **Key Equation:** $\text{Bubble Fraction} = \frac{P - 1}{M}$
+> **Key Equation:** $\text{Bubble Fraction} = \frac{P - 1}{M + P - 1}$
 
 **📖 Deep Dive:** [Volume II: Distributed Training](https://mlsysbook.ai/vol2/distributed_training.html)
 </details>
@@ -76,7 +76,7 @@ The domain of the AI Infrastructure Engineer. This round tests your understandin
 
 **Realistic Solution:** You solve a physical constraint satisfaction problem. $T$ is strictly bounded by the NVLink domain (usually $T=8$ per node). $P$ is bounded by the number of transformer layers and the microbatch count required to hide the bubble (e.g., $P=16$). Data parallelism ($D$) gets the remainder. Total GPUs = $D \times T \times P$, so $D = 1024 / (8 \times 16) = 8$.
 
-> **Napkin Math:** 175B params × 2 bytes = 350 GB weights. One H100 has 80 GB. Minimum TP to fit weights: $350/80 \approx 5$, round up to $T=8$ (NVLink domain). With 96 transformer layers and $P=16$ stages: 6 layers per stage, bubble = $(16-1)/M$. Need $M \geq 48$ to keep bubble under 33%. $D = 1024/(8 \times 16) = 8$ data-parallel replicas.
+> **Napkin Math:** 175B params × 2 bytes = 350 GB weights. One H100 has 80 GB. Minimum TP to fit weights: $350/80 \approx 5$, round up to $T=8$ (NVLink domain). With 96 transformer layers and $P=16$ stages: 6 layers per stage, bubble = $(16-1)/(M+16-1)$. Need $M \geq 45$ to keep bubble under 25%. $D = 1024/(8 \times 16) = 8$ data-parallel replicas.
 
 > **Key Equation:** $\text{Total GPUs} = D \times T \times P$
 

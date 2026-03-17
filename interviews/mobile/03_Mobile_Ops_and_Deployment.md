@@ -154,7 +154,7 @@ Fixes, in order of preference: (1) **Replace with a supported approximation** �
 
 (4) **Federated evaluation** — periodically sample a small subset of users, send them a labeled evaluation batch (e.g., 100 images with known labels), and compare the model's predictions. This gives you direct accuracy measurement without collecting user data. Privacy-preserving: the evaluation data comes from you, not from users.
 
-> **Napkin Math:** Confidence monitoring: ~0.1 KB per inference (just the max softmax score). 1000 inferences/day × 30 days = 30,000 data points. KL divergence computation: trivial. Storage: 30 KB/month. Anomaly detector: 1 MB model, 0.5ms per inference. Federated evaluation: 100 labeled images × 4 evaluations/year = 400 labeled predictions per user per year. With 10,000 users: 4M labeled predictions — statistically powerful.
+> **Napkin Math:** Confidence monitoring: ~1 byte per inference (just the max softmax score). 1000 inferences/day × 30 days = 30,000 data points. KL divergence computation: trivial. Storage: ~30 KB/month. Anomaly detector: 1 MB model, 0.5ms per inference. Federated evaluation: 100 labeled images × 4 evaluations/year = 400 labeled predictions per user per year. With 10,000 users: 4M labeled predictions — statistically powerful.
 
 **📖 Deep Dive:** [Volume I: ML Operations](https://mlsysbook.ai/vol1/ml_ops.html)
 </details>

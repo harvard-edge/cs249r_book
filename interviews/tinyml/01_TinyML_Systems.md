@@ -3,8 +3,11 @@
 <div align="center">
   <a href="../README.md">🏠 Home</a> ·
   <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
-  <a href="01_TinyML_Systems.md">🔬 TinyML Round 1</a> ·
-  <a href="02_TinyML_Advanced.md">🔩 TinyML Round 2</a>
+  <a href="01_TinyML_Systems.md">🔬 Round 1</a> ·
+  <a href="02_TinyML_Constraints.md">⚖️ Round 2</a> ·
+  <a href="03_TinyML_Ops_and_Deployment.md">🚀 Round 3</a> ·
+  <a href="04_TinyML_Visual_Debugging.md">🖼️ Round 4</a> ·
+  <a href="05_TinyML_Advanced.md">🔬 Round 5</a>
 </div>
 
 ---
