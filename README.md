@@ -328,29 +328,35 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
 <table>
   <thead>
     <tr>
-      <th width="40%">I want to...</th>
-      <th width="60%">Go here</th>
+      <th width="5%"></th>
+      <th width="45%">I want to...</th>
+      <th width="50%">Go here</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td>Fix a typo or improve a chapter</td>
+      <td align="center">📖</td>
+      <td><b>Fix a typo or improve a chapter</b></td>
       <td><a href="book/docs/CONTRIBUTING.md">book/docs/CONTRIBUTING.md</a></td>
     </tr>
     <tr>
-      <td>Add a TinyTorch module or fix a bug</td>
+      <td align="center">🔥</td>
+      <td><b>Add a TinyTorch module or fix a bug</b></td>
       <td><a href="tinytorch/CONTRIBUTING.md">tinytorch/CONTRIBUTING.md</a></td>
     </tr>
     <tr>
-      <td>Improve hardware labs</td>
+      <td align="center">🛠️</td>
+      <td><b>Improve hardware labs</b></td>
       <td><a href="kits/README.md">kits/README.md</a></td>
     </tr>
     <tr>
-      <td>Report an issue</td>
+      <td align="center">🐛</td>
+      <td><b>Report an issue</b></td>
       <td><a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub Issues</a></td>
     </tr>
     <tr>
-      <td>Ask a question</td>
+      <td align="center">💬</td>
+      <td><b>Ask a question</b></td>
       <td><a href="https://github.com/harvard-edge/cs249r_book/discussions">GitHub Discussions</a></td>
     </tr>
   </tbody>
