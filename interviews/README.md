@@ -17,7 +17,7 @@ Content may be incomplete or change without notice. The published curriculum liv
 # The ML Systems Interview Playbook
 
 <p align="center">
-  <b>800+ systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
+  <b>1,000+ systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
   <i>You can generate the code, but you cannot prompt your way out of a silicon bottleneck.</i>
 </p>
 
