@@ -1307,3 +1307,242 @@ The domain of the Mobile ML Engineer. This round tests your understanding of wha
   </details>
 
 </details>
+
+
+---
+
+### 🆕 Advanced SoC & Systems Architecture
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory Bandwidth Throttling</b> · <code>memory-hierarchy</code> <code>soc</code></summary>
+
+- **Interviewer:** "Your mobile application runs a 1080p semantic segmentation model on the NPU at 30 FPS. The NPU requires 4 GB/s of memory bandwidth to sustain this. The device has LPDDR5 RAM capable of 25 GB/s. However, when the user starts screen recording the app, the ML model drops to 12 FPS. The screen recording uses the hardware video encoder, not the NPU. Why did the NPU slow down?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The NPU and Video Encoder are sharing the same compute cores." They are separate hardware blocks. The issue is the shared memory bus.
+
+  **Realistic Solution:** You hit the **System-level Memory Bandwidth Wall**. In a mobile System-on-Chip (SoC), all accelerators (CPU, GPU, NPU, ISP, Video Encoder, Display Controller) share a single physical interface to the LPDDR RAM (Unified Memory Architecture).
+
+  While the LPDDR5 might theoretically provide 25 GB/s, this is peak sequential bandwidth. When multiple hardware blocks access memory simultaneously, they create random access patterns, causing DRAM page misses. This dramatically reduces the *effective* bandwidth of the entire system (often by 40-50%).
+
+  The Display Controller (pushing 60Hz UI) and the Video Encoder (compressing 1080p video) both have hard real-time deadlines. Their DMA controllers are typically given the highest QoS (Quality of Service) priority on the system bus. The NPU's memory requests are queued behind the display and encoder traffic. Starved of data, the NPU stalls, and your framerate plummets.
+
+  **The Fix:** You must compress your ML memory traffic. Use INT8 quantization (halves bandwidth), use smaller input resolutions during screen recording, or utilize the NPU's internal SRAM to fuse layers and avoid writing intermediate activations back to main memory.
+
+  > **Napkin Math:** Display Controller needs ~1.5 GB/s. Video Encoder needs ~2.0 GB/s. NPU needs 4.0 GB/s. Total required: 7.5 GB/s. LPDDR5 peak is 25 GB/s, but heavily interleaved access drops effective bandwidth to ~8 GB/s. With QoS priorities, the Display and Encoder take their 3.5 GB/s, leaving only 4.5 GB/s for the NPU and CPU. The NPU starves.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The CoreML Neural Engine Black Box</b> · <code>compiler</code> <code>apple-silicon</code></summary>
+
+- **Interviewer:** "You profile your CoreML model on an iPhone 14. Instruments shows that Layer 1 through 10 execute on the Apple Neural Engine (ANE) in 2ms. Layer 11 (a custom Softmax over a non-contiguous dimension) executes on the CPU in 1ms. Layers 12 through 20 execute back on the ANE in 2ms. You expect a total latency of 5ms. Reality shows 18ms. Where did the extra 13ms come from?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The CPU is just slower than the NPU." You measured the CPU time at 1ms. The math isn't the problem.
+
+  **Realistic Solution:** You are suffering from **Accelerator Context Switching and Memory Copies**.
+
+  The ANE is not a general-purpose processor; it only supports specific tensor layouts and operations. When CoreML encounters an unsupported operation (Layer 11), it "falls back" to the CPU.
+
+  Because the ANE and CPU use different optimal memory layouts (e.g., the ANE often uses a proprietary tiled layout like `NC/32HW32` for efficiency, while the CPU expects standard `NCHW` or `NHWC`), the transition is brutally expensive.
+
+  The system must:
+  1. Wait for the ANE to finish Layer 10.
+  2. Run a "De-tiling" memory transformation to convert the ANE tensor into a CPU-friendly format.
+  3. Flush the memory so the CPU cache can see it.
+  4. Run Layer 11 on the CPU (1ms).
+  5. Run a "Tiling" memory transformation to convert the CPU tensor back into the ANE format.
+  6. Flush memory to the ANE.
+  7. Resume execution.
+
+  Those memory transformations and synchronizations take vastly more time than the actual ML math.
+
+  **The Fix:** You must ensure your model is "ANE-clean." You must modify the model graph to replace the unsupported operation with mathematically equivalent operations that *are* supported by the ANE, ensuring the entire graph executes without ever bouncing back to the CPU.
+
+  > **Napkin Math:** Math time: 2ms + 1ms + 2ms = 5ms. Memory transformation of a 5MB tensor: ~6ms down, ~6ms up. OS scheduling overhead: ~1ms. Total = 18ms. The memory copies took 2.5x longer than the neural network execution.
+
+  📖 **Deep Dive:** [Volume I: ML Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Thermal Throttling Death Spiral</b> · <code>power-thermal</code> <code>latency</code></summary>
+
+- **Interviewer:** "Your mobile game runs a super-resolution AI model to upscale 720p to 1080p at 60 FPS. When the user launches the game, it runs perfectly. After 15 minutes of gameplay, the framerate halves to 30 FPS, and the phone feels hot. Your CPU/GPU utilization logs say they are only at 50% capacity. What physical reality is taking down your app?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "There is a memory leak." Memory leaks cause crashes (OOM), not steady performance degradation accompanied by heat.
+
+  **Realistic Solution:** You have hit the **Thermal Envelope and DVFS (Dynamic Voltage and Frequency Scaling)** limits.
+
+  A smartphone has no active cooling (no fans). It can only dissipate roughly 3 to 5 Watts of sustained heat through its chassis. Running a 3D game (heavy GPU) while simultaneously running an AI upscaler (heavy NPU) easily draws 8 to 10 Watts peak.
+
+  After 10-15 minutes, the silicon die gets dangerously close to its thermal limit (e.g., 85°C junction temperature, translating to ~45°C skin temperature, which burns the user). The OS's thermal management daemon steps in. It protects the hardware by aggressively lowering the clock speeds (frequency) of the CPU, GPU, and NPU.
+
+  Your logs show "50% utilization" because the chip is fully busy *relative to its new, crippled clock speed*, but it is physically doing half the math per second compared to when it was cold.
+
+  **The Fix:** You cannot cheat thermodynamics. You must lower the sustained power draw. Use a smaller model, run inference at a lower precision (INT8 instead of FP16), or only run the upscaler on keyframes.
+
+  > **Napkin Math:** Cold SoC: NPU runs at 1.0 GHz, generating 100 TOPS. Model requires 50 TOPS to hit 60 FPS. (50% utilization).
+  > Hot SoC: Thermal governor limits NPU to 400 MHz, generating 40 TOPS. The model needs 50 TOPS. The NPU is now maxed out, and can only deliver 48 FPS. Because display pipelines usually rely on VSync, missing the 16.6ms deadline (60 FPS) forces the system to drop to the next VSync tier (33ms, or 30 FPS).
+
+  📖 **Deep Dive:** [Volume II: Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Asymmetric Multiprocessing (Big.LITTLE) Stutter</b> · <code>soc</code> <code>latency</code></summary>
+
+- **Interviewer:** "Your Android app runs an OCR model entirely on the CPU (using XNNPACK). You spawn 4 threads to match the 4 cores of the device. The average latency is 50ms. However, the 99th percentile (P99) latency is a massive 150ms, causing noticeable UI stutter. The device is not thermal throttling. What architectural feature of mobile CPUs causes this massive latency variance?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The Java Garbage Collector is pausing the threads." While GC causes pauses, a 3x consistent variance on CPU execution points to hardware asymmetry.
+
+  **Realistic Solution:** You are falling victim to **Asymmetric Multiprocessing (ARM Big.LITTLE)** scheduling.
+
+  Unlike desktop CPUs where all cores are identical, mobile CPUs mix massive, power-hungry "Big" cores (e.g., Cortex-X2) with tiny, power-efficient "LITTLE" cores (e.g., Cortex-A510).
+
+  When you spawn 4 threads, the Linux completely controls where they run. If the user is actively touching the screen, the OS boosts your app, placing the threads on the fast Big cores. Inference takes 50ms.
+
+  If the user stops touching the screen for a second, the OS aggressively tries to save battery. It migrates your heavy math threads off the Big cores and onto the slow LITTLE cores. The LITTLE cores have narrower superscalar execution pipelines, smaller caches, and run at lower clock speeds. The exact same math code suddenly takes 150ms to execute.
+
+  **The Fix:** You must use **Thread Affinity** or OS-level hints. By using `sched_setaffinity()` (or configuring XNNPACK/TFLite properly), you can explicitly bind your inference threads to the CPU mask of the Big cores, ensuring deterministic latency at the cost of slightly higher battery drain.
+
+  > **Napkin Math:** Big Core: 3.0 GHz, 4-wide decode, massive L2 cache. LITTLE Core: 1.8 GHz, 2-wide decode, tiny cache. The raw architectural difference is roughly 2.5x to 3x in IPC (Instructions Per Clock). 50ms * 3 = 150ms.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory Map (mmap) Page Fault Freeze</b> · <code>memory</code> <code>storage</code></summary>
+
+- **Interviewer:** "To load a 150 MB transformer model quickly on an iPhone without blowing up the app's RAM limit, you use `mmap` (Memory-Mapped Files). The OS reports zero RAM used, which is great. However, during the *first* inference pass, the app completely freezes for 1.2 seconds. Subsequent passes take only 40ms. Why did `mmap` cause a massive freeze?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The model is moving from RAM to the NPU cache." It hasn't even reached RAM yet.
+
+  **Realistic Solution:** The slowness is caused by a storm of **Major Page Faults**.
+
+  `mmap` does not actually load the file into physical RAM; it just maps the file into the application's virtual address space. When you trigger the first inference, the CPU/NPU attempts to read the first tensor. Because the data isn't in physical RAM, the Memory Management Unit (MMU) triggers a page fault.
+
+  The OS must stop your app, go to the slow NVMe flash storage, read a 4 KB page, place it in physical RAM, update the page tables, and resume.
+
+  For a 150 MB model, the OS must perform over 38,000 individual, blocking page faults during that first forward pass.
+
+  **The Fix:** You must "warm up" the cache. Spawn a background thread during app startup to sequentially read one byte from every 4 KB chunk of the mapped memory (or use `madvise` / `mlock`). This forces the OS to handle all the page faults asynchronously in the background, fully loading the model into physical RAM before the user requests a time-critical inference.
+
+  > **Napkin Math:** 150 MB / 4 KB page size = ~38,400 pages. A single random read from mobile flash storage takes ~0.03ms. 38,400 * 0.03ms = 1,152ms (1.15 seconds) of pure I/O blocking time.
+
+  📖 **Deep Dive:** [Volume I: Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Int8 Quantization Activation Clipping</b> · <code>quantization</code> <code>soc</code></summary>
+
+- **Interviewer:** "You quantize an image classification model to INT8 to run on a Qualcomm Hexagon DSP. The FP32 model had 92% accuracy. The INT8 model runs 4x faster but drops to 60% accuracy. The weights quantized perfectly, but debugging shows the activations in Layer 5 are completely saturated (hitting the maximum value of 127 constantly). What property of mobile activation functions causes this?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "INT8 just doesn't have enough precision for deep networks." INT8 has plenty of precision if the dynamic range is managed.
+
+  **Realistic Solution:** You are suffering from **Unbounded Activation Functions (like standard ReLU)** breaking Post-Training Quantization (PTQ).
+
+  Standard ReLU has no upper bound. During training, an outlier image might produce an activation value of `50.0`. During PTQ, the quantization algorithm observes this `50.0` and sets the maximum representable value of the INT8 tensor to `50.0`.
+
+  INT8 has 256 distinct "buckets" (from -128 to 127). If the range is stretched from 0 to 50.0, each bucket represents a massive step size of `~0.2`. The vast majority of normal features (which might live between 0.0 and 2.0) are completely crushed into the first 10 buckets, destroying the model's ability to differentiate fine details. If you use a smaller range to save precision, the outliers clip to `127`, destroying the strong signals.
+
+  **The Fix:** You must change the architecture before training. Replace `ReLU` with **`ReLU6`** (which caps maximum activations at 6.0). This hard-caps the dynamic range, allowing the INT8 quantization algorithm to allocate its 256 buckets across a tight, known range (0 to 6.0), preserving extreme precision and restoring the accuracy to 91%.
+
+  > **Napkin Math:** ReLU Outlier Range (0 to 50.0): Step size = 50 / 127 = 0.39. A feature value of 1.0 is bucket 2. A feature value of 1.3 is bucket 3. Massive rounding error.
+  > ReLU6 Range (0 to 6.0): Step size = 6.0 / 127 = 0.047. A feature of 1.0 is bucket 21. A feature of 1.3 is bucket 27. High resolution maintained.
+
+  📖 **Deep Dive:** [Volume I: Model Compression](https://harvard-edge.github.io/cs249r_book_dev/contents/model_compression/model_compression.html)
+
+  </details>
+
+</details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The SLC Cache Eviction</b> · <code>memory-hierarchy</code> <code>soc</code></summary>
+
+- **Interviewer:** "You are designing an always-on audio classifier for a mobile SoC. The model is 2 MB and the SoC has a 4 MB System-Level Cache (SLC). You pin the model to the SLC. It runs perfectly at 1 mW. However, the moment the user turns on the screen and scrolls the UI, the audio model's power consumption spikes to 15 mW, even though the CPU/NPU usage hasn't changed. Why does UI scrolling ruin your ML power budget?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The screen takes power, so the total power goes up." The question states the *model's* power consumption spiked, independent of the screen's baseline power.
+
+  **Realistic Solution:** You experienced **SLC Thrashing and DRAM Fallback**.
+
+  The System-Level Cache (SLC) is a shared L3/L4 cache sitting between the SoC IP blocks (CPU, GPU, NPU) and the external main memory (LPDDR). Reading from the SLC is extremely low-power (e.g., 5 pJ/byte).
+
+  When the user scrolls the UI, the mobile GPU and Display Controller suddenly wake up and begin moving massive amounts of framebuffer data (megabytes per frame at 60/120 Hz). This massive influx of display data immediately **evicts your 2 MB model from the SLC**.
+
+  Because the model is no longer in the ultra-low-power cache, the NPU is forced to fetch the 2 MB of weights directly from the external LPDDR RAM for every single inference. Reading from LPDDR costs significantly more energy (e.g., 50 to 100 pJ/byte). The math hasn't changed, but the physical distance the bits are traveling increased, destroying your microwatt power budget.
+
+  **The Fix:** You must use **Hardware Cache Partitioning/Locking** (if the SoC supports it) to dedicate a hard 2 MB partition of the SLC to the NPU that the GPU is physically prohibited from evicting.
+
+  > **Napkin Math:** SLC Read: 2 MB * 5 pJ = 10 µJ per inference. DRAM Read: 2 MB * 100 pJ = 200 µJ per inference. A 20x explosion in energy cost simply because another subsystem polluted the shared cache.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The DVFS Polling Delay</b> · <code>power-thermal</code> <code>latency</code></summary>
+
+- **Interviewer:** "Your app has a 'Magic Enhance' button that runs a heavy GAN on a photo. The user taps the button, and the inference takes 800ms. You notice that if the user taps the button *while* they are actively scrolling a list, the exact same inference only takes 400ms. Why does doing *more* work (scrolling + inference) make the inference 2x faster?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The OS prioritizes the foreground app during scrolling." The app is always in the foreground when the button is tapped.
+
+  **Realistic Solution:** You are witnessing the **DVFS (Dynamic Voltage and Frequency Scaling) Ramp-Up Delay**.
+
+  When a mobile phone is idle (user staring at a static photo), the OS drops the CPU/NPU to its absolute lowest clock frequency (e.g., 300 MHz) to save battery.
+
+  When you tap the button and trigger the massive ML workload, the OS thermal governor doesn't instantly snap to max frequency. It samples CPU utilization every ~50ms. It sees a spike, bumps the clock slightly, waits 50ms, sees it's still maxed, and bumps it again. It can take 200-400ms for the silicon to physically ramp up to its 2.8 GHz maximum boost state. Your 800ms inference spent half its life executing on a sleeping, underclocked chip.
+
+  However, when the user is actively scrolling a list, the OS's UI framework has already forced the CPU into a high-performance state to maintain 60 FPS. The chip is already "hot and fast." The inference executes entirely at maximum clock speed, finishing in 400ms.
+
+  **The Fix:** Use OS-level performance APIs (like Android's `PerformanceHintManager` or iOS's Quality of Service classes) to explicitly request a temporary CPU boost *before* you invoke the heavy ML model.
+
+  > **Napkin Math:**
+  > Idle Start: 200ms @ 500 MHz + 200ms @ 1.5 GHz + 400ms @ 2.8 GHz = 800ms total.
+  > Scrolling Start: Chip is already at 2.8 GHz. All math executes instantly. Total = 400ms.
+
+  📖 **Deep Dive:** [Volume I: Benchmarking](https://harvard-edge.github.io/cs249r_book_dev/contents/benchmarking/benchmarking.html)
+
+  </details>
+
+</details>

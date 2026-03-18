@@ -1045,3 +1045,253 @@ The domain of the MLOps and Deployment Engineer. This round tests your ability t
   </details>
 
 </details>
+
+
+---
+
+### 🆕 Advanced Inference & Serving Architecture
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The KV-Cache Swapping Cliff</b> · <code>serving</code> <code>memory</code></summary>
+
+- **Interviewer:** "To handle a massive spike in concurrent users for your LLM service, you configure vLLM to enable CPU swapping. If the GPU VRAM gets full, it moves inactive KV-cache blocks to the host CPU RAM over PCIe. The system handles 10x more users without OOMing, but the Time-Per-Output-Token (TPOT) randomly spikes from 40ms to 800ms. Why does swapping cause such a catastrophic latency cliff?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "CPU RAM is slower than GPU RAM." It is slower, but the CPU RAM speed isn't the bottleneck. The pipe connecting them is.
+
+  **Realistic Solution:** You hit the **PCIe Bandwidth Wall**.
+
+  When a request that was swapped to the CPU becomes active again (it's their turn to generate a token), the GPU cannot compute attention over data sitting in host RAM. The *entire* KV-cache for that user's sequence must be physically copied back over the PCIe bus into the GPU's HBM before the forward pass can execute.
+
+  If the user has a 8,000 token context window, their KV-cache is roughly 2 GB.
+  A PCIe Gen4 x16 bus has a real-world bandwidth of roughly 25 GB/s.
+  It takes nearly 100ms just to copy that single user's cache back to the GPU.
+  If the scheduler decides to swap in 8 users simultaneously for the next batch, you saturate the PCIe bus, causing an 800ms pure I/O stall before any math happens.
+
+  **The Fix:** CPU swapping is a trap for latency-sensitive real-time generation. It should only be used for offline batch processing. For real-time serving, you must cap `max_num_seqs` to strictly fit within the physical HBM boundaries, or use prompt caching / context summarization.
+
+  > **Napkin Math:** 2 GB KV cache. PCIe Gen4 = 25 GB/s. Transfer time = 2 / 25 = 80ms per user. Generating 1 token takes 10ms of math. You spent 8x more time moving the memory than doing the inference.
+
+  📖 **Deep Dive:** [Volume I: Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Input Chunking Pipeline Bubble</b> · <code>latency</code> <code>serving</code></summary>
+
+- **Interviewer:** "Users submit 100,000-token documents to your summarization model. To avoid OOMing during the prefill phase, you implement 'Chunked Prefill' (breaking the document into 4,000-token blocks). The prefill now succeeds. But users notice that the Time-To-First-Token (TTFT) actually *increased* compared to when you ran the 100k prompt all at once on a bigger GPU. Why does chunking the prompt slow down the time to first token?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Chunking adds Python looping overhead." Python overhead is microseconds; the slowdown is seconds.
+
+  **Realistic Solution:** You destroyed the **Parallel Math Advantage (Arithmetic Intensity)**.
+
+  Attention and feed-forward layers are matrix multiplications.
+  When you process 100,000 tokens in a single massive batch, you formulate a massive matrix multiplication `[100k, hidden_dim] * [hidden_dim, hidden_dim]`. GPUs are incredibly efficient at this. The arithmetic intensity is astronomical, pushing the GPU to its absolute theoretical peak TFLOPS (e.g., hitting 900+ TFLOPS on an H100).
+
+  When you chunk the prompt into 25 sequential blocks of 4,000 tokens, you force the GPU to do 25 separate, smaller matrix multiplications.
+  1. The arithmetic intensity drops.
+  2. The GPU must load the *entire* 140 GB model weights from HBM to the SRAM 25 separate times (once for each chunk).
+
+  Instead of loading the weights once and doing massive math, you load the weights 25 times and do small math. You shifted the workload from compute-bound back toward memory-bandwidth-bound, ruining efficiency.
+
+  **The Fix:** Chunked prefill is a memory-saving compromise, not a speedup. To fix the speed, you must use Tensor Parallelism across multiple GPUs to keep the sequence contiguous, or interleave the chunks of different users (continuous batching) to restore the arithmetic intensity.
+
+  > **Napkin Math:** Single 100k pass: Read 140 GB weights once. Compute 140 TFLOPs. Time = 140T / 900TFLOPS = 0.15s.
+  > Chunked 25 passes: Read 140 GB weights 25 times = 3,500 GB of memory traffic. At 3.3 TB/s bandwidth, just *loading* the weights takes 1.06 seconds. TTFT increases by nearly 7x.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Multi-Modal Token Starvation</b> · <code>serving</code> <code>architecture</code></summary>
+
+- **Interviewer:** "You are serving a multi-modal model (like LLaVA). A user uploads a 4K image and asks, 'What is this?' The image is encoded into 4,000 visual tokens by the Vision Encoder. The LLM then begins decoding text. During the text decode phase, the GPU utilization is at 4%. Your manager asks you to optimize the Vision Encoder to fix this. Why is the manager focusing on the wrong part of the stack?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "4,000 tokens is too many, the Vision Encoder needs to be compressed." While a smaller encoder helps, it doesn't solve why the *text decode phase* is running at 4% utilization.
+
+  **Realistic Solution:** The manager fails to understand the **Autoregressive Decode Bottleneck**.
+
+  During the decode phase, the model generates exactly one text token at a time. To generate that single token, the GPU must read the entire 70B parameter model from memory, *plus* the KV-cache of the 4,000 visual tokens.
+
+  The GPU is doing almost zero math (just a vector-matrix multiplication) but is forced to move massive amounts of data across the memory bus. The 4% utilization means the compute cores (Tensor Cores) are sitting idle waiting for the HBM memory controller.
+
+  Optimizing the Vision Encoder (which runs *once* during the prefill phase) will do absolutely nothing to speed up the generation of the 500 text tokens that follow.
+
+  **The Fix:** You must optimize the Decode phase.
+  1. **Batching:** Serve multiple users simultaneously to reuse the model weight fetches.
+  2. **KV-Cache Compression:** Apply techniques like Token Merging (ToMe) or pooling to the 4,000 visual tokens *before* they enter the LLM's KV-cache, reducing the memory footprint to 100 tokens.
+  3. **Speculative Decoding:** Use a tiny draft model to guess the text.
+
+  > **Napkin Math:** Generating 1 text token requires reading 140 GB (weights) + 2 GB (4k visual KV-cache). At 3 TB/s bandwidth, that takes ~47ms. You are doing ~140 GFLOPs of math in 47ms, which is 3 TFLOPS. 3 TFLOPS / 900 TFLOPS peak = 0.3% compute utilization. The GPU is functionally asleep.
+
+  📖 **Deep Dive:** [Volume I: Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Beam Search Memory Explosion</b> · <code>algorithms</code> <code>memory</code></summary>
+
+- **Interviewer:** "You switch your generation algorithm from Greedy Search to Beam Search with a beam width of 4 to get better translation quality. Suddenly, your inference server can only handle 1/4th the number of concurrent users before OOMing. Why does Beam Search destroy your concurrency scaling?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Beam search does 4 times the math, so it takes 4 times the CPU/GPU." It does take more compute, but OOM errors are about memory capacity, not math speed.
+
+  **Realistic Solution:** You caused a **KV-Cache Explosion**.
+
+  In Greedy Search, a single user request requires exactly one sequence in the KV-cache.
+  When you enable Beam Search with a width of 4, the model explores 4 different possible sentence branches simultaneously.
+
+  To do this without recalculating the entire prompt every step, the serving framework must allocate **4 independent KV-cache sequences** for that single user. A user who previously required 500 MB of VRAM for their context window now instantly requires 2.0 GB.
+
+  Because your VRAM is fixed, multiplying the memory footprint per user by 4 exactly divides your maximum concurrent user capacity by 4.
+
+  **The Fix:** For high-concurrency production serving, standard Beam Search is almost never used. Stick to Greedy Search, or use advanced frameworks that implement **KV-Cache Sharing (like PagedAttention)** where the initial prompt is shared across all 4 beams, and only the diverging generated tokens allocate new memory pages.
+
+  > **Napkin Math:** Server has 40 GB free VRAM.
+  > Greedy User = 1 GB cache. Max concurrent = 40 users.
+  > Beam(4) User = 4 GB cache. Max concurrent = 10 users.
+  > You just quadrupled your hardware hosting costs for a slight bump in BLEU score.
+
+  📖 **Deep Dive:** [Volume I: Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Structured Output Parsing Tax</b> · <code>serving</code> <code>latency</code></summary>
+
+- **Interviewer:** "You need your LLM to output strict JSON. You implement a constrained decoding wrapper (like Guidance or Outlines) that forces the model to only select tokens valid under your JSON schema. The outputs are now perfect JSON, but the Time-Per-Output-Token (TPOT) doubled. What is the CPU doing that takes so much time?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The model has to think harder to generate JSON." The model is doing the exact same neural network math. The delay is outside the model.
+
+  **Realistic Solution:** You are paying the **Vocabulary Masking Overhead**.
+
+  Constrained decoding works by intercepting the logits (the probabilities for all 32,000+ words in the vocabulary) right before sampling. The CPU must evaluate the current state of the JSON string against a complex Regular Expression or Context-Free Grammar.
+
+  For every single token generated, the CPU must loop through all 32,000 vocabulary words, check if adding that word violates the JSON schema, and if so, force its probability to zero (masking).
+
+  If this masking logic is written in pure Python or uses inefficient regex state machines, checking 32,000 strings takes 20-30 milliseconds. If the GPU only takes 15ms to do the forward pass, you have effectively bottlenecked your trillion-dollar GPU behind a slow Python text-parsing script.
+
+  **The Fix:**
+  1. Use pre-compiled FSMs (Finite State Machines) written in C++/Rust (like the latest versions of Outlines).
+  2. Push the masking logic down to the GPU as a custom CUDA kernel so the logits never have to be copied back to the CPU for evaluation.
+
+  > **Napkin Math:** GPU forward pass: 15ms.
+  > Logit transfer to CPU (32k floats): 1ms.
+  > Python Regex over 32k strings: 25ms.
+  > Total TPOT = 41ms. The CPU parsing text took nearly double the time it took the GPU to run 70 billion parameters.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+
+  </details>
+
+</details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Tokenizer Overhead Spikes</b> · <code>serving</code> <code>cpu</code></summary>
+
+- **Interviewer:** "Your LLM inference server is utilizing a 70B model on an H100. P99 latency suddenly spikes. You look at the GPU utilization metrics, and the GPU is sitting at 0% for 50 milliseconds before every generation request. What CPU-bound process is blocking the GPU from doing its job?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The prompt is being transferred over the PCIe bus." Transferring a few kilobytes of text takes microseconds, not 50 milliseconds.
+
+  **Realistic Solution:** You are hitting the **Tokenizer CPU Bottleneck**.
+
+  Before an LLM can process text, the raw string must be converted into integer Token IDs. Most default tokenizers (like HuggingFace's pure Python implementations or regex-heavy BPE tokenizers) run entirely on a single CPU core.
+
+  If a user sends a 10,000 word document to be summarized, the CPU must iterate through the string, apply complex regex rules, and perform dictionary lookups to generate the thousands of token IDs. If this tokenizer is written in unoptimized Python, it can easily take 50 to 100 milliseconds of pure CPU compute, during which your trillion-dollar GPU is physically doing nothing.
+
+  **The Fix:**
+  1. Replace pure Python tokenizers with fast Rust/C++ bindings (e.g., HuggingFace `tokenizers` fast mode).
+  2. For massive batch serving, decouple tokenization into a separate CPU-heavy microservice to ensure the GPU serving node only ever receives pre-computed integer tensors.
+
+  > **Napkin Math:** A slow Python BPE tokenizer might process 100,000 tokens per second. A 5,000 token prompt takes 50ms to tokenize. An H100 can process that same 5,000 token prompt (prefill) in ~15ms. The text parsing is literally 3x slower than the neural network math.
+
+  📖 **Deep Dive:** [Volume I: Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The KV-Cache Fragmentation</b> · <code>memory</code> <code>serving</code></summary>
+
+- **Interviewer:** "You are serving a 13B model on a single 80GB GPU. You know the weights take 26GB, leaving 54GB for KV-cache. A single user request takes exactly 1GB of KV-cache. Therefore, you configure the server to accept 54 concurrent requests. However, after an hour of operation, the server OOMs and crashes when serving only 35 concurrent requests. Where did the missing 19GB of VRAM go?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Memory leak in the Python code." Python memory leaks affect system RAM, not the GPU VRAM.
+
+  **Realistic Solution:** You are experiencing severe **KV-Cache Memory Fragmentation**.
+
+  Standard huggingface/PyTorch text generation pre-allocates a contiguous block of GPU memory for a sequence's *maximum possible length* (e.g., 2048 tokens).
+
+  If User A asks a question and the model only generates 10 tokens before stopping, User A's request still pinned a 2048-token-sized block of VRAM. When User A finishes, that block is freed. Over thousands of requests of varying lengths, the VRAM becomes a "swiss cheese" of free and used blocks.
+
+  When a new user connects and asks for a 2048-token context window, the OS cannot find a *contiguous* 1GB block of free VRAM, even though there is 19GB of *total* free space scattered across the chip. The allocation fails, and the server OOMs.
+
+  **The Fix:** You must use **PagedAttention** (like vLLM). PagedAttention breaks the KV-cache into small, fixed-size blocks (e.g., 16 tokens) that do not need to be contiguous in physical memory, completely eliminating external fragmentation and allowing you to safely utilize 99% of your VRAM.
+
+  > **Napkin Math:** Without PagedAttention, the average internal/external memory waste in an LLM serving cluster is typically 60% to 80%. A $30,000 H100 GPU is effectively operating as a $6,000 GPU because the memory allocator is too rigid.
+
+  📖 **Deep Dive:** [Volume I: Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Router Bottleneck in MoE Serving</b> · <code>architecture</code> <code>serving</code></summary>
+
+- **Interviewer:** "You deploy a Mixtral 8x7B (Mixture of Experts) model on a single 80GB GPU. Because it only uses ~13B active parameters per token, the math should be fast. However, your profiling shows that generating a token takes 2x longer than a standard dense 13B model. What architectural component of the MoE model is destroying your memory bandwidth?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The router network math is too heavy." The router network is usually a tiny single linear layer; its compute is negligible.
+
+  **Realistic Solution:** You are paying the **MoE Memory Loading Penalty**.
+
+  During autoregressive decoding (batch size 1), the GPU must load the weights from HBM to SRAM to do the math.
+  For a dense 13B model, the GPU streams 26 GB of weights sequentially. Memory controllers love sequential reads, hitting near peak bandwidth.
+
+  For an MoE model, the router decides *at runtime* which expert to use for a given token. The GPU must wait for the router math to finish, and then it must perform **sparse, random memory accesses** to fetch the weights for Expert 3 and Expert 7 out of the massive 46GB pool of total weights.
+
+  These random memory reads defeat the GPU's hardware prefetchers and destroy memory bus efficiency. Even though you are only doing 13B parameters worth of math, the time it takes to randomly fetch those specific 13B parameters from HBM takes vastly longer than streaming them sequentially.
+
+  **The Fix:**
+  1. Serve MoE models at higher batch sizes, so multiple tokens activate multiple experts simultaneously, making the memory reads more dense and predictable.
+  2. Use specialized kernels (like Megatron's MoE kernels) that group tokens by expert before launching the matrix multiplications to maximize memory locality.
+
+  > **Napkin Math:** HBM Sequential Read Speed = 2000 GB/s. HBM Random Access Speed = ~400 GB/s. Fetching 26GB sequentially takes 13ms. Fetching 26GB via sparse random accesses takes 65ms. The MoE model feels 5x slower despite having the same FLOPs.
+
+  📖 **Deep Dive:** [Volume I: Network Architectures](https://harvard-edge.github.io/cs249r_book_dev/contents/network_architectures/network_architectures.html)
+
+  </details>
+
+</details>

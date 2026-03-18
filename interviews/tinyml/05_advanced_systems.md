@@ -1673,3 +1673,71 @@ This round is for principal-level TinyML engineers and researchers who design th
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Floating Point Sensor Tax</b> · <code>sensor-pipeline</code> <code>compute</code></summary>
+
+- **Interviewer:** "Your MCU has a hardware FPU. You read a temperature sensor over I2C, which gives you a 16-bit integer. You convert it to a float, apply a scaling factor (`temp = raw * 0.01f`), and feed it to your TinyML model. The model is an INT8 quantized network. Your profiler shows that preprocessing the sensor data takes longer than the first 3 layers of your neural network combined. Why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "I2C is slow." I2C is slow, but the prompt says the *preprocessing* (the math) is what's taking the time.
+
+  **Realistic Solution:** You are forcing the CPU to perform **Pointless Type Conversions (Quantization Thrashing)**.
+
+  Your neural network is INT8. That means its input layer expects an 8-bit integer.
+  Your pipeline looks like this:
+  1. Read INT16 from sensor.
+  2. Cast INT16 to FP32 (CPU cycles).
+  3. Multiply FP32 by 0.01f (FPU cycles).
+  4. Pass to TFLite Micro.
+  5. TFLite Micro immediately takes your FP32 value, calculates `(val / scale) + zero_point`, and casts it back down to INT8 (Heavy CPU cycles).
+
+  You went from Integer -> Float -> Integer. The float conversion and the TFLite input quantization step require division and floating-point math that is completely unnecessary.
+
+  **The Fix:** Keep the data in the integer domain. Pre-calculate the scaling factor and the model's input zero-point offline. Write a simple bit-shift or integer multiplication in C to map the raw INT16 sensor data directly into the exact INT8 bucket the model expects.
+
+  > **Napkin Math:** Dynamic Float Quantization at runtime: ~50-100 cycles per value. Fixed-point bit-shift: 1 cycle. For an audio waveform with 16,000 samples, avoiding the float conversion saves 1.5 million clock cycles per second.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Unaligned Struct Padding</b> · <code>memory</code> <code>deployment</code></summary>
+
+- **Interviewer:** "You define a C-struct to hold your sensor telemetry and ML prediction before writing it to Flash memory. It looks like this: `struct { char sensor_id; int32_t prediction; char status; }`. You expect it to take 6 bytes (1+4+1). When you check your Flash usage, you are writing 12 bytes per log. You are running out of Flash twice as fast as expected. Why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The compiler is adding null terminators to the chars." Null terminators only apply to strings, not single characters.
+
+  **Realistic Solution:** You fell victim to **C-Compiler Struct Padding (Alignment)**.
+
+  32-bit ARM microcontrollers prefer to read memory in 4-byte chunks (word-aligned). If a 32-bit integer (`int32_t`) is placed at a memory address that is not a multiple of 4, the CPU throws a hardware fault (or incurs a massive performance penalty).
+
+  To prevent this, the C compiler automatically inserts invisible "padding" bytes into your struct to align the larger variables.
+  - `char sensor_id` (1 byte)
+  - *Compiler inserts 3 bytes of padding*
+  - `int32_t prediction` (4 bytes)
+  - `char status` (1 byte)
+  - *Compiler inserts 3 bytes of padding at the end to align the next struct in an array.*
+
+  Your 6-byte payload ballooned to 12 bytes purely due to compiler memory alignment rules.
+
+  **The Fix:**
+  1. **Order by size:** Always order struct members from largest to smallest (`int32_t`, then `char`, then `char`). This eliminates internal padding, reducing the size to 8 bytes.
+  2. **Packed Structs:** Use `__attribute__((packed))` to tell the compiler to strip all padding. This makes it exactly 6 bytes, but beware: accessing the unaligned `int32_t` directly will cause a hardware fault on some MCUs, so you must serialize/memcpy it carefully.
+
+  > **Napkin Math:** 100,000 logs * 12 bytes = 1.2 MB Flash used. 100,000 logs * 6 bytes (packed) = 600 KB Flash used. You just saved 600 KB of physical silicon by rearranging lines of code.
+
+  📖 **Deep Dive:** [Volume I: Optimizing AI](https://harvard-edge.github.io/cs249r_book_dev/contents/optimizing_ai/optimizing_ai.html)
+
+  </details>
+
+</details>

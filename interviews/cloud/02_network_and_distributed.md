@@ -1009,3 +1009,237 @@ The domain of the AI Infrastructure Engineer. This round tests your understandin
   </details>
 
 </details>
+
+
+---
+
+### 🆕 Advanced Network & Distributed Systems
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The AllReduce Incast Congestion</b> · <code>network-fabric</code> <code>collectives</code></summary>
+
+- **Interviewer:** "You are scaling Data Parallel training from 128 to 512 GPUs. You use a standard hierarchical AllReduce. While the mathematical volume of data sent per GPU is constant regardless of cluster size, the actual network time triples when moving to 512 GPUs. Packet loss metrics show a huge spike. What physical network phenomenon is causing this?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The bandwidth is saturated." If the volume of data per GPU is constant, the bandwidth requirement per link is constant. The issue is buffers, not bandwidth.
+
+  **Realistic Solution:** You are experiencing **TCP/RoCE Incast Congestion**.
+
+  In a large distributed AllReduce (especially Tree or Halving-Doubling topologies), multiple nodes must send their gradient chunks to a single receiving node at the exact same microsecond.
+
+  When 8 leaf switches simultaneously forward data down to 1 specific destination port, the traffic bursts. The Top-of-Rack (ToR) switch has very limited physical memory buffers (e.g., 32 MB shared across all ports). During this microsecond burst, the switch buffer instantly overflows. Packets are dropped.
+
+  Because RoCEv2 (RDMA) requires a lossless network, these packet drops trigger Priority Flow Control (PFC) pause frames, which halt traffic on the upstream switches, causing a cascading "congestion spreading" effect that freezes the entire training cluster until the buffers drain.
+
+  **The Fix:**
+  1. Use **In-Network Computing (e.g., NVIDIA SHARP)** where the switch hardware performs the gradient addition itself, preventing multiple flows from needing to hit a single destination GPU.
+  2. Switch from Ethernet/RoCE to a credit-based flow control network like **InfiniBand**, which inherently prevents buffer overruns.
+
+  > **Napkin Math:** 8 nodes sending 1 MB chunks to 1 destination simultaneously = 8 MB burst. If the switch port only has 2 MB of dedicated egress buffer, 6 MB of packets are instantly dropped in the span of a few microseconds.
+
+  📖 **Deep Dive:** [Volume II: Network Fabrics](https://harvard-edge.github.io/cs249r_book_dev/contents/network_fabrics/network_fabrics.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Pipeline Stutter (1F1B)</b> · <code>parallelism</code> <code>scheduling</code></summary>
+
+- **Interviewer:** "You implement Pipeline Parallelism with 8 stages. To minimize the 'bubble' (idle time), you use the 1F1B (One Forward, One Backward) scheduling strategy with 32 microbatches. It works perfectly for 100 steps. Then, suddenly, the entire pipeline stalls for 2 seconds. The computation is perfectly load-balanced. What non-compute operation broke the 1F1B rhythm?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "One of the GPUs must have thermal throttled." While true that throttling causes delays, a complete 2-second pipeline stall usually points to a synchronization barrier, not a slight clock speed reduction.
+
+  **Realistic Solution:** You hit the **Optimizer Step Barrier**.
+
+  1F1B scheduling does a beautiful job of keeping GPUs busy by interleaving the forward and backward passes of different microbatches. However, at the very end of the global batch (after all 32 microbatches have finished their backward pass), the pipeline must apply the gradients to the weights (the Optimizer Step).
+
+  The optimizer step represents a **global synchronization barrier**. GPU 0 cannot start the forward pass for the *next* global batch until GPU 7 has completely finished its backward pass for the *last* microbatch, and all GPUs have synchronized and updated their weights.
+
+  During this optimizer step and the subsequent pipeline refill (the new bubble), the steady-state 1F1B rhythm is broken, creating a massive, predictable stutter at the boundary of every global batch.
+
+  **The Fix:** Implement **Interleaved Pipeline Parallelism** (where each GPU is assigned multiple smaller chunks of the model to shrink the bubble further) or use asynchronous/overlapping optimizer steps if the math permits.
+
+  > **Napkin Math:** 1F1B Bubble Fraction = `(P - 1) / M`. For P=8 stages and M=32 microbatches, the bubble is `7 / 32 = ~22%`. That 22% of wasted time manifests entirely at the beginning and end of the global batch synchronization barrier.
+
+  📖 **Deep Dive:** [Volume II: Distributed Training](https://harvard-edge.github.io/cs249r_book_dev/contents/distributed_training/distributed_training.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The ZeRO-3 Cross-Node Thrashing</b> · <code>parallelism</code> <code>network</code></summary>
+
+- **Interviewer:** "You are training a 500B model using DeepSpeed ZeRO-3 across 256 GPUs. ZeRO-3 shards all parameters across all GPUs. The training speed is acceptable. However, when you increase the batch size slightly to improve utilization, the training time per step skyrockets by 500%. You haven't run out of memory (OOM). Why did a slight batch size increase destroy the network?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Larger batches take longer to compute." Compute scales linearly. A 500% spike implies a phase transition from compute-bound to network-bound.
+
+  **Realistic Solution:** You caused a **ZeRO-3 Prefetching / Thrashing Collapse**.
+
+  ZeRO-3 works by dynamically fetching the required weight shards from other GPUs over the network *just before* computing a layer, and immediately discarding them after the layer finishes to save memory.
+
+  To hide this network latency, DeepSpeed uses aggressive prefetching: it starts fetching the weights for Layer N+1 while the GPU is still computing Layer N.
+
+  When you increased the batch size, the *activation memory* (which scales linearly with batch size) grew. To fit these larger activations, the ZeRO memory allocator had less headroom to hold pre-fetched weights. The prefetch buffer size was forced to shrink.
+
+  Because the prefetch buffer was too small, the GPU finished computing Layer N, but the weights for Layer N+1 hadn't arrived yet. The GPU stalled, waiting for the InfiniBand network. This happened for every single layer, turning a compute-bound training job into a pure network-IO-bound job.
+
+  **The Fix:** You must balance the memory. If you increase batch size (activations), you must either use Activation Checkpointing to free up RAM, or increase the size of the cluster so the per-GPU parameter shards are smaller, leaving enough memory for the critical network prefetch buffers.
+
+  > **Napkin Math:** 500B model = 1TB FP16 weights. Sharded over 256 GPUs = 4 GB of weights stored per GPU. However, to compute Layer N, the GPU needs the full 15 GB weight matrix for that specific layer. If the network bandwidth is 50 GB/s, fetching the layer takes 300ms. If compute takes 200ms, and you don't have RAM to prefetch, the GPU spends 100ms completely idle per layer.
+
+  📖 **Deep Dive:** [Volume II: Distributed Training](https://harvard-edge.github.io/cs249r_book_dev/contents/distributed_training/distributed_training.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The NCCL NVLink Deadlock</b> · <code>hardware</code> <code>distributed</code></summary>
+
+- **Interviewer:** "You are running Data Parallel training on a single 8-GPU DGX node. GPU 0 crashes due to a faulty memory bank. You rewrite the host script to exclude GPU 0 and launch the job on GPUs 1 through 7. The job starts, but the NCCL AllReduce immediately hangs indefinitely. Why does a 7-GPU topology fail on a DGX?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The batch size must be divisible by the number of GPUs." While math divisibility is a common issue, it would throw a shape mismatch error, not hang the network.
+
+  **Realistic Solution:** You broke the **Physical NVLink Ring/Mesh Topology**.
+
+  In an NVIDIA DGX server, the GPUs are physically connected to each other via NVSwitch and hardwired NVLink traces on the motherboard. NCCL (NVIDIA Collective Communication Library) profiles this physical hardware at startup to create an optimal logical ring or tree for passing gradients.
+
+  When you exclude GPU 0, you leave a physical "hole" in the hardware topology. NCCL attempts to build a continuous high-speed ring across GPUs 1-7. If the physical wiring relies on GPU 0 to bridge certain NVSwitch domains (depending on the specific baseboard architecture), NCCL cannot form a closed loop using only NVLinks.
+
+  Instead of falling back to the much slower PCIe bus automatically, NCCL will often hang during the ring negotiation phase, or it will construct a broken ring that deadlocks waiting for a signal from a missing hardware path.
+
+  **The Fix:** You must explicitly set `NCCL_P2P_DISABLE=1` (forcing it to use PCIe, which destroys performance) or, more practically, you cannot use an asymmetric subset of GPUs on a tightly coupled baseboard. You must repair the node.
+
+  > **Napkin Math:** A standard AllReduce on 8 GPUs via NVLink (900 GB/s) takes ~20ms. If forced to fallback to PCIe Gen4 routing through the CPU root complex to bypass a dead GPU, the bandwidth drops to ~32 GB/s, taking ~560ms. A 28x slowdown, effectively ruining the node.
+
+  📖 **Deep Dive:** [Volume II: Network Fabrics](https://harvard-edge.github.io/cs249r_book_dev/contents/network_fabrics/network_fabrics.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The DDP Bucket Straggler</b> · <code>training</code> <code>parallelism</code></summary>
+
+- **Interviewer:** "You are using PyTorch DistributedDataParallel (DDP) across 4 GPUs. GPU 3 is slightly slower than the others due to thermal throttling. You notice that GPU 0, 1, and 2 are sitting idle for 200ms at the end of every backward pass. You know DDP overlaps communication with computation. Why isn't the overlap hiding the delay of GPU 3?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "DDP waits until the entire backward pass is finished before communicating." This is exactly what DDP *doesn't* do. DDP uses gradient bucketing.
+
+  **Realistic Solution:** You are experiencing the **Global Synchronization of the Final Bucket**.
+
+  PyTorch DDP works by grouping gradients into "buckets" (e.g., 25 MB each). As soon as the backward pass finishes calculating the gradients for Bucket 1, it immediately fires off an asynchronous network AllReduce for Bucket 1, while the GPU continues calculating the backward pass for Bucket 2. This perfectly overlaps compute and network.
+
+  However, for the *very last bucket* (which contains the gradients for the first layers of the model), there is no more compute left to overlap. Furthermore, the optimizer step cannot begin until *all* buckets have finished their AllReduce across *all* GPUs.
+
+  If GPU 3 is 200ms slower at finishing its math for the final bucket, GPUs 0, 1, and 2 will hit the hard synchronization barrier and sit completely idle. The network cannot fix a compute straggler.
+
+  **The Fix:** You must address the thermal throttling on GPU 3, or use an asynchronous training method (which hurts convergence) to break the strict synchronization barrier.
+
+  > **Napkin Math:** If 3 GPUs finish in 800ms, and 1 GPU finishes in 1000ms. The effective step time is 1000ms. You are wasting 200ms * 3 GPUs = 600ms of GPU compute time every single step. At $3.00 an hour per GPU, you are throwing away thousands of dollars just waiting for the slow chip.
+
+  📖 **Deep Dive:** [Volume II: Distributed Training](https://harvard-edge.github.io/cs249r_book_dev/contents/distributed_training/distributed_training.html)
+
+  </details>
+
+</details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Data Parallel Straggler</b> · <code>training</code> <code>parallelism</code></summary>
+
+- **Interviewer:** "You're running standard Data Parallel (DDP) training on 256 GPUs. One specific node has a slightly degraded cooling fan, causing its 8 GPUs to thermal throttle and run 15% slower than the rest of the cluster. The network is perfectly healthy. By exactly how much does this single degraded node slow down the entire 256-GPU training job?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "It slows down the job by (15% / 256) since it's only one node." This assumes asynchronous execution.
+
+  **Realistic Solution:** It slows down the entire job by **exactly 15%**.
+
+  Data Parallelism uses synchronous SGD. At the end of every single backward pass, all 256 GPUs must participate in a global `AllReduce` operation to sum their gradients before the optimizer step can occur.
+
+  This creates a strict global barrier. The 248 healthy GPUs will finish their math at 100% speed, and then sit completely idle (0% utilization), waiting for the throttled node to finish its math and join the collective communication ring. The throughput of a synchronously parallel system is strictly dictated by the throughput of its absolute slowest component.
+
+  **The Fix:** You must proactively monitor hardware health (e.g., tracking `AllReduce` wait times per rank) and evict/replace the straggler node, or switch to an asynchronous or gradient-staleness tolerant architecture (which is mathematically riskier).
+
+  > **Napkin Math:** 256 GPUs * $3/hr = $768/hour. A 15% slowdown wastes $115 every hour in idle compute time across the healthy nodes, vastly exceeding the cost of just replacing the $15 broken cooling fan.
+
+  📖 **Deep Dive:** [Volume II: Distributed Training](https://harvard-edge.github.io/cs249r_book_dev/contents/distributed_training/distributed_training.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The ZeRO-1 Memory Squeeze</b> · <code>training</code> <code>memory</code></summary>
+
+- **Interviewer:** "You are trying to fit a 30B parameter model on a single 8-GPU node (80GB A100s) for fine-tuning. The weights in FP16 take 60GB. You enable DeepSpeed ZeRO Stage 1, which partitions the optimizer states across the 8 GPUs. However, the system still instantly OOMs on the first forward pass, even with a batch size of 1. Why didn't ZeRO-1 save you enough memory?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "ZeRO-1 reduces the memory footprint by 8x, so it should fit." ZeRO-1 *only* partitions the optimizer states, not the gradients or the weights.
+
+  **Realistic Solution:** You ran out of memory because you didn't shard the **Gradients** or the **Model Weights**.
+
+  Let's calculate the memory per GPU *with* ZeRO-1:
+  1. **Weights (Replicated):** 30B * 2 bytes (FP16) = 60 GB.
+  2. **Gradients (Replicated):** 30B * 2 bytes (FP16) = 60 GB.
+  3. **Optimizer States (Sharded):** Adam requires 12 bytes per parameter (FP32 momentum, variance, and master weights). Total = 360 GB. Sharded across 8 GPUs = 45 GB per GPU.
+
+  Total memory required per GPU: 60 GB + 60 GB + 45 GB = **165 GB**.
+  Your 80 GB A100 OOMs immediately.
+
+  **The Fix:** To fit this model on 80GB cards, you must use **ZeRO Stage 3**, which partitions the weights, gradients, AND optimizer states across all 8 GPUs. (Total per GPU: `(60+60+360)/8 = ~60 GB`, which fits nicely).
+
+  > **Napkin Math:** ZeRO-1 memory: `(W + G) + (O / N)`. ZeRO-3 memory: `(W + G + O) / N`. For large models, W and G alone will exceed VRAM, forcing the use of Stage 3 or tensor parallelism.
+
+  📖 **Deep Dive:** [Volume II: Distributed Training](https://harvard-edge.github.io/cs249r_book_dev/contents/distributed_training/distributed_training.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Tensor Parallelism Bandwidth Tax</b> · <code>architecture</code> <code>network</code></summary>
+
+- **Interviewer:** "You are serving a 70B model. It fits perfectly on 2x A100 (80GB) GPUs using Tensor Parallelism (TP=2). To handle more traffic, you buy 2 more A100s. Your colleague says, 'Let's just increase to TP=4, that will double our throughput because the math is split 4 ways instead of 2.' You argue that TP=4 will actually be *slower* than running two separate TP=2 replicas. Why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "More GPUs always means faster math." Math scales, but communication overhead does not scale linearly in Tensor Parallelism.
+
+  **Realistic Solution:** You are fighting the **Tensor Parallelism AllReduce Tax**.
+
+  In Tensor Parallelism (Megatron-LM style), every single Transformer layer requires **two AllReduce operations** across all participating GPUs (one after the self-attention block, one after the MLP block).
+
+  An AllReduce operation's latency is heavily dependent on the number of devices participating in the ring/tree. By expanding from TP=2 to TP=4, you have doubled the number of synchronization barriers the GPUs must hit for every single token generated.
+
+  Because LLM decoding is already memory-bandwidth bound (not compute bound), splitting the matrix math 4 ways yields almost zero compute benefit, but incurs massive network synchronization penalties.
+
+  **The Fix:** You should use **Data Parallelism** (or Replica Parallelism) for serving. Run Replica A on GPUs 0,1 (TP=2) and Replica B on GPUs 2,3 (TP=2). This gives you exactly 2x the throughput with zero additional network overhead.
+
+  > **Napkin Math:** A 70B model with 80 layers requires 160 AllReduces per token. At TP=2, an NVLink AllReduce might take 5µs (160 * 5 = 0.8ms total). At TP=4, it might take 8µs (160 * 8 = 1.28ms total). The network overhead increases latency by 50% without speeding up the memory-bound math at all.
+
+  📖 **Deep Dive:** [Volume II: Distributed Training](https://harvard-edge.github.io/cs249r_book_dev/contents/distributed_training/distributed_training.html)
+
+  </details>
+
+</details>

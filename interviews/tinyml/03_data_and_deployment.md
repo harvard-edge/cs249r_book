@@ -953,3 +953,177 @@ Deploying a model to a single MCU is an engineering exercise. Deploying it to 10
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Flash Wear-Leveling Blindspot</b> · <code>storage</code> <code>mlops</code></summary>
+
+- **Interviewer:** "Your edge sensors log anomaly data to internal Flash. To prevent wearing out the Flash (which has a 10,000 cycle limit), you write a script to always save logs starting at memory address 0x08000000, and sequentially move forward to 0x08040000 before looping back. After a year, the system crashes because the flash sector at 0x08000000 is physically destroyed. Why didn't your sequential logging work as wear-leveling?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "You didn't make the loop big enough." The size of the loop isn't the primary failure mode; it's how Flash physics requires data to be updated.
+
+  **Realistic Solution:** You ignored **Flash Page Erase Granularity**.
+
+  You can write (program) bits in Flash from 1 to 0 sequentially. But you cannot flip a 0 back to a 1 without **erasing an entire sector/page** at once.
+  If your microcontroller's flash sector size is 16 KB, and you write 100 bytes of logs sequentially into that sector, you eventually fill the 16 KB. To write the 16,001st byte, you must erase the *entire* 16 KB sector.
+
+  Your script looped through the memory, but every time it looped back to 0x08000000, it had to issue an Erase command on Sector 0. If you log frequently, Sector 0 absorbs massive amounts of Erase cycles (which is what physically destroys the silicon) while the rest of the memory space might remain lightly used.
+
+  **The Fix:** Never write raw Flash management code yourself. Use a proper **Flash Translation Layer (FTL)** or an embedded filesystem designed for flash (like LittleFS or SPIFFS). These libraries abstract the physical addresses and automatically map logical writes to different physical sectors to ensure perfect, even wear-leveling across the entire chip.
+
+  > **Napkin Math:** If you log 64 bytes a minute, a 16 KB sector fills in 256 minutes (~4.2 hours). You are erasing that sector 5.6 times a day. 5.6 erases * 365 days = 2,044 erase cycles per year. The flash will die in roughly 4.8 years.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The OTA Bandwidth Congestion</b> · <code>networking</code> <code>deployment</code></summary>
+
+- **Interviewer:** "You have a fleet of 5,000 smart factory sensors connected via a shared LoRaWAN gateway. You push a 100 KB model update to the fleet simultaneously. The OTA update process stalls, taking days to complete, and normal sensor telemetry stops functioning entirely. What network characteristic of LoRaWAN did you violate?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "100 KB is too large for the gateway." While true, it's not just the size; it's the collision domain and the protocol duty cycle.
+
+  **Realistic Solution:** You violated the **Duty Cycle Limits and the ALOHA MAC protocol**.
+
+  LoRaWAN operates in unlicensed sub-GHz bands (like 868 MHz or 915 MHz). By law in many regions, a device can only transmit for 1% of the time (the duty cycle limit).
+
+  Furthermore, LoRa uses a modified ALOHA protocol. Devices just "shout" their data into the air. If 5,000 devices are all trying to send acknowledgment packets (ACKs) for the OTA chunks they are receiving at the exact same time, the radio waves collide in the air. The gateway receives garbage. The devices wait, timeout, and retry... causing even more collisions. This is a **Broadcast Storm**.
+
+  Your OTA update effectively DDOS'd your own factory network.
+
+  **The Fix:**
+  1. Use **Multicast OTA (FUOTA - Firmware Update Over The Air)**. The gateway broadcasts the firmware chunks once, and all 5,000 devices listen simultaneously without sending individual ACKs for every packet. They only request missing packets at the very end.
+  2. If Multicast isn't available, you must strictly stagger the updates (e.g., updating only 10 devices an hour) to prevent airwave congestion.
+
+  > **Napkin Math:** In LoRa SF12, a 51-byte payload takes ~2.5 seconds of airtime. A 1% duty cycle means the device must remain completely silent for the next 247 seconds before it can send an ACK. Sending 100 KB point-to-point to 5,000 devices is mathematically impossible under these physics.
+
+  📖 **Deep Dive:** [Volume I: Optimizing AI](https://harvard-edge.github.io/cs249r_book_dev/contents/optimizing_ai/optimizing_ai.html)
+
+  </details>
+
+</details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Continuous Logging Flash Death</b> · <code>storage</code> <code>mlops</code></summary>
+
+- **Interviewer:** "Your smart thermostat logs the room temperature and the ML model's occupancy prediction to internal Flash memory every 5 minutes for user analytics. You are using a standard SPIFFS filesystem. The internal flash has a 10,000 cycle erase limit. A year later, 15% of the devices are permanently bricked. How did logging 20 bytes every 5 minutes destroy the Flash?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "20 bytes * 105,000 logs a year is only 2 MB. It didn't fill up the drive." It didn't fill up the drive, it destroyed the silicon via Write Amplification.
+
+  **Realistic Solution:** You fell victim to **Write Amplification and Erase Granularity**.
+
+  Flash memory cannot overwrite a 0 to a 1 without erasing an entire "Sector" (usually 4 KB or 16 KB).
+  When you append 20 bytes to a log file, the filesystem (even flash-aware ones like SPIFFS) eventually fills up a sector. To write the next 20 bytes, it must find a new sector, or erase an old one.
+
+  Because the filesystem also has to update metadata (the file size, the directory index, the wear-leveling headers) for *every single 20-byte write*, it is constantly erasing and rewriting the metadata sectors. You are effectively performing a 4 KB erase cycle just to save 20 bytes of data.
+
+  **The Fix:** Never log high-frequency telemetry synchronously to internal Flash.
+  1. Buffer the 20-byte logs in SRAM (RAM has infinite endurance).
+  2. Only write to Flash once a day, or when the SRAM buffer hits 4 KB, ensuring you only trigger one Erase cycle per 4 KB of actual payload data.
+
+  > **Napkin Math:** 1 log every 5 mins = 288 logs/day. If each log updates a metadata sector, that sector is erased 288 times a day. 288 * 365 = 105,120 erase cycles per year. The Flash is rated for 10,000 cycles. You physically destroyed the silicon in exactly 34 days.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Model Calibration Drift</b> · <code>deployment</code> <code>sensor</code></summary>
+
+- **Interviewer:** "You train an anomaly detection model for industrial motors using a high-end lab accelerometer. You achieve 99% accuracy. You deploy the model to the factory floor using a cheap $2 MEMS accelerometer. The model immediately fires a continuous stream of false positives. Both sensors are 16-bit. What critical MLOps step did you skip during deployment?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The cheap sensor is too noisy, we need a low-pass filter." Noise is a factor, but the immediate catastrophic failure is a scaling mismatch.
+
+  **Realistic Solution:** You skipped **Sensor Sensitivity Calibration (g-scaling)**.
+
+  Just because both sensors output 16-bit integers (-32768 to 32767) does not mean the numbers mean the same thing in the physical world.
+
+  The lab sensor might be configured for a ±2g range, meaning a raw value of `16,384` equals exactly 1.0g of force.
+  The cheap factory sensor might default to a ±8g range, meaning a raw value of `16,384` equals exactly 4.0g of force.
+
+  If you feed the raw 16-bit integers directly from the factory sensor into the neural network trained on the lab sensor, the network perceives a normal 1.0g vibration as a catastrophic 4.0g earthquake, triggering immediate anomalies.
+
+  **The Fix:** Always convert raw ADC ticks into absolute physical engineering units (e.g., m/s² or g's) inside your edge C++ pipeline *before* passing the tensor to the ML model.
+
+  > **Napkin Math:** Lab Sensor (±2g): 1 LSB = 0.061 mg. Factory Sensor (±8g): 1 LSB = 0.244 mg. Feeding the raw integers without scaling means your model thinks every movement is exactly 4 times more violent than it actually is.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Bootloader Pin Trap</b> · <code>deployment</code> <code>hardware</code></summary>
+
+- **Interviewer:** "You deploy a TinyML model on an ESP32 for a smart door lock. It runs perfectly. You design a custom PCB to shrink the device, and to save space, you wire the battery monitor ADC to GPIO 0. When you flash the firmware, the ML model works. When you unplug it from the computer and run it on battery, the device refuses to boot entirely. Why did moving a single sensor pin brick the deployment?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The battery monitor is drawing too much current." ADC pins draw nanoamps; it's not a power issue.
+
+  **Realistic Solution:** You violated the **Strapping Pin / Boot Mode Configuration**.
+
+  Microcontrollers like the ESP32 use specific GPIO pins (called strapping pins) to determine *how* to boot the moment power is applied. For the ESP32, GPIO 0 determines if the chip should boot into normal execution mode (Flash) or enter UART Download Mode (waiting for a firmware flash).
+
+  When connected to a computer, your USB-to-Serial chip automatically handled the boot sequence. But when running on a raw battery, if your battery monitor circuit pulls GPIO 0 low (even slightly) during the first few milliseconds of power-on, the ESP32 thinks it is supposed to enter Firmware Update mode. It halts the bootloader and sits there forever, waiting for code that will never arrive.
+
+  **The Fix:** Never use manufacturer-designated strapping pins (like GPIO 0, 2, 5, 12, or 15 on an ESP32) for general ML sensors or pull-down circuits unless you strictly isolate them during the power-on-reset (POR) phase.
+
+  > **Napkin Math:** The bootloader samples the strapping pins for approximately 1 millisecond at boot. A single resistor pulling GPIO 0 below 1.5V during that 1ms window turns a $50 smart lock into a paperweight.
+
+  📖 **Deep Dive:** [Volume I: Optimizing AI](https://harvard-edge.github.io/cs249r_book_dev/contents/optimizing_ai/optimizing_ai.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Unsigned Integer Wrap</b> · <code>mlops</code> <code>robustness</code></summary>
+
+- **Interviewer:** "Your predictive maintenance system uses a Cortex-M0+ to monitor motor vibrations. It keeps a running tally of anomalies in a `uint16_t` counter and uploads the total to the cloud every week. After 18 months, the cloud dashboard suddenly reports that the factory had exactly 65,500 *fewer* anomalies this week than last week. The factory hasn't changed. What broke?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The ML model drifted and stopped detecting anomalies." Model drift happens slowly; an instant drop of 65,000 points to a data type failure.
+
+  **Realistic Solution:** You suffered an **Integer Overflow (Wrap-Around)**.
+
+  A `uint16_t` (unsigned 16-bit integer) can only hold a maximum value of `65,535`.
+  Because your edge device was keeping a *running total* of anomalies over 18 months, the counter slowly crept up.
+  When the counter hit `65,535`, the very next anomaly caused the integer to overflow and wrap back to `0`.
+
+  When the device uploaded `0` to the cloud, the cloud dashboard subtracted last week's value (e.g., `65,500`) from this week's value (`0`), determining that there was a massive negative drop in anomalies.
+
+  **The Fix:**
+  1. Use wider data types for absolute accumulators (e.g., `uint32_t` holds up to 4.2 billion).
+  2. The edge device should *never* send running totals. It should send the *delta* (number of anomalies since the last upload) and clear the counter to zero.
+
+  > **Napkin Math:** 100 anomalies a day. `65535 / 100 = 655 days`. At exactly 1.8 years (18 months), the integer physically runs out of bits and wraps to zero, corrupting your MLOps dashboard.
+
+  📖 **Deep Dive:** [Volume I: ML Operations](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_ops/ml_ops.html)
+
+  </details>
+
+</details>

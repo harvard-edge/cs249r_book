@@ -799,3 +799,174 @@ The domain of the TinyML Systems Engineer. This round tests your understanding o
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Context Switch Cost</b> · <code>real-time</code> <code>architecture</code></summary>
+
+- **Interviewer:** "You are running inference on a Cortex-M4 using an RTOS. Your model takes 20ms to run. To prevent starring other tasks, you split the inference into 20 chunks of 1ms, calling `taskYIELD()` between each chunk. Now, your inference takes 35ms total. What RTOS mechanism is costing you 15ms?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The OS is just slow at executing the yield function." It's not the function call; it's the physical movement of data required to change tasks.
+
+  **Realistic Solution:** You are experiencing the hidden cost of **Context Switching**.
+
+  Every time you call `taskYIELD()`, the RTOS must halt your ML thread. To do this safely, it must take all the values currently sitting in the CPU's registers (R0-R15, Program Counter, Status Registers) and push them onto the thread's Stack in SRAM. Then, it loads the registers of the next task from its stack, and resumes execution.
+
+  When that task yields back to your ML model, the RTOS does the reverse: saving the other task's state and restoring your ML task's 16+ registers from SRAM back into the CPU core.
+
+  On a Cortex-M4, a full RTOS context switch can take hundreds of clock cycles. Doing this 20 times (or 40, counting the return trips) introduces massive overhead.
+
+  **The Fix:** You must balance responsiveness with throughput. Yielding every 1ms is too aggressive. Yielding every 5ms or 10ms (at natural layer boundaries in the neural network) drastically reduces context switching overhead while still keeping the system responsive.
+
+  > **Napkin Math:** If a context switch takes 10 microseconds, and you yield to 5 other tasks 20 times, you perform 100 context switches. That's 1ms of pure OS overhead. If those tasks also do work or trigger other interrupts, cache/pipeline disruption inflates this further, easily reaching the 15ms penalty observed.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Double-Precision FPU Trap</b> · <code>compute</code> <code>precision</code></summary>
+
+- **Interviewer:** "You are porting a Python model to C for a Cortex-M7. In Python, you have the line `y = x * 0.5`. In your C code, you write exactly that: `float y = x * 0.5;`. Your profiling shows this one line is incredibly slow. The M7 has a hardware FPU. Why is this math operation stalling the pipeline?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Floating point math is just naturally slow on microcontrollers." While true historically, an M7 with an FPU should execute this in one cycle. The problem is a specific C language default.
+
+  **Realistic Solution:** You fell into the **Double-Precision Promotion Trap**.
+
+  In the C language, the literal `0.5` is treated as a `double` (64-bit float) by default, not a `float` (32-bit).
+  If your Cortex-M7 only has a single-precision FPU (FPv5-SP), it physically cannot execute 64-bit math in hardware.
+
+  When the compiler sees `x * 0.5`, it implicitly promotes `x` to a `double`, and then calls a software library function (like `__aeabi_dmul`) to perform the 64-bit multiplication using integer registers. This software emulation takes dozens or hundreds of cycles.
+
+  **The Fix:** You must append an `f` to floating-point literals in C/C++ to force single-precision: `float y = x * 0.5f;`. This allows the compiler to map the operation directly to a single-cycle hardware `VMUL.F32` instruction.
+
+  > **Napkin Math:** Software double-precision multiply: ~50-100 cycles. Hardware single-precision multiply: 1 cycle. Missing one `f` in your source code made that specific operation 100x slower.
+
+  📖 **Deep Dive:** [Volume I: Neural Computation](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Non-Volatile MRAM Trap</b> · <code>memory-hierarchy</code> <code>power</code></summary>
+
+- **Interviewer:** "Your ultra-low-power device uses an Ambiq Apollo4 MCU, which features MRAM (Magnetoresistive RAM) instead of standard Flash. MRAM is incredibly fast and allows byte-level writes without erasing pages. You decide to run your entire model inference directly from MRAM to save SRAM. Your battery dies in 2 days instead of the calculated 14 days. Why did MRAM kill your power budget?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "MRAM is slower than SRAM so it took longer to run." MRAM is fast enough; the issue is the physical energy required to perform the reads and writes compared to SRAM.
+
+  **Realistic Solution:** You ignored the **Active Power Cost of Non-Volatile Memory**.
+
+  While MRAM is phenomenal for deep sleep (it retains data with zero power) and is faster/easier to write than Flash, it physically requires more energy to read and write a bit than traditional 6T SRAM.
+
+  During a neural network inference, the intermediate activation tensors are read and written hundreds of thousands of times. If you place the Tensor Arena (activations) in MRAM, the memory controller must drive physical magnetic tunneling currents on every single cycle of the inner loop.
+
+  **The Fix:** MRAM is a replacement for Flash (storing the weights and code permanently), not a replacement for SRAM (scratchpad memory). You must configure the linker script to put the immutable Model Weights in MRAM, but strictly place the read/write Tensor Arena (activations) in standard SRAM to preserve the active power budget.
+
+  > **Napkin Math:** SRAM Read/Write Energy: ~5 pJ per word. MRAM Read Energy: ~15 pJ per word. MRAM Write Energy: ~50 pJ per word. If an inference does 1,000,000 writes, putting the arena in MRAM burns 50 µJ of energy just on memory physics, destroying the microwatt power budget.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The TFLite Micro Heap Overhead</b> · <code>memory</code> <code>frameworks</code></summary>
+
+- **Interviewer:** "You compile a 15 KB model. Your MCU has 32 KB of SRAM. You allocate exactly 15 KB for the `tensor_arena` array for TFLite Micro. When you call `interpreter.AllocateTensors()`, it fails with an OOM error. The model only needs 15 KB. Why did it fail?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The model weights take up space in the arena." Weights usually live in Flash and aren't copied to the arena.
+
+  **Realistic Solution:** You forgot to budget for **Framework Metadata and Scratch Buffers**.
+
+  The `tensor_arena` in TFLite Micro is not just for the intermediate activation tensors. The framework uses the very beginning of the arena to allocate its own internal state. This includes:
+  1. The `MicroInterpreter` class object itself.
+  2. The memory planner's array of `TfLiteTensor` C-structs (which contain shape, type, and data pointer metadata for every tensor in the graph).
+  3. The `TfLiteEvalTensor` structs used during execution.
+  4. Node and Registration metadata for the operators.
+  5. Im2Col scratch buffers required by CMSIS-NN convolutions to rearrange image data before matrix multiplication.
+
+  **The Fix:** You must always pad the theoretical peak memory of your network. A good rule of thumb is to add 2-4 KB of headroom to the `tensor_arena` specifically for TFLite Micro's object and struct overhead, plus whatever the specific DSP kernels require for scratch space.
+
+  > **Napkin Math:** A model with 50 layers requires 50 `TfLiteTensor` structs and 50 `TfLiteNode` structs. At ~64 bytes per layer of metadata, that is over 3 KB of overhead. If your arena was sized exactly to the 15 KB peak activation limit, it will crash immediately during the initialization phase.
+
+  📖 **Deep Dive:** [Volume I: ML Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
+</details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Volatile Variable Wipe</b> · <code>compiler</code> <code>memory</code></summary>
+
+- **Interviewer:** "You deploy a TFLite Micro model on an STM32. To save memory, you allocate a large `static uint8_t arena[10240]` and point both the ML inference engine and a secondary USB data-transfer task to use it. The ML model runs perfectly. When you plug in the USB cable to download logs, the device hard-faults. Why can't two tasks share a static array?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "You need a mutex to lock the array." While a mutex is needed for thread safety, the hard fault happens even if the tasks run sequentially.
+
+  **Realistic Solution:** You broke the **TFLite Micro Memory Lifecycles**.
+
+  TFLite Micro's memory planner is heavily optimized. It doesn't just use the Arena for intermediate activations during the `invoke()` call. It places permanent, stateful C++ objects (like the interpreter itself, node structures, and quantization parameters) at the very beginning of the Arena during the initial `AllocateTensors()` phase.
+
+  These metadata structures must persist for the entire lifetime of the application.
+
+  When your USB task took over the array and wrote data into `arena[0]`, it overwrote the TFLite Micro C++ object pointers. When you subsequently called `invoke()` again, the CPU tried to dereference a memory address that was now filled with random USB bytes, causing an immediate invalid memory access (Hard Fault).
+
+  **The Fix:** You cannot blindly share the entire ML Arena. You must either query TFLite Micro for the exact start address of the *temporary* activation buffers (which can be safely overwritten between inferences), or isolate the ML metadata into a separate, protected memory region.
+
+  > **Napkin Math:** TFLite metadata takes ~2 KB. If your USB task writes a 512-byte payload to `arena[0]`, you just destroyed the pointers for the first 10 layers of your neural network.
+
+  📖 **Deep Dive:** [Volume I: ML Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Cache-Line False Sharing</b> · <code>architecture</code> <code>parallelism</code></summary>
+
+- **Interviewer:** "You are using a dual-core Cortex-M7 (e.g., STM32H7 dual-core). Core 0 runs an anomaly detection ML model. Core 1 runs a high-frequency sensor filtering loop. Both cores are reading and writing to separate, independent variables in SRAM. However, profiling shows that Core 0's ML execution time degrades by 30% when Core 1 is active. There are no shared variables or mutexes. What microarchitectural feature is causing the slowdown?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "SRAM bus contention." While bus contention exists, a 30% penalty for accessing separate variables points to the cache layer.
+
+  **Realistic Solution:** You are experiencing **False Sharing in the L1 Data Cache**.
+
+  The Cortex-M7 has a Data Cache (D-Cache) structured in "cache lines" (typically 32 bytes wide).
+  When Core 0 reads a 4-byte variable, it actually loads the entire 32-byte cache line from SRAM into its local L1 cache.
+
+  If the variable that Core 1 is modifying happens to live in the exact same 32-byte memory block (because the compiler linked them adjacently in the `.bss` section), you trigger a coherency nightmare.
+
+  Every time Core 1 writes to its variable, the hardware cache coherency protocol marks that entire 32-byte cache line as "invalid" for all other cores. When Core 0 tries to read its *completely separate* ML variable, it gets a cache miss, forcing it to stall and fetch the line back from slow SRAM. They bounce the cache line back and forth thousands of times a second, destroying performance.
+
+  **The Fix:** Use compiler directives (e.g., `__attribute__((aligned(32)))`) to force the variables used by Core 0 and Core 1 into strictly separate 32-byte memory boundaries, ensuring they reside in different physical cache lines.
+
+  > **Napkin Math:** An L1 Cache hit takes 1 cycle. An SRAM fetch takes ~6 cycles. If False Sharing forces 100,000 cache misses per second, you lose 500,000 clock cycles to pure hardware synchronization overhead.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>

@@ -869,3 +869,298 @@ This round covers the hardest problems in mobile ML systems: on-device LLM archi
   </details>
 
 </details>
+
+
+---
+
+### 🆕 Advanced Mobile Systems & Constraints
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The ISP Format Conversion Bottleneck</b> · <code>sensor-pipeline</code> <code>compute</code></summary>
+
+- **Interviewer:** "Your mobile app captures 4K video. Your neural network requires 224x224 RGB input. You write a script to read frames via OpenCV/CPU, resize them, and pass them to the NPU. The NPU processes the frame in 5ms. But your max framerate is 12 FPS. Where is the bottleneck?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "OpenCV `cv2.resize` is slow." It is, but resizing isn't the root of the problem. The format conversion is.
+
+  **Realistic Solution:** The bottleneck is the **Software Image Signal Processing (ISP) Pipeline**.
+
+  Mobile cameras do not natively output "RGB" pixels. They output raw Bayer patterns, or hardware-optimized YUV formats (like NV21 or YUV420).
+  When you use standard CPU libraries (like OpenCV or basic iOS/Android bitmaps) to grab an RGB frame, the CPU must:
+  1. De-bayer the 4K raw sensor data.
+  2. Convert 4K YUV to 4K RGB. (Massive math operation over 8.2 million pixels).
+  3. Resize 4K RGB to 224x224.
+
+  The CPU takes ~70ms just to translate the raw camera data into an RGB tensor, creating a massive bottleneck *before* the NPU ever sees the data.
+
+  **The Fix:** You must use the **Hardware ISP and GPU Shaders**. Use native APIs (like iOS `AVFoundation` or Android `Camera2 API`) to request the hardware ISP to directly output the downscaled 224x224 image. If color conversion is still needed, perform the YUV-to-RGB math inside a GPU compute shader (which runs in microseconds) rather than on the CPU.
+
+  > **Napkin Math:** Converting 4K YUV to RGB requires ~5 math operations per pixel. 8.2 million pixels * 5 = 41 million operations. Doing this on a mobile CPU at 30 FPS requires over 1.2 GFLOPS of sustained compute just for color conversion.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The On-Device Training Graph Explosion</b> · <code>training</code> <code>memory</code></summary>
+
+- **Interviewer:** "Your app has a 30 MB vision model that runs inference flawlessly on older iPhones with 2 GB of RAM. You decide to add on-device personalization—allowing the model to fine-tune its weights using the user's photos. As soon as you trigger `model.fit()` with a batch size of 8, the app crashes with an Out-of-Memory (OOM) error from iOS. Why did a 30 MB model suddenly exceed the ~1 GB per-app memory limit?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The batch size of 8 images took up all the RAM." 8 images only take a few megabytes. The hidden cost is the autograd graph.
+
+  **Realistic Solution:** Inference only requires storing the weights and the *current* layer's activations. Training requires backpropagation, which means you must store the **Forward Activations for every single layer** in the network to compute the chain rule gradients later.
+
+  When you run a forward pass during inference, memory is reused (Layer 3 overwrites Layer 1's buffer). But when gradients are required, the framework builds a computational graph and keeps every intermediate activation tensor in memory. For a deep CNN like MobileNet or ResNet, the activation memory for a batch size of 8 can easily exceed 600 MB. Add in the Adam optimizer states (which triple the weight memory requirements), and you instantly blow past the OS app limits.
+
+  **The Fix:**
+  To do on-device personalization, you cannot do full backpropagation. You must use **Feature Extraction Caching or LoRA**.
+  Freeze the entire backbone (so it operates in inference-only mode, reusing memory), run the images through to get the 1D feature vectors, and only run backpropagation on the tiny, final fully-connected classification layer.
+
+  > **Napkin Math:** Inference: 30 MB weights + 15 MB activation buffer = 45 MB peak memory.
+  > Training (Batch 8): 30 MB weights + (40 MB of intermediate activations per image * 8 images) + 30 MB gradients + 60 MB optimizer moments = ~440 MB peak memory. A 10x explosion in RAM usage just by turning on training.
+
+  📖 **Deep Dive:** [Volume I: Model Training](https://harvard-edge.github.io/cs249r_book_dev/contents/training/training.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Federated Learning Radio Drain</b> · <code>training</code> <code>power</code></summary>
+
+- **Interviewer:** "You implement Federated Learning to update a next-word prediction model directly on users' phones. The on-device training takes 5 minutes and consumes 1% of the battery. However, users complain that the app is destroying their battery life overnight. If the math only takes 1%, where is the massive energy drain coming from?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The backpropagation algorithm is using too much memory and causing swapping to flash." While backprop is intensive, the primary energy vampire in Federated Learning isn't the compute—it's the telemetry.
+
+  **Realistic Solution:** The energy is being burned by the **Cellular/Wi-Fi Radio Transmission**.
+
+  In Federated Learning, after the device computes the local weight updates (gradients), it must transmit those updates back to the central server. Modern models have millions of parameters. If your model is 50 MB, the device must upload 50 MB of gradient data.
+
+  Transmitting data requires powering up the Radio Frequency (RF) power amplifiers. This can draw 1.5W to 3.0W of power for the duration of the upload. If the user has a poor connection, a 50 MB upload might take 5 to 10 minutes, burning vastly more energy keeping the antenna active than the NPU used for the 5 minutes of training.
+
+  **The Fix:**
+  1. **Gradient Compression:** Aggressively compress gradients before transmission using sparse quantization or Top-K selection.
+  2. **Conditionality:** The Federated Learning scheduler must strictly require the device to be: (a) plugged into power, (b) on unmetered Wi-Fi, and (c) idle. Never transmit model weights over a weak cellular connection on battery.
+
+  > **Napkin Math:** NPU Training Compute: 1W * 5 mins (300s) = 300 Joules.
+  > Radio Transmission (50MB over weak LTE at 1 Mbps): 50MB * 8 = 400 Megabits. 400 seconds of transmission. RF Amp at 2.5W * 400s = 1,000 Joules. The communication costs 3.3x more energy than the actual AI training.
+
+  📖 **Deep Dive:** [Volume II: Distributed Training](https://harvard-edge.github.io/cs249r_book_dev/contents/distributed_training/distributed_training.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Double-Precision Mobile Tax</b> · <code>compute</code> <code>precision</code></summary>
+
+- **Interviewer:** "A data scientist writes a custom post-processing script for bounding boxes in Python, and you port it to C++ for the iOS app. In Python: `area = width * height * 0.5`. In C++: `float area = width * height * 0.5;`. The profiler flags this line as shockingly slow on the ARM CPU. Why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "C++ is just slower at floating point math than Python." Python relies on C under the hood; the issue is a specific C++ language default interacting with ARM architecture.
+
+  **Realistic Solution:** You fell into the **Double-Precision Promotion Trap**.
+
+  In C/C++, the literal `0.5` is strictly typed as a `double` (64-bit float), not a `float` (32-bit).
+  Mobile ARM CPUs (like the Cortex-A series) have massive parallel pipelines (NEON) for 32-bit floats. However, computing 64-bit doubles often requires the CPU to fall back to slower scalar execution units or requires multiple clock cycles to process the larger registers.
+
+  When the compiler sees `width * height * 0.5`, it implicitly promotes the 32-bit floats `width` and `height` to 64-bit doubles, performs the slow 64-bit multiplication, and then truncates the result back down to a 32-bit `float` for `area`.
+
+  **The Fix:** You must append an `f` to floating-point literals in C++ to force single-precision: `float area = width * height * 0.5f;`. This allows the compiler to vectorize the math using 32-bit NEON SIMD instructions, instantly speeding up the code by 4x to 8x.
+
+  > **Napkin Math:** A 128-bit NEON register can hold four 32-bit floats, allowing 4 multiplications per clock cycle. It can only hold two 64-bit doubles, instantly halving throughput, plus the overhead of casting types back and forth.
+
+  📖 **Deep Dive:** [Volume I: Neural Computation](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The NCHW vs NHWC Memory Layout</b> · <code>memory-layout</code> <code>compiler</code></summary>
+
+- **Interviewer:** "You train a PyTorch model on an NVIDIA GPU using the standard `NCHW` memory layout. You convert it to TFLite and deploy it on an Android phone's CPU. The model accuracy is fine, but it runs 3x slower than a comparable model trained natively in TensorFlow. What architectural difference between GPUs and mobile CPUs causes this?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "TensorFlow is just better optimized for Android than PyTorch." While TFLite is native, the root cause is the physical layout of the bytes in memory.
+
+  **Realistic Solution:** You are suffering from **Memory Layout Thrashing (NCHW vs NHWC)**.
+
+  NVIDIA GPUs strongly prefer `NCHW` (Batch, Channels, Height, Width) because it allows their massive parallel cores to perform spatial operations across planar data efficiently.
+
+  Mobile ARM CPUs, however, rely on NEON SIMD instructions. These instructions are highly optimized for `NHWC` (Batch, Height, Width, Channels) because it allows the CPU to load all the channels for a specific pixel into a register in a single contiguous memory read, perfectly aligning with how spatial convolutions process depth.
+
+  If you force a mobile CPU to compute an `NCHW` tensor, it cannot use contiguous memory reads. It must jump around memory (strided access) to gather the channels for a single pixel, destroying cache locality and stalling the CPU pipeline.
+
+  **The Fix:** You must instruct your converter (e.g., ONNX to TFLite) to explicitly transpose the graph from NCHW to NHWC, or train the model in NHWC natively if targeting edge CPUs.
+
+  > **Napkin Math:** A contiguous memory read on an ARM CPU might take 2 cycles. A strided memory read that misses the L1 cache takes ~20 cycles. For a 3x3 convolution with 64 channels, doing 64 strided reads instead of 1 block read makes the memory fetch 10x slower, dominating the compute time.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Audio Pipeline Latency Creep</b> · <code>latency</code> <code>audio</code></summary>
+
+- **Interviewer:** "You build an acoustic anomaly detector for a smartphone. The model requires 1 second of audio and takes 50ms to run. You want to alert the user within 500ms of the event. You use standard Android AudioRecord APIs to grab audio chunks. Users complain the alert happens nearly a full second late. The model is fast. Where is the latency hiding?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The model is taking longer in production than in testing." If you profiled the model at 50ms, the math isn't the problem. The data delivery is.
+
+  **Realistic Solution:** You are fighting **OS Audio Buffer Bloat**.
+
+  Mobile operating systems (especially Android) heavily buffer audio to prevent skipping during music playback or Bluetooth transmission. The default audio capture path often uses deep hardware and software buffers to maximize power efficiency (letting the CPU sleep while the DSP fills the buffer).
+
+  By the time the `AudioRecord` API hands your application a "fresh" 1-second chunk of audio, the actual physical sound wave hit the microphone 300ms to 500ms ago.
+
+  **The Fix:** You must bypass the standard audio pipeline.
+  1. Use low-latency audio APIs (like `AAudio` or `Oboe` on Android).
+  2. Request the absolute minimum buffer size (the "Fast Mixer" path).
+  3. Change your ML architecture to a **Streaming / Stateful RNN/CNN**. Instead of waiting for a full 1-second chunk, feed the model tiny 20ms chunks continuously, maintaining hidden states.
+
+  > **Napkin Math:** Physical Event -> Mic hardware delay (5ms) -> OS DSP Buffer (250ms) -> OS Framework Buffer (100ms) -> App receives 1s chunk -> ML Inference (50ms) -> Alert UI (16ms). Total Latency = 421ms *after* the 1 second event finished. The user perceives the alert 1.4 seconds after the noise started.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Hardware Decoder Synchronization</b> · <code>pipeline</code> <code>latency</code></summary>
+
+- **Interviewer:** "Your app runs an action recognition model on a live video stream. You use the Android MediaCodec API to decode the H.264 video using hardware. You then convert the frame to a tensor and run inference. The model takes 15ms. The hardware decode takes 10ms. You should easily hit 30 FPS. However, the app frequently drops frames and stutters. What is fundamentally wrong with putting hardware decoding in the critical path of a synchronous loop?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The hardware decoder is slow." Hardware decoders are extremely fast, but they are highly asynchronous.
+
+  **Realistic Solution:** You built a **Synchronous Wait on an Asynchronous Peripheral**.
+
+  MediaCodec (and iOS VideoToolbox) are designed around asynchronous, non-blocking state machines. You feed them a compressed byte buffer, and at some unpredictable point in the future, they fire a callback with the uncompressed frame.
+
+  If your main ML loop says: `decode_frame() -> wait_for_frame() -> run_model()`, you are forcing the CPU to block while the dedicated hardware video decoder works. Furthermore, video decoders often batch their work or reorder frames (B-frames/P-frames), meaning the time between feeding bytes and receiving a frame is highly variable (high jitter).
+
+  **The Fix:**
+  You must decouple the pipelines.
+  1. The **Decoder Thread** runs freely, pushing decoded frames into a thread-safe ring buffer.
+  2. The **ML Thread** runs on a fixed timer (e.g., every 33ms), grabbing the *most recent* complete frame from the ring buffer and running inference. This guarantees steady ML throughput regardless of the hardware decoder's micro-jitter.
+
+  > **Napkin Math:** A hardware decoder might decode 3 frames in 5ms, then take 25ms to decode the next frame due to keyframe dependencies. If your ML thread blocks on that 25ms frame, it misses its 33ms deadline. Decoupling absorbs the 25ms jitter perfectly.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Hidden Broadcast Receiver Wake-Ups</b> · <code>deployment</code> <code>power</code></summary>
+
+- **Interviewer:** "You deploy a background service on Android to run inference on incoming SMS messages (for phishing detection). The model is tiny and takes 2ms on the CPU. A user receives 10 texts a day. The ML math therefore takes 20ms of CPU time per day. However, Google Play Console shows your app is in the top 1% of battery drainers. What OS-level event sequence is destroying the battery?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The ML model has a memory leak." Memory leaks don't drain batteries, CPU cycles do.
+
+  **Realistic Solution:** You are triggering a **Cold App Boot on every Broadcast**.
+
+  When your app registers a `BroadcastReceiver` for SMS events, the OS must deliver the message to your app. If your app is not currently running in memory (which it usually isn't, to save RAM), Android must:
+  1. Spin up the Dalvik/ART virtual machine.
+  2. Load your app's `Application` class into memory.
+  3. Initialize your ML framework (e.g., TensorFlow Lite).
+  4. Parse the model from disk.
+  5. Run the 2ms inference.
+  6. Let the app die.
+
+  Booting the entire app environment and initializing the ML engine requires hundreds of millions of CPU cycles, taking several seconds and keeping the CPU pegged at maximum frequency. You are doing this 10 times a day.
+
+  **The Fix:**
+  For rare events, do not initialize the heavy ML engine on every trigger.
+  1. Use **WorkManager** to batch the messages and run the ML model once a day.
+  2. If real-time is required, use a bare-minimum native C++ daemon to bypass the heavy Android JVM startup tax, or utilize OS-level ML services (like Android System Intelligence) if available.
+
+  > **Napkin Math:** ML Inference = 2ms at 1 Watt = 0.002 Joules. App Boot + ML Init = 2.5 seconds at 3 Watts = 7.5 Joules. The OS startup tax is 3,750 times more expensive than the neural network.
+
+  📖 **Deep Dive:** [Volume II: Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The JNI Boundary Crossing</b> · <code>architecture</code> <code>latency</code></summary>
+
+- **Interviewer:** "You write a highly optimized C++ inference engine using XNNPACK for Android. Your Java app calls `runInference(float[] image)` natively via JNI. The C++ code executes in 5ms. However, the app measures 18ms per frame. What is JNI doing that consumes 13ms of overhead?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "JNI function calls are just slow." The function call itself takes microseconds. The massive overhead comes from data marshaling.
+
+  **Realistic Solution:** You are suffering from **JNI Data Copying and Array Marshaling**.
+
+  When you pass a standard Java `float[]` array (which lives in the managed JVM heap and can be moved by the Garbage Collector) to a C++ JNI function, the JVM must ensure the memory is safe for native C++ to access.
+
+  To do this, JNI typically allocates a new C++ array and copies every single byte of the image data from the Java heap to the Native heap before the C++ code can even start. After inference, it copies the output tensor back. For a 1080p image, this `memcpy` operation across the managed/unmanaged boundary completely dominates the execution time.
+
+  **The Fix:** You must use **NIO Direct ByteBuffers** (`ByteBuffer.allocateDirect()`). A Direct ByteBuffer allocates memory directly on the native C++ heap. When you pass a Direct ByteBuffer via JNI, the JVM simply passes the raw memory pointer (zero-copy), reducing the 13ms overhead to less than 0.1ms.
+
+  > **Napkin Math:** 1080p Image = 1920 x 1080 x 3 bytes = 6.2 MB. Copying 6.2 MB of memory twice per frame (in and out) on a mobile CPU takes roughly 10-15 milliseconds.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The WebView WebGL Throttle</b> · <code>deployment</code> <code>gpu</code></summary>
+
+- **Interviewer:** "You deploy a TensorFlow.js model inside a React Native app wrapped in a mobile WebView. The model uses WebGL to run on the mobile GPU. On a desktop browser, it runs at 60 FPS. On the mobile WebView, it runs at 15 FPS, even though the mobile GPU is powerful enough. What OS-level security mechanism is strangling the WebGL performance?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Mobile GPUs are just much weaker than desktop GPUs." They are weaker, but a 4x drop for a tiny TF.js model points to a structural bottleneck.
+
+  **Realistic Solution:** You are hitting the **Cross-Process GPU Compositing and Security Sandbox**.
+
+  On mobile OSs (like iOS), the WebView is heavily sandboxed. For security reasons (preventing web code from crashing the hardware GPU or reading VRAM), the WebView does not get direct metal access to the GPU.
+
+  When TF.js issues a WebGL draw call, the math is serialized, sent over an Inter-Process Communication (IPC) boundary to a separate, highly privileged OS graphics daemon, executed, and the results are read back via CPU memory. This IPC marshaling and CPU-readback of GPU textures completely destroys the parallelism of neural network execution.
+
+  **The Fix:** Do not use WebGL/TF.js for heavy ML inside a WebView. You must bridge the ML logic to native code (using CoreML/Metal on iOS or NNAPI on Android) via React Native Native Modules, bypassing the browser's graphics sandbox entirely.
+
+  > **Napkin Math:** WebGL Tensor Readback (using `gl.readPixels`) forces the GPU pipeline to flush and synchronize with the CPU. On mobile Safari, a single `readPixels` call can block the main thread for 5-10ms. If your model has 10 layers and synchronizes intermediate tensors, you instantly lose 100ms per frame.
+
+  📖 **Deep Dive:** [Volume I: ML Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
+</details>

@@ -1099,3 +1099,185 @@ The domain of the Edge ML Systems Engineer. This round tests your understanding 
   </details>
 
 </details>
+
+
+---
+
+### 🆕 Advanced Real-Time Systems
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Watchdog Timeout Freeze</b> · <code>real-time</code> <code>architecture</code></summary>
+
+- **Interviewer:** "Your autonomous drone uses a Jetson Nano. The flight controller expects a heartbeat signal from your ML perception script over UART every 200ms. If it doesn't get one, it assumes the Jetson crashed and triggers an emergency landing. Your ML inference takes 50ms. However, once a minute, the drone emergency lands. Your inference didn't crash. What OS-level event stalled your script for over 200ms?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The Jetson thermal throttled." Throttling slows things down by 20-30%, it doesn't cause a 4x latency spike that lasts for half a second.
+
+  **Realistic Solution:** You were preempted by **Linux Kernel Page Reclaim or I/O Wait**.
+
+  The Jetson Nano runs a full, non-real-time Ubuntu Linux OS. If your perception script triggers a log write to the SD card, or if another process (like the system updater) decides to run, the Linux kernel can decide to flush file buffers to disk or reclaim memory pages.
+
+  During this heavy I/O operation, the OS scheduler can forcefully preempt your ML user-space thread. Because standard Linux is not an RTOS (Real-Time Operating System), it makes absolutely no guarantees about when your thread will get the CPU back. Your 50ms inference was perfectly fine, but the OS literally paused your program for 300ms to handle SD card write-back.
+
+  **The Fix:**
+  1. Apply the **PREEMPT_RT** patch to the Linux kernel to make it fully preemptible.
+  2. Set your ML perception thread to a real-time scheduling policy (`SCHED_FIFO` or `SCHED_RR`) with a high priority.
+  3. Use `mlockall()` to lock your application's memory into RAM so it can never be swapped to disk.
+
+  > **Napkin Math:** Inference = 50ms. Deadline = 200ms. Linux `sync()` or SD card write-back stall under heavy load = 300ms to 1,500ms. The OS overhead completely obliterates your 150ms of safety margin.
+
+  📖 **Deep Dive:** [Volume I: Benchmarking](https://harvard-edge.github.io/cs249r_book_dev/contents/benchmarking/benchmarking.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Camera VSync Tearing</b> · <code>sensor-pipeline</code> <code>latency</code></summary>
+
+- **Interviewer:** "Your edge device runs a conveyor belt defect detector. The camera captures at 60 FPS (16.6ms). The ML model takes 12ms. You write a loop: `capture_frame() -> run_inference() -> trigger_actuator()`. Sometimes the actuator hits the target perfectly; other times it misses by exactly 16.6ms. Why is your latency violently oscillating between 12ms and 28ms?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The NPU is taking varying amounts of time." NPUs are highly deterministic; the inference time is fixed at 12ms.
+
+  **Realistic Solution:** You are suffering from **VSync and Frame Buffer Polling Misalignment**.
+
+  Cameras do not provide data instantly; they fill a hardware frame buffer. If your software loop calls `capture_frame()` *just after* the camera finished exposing a frame, you get the frame instantly, compute for 12ms, and trigger the actuator. Total latency: 12ms.
+
+  However, if you call `capture_frame()` *just after* the camera *started* exposing the next frame, your `capture_frame()` function must block and wait for the entire 16.6ms exposure to finish before it can return the data.
+
+  Because your software loop is not perfectly synchronized to the camera's hardware VSync (Vertical Sync) interrupt, the alignment drifts. You are paying a hidden penalty of up to 1 frame of waiting just to pull the data from the sensor.
+
+  **The Fix:** You must make the system **Interrupt-Driven**. Instead of polling in a `while(True)` loop, your software should sleep until the camera hardware fires a "Frame Ready" interrupt (e.g., via V4L2 events). This guarantees your inference begins exactly at the moment the exposure finishes, locking the latency to a deterministic 12ms.
+
+  > **Napkin Math:** Frame interval = 16.6ms. Inference = 12ms.
+  > Best case: Wait 0ms + Compute 12ms = 12ms latency.
+  > Worst case: Wait 16.5ms + Compute 12ms = 28.5ms latency.
+  > The jitter is larger than the actual compute time.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Rolling Shutter Distortion</b> · <code>sensors</code> <code>vision</code></summary>
+
+- **Interviewer:** "You mount an edge AI camera on a drone to read barcodes on fast-moving trains. The model achieves 99% accuracy on stationary barcodes. In flight, the accuracy drops to 15%. The images aren't blurry, but the barcodes look diagonally slanted, like a parallelogram. What hardware choice ruined the model?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "It's motion blur; you need a faster shutter speed." Motion blur makes things fuzzy. Diagonal slanting is a specific physical artifact.
+
+  **Realistic Solution:** You used a **Rolling Shutter CMOS Sensor**.
+
+  Standard, cheap CMOS cameras do not capture the entire image at the exact same microsecond. They expose and read the image out line-by-line, from top to bottom (like a scanner).
+
+  If the drone is moving fast horizontally while the camera is reading vertically, the object will have moved between the time the top line was recorded and the bottom line was recorded. This causes vertical lines to shear into diagonal lines (the "jello effect").
+
+  Your CNN was trained on perfectly square, right-angled barcodes. It has never seen a slanted parallelogram barcode, so it fails completely, even if the image is perfectly sharp.
+
+  **The Fix:** For high-speed machine vision, you must use a **Global Shutter** sensor. Global shutters expose every pixel on the entire sensor at the exact same physical instant, completely eliminating geometric distortion regardless of speed.
+
+  > **Napkin Math:** If a camera reads out a 1080p frame in 16ms (top to bottom), and a train is moving at 30 m/s (108 km/h). During the 16ms it takes to capture one frame, the train moves nearly half a meter. The top of the barcode is recorded half a meter away from where the bottom of the barcode is recorded, causing massive sheer.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Throttling Deadline Miss</b> · <code>latency</code> <code>thermal</code></summary>
+
+- **Interviewer:** "Your autonomous delivery robot has a strict 33ms deadline for object detection to brake in time. At 25°C ambient, inference takes 25ms. You test the robot outdoors in 40°C heat. The inference time slowly creeps up to 45ms over 10 minutes, and the robot crashes into a wall. The CPU utilization is only 60%. Why did the latency double?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The OS background tasks are stealing CPU cycles." Background tasks would cause random spikes, not a steady, permanent 20ms increase.
+
+  **Realistic Solution:** You fell victim to **DVFS (Dynamic Voltage and Frequency Scaling) Thermal Throttling**.
+
+  Edge SoCs (like the Jetson Nano or NXP i.MX) lack active cooling fans. When the ambient temperature hits 40°C, the silicon die quickly reaches its thermal safety limit (e.g., 85°C). To prevent the chip from physically melting, the hardware thermal governor intervenes.
+
+  It does not kill your process; it physically lowers the clock frequency of the CPU/GPU/NPU (e.g., dropping from 1.5 GHz to 800 MHz). Your neural network is executing the exact same number of MAC operations, but the hardware is executing them at half the speed. The 25ms inference physically stretches to 45ms, blowing past your 33ms hard real-time deadline.
+
+  **The Fix:** Real-time edge systems must be profiled at their **Worst-Case Execution Time (WCET)** under maximum thermal throttling, not at their peak burst speeds. If the throttled state cannot meet the 33ms deadline, you must use a smaller model, lower the input resolution, or add an active cooling solution.
+
+  > **Napkin Math:** 1.5 GHz clock = 25ms execution. If the thermal limit forces the clock to 800 MHz: `(1500 / 800) * 25ms = 46.8ms`. You lose 20ms of reaction time, resulting in a physical crash.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The USB Bandwidth Saturation</b> · <code>sensors</code> <code>bandwidth</code></summary>
+
+- **Interviewer:** "You build an edge AI system using a Raspberry Pi 4. You attach three 1080p USB 3.0 webcams to run parallel inference. A single webcam runs at 30 FPS perfectly. When you plug in all three, the framerates randomly drop to 12 FPS, and the video feeds occasionally tear or corrupt. The CPU usage is only 40%. What physical limitation are you hitting?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The USB 3.0 ports are too slow." A single USB 3.0 port has 5 Gbps, which is plenty. The problem is the internal routing.
+
+  **Realistic Solution:** You saturated the **USB Host Controller's PCIe Lane**.
+
+  On devices like the Raspberry Pi 4, all four physical USB ports (both USB 2.0 and 3.0) are routed through a single, shared USB Host Controller chip (the VL805). This controller is connected to the main SoC via a single PCIe Gen 2.0 x1 lane.
+
+  A single PCIe Gen 2.0 x1 lane has a theoretical maximum bandwidth of ~4 Gbps (roughly 400 MB/s real-world).
+  An uncompressed 1080p stream at 30 FPS requires roughly 186 MB/s.
+  Three uncompressed 1080p streams require `3 * 186 = 558 MB/s`.
+
+  You are physically asking the USB Host Controller to push 558 MB/s through a 400 MB/s PCIe pipe. The hardware drops packets to keep up, resulting in corrupted frames, torn images, and plummeting framerates, while the CPU sits idle waiting for data that will never arrive.
+
+  **The Fix:** You must compress the video stream at the hardware level *before* it hits the USB bus (e.g., configuring the cameras to output MJPEG or H.264 instead of raw YUYV), or switch to an architecture with multiple independent MIPI CSI-2 camera lanes.
+
+  > **Napkin Math:** 1080p raw YUYV (2 bytes per pixel) @ 30 FPS = `1920 * 1080 * 2 * 30 = 124.4 MB/s`. Three cameras = 373 MB/s. Adding USB protocol overhead puts you right at the ~400 MB/s choking point of the internal PCIe x1 bus.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Preemption Priority Inversion</b> · <code>real-time</code> <code>os</code></summary>
+
+- **Interviewer:** "Your edge robot runs on a Real-Time Operating System (RTOS). You have a High-Priority ML Thread (inference), a Medium-Priority UI Thread (screen updates), and a Low-Priority I/O Thread (writing logs to SD card). The ML Thread occasionally stalls for hundreds of milliseconds. You discover the ML Thread is waiting for a Mutex held by the Low-Priority I/O Thread. Why didn't the High-Priority ML Thread just preempt the Low-Priority thread?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The RTOS scheduler is broken." The scheduler is doing exactly what it is designed to do; the architectural design of the locks is flawed.
+
+  **Realistic Solution:** You have caused a classic **Priority Inversion**.
+
+  Here is the sequence of disaster:
+  1. The Low-Priority (I/O) thread acquires a Mutex to write to the shared memory bus.
+  2. The High-Priority (ML) thread wakes up. It preempts the Low-Priority thread. It needs to access the memory bus, so it tries to acquire the Mutex.
+  3. The Mutex is locked. The High-Priority ML thread is blocked and goes to sleep.
+  4. The Medium-Priority (UI) thread wakes up. Because its priority is higher than the Low-Priority thread, it preempts it.
+  5. The Medium-Priority thread runs for 500ms updating the screen.
+
+  Because the Medium-Priority thread is running, the Low-Priority thread cannot execute. Because the Low-Priority thread cannot execute, it cannot release the Mutex. Because the Mutex is not released, the High-Priority ML thread is permanently blocked. A medium-priority task has effectively frozen a high-priority task.
+
+  **The Fix:** You must enable **Priority Inheritance** on the Mutex. This RTOS feature temporarily boosts the priority of the Low-Priority thread to match the High-Priority thread the moment the block occurs. This ensures the Low-Priority thread can finish its I/O, release the Mutex, and immediately hand control back to the ML thread without the UI thread ever interrupting.
+
+  > **Napkin Math:** High priority deadline = 10ms. Low priority Mutex hold time = 1ms. Medium priority execution = 500ms. Without Priority Inheritance, your 10ms deadline is blown out by 500ms of unrelated UI rendering.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+
+  </details>
+
+</details>
