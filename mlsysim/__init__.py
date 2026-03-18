@@ -61,7 +61,7 @@ from .core.solver import (
 
 # Export Registries
 from .hardware.registry import Hardware
-from .core.models import Models
+from .models.registry import Models
 from .infra.registry import Infra
 from .systems.registry import Systems, Tiers
 

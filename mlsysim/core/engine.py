@@ -49,20 +49,6 @@ class PerformanceProfile(BaseModel):
         ]
         return "\n".join(lines)
 
-    def plot(self, mode="latency"):
-        """Generates a visualization of this profile.
-        
-        Args:
-            mode (str): 'latency' for breakdown, 'roofline' for roofline plot.
-        """
-        from ..viz import plot_latency_breakdown, plot_roofline
-        if mode == "latency":
-            return plot_latency_breakdown(self)
-        elif mode == "roofline":
-            return plot_roofline(self)
-        else:
-            raise ValueError(f"Unknown plot mode: {mode}")
-
 
 class Engine:
     """

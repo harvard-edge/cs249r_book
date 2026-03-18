@@ -295,7 +295,7 @@ def anchor7_parallelism():
 # output against these to flag mismatches.
 
 PAPER_CLAIMS = {
-    "Anchor 1": {"key_value": 38500, "key_name": "throughput (s/s)", "reported": 38200},
+    "Anchor 1": {"key_value": 37487, "key_name": "throughput (s/s)", "reported": 38200},
     "Anchor 2": {"key_value": 43,    "key_name": "ITL (ms)",         "reported": "40-50"},
     "Anchor 3": {"key_value": 40.0,  "key_name": "MFU (%)",          "reported": "38-43"},
     "Anchor 4": {"key_value": 45,    "key_name": "MFU (%)",          "reported": 46},

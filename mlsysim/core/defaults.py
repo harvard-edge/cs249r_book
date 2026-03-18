@@ -86,7 +86,7 @@ MFU_INFERENCE_BATCHED = 0.40       # Inference at large batch size
 # Latency overhead for a single kernel launch on a modern GPU.
 # Source: NVIDIA (2024), "CUDA C++ Programming Guide."
 KERNEL_LAUNCH_LATENCY_US = 15.0    # 15 μs typical launch overhead
-FRAMEWORK_LAYER_TAX_MS = 0.10      # 100 μs typical framework tax per model layer
+FRAMEWORK_LAYER_TAX_MS = 0.01      # 10 μs typical framework tax per model layer (assumes graph compilation/fused kernels)
 
 # Scaling efficiency η = T_1 / (N × T_N)
 SCALING_EFF_32GPU = 0.90           # Near-linear regime
