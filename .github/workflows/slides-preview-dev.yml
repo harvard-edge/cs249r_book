@@ -1,14 +1,8 @@
-name: '📊 Slides · 👀 Preview (Dev)'
+name: '📊 Slides · 👁️ Preview (Dev)'
 
-# =============================================================================
-# Lecture Slides — Deploy Preview to Cloudflare Pages (Dev)
-# =============================================================================
-#
-# Builds the Quarto slides portal and deploys to the dev preview URL.
-# PDF compilation is NOT done in CI (too heavy) — PDFs are built locally
-# and referenced from the portal.
-#
-# =============================================================================
+# Builds the Quarto slides portal and deploys to the dev preview site.
+# PDF compilation is NOT done here — PDFs are built via slides-build-pdfs.yml
+# and referenced from the portal via GitHub Releases.
 
 on:
   workflow_dispatch:
@@ -20,7 +14,7 @@ on:
 
 permissions:
   contents: read
-  deployments: write
+  actions: read
 
 concurrency:
   group: slides-preview-${{ github.ref }}
@@ -28,7 +22,7 @@ concurrency:
 
 jobs:
   build-and-deploy:
-    name: '🚀 Build & Deploy Preview'
+    name: '📊 Build & Deploy Slides (Dev)'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -52,12 +46,76 @@ jobs:
           echo "✅ Build successful"
           echo "📊 Size: $(du -sh slides/_build/html | cut -f1)"
 
-      # Placeholder: Replace with your deployment provider
-      # - name: 🚀 Deploy to Cloudflare Pages
-      #   uses: cloudflare/pages-action@v1
-      #   with:
-      #     apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      #     accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      #     projectName: mlsysbook-slides
-      #     directory: slides/_build/html
-      #     branch: dev
+      - name: 🔧 Rewrite URLs for dev site
+        run: |
+          echo "🔧 Rewriting absolute mlsysbook.ai URLs for dev site..."
+          # Slides portal is deployed at /slides/ on the dev site.
+          # From /slides/*.html, one ../ reaches the site root.
+          cd slides/_build/html
+          for f in $(find . -name "*.html" -type f); do
+            sed -i 's|https://mlsysbook.ai/vol1/|../book/vol1/|g' "$f"
+            sed -i 's|https://mlsysbook.ai/vol2/|../book/vol2/|g' "$f"
+            sed -i 's|https://mlsysbook.ai/tinytorch/|../tinytorch/|g' "$f"
+            sed -i 's|https://mlsysbook.ai/kits/|../kits/|g' "$f"
+            sed -i 's|https://mlsysbook.ai/labs/|../labs/|g' "$f"
+            sed -i 's|https://mlsysbook.ai/mlsysim/|../mlsysim/|g' "$f"
+            sed -i 's|https://mlsysbook.ai/instructors/|../instructors/|g' "$f"
+            sed -i 's|https://mlsysbook.ai/slides/|./|g' "$f"
+            sed -i 's|https://mlsysbook.ai/|../|g' "$f"
+          done
+          echo "✅ URL rewriting complete"
+
+      - name: 🔧 Modify announcement for dev preview
+        run: |
+          echo "🔧 Modifying announcement banner for development preview..."
+          COMMIT_SHORT="${{ github.sha }}"
+          COMMIT_SHORT="${COMMIT_SHORT:0:8}"
+
+          python3 ${{ vars.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py \
+            slides/_build/html \
+            --verbose \
+            --commit-hash "${{ github.sha }}" \
+            --commit-short "$COMMIT_SHORT"
+
+      - name: 🚀 Deploy to Dev Site via SSH
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          echo "🔧 Configuring git..."
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning dev preview repository (${{ vars.DEV_REPO }})..."
+          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+
+          cd target-repo
+
+          echo "🧹 Cleaning ${{ vars.DEV_SLIDES_PATH }} directory..."
+          rm -rf ${{ vars.DEV_SLIDES_PATH }}
+          mkdir -p ${{ vars.DEV_SLIDES_PATH }}
+
+          echo "🚚 Copying Slides portal content..."
+          cp -r "${{ github.workspace }}/slides/_build/html/." ${{ vars.DEV_SLIDES_PATH }}/
+
+          echo "🔍 Validating deployment content..."
+          if [ ! -f "${{ vars.DEV_SLIDES_PATH }}/index.html" ]; then
+            echo "❌ CRITICAL: ${{ vars.DEV_SLIDES_PATH }}/index.html is missing. Aborting deployment."
+            exit 1
+          fi
+
+          echo "📊 Contents of ${{ vars.DEV_SLIDES_PATH }}/:"
+          ls -la ${{ vars.DEV_SLIDES_PATH }}/ | head -10
+
+          echo "📊 Committing and pushing changes..."
+          git add .
+          git commit -m "📊 Deploy Slides dev to /${{ vars.DEV_SLIDES_PATH }}/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+          git push origin main
+
+          echo "✅ Slides deployed to: https://harvard-edge.github.io/${{ vars.DEV_REPO }}/${{ vars.DEV_SLIDES_PATH }}/"
