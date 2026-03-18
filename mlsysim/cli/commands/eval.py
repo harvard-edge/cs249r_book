@@ -38,15 +38,21 @@ def evaluate_main(
     is_json = output_format == "json"
     
     with error_shield(output_format=output_format):
-        # Branch 1: Deep Evaluation (YAML / IaC)
+        # Determine if target is a Cluster YAML or a Workload (Model) YAML/String
+        is_cluster_yaml = False
+        raw_data = None
         if target.endswith(".yaml") or target.endswith(".yml"):
             config_file = Path(target)
             if not config_file.exists():
                 raise ValueError(f"File not found: {config_file}")
-                
             with open(config_file, "r") as f:
                 raw_data = yaml.safe_load(f)
-                
+            # A full cluster definition must have a hardware block
+            if raw_data and "hardware" in raw_data and "workload" in raw_data:
+                is_cluster_yaml = True
+
+        # Branch 1: Deep Evaluation (YAML / IaC Cluster Plan)
+        if is_cluster_yaml:
             # Gate 1 & 2: Schema Validation
             schema = MlsysPlanSchema(**raw_data)
             

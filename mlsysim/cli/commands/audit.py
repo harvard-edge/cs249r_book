@@ -96,12 +96,10 @@ def audit_main(
         
         ratio = h100_eval.performance.metrics['latency'] / eval_obj.performance.metrics['latency']
         
-        print("
-" + "═"*44)
+        print("\n" + "═"*44)
         print(f"🚀 Your local machine is {ratio:.2f}x as fast as an H100 node.")
         print("   (Benchmark: Llama-3-8B Inference at INT4 vs FP16)")
         print("═"*44)
-        print("
-✨ Star the repo to unlock the full 'Hardware Zoo' and 22-Wall diagnostics!")
+        print("\n✨ Star the repo to unlock the full 'Hardware Zoo' and 22-Wall diagnostics!")
         print("🔗 https://github.com/harvard-edge/cs249r_book")
 
