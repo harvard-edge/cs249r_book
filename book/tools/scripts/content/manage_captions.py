@@ -4104,8 +4104,8 @@ Examples:
   # Cloud LLM providers (no local Ollama required):
   python improve_figure_captions.py -d contents/vol1/ -p openai -m gpt-4o-mini
   python improve_figure_captions.py -d contents/vol1/ -p groq -m llama-3.3-70b-versatile
-  python improve_figure_captions.py -d contents/vol1/ -p minimax -m MiniMax-M2.5
-  python improve_figure_captions.py -d contents/vol1/ --provider minimax --model MiniMax-M2.5 --api-key sk-...
+  python improve_figure_captions.py -d contents/vol1/ -p minimax -m MiniMax-M2.7
+  python improve_figure_captions.py -d contents/vol1/ --provider minimax --model MiniMax-M2.7 --api-key sk-...
 """
     )
 
