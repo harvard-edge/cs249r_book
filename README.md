@@ -125,7 +125,7 @@ Every component connects. The textbook gives you the mental models. The labs let
     <tr>
       <td align="center">💼</td>
       <td><b>Interview Playbook</b></td>
-      <td>40+ systems design questions for AI infrastructure roles. Silicon physics, distributed infra, production serving, and ML operations.</td>
+      <td>1,000+ systems design questions for AI infrastructure roles. Silicon physics, distributed infra, production serving, and ML operations.</td>
       <td><a href="interviews/README.md">Start drilling</a> <i>(dev)</i></td>
     </tr>
   </tbody>
@@ -173,30 +173,36 @@ This textbook teaches you to think at the intersection of machine learning and s
 <table>
   <thead>
     <tr>
-      <th width="50%">You know...</th>
-      <th width="50%">You will learn...</th>
+      <th width="45%">You know...</th>
+      <th width="10%" align="center"></th>
+      <th width="45%">You will learn...</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td>How to train a model</td>
-      <td>How training scales across GPU clusters</td>
+      <td align="center">→</td>
+      <td><b>How training scales across GPU clusters</b></td>
     </tr>
     <tr>
       <td>That quantization shrinks models</td>
-      <td>How INT8 math maps to silicon</td>
+      <td align="center">→</td>
+      <td><b>How INT8 math maps to silicon</b></td>
     </tr>
     <tr>
       <td>What a transformer is</td>
-      <td>Why KV-cache dominates memory at inference</td>
+      <td align="center">→</td>
+      <td><b>Why KV-cache dominates memory at inference</b></td>
     </tr>
     <tr>
       <td>Models run on GPUs</td>
-      <td>How schedulers balance latency vs throughput</td>
+      <td align="center">→</td>
+      <td><b>How schedulers balance latency vs throughput</b></td>
     </tr>
     <tr>
       <td>Edge devices have limits</td>
-      <td>How to co-design models and hardware</td>
+      <td align="center">→</td>
+      <td><b>How to co-design models and hardware</b></td>
     </tr>
   </tbody>
 </table>
@@ -208,21 +214,24 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
 <table>
   <thead>
     <tr>
-      <th width="20%">Volume</th>
-      <th width="30%">Theme</th>
-      <th width="50%">Scope</th>
+      <th width="5%"></th>
+      <th width="15%">Volume</th>
+      <th width="25%">Theme</th>
+      <th width="55%">Scope</th>
     </tr>
   </thead>
   <tbody>
     <tr>
+      <td align="center">📗</td>
       <td><b>Volume I</b></td>
       <td>Build, Optimize, Deploy</td>
-      <td>Single-machine ML systems (1-8 GPUs)</td>
+      <td>Single-machine ML systems (1–8 GPUs). Foundations, optimization, and deployment on one node.</td>
     </tr>
     <tr>
+      <td align="center">📘</td>
       <td><b>Volume II</b></td>
       <td>Scale, Distribute, Govern</td>
-      <td>Distributed systems at production scale</td>
+      <td>Distributed systems at production scale. Multi-machine infrastructure, fault tolerance, and governance.</td>
     </tr>
   </tbody>
 </table>
@@ -234,19 +243,19 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
 <table>
   <tbody>
     <tr>
-      <td width="10%" align="center"><b>1</b></td>
-      <td><b>Read the textbook.</b> Start with the <a href="https://mlsysbook.ai">current edition</a>. It's the foundation for everything else.</td>
+      <td width="7%" align="center"><h3>①</h3></td>
+      <td width="93%"><b>Read the textbook.</b> Start with the <a href="https://mlsysbook.ai">current edition</a>. It's the foundation for everything else.</td>
     </tr>
     <tr>
-      <td width="10%" align="center"><b>2</b></td>
+      <td align="center"><h3>②</h3></td>
       <td><b>Pick a hands-on path.</b> <a href="https://mlsysbook.ai/tinytorch/">Build a framework</a> (TinyTorch), <a href="labs/README.md">explore trade-offs</a> (Labs), or <a href="https://mlsysbook.ai/kits">deploy to real hardware</a> (Kits).</td>
     </tr>
     <tr>
-      <td width="10%" align="center"><b>3</b></td>
-      <td><b>Test yourself.</b> Drill the <a href="interviews/README.md">interview playbook</a>: 40+ systems design questions across cloud, edge, mobile, and TinyML.</td>
+      <td align="center"><h3>③</h3></td>
+      <td><b>Test yourself.</b> Drill the <a href="interviews/README.md">interview playbook</a>: 1,000+ systems design questions across cloud, edge, mobile, and TinyML.</td>
     </tr>
     <tr>
-      <td width="10%" align="center"><b>4</b></td>
+      <td align="center"><h3>④</h3></td>
       <td><b>Teach it.</b> Adopt the curriculum with the <a href="instructors/index.qmd">AI Engineering Blueprint</a> and <a href="slides/README.md">lecture slides</a>.</td>
     </tr>
   </tbody>
@@ -262,34 +271,36 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
 <table>
   <thead>
     <tr>
-      <th width="20%">Branch</th>
+      <th width="5%"></th>
+      <th width="15%">Branch</th>
       <th width="45%">What's on it</th>
       <th width="35%">Status</th>
     </tr>
   </thead>
   <tbody>
     <tr>
+      <td align="center">🟢</td>
       <td><b><code>main</code></b><br><a href="https://mlsysbook.ai">mlsysbook.ai</a></td>
-      <td>Single-volume textbook</td>
-      <td>Live. This is what readers see today.</td>
+      <td>Single-volume textbook (current edition)</td>
+      <td>Live — this is what readers see today.</td>
     </tr>
     <tr>
-      <td><b><code>dev</code></b> ← you are here</td>
+      <td align="center">🟡</td>
+      <td><b><code>dev</code></b><br><i>← you are here</i></td>
       <td>
-        Volume I (two-volume split)<br>
-        Volume II: At Scale<br>
-        Tiny🔥Torch, Hardware Kits, MLSys·im, Labs, Interview Playbook
+        <b>Volume I</b> — two-volume split (content complete, editorial polish)<br>
+        <b>Volume II</b> — At Scale (active development)<br>
+        <b>Curriculum</b> — TinyTorch, Kits, MLSys·im, Labs, Interview Playbook
       </td>
       <td>
-        Content complete, editorial polish<br>
-        Active development<br>
-        Tiny🔥Torch and Hardware Kits are live; MLSys·im, Labs, Interview Playbook in development
+        TinyTorch and Hardware Kits are live.<br>
+        MLSys·im, Labs, and Interview Playbook are in development.
       </td>
     </tr>
   </tbody>
 </table>
 
-<p><i>The two-volume split replaces the single-volume edition at launch.</i></p>
+<p align="center"><i>The two-volume split replaces the single-volume edition at launch.</i></p>
 
 ---
 
@@ -329,25 +340,25 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
   <thead>
     <tr>
       <th width="5%"></th>
-      <th width="45%">I want to...</th>
-      <th width="50%">Go here</th>
+      <th width="40%">I want to...</th>
+      <th width="55%">Go here</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td align="center">📖</td>
       <td><b>Fix a typo or improve a chapter</b></td>
-      <td><a href="book/docs/CONTRIBUTING.md">book/docs/CONTRIBUTING.md</a></td>
+      <td><a href="book/docs/CONTRIBUTING.md">Textbook contributing guide</a></td>
     </tr>
     <tr>
       <td align="center">🔥</td>
       <td><b>Add a TinyTorch module or fix a bug</b></td>
-      <td><a href="tinytorch/CONTRIBUTING.md">tinytorch/CONTRIBUTING.md</a></td>
+      <td><a href="tinytorch/CONTRIBUTING.md">TinyTorch contributing guide</a></td>
     </tr>
     <tr>
       <td align="center">🛠️</td>
       <td><b>Improve hardware labs</b></td>
-      <td><a href="kits/README.md">kits/README.md</a></td>
+      <td><a href="kits/README.md">Hardware kits guide</a></td>
     </tr>
     <tr>
       <td align="center">🐛</td>
