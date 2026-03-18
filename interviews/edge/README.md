@@ -66,34 +66,34 @@ In the cloud, you can always add more GPUs. At the edge, the hardware is fixed a
   </thead>
   <tbody>
     <tr>
-      <td><b><a href="01_Edge_Systems.md">1. Edge Systems & Real-Time Physics</a></b></td>
+      <td><b><a href="01_systems_and_real_time.md">1. Edge Systems & Real-Time Physics</a></b></td>
       <td>Roofline, real-time deadlines, thermal management, sensor fusion, OTA</td>
-      <td>9</td>
+      <td>40</td>
     </tr>
     <tr>
-      <td><b><a href="02_Edge_Constraints.md">2. Constraints & Trade-offs</a></b></td>
+      <td><b><a href="02_compute_and_memory.md">2. Constraints & Trade-offs</a></b></td>
       <td>Compute analysis, memory budgets, quantization, architecture, latency, power, edge LLMs</td>
-      <td>19</td>
+      <td>63</td>
     </tr>
     <tr>
-      <td><b><a href="03_Edge_Ops_and_Deployment.md">3. Operations & Deployment</a></b></td>
+      <td><b><a href="03_data_and_deployment.md">3. Operations & Deployment</a></b></td>
       <td>Model optimization, fleet management, monitoring, security, economics</td>
-      <td>13</td>
+      <td>47</td>
     </tr>
     <tr>
-      <td><b><a href="04_Edge_Visual_Debugging.md">4. Visual Architecture Debugging</a></b></td>
+      <td><b><a href="04_visual_debugging.md">4. Visual Architecture Debugging</a></b></td>
       <td>Spot the bottleneck in edge system diagrams</td>
-      <td>7</td>
+      <td>11</td>
     </tr>
     <tr>
-      <td><b><a href="05_Edge_Advanced.md">5. Advanced Edge Systems</a></b></td>
-      <td>Safety certification, multi-sensor fusion, privacy, long-term reliability, edge-cloud hybrid</td>
-      <td>9</td>
+      <td><b><a href="05_heterogeneous_and_advanced.md">5. Advanced Edge Systems</a></b></td>
+      <td>Safety certification, multi-sensor fusion, privacy, long-term reliability, edge-cloud hybrid, heterogeneous accelerators, thermal, fleet ops</td>
+      <td>46</td>
     </tr>
     <tr>
       <td><b>Total</b></td>
       <td></td>
-      <td><b>57</b></td>
+      <td><b>207</b></td>
     </tr>
   </tbody>
 </table>

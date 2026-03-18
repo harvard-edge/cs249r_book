@@ -17,8 +17,8 @@ Content may be incomplete or change without notice. The published curriculum liv
 # The ML Systems Interview Playbook
 
 <p align="center">
-  <b>130+ systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
-  <i>You cannot prompt your way out of a silicon bottleneck.</i>
+  <b>800+ systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
+  <i>You can generate the code, but you cannot prompt your way out of a silicon bottleneck.</i>
 </p>
 
 <p align="center">
@@ -34,9 +34,11 @@ Content may be incomplete or change without notice. The published curriculum liv
 
 ## Why This Exists
 
-Students often ask me: *"How do I prepare for ML systems interviews?"* They can write a training loop, but they can't explain why a 175B parameter model will hit a communication wall across InfiniBand, or why serving a 128k context window will fragment the KV-cache and blow up P99 latency. These are **physical constraints**, not code syntax, and they're exactly what companies like Meta, Google, and OpenAI test for.
+In the age of GenAI, writing a training loop is trivial. Anyone can ask an LLM for PyTorch syntax. But an LLM cannot fix a fragmented KV-cache, it cannot un-choke a saturated InfiniBand switch, and it cannot cool a melting Edge NPU. **Code is generated; physics is enforced.**
 
-The industry calls it *Mechanical Sympathy*: seeing past framework abstractions to reason about the physics of keeping 10,000 GPUs fed and 1 million users served. This playbook organizes that knowledge into something you can actually study.
+Students often ask me: *"How do I prepare for ML systems interviews?"* This playbook is the answer. These questions test your **Mechanical Sympathy**: the ability to see past the framework abstractions and engineer the metal underneath. You must learn to reason about the physical constraints of keeping 10,000 GPUs fed and 1 million users served. This is exactly what companies like Meta, Google, and OpenAI test for.
+
+This playbook organizes that knowledge into something you can actually study.
 
 ---
 
@@ -62,11 +64,11 @@ Pick your level and start drilling:
     </tr>
     <tr>
       <td><b>Targeting Senior (L5)</b></td>
-      <td>🟡 Yellow-tagged questions + <a href="cloud/01_Single_Node_Physics.md">Round 1</a> & <a href="cloud/03_Production_Serving.md">Round 3</a></td>
+      <td>🟡 Yellow-tagged questions + <a href="cloud/01_compute_and_memory.md">1. Compute & Memory</a> & <a href="cloud/03_inference_and_serving.md">3. Inference & Serving</a></td>
     </tr>
     <tr>
       <td><b>Targeting Staff+ (L6+)</b></td>
-      <td>🔴 Red-tagged questions + <a href="cloud/05_Visual_Architecture_Debugging.md">Round 5: Visual Debugging</a></td>
+      <td>🔴 Red-tagged questions + <a href="cloud/05_visual_debugging.md">5. Visual Debugging</a></td>
     </tr>
     <tr>
       <td><b>Mock interview practice</b></td>
@@ -97,7 +99,7 @@ Each track targets a different deployment regime — different physics, differen
       <td><b><a href="cloud/README.md">☁️ Cloud</a></b></td>
       <td>Data center training & serving</td>
       <td>Memory bandwidth / network</td>
-      <td>57</td>
+      <td>253</td>
       <td>6 + visual</td>
       <td>PFLOPS, 80 GB HBM</td>
     </tr>
@@ -105,7 +107,7 @@ Each track targets a different deployment regime — different physics, differen
       <td><b><a href="edge/README.md">🤖 Edge</a></b></td>
       <td>Autonomous vehicles, robotics</td>
       <td>Thermal envelope / real-time</td>
-      <td>57</td>
+      <td>207</td>
       <td>5</td>
       <td>TOPS, 8–32 GB</td>
     </tr>
@@ -113,7 +115,7 @@ Each track targets a different deployment regime — different physics, differen
       <td><b><a href="mobile/README.md">📱 Mobile</a></b></td>
       <td>On-device AI for smartphones</td>
       <td>Battery life / shared resources</td>
-      <td>45</td>
+      <td>177</td>
       <td>5</td>
       <td>TOPS, 6–12 GB</td>
     </tr>
@@ -121,7 +123,7 @@ Each track targets a different deployment regime — different physics, differen
       <td><b><a href="tinyml/README.md">🔬 TinyML</a></b></td>
       <td>Microcontroller & ultra-low-power</td>
       <td>SRAM capacity / hard real-time</td>
-      <td>47</td>
+      <td>171</td>
       <td>5</td>
       <td>MFLOPS, 256 KB–2 MB</td>
     </tr>
@@ -282,124 +284,99 @@ Every question is tagged with a mastery level. These levels mirror engineering l
 
 ## Topic Index
 
-Every question is tagged with a topic. Use this index to study a specific concept across all rounds, or to find where we need more questions.
+Every question is tagged with a topic. Use this index to study a specific concept across all rounds. The examples below highlight key questions from across the tracks.
 
 <table>
   <thead>
     <tr>
       <th width="22%">Topic</th>
-      <th width="48%">Questions</th>
-      <th width="12%">Rounds</th>
+      <th width="60%">Example Questions Across Tracks</th>
       <th width="18%">Coverage</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td><b><code>roofline</code></b> — Arithmetic Intensity, compute vs memory bound</td>
-      <td>The Profiling Crisis · The Roofline Shift · The Amdahl Ceiling · The Decoding Bottleneck</td>
-      <td>1, 2, 3</td>
-      <td>🟡 Moderate</td>
+      <td><b>Cloud:</b> The Profiling Crisis · <b>Edge:</b> The Bandwidth-Bound Orin · <b>Mobile:</b> The Budget Phone Mystery</td>
+      <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>memory</code></b> — VRAM accounting, memory hierarchy, energy</td>
-      <td>The Sequence Length Trap · The Energy-Movement Invariant · The OOM Error · Ch.6: KV-Cache · Ch.7: Data Parallelism</td>
-      <td>1, 2, 5</td>
+      <td><b>Cloud:</b> The Sequence Length Trap · <b>Mobile:</b> The Background Kill · <b>TinyML:</b> The Flash-SRAM Boundary</td>
       <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>kv-cache</code></b> — KV-Cache sizing, fragmentation, PagedAttention</td>
-      <td>The Sequence Length Trap · The Fragmentation Crisis · The Disaggregated Serving · Ch.3: Serving Stack · Ch.6: KV-Cache</td>
-      <td>1, 3, 5</td>
+      <td><b>Cloud:</b> The Fragmentation Crisis · <b>Mobile:</b> The Mobile LLM KV-Cache Squeeze</td>
       <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>precision</code></b> — FP16/BF16/INT8, quantization, underflow</td>
-      <td>The Underflow Crisis · The Precision Trade-off</td>
-      <td>1</td>
-      <td>🟡 Moderate</td>
+      <td><b>Cloud:</b> The Underflow Crisis · <b>Edge:</b> The QAT Cliff · <b>TinyML:</b> The Requantization Pipeline</td>
+      <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>hardware</code></b> — Tensor Cores, sparsity, silicon architecture</td>
-      <td>The Precision Trade-off · The Sparsity Fallacy</td>
-      <td>1</td>
-      <td>🟡 Moderate</td>
+      <td><b>Cloud:</b> The Sparsity Fallacy · <b>Mobile:</b> The NPU Efficiency Advantage</td>
+      <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>frameworks</code></b> — JIT compilation, graph tracing, kernels</td>
-      <td>The Compilation Overhead</td>
-      <td>1</td>
-      <td>🔴 Thin — needs expansion</td>
+      <td><b>Cloud:</b> The Compilation Overhead · <b>Mobile:</b> The Single-Op Delegation Fix</td>
+      <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>data-pipeline</code></b> — CPU starvation, preprocessing, ingestion</td>
-      <td>The Data Pipeline Stall · Ch.1: Dataloader</td>
-      <td>1, 5</td>
-      <td>🔴 Thin — needs expansion</td>
+      <td><b>Cloud:</b> The Data Pipeline Stall · <b>Edge:</b> The Timestamp Drift</td>
+      <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>parallelism</code></b> — DP, TP, PP, ZeRO, 3D parallelism</td>
-      <td>The OOM Error · The Pipeline Bubble · The Amdahl Ceiling · Dimensioning the 3D Cube · The Cross-Rack Stall · Ch.4: Pipeline · Ch.7: Data Parallelism</td>
-      <td>2, 5</td>
+      <td><b>Cloud:</b> The Pipeline Bubble · The Amdahl Ceiling · Dimensioning the 3D Cube</td>
       <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>network</code></b> — NVLink, InfiniBand, Fat-Tree, AllReduce</td>
-      <td>The Cross-Rack Stall · The Oversubscription Choke · The Ring vs Tree Dilemma · Dimensioning the 3D Cube · Ch.2: Training Cluster</td>
-      <td>2, 5</td>
+      <td><b>Cloud:</b> The Cross-Rack Stall · The Oversubscription Choke · The Ring vs Tree Dilemma</td>
       <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>fault-tolerance</code></b> — Checkpointing, MTBF, stragglers</td>
-      <td>The Straggler Problem · The MTBF Crisis</td>
-      <td>2</td>
-      <td>🔴 Thin — needs expansion</td>
+      <td><b>Cloud:</b> The Straggler Problem · <b>Edge:</b> The Degradation Ladder</td>
+      <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>latency</code></b> — TTFT, TPOT, tail latency, queueing theory</td>
-      <td>The Serving Inversion · The LLM Metrics · The Black Friday Collapse</td>
-      <td>3</td>
+      <td><b>Cloud:</b> The Serving Inversion · <b>Mobile:</b> The Jank Explanation · <b>TinyML:</b> The Interrupt Deadline</td>
       <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>serving</code></b> — Batching, cold starts, speculative decoding</td>
-      <td>The Serverless Freeze · The Pre-computation Trade-off · The Batching Dilemma · The Disaggregated Serving · The Decoding Bottleneck · Ch.3: Serving Stack</td>
-      <td>3, 5</td>
+      <td><b>Cloud:</b> The Batching Dilemma · <b>Edge:</b> The eMMC Cold Start</td>
       <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>mlops</code></b> — Drift, skew, deployment, technical debt</td>
-      <td>The '95% Problem' · The Silent Failure · The Training-Serving Skew · The Retraining Math · The Deployment Risk · Ch.5: Feature Store</td>
-      <td>4, 5</td>
+      <td><b>Cloud:</b> The Training-Serving Skew · <b>Mobile:</b> The Silent Accuracy Degradation</td>
       <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>economics</code></b> — TCO, retraining cost, sustainability</td>
-      <td>The Energy Economics · The Retraining Math</td>
-      <td>4</td>
-      <td>🔴 Thin — needs expansion</td>
+      <td><b>Cloud:</b> The Energy Economics · <b>Edge:</b> The Edge vs Cloud Cost Crossover</td>
+      <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>security</code></b> — Prompt injection, adversarial attacks</td>
-      <td>The Trust Boundary</td>
-      <td>4</td>
-      <td>🔴 Thin — needs expansion</td>
+      <td><b>Cloud:</b> The Trust Boundary · <b>Edge:</b> The Adversarial Patch Attack</td>
+      <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>privacy</code></b> — DP-SGD, membership inference</td>
-      <td>The Privacy Audit</td>
-      <td>4</td>
-      <td>🔴 Thin — needs expansion</td>
-    </tr>
-    <tr>
-      <td><b><code>fairness</code></b> — Subgroup evaluation, bias amplification</td>
-      <td>The Bias Amplifier</td>
-      <td>4</td>
-      <td>🔴 Thin — needs expansion</td>
+      <td><b>Cloud:</b> The Privacy Audit · <b>Mobile:</b> The Federated Keyboard</td>
+      <td>✅ Strong</td>
     </tr>
   </tbody>
 </table>
-
-> **Want to contribute?** Topics marked 🔴 **Thin** are where we most need new questions. See [Contributing](#contributing) below.
 
 ---
 

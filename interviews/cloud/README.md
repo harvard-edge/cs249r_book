@@ -62,34 +62,34 @@ The Cloud track covers ML systems that run in data centers — from a single H10
   </thead>
   <tbody>
     <tr>
-      <td><b><a href="01_Single_Node_Physics.md">1. Silicon Physics</a></b></td>
+      <td><b><a href="01_compute_and_memory.md">1. Silicon Physics</a></b></td>
       <td>What happens inside a single server</td>
-      <td>9</td>
+      <td>61</td>
     </tr>
     <tr>
-      <td><b><a href="02_Distributed_Infrastructure.md">2. Distributed Infra</a></b></td>
+      <td><b><a href="02_network_and_distributed.md">2. Distributed Infra</a></b></td>
       <td>What happens when you exceed one node</td>
-      <td>9</td>
+      <td>38</td>
     </tr>
     <tr>
-      <td><b><a href="03_Production_Serving.md">3. Production Serving</a></b></td>
+      <td><b><a href="03_inference_and_serving.md">3. Production Serving</a></b></td>
       <td>Surviving real user traffic</td>
-      <td>9</td>
+      <td>40</td>
     </tr>
     <tr>
-      <td><b><a href="04_Operations_and_Economics.md">4. Ops & Economics</a></b></td>
+      <td><b><a href="04_data_and_mlops.md">4. Ops & Economics</a></b></td>
       <td>Keeping systems healthy over time</td>
-      <td>9</td>
+      <td>49</td>
     </tr>
     <tr>
-      <td><b><a href="05_Visual_Architecture_Debugging.md">5. Visual Debugging</a></b></td>
+      <td><b><a href="05_visual_debugging.md">5. Visual Debugging</a></b></td>
       <td>Spotting bottlenecks in diagrams</td>
-      <td>7</td>
+      <td>10</td>
     </tr>
     <tr>
-      <td><b><a href="06_Advanced_Systems.md">6. Advanced Systems</a></b></td>
+      <td><b><a href="06_advanced_systems.md">6. Advanced Systems</a></b></td>
       <td>Compute analysis, power, architecture cost, security & fairness</td>
-      <td>14</td>
+      <td>55</td>
     </tr>
   </tbody>
 </table>

@@ -3,12 +3,12 @@
 <div align="center">
   <a href="../README.md">🏠 Home</a> ·
   <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
-  <a href="01_Single_Node_Physics.md">🧱 Round 1</a> ·
-  <a href="02_Distributed_Infrastructure.md">🚀 Round 2</a> ·
-  <a href="03_Production_Serving.md">⚡ Round 3</a> ·
-  <a href="04_Operations_and_Economics.md">💼 Round 4</a> ·
-  <a href="05_Visual_Architecture_Debugging.md">🖼️ Round 5</a> ·
-  <a href="06_Advanced_Systems.md">⚙️ Round 6</a>
+  <a href="01_compute_and_memory.md">🧱 1. Compute & Memory</a> ·
+  <a href="02_network_and_distributed.md">🚀 2. Network & Distributed</a> ·
+  <a href="03_inference_and_serving.md">⚡ 3. Inference & Serving</a> ·
+  <a href="04_data_and_mlops.md">💼 4. Data & MLOps</a> ·
+  <a href="05_visual_debugging.md">🖼️ 5. Visual Debugging</a> ·
+  <a href="06_advanced_systems.md">⚙️ 6. Advanced Systems</a>
 </div>
 
 ---
@@ -17,7 +17,7 @@ The ultimate test of an AI Systems Engineer is not reciting formulas, but spotti
 
 In this round, you are presented with systems designs that look plausible on paper but violate the fundamental physics of AI computation. Each challenge follows the same structure: **The Scenario** sets the context, a **diagram** shows the proposed architecture, and **The Question** asks you to find the flaw. Try to answer before clicking "Reveal the Bottleneck."
 
-> **[➕ Add a Visual Challenge](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/cloud/05_Visual_Architecture_Debugging.md)** (Edit in Browser) — see [README](../README.md#question-format) for the template.
+> **[➕ Add a Visual Challenge](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/cloud/05_visual_debugging.md)** (Edit in Browser) — see [README](../README.md#question-format) for the template.
 
 ---
 
@@ -47,7 +47,7 @@ Training Loop}
 **The Question:** This pipeline looks like it has plenty of bandwidth at every stage. But the GPUs are sitting at 0% utilization most of the time. One component in this diagram is the bottleneck — which one, and why?
 
 <details>
-<summary><b>🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> 🚨 Reveal the Bottleneck</b></summary>
 
 ### The Transformation Wall (CPU Starvation)
 
@@ -59,7 +59,7 @@ The GPUs will finish their matrix multiplication in 5ms, and then sit completely
 
 **The Fix:** You must bypass the CPU. Use GPU-accelerated libraries (like NVIDIA DALI) to move the JPEG decoding and augmentation directly onto the GPUs, utilizing their spare ALU capacity during the data loading phase.
 
-**📖 Deep Dive:** [Volume I: Data Engineering](https://mlsysbook.ai/vol1/data_engineering.html)
+**📖 Deep Dive:** [Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
 </details>
 
 ---
@@ -90,7 +90,7 @@ flowchart LR
 **The Question:** The CTO claims this cluster will train the 70B model at 512× the speed of a single GPU. What fundamental networking constraint makes this architecture dead on arrival?
 
 <details>
-<summary><b>🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
 
 ### The Communication Wall (Amdahl's Law)
 
@@ -102,7 +102,7 @@ This requires moving hundreds of gigabytes of data across the network simultaneo
 
 **The Fix:** Training large models requires specialized topologies. You need a non-blocking Fat-Tree (Clos) topology with InfiniBand (200-400 Gbps) between racks, and NVLink (900 GB/s) within the nodes. Without high **Bisection Bandwidth**, adding more GPUs actively degrades throughput.
 
-**📖 Deep Dive:** [Volume II: Network Fabrics](https://mlsysbook.ai/vol2/network_fabrics.html)
+**📖 Deep Dive:** [Network Architectures](https://harvard-edge.github.io/cs249r_book_dev/contents/network_architectures/network_architectures.html)
 </details>
 
 ---
@@ -133,7 +133,7 @@ Memory-BW Bound]
 **The Question:** Users report that their token stream randomly freezes mid-conversation, even though the cluster isn't at full capacity. The diagram shows two phases with fundamentally different resource profiles sharing the same hardware. What is causing the interference, and how do you isolate it?
 
 <details>
-<summary><b>🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> 🚨 Reveal the Bottleneck</b></summary>
 
 ### The Prefill-Decode Interference
 
@@ -145,7 +145,7 @@ When a user sends a long prompt, the prefill phase seizes the GPU's compute unit
 
 **The Fix:** Disaggregated Serving. Split Prefill and Decode onto separate GPU clusters. Prefill nodes compute the KV-Cache and transmit it over the network to dedicated Decode nodes. This isolates the two fundamentally different workload profiles.
 
-**📖 Deep Dive:** [Volume II: Inference at Scale](https://mlsysbook.ai/vol2/inference.html)
+**📖 Deep Dive:** [Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
 </details>
 
 ---
@@ -177,7 +177,7 @@ Layers 85-96]
 **The Question:** The profiler shows GPUs 0–6 are idle most of the time while GPU 7 does all the work. The team is paying for 8 GPUs but getting the throughput of 1. What is the utilization of this pipeline, and how do you fix it without changing the model or the hardware?
 
 <details>
-<summary><b>🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
 
 ### The Pipeline Bubble
 
@@ -189,53 +189,50 @@ The pipeline bubble fraction is $(P-1)/M$ where $P$ is the number of stages and 
 
 **The Fix:** Split the global batch into many microbatches ($M \gg P$). With $M=32$ microbatches, GPU 0 processes microbatch 2 while GPU 1 processes microbatch 1. The bubble shrinks to $(8-1)/32 = 21.9\%$. Techniques like 1F1B (one forward, one backward) scheduling further reduce peak memory.
 
-**📖 Deep Dive:** [Volume II: Distributed Training](https://mlsysbook.ai/vol2/distributed_training.html)
+**📖 Deep Dive:** [Training](https://harvard-edge.github.io/cs249r_book_dev/contents/training/training.html)
 </details>
 
 ---
 
-## 🛑 Challenge 5: The "Scalable" Feature Store · `mlops`
+## 🛑 Challenge 5: The "Scalable" Feature Store · `mlops` `hardware-bottleneck`
 
-**The Scenario:** The ML platform team built a feature store for their real-time recommendation system. Features are computed in a batch Spark job and served from Redis. The architecture looks clean — until Black Friday.
+**The Scenario:** The ML platform team built a feature store for their real-time recommendation system. Features are computed in a batch Spark job (CPU) and served from Redis. The model runs on an NVIDIA T4 GPU. The architecture looks clean — until Black Friday.
 
 ```mermaid
 flowchart TD
     subgraph "Batch Pipeline (Daily)"
-        Spark[Spark Job] -->|Write| Redis[(Redis
+        Spark[Spark Job (CPU)] -->|Write| Redis[(Redis
 Feature Cache)]
     end
 
     subgraph "Serving Path (Real-time)"
-        Request([User Request]) --> API[Model Server]
+        Request([User Request]) --> API[Model Server (CPU)]
         API -->|Feature Lookup| Redis
-        API -->|Predict| Response([Response])
-    end
-
-    subgraph "Training Path (Weekly)"
-        Notebook[Jupyter Notebook] -->|Read CSV| Train[Training Job]
-        Train --> Model[Model Artifact]
+        API -->|Preprocess to Tensor| CPU_RAM[CPU RAM]
+        CPU_RAM -->|PCIe Transfer| GPU_VRAM[GPU VRAM]
+        GPU_VRAM -->|Predict| Response([Response])
     end
 
     classDef error fill:#ffe0e0,stroke:#d32f2f,stroke-width:2px;
-    class Notebook error;
+    class CPU_RAM,GPU_VRAM error;
 ```
 
-**The Question:** The model achieves 95% accuracy offline but drops to 70% in production. The model weights are identical. The serving infrastructure is healthy. Where in this diagram is the silent killer hiding?
+**The Question:** During the traffic spike, the model's latency jumps from 20ms to 500ms, but the GPU utilization is only 15%. Where in this diagram is the silent killer hiding, and why does the hardware architecture cause this latency spike?
 
 <details>
-<summary><b>🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
 
-### Training-Serving Skew
+### The CPU-GPU Data Transfer Bottleneck
 
-**Common Mistake:** "The test set isn't representative of production data." Distribution shift is possible, but when the weights are identical and the accuracy gap is this large, the problem is almost always in the feature pipeline, not the data.
+**Common Mistake:** "The GPU is too slow, we need to upgrade to an A10G." The GPU is only at 15% utilization — it's starving for data, not compute.
 
-The diagram hides a silent killer: the **Jupyter Notebook** computes features using different Python code than the Spark batch job that writes to Redis. The training pipeline reads CSVs with pandas transformations; the serving pipeline reads pre-computed features from Redis written by Spark.
+The diagram hides a hardware-level silent killer: **PCIe transfer overhead and CPU-bound preprocessing**. The Spark job computes raw features, but the Model Server (running on CPU) must deserialize them from Redis, convert them into PyTorch tensors, and send them over the PCIe bus to the GPU for every single request.
 
-The model achieves 95% accuracy offline but drops to 70% in production — not because the model is bad, but because it sees different feature distributions at serving time than it saw during training. This is Training-Serving Skew, and it's one of the most common production ML failures.
+During a traffic spike, the CPU becomes 100% saturated doing data serialization and tensor formatting. The PCIe bus is flooded with small, unbatched memory transfers (host-to-device). The GPU spends 85% of its time waiting for the CPU to hand it the next tensor.
 
-**The Fix:** A unified Feature Store (like Feast or Tecton) that guarantees identical feature computation logic for both training and serving. Features are defined once, computed once, and served consistently.
+**The Fix:** Move the final feature preprocessing steps (like embedding lookups or tensor formatting) directly onto the GPU using NVIDIA Triton or DALI, and batch the requests on the CPU *before* the PCIe transfer so you send one large contiguous block of memory rather than thousands of tiny ones.
 
-**📖 Deep Dive:** [Volume I: ML Operations](https://mlsysbook.ai/vol1/ml_ops.html)
+**📖 Deep Dive:** [ML Operations](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_ops/ml_ops.html)
 </details>
 
 ---
@@ -273,7 +270,7 @@ Actual: 512 tokens]
 **The Question:** The system has 40 GB of free VRAM but can only serve 3 concurrent requests before hitting OOM. Request 1 is using only 47 tokens. Look at the allocation pattern — what percentage of memory is being wasted, and what OS concept from the 1960s solves this?
 
 <details>
-<summary><b>🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> 🚨 Reveal the Bottleneck</b></summary>
 
 ### KV-Cache Memory Fragmentation
 
@@ -285,7 +282,7 @@ This is the same problem that plagued early operating systems before virtual mem
 
 **The Fix:** PagedAttention (as implemented in vLLM). Instead of contiguous pre-allocation, map virtual KV-cache blocks to non-contiguous physical blocks on demand — exactly like OS virtual memory paging. This eliminates fragmentation, enabling 2-4x more concurrent requests with the same hardware.
 
-**📖 Deep Dive:** [Volume I: Frameworks](https://mlsysbook.ai/vol1/frameworks.html)
+**📖 Deep Dive:** [Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
 </details>
 
 ---
@@ -324,7 +321,7 @@ flowchart TB
 **The Question:** The diagram shows 60 GB of weights fitting comfortably in 80 GB of VRAM. But the system OOMs on the very first training step. The boxes marked "???" are the clue. Calculate the actual memory required per GPU, and explain why every node holds a redundant copy of the problem.
 
 <details>
-<summary><b>🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> 🚨 Reveal the Bottleneck</b></summary>
 
 ### The Optimizer State Explosion
 
@@ -341,5 +338,136 @@ The diagram shows 60 GB of weights fitting in 80 GB — looks fine, right? But i
 
 **The Fix:** ZeRO (Zero Redundancy Optimizer) or FSDP. Instead of replicating the full optimizer state on every GPU, shard it across all workers. ZeRO Stage 3 shards weights, gradients, and optimizer states, reducing per-GPU memory from 360 GB to ~90 GB across 4 nodes.
 
-**📖 Deep Dive:** [Volume II: Distributed Training](https://mlsysbook.ai/vol2/distributed_training.html)
+**📖 Deep Dive:** [Training](https://harvard-edge.github.io/cs249r_book_dev/contents/training/training.html)
+</details>
+
+
+---
+
+## 🛑 Challenge 8: The "Centralized" Checkpoint Storm · `fault-tolerance` `storage`
+
+**The Scenario:** You are training a 175B parameter model using 3D parallelism across 1,024 GPUs. To ensure no data is lost during preemptions, the infrastructure team configures synchronous checkpointing every 500 steps directly to a central enterprise NFS server.
+
+```mermaid
+flowchart TD
+    subgraph "Training Cluster (1,024 GPUs)"
+        Node1[Node 1<br>8x H100]
+        Node2[Node 2<br>8x H100]
+        Node128[Node 128<br>8x H100]
+    end
+
+    Storage[(Enterprise NFS Server<br>Bandwidth: 10 GB/s)]
+
+    Node1 -->|Sync Write| Storage
+    Node2 -->|Sync Write| Storage
+    Node128 -->|Sync Write| Storage
+
+    classDef error fill:#ffe0e0,stroke:#d32f2f,stroke-width:2px;
+    class Storage error;
+```
+
+**The Question:** The GPUs are spending 30% of their total time idle, waiting for checkpoints to finish. Looking at the diagram, why is the checkpointing taking so long, and how do you redesign this architecture to keep the GPUs computing?
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+
+### The Metadata and Bandwidth Choke
+
+**Common Mistake:** "The NFS server just needs a 100 GB/s link." Bandwidth is a problem, but upgrading the link won't solve the metadata storm of thousands of concurrent file handles.
+
+A 175B model requires saving roughly 2.8 TB of state (weights, gradients, optimizer moments in FP32). When 128 nodes simultaneously open files and push data to a single NFS server, two things happen:
+1. **Bandwidth limitation:** 2.8 TB / 10 GB/s = 280 seconds (nearly 5 minutes) of pure transfer time per checkpoint.
+2. **The Metadata Storm:** 1,024 GPUs simultaneously requesting file handles and inode locks overwhelms the NFS master node's single-threaded metadata manager, causing severe timeouts and stragglers.
+
+**The Fix:** Implement **Asynchronous, Two-Tier Checkpointing**.
+1. Have each node write its checkpoint shard synchronously to its *local* NVMe SSD (typically 3-7 GB/s per node). 128 nodes × 3 GB/s = 384 GB/s aggregate bandwidth. The 2.8 TB checkpoint writes locally in under **10 seconds**.
+2. Once written to local NVMe, the GPUs immediately resume training.
+3. A background CPU process slowly uploads the local SSD checkpoints to the central object storage without blocking the GPUs.
+
+**📖 Deep Dive:** [Volume II: Fault Tolerance](https://harvard-edge.github.io/cs249r_book_dev/contents/fault_tolerance/fault_tolerance.html)
+</details>
+
+---
+
+## 🛑 Challenge 9: The "Disaggregated" Bottleneck · `serving` `network`
+
+**The Scenario:** To solve prefill-decode interference, the team implements Disaggregated Serving for their 70B model. Prefill nodes process the prompts and send the computed KV-cache over the network to Decode nodes for token generation.
+
+```mermaid
+flowchart LR
+    subgraph "Prefill Tier"
+        GPU_P[H100 GPU<br>Processes Prompt]
+        RAM_P[Host RAM]
+    end
+
+    subgraph "Decode Tier"
+        GPU_D[H100 GPU<br>Generates Tokens]
+        RAM_D[Host RAM]
+    end
+
+    GPU_P -->|PCIe Gen5| RAM_P
+    RAM_P -->|10 GbE Network| RAM_D
+    RAM_D -->|PCIe Gen5| GPU_D
+
+    classDef error fill:#ffe0e0,stroke:#d32f2f,stroke-width:2px;
+    class RAM_P,RAM_D error;
+    style RAM_P stroke:#d32f2f,stroke-width:2px
+```
+
+**The Question:** The prefill nodes are processing 32k-token prompts perfectly, but the decode nodes are stalling for seconds before they can start generating the first token. What is the physical bottleneck in this transfer architecture?
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+
+### The KV-Cache Network Transfer Wall
+
+**Common Mistake:** "Disaggregated serving is always faster because it isolates compute from memory bandwidth." This assumes the transfer of the intermediate state (the KV-cache) is free.
+
+The bottleneck is the **10 GbE (Gigabit Ethernet) Network** and the **Host RAM bounce**.
+For a 70B model with a 32,000 token prompt, the KV-cache is massive.
+At 128 head dimension, 64 layers, and FP16, the KV-cache for 32k tokens is roughly **8.4 GB per request**.
+
+A 10 GbE network provides a theoretical maximum of 1.25 GB/s. Transferring an 8.4 GB KV-cache for a single user takes **~7 seconds** of pure network transmission time. The user experiences a 7-second Time-To-First-Token (TTFT) stall entirely due to network transfer. Furthermore, copying data through Host RAM adds PCIe contention and CPU overhead.
+
+**The Fix:** Disaggregated serving requires data-center scale networking. You must upgrade the inter-tier links to 200 Gbps or 400 Gbps InfiniBand/RoCE (giving 25-50 GB/s), which reduces the transfer time from 7 seconds to under 200 milliseconds. Additionally, you must bypass the CPU RAM entirely by using **GPUDirect RDMA** to transfer the KV-cache directly from the Prefill GPU's HBM to the Decode GPU's HBM.
+
+**📖 Deep Dive:** [Volume II: Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
+</details>
+
+---
+
+## 🛑 Challenge 10: The "Unbalanced" MoE Router · `architecture` `parallelism`
+
+**The Scenario:** You deploy a Mixture-of-Experts (MoE) model with 8 experts distributed across 8 GPUs. A router network assigns each token to the single best expert. During a highly specialized coding task, the pipeline grinds to a halt.
+
+```mermaid
+flowchart TD
+    Tokens[Batch of Tokens] --> Router[MoE Router]
+    Router -->|3%| E1[Expert 1 GPU]
+    Router -->|90%| E2[Expert 2 GPU<br>Code/Logic]
+    Router -->|2%| E3[Expert 3 GPU]
+    Router -->|...| EN[Other Experts]
+
+    classDef error fill:#ffe0e0,stroke:#d32f2f,stroke-width:2px;
+    class E2 error;
+```
+
+**The Question:** The diagram shows the token distribution during this specific task. Why does this distribution cause the entire 8-GPU cluster to run at 12.5% utilization?
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+
+### The Expert Capacity Drop
+
+**Common Mistake:** "Just add more GPUs for Expert 2." You can't dynamically clone model weights to new GPUs at the microsecond timescale of a forward pass without massive overhead.
+
+MoE models rely on the assumption that tokens will be roughly evenly distributed across experts. Because standard neural networks operate on fixed-size tensors, the framework pre-allocates a fixed **Expert Capacity** (e.g., maximum N tokens per expert per batch).
+
+When 90% of the tokens are routed to Expert 2 (which often happens when prompts are highly domain-specific, like pure code or math):
+1. Expert 2 hits its capacity limit and either **drops tokens** (destroying generation quality) or forces the system to serialize execution (destroying throughput).
+2. The other 7 GPUs sit completely idle, waiting for Expert 2 to finish its massive workload before the pipeline can proceed to the next layer.
+
+**The Fix:** Implement **Capacity Routing with Token Dropping / Auxiliary Loss**, and **Expert Replication**. Train the model with a load-balancing auxiliary loss to penalize the router for sending too many tokens to one expert. In deployment, if certain experts are known to be consistently "hot" (like a coding expert), replicate that specific expert's weights across multiple GPUs, or use **Expert Parallelism** paired with Tensor Parallelism to distribute the hot expert's compute.
+
+**📖 Deep Dive:** [Volume II: Distributed Training](https://harvard-edge.github.io/cs249r_book_dev/contents/distributed_training/distributed_training.html)
 </details>

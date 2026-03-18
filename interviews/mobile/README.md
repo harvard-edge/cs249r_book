@@ -66,34 +66,34 @@ Edge devices are dedicated to ML — the entire system exists to run inference. 
   </thead>
   <tbody>
     <tr>
-      <td><b><a href="01_Mobile_Systems.md">1. Mobile Systems & On-Device Physics</a></b></td>
+      <td><b><a href="01_systems_and_soc.md">1. Mobile Systems & On-Device Physics</a></b></td>
       <td>NPU delegation, thermal throttling, memory pressure, app lifecycle</td>
-      <td>9</td>
+      <td>26</td>
     </tr>
     <tr>
-      <td><b><a href="02_Mobile_Constraints.md">2. Constraints & Trade-offs</a></b></td>
+      <td><b><a href="02_compute_and_memory.md">2. Constraints & Trade-offs</a></b></td>
       <td>Compute analysis, memory, quantization, architecture, latency, power, NPU delegation, LLMs</td>
-      <td>17</td>
+      <td>61</td>
     </tr>
     <tr>
-      <td><b><a href="03_Mobile_Ops_and_Deployment.md">3. Operations & Deployment</a></b></td>
+      <td><b><a href="03_data_and_deployment.md">3. Operations & Deployment</a></b></td>
       <td>Model optimization, app store delivery, monitoring, privacy, platform design</td>
-      <td>10</td>
+      <td>53</td>
     </tr>
     <tr>
-      <td><b><a href="04_Mobile_Visual_Debugging.md">4. Visual Architecture Debugging</a></b></td>
+      <td><b><a href="04_visual_debugging.md">4. Visual Architecture Debugging</a></b></td>
       <td>Spot the bottleneck in mobile ML system diagrams</td>
-      <td>7</td>
+      <td>11</td>
     </tr>
     <tr>
-      <td><b><a href="05_Mobile_Advanced.md">5. Advanced Mobile Systems</a></b></td>
+      <td><b><a href="05_advanced_systems.md">5. Advanced Mobile Systems</a></b></td>
       <td>On-device LLMs, cross-platform deployment, federated learning, NAS, personalization</td>
-      <td>9</td>
+      <td>26</td>
     </tr>
     <tr>
       <td><b>Total</b></td>
       <td></td>
-      <td><b>52</b></td>
+      <td><b>177</b></td>
     </tr>
   </tbody>
 </table>

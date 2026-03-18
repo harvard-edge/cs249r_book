@@ -3,11 +3,11 @@
 <div align="center">
   <a href="README.md">🏠 Home</a> ·
   <a href="00_The_Architects_Rubric.md">📋 Rubric</a> ·
-  <a href="cloud/01_Single_Node_Physics.md">🧱 Round 1</a> ·
-  <a href="cloud/02_Distributed_Infrastructure.md">🚀 Round 2</a> ·
-  <a href="cloud/03_Production_Serving.md">⚡ Round 3</a> ·
-  <a href="cloud/04_Operations_and_Economics.md">💼 Round 4</a> ·
-  <a href="cloud/05_Visual_Architecture_Debugging.md">🖼️ Round 5</a>
+  <a href="cloud/01_compute_and_memory.md">🧱 1. Compute & Memory</a> ·
+  <a href="cloud/02_network_and_distributed.md">🚀 2. Network & Distributed</a> ·
+  <a href="cloud/03_inference_and_serving.md">⚡ 3. Inference & Serving</a> ·
+  <a href="cloud/04_data_and_mlops.md">💼 4. Data & MLOps</a> ·
+  <a href="cloud/05_visual_debugging.md">🖼️ 5. Visual Debugging</a>
 </div>
 
 ---

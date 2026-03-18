@@ -3,18 +3,18 @@
 <div align="center">
   <a href="../README.md">🏠 Home</a> ·
   <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
-  <a href="01_TinyML_Systems.md">🔬 Round 1</a> ·
-  <a href="02_TinyML_Constraints.md">⚖️ Round 2</a> ·
-  <a href="03_TinyML_Ops_and_Deployment.md">🚀 Round 3</a> ·
-  <a href="04_TinyML_Visual_Debugging.md">🖼️ Round 4</a> ·
-  <a href="05_TinyML_Advanced.md">🔬 Round 5</a>
+  <a href="01_micro_architectures.md">🔬 1. Micro Architectures</a> ·
+  <a href="02_compute_and_memory.md">⚖️ 2. Compute & Memory</a> ·
+  <a href="03_data_and_deployment.md">🚀 3. Data & Deployment</a> ·
+  <a href="04_visual_debugging.md">🖼️ 4. Visual Debugging</a> ·
+  <a href="05_advanced_systems.md">🔬 5. Advanced Systems</a>
 </div>
 
 ---
 
 The ultimate test of a TinyML systems engineer is spotting the flaw in a proposed architecture *before* it ships to 10,000 devices soldered onto PCBs that can't be recalled. Each challenge presents a plausible microcontroller system design with a hidden flaw. Try to find it before clicking "Reveal the Bottleneck."
 
-> **[➕ Add a Visual Challenge](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/tinyml/04_TinyML_Visual_Debugging.md)** (Edit in Browser) — see [README](../README.md#question-format) for the template.
+> **[➕ Add a Visual Challenge](https://github.com/harvard-edge/cs249r_book/edit/dev/interviews/tinyml/04_visual_debugging.md)** (Edit in Browser) — see [README](../README.md#question-format) for the template.
 
 ---
 
@@ -57,7 +57,7 @@ flowchart TD
 **The Question:** The simulation reports 190 KB peak activation memory. The arena is sized to 196 KB — 6 KB of headroom. The device boots fine but crashes randomly during inference after 10-30 minutes of operation. Memory corruption is suspected. What's wrong?
 
 <details>
-<summary><b>🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
 
 ### Stack Overflow into the Tensor Arena
 
@@ -67,7 +67,7 @@ The stack grows downward on ARM Cortex-M. The 8 KB stack sits directly above the
 
 **The Fix:** (1) Place a stack canary (known pattern, e.g., 0xDEADBEEF) at the bottom of the stack region. Check it periodically — if corrupted, the stack overflowed. (2) Use the MPU (Memory Protection Unit) to mark the boundary between stack and arena as no-access — a stack overflow triggers a MemManage fault instead of silent corruption. (3) Increase the stack to 16 KB and reduce the arena to 188 KB (still fits the 190 KB peak? No — now you need to optimize the model too). (4) Move the stack to the top of SRAM and the arena to the bottom, so stack overflow hits the end of SRAM and faults immediately instead of corrupting data.
 
-**📖 Deep Dive:** [Volume I: TinyML](https://mlsysbook.ai/vol1/tinyml.html)
+**📖 Deep Dive:** [Volume I: TinyML](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
 </details>
 
 ---
@@ -101,7 +101,7 @@ flowchart LR
 
     BLE["BLE Stack
     Connection Event
-    Priority 1"| -->|"Every 50ms
+    Priority 1"] -->|"Every 50ms
     ~8ms per event"| Radio["nRF Radio"]
 
     Inference -->|"Result"| Output["Anomaly
@@ -114,7 +114,7 @@ flowchart LR
 **The Question:** The inference pipeline (23ms) fits within the 25.6ms buffer window with 2.6ms of margin. But the system drops samples every few seconds, and occasionally the watchdog fires. The team says "the model is too slow — we need to optimize it." Is the model the problem?
 
 <details>
-<summary><b>🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> 🚨 Reveal the Bottleneck</b></summary>
 
 ### Interrupt Priority Inversion
 
@@ -126,7 +126,7 @@ Worse: the UART logging at Priority 0 means that if a UART interrupt fires durin
 
 **The Fix:** (1) Never run inference inside an ISR. Use a flag-based approach: DMA ISR sets a flag, main loop polls the flag and runs inference at base level. (2) Set interrupt priorities correctly: DMA complete = Priority 0, BLE = Priority 2, UART = Priority 3. DMA can preempt everything. (3) Remove debug UART logging from production firmware — it's the most common source of timing bugs in embedded systems. (4) Use a deferred processing pattern: ISR copies buffer pointer to a queue, main loop processes the queue.
 
-**📖 Deep Dive:** [Volume I: TinyML](https://mlsysbook.ai/vol1/tinyml.html)
+**📖 Deep Dive:** [Volume I: TinyML](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
 </details>
 
 ---
@@ -177,7 +177,7 @@ flowchart TD
 **The Question:** The power budget says 390 days — close to the 2-year target but not quite. The team says "we'll optimize the model to use less power." But when they deploy, the batteries die in 3 months — 4× faster than predicted. The model isn't the problem. What is?
 
 <details>
-<summary><b>🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
 
 ### BLE Advertisement Power is Massively Underestimated
 
@@ -197,7 +197,7 @@ Realistic BLE energy per wake cycle: **5-10 mJ** — not 0.8 mJ. This makes BLE 
 
 **The Fix:** (1) Don't transmit every cycle. Buffer results locally and transmit every 10th cycle (every 10 minutes). BLE energy amortized: 8 mJ / 10 = 0.8 mJ per cycle. (2) Use BLE advertising-only mode (no connection) with encoded data in the advertisement payload — eliminates connection overhead. (3) Use a lower TX power (-20 dBm instead of 0 dBm) if the gateway is nearby — 4× less TX energy. (4) Only transmit when an anomaly is detected — most cycles produce "normal" results that don't need reporting.
 
-**📖 Deep Dive:** [Volume I: TinyML](https://mlsysbook.ai/vol1/tinyml.html)
+**📖 Deep Dive:** [Volume I: TinyML](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
 </details>
 
 ---
@@ -239,7 +239,7 @@ flowchart TD
 **The Question:** The team says "we verify the CRC after writing, so corrupted updates are caught." During a thunderstorm, 200 sensors lose power mid-update. What happens to those 200 sensors?
 
 <details>
-<summary><b>🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> 🚨 Reveal the Bottleneck</b></summary>
 
 ### In-Place Update with No Rollback
 
@@ -257,7 +257,7 @@ The fundamental flaw: **writing directly to the active application region**. The
 
 (4) **Cost:** You lose 490 KB of flash for the staging area. But 490 KB per slot is still enough for most TinyML applications (model + app < 400 KB). The alternative — sending a technician to 200 farms to reflash bricked sensors — costs $50 × 200 = $10,000 per incident.
 
-**📖 Deep Dive:** [Volume I: ML Operations](https://mlsysbook.ai/vol1/ml_ops.html)
+**📖 Deep Dive:** [Volume I: ML Operations](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_ops/ml_ops.html)
 </details>
 
 ---
@@ -309,7 +309,7 @@ flowchart LR
 **The Question:** The model passes all automated tests. The overall accuracy looks fine. But one specific class pair is catastrophically confused. The team says "we need a better model architecture." Is the architecture the problem?
 
 <details>
-<summary><b>🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
 
 ### Quantization Range Collapse on Discriminative Features
 
@@ -323,7 +323,7 @@ With per-tensor quantization calibrated on the lab data: step size = 16 / 255 = 
 
 **The Fix:** (1) **Diverse calibration data** — include gestures from 20+ users with varying speeds, orientations, and strengths. This widens the activation distribution and sets more representative quantization ranges. (2) **Per-channel quantization** — different channels capture different features. The channel that discriminates left/right may have a narrow range [-0.5, 0.5] while other channels span [-8, 8]. Per-channel quantization gives each channel its own range. (3) **Quantization-aware training (QAT)** — the model learns to make discriminative features robust to quantization noise during training. (4) **Confusion matrix testing** — never rely on aggregate accuracy. Test per-class and per-class-pair metrics after quantization.
 
-**📖 Deep Dive:** [Volume I: Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+**📖 Deep Dive:** [Volume I: Model Compression](https://harvard-edge.github.io/cs249r_book_dev/contents/model_compression/model_compression.html)
 </details>
 
 ---
@@ -372,7 +372,7 @@ flowchart TD
 **The Question:** Both buffers should fill in exactly 100ms and arrive at the synchronization point simultaneously. In practice, after 10 minutes of operation, the accelerometer buffer consistently arrives 2-3ms before the audio buffer. After an hour, the drift reaches 15ms. The team says "the clocks are both derived from the same 32 MHz crystal — they can't drift." What's happening?
 
 <details>
-<summary><b>🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> 🚨 Reveal the Bottleneck</b></summary>
 
 ### Independent Clock Dividers with Rounding Error
 
@@ -388,7 +388,7 @@ The 32 MHz crystal is divided differently for each peripheral:
 
 **The Fix:** (1) **Timestamp each sample** using a single monotonic timer (e.g., the RTC or a dedicated hardware timer). Align data by timestamp, not by buffer-full events. (2) **Resample one stream** to match the other's actual rate. Use linear interpolation to resample the 15.873 kHz audio to exactly 16× the accelerometer's actual rate. (3) **Use a PLL-based I2S clock** (available on nRF5340) to generate an exact 512 kHz bit clock, eliminating the divider rounding error. (4) **Periodic resynchronization** — every N cycles, discard partial buffers and restart both DMA channels simultaneously.
 
-**📖 Deep Dive:** [Volume I: Data Engineering](https://mlsysbook.ai/vol1/data_engineering.html)
+**📖 Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
 </details>
 
 ---
@@ -439,7 +439,7 @@ flowchart LR
 **The Question:** The team deploys 100 monitors and detects far fewer bird calls than expected — only ~8% of what a continuously-recording reference microphone captures. The team says "the model accuracy is too low." Is it?
 
 <details>
-<summary><b>🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> 🚨 Reveal the Bottleneck</b></summary>
 
 ### The Duty Cycle Misses 92% of Events
 
@@ -460,5 +460,161 @@ This is a fundamental design flaw: **uniform duty cycling is wrong for event-dri
 
 The event-driven approach uses **7-10× less power** than fixed duty cycling AND detects **12× more events**.
 
-**📖 Deep Dive:** [Volume I: TinyML](https://mlsysbook.ai/vol1/tinyml.html)
+**📖 Deep Dive:** [Volume I: TinyML](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
+</details>
+
+
+### 🧠 Model Architecture -> System Cost
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The Memory-Mapped Weight Corruption</b> · <code>flash-memory</code></summary>
+
+- **Interviewer:** "You deploy a keyword spotting model on an ESP32 microcontroller. The model weights are marked as `const` in C so they are compiled directly into the read-only Flash memory. During a rigorous stress test, a junior engineer accidentally writes a bug in the audio ring-buffer code that causes a buffer overflow. Surprisingly, the bug doesn't cause a HardFault; instead, the neural network permanently forgets how to recognize the wake word until the device is fully rebooted. Why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Assuming that because a variable is marked `const` in C, the underlying physical memory is fundamentally un-writable by the CPU."
+
+  **Realistic Solution:** Your microcontroller likely uses a unified memory map where Flash memory and SRAM share the same address space. While Flash is technically 'read-only' for standard operations, many MCUs have memory-mapped control registers that, if accidentally hit by an out-of-bounds pointer write, can initiate a Flash erase/write cycle, or alter the cache/MMU (Memory Management Unit) mapping. The buffer overflow from the audio code silently marched a rogue pointer straight into the memory-mapped region of the weights, corrupting the physical data the NPU was reading.
+
+  > **Napkin Math:** If your audio buffer is `int16_t audio[1000]` starting at `0x20000000`, and your weights are mapped at `0x20010000`. A rogue loop like `for(int i=0; i<100000; i++) audio[i] = 0;` will write 0s continuously upward in memory. Once it reaches `0x20010000`, it begins overwriting the physical addresses where the NPU expects to find its weights. The math becomes garbage.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+---
+
+## 🛑 Challenge 8: The Interrupt Jitter Blockade · `real-time`
+
+**The Scenario:** Your TinyML system runs a heartbeat anomaly detector on a Cortex-M4. The inference takes 40ms, and it must run every 50ms. You add an I2C environmental sensor to the board, read by a timer interrupt every 10ms. Now, the anomaly detector randomly drops frames and misses heartbeats.
+
+```mermaid
+flowchart TD
+    Timer((10ms Timer)) --> ISR[I2C Read ISR<br>Takes 5ms to complete]
+
+    subgraph "Main RTOS Thread"
+        Model[Anomaly Inference<br>Takes 40ms]
+    end
+
+    ISR -->|Preempts| Model
+
+    classDef error fill:#ffe0e0,stroke:#d32f2f,stroke-width:2px;
+    class ISR error;
+```
+
+**The Question:** What is fundamentally wrong with how the I2C sensor is integrated, and how does it mathematically destroy your ML pipeline?
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+
+### The Blocking ISR Tax
+
+**Common Mistake:** "The processor isn't fast enough, increase the clock speed."
+
+The design flaw is executing a slow, blocking I2C read inside an **Interrupt Service Routine (ISR)**.
+I2C is a slow protocol (e.g., 100 kHz or 400 kHz). Reading a few registers can easily take 5ms.
+When an interrupt fires, it completely halts the main RTOS thread (where your ML model lives).
+
+In a 50ms window, the 10ms timer fires 5 times.
+5 interrupts × 5ms per ISR = **25ms of stolen CPU time**.
+Your ML model needs 40ms, but it only has 25ms of free time left in the window (50 - 25 = 25ms). The inference cannot complete before the next deadline, leading to dropped frames.
+
+**The Fix:** Never block inside an ISR. The ISR should simply set a flag or trigger a DMA transfer.
+1. Use **I2C with DMA** so the hardware fetches the sensor data in the background without CPU intervention.
+2. If DMA isn't possible, the ISR should immediately defer the I2C read to a low-priority background thread, allowing the high-priority ML inference to complete uninterrupted.
+
+**📖 Deep Dive:** [Volume I: Benchmarking](https://harvard-edge.github.io/cs249r_book_dev/contents/benchmarking/benchmarking.html)
+</details>
+
+---
+
+## 🛑 Challenge 9: The XIP SPI Flash Wall · `memory-hierarchy`
+
+**The Scenario:** You deploy a 1 MB keyword spotting model on an ESP32. The MCU only has 512 KB of internal SRAM, so you store the weights in an external SPI Flash chip and use Execute-In-Place (XIP) to read them directly during inference. Inference takes 850ms, missing your 200ms deadline.
+
+```mermaid
+flowchart LR
+    subgraph "ESP32 (240 MHz)"
+        CPU[CPU Core]
+        SRAM[Internal SRAM<br>Activations]
+    end
+
+    Flash[(External SPI Flash<br>1 MB Weights)]
+
+    CPU -->|XIP Read Weight| Flash
+    CPU -->|Read/Write Act| SRAM
+
+    classDef error fill:#ffe0e0,stroke:#d32f2f,stroke-width:2px;
+    class Flash error;
+```
+
+**The Question:** The CPU is running at a fast 240 MHz. Why is reading weights directly from flash destroying your latency, and how do you fix it?
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+
+### The SPI Bus Latency Choke
+
+**Common Mistake:** "The model is too big for the CPU." The CPU can handle the math easily; it's starving for data.
+
+The bottleneck is the **SPI bus physics**. Execute-In-Place (XIP) allows the CPU to treat external flash like normal memory, but it masks the severe hardware latency.
+While the CPU runs at 240 MHz (one cycle is ~4 ns), a standard SPI flash chip might operate at 40 MHz over a serial bus. Fetching a single 8-bit weight over SPI takes dozens or hundreds of CPU cycles.
+
+During a Convolution layer, the CPU tries to fetch millions of weights. Because they are located across the slow SPI bus, the CPU spends 95% of its time stalled, waiting for the flash chip to return data.
+
+**The Fix:**
+1. **Quad-SPI (QSPI) / Octal-SPI:** Upgrade the physical bus to move 4 or 8 bits per clock cycle instead of 1.
+2. **Flash Cache:** Ensure the MCU's instruction/data cache for the XIP region is enabled and properly sized so loops reusing weights don't hit the physical flash.
+3. **Model Pruning:** Prune the model to < 400 KB so the weights can be copied from Flash into the ultra-fast internal SRAM at boot time, avoiding the SPI bus entirely during inference.
+
+**📖 Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+</details>
+
+---
+
+## 🛑 Challenge 10: The Arena Fragmentation Trap · `memory`
+
+**The Scenario:** You allocate a static 100 KB Tensor Arena in SRAM for TFLite Micro. Your model's peak memory requirement (the largest combination of input, output, and scratch buffers for any single layer) is 85 KB. Yet, when `AllocateTensors()` runs, the system hard-faults with an OOM (Out of Memory) error.
+
+```mermaid
+flowchart TD
+    subgraph "100 KB Tensor Arena"
+        L1[Layer 1 In: 20KB]
+        L1_Out[Layer 1 Out: 40KB]
+        Hole[Free Space: 10KB]
+        L2_Scratch[Layer 2 Scratch: 15KB]
+        Hole2[Free Space: 15KB]
+    end
+
+    Req[Request: 30KB Contiguous] -->|Fails| 100KB
+
+    classDef error fill:#ffe0e0,stroke:#d32f2f,stroke-width:2px;
+    class Req error;
+```
+
+**The Question:** The model needs 85 KB, and you gave it 100 KB. Look at the memory map. Why did it crash?
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+
+### Memory Fragmentation
+
+**Common Mistake:** "TFLite Micro has a memory leak." TFLite Micro's allocator is static and runs once at initialization, so it cannot leak at runtime.
+
+The bottleneck is **Memory Fragmentation**. TFLite Micro uses a greedy memory planner to map tensor lifetimes to specific addresses in the Arena.
+Even though your total *peak* usage is 85 KB, those tensors are allocated and freed in different patterns based on the graph topology (e.g., skip connections in a ResNet keep older tensors alive while new ones are allocated).
+
+This leaves "holes" in the memory. If the next layer requires a 30 KB contiguous block for its output, but the free space is fragmented into two 15 KB holes, the allocation fails—even though there is technically enough total free bytes.
+
+**The Fix:**
+1. **Increase the Arena Size:** Add a 10-20% safety margin above the theoretical peak to accommodate fragmentation.
+2. **In-Place Operations:** Use a framework compiler (like TVM or heavily optimized TFLite) that rewrites the graph to use in-place operations (e.g., Activation functions overwriting their input buffers) to minimize allocation churn.
+3. **Graph Reordering:** Change the topology of the network to avoid long-lived skip connections that pin memory blocks and worsen fragmentation.
+
+**📖 Deep Dive:** [Volume I: ML Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
 </details>

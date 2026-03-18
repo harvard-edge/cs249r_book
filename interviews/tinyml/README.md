@@ -117,29 +117,29 @@ These are the areas where TinyML-specific interview questions would be most valu
   </thead>
   <tbody>
     <tr>
-      <td><b><a href="01_TinyML_Systems.md">1. TinyML Systems — Inference at the Edge of Physics</a></b></td>
+      <td><b><a href="01_micro_architectures.md">1. TinyML Systems — Inference at the Edge of Physics</a></b></td>
       <td>Memory layout, quantization, integer inference, power, CMSIS-NN, sensor pipelines</td>
-      <td>9</td>
+      <td>27</td>
     </tr>
     <tr>
-      <td><b><a href="02_TinyML_Constraints.md">2. Constraints & Trade-offs</a></b></td>
+      <td><b><a href="02_compute_and_memory.md">2. Constraints & Trade-offs</a></b></td>
       <td>Compute analysis, memory systems, numerical representation, architecture costs, latency, power</td>
-      <td>18</td>
+      <td>62</td>
     </tr>
     <tr>
-      <td><b><a href="03_TinyML_Ops_and_Deployment.md">3. Operations & Deployment</a></b></td>
+      <td><b><a href="03_data_and_deployment.md">3. Operations & Deployment</a></b></td>
       <td>FOTA updates, SRAM overflow, bootloader design, watchdog timers, security, fleet management, power profiling</td>
+      <td>25</td>
+    </tr>
+    <tr>
+      <td><b><a href="04_visual_debugging.md">4. Visual Architecture Debugging</a></b></td>
+      <td>Mermaid diagram challenges: spot the flaw in TinyML system designs</td>
       <td>11</td>
     </tr>
     <tr>
-      <td><b><a href="04_TinyML_Visual_Debugging.md">4. Visual Architecture Debugging</a></b></td>
-      <td>Mermaid diagram challenges: spot the flaw in TinyML system designs</td>
-      <td>7</td>
-    </tr>
-    <tr>
-      <td><b><a href="05_TinyML_Advanced.md">5. Advanced TinyML Systems</a></b></td>
+      <td><b><a href="05_advanced_systems.md">5. Advanced TinyML Systems</a></b></td>
       <td>NAS for MCUs, energy harvesting, multi-sensor fusion, compiler design, federated learning, always-on detection</td>
-      <td>9</td>
+      <td>46</td>
     </tr>
   </tbody>
 </table>
