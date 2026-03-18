@@ -1,4 +1,6 @@
 import pytest
+
+ortools = pytest.importorskip("ortools", reason="ortools not installed (optional dependency)")
 from mlsysim.core.optimization.ortools_backend import ORToolsDiscreteBackend
 from ortools.sat.python import cp_model
 

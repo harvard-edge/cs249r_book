@@ -1,4 +1,6 @@
 import pytest
+
+pytest.importorskip("scipy", reason="scipy not installed (optional dependency)")
 from mlsysim.core.optimization.scipy_backend import ScipyBackend
 
 def test_scipy_continuous_optimization():
