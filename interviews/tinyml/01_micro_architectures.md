@@ -743,3 +743,59 @@ The domain of the TinyML Systems Engineer. This round tests your understanding o
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Context Switch Cost</b> · <code>real-time</code> <code>architecture</code></summary>
+
+- **Interviewer:** "You are running inference on a Cortex-M4 using an RTOS. Your model takes 20ms to run. To prevent starring other tasks, you split the inference into 20 chunks of 1ms, calling `taskYIELD()` between each chunk. Now, your inference takes 35ms total. What RTOS mechanism is costing you 15ms?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The OS is just slow at executing the yield function." It's not the function call; it's the physical movement of data required to change tasks.
+
+  **Realistic Solution:** You are experiencing the hidden cost of **Context Switching**.
+
+  Every time you call `taskYIELD()`, the RTOS must halt your ML thread. To do this safely, it must take all the values currently sitting in the CPU's registers (R0-R15, Program Counter, Status Registers) and push them onto the thread's Stack in SRAM. Then, it loads the registers of the next task from its stack, and resumes execution.
+
+  When that task yields back to your ML model, the RTOS does the reverse: saving the other task's state and restoring your ML task's 16+ registers from SRAM back into the CPU core.
+
+  On a Cortex-M4, a full RTOS context switch can take hundreds of clock cycles. Doing this 20 times (or 40, counting the return trips) introduces massive overhead.
+
+  **The Fix:** You must balance responsiveness with throughput. Yielding every 1ms is too aggressive. Yielding every 5ms or 10ms (at natural layer boundaries in the neural network) drastically reduces context switching overhead while still keeping the system responsive.
+
+  > **Napkin Math:** If a context switch takes 10 microseconds, and you yield to 5 other tasks 20 times, you perform 100 context switches. That's 1ms of pure OS overhead. If those tasks also do work or trigger other interrupts, cache/pipeline disruption inflates this further, easily reaching the 15ms penalty observed.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Double-Precision FPU Trap</b> · <code>compute</code> <code>precision</code></summary>
+
+- **Interviewer:** "You are porting a Python model to C for a Cortex-M7. In Python, you have the line `y = x * 0.5`. In your C code, you write exactly that: `float y = x * 0.5;`. Your profiling shows this one line is incredibly slow. The M7 has a hardware FPU. Why is this math operation stalling the pipeline?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Floating point math is just naturally slow on microcontrollers." While true historically, an M7 with an FPU should execute this in one cycle. The problem is a specific C language default.
+
+  **Realistic Solution:** You fell into the **Double-Precision Promotion Trap**.
+
+  In the C language, the literal `0.5` is treated as a `double` (64-bit float) by default, not a `float` (32-bit).
+  If your Cortex-M7 only has a single-precision FPU (FPv5-SP), it physically cannot execute 64-bit math in hardware.
+
+  When the compiler sees `x * 0.5`, it implicitly promotes `x` to a `double`, and then calls a software library function (like `__aeabi_dmul`) to perform the 64-bit multiplication using integer registers. This software emulation takes dozens or hundreds of cycles.
+
+  **The Fix:** You must append an `f` to floating-point literals in C/C++ to force single-precision: `float y = x * 0.5f;`. This allows the compiler to map the operation directly to a single-cycle hardware `VMUL.F32` instruction.
+
+  > **Napkin Math:** Software double-precision multiply: ~50-100 cycles. Hardware single-precision multiply: 1 cycle. Missing one `f` in your source code made that specific operation 100x slower.
+
+  📖 **Deep Dive:** [Volume I: Neural Computation](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
+
+  </details>
+
+</details>

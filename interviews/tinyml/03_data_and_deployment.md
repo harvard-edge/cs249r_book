@@ -895,3 +895,61 @@ Deploying a model to a single MCU is an engineering exercise. Deploying it to 10
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Flash Wear-Leveling Blindspot</b> · <code>storage</code> <code>mlops</code></summary>
+
+- **Interviewer:** "Your edge sensors log anomaly data to internal Flash. To prevent wearing out the Flash (which has a 10,000 cycle limit), you write a script to always save logs starting at memory address 0x08000000, and sequentially move forward to 0x08040000 before looping back. After a year, the system crashes because the flash sector at 0x08000000 is physically destroyed. Why didn't your sequential logging work as wear-leveling?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "You didn't make the loop big enough." The size of the loop isn't the primary failure mode; it's how Flash physics requires data to be updated.
+
+  **Realistic Solution:** You ignored **Flash Page Erase Granularity**.
+
+  You can write (program) bits in Flash from 1 to 0 sequentially. But you cannot flip a 0 back to a 1 without **erasing an entire sector/page** at once.
+  If your microcontroller's flash sector size is 16 KB, and you write 100 bytes of logs sequentially into that sector, you eventually fill the 16 KB. To write the 16,001st byte, you must erase the *entire* 16 KB sector.
+
+  Your script looped through the memory, but every time it looped back to 0x08000000, it had to issue an Erase command on Sector 0. If you log frequently, Sector 0 absorbs massive amounts of Erase cycles (which is what physically destroys the silicon) while the rest of the memory space might remain lightly used.
+
+  **The Fix:** Never write raw Flash management code yourself. Use a proper **Flash Translation Layer (FTL)** or an embedded filesystem designed for flash (like LittleFS or SPIFFS). These libraries abstract the physical addresses and automatically map logical writes to different physical sectors to ensure perfect, even wear-leveling across the entire chip.
+
+  > **Napkin Math:** If you log 64 bytes a minute, a 16 KB sector fills in 256 minutes (~4.2 hours). You are erasing that sector 5.6 times a day. 5.6 erases * 365 days = 2,044 erase cycles per year. The flash will die in roughly 4.8 years.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The OTA Bandwidth Congestion</b> · <code>networking</code> <code>deployment</code></summary>
+
+- **Interviewer:** "You have a fleet of 5,000 smart factory sensors connected via a shared LoRaWAN gateway. You push a 100 KB model update to the fleet simultaneously. The OTA update process stalls, taking days to complete, and normal sensor telemetry stops functioning entirely. What network characteristic of LoRaWAN did you violate?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "100 KB is too large for the gateway." While true, it's not just the size; it's the collision domain and the protocol duty cycle.
+
+  **Realistic Solution:** You violated the **Duty Cycle Limits and the ALOHA MAC protocol**.
+
+  LoRaWAN operates in unlicensed sub-GHz bands (like 868 MHz or 915 MHz). By law in many regions, a device can only transmit for 1% of the time (the duty cycle limit).
+
+  Furthermore, LoRa uses a modified ALOHA protocol. Devices just "shout" their data into the air. If 5,000 devices are all trying to send acknowledgment packets (ACKs) for the OTA chunks they are receiving at the exact same time, the radio waves collide in the air. The gateway receives garbage. The devices wait, timeout, and retry... causing even more collisions. This is a **Broadcast Storm**.
+
+  Your OTA update effectively DDOS'd your own factory network.
+
+  **The Fix:**
+  1. Use **Multicast OTA (FUOTA - Firmware Update Over The Air)**. The gateway broadcasts the firmware chunks once, and all 5,000 devices listen simultaneously without sending individual ACKs for every packet. They only request missing packets at the very end.
+  2. If Multicast isn't available, you must strictly stagger the updates (e.g., updating only 10 devices an hour) to prevent airwave congestion.
+
+  > **Napkin Math:** In LoRa SF12, a 51-byte payload takes ~2.5 seconds of airtime. A 1% duty cycle means the device must remain completely silent for the next 247 seconds before it can send an ACK. Sending 100 KB point-to-point to 5,000 devices is mathematically impossible under these physics.
+
+  📖 **Deep Dive:** [Volume I: Optimizing AI](https://harvard-edge.github.io/cs249r_book_dev/contents/optimizing_ai/optimizing_ai.html)
+
+  </details>
+
+</details>
