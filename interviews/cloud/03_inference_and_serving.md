@@ -1357,3 +1357,165 @@ The domain of the MLOps and Deployment Engineer. This round tests your ability t
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Speculative Decoding Accept Rate Crash</b> · <code>serving</code> <code>algorithms</code></summary>
+
+- **Interviewer:** "You implement Speculative Decoding to speed up an LLM. You use a 1B draft model to guess 5 tokens, and a 70B target model to verify them in a single pass. On standard English text, it yields a 2.5x speedup. When you deploy it to your coding assistant API, the overall throughput actually *drops* by 15% compared to not using Speculative Decoding at all. Why did the optimization become a penalty?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Code is harder to generate." It is, but that alone doesn't explain why a speedup technique becomes an active *penalty*.
+
+  **Realistic Solution:** You suffered a **Catastrophic Draft Acceptance Rate Drop**.
+
+  Speculative Decoding works by gambling: the draft model is fast, and the target model verifies its guesses in parallel. If the target model agrees with the draft model, you get 5 tokens for the price of 1.
+
+  However, the target model's verification pass requires reading the KV-cache and processing all 5 draft tokens. If the draft model guesses *wrong* on the very first token, the target model rejects the entire draft sequence. You spent compute running the draft model, and you spent compute running the target model to verify a 5-token sequence, but you only got 1 valid token out of it.
+
+  Your 1B draft model was trained on general English, so it guessed English well. But on complex, highly structured programming languages (Python, C++), the 1B model was completely lost. Its guess-acceptance rate dropped from 70% to near 0%.
+
+  Because you constantly paid the overhead of running the draft model and evaluating longer target sequences without getting any parallel tokens accepted, the net throughput was worse than just running the 70B model autoregressively.
+
+  **The Fix:** Speculative Decoding is entirely reliant on the Draft/Target alignment. You must either fine-tune the 1B draft model specifically on your domain (code), use a smaller draft model to reduce overhead, or dynamically disable Speculative Decoding if the rolling acceptance rate drops below the break-even mathematical threshold.
+
+  > **Napkin Math:** Break-even Acceptance Rate. If draft takes 5ms, and target takes 20ms per pass.
+  > Standard (1 token): 20ms.
+  > Speculative (5 tokens, 0% accept): 5ms (draft) + 20ms (eval) = 25ms to get 1 token. (25% slower).
+  > Speculative (5 tokens, 100% accept): 5ms + 20ms = 25ms to get 5 tokens = 5ms per token. (400% faster).
+
+  📖 **Deep Dive:** [Volume I: Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The GQA/MQA Memory Bottleneck</b> · <code>architecture</code> <code>serving</code></summary>
+
+- **Interviewer:** "You are deploying Llama-3-70B. It uses Grouped Query Attention (GQA), which massively reduces the size of the KV-cache compared to standard Multi-Head Attention (MHA). Because the KV-cache is 8x smaller, your manager assumes the Time-Per-Output-Token (TPOT) during the decoding phase will be 8x faster. However, the TPOT only improves by about 10%. Why didn't an 8x reduction in KV-cache size yield an 8x reduction in latency?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "GQA requires complex routing logic that slows it down." The routing is trivial. The issue is the proportion of memory traffic.
+
+  **Realistic Solution:** The manager forgot about the **Model Weights memory traffic**.
+
+  During autoregressive decoding (batch size 1), the GPU must read *both* the KV-cache and the entire Model Weights from HBM to SRAM to generate a single token.
+
+  For Llama-3-70B (FP16):
+  - Model Weights = 140 GB.
+  - Standard MHA KV-Cache (1 sequence) = ~2 GB.
+  - GQA KV-Cache (1 sequence) = ~0.25 GB.
+
+  Total memory read per token (MHA) = 140 GB + 2 GB = 142 GB.
+  Total memory read per token (GQA) = 140 GB + 0.25 GB = 140.25 GB.
+
+  You only reduced the total memory bandwidth requirement per token from 142 GB down to 140.25 GB. The 140 GB of model weights still completely dominates the memory bus. Therefore, single-batch latency barely improves at all.
+
+  **The Fix:** GQA does not significantly speed up single-user latency. GQA's superpower is **Concurrency Scaling**. Because the KV-cache is 8x smaller, you can fit 8x as many *concurrent users* onto the same GPU before OOMing, which massively increases total system throughput (tokens/second) at high batch sizes.
+
+  > **Napkin Math:** Latency depends on total bytes moved. 142 GB vs 140.25 GB is only a ~1.2% difference in physical memory traffic. The true speedup from GQA only appears when serving hundreds of users, where the KV-cache size finally approaches the weight size.
+
+  📖 **Deep Dive:** [Volume I: Network Architectures](https://harvard-edge.github.io/cs249r_book_dev/contents/network_architectures/network_architectures.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The CPU-Bound Generation Loop</b> · <code>serving</code> <code>cpu</code></summary>
+
+- **Interviewer:** "Your PyTorch LLM inference script runs `model.generate()`. The GPU is extremely powerful (H100), but your Time-Per-Output-Token is hovering around 10ms. You want it to be 2ms. You look at `nvtop` and see the GPU utilization is only 15%. The GPU isn't doing much work. What part of the Python `generate` loop is physically preventing the GPU from running faster?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The memory bandwidth is saturated." If memory bandwidth was the only issue, GPU utilization (specifically memory controller utilization) would be high. 15% means the GPU is sleeping.
+
+  **Realistic Solution:** You are suffering from **Python CPU Launch Overhead**.
+
+  Autoregressive generation generates one token at a time. In a naive PyTorch loop, the process looks like this:
+  1. Python CPU tells GPU to run a layer.
+  2. GPU runs the layer (takes 0.1ms).
+  3. GPU sends result to CPU.
+  4. Python executes `argmax` or sampling logic on the CPU.
+  5. Python constructs the next input tensor.
+  6. Python sends the new token back to the GPU.
+
+  The Python interpreter's overhead to dispatch the CUDA kernels and do the sampling logic takes longer than the GPU takes to execute the 70 billion parameters. The GPU finishes its math instantly and then sits completely idle waiting for Python to tell it what to do next.
+
+  **The Fix:**
+  1. Use **CUDA Graphs** to capture the entire forward pass sequence so the CPU only issues one command to the GPU, bypassing the Python overhead.
+  2. Use a C++/Rust serving framework (like vLLM, TGI, or TensorRT-LLM) that compiles the generation loop into native code, entirely removing the Python interpreter from the critical path.
+
+  > **Napkin Math:** H100 kernel execution = ~100 microseconds. Python interpreter overhead to launch a kernel = ~20-50 microseconds. If the model has 80 layers, Python overhead alone adds 4ms per token of pure idle time where the GPU is waiting for instructions.
+
+  📖 **Deep Dive:** [Volume I: Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
+</details>
+
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The KV-Cache Swap Thrashing</b> · <code>memory</code> <code>serving</code></summary>
+
+- **Interviewer:** "To handle a massive spike in traffic, you configure vLLM to allow swapping inactive KV-cache blocks to the host CPU RAM via PCIe. This prevents OOM errors. However, you notice that while throughput remains okay, the latency (Time-Per-Output-Token) for individual users randomly spikes from 50ms to 900ms. Why does CPU swapping cause catastrophic latency spikes for active users?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "CPU RAM is slower than GPU RAM." The speed of the RAM isn't the primary bottleneck; the physical transport pipe between them is.
+
+  **Realistic Solution:** You are experiencing **PCIe Bus Thrashing**.
+
+  When a request that was swapped out to CPU RAM becomes active again, the GPU cannot compute attention over it. The *entire* KV-cache block must be physically transferred back from the CPU to the GPU over the PCIe bus before the forward pass can execute.
+
+  If a user has a 4,000 token context window, their KV-cache might be 1 GB.
+  A PCIe Gen4 x16 bus has a real-world bandwidth of roughly 25 GB/s.
+  It takes 40ms just to copy that single user's cache back to the GPU.
+  If the scheduler decides to swap in 10 users simultaneously for the next batch, the PCIe bus is locked for 400ms. The GPU tensor cores sit completely idle during this time, causing the massive 900ms latency spikes for anyone waiting for a token.
+
+  **The Fix:** CPU swapping is a trap for real-time latency-sensitive applications. It should only be used for offline, asynchronous batch processing. For real-time serving, you must strictly cap `max_num_seqs` to fit within physical HBM, or use context summarization.
+
+  > **Napkin Math:** 10 GB of swapped KV-cache needed for the next batch. PCIe Gen4 limit = 25 GB/s. `10 / 25 = 0.4 seconds` of pure memory movement before a single FLOP of neural network math can occur.
+
+  📖 **Deep Dive:** [Volume I: Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Continuous Batching Starvation</b> · <code>serving</code> <code>scheduling</code></summary>
+
+- **Interviewer:** "You implement Continuous Batching (iteration-level scheduling) for your LLM server. It successfully groups users together to maximize GPU utilization. However, you notice that users asking for very short, 10-token answers are experiencing incredibly long wait times, even though their requests require very little compute. How did your batching algorithm starve the easy requests?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The GPU prioritizes larger matrix math." The GPU doesn't prioritize anything; the software scheduler does.
+
+  **Realistic Solution:** You caused **Head-of-Line Blocking via First-Come-First-Served (FCFS) Scheduling**.
+
+  If a user asks for a 2,000-token story, their request enters the batch. The batch size is capped by the GPU's KV-cache capacity (e.g., max 32 concurrent sequences).
+  Because generating 2,000 tokens takes a long time, that user occupies 1 of the 32 slots for several seconds.
+
+  If 32 users ask for long stories, the batch becomes completely full. When User 33 arrives and asks a simple question requiring a 10-token response, the Continuous Batching scheduler cannot let them in because there is no KV-cache memory available.
+  User 33 must wait entirely for one of the long stories to finish generating all 2,000 tokens before a slot frees up.
+
+  **The Fix:** You must implement **Preemption and Fair-Share Scheduling**. The scheduler should detect long-running requests, temporarily evict/preempt them (saving their KV-cache to CPU RAM or recomputing it later), inject the short requests into the batch to clear them out quickly, and then resume the long requests.
+
+  > **Napkin Math:** 32 users request 2,000 tokens at 20ms/token = 40 seconds to finish. User 33 requests 10 tokens (0.2 seconds of work). User 33 waits 40 seconds to get 0.2 seconds of compute. This ruins P99 latency metrics.
+
+  📖 **Deep Dive:** [Volume I: Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
+  </details>
+</details>

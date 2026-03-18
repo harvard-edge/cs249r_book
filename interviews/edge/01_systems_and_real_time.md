@@ -1398,3 +1398,147 @@ The domain of the Edge ML Systems Engineer. This round tests your understanding 
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Swap File Latency Cliff</b> · <code>memory</code> <code>os</code></summary>
+
+- **Interviewer:** "You deploy a 4GB model to a Jetson Nano that has exactly 4GB of physical RAM. You enable a 4GB Linux Swap File on the SD card to prevent OOM crashes. The model loads successfully. However, when the inference runs, the latency is completely erratic—sometimes it takes 50ms, sometimes it takes 4,000ms. The CPU and GPU are barely being utilized during the 4,000ms spikes. Why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The SD card is slow to load the model." The model is already loaded. The problem is what the OS does *during* inference.
+
+  **Realistic Solution:** You are suffering from massive **Swap Thrashing**.
+
+  Because the OS, the networking stack, and your application require RAM, the 4GB model physically cannot fit entirely in the 4GB of physical HBM. The Linux kernel forcefully evicts (swaps out) chunks of the neural network's weights to the extremely slow SD card to make room.
+
+  When the GPU executes Layer 10, and discovers the weights for Layer 10 are currently on the SD card, a "Page Fault" occurs. The entire inference pipeline halts. The OS must read the weights from the SD card (at maybe 20 MB/s), but to make room in RAM, it must simultaneously write the weights from Layer 9 back to the SD card.
+
+  You have turned a high-speed GPU memory bus into a grindingly slow SD card read/write loop. The GPU sits idle for 4 seconds while the OS frantically moves memory pages back and forth.
+
+  **The Fix:** Never use Swap for ML inference buffers or weights on edge devices. You must strictly fit your model within the physical RAM boundaries (e.g., using INT8 quantization to shrink the 4GB model to 1GB) or completely disable swap (`swapoff -a`) to force an OOM rather than suffering silent 4-second latency cliffs.
+
+  > **Napkin Math:** GPU Memory Bandwidth = 25 GB/s. SD Card Bandwidth = 0.025 GB/s. Swapping reduces your memory throughput by a factor of 1,000x. If a layer takes 4ms to read from RAM, it takes 4,000ms to read from an SD card.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Python GIL Multithreading Trap</b> · <code>concurrency</code> <code>pipeline</code></summary>
+
+- **Interviewer:** "You run an object detection model on a Raspberry Pi. The camera capture takes 30ms. The ML model takes 40ms. In a sequential Python script, total time is 70ms (~14 FPS). To speed this up, you put the camera capture and the ML model into two separate Python `threading.Thread` objects. You expect them to run in parallel on the Pi's 4-core CPU, achieving 40ms total time (25 FPS). But the framerate remains exactly 14 FPS. Why did multithreading fail?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The Raspberry Pi CPU is too weak to handle threads." The hardware has 4 cores; the limitation is entirely in the software interpreter.
+
+  **Realistic Solution:** You hit the **Python Global Interpreter Lock (GIL)**.
+
+  The standard CPython interpreter has a mutex lock called the GIL. This lock ensures that only **one single thread** can execute Python bytecodes at any given millisecond, regardless of how many physical CPU cores you have.
+
+  When your ML Thread is doing setup or your Camera Thread is processing the NumPy array, they are fighting over the exact same CPU core lock. While the Camera Thread holds the GIL, the ML Thread is physically blocked from executing Python code. They are forced to run sequentially, just like before, entirely wasting the other 3 CPU cores.
+
+  **The Fix:** In Python, `threading` is only useful for I/O bound tasks (like waiting for a network request). For CPU-bound parallel processing, you must use the `multiprocessing` module, which spawns completely separate OS processes, each with their own Python interpreter and their own GIL, allowing them to truly utilize multiple physical cores.
+
+  > **Napkin Math:** Camera (30ms) + ML (40ms). Sequential = 70ms. Threading (with GIL context switching overhead) = 71ms. Multiprocessing (true parallelism) = bottlenecked by the slowest task = 40ms (25 FPS).
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Shared Bus Arbitration Lock</b> · <code>architecture</code> <code>hardware</code></summary>
+
+- **Interviewer:** "Your edge gateway runs a 4K camera feed into an NPU. You also have an external Gigabit Ethernet controller on the same physical PCIe bus. The NPU requires 3 GB/s of memory bandwidth to run the model at 30 FPS. The Ethernet controller uses 100 MB/s. The PCIe bus supports 4 GB/s. Theoretically, there is plenty of bandwidth. But when Ethernet traffic spikes, the NPU frame rate drops to 15 FPS. Why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The CPU is getting overwhelmed by network interrupts." CPU interrupts affect software, but NPU frame drops point to a hardware data starvation issue.
+
+  **Realistic Solution:** You are experiencing **PCIe Bus Arbitration Starvation**.
+
+  While the *average* bandwidth is sufficient, the PCIe bus is a shared physical medium. Only one device can transmit at a given microsecond. This requires an Arbiter to grant access.
+
+  If the Ethernet controller is configured with a high hardware arbitration priority (or uses massive burst transfers), it can monopolize the bus for several microseconds at a time. The NPU, which relies on a constant, smooth stream of weights and activations, is forced to wait.
+
+  Because the NPU's internal SRAM buffers are small, if it waits even a few microseconds for the PCIe bus to unlock, its internal compute units (MACs) run out of data and stall. These micro-stalls accumulate massively over a 33ms frame, dropping the overall throughput by 50% even though the *average* bus utilization is only 75%.
+
+  **The Fix:** You must configure the SoC's hardware Bus Arbiter (often via device tree or BIOS) to enforce Quality of Service (QoS) or guaranteed time-slots for the NPU DMA channels, preventing the Ethernet controller from executing overly long burst transfers that starve the ML hardware.
+
+  > **Napkin Math:** NPU needs data every 10µs. Ethernet bursts 100KB packets, holding the bus for 25µs. The NPU misses 2 data deadlines per burst, causing the MAC arrays to sit idle for 15µs. Over 1 second, the NPU sits physically idle for hundreds of milliseconds purely due to hardware traffic jams.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The USB Power Suspension</b> · <code>os</code> <code>hardware</code></summary>
+
+- **Interviewer:** "You deploy a Coral Edge TPU USB Accelerator to a Linux edge server to speed up inference. When the application starts, inference takes 2ms per frame. If the application stops and you restart it an hour later, the first inference takes 3 seconds, and then it goes back to 2ms. What OS power management feature is causing this massive cold-start penalty on the USB bus?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The model has to be reloaded into RAM." Loading a 10MB model into RAM takes milliseconds, not 3 seconds. The issue is the physical hardware bus.
+
+  **Realistic Solution:** You hit **USB Auto-Suspend (Selective Suspend)**.
+
+  By default, modern Linux kernels aggressively save power. If a USB device (like the Coral TPU) sits idle for a few seconds (e.g., when your application stops), the kernel's USB subsystem puts that specific USB port into a deep sleep state (D3/Auto-Suspend) and physically cuts power to the device to save energy.
+
+  When you restart the application an hour later, the OS must physically wake up the USB port, re-enumerate the device on the bus, reload the Edge TPU firmware, and initialize the PCIe-over-USB bridge inside the dongle. This entire hardware wake-up and firmware initialization sequence takes roughly 2 to 3 seconds before the first tensor can be sent.
+
+  **The Fix:** You must disable USB auto-suspend for the specific Vendor ID/Product ID of the ML accelerator using `udev` rules (e.g., `ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1a6e", ATTR{power/control}="on"`). This forces the OS to keep the port fully powered and enumerated 24/7.
+
+  > **Napkin Math:** Normal inference over USB 3.0 = 2ms. USB Port Wakeup + Enumeration + Firmware Load = ~3,000ms. The OS power-saving feature caused a 1,500x latency spike on the critical path of the application restart.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Preempt-RT Kernel Tick Overhead</b> · <code>os</code> <code>cpu</code></summary>
+
+- **Interviewer:** "You compile a custom Linux kernel with the PREEMPT_RT patch to guarantee hard real-time latency for your edge robot's motor controller. You configure the kernel timer tick frequency (HZ) to 1000 Hz for maximum responsiveness. The motor controller works perfectly. However, the background ML perception model (which ran fine at 30 FPS on standard Linux) now struggles to hit 15 FPS. Why did a real-time kernel destroy your throughput?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The motor controller is using all the CPU." The motor controller is fast; the issue is the operating system itself.
+
+  **Realistic Solution:** You are suffering from massive **Context Switch and Timer Interrupt Overhead**.
+
+  By setting the kernel tick frequency to 1000 Hz (`CONFIG_HZ=1000`), you told the physical hardware timer to interrupt the CPU exactly 1,000 times every single second.
+
+  Every single millisecond, the CPU must physically halt your ML matrix multiplication, save the registers to the stack, jump into the Linux kernel, evaluate the scheduler to see if the motor controller needs to run, realize it doesn't, restore the registers, and resume the ML math.
+
+  This OS-level hardware interruption is incredibly expensive. While it guarantees that the motor controller will wake up within 1ms of its deadline (great latency), it completely shreds the instruction pipeline and cache locality of the CPU (terrible throughput).
+
+  **The Fix:** Real-time systems are a strict trade-off between latency and throughput. You must tune the system:
+  1. Lower the tick rate (e.g., 250 Hz) if 4ms latency is acceptable.
+  2. Use a Tickless Kernel (`CONFIG_NO_HZ_FULL`) where the CPU only schedules interrupts exactly when needed, rather than blindly firing 1,000 times a second.
+
+  > **Napkin Math:** 1000 timer interrupts per second. If an interrupt entry/exit and scheduler check takes 20 microseconds, the CPU spends 20,000 microseconds (20ms) every second entirely inside the kernel. You surrendered 2% of your total CPU throughput to pure OS bureaucratic overhead.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+  </details>
+</details>

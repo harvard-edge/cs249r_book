@@ -1381,3 +1381,385 @@ Deploying a model to a single MCU is an engineering exercise. Deploying it to 10
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Float-to-Double Silent Promotion</b> · <code>compiler</code> <code>performance</code></summary>
+
+- **Interviewer:** "You are porting an audio feature extraction script from Python to C on a Cortex-M4F (which has a single-precision hardware FPU). You write `float result = sample * 3.14159;`. Your profiler shows this single line taking 60 CPU cycles instead of the expected 1 cycle. What C language default feature is bypassing your hardware FPU?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The FPU is turned off in the compiler." While possible, the more common issue is the data type of the constant.
+
+  **Realistic Solution:** You triggered a **Silent Double-Precision Promotion**.
+
+  In the C and C++ languages, any floating-point literal written without a suffix (like `3.14159`) is strictly interpreted by the compiler as a 64-bit `double`, not a 32-bit `float`.
+
+  The Cortex-M4F only has a hardware FPU for 32-bit single-precision math.
+  When the compiler sees `sample * 3.14159`, it follows the C standard:
+  1. It promotes the 32-bit `sample` up to a 64-bit `double` (software operation).
+  2. It performs a 64-bit multiplication. Because there is no 64-bit FPU, it links in a massive software emulation library (e.g., `__aeabi_dmul`) that performs the math using dozens of integer registers.
+  3. It truncates the 64-bit result back down to a 32-bit `float`.
+
+  **The Fix:** You must append an `f` to all floating-point literals: `float result = sample * 3.14159f;`. This tells the compiler to keep everything in 32-bit space, allowing it to map the operation to a single-cycle hardware `VMUL.F32` instruction.
+
+  > **Napkin Math:** Software 64-bit multiply = ~60 cycles. Hardware 32-bit multiply = 1 cycle. Missing a single 'f' character made your math 60 times slower and bloated your flash memory with emulation libraries.
+
+  📖 **Deep Dive:** [Volume I: Neural Computation](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The SPI DMA Cache Coherency Failure</b> · <code>memory</code> <code>sensors</code></summary>
+
+- **Interviewer:** "You configure a DMA controller on a Cortex-M7 to stream SPI camera data directly into a RAM buffer. When the DMA finishes, an interrupt fires, and your CPU prints the first few pixels of the buffer to the console. The printed values are all zeros (the old data), but if you pause the debugger and look at the raw memory, the correct camera pixels are physically there. Why is the CPU printing stale data?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The DMA didn't finish." The interrupt fired, which means the DMA hardware signaled completion.
+
+  **Realistic Solution:** You encountered a **D-Cache Coherency Failure**.
+
+  The Cortex-M7 is a high-performance core with a dedicated Data Cache (D-Cache).
+  When the DMA controller writes data from the SPI peripheral into the SRAM, it bypasses the CPU entirely and writes directly to the physical memory chips.
+
+  However, if the CPU had previously accessed that RAM buffer (e.g., initializing it to zero), those zeros are currently sitting in the CPU's ultra-fast L1 D-Cache.
+  When you tell `printf` to read the buffer, the CPU checks its L1 Cache, sees a "cache hit" for those addresses, and instantly prints the stale zeros. The CPU has absolutely no idea that the DMA controller secretly changed the physical RAM behind its back.
+
+  **The Fix:** You must perform manual Cache Maintenance. Right before the CPU reads the DMA buffer, you must call a CMSIS function like `SCB_InvalidateDCache_by_Addr()`. This forces the CPU to throw away its stale L1 cache lines and physically re-fetch the fresh data from the SRAM.
+
+  > **Napkin Math:** A D-Cache hit takes 1 cycle. An SRAM read takes ~6 cycles. The cache is doing exactly what it's supposed to do (being fast), but in hardware architectures with parallel DMA bus masters, software must manually act as the referee to maintain data truth.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Sensor Bus Pull-Up Resistor</b> · <code>hardware</code> <code>sensors</code></summary>
+
+- **Interviewer:** "You build a custom TinyML PCB. You attach an I2C environmental sensor to the MCU. The ML model expects temperature data. However, the `i2c_read()` function constantly timeouts, and the ML model runs on garbage `0xFF` data. You check the schematic: the SDA and SCL lines are wired directly from the sensor to the MCU pins. What crucial analog component is missing, causing the digital bus to fail?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "You need a level shifter." Not if both chips are 3.3V. The issue is fundamental to I2C.
+
+  **Realistic Solution:** You forgot the **I2C Pull-Up Resistors**.
+
+  The I2C protocol uses "Open-Drain" physical logic. This means the MCU and the sensor can only pull the voltage on the wire *down* to 0V (Ground). They physically cannot drive the voltage *up* to 3.3V (High).
+
+  To transmit a logical '1', the chips simply let go of the wire. If there is no external Pull-Up Resistor (e.g., 4.7k Ohm) connecting the wire to the 3.3V power rail, the wire just "floats" in an undefined analog state when released.
+
+  Because the voltage never returns to 3.3V, the MCU never registers the clock pulses or the data bits. The bus remains stuck, the read times out, and the buffer remains filled with its default uninitialized state (usually `0xFF` or `0x00`).
+
+  **The Fix:** You must physically solder pull-up resistors to the SDA and SCL lines, or explicitly configure the MCU's internal weak pull-up resistors in the GPIO initialization code (though internal pull-ups are often too weak for high-speed or long-wire I2C).
+
+  > **Napkin Math:** I2C relies on RC time constants. A 4.7k resistor pulling up a bus with 50pF of parasitic capacitance yields an RC time constant of 235ns, allowing the signal to cleanly rise to 3.3V fast enough for a standard 400 kHz (2.5µs period) clock. Without it, the rise time is infinite.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The LoRaWAN Confirmed ACK Spiral</b> · <code>networking</code> <code>latency</code></summary>
+
+- **Interviewer:** "Your smart agriculture sensor uses LoRaWAN to send ML anomaly predictions to a gateway 5 miles away. To ensure data is never lost, you configure the device to send 'Confirmed Messages' (requiring an ACK from the gateway). During a rainstorm, the signal quality drops. The sensor's battery dies in 3 days instead of 3 years. What protocol trap destroyed the battery?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The radio used more power to transmit through the rain." LoRa transmits at a fixed power unless ADR (Adaptive Data Rate) tells it otherwise. The issue is the retry logic.
+
+  **Realistic Solution:** You triggered a **Confirmed ACK Retry Spiral**.
+
+  When you send a "Confirmed Message" in LoRaWAN, the device transmits, opens two short receive windows, and waits for the gateway's ACK.
+  If the rainstorm degrades the signal and the ACK is lost in the air, the device assumes the transmission failed.
+
+  The LoRaWAN spec requires the device to retry. It will automatically back off, lower its data rate (which increases time-on-air), and transmit again. If it fails again, it lowers the data rate further.
+
+  At the lowest data rate (SF12), a single transmission can take 2.5 seconds. If the device retries 8 times, it spends 20 solid seconds transmitting at maximum radio power, completely draining the tiny coin cell battery.
+
+  **The Fix:** For edge ML telemetry over LPWANs, **never use Confirmed Messages for regular data**. Use Unconfirmed Messages. If an anomaly packet is lost, it is lost. Design the cloud backend to handle missing data gracefully, rather than allowing the edge device to commit battery suicide trying to guarantee delivery over an unstable 5-mile radio link.
+
+  > **Napkin Math:** Unconfirmed message at SF7 = 60ms of radio time (1 mAs energy). Confirmed message at SF12 with 8 retries = 20,000ms of radio time (300 mAs energy). One failed ACK costs 300x more battery than a successful transmission.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The I2C Clock Stretching Deadlock</b> · <code>hardware</code> <code>sensors</code></summary>
+
+- **Interviewer:** "Your MCU reads an ML sensor via I2C every 10ms. It runs flawlessly for weeks. Then, suddenly, the entire MCU freezes completely. The hardware watchdog timer is triggered, resetting the board. You trace the freeze to a `while()` loop inside the I2C driver waiting for the SCL (clock) line to go High. Why did the clock line stay Low forever?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The pull-up resistor broke." Resistors rarely fail completely. The issue is active protocol behavior.
+
+  **Realistic Solution:** You experienced an **I2C Clock Stretching Deadlock**.
+
+  The I2C protocol allows the *slave device* (the sensor) to hold the clock line (SCL) Low if it needs more time to process the data (e.g., if it's currently doing a slow ADC conversion). This is called Clock Stretching. The master (MCU) is supposed to wait until the slave releases SCL back to High before continuing.
+
+  However, if the sensor experiences a cosmic ray, a voltage glitch, or a firmware bug, it might lock up *while* holding the SCL line Low.
+  If your MCU's I2C driver uses a naive polling loop (`while(!SCL_IS_HIGH);`) without a timeout, the MCU will wait for eternity.
+
+  **The Fix:**
+  1. Never use infinite `while` loops in hardware drivers. Always implement a hardware or software timeout (e.g., if SCL is low for >10ms, abort).
+  2. Implement an **I2C Bus Recovery Routine**: If the bus is stuck, the MCU must manually toggle the SCL pin as a standard GPIO 9 times to flush the slave's state machine and force it to release the line.
+
+  > **Napkin Math:** A 400kHz I2C clock cycle takes 2.5µs. If the slave holds the line for 10,000µs (10ms), it's either doing a massive internal conversion, or it has crashed. A naive driver will wait infinity microseconds, crashing your multi-million dollar satellite.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The ADC Multiplexer Race Condition</b> · <code>sensors</code> <code>pipeline</code></summary>
+
+- **Interviewer:** "Your MCU has one physical ADC but reads from 4 analog sensors sequentially using an internal multiplexer (MUX). You switch the MUX to Channel 1, read, switch to Channel 2, read, etc. However, the data from Channel 1 seems to 'bleed' into Channel 2. If Sensor 1 is at 3.3V, Sensor 2 (which should be 0V) reads as 1.2V. What electrical property did you ignore?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The sensors are physically shorted." Cross-talk on a PCB is rare at these low frequencies. The issue is inside the MCU.
+
+  **Realistic Solution:** You ignored the **ADC Sample-and-Hold (S&H) Capacitor Charge Time**.
+
+  Inside the MCU, the ADC has a tiny internal capacitor that physically stores the analog voltage before conversion. When you switch the MUX from Channel 1 (3.3V) to Channel 2 (0V), that internal capacitor is still fully charged to 3.3V.
+
+  If Sensor 2 has a high output impedance (e.g., a weak analog signal), it takes time for Sensor 2 to physically drain that internal capacitor down to 0V. If you start the ADC conversion immediately after switching the MUX, you are measuring the residual charge from the previous channel.
+
+  **The Fix:** You must insert a small software delay (or configure a longer hardware sampling time) *after* switching the MUX but *before* starting the conversion, giving the analog voltage enough time to settle.
+
+  > **Napkin Math:** ADC S&H Cap = 10pF. Sensor Impedance = 100k Ohm. RC Time Constant = 1 microsecond. To reach 99% accuracy (5 time constants), you must wait at least 5 microseconds after switching the MUX before reading.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The OTA Heap Fragmentation</b> · <code>deployment</code> <code>memory</code></summary>
+
+- **Interviewer:** "Your ESP32 has 150 KB of free heap memory. You initiate an Over-The-Air (OTA) update that requires allocating a 64 KB download buffer. The `malloc(65536)` call fails with an Out-of-Memory error. You have 150 KB free. Why did a 64 KB allocation fail?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The OS reserves that memory." The OS already took its share; 150 KB is what's reported as free for the application.
+
+  **Realistic Solution:** You are suffering from severe **Heap Fragmentation**.
+
+  While you have 150 KB of *total* free memory, it is not contiguous. Over days of running your ML app, allocating and freeing small 1 KB chunks for JSON parsing, MQTT messages, and sensor arrays has turned your heap into Swiss cheese.
+
+  You might have 150 different 1 KB blocks of free space scattered across the RAM, separated by active variables. Because standard C/C++ `malloc` requires a single, physically contiguous block of memory, the OS cannot find a continuous 64 KB gap, so the allocation immediately fails.
+
+  **The Fix:** Pre-allocate all massive, critical buffers (like OTA staging areas or ML tensor arenas) statically at compile time (`static uint8_t ota_buffer[65536]`), or allocate them immediately at boot before any dynamic memory fragmentation can occur.
+
+  > **Napkin Math:** Total Free = 150 KB. Largest Free Block = 12 KB. Asking for 64 KB fails instantly, crashing the OTA process and stranding the device on old firmware forever.
+
+  📖 **Deep Dive:** [Volume I: Optimizing AI](https://harvard-edge.github.io/cs249r_book_dev/contents/optimizing_ai/optimizing_ai.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Deep Sleep I2C Leakage</b> · <code>power</code> <code>hardware</code></summary>
+
+- **Interviewer:** "Your TinyML sensor goes into Deep Sleep, cutting power to the main CPU core. The theoretical deep sleep current of the MCU is 2 microamps. However, your multimeter measures 700 microamps of constant drain. You discover the I2C peripheral lines (SDA/SCL) are still physically connected to an external sensor. How are the data lines draining power?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The sensor is still on." The sensor might be in sleep mode too. The drain is coming from the bus architecture itself.
+
+  **Realistic Solution:** You have **Pull-up Resistor Leakage through the I2C bus**.
+
+  I2C requires pull-up resistors (e.g., 4.7k Ohm) connected to the VCC rail.
+  When the MCU goes to sleep, its GPIO pins often default to a "High-Z" (floating) state, or worse, they might internally pull Low. If the external sensor powers down but pulls the SDA line Low, current flows directly from the 3.3V VCC rail, through the 4.7k resistor, into the sensor's ground pin.
+
+  This creates a continuous, physical short circuit that bypasses your MCU's power management entirely.
+
+  **The Fix:** Before entering Deep Sleep, the MCU software must explicitly reconfigure all I2C GPIO pins. They should be set to Analog/High-Z, or the physical pull-up resistors must be connected to a GPIO pin (instead of the VCC rail) so the MCU can turn off the voltage source to the resistors before sleeping.
+
+  > **Napkin Math:** $V = I 	imes R$. $3.3V / 4700 \Omega = 0.0007A = 700 \mu A$. A single misconfigured pull-up resistor burns 350x more power than the entire sleeping microcontroller.
+
+  📖 **Deep Dive:** [Volume II: Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Flash Erase Suspend Lockout</b> · <code>real-time</code> <code>storage</code></summary>
+
+- **Interviewer:** "You are writing ML telemetry to SPI Flash. A sector erase takes 300ms. Your MCU has a critical real-time motor control interrupt that must run every 5ms. While the SPI Flash is erasing, the MCU's instruction cache is disabled (since code runs from the same flash). The motor control interrupt misses its deadline and the motor crashes. Can you just pause the erase?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Yes, use a preemptive RTOS." An RTOS schedules threads, but it cannot schedule physical silicon physics.
+
+  **Realistic Solution:** You can use **Flash Erase Suspend/Resume**, but there are hard limitations.
+
+  Modern SPI Flash chips support an "Erase Suspend" command (e.g., `0x75`). When issued, the chip halts the internal high-voltage electron draining process, unlocking the SPI bus so the MCU can read instructions and handle the interrupt.
+
+  However, suspending takes time (typically 20-30 microseconds). More importantly, if you constantly suspend the erase every 5ms, the physical flash cells never get enough continuous high-voltage exposure to actually erase the data. The chip may permanently fail to erase the sector, causing a timeout or data corruption.
+
+  **The Fix:** You cannot rely on Erase Suspend for high-frequency interrupts (like 5ms). The critical motor control ISR *must* be relocated to internal SRAM (`IRAM_ATTR`), allowing it to execute independently of the SPI Flash bus state.
+
+  > **Napkin Math:** Erase takes 300ms. If you suspend every 5ms, you interrupt the erase 60 times. Many flash chips have a hard limit (e.g., maximum 15 suspends per erase cycle) before the physical erase operation permanently aborts.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The High-Speed SPI Ringing</b> · <code>hardware</code> <code>sensors</code></summary>
+
+- **Interviewer:** "To get a higher framerate from an external SPI camera, you bump the SPI clock from 10 MHz to 40 MHz. The MCU and the camera both support 40 MHz. However, the image data suddenly looks like static noise. You check the clock line with an oscilloscope and see massive, violent voltage spikes (ringing) going up to 5V on your 3.3V system. What analog phenomenon ruined your digital signal?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The MCU doesn't have enough power." Power isn't the issue; signal integrity is.
+
+  **Realistic Solution:** You caused **Signal Reflection (Ringing) due to Impedance Mismatch**.
+
+  At 10 MHz, a PCB trace is just a wire. At 40 MHz, the rise/fall times of the digital signals become incredibly fast (e.g., 2 nanoseconds). At these speeds, the PCB trace acts as an RF transmission line.
+
+  If the output impedance of the MCU pin does not match the characteristic impedance of the PCB trace (which it rarely does), the high-speed voltage wave hits the camera chip and physically bounces back toward the MCU. This reflection collides with the next wave, causing the voltage to swing wildly above 3.3V and below 0V (ringing). The camera interprets these bounces as false clock edges, corrupting the image.
+
+  **The Fix:** You must physically place a **Series Termination Resistor** (typically 22 to 33 Ohms) on the PCB trace as close to the driving pin (MCU MOSI/SCK) as possible. This resistor absorbs the reflected wave and matches the impedance, resulting in a perfectly clean, square digital signal.
+
+  > **Napkin Math:** A 40 MHz clock with a 2ns rise time creates wavelengths where traces as short as 2-3 inches become active transmission lines. Without termination, the 3.3V signal can bounce to 5V, violating the camera's input voltage limits and triggering double-reads.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The MRAM Wear Illusion</b> · <code>storage</code> <code>mlops</code></summary>
+
+- **Interviewer:** "You switch from traditional SPI Flash to an external MRAM (Magnetoresistive RAM) chip to store telemetry. MRAM is famous for essentially infinite write endurance. You write your ML logs continuously in a tight loop. A year later, the MRAM chip starts returning corrupted bits. If MRAM doesn't wear out like Flash, why did it fail?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "MRAM has a limited cycle count just like Flash." MRAM cycle counts are practically infinite (10^14 cycles), it shouldn't wear out in a year.
+
+  **Realistic Solution:** You fell victim to **Write Endurance vs. Data Retention Trade-offs**.
+
+  While MRAM does not suffer from dielectric breakdown like Flash memory, it is heavily susceptible to thermal energy and continuous magnetic disturbance.
+
+  If you write to the exact same memory cells millions of times a second without pause, the localized heating and continuous magnetic tunneling currents can physically destabilize the magnetic orientation of adjacent cells (similar to Rowhammer in DRAM, but magnetic).
+
+  Furthermore, many cheaper MRAM chips promise "infinite" endurance only if the ambient temperature is tightly controlled. In a hot industrial environment, the magnetic states naturally degrade over time (Data Retention failure), which is accelerated by constant writing.
+
+  **The Fix:** Even with MRAM, you should still implement basic wear-leveling (ring buffers) to distribute the localized thermal and magnetic stress across the entire silicon die, rather than hammering address `0x00` infinitely.
+
+  > **Napkin Math:** 10^14 writes is massive, but at 1 million writes per second (tight C loop), you hit 10^14 in about 3.1 years. If you hammer one address, you can absolutely wear out MRAM.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The UART Buffer Overrun</b> · <code>pipeline</code> <code>networking</code></summary>
+
+- **Interviewer:** "Your MCU streams ML predictions (100 bytes of JSON) to an external cellular modem via UART at 115200 baud. It works perfectly in the lab. In the field, the cellular modem sometimes loses its network connection and takes a few seconds to reconnect. During this time, the MCU keeps sending data. When the modem reconnects, the first few JSON strings are completely mangled. Why did the UART connection corrupt the data?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Baud rate mismatch." The baud rate didn't change; the hardware state did.
+
+  **Realistic Solution:** You experienced a **UART Hardware FIFO Overrun**.
+
+  The cellular modem has a small internal hardware buffer (FIFO) for the UART RX line, often only 64 or 128 bytes. When the modem is connected to the network, its internal processor reads this buffer instantly and transmits the data.
+
+  When the modem loses the network, its internal processor is busy trying to reconnect. It stops reading the UART RX buffer. Your MCU blindly keeps blasting 100-byte JSON strings over the wire. The modem's 128-byte buffer fills up immediately. The MCU sends the 129th byte. The modem hardware physically drops it.
+
+  When the modem finally reconnects and reads the buffer, it reads a disjointed mess of half-overwritten strings.
+
+  **The Fix:** You must implement **Hardware Flow Control (RTS/CTS)**. You wire two extra pins. The modem pulls the CTS (Clear To Send) line High when its buffer is full. The MCU's hardware UART peripheral automatically pauses transmission until the modem pulls CTS Low again, guaranteeing zero dropped bytes.
+
+  > **Napkin Math:** 115200 baud = ~11.5 KB/s. A 128-byte buffer fills in 11 milliseconds. If the modem's processor hangs for even 15ms, data is irreversibly lost.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Sensor ODR Aliasing</b> · <code>sensors</code> <code>math</code></summary>
+
+- **Interviewer:** "Your ML model detects motor bearing faults by looking for a high-frequency vibration spike at 400 Hz. You configure your IMU sensor's Output Data Rate (ODR) to 500 Hz to save power. You collect the data, run an FFT, and the ML model completely fails to see the 400 Hz spike. In fact, it thinks there is a massive anomaly at 100 Hz. Why did 400 Hz become 100 Hz?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The FFT math is wrong." The math is right; the data going into the math is fundamentally compromised.
+
+  **Realistic Solution:** You violated the **Nyquist-Shannon Sampling Theorem causing Aliasing**.
+
+  The Nyquist theorem states you must sample at a frequency at least **twice** the highest frequency you want to observe.
+  To see a 400 Hz signal, your sampling rate (ODR) must be strictly greater than 800 Hz.
+
+  Because you sampled at 500 Hz, your Nyquist limit (folding frequency) is 250 Hz.
+  Any physical vibration above 250 Hz will be mathematically "folded" back into the lower spectrum.
+  A 400 Hz physical signal sampled at 500 Hz will alias to: `|500 - 400| = 100 Hz`.
+
+  The ML model failed because the sensor hardware physically lied to it, presenting a high-frequency fault as a low-frequency rumble.
+
+  **The Fix:** You must configure the IMU's ODR to at least 800 Hz (preferably 1kHz). Alternatively, if you only care about low frequencies, you must enable the IMU's internal analog Low-Pass Filter (Anti-Aliasing Filter) to physically destroy the 400 Hz vibrations before they hit the ADC.
+
+  > **Napkin Math:** Nyquist Limit = ODR / 2. 500 Hz / 2 = 250 Hz. You are completely blind to anything vibrating faster than 250 times a second.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Cellular NAT Timeout</b> · <code>networking</code> <code>deployment</code></summary>
+
+- **Interviewer:** "Your IoT device connects to AWS IoT Core via MQTT over an LTE-M cellular connection. It sends an ML telemetry payload perfectly upon booting. It then sits idle for 30 minutes. When the next anomaly occurs, the `mqtt_publish()` function claims success, but the message never arrives at AWS. The device didn't sleep and the cellular signal is perfect. Why did the network silently swallow the message?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The MQTT broker crashed." AWS IoT Core doesn't crash; the path to it was severed.
+
+  **Realistic Solution:** You hit the **Cellular Carrier NAT (Network Address Translation) Timeout**.
+
+  Cellular networks do not give your device a public IP address. They put you behind a massive Carrier-Grade NAT. The NAT router maintains a state table linking your device's internal IP to the external AWS server's IP.
+
+  To save memory on their expensive routers, cellular carriers aggressively purge idle connections. If no data flows through the TCP socket for a short period (often as little as 2 to 5 minutes), the carrier silently deletes the routing table entry.
+
+  Your device thinks the TCP socket is still perfectly open. AWS thinks the device gracefully disconnected. When your device finally sends data 30 minutes later, the packet hits the carrier's NAT router, the router has no idea where it belongs, and silently drops it.
+
+  **The Fix:** You must configure the MQTT **Keep-Alive Interval** to be strictly shorter than the carrier's NAT timeout (e.g., set MQTT Keep-Alive to 60 or 120 seconds). The device will periodically send a tiny 2-byte PINGREQ packet, which resets the carrier's NAT timer and keeps the TCP tunnel physically open.
+
+  > **Napkin Math:** LTE-M NAT Timeout = ~300 seconds. ML Anomaly Interval = 1800 seconds. 1800 > 300. The TCP connection is guaranteed to be dead every single time the device tries to use it.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+  </details>
+</details>

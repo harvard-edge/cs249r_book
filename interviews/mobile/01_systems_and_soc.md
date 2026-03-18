@@ -1546,3 +1546,59 @@ The domain of the Mobile ML Engineer. This round tests your understanding of wha
   </details>
 
 </details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Big.LITTLE Task Migration</b> · <code>os</code> <code>performance</code></summary>
+
+- **Interviewer:** "Your AR app runs a hand-tracking model continuously on the CPU. When the app launches, inference takes 8ms per frame. After exactly 2 minutes of continuous usage, the inference time suddenly drops to 30ms per frame. The device is NOT hot, so thermal throttling is not active. What OS-level power management feature ruined your latency?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Garbage collection is pausing the thread." GC causes stutters, not a permanent, stable degradation in baseline performance.
+
+  **Realistic Solution:** The OS triggered a **Big.LITTLE Task Migration to Efficiency Cores**.
+
+  Modern mobile SoCs (like Apple Silicon or Snapdragon) use asymmetric multiprocessing: a mix of high-power "Performance" (Big) cores and low-power "Efficiency" (LITTLE) cores.
+
+  When your app starts, the OS scheduler sees a heavy compute load and assigns your ML thread to a fast Performance core (8ms latency).
+  However, after running continuously for an extended period, the OS's Energy Aware Scheduler (EAS) evaluates the system state. If it determines that your thread is a continuous, background-like load (and you haven't explicitly requested a real-time/high-performance Quality of Service), the scheduler aggressively migrates your ML thread to the Efficiency cores to save battery life.
+
+  Because the Efficiency cores have lower clock speeds, smaller caches, and weaker SIMD units, your physical execution time balloons to 30ms, completely destroying the real-time AR experience.
+
+  **The Fix:** You must explicitly bind the ML thread to a high Quality of Service (QoS) class (e.g., `userInteractive` on iOS or `THREAD_PRIORITY_URGENT_DISPLAY` on Android). This signals to the kernel scheduler that this thread is critical for user experience and must absolutely remain pinned to the Performance cores, regardless of battery drain.
+
+  > **Napkin Math:** Performance Core: 3.0 GHz, wide superscalar = 8ms. Efficiency Core: 1.5 GHz, narrow issue width = ~25-30ms. The OS saved 2 Watts of power but made your app unusable.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The GPU Context Switch Overhead</b> · <code>gpu</code> <code>pipeline</code></summary>
+
+- **Interviewer:** "Your mobile game uses an ML model to generate textures dynamically. The ML model runs on the GPU using a Compute Shader. The game engine renders the 3D graphics on the same GPU using a Render Shader. The ML model takes 10ms. The rendering takes 10ms. But the total frame time is 28ms, dropping you below 60 FPS. Where are the missing 8ms going?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The CPU is slow to launch the commands." Command dispatch takes microseconds, not 8 milliseconds.
+
+  **Realistic Solution:** You are suffering from massive **GPU Context Switching Overhead**.
+
+  Unlike CPUs, which can switch threads relatively quickly, GPUs are massive parallel machines. They execute workloads in large command buffers.
+  When you force the GPU to switch from a Compute context (running ML matrix multiplications) to a Render context (running rasterization and fragment shaders), the GPU must physically flush its massive pipelines, reconfigure its internal routing, swap out the shader state, and synchronize memory caches.
+
+  This heavy hardware reconfiguration (the context switch) takes several milliseconds. By interleaving your ML compute and your 3D rendering sequentially on the exact same GPU in a tight loop, you are forcing the hardware to violently reconfigure itself back and forth on every single frame.
+
+  **The Fix:**
+  1. If possible, run the ML workload on the NPU (Neural Engine) to completely decouple it from the graphics pipeline.
+  2. If you must use the GPU, batch the work. Run the ML compute for several frames ahead of time, or use advanced graphics APIs (like Vulkan/Metal Async Compute) to schedule the compute and render pipelines to execute asynchronously without blocking the hardware queues.
+
+  > **Napkin Math:** ML (10ms) + Context Switch (4ms) + Render (10ms) + Context Switch (4ms) = 28ms per frame. The hardware reconfiguration overhead is consuming nearly 30% of your total GPU timeline.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+  </details>
+</details>

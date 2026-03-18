@@ -1320,3 +1320,31 @@ The domain of the ML Leadership and Responsible Engineer. This round tests your 
   </details>
 
 </details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Parquet Row Group Chunking</b> · <code>storage</code> <code>mlops</code></summary>
+
+- **Interviewer:** "Your data engineering team provides a 5 TB dataset stored in Parquet format in AWS S3. Your PyTorch dataloader only needs to read a single column (the text feature) to train an NLP model. Because Parquet is columnar, this should be incredibly fast and save bandwidth. However, your dataloader is downloading data at 10 GB/s, saturating the network, and reading almost the entire 5 TB. Why didn't the columnar format save you bandwidth?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "S3 doesn't support columnar reads." S3 supports byte-range requests perfectly. The issue is how the Parquet file was internally structured.
+
+  **Realistic Solution:** The dataset was written with massive **Row Groups**.
+
+  While Parquet is a columnar format, it actually partitions data horizontally into "Row Groups" first, and *then* stores the columns sequentially within those row groups.
+
+  If the data engineering team wrote the file using a single, massive Row Group (or very few, large ones), the physical layout on disk looks like this: `[Col1_Chunk1, Col2_Chunk1, ..., ColN_Chunk1]`.
+
+  To read just Column 2, your dataloader must issue an HTTP Byte-Range request to S3. If the Row Group is massive, the byte range for `Col2_Chunk1` might be gigabytes long. Worse, many naive dataloaders or Parquet readers will simply download the entire Row Group into memory just to extract the single column they need.
+
+  **The Fix:** You must optimize the Parquet writing process. Write the data using smaller, highly tuned Row Group sizes (e.g., 100 MB). This allows the PyTorch dataloader to issue highly precise, small byte-range requests to S3, fetching exactly the column chunks it needs and skipping the 90% of the file containing the unused columns.
+
+  > **Napkin Math:** 5 TB file with 10 columns. If correctly chunked, reading 1 column pulls ~500 GB over the network. If written as a single Row Group, naive readers will download the entire 5,000 GB, wasting 4.5 TB of AWS egress and bandwidth.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+  </details>
+</details>

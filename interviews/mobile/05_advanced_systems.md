@@ -1530,3 +1530,206 @@ This round covers the hardest problems in mobile ML systems: on-device LLM archi
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Camera VSync Deadlock</b> · <code>sensors</code> <code>latency</code></summary>
+
+- **Interviewer:** "Your mobile app captures camera frames, runs ML inference, and draws the bounding box to the screen. The screen refreshes at 60Hz (16.6ms). The ML model takes 12ms. The camera outputs frames at 60 FPS (16.6ms). Logically, you have 4.6ms of headroom per frame. However, the app consistently drops every other frame, running at a jittery 30 FPS. What pipeline synchronization issue caused this?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The phone is thermal throttling." If it was throttling, the model would take longer than 12ms. The model still takes exactly 12ms.
+
+  **Realistic Solution:** You built a **Synchronous Blocking Pipeline out of Phase with VSync**.
+
+  Your loop likely looks like this: `Wait For Camera -> Run ML (12ms) -> Wait for Screen VSync to Draw`.
+
+  The camera hardware and the screen hardware run on two completely separate, independent quartz oscillators. Even if they both claim to be 60Hz, they are out of phase.
+
+  If the Camera finishes a frame 5ms *after* the Screen's VSync passed, your ML model starts. It takes 12ms. The total time elapsed since VSync is 17ms. Because you missed the 16.6ms VSync window, the screen driver forces your app to wait *another full 16.6ms* for the next VSync before it allows the draw call to complete.
+
+  By forcing the ML thread to wait for the screen, you blocked the ML thread from capturing the next camera frame. You effectively halved your throughput.
+
+  **The Fix:** You must fully decouple the pipeline using lock-free ring buffers.
+  1. Camera Thread captures and overwrites the latest buffer.
+  2. ML Thread runs continuously in a loop, grabbing whatever is in the buffer.
+  3. UI Thread runs strictly on the Screen VSync interrupt, grabbing the latest ML result.
+  No thread should ever wait for another hardware component's clock.
+
+  > **Napkin Math:** Camera offset (5ms) + ML (12ms) = 17ms. 17 > 16.6. The OS forces a wait until 33.3ms. 1000ms / 33.3ms = 30 FPS maximum throughput.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Battery Impedance Collapse</b> · <code>power</code> <code>hardware</code></summary>
+
+- **Interviewer:** "Your mobile app runs a massive diffusion model on the NPU to generate an image. When the phone is at 100% battery, it takes 3 seconds. When the phone is at 15% battery, the exact same operation takes 8 seconds. The OS is not officially in 'Low Power Mode'. What analog electrical property of the battery forced the hardware to slow down?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The battery has less voltage, so the CPU runs slower." Voltage alone doesn't directly dictate CPU speed; the power management IC regulates it.
+
+  **Realistic Solution:** You are witnessing **Dynamic Throttling due to Internal Resistance (Impedance) spikes**.
+
+  As a lithium-ion battery discharges, its Internal Resistance (IR) physically increases.
+  When the NPU starts a massive matrix multiplication, it suddenly draws a massive spike of current (e.g., 5 Amps).
+
+  According to Ohm's Law ($V = I 	imes R$), pulling 5 Amps through a highly resistive, depleted battery causes a massive, instantaneous voltage droop across the battery terminals. If the voltage drops below the Power Management IC's (PMIC) minimum threshold (e.g., 3.2V), the entire phone will instantly black-screen and hard-crash.
+
+  To prevent the phone from dying at 15%, modern mobile SoCs have hardware-level **Peak Power Management**. When the PMIC detects the battery's impedance is too high to sustain a 5 Amp spike without crashing, it aggressively downclocks the NPU/GPU to artificially limit the maximum current draw to, say, 2 Amps. The math takes over twice as long, but the phone stays alive.
+
+  **The Fix:** You cannot fix battery physics in software. But you can design your ML app to gracefully degrade. Query the battery level and health APIs; if the battery is low, switch to a smaller, less power-hungry model that won't trigger the PMIC's peak power throttling.
+
+  > **Napkin Math:** At 100%, IR = 0.05 Ohms. 5A spike = 0.25V droop (Safe). At 15%, IR = 0.2 Ohms. 5A spike = 1.0V droop (Crash). PMIC limits current to 2A to keep droop at a safe 0.4V, inherently cutting NPU speed by 60%.
+
+  📖 **Deep Dive:** [Volume II: Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Native Bridge Array Copy</b> · <code>architecture</code> <code>memory</code></summary>
+
+- **Interviewer:** "You build a React Native app that runs an image classification model. The ML model takes 10ms. You pass the base64 encoded image string from JavaScript to the native iOS/Android module over the React Native bridge. The total frame processing time spikes to 60ms. Why is the bridge so slow, and how do you bypass it for high-frequency video?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Base64 encoding is slow." Encoding is slow, but the primary bottleneck is the cross-context memory copying and serialization.
+
+  **Realistic Solution:** You are suffering from **JavaScript to Native JSON Serialization**.
+
+  The React Native bridge (prior to JSI/TurboModules) works by asynchronously serializing all data into JSON strings, passing them over a message queue, and deserializing them on the native side.
+
+  If you pass a 1080p image as a base64 string, you are forcing the JS engine to allocate a massive string, serialize it into a message, push it to the native C++/Objective-C runtime, which then allocates another massive string, parses it, and decodes the base64 back into raw bytes. This memory copying back-and-forth across the language boundary completely stalls both threads.
+
+  **The Fix:** Never send raw video frames over the React Native bridge.
+  Instead, use **JSI (JavaScript Interface)** to share memory pointers directly between JS and C++, or handle the entire Camera-to-ML pipeline completely natively, only sending the final small JSON result (e.g., `{"label": "dog"}`) back over the bridge to update the UI.
+
+  > **Napkin Math:** 1080p image = 6 MB raw. Base64 encoded = 8 MB string. Serializing and copying an 8 MB string across a bridge takes ~40-50ms on a mobile CPU. The IPC overhead is 5x more expensive than the neural network.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The CoreML Multi-Array Pre-allocation</b> · <code>memory</code> <code>frameworks</code></summary>
+
+- **Interviewer:** "You run a CoreML video processing pipeline at 60 FPS on iOS. The model prediction takes 5ms. However, the Instruments profiler shows your app is constantly triggering the OS memory allocator and occasionally dropping frames due to memory spikes. You are creating a new `MLMultiArray` for the output every frame. How do you stop this memory allocation overhead?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "You can't; CoreML always returns a new object." You can force it to reuse memory if you use the right API.
+
+  **Realistic Solution:** You failed to use **Client-Allocated Output Buffers (Prediction Options)**.
+
+  By default, when you call `model.prediction(input)`, CoreML dynamically allocates a new `MLMultiArray` on the heap to store the output tensor, and passes ownership to you. Doing this 60 times a second creates massive memory churn, forcing the Swift Garbage Collector (ARC) to constantly free the old buffers, eventually fragmenting the heap and stalling the CPU.
+
+  **The Fix:** You must manually pre-allocate a single, permanent `MLMultiArray` when the app starts. Then, when running inference, use `MLPredictionOptions` and pass your pre-allocated array into the `prediction(from:options:)` method via an implementation of the `MLFeatureProvider` protocol that explicitly vends your pre-allocated buffer for the output feature name.
+
+  CoreML will write the results directly into your existing memory buffer, resulting in **zero allocations per frame**.
+
+  > **Napkin Math:** Allocating and freeing a 10 MB tensor 60 times a second = 600 MB/s of pure memory allocation churn. Pre-allocating it drops the memory churn to exactly 0 MB/s.
+
+  📖 **Deep Dive:** [Volume I: ML Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
+</details>
+
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CoreML Model Compilation Jitter</b> · <code>deployment</code> <code>os</code></summary>
+
+- **Interviewer:** "You deploy a CoreML model in your iOS app. The `.mlmodel` file is bundled in the app. When the user taps 'Start Camera', you initialize the model using `let model = try MyModel(configuration: config)`. The very first time the user taps this button after downloading the app, the UI freezes for 3 seconds. Every subsequent tap is instant. What is iOS doing under the hood during that first initialization?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "It's loading the weights into memory." Loading a few megabytes of weights takes milliseconds, not 3 seconds.
+
+  **Realistic Solution:** You are causing a **Main-Thread Model Compilation (`.mlmodelc`)**.
+
+  When you ship a raw `.mlmodel` file, it is essentially a blueprint. It is not fully executable machine code. The very first time CoreML initializes the model on a device, the iOS framework must invoke an on-device compiler to translate that blueprint into a highly optimized, device-specific compiled format (`.mlmodelc`) tailored to the exact CPU/GPU/ANE silicon of that specific iPhone.
+
+  This compilation process is incredibly heavy and takes several seconds. Because you called the initialization synchronously on the main UI thread, you froze the entire app. Once compiled, iOS caches the `.mlmodelc` in a hidden app directory, which is why subsequent loads are instant.
+
+  **The Fix:**
+  1. Never initialize ML models synchronously on the main thread; always dispatch to a background queue.
+  2. Better yet, pre-compile the model *before* shipping the app using Xcode, and only bundle the compiled `.mlmodelc` folder in your app bundle, eliminating the on-device compilation entirely.
+
+  > **Napkin Math:** Compiling a 50-layer network graph into ANE machine code involves aggressive operator fusion and memory planning, consuming billions of CPU cycles. This is a one-time 3000ms tax that destroys the first-impression UX if not hidden.
+
+  📖 **Deep Dive:** [Volume I: ML Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Metal Shader Threadgroup Limit</b> · <code>gpu</code> <code>compute</code></summary>
+
+- **Interviewer:** "You write a custom Metal Compute Shader for iOS to perform a specialized activation function. You configure the threadgroup size to `MTLSizeMake(1024, 1, 1)` because you are processing 1024 pixels at a time. The code works perfectly on your iPhone 15 Pro. You release the app, and it immediately crashes on iPhone 11s with a 'Threadgroup size exceeds limit' error. Why does it crash on older hardware?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The older phone doesn't have enough GPU RAM." Threadgroups don't dictate total VRAM; they dictate physical silicon execution limits.
+
+  **Realistic Solution:** You hardcoded a Threadgroup size that exceeds the **Device's Maximum Hardware Execution Width**.
+
+  In Metal (and CUDA/OpenCL), a Threadgroup (or block) is a batch of threads that are guaranteed to execute concurrently on a single physical GPU compute unit, sharing extremely fast local memory.
+
+  Modern GPUs like the A17 Pro (iPhone 15) have massive compute units that might support up to 1024 threads per group. However, older architectures (like the A13 in the iPhone 11) have physically smaller compute units with hard hardware limits (e.g., maximum 512 threads per group).
+
+  When you request 1024 threads on a chip that physically only supports 512, the Metal driver instantly panics and aborts the dispatch.
+
+  **The Fix:** Never hardcode threadgroup sizes. You must dynamically query the `MTLComputePipelineState` object at runtime for its `maxTotalThreadsPerThreadgroup` property, and calculate your dispatch grid dynamically based on the specific physical limits of the silicon executing the code.
+
+  > **Napkin Math:** A compute unit might only have 16 KB of threadgroup memory and 512 register slots. Demanding 1024 threads means the hardware physically cannot hold the execution state for all threads simultaneously.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Android NNAPI Driver Fallback</b> · <code>deployment</code> <code>os</code></summary>
+
+- **Interviewer:** "You deploy a TFLite model on Android and enable the NNAPI (Neural Networks API) delegate to run it on the hardware NPU. On Samsung phones, it takes 5ms. On a specific Xiaomi model, it takes 80ms. You verify that the Xiaomi phone physically has a powerful NPU. Why is NNAPI making the model 16x slower than it should be?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The Xiaomi NPU is just bad." A 16x slowdown usually points to the NPU not being used at all.
+
+  **Realistic Solution:** You hit an **NNAPI Vendor Driver Bug leading to CPU Fallback**.
+
+  Android NNAPI is a HAL (Hardware Abstraction Layer). It routes ML commands from TFLite to the specific vendor's (Qualcomm, MediaTek, Samsung) proprietary NPU driver.
+
+  The Android ecosystem is notorious for buggy, fragmented, or incomplete vendor NPU drivers. If the specific Xiaomi NPU driver encounters an operator it cannot parse, or if it crashes during the graph compilation phase, NNAPI will silently catch the error.
+  To prevent the app from crashing, NNAPI quietly falls back to executing the entire model on its own generic, unoptimized CPU reference implementation.
+
+  You thought you were running on the hardware NPU, but you are actually running on a slow, generic CPU fallback layer hidden deep inside the OS.
+
+  **The Fix:** You must always query the delegate execution status after initialization. If NNAPI falls back, you are often better off completely disabling NNAPI and using TFLite's highly optimized XNNPACK CPU delegate, which is significantly faster than NNAPI's reference CPU fallback.
+
+  > **Napkin Math:** Hardware NPU = 5ms. XNNPACK CPU = 20ms. NNAPI Reference CPU = 80ms. Blindly trusting NNAPI without verifying execution location can result in worse performance than explicitly requesting CPU.
+
+  📖 **Deep Dive:** [Volume I: ML Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+  </details>
+</details>

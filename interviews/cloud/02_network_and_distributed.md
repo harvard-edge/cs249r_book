@@ -1330,3 +1330,181 @@ The domain of the AI Infrastructure Engineer. This round tests your understandin
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The TCP Congestion Window Collapse</b> · <code>networking</code> <code>throughput</code></summary>
+
+- **Interviewer:** "You are transferring a 2 TB model checkpoint from an AWS datacenter in Virginia to a GCP datacenter in Tokyo. You have a dedicated 10 Gbps direct fiber link. However, your `scp` or `rsync` transfer maxes out at a pathetic 250 Mbps. The link is not shared, and there is 0% packet loss. Why is standard TCP catastrophically failing to use the bandwidth over a long distance?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "AWS is throttling the egress." While egress costs money, dedicated lines aren't artificially throttled to 2%. The issue is the protocol physics.
+
+  **Realistic Solution:** You are a victim of the **Bandwidth-Delay Product (BDP) and TCP Receive Windows**.
+
+  Standard TCP requires the sender to receive an Acknowledgment (ACK) from the receiver before it can send more data. The amount of un-acknowledged data allowed in flight is dictated by the TCP Window Size.
+
+  Over a long distance (Virginia to Tokyo), the Round Trip Time (RTT) is roughly 150ms.
+  If your OS has a default maximum TCP window size of 4 Megabytes, the sender blasts 4 MB into the fiber optic cable, and then *must completely stop sending* and wait 150ms for the ACK to return.
+
+  You are physically only allowed to send 4 MB every 150ms.
+  `4 MB / 0.150 seconds = 26.6 MB/s (roughly 212 Mbps)`.
+
+  It does not matter if your pipe is 10 Gbps or 100 Gbps; the strict mathematical relationship between the TCP window size and the speed of light (latency) creates a hard throughput ceiling.
+
+  **The Fix:**
+  1. Manually tune the Linux kernel TCP parameters (`sysctl -w net.core.rmem_max=...`) to massively increase the window size (BDP tuning).
+  2. Abandon TCP entirely and use UDP-based massive file transfer protocols (like Aspera, or custom multipath UDP) which do not block on sequential ACKs.
+
+  > **Napkin Math:** To fill a 10 Gbps (1.25 GB/s) pipe with a 150ms latency, your TCP Window Size must be: `1.25 GB/s * 0.150s = 187.5 Megabytes`. The Linux default is usually 2 MB to 6 MB. You were starving the pipe by a factor of 40x.
+
+  📖 **Deep Dive:** [Volume II: Network Fabrics](https://harvard-edge.github.io/cs249r_book_dev/contents/network_fabrics/network_fabrics.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The TCP/IP CPU Overhead</b> · <code>network-fabric</code> <code>cpu</code></summary>
+
+- **Interviewer:** "You are training a model across 64 GPUs on AWS using standard 100 Gbps Ethernet (TCP/IP). You notice the GPUs are only running at 60% utilization. You look at the host CPU, and all 48 CPU cores are pinned at 100% utilization during the AllReduce phase. The CPU is not doing any data loading. What is the CPU doing that is bottlenecking a 100 Gbps network?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The CPU is doing the AllReduce addition math." The GPUs do the addition. The CPU is struggling with the data transport.
+
+  **Realistic Solution:** You are bottlenecked by the **OS Kernel TCP/IP Stack Processing**.
+
+  When you use standard TCP/IP sockets over Ethernet, every single packet (typically 1500 bytes) must be processed by the Linux kernel.
+  The CPU must calculate checksums, handle sliding windows, acknowledge packets, and physically copy the data from the network card's ring buffer into kernel space, and then copy it *again* into user-space memory (the GPU's memory buffer).
+
+  Pushing 100 Gigabits per second (12.5 GB/s) through the Linux kernel requires millions of interrupts and memory copies per second. The CPU cores are completely overwhelmed just executing the TCP protocol state machine, meaning they cannot feed data to the network card fast enough to saturate the 100 Gbps link. The network stalls, which makes the GPUs stall.
+
+  **The Fix:** You must bypass the OS kernel entirely using **RDMA (Remote Direct Memory Access)** via RoCEv2 (RDMA over Converged Ethernet) or EFA (Elastic Fabric Adapter on AWS). RDMA allows the network card to read/write directly to the GPU's memory without the CPU or the Linux kernel ever touching the packets, dropping CPU utilization to near 0%.
+
+  > **Napkin Math:** 100 Gbps = 12.5 GB/s. With an MTU of 1500 bytes, the CPU must process 8.3 million packets per second. At 1 microsecond of kernel overhead per packet, that requires 8.3 dedicated CPU cores running at 100% just to run the network, completely destroying the node's balance.
+
+  📖 **Deep Dive:** [Volume II: Network Fabrics](https://harvard-edge.github.io/cs249r_book_dev/contents/network_fabrics/network_fabrics.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The NVLink PCIe Bottleneck</b> · <code>hardware</code> <code>topology</code></summary>
+
+- **Interviewer:** "You are buying a custom 8-GPU server for training. Vendor A offers 8x RTX 4090s connected entirely via PCIe Gen4 switches. Vendor B offers 8x H100s connected via NVLink and NVSwitch. Vendor A's server is much cheaper, and they claim 'PCIe Gen4 x16 gives 64 GB/s, which is plenty for training.' Why will Vendor A's server fail catastrophically at 8-GPU Data Parallel training compared to Vendor B?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "PCIe is slower than NVLink." It is slower, but the real issue is the *topology*, not just the raw speed.
+
+  **Realistic Solution:** You hit the **PCIe Root Complex Bottleneck (Tree vs Mesh topology)**.
+
+  NVLink + NVSwitch provides a fully non-blocking mesh. GPU 1 can talk to GPU 8 at 900 GB/s at the exact same time GPU 2 talks to GPU 7.
+
+  PCIe is a tree topology. All 8 GPUs must eventually route their traffic through PCIe switches, which often bottleneck at the CPU's Root Complex. If GPU 1 tries to send 64 GB/s to GPU 2, and GPU 3 tries to send 64 GB/s to GPU 4, they both hit the same upstream PCIe switch. The bandwidth is divided.
+
+  During an AllReduce operation, *all 8 GPUs* are transmitting simultaneously. The PCIe bus instantly saturates, and the effective bandwidth per GPU drops from 64 GB/s to a fraction of that, causing massive network stalls during every optimizer step.
+
+  **The Fix:** Do not use PCIe for massively parallel multi-GPU training within a single node. You must use hardware with dedicated GPU-to-GPU interconnects (NVLink) that bypass the CPU and PCIe tree entirely.
+
+  > **Napkin Math:** NVLink Bisection Bandwidth on an 8-GPU node = ~3,600 GB/s. PCIe Gen4 CPU Root Complex limit = ~128 GB/s (total, shared by all lanes). The NVLink topology is roughly 28x faster during a global AllReduce.
+
+  📖 **Deep Dive:** [Volume II: Network Fabrics](https://harvard-edge.github.io/cs249r_book_dev/contents/network_fabrics/network_fabrics.html)
+
+  </details>
+
+</details>
+
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The InfiniBand Adaptive Routing Loop</b> · <code>network-fabric</code> <code>architecture</code></summary>
+
+- **Interviewer:** "You are running a 1,000 GPU training job over a massive InfiniBand network. To maximize bandwidth, you enable Adaptive Routing (AR), allowing the network to dynamically send packets down the least congested paths. Throughput improves, but occasionally, NCCL crashes with an unrecoverable timeout error during a global AllReduce. The network cables and switches are perfectly healthy. What did Adaptive Routing do to the packets to break NCCL?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The packets got dropped by a congested switch." InfiniBand is lossless (credit-based flow control); it rarely drops packets. The problem is the order.
+
+  **Realistic Solution:** You caused **Out-of-Order Packet Delivery that NCCL cannot handle**.
+
+  Standard Ethernet/TCP handles out-of-order packets via the kernel stack, reordering them before the application sees them.
+  InfiniBand RDMA bypasses the CPU and writes directly to GPU memory to achieve ultra-low latency. Many RDMA operations (like memory writes) strictly assume packets will arrive in the exact order they were sent.
+
+  When you enable Adaptive Routing, Packet 1 might take Path A, and Packet 2 might take a slightly faster Path B. Packet 2 arrives at the destination GPU *before* Packet 1.
+  If NCCL is heavily optimized and expects contiguous memory updates to signal completion, an out-of-order arrival breaks the internal state machine of the collective communication algorithm. The GPU waits for Packet 1, stalls, and eventually triggers a hard timeout, crashing the entire training job.
+
+  **The Fix:** Adaptive Routing on InfiniBand requires hardware features like **SHIELD (Self-Healing Interconnect Enhancement for Intelligent Datacenters)** or specific NCCL ordering configurations that allow the local NIC to reorder RDMA packets in hardware before they hit the GPU memory. Otherwise, you must disable AR and rely on static ECMP routing.
+
+  > **Napkin Math:** If Path A has 2 microseconds of congestion delay, Packet 2 easily beats Packet 1 to the destination. In a 1,000 GPU AllReduce, the statistical probability of a micro-congestion event reordering a critical packet approaches 100% over a 12-hour training run.
+
+  📖 **Deep Dive:** [Volume II: Network Fabrics](https://harvard-edge.github.io/cs249r_book_dev/contents/network_fabrics/network_fabrics.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The ToR Switch Buffer Microburst</b> · <code>network</code> <code>latency</code></summary>
+
+- **Interviewer:** "You are using RoCEv2 (RDMA over Ethernet) for a 64-GPU cluster. The network links are 100 Gbps. During the AllToAll phase of a Mixture of Experts (MoE) training step, the network throughput plummets, and PFC (Priority Flow Control) pause frames flood the network. The total data volume sent by any GPU is well under the 100 Gbps limit. Why is the network freezing?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The bandwidth is saturated." The prompt explicitly says the data volume is under the limit. The issue is time, not volume.
+
+  **Realistic Solution:** You triggered a **Top-of-Rack (ToR) Switch Microburst**.
+
+  In an AllToAll operation, every GPU simultaneously sends a small chunk of data to every other GPU.
+  If 63 GPUs all try to send a 1 MB chunk of data to GPU #1 at the exact same microsecond, 63 MB of traffic instantly hits the ToR switch port connected to GPU #1.
+
+  While the *average* bandwidth over a second is low, the *instantaneous* burst is massive. A typical Ethernet ToR switch only has a few megabytes (e.g., 16 MB to 32 MB) of packet buffer memory shared across all ports.
+  The 63 MB microburst instantly overflows the switch's buffer. Because RoCEv2 requires a lossless network, the switch fires PFC Pause Frames back to the sender GPUs, forcefully halting all transmissions and freezing the cluster until the buffer drains.
+
+  **The Fix:**
+  1. Tune the application's communication algorithm to stagger transmissions.
+  2. Deepen the switch buffers (buy expensive deep-buffer switches).
+  3. Carefully tune the DCQCN (Data Center Quantized Congestion Notification) parameters to slow down senders before the buffers completely fill.
+
+  > **Napkin Math:** 63 GPUs * 1 MB = 63 MB burst. ToR Switch buffer = 32 MB. The buffer overflows in less than 1 millisecond, triggering a cascading network-wide pause.
+
+  📖 **Deep Dive:** [Volume II: Network Fabrics](https://harvard-edge.github.io/cs249r_book_dev/contents/network_fabrics/network_fabrics.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The PCIe ACS Block</b> · <code>hardware</code> <code>distributed</code></summary>
+
+- **Interviewer:** "You rent a bare-metal server with 4x GPUs. They do not have NVLink; they communicate over the motherboard's PCIe bus. You run an NCCL test, and the GPU-to-GPU bandwidth is only 12 GB/s, instead of the expected 24 GB/s for PCIe Gen4 x16. You notice the host CPU utilization is spiking during the transfer. Why is the CPU getting involved in a direct GPU-to-GPU transfer?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The PCIe bus is too slow." PCIe Gen4 x16 supports ~25 GB/s. The issue is the routing of the traffic.
+
+  **Realistic Solution:** You are blocked by **PCIe Access Control Services (ACS) preventing P2P DMA**.
+
+  In a multi-GPU system, GPUs use Peer-to-Peer (P2P) DMA to read and write directly to each other's VRAM over the PCIe switches, completely bypassing the CPU.
+
+  However, in many enterprise servers (especially those designed for virtualization or security), the BIOS enables PCIe ACS (Access Control Services) or IOMMU isolation. This security feature strictly forbids direct communication between PCIe devices to prevent rogue devices from attacking each other.
+
+  Because the hardware blocks the direct P2P path, NCCL is forced to fall back to routing the traffic through the host CPU's memory. GPU 1 writes to system RAM, the CPU manages it, and GPU 2 reads from system RAM. This double-copy through the CPU's memory controller halves the effective bandwidth and spikes CPU usage.
+
+  **The Fix:** You must enter the server's BIOS settings and explicitly disable PCIe ACS (or configure IOMMU pass-through policies) to allow the PCIe switch to route packets directly between the GPU endpoints.
+
+  > **Napkin Math:** Direct P2P = 1 trip over PCIe (24 GB/s). CPU routing = GPU to RAM (Trip 1), RAM to GPU (Trip 2). The data crosses the bus twice, mathematically halving the maximum throughput to 12 GB/s.
+
+  📖 **Deep Dive:** [Volume II: Infrastructure](https://harvard-edge.github.io/cs249r_book_dev/contents/infrastructure/infrastructure.html)
+  </details>
+</details>

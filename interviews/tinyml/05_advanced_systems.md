@@ -1831,3 +1831,110 @@ This round is for principal-level TinyML engineers and researchers who design th
   </details>
 
 </details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Dual-Core Synchronization Deadlock</b> · <code>concurrency</code> <code>architecture</code></summary>
+
+- **Interviewer:** "You are using an RP2040 (Dual-core Cortex-M0+). Core 0 handles camera I/O and Core 1 runs the ML model. To share the tensor arena safely, you implement a simple boolean spinlock: `while(lock == true); lock = true;`. Core 0 locks it, writes the image, and unlocks it. Core 1 locks it, runs ML, and unlocks it. After an hour, both cores freeze simultaneously in the `while` loop. How did a lock designed to prevent collisions cause a permanent deadlock?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "One core forgot to release the lock." Assuming the code has no bugs, the lock was released, but the hardware didn't register it correctly.
+
+  **Realistic Solution:** You failed to use **Hardware-Atomic Synchronization Primitives (SIO/Mutexes)**.
+
+  A boolean spinlock in C translates to three assembly instructions: Read from memory, Check value, Write to memory.
+
+  If Core 0 and Core 1 happen to read the `lock` variable on the *exact same clock cycle* (when it is `false`), both cores believe the lock is free. They both proceed to the next instruction and both write `true` to the memory address. Both cores now believe they exclusively own the lock. They both execute, corrupt the memory, and eventually one core gets out of phase, attempts to lock a lock that the other core already holds, and they both deadlock waiting for a state change that will never happen.
+
+  **The Fix:** You cannot use standard variables for multi-core synchronization. You must use the silicon's **Hardware Spinlocks (Hardware Mutexes)**. On the RP2040, this is the SIO (Single-cycle IO) block. It provides a specialized memory address where reading the address returns the lock state and physically locks it in a single, uninterruptible hardware clock cycle, making race conditions physically impossible.
+
+  > **Napkin Math:** At 133 MHz, the window for a race condition is about 15 nanoseconds. If you pass frames 30 times a second, a 15ns collision window might take an hour to hit, creating a nightmare "heisenbug" that only crashes in production.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The AMP Mailbox Full</b> · <code>pipeline</code> <code>os</code></summary>
+
+- **Interviewer:** "Your system uses Asymmetric Multi-Processing (AMP). A Linux Cortex-A processor handles the network, and a bare-metal Cortex-M processor handles the real-time ML sensors. They communicate via an RPMsg (Remote Processor Messaging) mailbox. The ML core detects anomalies at 500 Hz and sends a 10-byte message to Linux for each one. The system runs for 5 seconds and then the ML core crashes with a `Mailbox Full` error. Linux is running fine. Why did the mailbox fill up?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The mailbox size is too small." You can't just make the mailbox infinitely large; the issue is the processing rate disparity.
+
+  **Realistic Solution:** You have a massive **Throughput Mismatch across the OS boundary**.
+
+  The bare-metal Cortex-M core is running a tight real-time loop. It can easily push a 10-byte message into the hardware mailbox memory 500 times a second.
+
+  The Cortex-A core is running Linux. To process a message from the mailbox, the Linux kernel must receive a hardware interrupt, wake up a kernel driver, copy the memory, wake up a user-space daemon, and process the event. Because Linux is a time-shared OS, if it is busy doing network I/O or garbage collection, it might only be able to process 100 mailbox interrupts per second.
+
+  The ML core is producing 500 msgs/sec. Linux is consuming 100 msgs/sec. The queue fills up in seconds, and the ML core hard-faults trying to write to a full hardware FIFO.
+
+  **The Fix:** The ML core must **Batch and Throttle** its messages. Instead of firing an interrupt for every single anomaly, the ML core should buffer the anomalies in its own SRAM and send a single batched payload (e.g., 50 anomalies at once) at 10 Hz, drastically reducing the interrupt load on the Linux kernel.
+
+  > **Napkin Math:** Inflow = 500/sec. Outflow = 100/sec. Net gain = +400 msgs/sec. If the mailbox holds 2000 messages, the system mathematically guarantees a catastrophic crash in exactly 5.0 seconds.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Hardware Crypto Engine Latency</b> · <code>security</code> <code>pipeline</code></summary>
+
+- **Interviewer:** "Your ML device connects to AWS over Wi-Fi. Every hour, it performs a TLS handshake to securely upload a model update. The MCU has a hardware crypto accelerator (AES/RSA). You use an RTOS. When the hourly TLS handshake occurs, the ML audio inference task (which runs every 20ms) misses its deadline and drops audio frames. If the crypto is hardware-accelerated, why is it freezing the CPU?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The crypto engine is slow." Hardware crypto is fast, but the protocol handshake requires intense software coordination.
+
+  **Realistic Solution:** The TLS handshake requires **Massive Asymmetric Math (RSA/ECC) performed by the CPU**.
+
+  Hardware crypto accelerators on MCUs are typically designed for symmetric encryption (like AES-256) used *after* the connection is established.
+
+  However, establishing the connection (the TLS Handshake) requires asymmetric cryptography (like validating RSA certificates or Elliptic Curve Diffie-Hellman key exchanges). Many MCUs do not have hardware acceleration for massive 2048-bit RSA math.
+
+  The networking thread must fall back to using a software library (like mbedTLS) to compute the RSA signatures. Doing 2048-bit prime number math in pure software on a 100 MHz MCU can take hundreds of milliseconds of continuous CPU time. If the networking thread has a higher RTOS priority than the ML thread, the ML thread is starved and misses its 20ms deadline.
+
+  **The Fix:**
+  1. Offload the TLS handshake to a dedicated Wi-Fi co-processor (like an ESP32 or ATWINC1500) so the main MCU never does the math.
+  2. If doing it on-chip, explicitly lower the RTOS priority of the network thread below the ML thread, forcing the slow RSA math to yield to the audio inference.
+
+  > **Napkin Math:** Software RSA-2048 verify on an M4 takes ~200ms to 500ms. If the ML deadline is 20ms, the CPU spends 10 to 25 full ML cycles completely locked in a cryptography while-loop.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The FreeRTOS Heap Exhaustion</b> · <code>os</code> <code>memory</code></summary>
+
+- **Interviewer:** "You are using FreeRTOS on an MCU. Every time a new image arrives, you dynamically spawn a new ML worker task using `xTaskCreate()` to run the inference, and then delete the task when it finishes. After a few hundred images, the system crashes because `xTaskCreate` returns NULL. You have plenty of SRAM. Why did it fail?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "You didn't delete the task correctly." You called `vTaskDelete`, but that doesn't mean the memory is instantly available.
+
+  **Realistic Solution:** You exhausted the heap due to **Delayed Idle Task Cleanup (FreeRTOS Idle Task Starvation)**.
+
+  When you call `vTaskDelete(NULL)` in FreeRTOS to kill a task, the memory for its TCB (Task Control Block) and Stack is *not* immediately freed by the calling thread.
+
+  FreeRTOS pushes the cleanup responsibility to the system's "Idle Task"—a special, absolute-lowest-priority task created by the OS.
+  If your MCU is constantly busy processing camera frames, running ML tasks, and handling network interrupts, the CPU never drops to 0% utilization. Because the CPU is never idle, the Idle Task never gets scheduled to run.
+
+  Because the Idle Task never runs, the memory from the deleted ML tasks is never actually freed back to the heap. You create a massive memory leak strictly because your system is too busy.
+
+  **The Fix:** Never dynamically spawn and destroy tasks in a high-frequency real-time loop. Create a static pool of ML worker tasks at boot time (`xTaskCreateStatic`), and use queues or semaphores to wake them up and put them to sleep when work arrives.
+
+  > **Napkin Math:** A task stack might be 4 KB. If you process 10 frames a second, you "leak" 40 KB/s if the Idle Task is starved. A 256 KB MCU will hard crash in exactly 6 seconds of continuous operation.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+  </details>
+</details>

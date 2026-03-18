@@ -1221,3 +1221,334 @@ The domain of the TinyML Systems Engineer. This round tests your understanding o
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CMSIS-NN Alignment Fault</b> · <code>memory</code> <code>frameworks</code></summary>
+
+- **Interviewer:** "You define a global `int8_t tensor_arena[20000]` for your TFLite Micro model. You are using the highly optimized ARM CMSIS-NN library. The model compiles, but the moment you call `invoke()`, the microcontroller instantly crashes with a Hard Fault (Unaligned Memory Access). The array is large enough. What trivial C-language mistake caused the crash?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The weights are too big." If it was a size issue, TFLite Micro would return an error code during allocation, not a hardware fault.
+
+  **Realistic Solution:** You forgot to **Align the Tensor Arena to a 16-byte boundary**.
+
+  When you declare a standard `int8_t` array in C, the compiler places it wherever it fits in the `.bss` section. Its starting memory address might be `0x20000001`.
+
+  The CMSIS-NN library relies heavily on ARM NEON or DSP SIMD instructions (like `LDRD` or `VLD1`). These hardware instructions are designed to load 4, 8, or 16 bytes of data into the math registers in a single clock cycle. However, these instructions mathematically *require* the memory addresses to be perfectly divisible by 4 (or 16).
+
+  If the TFLite Micro arena starts at an odd address, the internal pointers passed to the CMSIS-NN functions will be unaligned. When the CPU attempts to execute a vector load instruction on an unaligned address, the memory controller panics and throws an immediate bus fault.
+
+  **The Fix:** You must use compiler-specific alignment attributes when declaring the arena:
+  `__attribute__((aligned(16))) int8_t tensor_arena[20000];` (for GCC/Clang)
+  This guarantees the base pointer is a multiple of 16, satisfying all SIMD hardware constraints.
+
+  > **Napkin Math:** A 16-byte aligned address ends in `0x0`. If your array starts at `0x20000001`, an attempt to load 4 bytes (`LDR`) spans across two physical 32-bit memory boundaries, which the M-class core refuses to do in a single cycle.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Watchdog Interrupt Starvation</b> · <code>real-time</code> <code>architecture</code></summary>
+
+- **Interviewer:** "Your Cortex-M4 runs a heavy anomaly detection model that takes 800ms to execute. Because this blocks the main loop, you move the ML inference into a timer interrupt (ISR) that fires every 1 second. Your device has a hardware watchdog timer that must be reset in the main loop every 500ms. After you move the ML to the ISR, the device constantly resets. Why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The watchdog timer is too fast." While true, the fundamental architectural error is running heavy math inside an interrupt context.
+
+  **Realistic Solution:** You caused **Main Loop Starvation via ISR Blocking**.
+
+  When a hardware interrupt (like your 1-second timer) fires, the CPU halts the main loop and jumps into the Interrupt Service Routine (ISR).
+  Crucially, while the CPU is inside an ISR, *the main loop does not execute at all*.
+
+  By putting an 800ms ML math workload directly inside the ISR, you physically froze the main loop for 800ms. The watchdog timer, which expects a ping from the main loop every 500ms, expires while the CPU is stuck inside your massive interrupt handler. The hardware watchdog assumes the main loop is deadlocked and forcefully resets the chip.
+
+  **The Fix:** **Never put blocking ML math inside an ISR.**
+  The ISR should take < 1ms. It should simply set a volatile boolean flag (`ml_flag = true`) or push to a queue, and immediately return. The main loop checks the flag, resets the watchdog, and then runs the 800ms ML model in normal user context.
+
+  > **Napkin Math:** ISR duration = 800ms. Watchdog deadline = 500ms. The CPU is trapped in the interrupt context 300ms past the physical hardware kill-switch deadline.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The TFLite Micro Resolving Pointer</b> · <code>frameworks</code> <code>memory</code></summary>
+
+- **Interviewer:** "You profile a TFLite Micro inference loop on a Cortex-M4. You notice that the actual math kernel (`arm_convolve_s8`) takes 10ms, but the overall `invoke()` call takes 13ms. You trace the extra 3ms to the framework's internal `GetTensor()` function. Why does looking up a tensor address take 3ms?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The tensor is stored in slow Flash." `GetTensor()` just returns a pointer; it doesn't read the whole tensor.
+
+  **Realistic Solution:** You are paying the **Dynamic Pointer Resolution Tax**.
+
+  In standard TFLite Micro, the memory planner allocates tensors inside the `tensor_arena`. During execution, the framework iterates through a linked list or an array of Node structs. For every single operator, the framework calls `GetTensor(input_index)` to find exactly where in the arena the input array currently lives.
+
+  Because the graph topology is parsed dynamically at runtime from the FlatBuffer, this lookup involves traversing arrays of structs, bounds checking, and pointer dereferencing for every single input, output, and scratch tensor, for every single layer, on every single inference.
+
+  **The Fix:** You must use **Ahead-of-Time (AoT) Compilation (like TVM microTVM or specific TFLite Micro compilers like TFLM-compiler)**. AoT compilation reads the graph offline and generates raw C code where the tensor memory addresses are hardcoded as static C-array offsets (e.g., `&tensor_arena[1024]`). This completely eliminates the dynamic lookup overhead, turning a 3ms tree-traversal into a 0-cycle compile-time constant.
+
+  > **Napkin Math:** A 50-layer model with 3 tensors per layer = 150 `GetTensor` calls per inference. If a dynamic lookup and bounds check takes 1,000 cycles (due to poor cache locality on the FlatBuffer), you lose 150,000 cycles (~1-3ms) purely on framework plumbing.
+
+  📖 **Deep Dive:** [Volume I: ML Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Int8 Asymmetric Zero-Point</b> · <code>frameworks</code> <code>math</code></summary>
+
+- **Interviewer:** "You are inspecting a TFLite Micro fully connected layer. The input tensor is INT8, the weights are INT8, and the output is INT8. However, the inner loop of the C++ code performs `(input[i] - input_zero_point) * (weight[i] - weight_zero_point)`. Why is this math so much slower than a pure `input * weight` dot product?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The zero-point is an optional calibration." It's not optional; it's the fundamental definition of asymmetric quantization.
+
+  **Realistic Solution:** You are suffering the math penalty of **Asymmetric Quantization**.
+
+  In asymmetric quantization, the real float value `0.0` does not necessarily map to the integer `0`. It might map to `127` (the zero-point).
+  To perform a mathematically correct multiplication of the underlying float values, the framework must shift the integers back to a symmetric origin *before* multiplying them.
+
+  If you just do `input * weight`, you are calculating `(A_real + Z_a) * (B_real + Z_b)`, which produces a massive algebraic cross-term error.
+
+  This subtraction forces the inner loop to do three operations (Subtract, Subtruct, Multiply) instead of one (Multiply), preventing the compiler from using the fastest `SMLAD` (Signed Multiply Accumulate Dual) DSP instructions.
+
+  **The Fix:** Force the quantization scheme to be **Symmetric** for weights (where `zero_point == 0`). If the weight zero-point is 0, the math simplifies drastically, and standard CMSIS-NN kernels can heavily optimize the inner dot-product loops. (Note: Activations are often kept asymmetric to handle ReLU ranges like 0 to 255).
+
+  > **Napkin Math:** Asymmetric MAC = 3 instructions. Symmetric Weight MAC = 2 instructions. For a million parameters, symmetric weights eliminate a million unnecessary integer subtractions per inference.
+
+  📖 **Deep Dive:** [Volume I: Model Compression](https://harvard-edge.github.io/cs249r_book_dev/contents/model_compression/model_compression.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The CMSIS-DSP FFT Scaling Bug</b> · <code>math</code> <code>frameworks</code></summary>
+
+- **Interviewer:** "You use the ARM CMSIS-DSP library to compute a 256-point FFT for an audio wake-word model. The audio signal is a perfect sine wave. However, the FFT output values are bizarrely small, much lower than the theoretical amplitude. The code isn't crashing, but the TinyML model fails to trigger because the input features are too weak. What scaling behavior of the CMSIS-DSP library did you forget to reverse?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The microphone volume is too low." A hardware gain issue wouldn't just make the FFT numbers small; it would increase the noise floor ratio. The prompt says it's a *perfect* sine wave.
+
+  **Realistic Solution:** You forgot to reverse the **Inherent Bit-Growth Downscaling**.
+
+  When computing an FFT on an integer/fixed-point processor (or even using the float implementations designed to mimic them), each stage (butterfly) of the FFT algorithm naturally causes the mathematical values to grow. A 256-point FFT has $\log_2(256) = 8$ stages.
+
+  To prevent the numbers from overflowing the 32-bit registers during these stages, the CMSIS-DSP `arm_cfft` functions automatically downscale the values by dividing by 2 at each stage.
+  Therefore, the final output of the 256-point FFT is technically scaled down by a factor of 256 ($2^8$).
+
+  **The Fix:** Before passing the FFT bins into your neural network (which was likely trained on unscaled or normalized STFT data in Python using `scipy` or `librosa`), you must manually multiply every bin by the FFT size (e.g., 256) to restore the true physical amplitude of the signal.
+
+  > **Napkin Math:** $N=256$. If the true amplitude of a frequency bin is $1.0$, the CMSIS-DSP function will output roughly $0.0039$ ($1 / 256$). If your neural network was expecting values near $1.0$, passing $0.0039$ guarantees a $0\%$ confidence score.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Hardware Divider Stall</b> · <code>compute</code> <code>architecture</code></summary>
+
+- **Interviewer:** "You are porting an anomaly detection algorithm to a Cortex-M0+. The code has a normalization step inside the tightest inner loop: `float norm = val / max_val;`. Your profiling shows this single division operation takes an astonishing 40 clock cycles. Why is division so slow on this specific chip?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Floating point math is slow." While true on chips without an FPU, division is uniquely terrible on the M0+.
+
+  **Realistic Solution:** The Cortex-M0+ lacks a **Hardware Divide Instruction (SDIV/UDIV)**.
+
+  Higher-end chips (like the M3, M4) have dedicated silicon to perform integer division in 2-12 cycles. The M0+ was designed for absolute minimum silicon area. It physically does not have a divider circuit.
+
+  When the compiler encounters the `/` operator, it cannot generate a single assembly instruction. Instead, it injects a branch to a software division subroutine (like `__aeabi_fdiv`). This subroutine performs the division manually using a loop of shift-and-subtract instructions. Branching to the subroutine, executing the loop, and returning takes massive amounts of time.
+
+  **The Fix:** Never perform division inside a tight loop on low-end MCUs. Pre-calculate the reciprocal outside the loop (`float inv_max = 1.0f / max_val;`), and then use multiplication inside the loop (`float norm = val * inv_max;`), which can be executed much faster via the hardware multiplier.
+
+  > **Napkin Math:** Software division: ~40 cycles. Hardware multiplication: 1-2 cycles. Changing a `/` to a `*` makes the normalization step 20x faster.
+
+  📖 **Deep Dive:** [Volume I: Neural Computation](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The SRAM Bank Collision</b> · <code>architecture</code> <code>memory</code></summary>
+
+- **Interviewer:** "You have a Cortex-M7 running at 400 MHz. Core memory is split into SRAM1 and SRAM2. Your DMA controller streams 1080p camera data into a buffer in SRAM1. To maximize cache locality, you place your ML model's `tensor_arena` directly adjacent to the camera buffer, also in SRAM1. When the camera is active, your ML inference time slows down by 25%. The DMA uses zero CPU cycles. Why did the CPU slow down?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The CPU is processing the interrupts from the camera." Interrupts take microseconds, not 25% of the total runtime.
+
+  **Realistic Solution:** You caused a **Bus Matrix Collision on a single SRAM bank**.
+
+  The SoC has a multi-layer bus matrix allowing parallel transfers. If the DMA talks to SRAM1 and the CPU talks to SRAM2, they operate perfectly in parallel.
+
+  However, you placed *both* the DMA target and the CPU's ML arena inside SRAM1. SRAM blocks typically have a single physical port to the bus matrix. When the DMA controller attempts to write a pixel to SRAM1, and the CPU attempts to read a weight from SRAM1 on the exact same clock cycle, the Bus Arbiter must intervene.
+
+  It halts the CPU pipeline for 1 or 2 cycles to allow the DMA to finish its write. Because the NPU/CPU is attempting to read memory constantly during a matrix multiplication, it suffers thousands of these micro-stalls, destroying the 400 MHz throughput.
+
+  **The Fix:** You must deliberately separate the memory domains. Place the DMA peripheral buffers in SRAM2, and the ML Tensor Arena in SRAM1. The crossbar switch will allow the CPU and DMA to operate simultaneously with zero contention.
+
+  > **Napkin Math:** Camera DMA writes a byte every 10 cycles. The CPU tries to read a byte every 2 cycles. Every 10th cycle, the CPU gets blocked by the DMA, resulting in a minimum 10% structural stall across millions of operations.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The FPU Register Thrashing</b> · <code>os</code> <code>latency</code></summary>
+
+- **Interviewer:** "Your Cortex-M4F (which has an FPU) runs an RTOS. The ML model runs in a low-priority thread using heavily optimized floating-point math. You have a high-priority timer interrupt (ISR) that fires every 1ms to read an analog sensor. To be 'accurate', you decide to convert the sensor's integer value to a float inside the ISR before saving it. Suddenly, your ML thread's overall latency spikes dramatically. What did you do to the RTOS scheduler?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Floating point math is slow." Converting an int to a float takes 1 cycle on an FPU. That doesn't explain a massive latency spike.
+
+  **Realistic Solution:** You destroyed the **Lazy FPU Stacking (Context Save) mechanism**.
+
+  The FPU has 32 massive registers (128 bytes total). To save time during interrupts, the ARM Cortex-M architecture uses "Lazy Stacking". When an interrupt fires, it only saves the basic integer registers to the stack. It *does not* save the FPU registers, assuming the ISR won't use them.
+
+  However, the moment you put a floating-point operation inside your ISR, the CPU detects that the FPU state is about to be modified. It physically halts the ISR execution and forces a massive memory dump of all 32 FPU registers from the interrupted ML thread onto the stack before proceeding. When the ISR finishes, it has to pop them all back off.
+
+  You turned a lightning-fast 16-byte context switch into a grinding 144-byte context switch, and you are doing it 1,000 times a second.
+
+  **The Fix:** Never use floating-point types inside an Interrupt Service Routine. Keep the data as integers, and perform the float conversion later in a normal thread context to preserve Lazy Stacking.
+
+  > **Napkin Math:** Standard ISR entry = ~12 cycles. FPU stacking ISR entry = ~30 cycles. Adding 1 line of float code tripled the hardware overhead of entering and exiting the interrupt 1,000 times a second.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The ITCM Execution Bottleneck</b> · <code>memory-hierarchy</code> <code>performance</code></summary>
+
+- **Interviewer:** "You compile a highly optimized custom ML C++ kernel for an NXP i.MX RT crossover MCU (running at 600 MHz). The code is stored in the external QSPI Flash. When you run it, the performance is identical to an MCU running at 150 MHz. You check the cache, and it's enabled. Why is the 600 MHz CPU effectively running at quarter speed?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The external flash is slow." It is slow, but the cache should mask that. The issue is what happens during a cache miss in a tight, unrolled mathematical loop.
+
+  **Realistic Solution:** You are suffering from **I-Cache Misses on critical DSP inner loops**.
+
+  When running code from external Flash, the CPU relies on the Instruction Cache (I-Cache). However, highly optimized DSP code (like unrolled matrix multiplications) often has a large binary footprint. If the inner loop of the convolution exceeds the size of a cache line (or causes conflicts), the CPU constantly suffers cache misses.
+
+  A cache miss forces the 600 MHz CPU to stall and wait for the extremely slow external QSPI Flash (e.g., 50 MHz) to fetch the next instruction. The CPU spends 75% of its time frozen, waiting for the memory controller.
+
+  **The Fix:** You must link the critical inner loop functions directly into the **ITCM (Instruction Tightly Coupled Memory)**. ITCM is a block of SRAM built directly into the CPU core pipeline. Code running from ITCM executes with zero wait states at the full 600 MHz clock speed, completely bypassing the unpredictable I-Cache and external Flash.
+
+  > **Napkin Math:** QSPI Flash access = ~20 cycles. ITCM access = 1 cycle. If an unrolled loop misses the cache even 10% of the time, the effective CPI (Cycles Per Instruction) spikes from 1.0 to 3.0, slashing the 600 MHz core's throughput by 66%.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The 16-bit MAC Overflow</b> · <code>compute</code> <code>math</code></summary>
+
+- **Interviewer:** "You are writing a custom dot-product loop in C for an older 16-bit MCU. You declare your accumulator as `int16_t sum = 0;`. Your input features and weights are all `int8_t`. The loop multiplies them and adds to the sum. The code compiles and runs instantly, but the ML output predictions are completely random. Why is the math catastrophically wrong?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "An 8-bit times an 8-bit fits in a 16-bit, so the math is fine." The multiplication fits, but the accumulation does not.
+
+  **Realistic Solution:** You hit an **Accumulator Overflow (Wrap-around)**.
+
+  When you multiply two maximum `int8_t` values (127 * 127), the result is 16,129. This fits perfectly into a 16-bit integer (max 32,767).
+
+  However, a dot product *accumulates* these results. On the very second iteration of the loop, if you add another 16,129, the sum becomes 32,258.
+  On the third iteration, adding another 16,129 pushes the sum to 48,387. Because a signed 16-bit integer wraps around at 32,767, the integer overflows into the negatives (e.g., -17,149).
+
+  The loop continues summing, wildly oscillating between positive and negative extremes, completely destroying the mathematical result of the convolution layer.
+
+  **The Fix:** You must always accumulate into a register that is significantly wider than the multiplication result. For `int8_t` math, you must use an `int32_t` accumulator (which allows you to safely sum over 2 billion before overflowing).
+
+  > **Napkin Math:** 127 * 127 = 16,129. 32,767 / 16,129 = ~2. You physically cannot sum more than 2 maximum activations together before a 16-bit accumulator catastrophically overflows.
+
+  📖 **Deep Dive:** [Volume I: Neural Computation](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Branch Prediction Penalty</b> · <code>compute</code> <code>architecture</code></summary>
+
+- **Interviewer:** "You are implementing a custom Leaky ReLU activation function in C. You write it like this: `for(i=0; i<N; i++) { if (x[i] > 0) y[i] = x[i]; else y[i] = x[i] * 0.1f; }`. You test it on an array of 10,000 values, and it takes 30,000 cycles. Why is a simple `if` statement so incredibly slow on an ARM Cortex-M7?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "If statements are just slow." If statements are usually fast (1 cycle), unless they break the CPU pipeline.
+
+  **Realistic Solution:** You are causing massive **Branch Prediction Failures**.
+
+  The Cortex-M7 has a deep 6-stage instruction pipeline. To keep it full, the CPU tries to guess which way the `if` statement will go before it actually computes it.
+
+  In a neural network, activations are essentially random noise hovering around zero. The CPU's branch predictor guesses incorrectly roughly 50% of the time. When it guesses wrong, it executes the wrong instruction, realizes its mistake, flushes the entire 6-stage pipeline, and has to fetch the correct instructions from memory. This pipeline flush penalty costs many cycles.
+
+  **The Fix:** Eliminate the branch entirely using bitwise math or hardware-specific conditional instructions. For example, using the ARM `IT` (If-Then) block in assembly, or using branchless bit-masking in C, ensures the pipeline never stalls regardless of the data value.
+
+  > **Napkin Math:** A correct branch = 1 cycle. A mispredicted branch = 6 cycles (pipeline flush). At a 50% fail rate, your average instruction takes 3.5 cycles instead of 1. You slowed down the entire layer by 350%.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The L1 Cache Miss Penalty</b> · <code>memory-hierarchy</code> <code>performance</code></summary>
+
+- **Interviewer:** "You are implementing a Transposed Convolution (often used in audio upsampling) on an MCU with an L1 Data Cache. The input array is small. To perform the transpose, your C code reads sequentially from the input array, but writes to the output array using a massive stride (`output[i * 256] = val;`). The profiler shows the CPU is stalling constantly. Why does writing to memory with a stride destroy performance?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Writing to RAM is slower than reading." RAM write speeds are symmetrical. The problem is how the cache handles the writes.
+
+  **Realistic Solution:** You are causing continuous **L1 Cache Write-Misses and Evictions**.
+
+  A Data Cache loads memory in "Cache Lines" (e.g., 32 bytes at a time). When you write sequentially, the CPU fills the 32-byte line in the ultra-fast cache, and then flushes it to SRAM once.
+
+  When you write with a stride of 256, you write one 4-byte float into a new cache line, and then immediately jump to a completely different memory address 256 bytes away.
+  1. The CPU suffers a "Write Miss" (the address isn't in cache).
+  2. It must fetch the surrounding 32 bytes from SRAM into the cache just to modify 4 bytes.
+  3. Because you keep jumping around, you quickly fill up the tiny L1 cache.
+  4. The CPU is forced to evict the cache lines back to SRAM before they are even full.
+
+  You have turned the high-speed L1 Cache into a bottleneck, forcing the hardware to perform two massive SRAM transfers (read line, write line) for every single float you calculate.
+
+  **The Fix:** You must restructure the loops to employ **Cache Blocking/Tiling**. Process the transpose in small 8x8 or 16x16 blocks that perfectly fit inside the L1 cache, ensuring that once a cache line is loaded, all data within it is utilized before it is evicted.
+
+  > **Napkin Math:** Sequential write = 1 SRAM access per 8 floats. Strided write = 2 SRAM accesses per 1 float. You increased the physical memory bandwidth requirement by a factor of 16x.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+  </details>
+</details>
