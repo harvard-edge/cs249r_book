@@ -1,14 +1,14 @@
 name: '🔮 Labs · 👁️ Preview (Dev)'
 
-# Builds and deploys Labs site to dev preview
+# Builds and deploys Labs site to dev preview.
+# Gated: only runs after labs-validate-dev passes (or on manual dispatch).
 
 on:
   workflow_dispatch:
-  push:
+  workflow_run:
+    workflows: ['🔮 Labs · ✅ Validate (Dev)']
+    types: [completed]
     branches: [dev]
-    paths:
-      - 'labs/**'
-      - 'mlsysim/**'
 
 permissions:
   contents: read
@@ -21,6 +21,7 @@ concurrency:
 jobs:
   build-and-deploy:
     name: '🔮 Build & Deploy Labs (Dev)'
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -32,37 +33,49 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: 📦 Build mlsysim wheel
+      - name: 📦 Install dependencies & build mlsysim wheel
         run: |
-          pip install build
+          pip install build marimo
+          pip install -r labs/requirements.txt
+          pip install mlsysim/
           cd mlsysim && python3 -m build --wheel
           echo "✅ Wheel built:"
           ls -la dist/*.whl
 
       - name: 🔮 Export labs as WASM HTML
         run: |
-          pip install marimo
           mkdir -p labs/_wasm_build/wheels
 
-          # Copy the mlsysim wheel to the output
           cp mlsysim/dist/mlsysim-*.whl labs/_wasm_build/wheels/
 
-          # Export each lab as a self-contained WASM HTML app
+          EXPECTED=0
+          EXPORTED=0
+          FAILED=""
+
           for vol in vol1 vol2; do
             mkdir -p "labs/_wasm_build/${vol}"
             for lab in labs/${vol}/lab_*.py; do
               name=$(basename "$lab" .py)
+              EXPECTED=$((EXPECTED + 1))
               echo "  Exporting ${vol}/${name}..."
-              marimo export html-wasm "$lab" \
+              if marimo export html-wasm "$lab" \
                 -o "labs/_wasm_build/${vol}/${name}/index.html" \
                 --mode run \
-                2>&1 || echo "⚠️ Failed to export ${vol}/${name}, skipping"
+                --no-show-code; then
+                EXPORTED=$((EXPORTED + 1))
+              else
+                echo "❌ FAILED to export ${vol}/${name}"
+                FAILED="${FAILED} ${vol}/${name}"
+              fi
             done
           done
 
-          echo "✅ WASM export complete:"
-          find labs/_wasm_build -name "index.html" | wc -l
-          echo " notebooks exported"
+          echo ""
+          echo "📊 WASM Export Summary: ${EXPORTED}/${EXPECTED} notebooks exported"
+          if [ -n "$FAILED" ]; then
+            echo "❌ Failed exports:${FAILED}"
+            exit 1
+          fi
 
       - name: 🔧 Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
@@ -73,13 +86,23 @@ jobs:
           quarto render
           touch _build/.nojekyll
 
-          # Merge WASM exports into the Quarto build output
-          cp -r _wasm_build/vol1 _build/vol1 2>/dev/null || true
-          cp -r _wasm_build/vol2 _build/vol2 2>/dev/null || true
-          cp -r _wasm_build/wheels _build/wheels 2>/dev/null || true
+          # Merge WASM exports AFTER Quarto render so they overwrite any fallback
+          cp -r _wasm_build/vol1 _build/vol1
+          cp -r _wasm_build/vol2 _build/vol2
+          cp -r _wasm_build/wheels _build/wheels
+
+          # Verify WASM notebooks are in place
+          WASM_COUNT=$(find _build/vol1 _build/vol2 -name "index.html" | wc -l)
+          echo "📊 WASM notebooks in final build: ${WASM_COUNT}"
+          if [ "$WASM_COUNT" -lt 10 ]; then
+            echo "❌ Too few WASM notebooks in build output (expected 33, got ${WASM_COUNT})"
+            exit 1
+          fi
 
           echo "✅ Final build contents:"
           ls -la _build/
+          echo "  vol1/:" && ls _build/vol1/ | head -5
+          echo "  vol2/:" && ls _build/vol2/ | head -5
 
       - name: 🔧 Modify announcement for dev preview
         run: |
