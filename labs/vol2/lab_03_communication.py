@@ -15,8 +15,9 @@ async def _():
 
     if sys.platform == "emscripten":
         import micropip
+        await micropip.install(["pydantic", "pint"], keep_going=False)
         await micropip.install(
-            "https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl"
+            "../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
         )
     elif "mlsysim" not in sys.modules:
         _root = Path(__file__).resolve().parents[2]
@@ -43,6 +44,8 @@ async def _():
     NVLINK_GBS = NVLINK_H100_BW.m_as("GB/s")
 
     ledger = DesignLedger()
+    if getattr(ledger, "is_wasm", False):
+        await ledger.load_async()
     return (
         COLORS, LAB_CSS, apply_plotly_theme, go, math, mo, np, ledger, ureg,
         INFINIBAND_NDR_BW_GBS, INFINIBAND_HDR_BW_GBS,

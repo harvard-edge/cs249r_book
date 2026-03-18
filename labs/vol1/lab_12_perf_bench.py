@@ -18,8 +18,9 @@ async def _():
 
     if sys.platform == "emscripten":
         import micropip
+        await micropip.install(["pydantic", "pint"], keep_going=False)
         await micropip.install(
-            "https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl"
+            "../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
         )
     elif "mlsysim" not in sys.modules:
         _root = Path(__file__).resolve().parents[2]
@@ -44,6 +45,8 @@ async def _():
     RESNET50_PARAMS = mlsysim.Models.ResNet50.parameters.m_as("count")
 
     ledger = DesignLedger()
+    if getattr(ledger, "is_wasm", False):
+        await ledger.load_async()
     return (
         A100_BW, A100_TFLOPS,
         COLORS, H100_BW, H100_TDP, H100_TFLOPS,

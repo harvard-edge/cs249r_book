@@ -181,7 +181,6 @@ jobs:
         run: |
           echo "🧪 Running engine execution tests..."
           python3 -m pytest labs/tests/test_engine.py -v --tb=short -k "engine" --junitxml=test-results-engine.xml
-        continue-on-error: true  # Engine tests may fail on labs that need custom sim modules
 
       - name: 🧪 Run Level 3 tests (widget structure)
         run: |
@@ -225,12 +224,118 @@ jobs:
           echo "📊 Build size: $(du -sh ${{ vars.LABS_ROOT }}/_build | cut -f1)"
 
   # ===========================================================================
+  # Stage 3: WASM export smoke test
+  # ===========================================================================
+  wasm-smoke-test:
+    name: '🌐 WASM Export Smoke Test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 📦 Install dependencies
+        run: |
+          pip install build marimo
+          pip install -r labs/requirements.txt
+          pip install mlsysim/
+
+      - name: 📦 Build mlsysim wheel
+        run: |
+          cd mlsysim && python3 -m build --wheel
+          echo "✅ Wheel built:"
+          ls -la dist/*.whl
+
+      - name: 📦 Setup Node.js for Pyodide test
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 🧪 Test Pyodide wheel install
+        run: |
+          npm install pyodide
+          WHEEL_FILE=$(ls mlsysim/dist/*.whl | head -n 1)
+          cat << 'EOF' > test_pyodide.js
+          const { loadPyodide } = require("pyodide");
+          const path = require("path");
+          
+          async function main() {
+            const pyodide = await loadPyodide();
+            await pyodide.loadPackage("micropip");
+            const micropip = pyodide.pyimport("micropip");
+            
+            console.log("Installing pydantic and pint...");
+            await micropip.install(["pydantic", "pint"], {keep_going: false});
+            
+            console.log("Installing mlsysim wheel...");
+            const wheelPath = process.argv[2];
+            await micropip.install("file://" + path.resolve(wheelPath), {keep_going: false});
+            
+            console.log("Testing imports...");
+            pyodide.runPython(`
+              import mlsysim
+              from mlsysim.core.engine import Engine
+              print("✅ mlsysim imported successfully in Pyodide!")
+            `);
+          }
+          main().catch(err => {
+            console.error("❌ Pyodide test failed:", err);
+            process.exit(1);
+          });
+          EOF
+          node test_pyodide.js "$WHEEL_FILE"
+
+      - name: 🌐 Export representative labs to WASM HTML
+        run: |
+          SMOKE_LABS="labs/vol1/lab_00_introduction.py labs/vol1/lab_01_ml_intro.py labs/vol2/lab_01_introduction.py"
+          FAILED=""
+          
+          # Setup wheel directory so relative paths work
+          mkdir -p /tmp/wasm-smoke/wheels
+          cp mlsysim/dist/*.whl /tmp/wasm-smoke/wheels/
+
+          for lab in $SMOKE_LABS; do
+            name=$(basename "$lab" .py)
+            echo "  Exporting ${name}..."
+            mkdir -p "/tmp/wasm-smoke/${name}"
+            if marimo export html-wasm "$lab" \
+              -o "/tmp/wasm-smoke/${name}/index.html" \
+              --mode run --no-show-code; then
+              # Verify the HTML is non-trivial (>10KB)
+              SIZE=$(wc -c < "/tmp/wasm-smoke/${name}/index.html")
+              if [ "$SIZE" -lt 10000 ]; then
+                echo "❌ ${name}: index.html is only ${SIZE} bytes (expected >10KB)"
+                FAILED="${FAILED} ${name}"
+              else
+                echo "✅ ${name}: ${SIZE} bytes"
+              fi
+            else
+              echo "❌ ${name}: marimo export failed"
+              FAILED="${FAILED} ${name}"
+            fi
+          done
+
+          if [ -n "$FAILED" ]; then
+            echo ""
+            echo "❌ WASM smoke test failed for:${FAILED}"
+            exit 1
+          fi
+          echo ""
+          echo "✅ All WASM smoke tests passed"
+
+  # ===========================================================================
   # Summary
   # ===========================================================================
   summary:
     name: '📊 Summary'
     runs-on: ubuntu-latest
-    needs: [validate-notebooks, build-site]
+    needs: [validate-notebooks, build-site, wasm-smoke-test]
     if: always()
 
     steps:
@@ -242,10 +347,13 @@ jobs:
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| 🧪 Notebook Validation | ${{ needs.validate-notebooks.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔨 Site Build | ${{ needs.build-site.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌐 WASM Export | ${{ needs.wasm-smoke-test.result }} |" >> $GITHUB_STEP_SUMMARY
 
       - name: ❌ Check for failures
         run: |
-          if [ "${{ needs.validate-notebooks.result }}" = "failure" ] || [ "${{ needs.build-site.result }}" = "failure" ]; then
+          if [ "${{ needs.validate-notebooks.result }}" = "failure" ] || \
+             [ "${{ needs.build-site.result }}" = "failure" ] || \
+             [ "${{ needs.wasm-smoke-test.result }}" = "failure" ]; then
             echo "❌ Validation failed"
             exit 1
           fi

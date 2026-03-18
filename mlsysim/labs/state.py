@@ -48,15 +48,8 @@ class DesignLedger:
     def load(self) -> LedgerState:
         """Loads the ledger from the best available persistent storage."""
         if self.is_wasm:
-            try:
-                from js import localStorage  # Pyodide bridge to browser API
-                raw = localStorage.getItem(self._LOCALSTORAGE_KEY)
-                if raw:
-                    data = json.loads(raw)
-                    data["history"] = self._parse_history(data)
-                    self._state = LedgerState(**data)
-            except Exception:
-                self._state = LedgerState()
+            # Synchronous load is not possible in WASM with IndexedDB.
+            # Labs must call `await ledger.load_async()` during setup.
             return self._state
 
         if self.file_path.exists():
@@ -68,6 +61,96 @@ class DesignLedger:
             except Exception:
                 self._state = LedgerState()
         return self._state
+
+    async def load_async(self) -> LedgerState:
+        """Async load for WASM environments using IndexedDB."""
+        if not self.is_wasm:
+            return self.load()
+        
+        try:
+            from pyodide.code import run_js
+            
+            js_code = """
+            (async () => {
+                return new Promise((resolve, reject) => {
+                    const request = indexedDB.open("mlsys_ledger_db", 1);
+                    request.onupgradeneeded = (e) => {
+                        const db = e.target.result;
+                        if (!db.objectStoreNames.contains("ledger")) {
+                            db.createObjectStore("ledger");
+                        }
+                    };
+                    request.onsuccess = (e) => {
+                        const db = e.target.result;
+                        if (!db.objectStoreNames.contains("ledger")) {
+                            resolve(null);
+                            return;
+                        }
+                        try {
+                            const tx = db.transaction("ledger", "readonly");
+                            const store = tx.objectStore("ledger");
+                            const getReq = store.get("mlsys_design_ledger");
+                            getReq.onsuccess = () => resolve(getReq.result);
+                            getReq.onerror = () => resolve(null);
+                        } catch (err) {
+                            resolve(null);
+                        }
+                    };
+                    request.onerror = () => resolve(null);
+                });
+            })()
+            """
+            raw = await run_js(js_code)
+            if raw:
+                data = json.loads(raw)
+                data["history"] = self._parse_history(data)
+                self._state = LedgerState(**data)
+        except Exception as e:
+            print(f"Failed to load from IndexedDB: {e}")
+            self._state = LedgerState()
+        return self._state
+
+    async def save_async(self):
+        """Async save for WASM environments using IndexedDB."""
+        if not self.is_wasm:
+            return
+        try:
+            import json
+            from pyodide.code import run_js
+            from js import globalThis
+            
+            state_json = json.dumps(asdict(self._state))
+            globalThis.__mlsys_temp_state = state_json
+            
+            js_code = """
+            (async () => {
+                return new Promise((resolve, reject) => {
+                    const request = indexedDB.open("mlsys_ledger_db", 1);
+                    request.onupgradeneeded = (e) => {
+                        const db = e.target.result;
+                        if (!db.objectStoreNames.contains("ledger")) {
+                            db.createObjectStore("ledger");
+                        }
+                    };
+                    request.onsuccess = (e) => {
+                        const db = e.target.result;
+                        try {
+                            const tx = db.transaction("ledger", "readwrite");
+                            const store = tx.objectStore("ledger");
+                            const putReq = store.put(globalThis.__mlsys_temp_state, "mlsys_design_ledger");
+                            putReq.onsuccess = () => resolve(true);
+                            putReq.onerror = () => resolve(false);
+                        } catch (err) {
+                            resolve(false);
+                        }
+                    };
+                    request.onerror = () => resolve(false);
+                });
+            })()
+            """
+            await run_js(js_code)
+        except Exception as e:
+            print(f"Failed to save to IndexedDB: {e}")
 
     def save(self, track: str = None, chapter: int = None, design: dict = None):
         """Persists the design decisions to storage."""
@@ -82,14 +165,8 @@ class DesignLedger:
             self._state.history[ch_id] = design
 
         if self.is_wasm:
-            try:
-                from js import localStorage
-                localStorage.setItem(
-                    self._LOCALSTORAGE_KEY,
-                    json.dumps(asdict(self._state)),
-                )
-            except Exception:
-                pass  # Degrade gracefully if localStorage unavailable
+            import asyncio
+            asyncio.create_task(self.save_async())
         else:
             self.config_dir.mkdir(exist_ok=True)
             with open(self.file_path, 'w') as f:

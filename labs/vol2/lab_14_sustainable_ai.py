@@ -41,7 +41,10 @@ async def _():
 
     if sys.platform == "emscripten":
         import micropip
-        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+        await micropip.install(["pydantic", "pint"], keep_going=False)
+        await micropip.install(
+            "../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
+        )
     elif "mlsysim" not in sys.modules:
         _root = Path(__file__).resolve().parents[2]
         if str(_root) not in sys.path:
@@ -52,6 +55,8 @@ async def _():
     from mlsysim.labs.components import DecisionLog
 
     ledger = DesignLedger()
+    if getattr(ledger, "is_wasm", False):
+        await ledger.load_async()
 
     # ── Sustainability constants ────────────────────────────────────────────
     # Grid carbon intensities (gCO2/kWh) — Source: IEA (2023), chapter data

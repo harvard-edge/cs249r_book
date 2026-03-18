@@ -22,8 +22,9 @@ async def _():
     # WASM bootstrap: install mlsysim from hosted wheel when running in browser
     if sys.platform == "emscripten":
         import micropip
+        await micropip.install(["pydantic", "pint"], keep_going=False)
         await micropip.install(
-            "https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl"
+            "../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
         )
     elif "mlsysim" not in sys.modules:
         _root = Path(__file__).resolve().parents[2]
@@ -32,6 +33,7 @@ async def _():
 
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
     import mlsysim
     from mlsysim import Engine, Models, Hardware
 
@@ -78,8 +80,10 @@ async def _():
     RESNET50_SIZE_MB = RESNET50_PARAMS * 2 / (1024 * 1024)  # FP16
 
     ledger = DesignLedger()
+    if getattr(ledger, "is_wasm", False):
+        await ledger.load_async()
     return (
-        COLORS, LAB_CSS, apply_plotly_theme,
+        COLORS, LAB_CSS, apply_plotly_theme, DecisionLog,
         go, mo, np, math,
         Engine, Models, Hardware,
         H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB, H100_TDP_W,
@@ -304,7 +308,7 @@ def _(mo, partA_prediction):
         label="For ResNet-50 inference at batch=1 on an H100 GPU, which Iron Law "
               "term dominates total inference latency?",
     )
-    return (partB_prediction,)
+    return (partA_scenario, partA_fix, partB_prediction)
 
 @app.cell(hide_code=True)
 def _(mo, partB_prediction):
@@ -323,7 +327,7 @@ def _(mo, partB_prediction):
         label="ResNet-50 requires ~49 MB in FP16. The ESP32-S3 has 512 KB of SRAM. "
               "What is the ratio of model size to available memory?",
     )
-    return (partC_prediction,)
+    return (partB_batch, partC_prediction)
 
 @app.cell(hide_code=True)
 def _(mo, partC_prediction):
@@ -349,10 +353,10 @@ def _(mo, partC_prediction):
         label="What is the compute ratio between an H100 GPU and an ESP32 "
               "microcontroller?",
     )
-    return (partD_prediction,)
+    return (partC_target, partD_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partD_prediction):
+def _(DecisionLog, mo, partD_prediction):
     partD_scale = mo.ui.radio(
         options={"Linear scale": "linear", "Log scale": "log"},
         value="Linear scale",
@@ -360,6 +364,31 @@ def _(mo, partD_prediction):
         inline=True,
     )
 
+    synth_decision_input, synth_decision_ui = DecisionLog(
+        placeholder="Based on what I learned in this lab, the most important diagnostic "
+                    "question before investing in hardware is..."
+    )
+    return (partD_scale, synth_decision_input, synth_decision_ui)
+
+@app.cell(hide_code=True)
+def _(
+    COLORS,
+    H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB, H100_TDP_W,
+    A100_TFLOPS_FP16, A100_BW_GBS, A100_RAM_GB,
+    JETSON_TFLOPS, JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W,
+    IPHONE_TFLOPS, IPHONE_BW_GBS, IPHONE_RAM_GB, IPHONE_TDP_W,
+    ESP32_TFLOPS, ESP32_BW_GBS, ESP32_RAM_KB, ESP32_RAM_GB, ESP32_TDP_W,
+    HIMAX_TFLOPS, HIMAX_BW_GBS, HIMAX_RAM_GB, HIMAX_TDP_W,
+    RESNET50_PARAMS, RESNET50_FLOPS, RESNET50_SIZE_MB,
+    Engine, Models, Hardware,
+    apply_plotly_theme, go, math, mo, np,
+    partA_prediction, partA_scenario, partA_fix,
+    partB_prediction, partB_batch,
+    partC_prediction, partC_target,
+    partD_prediction, partD_scale,
+    synth_decision_input, synth_decision_ui,
+    ledger,
+):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- Three Axes, One System
     # ─────────────────────────────────────────────────────────────────────
@@ -624,22 +653,20 @@ Algorithm capacity metrics complete the picture.
 
         _batch = partB_batch.value
         _eta = 0.5
-        _overhead_ms = 0.05
 
-        # Iron Law calculation using direct formulas (matching Engine.solve physics)
-        _model_gb = RESNET50_SIZE_MB / 1024
-        _activ_gb = 0.002 * _batch
-        _d_gb = _model_gb + _activ_gb
-        _t_data_ms = (_d_gb / H100_BW_GBS) * 1000.0
-        _t_comp_ms = (RESNET50_FLOPS * _batch / (H100_TFLOPS_FP16 * 1e12 * _eta)) * 1000.0
-        _t_ovh_ms = _overhead_ms
-        _t_total = _t_data_ms + _t_comp_ms + _t_ovh_ms
+        # Use the Engine API — the same Roofline solver students will use for all 14 labs
+        _profile = Engine.solve(
+            Models.ResNet50, Hardware.Cloud.H100,
+            batch_size=_batch, precision="fp16", efficiency=_eta,
+        )
+        _t_data_ms = _profile.latency_memory.m_as("ms")
+        _t_comp_ms = _profile.latency_compute.m_as("ms")
+        _t_ovh_ms = _profile.latency_overhead.m_as("ms")
+        _t_total = _profile.latency.m_as("ms")
+        _bottleneck = _profile.bottleneck
+        _mfu = _profile.mfu * 100
 
         _terms = {"Data": _t_data_ms, "Compute": _t_comp_ms, "Overhead": _t_ovh_ms}
-        _bottleneck = max(_terms, key=_terms.get)
-
-        # MFU gauge
-        _mfu = _t_comp_ms / _t_total * 100 if _t_total > 0 else 0
 
         # Waterfall chart
         _labels = ["Data Term (D/BW)", "Compute Term (O/R*eta)", "Overhead (L)"]
@@ -647,9 +674,10 @@ Algorithm capacity metrics complete the picture.
         _bar_colors = [COLORS["BlueLine"], COLORS["OrangeLine"], COLORS["Grey"]]
         _tkeys = list(_terms.keys())
 
+        _bottleneck_map = {"Memory": "Data", "Compute": "Compute"}
         _fig = go.Figure()
         for _i, (_lbl, _v, _bc) in enumerate(zip(_labels, _vals, _bar_colors)):
-            _bw = 3 if _tkeys[_i] == _bottleneck else 1
+            _bw = 3 if _tkeys[_i] == _bottleneck_map.get(_bottleneck, "") else 1
             _fig.add_trace(go.Bar(
                 name=_lbl, x=[_lbl], y=[_v],
                 marker_color=_bc, marker_line_color="white",
@@ -680,16 +708,17 @@ Algorithm capacity metrics complete the picture.
                 <div style="font-size:0.7rem; color:#94a3b8; margin-top:4px;">{sub}</div>
             </div>"""
 
+        _mem_gb = _profile.memory_footprint.m_as("GB")
+        _ai = _profile.arithmetic_intensity.magnitude
         _ridge_point = H100_TFLOPS_FP16 * 1000 / H100_BW_GBS  # FLOPs/Byte
-        _ai = RESNET50_FLOPS * _batch / (_d_gb * 1e9)  # FLOPs/Byte
 
         _cards = f"""
         <div style="display:flex; gap:12px; flex-wrap:wrap; margin:16px 0;">
-            {_mcard("Data Term", _t_data_ms, _bottleneck == "Data",
-                    f"{_d_gb:.4f} GB / {H100_BW_GBS:,.0f} GB/s")}
+            {_mcard("Data Term", _t_data_ms, _bottleneck == "Memory",
+                    f"{_mem_gb:.4f} GB / {H100_BW_GBS:,.0f} GB/s")}
             {_mcard("Compute Term", _t_comp_ms, _bottleneck == "Compute",
                     f"{RESNET50_FLOPS*_batch/1e9:.1f} GF / ({H100_TFLOPS_FP16:.0f}T * {_eta})")}
-            {_mcard("Overhead", _t_ovh_ms, _bottleneck == "Overhead", "dispatch tax")}
+            {_mcard("Overhead", _t_ovh_ms, False, "dispatch tax")}
             {_mcard("Total", _t_total, False, f"Bottleneck: {_bottleneck}")}
         </div>
         <div style="display:flex; gap:12px; flex-wrap:wrap; margin:0 0 16px 0;">
@@ -721,7 +750,7 @@ Algorithm capacity metrics complete the picture.
 
 ```
 T  =  D_vol/BW              +  O/(R * eta)                       +  L
-   =  {_d_gb:.4f} GB / {H100_BW_GBS:,} GB/s  +  {RESNET50_FLOPS*_batch:.2e} / ({H100_TFLOPS_FP16:.0f}T * {_eta})  +  {_t_ovh_ms:.3f} ms
+   =  {_mem_gb:.4f} GB / {H100_BW_GBS:,} GB/s  +  {RESNET50_FLOPS*_batch:.2e} / ({H100_TFLOPS_FP16:.0f}T * {_eta})  +  {_t_ovh_ms:.3f} ms
    =  {_t_data_ms:.4f} ms           +  {_t_comp_ms:.4f} ms                     +  {_t_ovh_ms:.4f} ms
    =  {_t_total:.4f} ms total  (Bottleneck: {_bottleneck})
 
@@ -730,14 +759,14 @@ AI = {_ai:.1f} FLOPs/Byte  {'<<' if _ai < _ridge_point else '>>'} Ridge Point ~{
 ```
 """))
 
-        # Batch sweep chart showing crossover
+        # Batch sweep chart showing crossover — powered by Engine.solve()
         _batches = [1, 2, 4, 8, 16, 32, 64, 128, 256]
         _data_times = []
         _comp_times = []
         for _b in _batches:
-            _dg = RESNET50_SIZE_MB / 1024 + 0.002 * _b
-            _data_times.append((_dg / H100_BW_GBS) * 1000)
-            _comp_times.append((RESNET50_FLOPS * _b / (H100_TFLOPS_FP16 * 1e12 * _eta)) * 1000)
+            _p = Engine.solve(Models.ResNet50, Hardware.Cloud.H100, batch_size=_b, precision="fp16", efficiency=_eta)
+            _data_times.append(_p.latency_memory.m_as("ms"))
+            _comp_times.append(_p.latency_compute.m_as("ms"))
 
         _fig2 = go.Figure()
         _fig2.add_trace(go.Scatter(
@@ -759,10 +788,11 @@ AI = {_ai:.1f} FLOPs/Byte  {'<<' if _ai < _ridge_point else '>>'} Ridge Point ~{
         items.append(mo.md("### Bottleneck Crossover: Data vs Compute by Batch Size"))
         items.append(mo.as_html(_fig2))
 
-        # Prediction reveal
+        # Prediction reveal — use Engine at batch=1 for reference values
         _pred = partB_prediction.value
-        _t_data_ref = (RESNET50_SIZE_MB / 1024 / H100_BW_GBS) * 1000
-        _t_comp_ref = (RESNET50_FLOPS / (H100_TFLOPS_FP16 * 1e12 * _eta)) * 1000
+        _ref = Engine.solve(Models.ResNet50, Hardware.Cloud.H100, batch_size=1, precision="fp16", efficiency=_eta)
+        _t_data_ref = _ref.latency_memory.m_as("ms")
+        _t_comp_ref = _ref.latency_compute.m_as("ms")
 
         if _pred == "data":
             _rev_msg = (
@@ -785,7 +815,7 @@ AI = {_ai:.1f} FLOPs/Byte  {'<<' if _ai < _ridge_point else '>>'} Ridge Point ~{
             _rev_msg = (
                 f"**The dominant term is Data at batch=1.** "
                 f"Data: {_t_data_ref:.4f} ms, Compute: {_t_comp_ref:.4f} ms, "
-                f"Overhead: {_overhead_ms:.4f} ms. "
+                f"Overhead: {_ref.latency_overhead.m_as('ms'):.4f} ms. "
                 "The workload is memory-bound. "
                 "Slide batch size up to ~32-64 to watch it become compute-bound."
             )
@@ -1211,6 +1241,15 @@ Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, th
         _mem_ratio = RESNET50_SIZE_MB * 1024 / ESP32_RAM_KB
         _ridge_point = H100_TFLOPS_FP16 * 1000 / H100_BW_GBS
 
+        # Persist to Design Ledger when student writes a decision
+        if synth_decision_input.value:
+            ledger.save(chapter=1, design={
+                "insight": synth_decision_input.value,
+                "bottleneck_at_batch1": "Memory",
+                "compute_ratio_h100_esp32": f"{_compute_ratio:,.0f}x",
+                "memory_ratio_resnet50_esp32": f"{_mem_ratio:.0f}x",
+            })
+
         return mo.vstack([
             mo.Html(f"""
             <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
@@ -1283,6 +1322,12 @@ Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, th
 *If you cannot answer all three from memory, revisit Parts A, B, and C.*
 """)
             }),
+
+            mo.md("---"),
+            mo.md("### Decision Log"),
+            mo.md("Record the single most important insight from this lab. "
+                   "This entry carries forward to Lab 02 and beyond via the Design Ledger."),
+            synth_decision_ui,
         ])
 
     # ─────────────────────────────────────────────────────────────────────

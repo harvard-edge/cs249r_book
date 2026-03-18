@@ -18,8 +18,9 @@ async def _():
 
     if sys.platform == "emscripten":
         import micropip
+        await micropip.install(["pydantic", "pint"], keep_going=False)
         await micropip.install(
-            "https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl"
+            "../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
         )
     elif "mlsysim" not in sys.modules:
         _root = Path(__file__).resolve().parents[2]
@@ -46,6 +47,8 @@ async def _():
     MOBILENET_FLOPS  = mlsysim.Models.MobileNetV2.inference_flops.m_as("flop")
 
     ledger = DesignLedger()
+    if getattr(ledger, "is_wasm", False):
+        await ledger.load_async()
     return (
         A100_BW, A100_RAM, A100_TFLOPS,
         COLORS, JETSON_BW, JETSON_RAM, JETSON_TFLOPS,

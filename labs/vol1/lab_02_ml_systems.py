@@ -21,8 +21,9 @@ async def _():
 
     if sys.platform == "emscripten":
         import micropip
+        await micropip.install(["pydantic", "pint"], keep_going=False)
         await micropip.install(
-            "https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl"
+            "../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
         )
     elif "mlsysim" not in sys.modules:
         _root = Path(__file__).resolve().parents[2]
@@ -69,6 +70,8 @@ async def _():
     FIBER_FACTOR = 0.67  # refractive index factor for fiber optic
 
     ledger = DesignLedger()
+    if getattr(ledger, "is_wasm", False):
+        await ledger.load_async()
     return (
         COLORS, LAB_CSS, apply_plotly_theme,
         go, mo, np, math,
@@ -138,8 +141,28 @@ def _(LAB_CSS, mo):
 
 # ─── CELL 2: BRIEFING ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
+def _(COLORS, ledger, mo):
+    # Load Lab 01 context from Design Ledger
+    _lab01 = ledger.get_design(1)
+    _lab01_banner = ""
+    if _lab01:
+        _lab01_banner = f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 10px; padding: 14px 20px; margin: 0 0 12px 0;
+                    font-size: 0.82rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+            <span style="font-size: 0.68rem; font-weight: 700; color: {COLORS['GreenLine']};
+                         text-transform: uppercase; letter-spacing: 0.1em;">
+                From Lab 01 &middot; Design Ledger
+            </span><br/>
+            You established that ResNet-50 at batch=1 on H100 is <strong>{_lab01.get('bottleneck_at_batch1', 'Memory')}-bound</strong>,
+            and the H100-to-ESP32 compute gap is <strong>{_lab01.get('compute_ratio_h100_esp32', '~1,000,000x')}</strong>.
+            This lab deepens that analysis.
+        </div>
+        """
+
+    mo.vstack([
+        mo.Html(_lab01_banner) if _lab01_banner else mo.md(""),
+        mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
                 padding: 20px 28px; margin: 8px 0 16px 0;
@@ -204,7 +227,8 @@ def _(COLORS, mo):
             </div>
         </div>
     </div>
-    """)
+    """),
+    ])
     return
 
 

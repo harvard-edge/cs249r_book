@@ -16,8 +16,9 @@ async def _():
     # WASM bootstrap: install mlsysim from hosted wheel when running in browser
     if sys.platform == "emscripten":
         import micropip
+        await micropip.install(["pydantic", "pint"], keep_going=False)
         await micropip.install(
-            "https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl"
+            "../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
         )
     elif "mlsysim" not in sys.modules:
         _root = Path(__file__).resolve().parents[2]
@@ -46,6 +47,8 @@ async def _():
     H100_TDP_W = mlsysim.Hardware.Cloud.H100.tdp.m_as("W")
 
     ledger = DesignLedger()
+    if getattr(ledger, "is_wasm", False):
+        await ledger.load_async()
     return (
         COLORS,
         H100_BW_GBS,

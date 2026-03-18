@@ -18,8 +18,9 @@ async def _():
 
     if sys.platform == "emscripten":
         import micropip
+        await micropip.install(["pydantic", "pint"], keep_going=False)
         await micropip.install(
-            "https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl"
+            "../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
         )
     elif "mlsysim" not in sys.modules:
         _root = Path(__file__).resolve().parents[2]
@@ -51,6 +52,8 @@ async def _():
     LLAMA3_8B_PARAMS = mlsysim.Models.Llama3_8B.parameters.m_as("count")
 
     ledger = DesignLedger()
+    if getattr(ledger, "is_wasm", False):
+        await ledger.load_async()
     return (
         COLORS, H100_BW, H100_RAM, H100_TDP, H100_TFLOPS,
         IPHONE_BW, IPHONE_RAM, IPHONE_TDP, IPHONE_TFLOPS,

@@ -13,6 +13,8 @@ Tests:
   - No hardcoded Cortex-M7 references (should be ESP32)
   - Cell count sanity (minimum 4 cells per lab)
   - Tab structure (mo.ui.tabs present)
+  - Wheel version consistency (micropip URL matches pyproject.toml)
+  - WASM-incompatible import detection
 """
 
 import ast
@@ -20,6 +22,8 @@ import re
 from pathlib import Path
 
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -179,3 +183,80 @@ class TestContentQuality:
         ]
         has_failure = any(marker in source for marker in failure_markers)
         assert has_failure, "No failure state found — every lab needs at least one"
+
+
+# ── Test: Wheel Version Consistency ─────────────────────────────────────────
+
+class TestWheelConsistency:
+    """Ensure the micropip wheel URL in every lab matches the actual mlsysim version."""
+
+    def test_micropip_url_matches_pyproject_version(self, lab_path):
+        """The micropip wheel URL must contain the version from mlsysim/pyproject.toml."""
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+
+        pyproject = REPO_ROOT / "mlsysim" / "pyproject.toml"
+        with open(pyproject, "rb") as f:
+            version = tomllib.load(f)["project"]["version"]
+
+        source = read_source(lab_path)
+        expected_fragment = f"../../wheels/mlsysim-{version}-py3-none-any.whl"
+        assert expected_fragment in source, (
+            f"Wheel version mismatch or not relative. Expected '{expected_fragment}' in micropip URL "
+            f"but not found. Update the micropip.install() URL in this lab."
+        )
+
+    def test_no_absolute_wheel_url(self, lab_path):
+        """Labs must use relative URLs for the wheel, not absolute mlsysbook.ai URLs."""
+        source = read_source(lab_path)
+        assert "https://mlsysbook.ai/labs/wheels/" not in source, (
+            "Found absolute wheel URL. Use relative path '../../wheels/mlsysim-...' instead."
+        )
+
+
+# ── Test: WASM Compatibility ────────────────────────────────────────────────
+
+WASM_BLOCKED_IMPORTS = {
+    "scipy", "sklearn", "scikit-learn", "torch", "tensorflow",
+    "cv2", "opencv", "psutil", "subprocess", "multiprocessing",
+    "tkinter", "PyQt5", "PyQt6",
+}
+
+
+class TestStateImplementation:
+    """Ensure state.py uses IndexedDB and not localStorage."""
+
+    def test_no_localstorage_import(self):
+        state_py_path = REPO_ROOT / "mlsysim" / "labs" / "state.py"
+        with open(state_py_path, "r") as f:
+            source = f.read()
+        assert "from js import localStorage" not in source, (
+            "Found 'from js import localStorage' in state.py. "
+            "Use IndexedDB instead, as localStorage is not available in WASM web workers."
+        )
+
+class TestWASMCompatibility:
+    """Catch imports that will fail in the Pyodide/WASM environment."""
+
+    def test_no_wasm_incompatible_imports(self, lab_path):
+        """Labs must not import packages unavailable in Pyodide."""
+        source = read_source(lab_path)
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    root = alias.name.split(".")[0]
+                    if root in WASM_BLOCKED_IMPORTS:
+                        pytest.fail(
+                            f"WASM-incompatible import '{alias.name}' at line {node.lineno}. "
+                            f"This package is not available in Pyodide."
+                        )
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                root = node.module.split(".")[0]
+                if root in WASM_BLOCKED_IMPORTS:
+                    pytest.fail(
+                        f"WASM-incompatible import 'from {node.module}' at line {node.lineno}. "
+                        f"This package is not available in Pyodide."
+                    )

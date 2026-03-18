@@ -43,7 +43,10 @@ async def _():
 
     if sys.platform == "emscripten":
         import micropip
-        await micropip.install("https://mlsysbook.ai/labs/wheels/mlsysim-0.1.0-py3-none-any.whl")
+        await micropip.install(["pydantic", "pint"], keep_going=False)
+        await micropip.install(
+            "../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
+        )
     elif "mlsysim" not in sys.modules:
         _root = Path(__file__).resolve().parents[2]
         if str(_root) not in sys.path:
@@ -58,6 +61,8 @@ async def _():
     TRAINING_COST_2M = 2_000_000  # $2M training cost for 70B model
 
     ledger = DesignLedger()
+    if getattr(ledger, "is_wasm", False):
+        await ledger.load_async()
     return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, H100_RAM_GB, H100_COST_HR, TRAINING_COST_2M, DecisionLog
 
 
