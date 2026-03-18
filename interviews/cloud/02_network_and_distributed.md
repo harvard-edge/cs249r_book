@@ -1243,3 +1243,90 @@ The domain of the AI Infrastructure Engineer. This round tests your understandin
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The InfiniBand Subnet Saturation</b> · <code>network-fabric</code> <code>topology</code></summary>
+
+- **Interviewer:** "You are building a 4,000 GPU cluster. You use a standard Fat-Tree InfiniBand topology. The cluster is divided into 4 pods of 1,000 GPUs each. Jobs running entirely within Pod A achieve 98% network scaling efficiency. However, when you launch a 2,000 GPU job spanning Pod A and Pod B, the network efficiency plummets to 40%. The cables are all 400 Gbps. What architectural constraint in the Fat-Tree is causing the bottleneck?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The distance between the pods adds latency." Fiber optic latency over 100 meters is microseconds. It doesn't drop efficiency by 60%.
+
+  **Realistic Solution:** You designed an **Oversubscribed Core Network (Blocking Topology)**.
+
+  In a Fat-Tree topology, Leaf switches connect to Spine switches, which connect to Core switches. To save massive amounts of money on expensive Core switches and optics, network architects often use an "oversubscription ratio" (e.g., 3:1) at the higher layers.
+
+  This means that while every GPU has a dedicated 400 Gbps link to its local Leaf switch (non-blocking within the Pod), the total bandwidth connecting Pod A to Pod B is intentionally bottlenecked. If 1,000 GPUs in Pod A try to simultaneously talk to 1,000 GPUs in Pod B, the uplink cables to the Core switches can only handle 1/3rd of the traffic.
+
+  The network physically drops packets or uses hardware flow control (PFC) to pause the GPUs, forcing them to wait for bandwidth to clear.
+
+  **The Fix:** For massive distributed training (like LLMs), you must design a strictly **Non-Blocking (1:1 Oversubscription) Clos Network**, ensuring the total bisection bandwidth at the Core is equal to the sum of the edge bandwidth, regardless of the cost.
+
+  > **Napkin Math:** 1,000 GPUs * 400 Gbps = 400 Tbps of traffic trying to leave the Pod. At a 3:1 oversubscription ratio, you only have 133 Tbps of uplink capacity. 267 Tbps of data is physically blocked at the Spine switch every second.
+
+  📖 **Deep Dive:** [Volume II: Network Fabrics](https://harvard-edge.github.io/cs249r_book_dev/contents/network_fabrics/network_fabrics.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The NCCL Topology Misconfiguration</b> · <code>network-fabric</code> <code>distributed</code></summary>
+
+- **Interviewer:** "You have a cluster of 8 DGX nodes. Each node has 8 GPUs connected via NVLink, and 8 dedicated Mellanox InfiniBand NICs. You launch a PyTorch distributed training job. The job runs, but cross-node communication is bizarrely slow. You check `nvidia-smi topo -m` and see all hardware is physically connected correctly. You check the NCCL logs and see `NCCL INFO: Using PCIe for cross-node communication`. Why is NCCL ignoring your expensive InfiniBand network?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The InfiniBand cables are broken." If they were broken, it would fail to route entirely. PCIe means it's routing through the host CPU.
+
+  **Realistic Solution:** You failed to configure the **NCCL Network Interface Bindings (NCCL_SOCKET_IFNAME)**.
+
+  By default, NCCL probes the OS for available network interfaces. If your cluster has standard 1 Gbps Ethernet management interfaces (e.g., `eth0`) alongside the high-speed InfiniBand interfaces (e.g., `ib0`, `ib1`), NCCL can sometimes guess incorrectly and bind the collective communication rings to the slow Ethernet management network.
+
+  Because the Ethernet network is incredibly slow, NCCL detects that routing traffic through the CPU's PCIe bus to the Ethernet NIC is the only path available. It completely ignores the `ib` interfaces.
+
+  **The Fix:** You must explicitly tell NCCL which physical network interfaces to use by setting environment variables in your launch script: `export NCCL_IB_DISABLE=0` and `export NCCL_SOCKET_IFNAME=ib0,ib1...` to strictly bind the communication to the high-speed hardware.
+
+  > **Napkin Math:** InfiniBand NDR = 400 Gbps (50 GB/s). Standard Ethernet Management = 1 Gbps (125 MB/s). An incorrect environment variable silently downgraded your trillion-parameter training network speed by a factor of 400x.
+
+  📖 **Deep Dive:** [Volume II: Network Fabrics](https://harvard-edge.github.io/cs249r_book_dev/contents/network_fabrics/network_fabrics.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Ephemeral Storage I/O Cliff</b> · <code>mlops</code> <code>storage</code></summary>
+
+- **Interviewer:** "You are training a model on a massive cloud VM with 8x GPUs. You download your 1 TB dataset from S3 to the VM's attached local NVMe drive (ephemeral storage). Training speeds are phenomenal. However, 12 hours into the 48-hour training run, the VM is preempted (Spot Instance). When the orchestration system brings the VM back up and resumes from the checkpoint, training crashes because the dataset file is missing. Why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The orchestration system didn't mount the drive." It's mounted, but it's empty.
+
+  **Realistic Solution:** You forgot that **Ephemeral Storage is physically tied to the Host hardware**.
+
+  When you provision a cloud VM with "local NVMe" (like AWS instance store), that SSD is physically bolted into the server rack hosting your VM. It offers incredible bandwidth (e.g., 10 GB/s) because it bypasses the network.
+
+  However, when a Spot Instance is preempted, the cloud provider tears down your VM and gives the hardware to someone else. When your job is rescheduled 5 minutes later, it is assigned to a *completely different physical server* in the datacenter. The new server's local NVMe drive is completely blank. Your 1 TB dataset was destroyed when the previous VM died.
+
+  **The Fix:** For preemptible/Spot instances, you cannot rely on ephemeral local storage for persistent state.
+  1. You must stream the data from a persistent network file system (like Amazon FSx for Lustre or EFS).
+  2. Or, your startup script must include logic to completely re-download the 1 TB dataset from S3 to the new local NVMe drive every single time the instance respawns (which costs time and money).
+
+  > **Napkin Math:** Re-downloading 1 TB at 10 Gbps (1.25 GB/s) takes roughly 15 minutes. Every time you get preempted, you lose 15 minutes of compute time just waiting for the dataset to arrive on the new hardware.
+
+  📖 **Deep Dive:** [Volume II: Fault Tolerance](https://harvard-edge.github.io/cs249r_book_dev/contents/fault_tolerance/fault_tolerance.html)
+
+  </details>
+
+</details>

@@ -1741,3 +1741,93 @@ This round is for principal-level TinyML engineers and researchers who design th
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CMSIS-DSP Buffer Overrun</b> · <code>memory</code> <code>frameworks</code></summary>
+
+- **Interviewer:** "You are using ARM's CMSIS-DSP library to compute an FFT (Fast Fourier Transform) on raw audio before feeding it to a TinyML model. You allocate an array `float audio_buffer[1024]` for the FFT. You call `arm_cfft_f32()`. The function returns, but your program immediately crashes with a Hard Fault on the next line of code. The FFT algorithm works perfectly. Why did it crash?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The array is too big for the stack." 4KB is large for a stack, but it would crash *during* allocation, not after the FFT function returns.
+
+  **Realistic Solution:** You forgot that **CMSIS-DSP FFT requires Complex Number Buffers (In-Place modification)**.
+
+  The `arm_cfft_f32` function computes a *complex* FFT. It expects the input buffer to contain interleaved real and imaginary parts: `[real0, imag0, real1, imag1, ...]`.
+
+  If you want a 1024-point FFT, the function assumes your array actually contains 2048 floats (1024 real + 1024 imaginary).
+  Because you only allocated `float audio_buffer[1024]`, when the highly optimized DSP assembly instructions start writing the FFT output back into the array (in-place), they blindly write past the end of your 1024-float boundary.
+
+  They overwrite the next 4 KB of RAM, which likely contains the call stack return addresses or critical ML model pointers. When the function returns, the CPU jumps to a corrupted memory address, causing an immediate Hard Fault.
+
+  **The Fix:** If you are doing a 1024-point complex FFT, you must allocate `float audio_buffer[2048]`, fill the even indices with your audio data, and fill the odd indices with zeros (imaginary part) before calling the function.
+
+  > **Napkin Math:** 1024 points * 2 (complex) * 4 bytes = 8,192 bytes. You only allocated 4,096 bytes. The DSP library silently nuked exactly 4 KB of your adjacent application memory.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Watchdog Flash Stall</b> · <code>deployment</code> <code>architecture</code></summary>
+
+- **Interviewer:** "Your smart agriculture sensor uses an ESP32. It has a hardware watchdog timer set to 5 seconds. To save the 1 MB ML model permanently, you download it via Wi-Fi and write it to the internal SPI Flash using standard `esp_flash_write` commands. The download takes 10 seconds. Even though your download loop calls `vTaskDelay` to let other tasks run, the watchdog triggers and resets the chip mid-download. Why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Wi-Fi is blocking the CPU." The Wi-Fi task runs on a separate core or is yielded. The issue is the physical Flash memory.
+
+  **Realistic Solution:** You triggered a **Flash Cache Disable Stall**.
+
+  On microcontrollers like the ESP32, the executing code (your program) and the data you are writing (the ML model) physically reside on the *same external SPI Flash chip*.
+
+  Because the SPI bus can only do one thing at a time, when you issue an erase or write command to the Flash, the OS must completely disable the Instruction Cache (I-Cache) and halt the CPU from fetching new instructions from Flash until the write completes.
+
+  Erasing a large sector of Flash can take hundreds of milliseconds. During this time, all interrupts (including the interrupt that feeds the hardware watchdog timer) are physically blocked because the CPU cannot read the interrupt handler code from the Flash. If you write/erase too many sectors in a tight loop, the watchdog starves and kills the system.
+
+  **The Fix:** You must place the watchdog-feeding routine (or the critical RTOS tick handler) into **IRAM (Internal RAM)** using the `IRAM_ATTR` macro. Code in IRAM can execute freely even when the external SPI Flash is locked down for writing.
+
+  > **Napkin Math:** Erasing a 64 KB block of SPI Flash can take ~500ms. If you write a 1 MB model, you must erase 16 blocks (8 seconds of total bus lockup). If your watchdog expects a ping every 5 seconds, the OS mathematically cannot ping it in time.
+
+  📖 **Deep Dive:** [Volume I: Optimizing AI](https://harvard-edge.github.io/cs249r_book_dev/contents/optimizing_ai/optimizing_ai.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Float-to-Int Hardware Trap</b> · <code>compute</code> <code>architecture</code></summary>
+
+- **Interviewer:** "You are profiling a TinyML model on an older Cortex-M4F. The layer is a simple Dequantization node that takes an `int8_t` array and converts it to a `float` array. The M4F has a hardware floating-point unit (FPU). However, the profiler shows this conversion taking 45 cycles per element instead of the expected 2 cycles. Why is the hardware FPU ignoring your code?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Memory bandwidth is slowing it down." Fetching 1 byte and writing 4 bytes takes ~6 cycles, not 45.
+
+  **Realistic Solution:** You hit the **Missing Hardware Conversion Instruction (VCVT missing integer support)**.
+
+  While the Cortex-M4F has an FPU, its FPU is a "Single Precision" unit (FPv4-SP). Crucially, the FPv4 specification includes instructions for converting floats to *32-bit* integers (`VCVT.F32.S32`), but it does **not** include instructions for directly converting floats to/from *8-bit or 16-bit* integers.
+
+  When you write `float_val = (float)int8_val;` in C, the compiler cannot map this directly to the FPU. It must:
+  1. Load the 8-bit value into a general-purpose CPU register.
+  2. Sign-extend the 8-bit value to a 32-bit integer in software (multiple cycles).
+  3. Move the 32-bit integer from the CPU core over to the FPU coprocessor registers (pipeline stall).
+  4. Finally run the `VCVT` instruction.
+
+  This data juggling between the ALU, the software sign-extension, and the FPU register banks absolutely destroys the instruction pipeline.
+
+  **The Fix:** Do not let the compiler guess. You must explicitly cast the 8-bit values to 32-bit integers in your C code, preferably using SIMD `SXT` (Sign Extend) instructions, and then feed the 32-bit integers to the float converter.
+
+  > **Napkin Math:** For a 100,000 element tensor, 45 cycles = 4.5 million cycles. 2 cycles = 200k cycles. Relying on implicit compiler casting on an M4F made your dequantization layer 22x slower than it should be.
+
+  📖 **Deep Dive:** [Volume I: Neural Computation](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
+
+  </details>
+
+</details>

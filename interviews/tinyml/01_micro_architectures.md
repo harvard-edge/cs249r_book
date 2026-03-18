@@ -970,3 +970,254 @@ The domain of the TinyML Systems Engineer. This round tests your understanding o
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CMSIS-NN Transpose Overhead</b> · <code>compiler</code> <code>memory</code></summary>
+
+- **Interviewer:** "You are running a CNN on a Cortex-M4. The model was trained in PyTorch (which defaults to NCHW memory layout). You convert it to TFLite Micro and use the CMSIS-NN kernels. The model runs, but the profiler shows that between every single convolution layer, the CPU spends 30% of the total inference time executing a `Transpose` operation. Why is the framework transposing the data, and how do you eliminate it?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "TFLite is unoptimized, you need to write custom C code." The framework is doing exactly what it has to do based on the input graph.
+
+  **Realistic Solution:** You are hitting the **Memory Layout Mismatch (NCHW vs NHWC)**.
+
+  PyTorch natively trains in `NCHW` (Channels-First) format. CMSIS-NN (and ARM NEON/DSP instructions in general) are strictly optimized for `NHWC` (Channels-Last) format. In `NHWC`, the channels for a single pixel are contiguous in memory, allowing a single 32-bit `LDR` instruction to fetch 4 INT8 channels at once.
+
+  Because you exported an `NCHW` graph to TFLite without explicitly converting the layout, TFLite Micro realizes that the CMSIS-NN `arm_convolve_s8` function physically *cannot* accept NCHW data. To prevent a crash, the TFLite compiler automatically inserts a `Transpose` node (converting NCHW to NHWC) before the convolution, and another `Transpose` (NHWC back to NCHW) after it.
+
+  Transposing a tensor on a microcontroller requires strided memory accesses, which destroys cache locality and takes millions of clock cycles.
+
+  **The Fix:** You must convert the graph layout *before* or *during* export. Use tools like `tf.lite.TFLiteConverter` with optimization flags that force the entire graph into NHWC format statically. The TFLite compiler will fuse/eliminate the transposes, allowing the CMSIS-NN kernels to pass data directly to each other.
+
+  > **Napkin Math:** Transposing a 32x32x64 INT8 tensor requires moving 65,536 bytes via strided reads. On an M4 without a data cache, this can take ~500,000 cycles. Doing this before and after 10 layers wastes 10 million CPU cycles (60ms at 168 MHz) purely on rearranging data.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The LDO Regulator Brownout</b> · <code>power</code> <code>hardware</code></summary>
+
+- **Interviewer:** "Your TinyML acoustic sensor runs on a small LiPo battery. The MCU operates at 3.3V, powered by an LDO (Low Dropout) voltage regulator connected to the battery. The system works perfectly when the battery is fully charged (4.2V). However, when the battery reaches 3.5V (still holding 30% of its capacity), the MCU randomly resets during ML inference. Why is a 3.5V battery failing to power a 3.3V system?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The battery is dead." A LiPo at 3.5V has plenty of energy left. The issue is the power delivery circuitry.
+
+  **Realistic Solution:** You hit the **LDO Dropout Voltage combined with Inference Current Spikes**.
+
+  An LDO regulator needs a certain amount of "headroom" (the Dropout Voltage) above the target output voltage to maintain regulation. A cheap LDO might have a dropout voltage of 300mV (0.3V).
+  If you want 3.3V out, you *must* provide at least 3.6V in.
+
+  When the battery is at 3.5V, the LDO is already struggling.
+  When the MCU wakes up and executes a heavy CMSIS-NN convolution, the CPU core draws a sudden spike of current (e.g., jumping from 1mA to 40mA in a microsecond).
+
+  This sudden current draw causes a temporary voltage sag on the battery (due to internal resistance). The battery voltage dips to 3.3V. The LDO, needing 0.3V of headroom, can only output 3.0V. The MCU's internal Brown-Out Detector (BOD) sees the voltage drop below its safety threshold (e.g., 3.1V) and immediately triggers a hardware reset to prevent memory corruption.
+
+  **The Fix:**
+  1. Replace the LDO with an ultra-low dropout regulator (e.g., 50mV dropout).
+  2. Add a large bypass capacitor (e.g., 100uF) as close to the MCU's VDD pins as possible to supply the instantaneous current spikes, shielding the battery and LDO from the sudden demand.
+  3. Switch to a Buck-Boost switching regulator.
+
+  > **Napkin Math:** Battery = 3.5V. Internal Resistance = 5 Ohms. Inference Spike = 40mA (0.04A). Voltage Sag = V = I*R = 0.04 * 5 = 0.2V. Battery instantly drops to 3.3V under load. LDO Dropout = 0.3V. Final MCU Voltage = 3.0V. BOD trips at 3.1V. System crashes.
+
+  📖 **Deep Dive:** [Volume II: Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+
+  </details>
+
+</details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Unaligned Struct Padding</b> · <code>compiler</code> <code>memory</code></summary>
+
+- **Interviewer:** "You are designing an IoT sensor node. The ML model outputs a probability (4 bytes). You structure your telemetry packet like this: `struct { bool motion_detected; float probability; bool battery_low; }`. You expect it to take 6 bytes. But when you write it to an external SPI Flash chip, it takes 12 bytes. Why did the size double, and how do you fix it?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Boolean values take 4 bytes in C." A boolean is 1 byte. The issue isn't the data types; it's the compiler's memory alignment.
+
+  **Realistic Solution:** You are suffering from **Compiler Struct Padding**.
+
+  To make memory access fast on 32-bit ARM architectures (like Cortex-M), the C compiler automatically aligns 4-byte variables (like `float`) so their memory addresses are multiples of 4.
+
+  Your struct layout in memory:
+  1. `bool motion_detected` (1 byte)
+  2. *Compiler inserts 3 bytes of invisible padding*
+  3. `float probability` (4 bytes, now safely aligned)
+  4. `bool battery_low` (1 byte)
+  5. *Compiler inserts 3 bytes of padding at the end so the next struct in an array is aligned.*
+
+  Total size = 1 + 3 + 4 + 1 + 3 = 12 bytes. You just doubled your SPI Flash wear and your cellular bandwidth costs.
+
+  **The Fix:**
+  1. **Reorder the struct:** Put the largest variables first. `struct { float probability; bool motion_detected; bool battery_low; }`. This requires zero internal padding, reducing the size to 6 bytes (plus 2 bytes at the end for array alignment = 8 bytes total).
+  2. **Packed Structs:** Use `__attribute__((packed))` to force the compiler to remove all padding, making it exactly 6 bytes. *Warning:* accessing a packed, unaligned float directly on a Cortex-M0+ will cause a Hard Fault, so you must serialize it carefully.
+
+  > **Napkin Math:** 1 million logs. 12 bytes = 12 MB Flash usage. 6 bytes = 6 MB Flash usage. You halved the physical silicon required to store the device's history just by reordering two lines of C code.
+
+  📖 **Deep Dive:** [Volume I: Optimizing AI](https://harvard-edge.github.io/cs249r_book_dev/contents/optimizing_ai/optimizing_ai.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CMSIS-NN Transpose Overhead</b> · <code>compiler</code> <code>memory</code></summary>
+
+- **Interviewer:** "You are running a CNN on a Cortex-M4. The model was trained in PyTorch (which defaults to NCHW memory layout). You convert it to TFLite Micro and use the CMSIS-NN kernels. The model runs, but the profiler shows that between every single convolution layer, the CPU spends 30% of the total inference time executing a `Transpose` operation. Why is the framework transposing the data, and how do you eliminate it?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "TFLite is unoptimized, you need to write custom C code." The framework is doing exactly what it has to do based on the input graph.
+
+  **Realistic Solution:** You are hitting the **Memory Layout Mismatch (NCHW vs NHWC)**.
+
+  PyTorch natively trains in `NCHW` (Channels-First) format. CMSIS-NN (and ARM NEON/DSP instructions in general) are strictly optimized for `NHWC` (Channels-Last) format. In `NHWC`, the channels for a single pixel are contiguous in memory, allowing a single 32-bit `LDR` instruction to fetch 4 INT8 channels at once.
+
+  Because you exported an `NCHW` graph to TFLite without explicitly converting the layout, TFLite Micro realizes that the CMSIS-NN `arm_convolve_s8` function physically *cannot* accept NCHW data. To prevent a crash, the TFLite compiler automatically inserts a `Transpose` node (converting NCHW to NHWC) before the convolution, and another `Transpose` (NHWC back to NCHW) after it.
+
+  Transposing a tensor on a microcontroller requires strided memory accesses, which destroys cache locality and takes millions of clock cycles.
+
+  **The Fix:** You must convert the graph layout *before* or *during* export. Use tools like `tf.lite.TFLiteConverter` with optimization flags that force the entire graph into NHWC format statically. The TFLite compiler will fuse/eliminate the transposes, allowing the CMSIS-NN kernels to pass data directly to each other.
+
+  > **Napkin Math:** Transposing a 32x32x64 INT8 tensor requires moving 65,536 bytes via strided reads. On an M4 without a data cache, this can take ~500,000 cycles. Doing this before and after 10 layers wastes 10 million CPU cycles (60ms at 168 MHz) purely on rearranging data.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The LDO Regulator Brownout</b> · <code>power</code> <code>hardware</code></summary>
+
+- **Interviewer:** "Your TinyML acoustic sensor runs on a small LiPo battery. The MCU operates at 3.3V, powered by an LDO (Low Dropout) voltage regulator connected to the battery. The system works perfectly when the battery is fully charged (4.2V). However, when the battery reaches 3.5V (still holding 30% of its capacity), the MCU randomly resets during ML inference. Why is a 3.5V battery failing to power a 3.3V system?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The battery is dead." A LiPo at 3.5V has plenty of energy left. The issue is the power delivery circuitry.
+
+  **Realistic Solution:** You hit the **LDO Dropout Voltage combined with Inference Current Spikes**.
+
+  An LDO regulator needs a certain amount of "headroom" (the Dropout Voltage) above the target output voltage to maintain regulation. A cheap LDO might have a dropout voltage of 300mV (0.3V).
+  If you want 3.3V out, you *must* provide at least 3.6V in.
+
+  When the battery is at 3.5V, the LDO is already struggling.
+  When the MCU wakes up and executes a heavy CMSIS-NN convolution, the CPU core draws a sudden spike of current (e.g., jumping from 1mA to 40mA in a microsecond).
+
+  This sudden current draw causes a temporary voltage sag on the battery (due to internal resistance). The battery voltage dips to 3.3V. The LDO, needing 0.3V of headroom, can only output 3.0V. The MCU's internal Brown-Out Detector (BOD) sees the voltage drop below its safety threshold (e.g., 3.1V) and immediately triggers a hardware reset to prevent memory corruption.
+
+  **The Fix:**
+  1. Replace the LDO with an ultra-low dropout regulator (e.g., 50mV dropout).
+  2. Add a large bypass capacitor (e.g., 100uF) as close to the MCU's VDD pins as possible to supply the instantaneous current spikes, shielding the battery and LDO from the sudden demand.
+  3. Switch to a Buck-Boost switching regulator.
+
+  > **Napkin Math:** Battery = 3.5V. Internal Resistance = 5 Ohms. Inference Spike = 40mA (0.04A). Voltage Sag = V = I*R = 0.04 * 5 = 0.2V. Battery instantly drops to 3.3V under load. LDO Dropout = 0.3V. Final MCU Voltage = 3.0V. BOD trips at 3.1V. System crashes.
+
+  📖 **Deep Dive:** [Volume II: Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+
+  </details>
+
+</details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The DMA Ping-Pong Desync</b> · <code>pipeline</code> <code>sensors</code></summary>
+
+- **Interviewer:** "You are capturing audio using I2S and DMA on an STM32. You use a standard Ping-Pong (Double Buffering) scheme. DMA writes to Buffer A, fires a 'Half-Transfer' interrupt, then writes to Buffer B, firing a 'Full-Transfer' interrupt. You process the data in the main loop. After a few hours, the audio sounds garbled, like small chunks of time are missing. What timing failure broke the Ping-Pong buffer?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The DMA is dropping bytes." DMA is driven by hardware clocks; it rarely drops bytes unless the bus is totally locked.
+
+  **Realistic Solution:** You suffered a **Main Loop Processing Overrun**.
+
+  In a Ping-Pong buffer, you must finish processing Buffer A (e.g., running the FFT and the ML model) *before* the DMA finishes writing to Buffer B and loops back around to overwrite Buffer A.
+
+  If your ML model usually takes 10ms, and half the DMA buffer takes 12ms to fill, you are safe. But if an edge case causes your ML model (or another task in the main loop) to take 13ms, the DMA will loop back and start overwriting Buffer A while your ML model is still reading it.
+
+  You end up feeding the neural network a buffer that contains half of the old audio and half of the brand new audio, creating a massive discontinuity (a "tear") in the waveform, which destroys the frequency spectrum and causes the garbled sound.
+
+  **The Fix:** You must continuously monitor the DMA memory pointers or use a queue system. If the processing loop detects an overrun, it must explicitly drop the corrupted frame and resynchronize, rather than silently feeding garbage to the neural network.
+
+  > **Napkin Math:** 16 kHz audio, 16-bit. A 1024-sample half-buffer takes exactly 64ms to fill. If your inference takes 65ms, you will suffer silent data corruption on every single frame.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The CMSIS-NN Dimension Limit</b> · <code>frameworks</code> <code>architecture</code></summary>
+
+- **Interviewer:** "You are porting an anomaly detection Autoencoder to an STM32. The input is a very long 1D time-series signal of shape `(1, 1, 100000, 1)`. When you run this through TFLite Micro using CMSIS-NN kernels, the convolution layer produces completely random garbage outputs, but it doesn't crash. What mathematical assumption of the DSP library did you violate?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The MCU doesn't have enough RAM for 100,000 floats." If it OOM'd, it would crash. It didn't crash; the math is just wrong.
+
+  **Realistic Solution:** You hit the **16-bit Integer Dimension Overflow**.
+
+  Highly optimized DSP libraries like CMSIS-NN use 16-bit integers (`int16_t`) internally to store the dimensions (height, width, channels) of the tensors to save register space and speed up loop counters.
+
+  A 16-bit signed integer has a maximum value of `32,767`.
+  Your input width is `100,000`.
+
+  When the CMSIS-NN kernel reads `100,000` into its 16-bit internal state struct, the integer overflows and wraps around to a negative number (e.g., `-31072`). The inner loop counters of the matrix multiplication instantly break, reading from the wrong memory offsets and producing mathematically garbage output without triggering a hard fault.
+
+  **The Fix:** You cannot pass dimensions larger than 32,767 into standard CMSIS-NN kernels. You must either reshape your 1D array into a 2D array (e.g., `(1, 100, 1000, 1)`), chunk the input manually, or recompile the library using 32-bit dimension flags (if supported).
+
+  > **Napkin Math:** `int16_t max = 32,767`. `100,000 % 65,536 = 34,464`. Since it's signed, it wraps to `-31,072`. The loop says `for(int i=0; i < -31072; i++)`, immediately fails, and leaves the uninitialized scratch buffer as the "output".
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Flash Page Erase Block</b> · <code>storage</code> <code>real-time</code></summary>
+
+- **Interviewer:** "Your edge device runs a continuous audio inference loop (every 50ms). When an anomaly is detected, it logs a 20-byte string to internal SPI Flash using a standard filesystem (like LittleFS). The logging function usually takes 1ms. However, once a week, the logging function takes 500ms, causing the audio inference loop to miss its deadline entirely and drop 10 frames of audio. What physical process on the Flash chip causes this massive delay?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The filesystem is fragmented." Fragmentation slows down reads, but a 500x slowdown on a 20-byte write points to flash physics.
+
+  **Realistic Solution:** You hit a **Flash Page Erase Cycle**.
+
+  Flash memory can change a bit from `1` to `0` instantly (Programming). But it cannot change a `0` back to a `1` without erasing an entire "Page" or "Sector" (typically 4 KB or 64 KB) all at once.
+
+  For a week, your filesystem was happily appending 20-byte logs into empty space (turning 1s into 0s, which takes 1ms). But eventually, the sector filled up.
+
+  To write the next 20 bytes, the filesystem had to find an old, deleted sector, issue a hardware Erase command, wait for the physical silicon to drain the electrons from the floating gates, and then write the new data. An Erase operation is physically slow and blocks the SPI bus entirely.
+
+  **The Fix:** You must use an **Asynchronous / Interrupt-Driven Flash API**, or delegate all logging to a low-priority background thread that uses a large SRAM ring buffer. The real-time ML thread must never wait for synchronous Flash operations.
+
+  > **Napkin Math:** Writing 20 bytes = ~1ms. Erasing a 64 KB SPI Flash sector = ~500ms. If your real-time deadline is 50ms, a single hardware Erase command destroys your latency budget by 10x.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>

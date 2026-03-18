@@ -1127,3 +1127,257 @@ Deploying a model to a single MCU is an engineering exercise. Deploying it to 10
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The BLE Connection Event Starvation</b> · <code>networking</code> <code>latency</code></summary>
+
+- **Interviewer:** "Your wearable device runs a gesture recognition model on a single-core Cortex-M4. It streams the classification results (4 bytes) over Bluetooth Low Energy (BLE) to a phone. The model takes 30ms to run. You configure the BLE connection interval to 15ms to ensure low latency. The system works, but the model's inference time randomly spikes to 45ms or 60ms. What protocol conflict is causing the ML latency spikes?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The BLE transmission takes too long." Sending 4 bytes over BLE takes microseconds. The issue is the radio's scheduling priority.
+
+  **Realistic Solution:** You caused a **Radio Interrupt Preemption**.
+
+  On a single-core MCU handling both ML and BLE (like an nRF52), the BLE SoftDevice (the radio protocol stack) runs at the absolute highest hardware interrupt priority. It *must* wake up and service the radio during every negotiated "Connection Event" to maintain synchronization with the phone, even if it has no data to send.
+
+  You set the Connection Interval to 15ms. Your ML inference takes 30ms.
+  This guarantees that the BLE radio will interrupt your neural network **at least twice** during every single forward pass.
+
+  When the BLE interrupt fires, it halts the ML math, powers up the radio, listens for the phone, transmits empty packets (or your 4 bytes), and powers down. This OS-level preemption steals CPU cycles. If the radio environment is noisy, the BLE stack may stay awake longer to handle retries, adding 5-15ms of pure delay to your 30ms inference.
+
+  **The Fix:**
+  1. Increase the BLE Connection Interval to be strictly larger than your maximum inference time (e.g., 50ms) so the ML model can finish uninterrupted between radio events.
+  2. Use a dual-core MCU (like the nRF5340) where Core 0 handles the ML math and Core 1 is dedicated entirely to the BLE radio.
+
+  > **Napkin Math:** Inference = 30ms. BLE Interval = 15ms. BLE Event Overhead = 3ms.
+  > During 30ms, the BLE stack fires twice. 30ms + (2 * 3ms) = 36ms minimum latency. If the phone requests a parameter update or there are dropped packets, the radio might hold the CPU for 10ms, pushing the inference to 40ms+.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Model Checksum Paradox</b> · <code>deployment</code> <code>security</code></summary>
+
+- **Interviewer:** "You deploy a `.tflite` model to an MCU via an OTA update. To ensure the file isn't corrupted, you calculate a CRC32 checksum of the file on your server, send it to the device, and the device calculates the CRC32 of the downloaded file. They match. The device reboots. The model fails to load, crashing the device. How can a file have a perfect checksum but still be completely invalid?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "CRC32 has collisions." While CRC32 isn't cryptographically secure, random collisions on OTA updates are vanishingly rare. The problem is what happened *after* the download.
+
+  **Realistic Solution:** You checked the data in transit, but ignored **Flash Write Errors**.
+
+  Your OTA architecture likely did this:
+  1. Download chunk from network into RAM.
+  2. Update running CRC32 calculation using the RAM buffer.
+  3. Write the RAM buffer to Flash memory.
+  4. Compare final CRC32. Match!
+
+  The flaw is that you verified the bytes *before* they were written to the physical storage medium. If the Flash memory was worn out, if there was a voltage droop during the write, or if you forgot to erase the Flash sector before writing (Flash can only turn 1s into 0s without an erase), the physical bits on the silicon will be corrupted. Your RAM buffer was perfect, but the persistent storage is garbage.
+
+  **The Fix:** Always calculate the checksum by reading the data **back out of the Flash memory** after the write is complete. This verifies the entire pipeline: network -> RAM -> Flash Controller -> Physical Silicon.
+
+  > **Napkin Math:** Flash memory must be erased to `0xFF` before writing. If you write `0xAA` (10101010) over unerased data like `0x0F` (00001111), the result is the bitwise AND: `0x0A` (00001010). The file on disk is destroyed, even though the byte in RAM you checksummed was a perfect `0xAA`.
+
+  📖 **Deep Dive:** [Volume I: Optimizing AI](https://harvard-edge.github.io/cs249r_book_dev/contents/optimizing_ai/optimizing_ai.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Bootloader Vector Table Relocation</b> · <code>deployment</code> <code>architecture</code></summary>
+
+- **Interviewer:** "You implement a custom bootloader for your TinyML device to handle OTA updates. The bootloader lives at Flash address `0x08000000`. It verifies the new ML application at `0x08020000` and jumps to it. The ML application's first line of code executes perfectly. But the moment a hardware timer interrupt fires, the device crashes and reboots. Why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The ML application didn't initialize the timer correctly." The timer fired, so it was initialized. The problem is what the CPU does *after* the timer fires.
+
+  **Realistic Solution:** You forgot to **Relocate the Interrupt Vector Table (VTOR)**.
+
+  When a hardware interrupt (like a timer or DMA) fires, the ARM Cortex-M CPU stops what it's doing and looks at a specific memory address (the Vector Table) to find the function pointer (the ISR) it should execute.
+
+  By default, the CPU assumes the Vector Table is at the very beginning of Flash (`0x08000000`), which currently belongs to your Bootloader.
+
+  Your bootloader jumped to the ML application at `0x08020000`, but it didn't tell the CPU hardware about the move. When the ML application's timer fires, the CPU looks at `0x08000000` (the Bootloader's vector table), finds a function pointer for a bootloader timer (or garbage), jumps to it, and instantly corrupts the system state or causes a Hard Fault.
+
+  **The Fix:** The very first line of code in your ML application (usually in `SystemInit()`) must write the new offset (`0x08020000`) into the ARM core's Vector Table Offset Register (VTOR).
+
+  > **Napkin Math:** A jump instruction takes 1-3 cycles. Without VTOR relocation, the CPU jumps to an address compiled for a completely different binary, executes random bytes as instructions, and triggers a fault in less than a microsecond.
+
+  📖 **Deep Dive:** [Volume I: Optimizing AI](https://harvard-edge.github.io/cs249r_book_dev/contents/optimizing_ai/optimizing_ai.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The BLE Connection Event Starvation</b> · <code>networking</code> <code>latency</code></summary>
+
+- **Interviewer:** "Your wearable device runs a gesture recognition model on a single-core Cortex-M4. It streams the classification results (4 bytes) over Bluetooth Low Energy (BLE) to a phone. The model takes 30ms to run. You configure the BLE connection interval to 15ms to ensure low latency. The system works, but the model's inference time randomly spikes to 45ms or 60ms. What protocol conflict is causing the ML latency spikes?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The BLE transmission takes too long." Sending 4 bytes over BLE takes microseconds. The issue is the radio's scheduling priority.
+
+  **Realistic Solution:** You caused a **Radio Interrupt Preemption**.
+
+  On a single-core MCU handling both ML and BLE (like an nRF52), the BLE SoftDevice (the radio protocol stack) runs at the absolute highest hardware interrupt priority. It *must* wake up and service the radio during every negotiated "Connection Event" to maintain synchronization with the phone, even if it has no data to send.
+
+  You set the Connection Interval to 15ms. Your ML inference takes 30ms.
+  This guarantees that the BLE radio will interrupt your neural network **at least twice** during every single forward pass.
+
+  When the BLE interrupt fires, it halts the ML math, powers up the radio, listens for the phone, transmits empty packets (or your 4 bytes), and powers down. This OS-level preemption steals CPU cycles. If the radio environment is noisy, the BLE stack may stay awake longer to handle retries, adding 5-15ms of pure delay to your 30ms inference.
+
+  **The Fix:**
+  1. Increase the BLE Connection Interval to be strictly larger than your maximum inference time (e.g., 50ms) so the ML model can finish uninterrupted between radio events.
+  2. Use a dual-core MCU (like the nRF5340) where Core 0 handles the ML math and Core 1 is dedicated entirely to the BLE radio.
+
+  > **Napkin Math:** Inference = 30ms. BLE Interval = 15ms. BLE Event Overhead = 3ms.
+  > During 30ms, the BLE stack fires twice. 30ms + (2 * 3ms) = 36ms minimum latency. If the phone requests a parameter update or there are dropped packets, the radio might hold the CPU for 10ms, pushing the inference to 40ms+.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Model Checksum Paradox</b> · <code>deployment</code> <code>security</code></summary>
+
+- **Interviewer:** "You deploy a `.tflite` model to an MCU via an OTA update. To ensure the file isn't corrupted, you calculate a CRC32 checksum of the file on your server, send it to the device, and the device calculates the CRC32 of the downloaded file. They match. The device reboots. The model fails to load, crashing the device. How can a file have a perfect checksum but still be completely invalid?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "CRC32 has collisions." While CRC32 isn't cryptographically secure, random collisions on OTA updates are vanishingly rare. The problem is what happened *after* the download.
+
+  **Realistic Solution:** You checked the data in transit, but ignored **Flash Write Errors**.
+
+  Your OTA architecture likely did this:
+  1. Download chunk from network into RAM.
+  2. Update running CRC32 calculation using the RAM buffer.
+  3. Write the RAM buffer to Flash memory.
+  4. Compare final CRC32. Match!
+
+  The flaw is that you verified the bytes *before* they were written to the physical storage medium. If the Flash memory was worn out, if there was a voltage droop during the write, or if you forgot to erase the Flash sector before writing (Flash can only turn 1s into 0s without an erase), the physical bits on the silicon will be corrupted. Your RAM buffer was perfect, but the persistent storage is garbage.
+
+  **The Fix:** Always calculate the checksum by reading the data **back out of the Flash memory** after the write is complete. This verifies the entire pipeline: network -> RAM -> Flash Controller -> Physical Silicon.
+
+  > **Napkin Math:** Flash memory must be erased to `0xFF` before writing. If you write `0xAA` (10101010) over unerased data like `0x0F` (00001111), the result is the bitwise AND: `0x0A` (00001010). The file on disk is destroyed, even though the byte in RAM you checksummed was a perfect `0xAA`.
+
+  📖 **Deep Dive:** [Volume I: Optimizing AI](https://harvard-edge.github.io/cs249r_book_dev/contents/optimizing_ai/optimizing_ai.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Sleep Mode Wi-Fi Disconnect</b> · <code>power</code> <code>networking</code></summary>
+
+- **Interviewer:** "Your ESP32 battery-powered camera needs to send an image to the cloud when motion is detected. To save power, you put it into Light Sleep. The Wi-Fi modem stays powered on to maintain the router connection. However, when it wakes up to send an image, the `send()` call fails, and it has to do a full 3-second DHCP reconnection, draining the battery. Why did the router drop the connection if the modem was on?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The ESP32 turned off the antenna." The prompt specifies the modem was kept on.
+
+  **Realistic Solution:** You failed to respond to the **DTIM Beacon (Delivery Traffic Indication Message)**.
+
+  Wi-Fi routers periodically broadcast a DTIM beacon (usually every 100ms to 300ms) to check if sleeping devices are still alive and to deliver buffered packets.
+
+  If your ESP32 is in Light Sleep, the CPU is paused. Even if the modem hardware is powered, if the CPU doesn't wake up to process the DTIM beacon and send an ACK back to the router, the router assumes the device has left the network. After missing a few beacons (e.g., after 1-2 seconds), the router forcefully de-authenticates the ESP32.
+
+  When your device finally wakes up from motion, it finds out it was kicked off the network and must perform the incredibly expensive TCP/IP and TLS handshake all over again.
+
+  **The Fix:** You must configure the Wi-Fi power-save mode to automatically wake the CPU *briefly* just to answer the DTIM beacons (e.g., `esp_wifi_set_ps(WIFI_PS_MIN_MODEM)`), ensuring the router keeps the connection alive while you sleep.
+
+  > **Napkin Math:** A DTIM wake-up takes ~2ms at 50mA (0.1 mAs). A full DHCP/TLS reconnect takes ~3000ms at 300mA (900 mAs). Missing the beacons costs you 9,000x more energy when you finally need to transmit.
+
+  📖 **Deep Dive:** [Volume II: Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The SPI Bus Capacitance Limit</b> · <code>hardware</code> <code>sensors</code></summary>
+
+- **Interviewer:** "Your ML device needs to sample 4 high-speed IMUs simultaneously. You connect all 4 IMUs to the same SPI bus on the MCU. You configure the SPI clock to 20 MHz. The system works perfectly with 1 IMU. When you plug in all 4, the data read from all sensors becomes corrupted. The firmware is correct, the Chip Select pins are correct, and 20 MHz is well within the IMU specs. What analog physics problem ruined the digital bus?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The MCU can't read from 4 things at once." SPI is master/slave; it reads them one at a time using Chip Selects.
+
+  **Realistic Solution:** You hit the **Parasitic Bus Capacitance Limit**.
+
+  SPI is a high-speed digital protocol that relies on sharp, square voltage waves. Every time you physically attach a new chip (IMU) to the SPI MISO/MOSI/SCK lines, you add parasitic capacitance to the wire.
+
+  At 20 MHz, the voltage transitions (rise/fall times) must happen in nanoseconds. When you add 4 devices, the combined capacitance of the chips and the PCB traces acts like a low-pass filter.
+  Instead of sharp square waves, the clock and data signals become slow, sloping shark-fins.
+
+  When the MCU tries to sample the bit at the precise clock edge, the voltage hasn't finished rising to "High" yet, causing the MCU to read a 0 instead of a 1, completely corrupting the sensor data.
+
+  **The Fix:**
+  1. Slow down the SPI clock (e.g., to 5 MHz) to give the voltage enough time to rise despite the capacitance.
+  2. Use multiple, independent SPI hardware peripherals (e.g., SPI1 for IMUs 1/2, SPI2 for IMUs 3/4).
+  3. Shorten the physical PCB traces and use stronger pull-up/drive strength settings on the MCU pins.
+
+  > **Napkin Math:** 20 MHz clock = 50ns period. A bit must be read in 25ns. If bus capacitance (C) and trace resistance (R) create an RC time constant of 30ns, the signal mathematically cannot reach the 3.3V threshold in time to be registered as a '1'.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Battery Voltage Sag Reset</b> · <code>hardware</code> <code>power</code></summary>
+
+- **Interviewer:** "Your battery-powered TinyML device wakes from deep sleep, turns on its Wi-Fi modem, and runs a heavy CNN to classify an image. When the battery is full (4.2V), it works perfectly. When the battery drops to 3.6V (which is still 40% full), the device crashes and reboots the exact moment the neural network starts computing. Why does the device die when there is still 40% battery left?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The battery voltage is too low for the MCU." Most MCUs operate down to 1.8V or 3.3V, so 3.6V is plenty. The problem is dynamic, not static.
+
+  **Realistic Solution:** You triggered the **Brown-Out Detector (BOD) via Transient Current Spikes**.
+
+  When a battery discharges, its Internal Resistance (IR) increases.
+  When your device wakes up, the Wi-Fi modem draws a sudden spike of current (e.g., 300mA). A microsecond later, the neural network starts, utilizing 100% of the CPU and hardware multipliers, drawing another spike (e.g., 50mA).
+
+  According to Ohm's Law ($V_{drop} = I 	imes R$), pulling 350mA through an older, half-depleted battery with high internal resistance causes the output voltage to physically droop (sag) momentarily.
+
+  If the battery is at 3.6V, a 0.8V sag pulls the system voltage down to 2.8V for a few milliseconds. The MCU's Brown-Out Detector sees the voltage drop below its safety threshold (e.g., 3.0V) and immediately pulls the hardware reset pin to prevent memory corruption.
+
+  **The Fix:**
+  1. **Hardware:** Add a massive bypass capacitor (e.g., 470uF) near the MCU to supply the instantaneous current spikes.
+  2. **Software:** Do not run Wi-Fi and heavy ML math at the exact same time. Run the ML inference while the radio is off, *then* turn on the radio to transmit.
+
+  > **Napkin Math:** Battery = 3.6V. Internal Resistance = 2 Ohms. Peak Current (Wi-Fi + ML) = 0.35A. Voltage Drop = 0.35A * 2 Ohm = 0.7V. Actual Voltage reaching MCU = 3.6 - 0.7 = 2.9V. If the MCU needs 3.3V, it instantly crashes.
+
+  📖 **Deep Dive:** [Volume II: Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+
+  </details>
+
+</details>

@@ -1295,3 +1295,65 @@ The domain of the MLOps and Deployment Engineer. This round tests your ability t
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The PagedAttention Block Size Trap</b> · <code>memory</code> <code>serving</code></summary>
+
+- **Interviewer:** "You are using vLLM to serve an LLM. You configure the PagedAttention block size to 256 tokens per block to reduce the metadata overhead in the memory allocator. Your memory fragmentation drops to zero. However, your time-to-first-token (TTFT) latency suddenly spikes, and the GPU is sitting idle waiting for memory. Why did a large block size destroy your performance?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "256 tokens is too much memory to allocate at once." 256 tokens is only a few megabytes; the GPU can allocate that instantly.
+
+  **Realistic Solution:** You are suffering from **Internal Fragmentation and Wasted Memory Bandwidth**.
+
+  PagedAttention eliminates *external* fragmentation by breaking the KV-cache into blocks. However, it still suffers from *internal* fragmentation.
+  If a user prompt is 257 tokens long, vLLM must allocate TWO 256-token blocks (512 tokens total). The second block is 99% empty.
+
+  The fatal flaw is the memory fetch: During the autoregressive decode phase, when the GPU reads the KV-cache to compute attention for the 258th token, the memory controller fetches the *entire* 256-token block from HBM into SRAM, even though 255 of those token slots are completely empty.
+
+  You are forcing the GPU to move massive amounts of useless, empty bytes across the memory bus, destroying the effective memory bandwidth and starving the Tensor Cores.
+
+  **The Fix:** You must use smaller block sizes (e.g., 16 or 32 tokens). This slightly increases the page table metadata overhead on the CPU/GPU, but tightly packs the KV-cache memory, ensuring that almost every byte fetched from HBM contains useful math data.
+
+  > **Napkin Math:** Block size 256. Sequence length 257. Allocated = 512. Wasted space = 255 tokens (nearly 50%). When generating the next token, the GPU reads 512 tokens worth of data (e.g., 2 MB), but only 1 MB is real data. Your effective memory bandwidth is halved.
+
+  📖 **Deep Dive:** [Volume I: Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The FP32 Fallback Penalty</b> · <code>hardware</code> <code>precision</code></summary>
+
+- **Interviewer:** "You serve a PyTorch model on a T4 GPU. The model is cast to `torch.float16`. You use standard matrix multiplications. However, your profiler shows the GPU is only achieving 8 TFLOPS of throughput, which is the theoretical maximum for FP32 on a T4. The T4 is capable of 65 TFLOPS in FP16. Why is your FP16 model running at FP32 speeds?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The model didn't actually cast to FP16." It did; the memory footprint confirmed it. The issue is the math engine.
+
+  **Realistic Solution:** You failed to enable **Tensor Cores (Hardware FP16 Multipliers)**.
+
+  On NVIDIA GPUs (Volta architecture and newer, like the T4), standard CUDA cores handle FP32 math. To get the massive 65 TFLOPS speedup for FP16, the math must be routed to specialized hardware units called Tensor Cores.
+
+  In older versions of PyTorch (or if not explicitly configured), simply casting the tensors to FP16 is not enough. If the matrix dimensions do not perfectly align with the hardware requirements of the Tensor Cores (e.g., dimensions must be multiples of 8), the cuBLAS library will silently refuse to use the Tensor Cores.
+
+  Instead, it will cast your FP16 data *back up* to FP32 in registers, run the math on the slow, standard FP32 CUDA cores, and cast the result back to FP16. You get the memory savings of FP16, but completely lose the compute speedup.
+
+  **The Fix:**
+  1. Ensure your batch sizes, embedding dims, and sequence lengths are strictly padded to multiples of 8 (or 16 for newer architectures).
+  2. In PyTorch, explicitly enable Tensor Core usage (e.g., `torch.backends.cudnn.allow_tf32 = True` for TF32, or ensure AMP/autocast is correctly configured).
+
+  > **Napkin Math:** T4 Peak FP32 = 8.1 TFLOPS. Peak FP16 (Tensor Cores) = 65 TFLOPS. Failing to align dimensions by 1 pixel (e.g., size 127 instead of 128) silently degrades your hardware performance by exactly 8x.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>

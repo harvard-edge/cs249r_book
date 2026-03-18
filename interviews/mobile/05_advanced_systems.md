@@ -1164,3 +1164,369 @@ This round covers the hardest problems in mobile ML systems: on-device LLM archi
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The JNI Object Pinning Death</b> · <code>memory</code> <code>latency</code></summary>
+
+- **Interviewer:** "You are passing camera frames (byte arrays) from Android Java to a C++ inference engine via JNI using `GetByteArrayElements`. The ML model takes 15ms. The system runs perfectly at 30 FPS for a minute. Suddenly, the entire Android UI stutters massively, dropping to 2 FPS for several seconds, before recovering. What is JNI doing to the Android Garbage Collector?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The C++ code has a memory leak." C++ memory leaks crash the app eventually; they don't cause periodic, recovering stutters.
+
+  **Realistic Solution:** You are causing a **Garbage Collection (GC) Stall via Object Pinning**.
+
+  When you call `GetByteArrayElements` in JNI without explicitly copying the data, the JVM often "pins" that Java array in memory so the C++ code can read it directly. While an object is pinned, the Android Garbage Collector (ART) *cannot physically move it*.
+
+  Modern GCs rely heavily on moving objects around in memory to defragment the heap. If your ML thread constantly pins large 1080p byte arrays at 30 FPS, the GC becomes severely restricted. Eventually, the heap becomes so fragmented that the OS cannot allocate memory for basic UI operations.
+
+  To fix the fragmentation, the ART triggers a "Stop-The-World" Compacting GC. It halts all application threads, waits for your C++ code to release the pinned array (`ReleaseByteArrayElements`), and then spends hundreds of milliseconds frantically moving memory around to defragment the heap.
+
+  **The Fix:**
+  Use **NIO Direct ByteBuffers** instead of standard Java arrays. Direct ByteBuffers are allocated completely outside the Java heap. The C++ code can access them instantly without pinning, and the Android GC never has to worry about defragmenting them, completely eliminating the Stop-The-World stutters.
+
+  > **Napkin Math:** A 1080p NV21 frame is ~3 MB. Pinning 3 MB of memory 30 times a second creates massive roadblocks for the concurrent GC. A Stop-The-World compaction on a fragmented 512 MB heap can easily take 200-500ms, entirely destroying the 33ms frame deadline.
+
+  📖 **Deep Dive:** [Volume I: ML Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CPU-GPU Asynchronous Desync</b> · <code>pipeline</code> <code>gpu</code></summary>
+
+- **Interviewer:** "Your mobile app applies an ML filter to a live video feed. The camera produces frames at 30 FPS. The GPU runs the ML filter in 20ms. The CPU submits the job to the GPU, waits for it to finish using `glFinish()`, and then renders it to the screen. You notice the framerate is only 22 FPS, even though 20ms is well under the 33ms deadline. What pipeline rule did you break?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The GPU is slower than 20ms in reality." The GPU is fast; the CPU is blocking it.
+
+  **Realistic Solution:** You broke the pipeline by forcing **Synchronous Execution (`glFinish`)**.
+
+  The CPU and GPU are designed to run asynchronously. The CPU is supposed to queue up work (draw calls, compute shaders) and immediately move on to preparing the next frame. The GPU pulls from that queue and executes.
+
+  By calling `glFinish()`, you force the CPU to physically halt and wait until the GPU is completely finished with the current frame.
+  1. CPU prepares Frame 1 (5ms).
+  2. CPU tells GPU to execute.
+  3. CPU goes to sleep (`glFinish`).
+  4. GPU wakes up, executes Frame 1 (20ms).
+  5. GPU finishes, wakes CPU.
+  6. CPU renders Frame 1 (5ms), *then* starts preparing Frame 2.
+
+  The total latency is 5 + 20 + 5 = 30ms. But because you serialized them, the *throughput* is also 1 frame / 30ms = 33 FPS. Add in OS jitter, and you drop to 22 FPS.
+
+  **The Fix:** You must pipeline the system. The CPU should submit Frame 1, and *instantly* start preparing Frame 2 while the GPU is processing Frame 1. You synchronize using Fences/Semaphores (`glFenceSync`), not blocking waits, allowing the CPU and GPU to work in parallel.
+
+  > **Napkin Math:** Serialized: CPU (5) -> GPU (20) -> CPU (5). Total time = 30ms. Max FPS = 33.
+  > Pipelined: CPU prepares F2 while GPU processes F1. The bottleneck is the GPU (20ms). Max FPS = 1 / 20ms = 50 FPS.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The ISP/NPU Hardware Synchronization</b> · <code>pipeline</code> <code>soc</code></summary>
+
+- **Interviewer:** "Your AR headset uses a dedicated Image Signal Processor (ISP) and an NPU. You want zero-copy memory between them. You allocate a hardware buffer. The ISP writes a frame to it, then the NPU reads it. It works, but occasionally the ML model outputs complete garbage. The image visually looks fine if you save it to disk right after the ISP finishes. What hardware synchronization mechanism did you forget?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "You didn't flush the CPU cache." The CPU isn't touching this memory—it's a direct ISP to NPU transfer. The issue is between the hardware blocks.
+
+  **Realistic Solution:** You forgot to implement a **Hardware Sync Fence (e.g., Android Sync Fences or iOS Metal Events)**.
+
+  Just because the ISP *tells* the CPU "I am done" does not mean the ISP's internal DMA controller has actually finished flushing all its burst writes to the physical LPDDR memory.
+
+  If the CPU immediately tells the NPU "Go read the buffer," the NPU starts reading. Because the NPU is incredibly fast, its read pointers can overtake the ISP's physical write pointers inside the memory controller. The NPU ends up reading half of the new frame and half of the old frame (or uninitialized memory), resulting in garbage ML output.
+
+  If you save the image to disk from the CPU, you are implicitly introducing a massive time delay, giving the ISP DMA enough time to finish naturally, masking the race condition.
+
+  **The Fix:** You must pass a hardware-level `SyncFence` file descriptor from the ISP to the NPU. The NPU's driver will physically halt the NPU's execution pipeline at the silicon level until the memory controller confirms the ISP's DMA transaction is 100% committed to RAM.
+
+  > **Napkin Math:** An ISP might process a frame in 10ms. The final DMA flush to RAM takes 0.5ms. If the CPU signals the NPU in 0.1ms, the NPU reads memory that is 400 microseconds out of date, destroying the spatial consistency of the image tensor.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The JNI Boundary Crossing</b> · <code>architecture</code> <code>latency</code></summary>
+
+- **Interviewer:** "You write a highly optimized C++ inference engine using XNNPACK for Android. Your Java app calls `runInference(float[] image)` natively via JNI. The C++ code executes in 5ms. However, the app measures 18ms per frame. What is JNI doing that consumes 13ms of overhead?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "JNI function calls are just slow." The function call itself takes microseconds. The massive overhead comes from data marshaling.
+
+  **Realistic Solution:** You are suffering from **JNI Data Copying and Array Marshaling**.
+
+  When you pass a standard Java `float[]` array (which lives in the managed JVM heap and can be moved by the Garbage Collector) to a C++ JNI function, the JVM must ensure the memory is safe for native C++ to access.
+
+  To do this, JNI typically allocates a new C++ array and copies every single byte of the image data from the Java heap to the Native heap before the C++ code can even start. After inference, it copies the output tensor back. For a 1080p image, this `memcpy` operation across the managed/unmanaged boundary completely dominates the execution time.
+
+  **The Fix:** You must use **NIO Direct ByteBuffers** (`ByteBuffer.allocateDirect()`). A Direct ByteBuffer allocates memory directly on the native C++ heap. When you pass a Direct ByteBuffer via JNI, the JVM simply passes the raw memory pointer (zero-copy), reducing the 13ms overhead to less than 0.1ms.
+
+  > **Napkin Math:** 1080p Image = 1920 x 1080 x 3 bytes = 6.2 MB. Copying 6.2 MB of memory twice per frame (in and out) on a mobile CPU takes roughly 10-15 milliseconds.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CPU-GPU Asynchronous Desync</b> · <code>pipeline</code> <code>gpu</code></summary>
+
+- **Interviewer:** "Your mobile app applies an ML filter to a live video feed. The camera produces frames at 30 FPS. The GPU runs the ML filter in 20ms. The CPU submits the job to the GPU, waits for it to finish using `glFinish()`, and then renders it to the screen. You notice the framerate is only 22 FPS, even though 20ms is well under the 33ms deadline. What pipeline rule did you break?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The GPU is slower than 20ms in reality." The GPU is fast; the CPU is blocking it.
+
+  **Realistic Solution:** You broke the pipeline by forcing **Synchronous Execution (`glFinish`)**.
+
+  The CPU and GPU are designed to run asynchronously. The CPU is supposed to queue up work (draw calls, compute shaders) and immediately move on to preparing the next frame. The GPU pulls from that queue and executes.
+
+  By calling `glFinish()`, you force the CPU to physically halt and wait until the GPU is completely finished with the current frame.
+  1. CPU prepares Frame 1 (5ms).
+  2. CPU tells GPU to execute.
+  3. CPU goes to sleep (`glFinish`).
+  4. GPU wakes up, executes Frame 1 (20ms).
+  5. GPU finishes, wakes CPU.
+  6. CPU renders Frame 1 (5ms), *then* starts preparing Frame 2.
+
+  The total latency is 5 + 20 + 5 = 30ms. But because you serialized them, the *throughput* is also 1 frame / 30ms = 33 FPS. Add in OS jitter, and you drop to 22 FPS.
+
+  **The Fix:** You must pipeline the system. The CPU should submit Frame 1, and *instantly* start preparing Frame 2 while the GPU is processing Frame 1. You synchronize using Fences/Semaphores (`glFenceSync`), not blocking waits, allowing the CPU and GPU to work in parallel.
+
+  > **Napkin Math:** Serialized: CPU (5) -> GPU (20) -> CPU (5). Total time = 30ms. Max FPS = 33.
+  > Pipelined: CPU prepares F2 while GPU processes F1. The bottleneck is the GPU (20ms). Max FPS = 1 / 20ms = 50 FPS.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Memory-Mapped File Deadlock</b> · <code>storage</code> <code>latency</code></summary>
+
+- **Interviewer:** "You are using `mmap` to load a 100 MB model on Android. The model loads instantly, which is great. However, during the first few seconds of inference, the UI thread occasionally stalls for 50-100ms. You are running inference on a background thread. Why is a background memory read stalling the foreground UI?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The background thread is using 100% of the CPU." The OS scheduler would preempt it; it wouldn't cause a 100ms hard lock.
+
+  **Realistic Solution:** You hit the **mmap Page Fault I/O Contention**.
+
+  When you `mmap` a file, the OS doesn't actually read the 100 MB from disk into RAM. It just creates virtual memory mappings.
+
+  When your background ML thread accesses the first layer's weights, it triggers a **Page Fault**. The OS halts the thread and physically reads that 4 KB page from the flash storage (eUFS/NVMe) into RAM.
+
+  The problem occurs because mobile storage controllers have limited parallel I/O queues. If your ML thread triggers thousands of page faults in the first few milliseconds, it floods the storage controller's queue. If the UI thread simultaneously needs to read a tiny PNG icon or a font file from disk to render an animation, its I/O request gets stuck behind the ML thread's massive queue of page faults. The UI thread blocks on I/O, causing the visible stutter.
+
+  **The Fix:** You must use `mlock` or `madvise(MADV_WILLNEED)` to force the OS to pre-fault and load the entire model into RAM asynchronously *before* you allow the user to start the UI animation or the inference loop.
+
+  > **Napkin Math:** 100 MB model = 25,000 page faults (at 4 KB/page). If each random read takes 0.1ms, that's 2.5 seconds of sustained I/O saturation. The UI thread's read request is statistically guaranteed to get stuck in traffic.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Double FPU Context Save</b> · <code>os</code> <code>latency</code></summary>
+
+- **Interviewer:** "Your mobile app does complex ML preprocessing in C++ (heavy floating-point math). It then passes the data to an ML model running on the same CPU core, handled by an RTOS-like microkernel on a dedicated wearable companion chip. You notice that every time the OS context-switches between your preprocessing thread and the ML inference thread, the context switch takes 3x longer than normal. What is the OS doing differently because of your math?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Floating point math is slow." The math speed doesn't explain the context switch speed.
+
+  **Realistic Solution:** You triggered the **FPU Register Bank Context Save**.
+
+  In a standard RTOS context switch, the OS only saves the core integer registers (e.g., R0-R15 on ARM). This is fast.
+
+  However, modern CPUs have a massive separate bank of Floating Point Unit (FPU) and SIMD (NEON) registers (e.g., 32 x 128-bit registers). Saving these takes a huge amount of memory bandwidth and time.
+
+  To optimize this, most OSs use "Lazy FPU Context Switching". If a thread never executes an FPU instruction, the OS doesn't bother saving the FPU registers when switching away from it.
+  But because your preprocessing thread *and* the ML thread both use heavy floating-point math, you dirtied the FPU state in both threads. The OS is forced to save and restore the massive FPU register bank on every single context switch, tripling the latency.
+
+  **The Fix:** If possible, confine all floating-point math to a single thread, or convert the preprocessing math to fixed-point integer math. This allows the OS to use Lazy FPU saving, drastically speeding up the context switches.
+
+  > **Napkin Math:** Standard integer context save: 16 registers * 4 bytes = 64 bytes. FPU context save: + 32 SIMD registers * 16 bytes = 512 bytes. You increased the memory traffic of the OS scheduler by 800% on every single thread swap.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Camera Defocus</b> · <code>sensors</code> <code>deployment</code></summary>
+
+- **Interviewer:** "You deploy an edge ML model on a thermal security camera. It detects humans perfectly in the winter. In the summer, the camera enclosure heats up significantly. The model's accuracy drops to near zero. The camera isn't thermal throttling, and the ambient temperature isn't higher than a human body. You look at the raw thermal images, and they are completely blurry. What physical property of the hardware failed?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Thermal cameras can't see humans when it's hot." They can, if the background isn't exactly 98.6F. The prompt says the images are blurry, not washed out.
+
+  **Realistic Solution:** You experienced **Thermal Expansion of the Lens Assembly (Focus Shift)**.
+
+  Thermal cameras use specialized lenses (often made of Germanium, not glass). Germanium has a very high coefficient of thermal expansion.
+
+  When the camera enclosure heats up in the summer, the physical lens material expands, and the mechanical barrel holding the lens expands. This physically moves the lens further away from the microbolometer sensor array.
+
+  Because the focal point shifted, the optical image hitting the sensor is completely out of focus. Your neural network was trained on sharp edges and clear silhouettes; it cannot process a completely blurred blob of heat.
+
+  **The Fix:**
+  1. Use **Athermalized Lenses** (mechanically designed to counteract expansion using varying materials).
+  2. Implement an active motorized autofocus system that recalibrates based on an internal temperature sensor.
+
+  > **Napkin Math:** A Germanium lens might expand by 50 micrometers over a 30°C temperature swing. If the depth of field is only 10 micrometers, a 50um shift completely destroys the optical focus, turning a sharp 10x10 pixel human face into a blurry 30x30 gradient.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Double JPEG Decode Tax</b> · <code>pipeline</code> <code>vision</code></summary>
+
+- **Interviewer:** "Your mobile app allows users to select a photo from their gallery to run through an image classifier. The ML model takes 10ms. However, from the moment the user taps the image to the moment the result appears, it takes over 150ms. You are using standard Android/iOS image picker APIs. Where did the other 140ms go, and how do you bypass it?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The disk I/O is slow." Reading a few megabytes from modern NVMe mobile storage takes ~5ms, not 140ms.
+
+  **Realistic Solution:** You are suffering from **Redundant Image Decompression and Resizing**.
+
+  When a user picks a photo from the gallery, the high-resolution original image (e.g., a 12 Megapixel JPEG, ~4000x3000) must be decompressed from disk.
+
+  Typically, developers load this into a `Bitmap` or `UIImage` object to display it on the screen (Decompression #1, CPU heavy).
+  Then, the ML pipeline takes that massive `Bitmap`, realizes the neural network only needs a 224x224 input, and performs a bilinear downsampling operation (Resizing, CPU/GPU heavy).
+  Then, it iterates over the 224x224 pixels to extract the raw RGB float values (Data extraction, CPU heavy).
+
+  **The Fix:** You must intercept the data pipeline *before* it inflates into a massive uncompressed Bitmap. Use APIs that allow **Decode-to-Target-Size** (e.g., Android's `ImageDecoder.setTargetSize()` or iOS's `ImageIO` framework with `kCGImageSourceThumbnailMaxPixelSize`). This forces the low-level hardware JPEG decoder to only extract and decode a 224x224 version of the image directly from the compressed file stream, skipping the massive 12MP memory allocation entirely.
+
+  > **Napkin Math:** Decompressing 12MP JPEG to RGB = 36 MB memory allocation + ~100ms CPU time. Decompressing straight to a 224x224 thumbnail = 150 KB memory allocation + ~5ms CPU time. You save 95ms and 35 MB of RAM per image.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The CoreML Neural Engine Fallback</b> · <code>hardware</code> <code>frameworks</code></summary>
+
+- **Interviewer:** "You compile a custom Transformer model for iOS using CoreML. You explicitly set `MLComputeUnits.all` to allow the OS to run it on the Apple Neural Engine (ANE). The model runs, but it consumes massive battery and the phone gets hot. You check the profiler and discover it is running entirely on the GPU. Why did CoreML silently reject the Neural Engine?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The ANE doesn't support Transformers." The ANE does support Transformers; it's an operator support issue.
+
+  **Realistic Solution:** You hit an **Unsupported Operator triggering a Subgraph Fallback**.
+
+  The Apple Neural Engine is a fixed-function hardware accelerator. It is incredibly fast and efficient, but it only supports a specific, strict subset of mathematical operations (mostly convolutions, dense layers, and standard activations).
+
+  If your model contains even a *single* operation that the ANE does not physically support (e.g., a custom `Erf` activation, a complex gather/scatter, or a specific type of dynamic reshaping), the CoreML compiler cannot map that node to the silicon.
+
+  To prevent the model from crashing, CoreML silently falls back. It maps the supported layers to the ANE, and the unsupported layers to the GPU or CPU. The severe issue is that passing tensors back and forth between the ANE and the GPU memory spaces destroys performance. In many cases, if there are too many unsupported nodes, CoreML will just move the entire graph to the GPU to avoid the memory transfer overhead, burning your battery.
+
+  **The Fix:** You must profile the model using Apple's CoreML Instruments to identify the specific unsupported ops. Then, rewrite your PyTorch model to mathematically approximate those ops using primitive layers that the ANE *does* support (e.g., replacing `GELU` with a sequence of `Sigmoid` or `Tanh` approximations that fuse into ANE blocks).
+
+  > **Napkin Math:** ANE efficiency is typically ~0.5 Watts. GPU efficiency is typically ~3-5 Watts. A silent fallback to the GPU increases your model's thermal load by 10x without throwing a single error.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Double FPU Context Save</b> · <code>os</code> <code>latency</code></summary>
+
+- **Interviewer:** "Your mobile app does complex ML preprocessing in C++ (heavy floating-point math). It then passes the data to an ML model running on the same CPU core, handled by an RTOS-like microkernel on a dedicated wearable companion chip. You notice that every time the OS context-switches between your preprocessing thread and the ML inference thread, the context switch takes 3x longer than normal. What is the OS doing differently because of your math?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Floating point math is slow." The math speed doesn't explain the context switch speed.
+
+  **Realistic Solution:** You triggered the **FPU Register Bank Context Save**.
+
+  In a standard RTOS context switch, the OS only saves the core integer registers (e.g., R0-R15 on ARM). This is fast.
+
+  However, modern CPUs have a massive separate bank of Floating Point Unit (FPU) and SIMD (NEON) registers (e.g., 32 x 128-bit registers). Saving these takes a huge amount of memory bandwidth and time.
+
+  To optimize this, most OSs use "Lazy FPU Context Switching". If a thread never executes an FPU instruction, the OS doesn't bother saving the FPU registers when switching away from it.
+  But because your preprocessing thread *and* the ML thread both use heavy floating-point math, you dirtied the FPU state in both threads. The OS is forced to save and restore the massive FPU register bank on every single context switch, tripling the latency.
+
+  **The Fix:** If possible, confine all floating-point math to a single thread, or convert the preprocessing math to fixed-point integer math. This allows the OS to use Lazy FPU saving, drastically speeding up the context switches.
+
+  > **Napkin Math:** Standard integer context save: 16 registers * 4 bytes = 64 bytes. FPU context save: + 32 SIMD registers * 16 bytes = 512 bytes. You increased the memory traffic of the OS scheduler by 800% on every single thread swap.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Camera Defocus</b> · <code>sensors</code> <code>deployment</code></summary>
+
+- **Interviewer:** "You deploy an edge ML model on a thermal security camera. It detects humans perfectly in the winter. In the summer, the camera enclosure heats up significantly. The model's accuracy drops to near zero. The camera isn't thermal throttling, and the ambient temperature isn't higher than a human body. You look at the raw thermal images, and they are completely blurry. What physical property of the hardware failed?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Thermal cameras can't see humans when it's hot." They can, if the background isn't exactly 98.6F. The prompt says the images are blurry, not washed out.
+
+  **Realistic Solution:** You experienced **Thermal Expansion of the Lens Assembly (Focus Shift)**.
+
+  Thermal cameras use specialized lenses (often made of Germanium, not glass). Germanium has a very high coefficient of thermal expansion.
+
+  When the camera enclosure heats up in the summer, the physical lens material expands, and the mechanical barrel holding the lens expands. This physically moves the lens further away from the microbolometer sensor array.
+
+  Because the focal point shifted, the optical image hitting the sensor is completely out of focus. Your neural network was trained on sharp edges and clear silhouettes; it cannot process a completely blurred blob of heat.
+
+  **The Fix:**
+  1. Use **Athermalized Lenses** (mechanically designed to counteract expansion using varying materials).
+  2. Implement an active motorized autofocus system that recalibrates based on an internal temperature sensor.
+
+  > **Napkin Math:** A Germanium lens might expand by 50 micrometers over a 30°C temperature swing. If the depth of field is only 10 micrometers, a 50um shift completely destroys the optical focus, turning a sharp 10x10 pixel human face into a blurry 30x30 gradient.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>

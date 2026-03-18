@@ -1281,3 +1281,120 @@ The domain of the Edge ML Systems Engineer. This round tests your understanding 
   </details>
 
 </details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The ROS 2 IPC Overhead</b> · <code>pipeline</code> <code>latency</code></summary>
+
+- **Interviewer:** "You build an autonomous driving stack using ROS 2. Node A (Camera Driver) captures a 4K frame and publishes it. Node B (ML Perception) subscribes to the frame, runs inference, and publishes bounding boxes. The ML inference takes 20ms. However, the end-to-end latency from Node A to Node B is 55ms. What is ROS 2 doing that costs 35ms, and how do you fix it?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "ROS 2 is built on DDS which uses UDP, so the network is slow." If both nodes are on the same machine, UDP loopback isn't the primary bottleneck. The issue is memory copying.
+
+  **Realistic Solution:** You are suffering from **Inter-Process Communication (IPC) Serialization and Copying**.
+
+  By default, when Node A publishes a message in ROS 2, the DDS (Data Distribution Service) middleware serializes the 4K image array into a byte stream, copies it into the OS network stack (loopback interface), and Node B deserializes and copies it back out into its own memory space.
+
+  For a 4K image (24 MB), performing two deep memory copies and a serialization pass completely overwhelms the memory bandwidth of an edge SoC, adding massive latency before the neural network even sees the data.
+
+  **The Fix:** You must enable **Zero-Copy / Shared Memory Transport (e.g., Iceoryx or Fast DDS Shared Memory)** and use ROS 2 Intra-Process Communication. Both nodes must be compiled as components within the same process container, allowing Node A to publish a *pointer* to the image in shared RAM, allowing Node B to read it instantly with zero bytes copied.
+
+  > **Napkin Math:** 4K Image = `3840 * 2160 * 3 = 24.8 MB`. Two memory copies = 50 MB of traffic. On a Jetson Nano (25 GB/s bandwidth), just moving the memory takes ~2ms. The serialization/deserialization CPU overhead takes the other 33ms.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Watchdog Priority Inversion</b> · <code>real-time</code> <code>architecture</code></summary>
+
+- **Interviewer:** "Your edge robot has a hardware watchdog timer. A high-priority real-time thread must ping the watchdog every 100ms. You add a low-priority thread to run a background ML log-compression task. The system runs perfectly for hours, then the robot suddenly hard-resets because the watchdog wasn't pinged. You check the logs; the high-priority thread was blocked. How did a low-priority background ML task kill the real-time thread?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The ML task used 100% of the CPU." In a preemptive RTOS, a low-priority task cannot steal CPU from a high-priority task, even at 100% load.
+
+  **Realistic Solution:** You caused a **Priority Inversion via a Shared Resource**.
+
+  The low-priority ML compression task needed to read logs from the shared file system. To do this safely, it acquired a Mutex lock on the file system.
+
+  While the low-priority task held the lock, the high-priority watchdog thread woke up. It also needed to write a quick status update to the file system before pinging the watchdog. It tried to acquire the Mutex, but it was locked. So, the high-priority thread went to sleep, waiting for the lock.
+
+  Here is the fatal flaw: While the low-priority task was holding the lock, a *medium-priority* thread (e.g., a UI update) woke up. Because it was higher priority than the ML task, it preempted the ML task. The medium-priority thread ran for 200ms.
+
+  Because the ML task was preempted, it couldn't release the lock. Because the lock wasn't released, the high-priority thread couldn't run. The medium-priority thread effectively blocked the high-priority thread, blowing past the 100ms watchdog deadline.
+
+  **The Fix:** You must use **Priority Inheritance Mutexes**. When the high-priority thread attempts to grab the lock held by the low-priority thread, the OS temporarily boosts the low-priority thread to "high priority", preventing the medium-priority thread from interrupting it until the lock is safely released.
+
+  > **Napkin Math:** High-priority deadline: 100ms. Low-priority lock duration: 5ms. Medium-priority interruption: 200ms. Without Priority Inheritance, the 100ms deadline is violated by 105ms.
+
+  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The UVC Camera MJPEG CPU Tax</b> · <code>sensors</code> <code>cpu</code></summary>
+
+- **Interviewer:** "You attach a USB webcam to a Raspberry Pi to run a vision model. To save USB bandwidth, you configure the camera via V4L2 to output compressed MJPEG video at 1080p 30FPS instead of raw YUYV. The USB bandwidth drops significantly, which is good. But your ML inference time increases by 40%, and the Pi runs incredibly hot. Why did saving USB bandwidth destroy your CPU?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The ML model can't read MJPEG." The ML model isn't reading MJPEG; OpenCV is reading it first.
+
+  **Realistic Solution:** You shifted the bottleneck from the USB bus to **Software Video Decoding on the CPU**.
+
+  A neural network requires raw, uncompressed RGB arrays to do math. When the camera sends raw YUYV, the CPU only has to do a very fast, lightweight color-space conversion (YUYV to RGB) before passing it to the model.
+
+  When you tell the camera to send MJPEG, the camera compresses the image. When it arrives at the Raspberry Pi, OpenCV (or GStreamer) must perform a full JPEG decompression algorithm (Inverse DCT, Huffman decoding) on every single frame.
+
+  Software JPEG decoding at 1080p 30FPS consumes a massive amount of CPU cycles. You maxed out the CPU cores just unzipping the video, leaving very few CPU cycles left for the actual neural network inference, causing the inference time to spike and the chip to overheat.
+
+  **The Fix:** You must leverage **Hardware Accelerated Decoding**. Use GStreamer with the `v4l2h264dec` or `omxmjpegdec` plugins to route the compressed video stream directly into the Raspberry Pi's hardware VideoCore unit, completely offloading the decompression from the main CPU.
+
+  > **Napkin Math:** Raw YUYV conversion = ~2ms CPU time per frame. Software MJPEG decode = ~15ms CPU time per frame. If your ML model took 30ms, adding 15ms of JPEG decoding overhead instantly increases your total frame latency by 50%.
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
+
+  </details>
+
+</details>
+
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Unaligned Memory DMA Fault</b> · <code>hardware</code> <code>memory</code></summary>
+
+- **Interviewer:** "You configure a hardware DMA (Direct Memory Access) controller to stream incoming camera pixels directly into the `tensor_arena` array of your TFLite Micro model. It works perfectly on your Cortex-M4 dev board. You move the exact same C++ code to a Cortex-M0+ production board. The moment the DMA starts, the system crashes with a Hard Fault. Why does the exact same DMA code crash on the M0+?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The M0+ doesn't have DMA." It usually does. The issue is how different ARM cores handle memory addresses.
+
+  **Realistic Solution:** You hit an **Unaligned Memory Access Fault**.
+
+  The Cortex-M3/M4/M7 families have hardware support for *unaligned* memory access. If you tell the DMA to write a 32-bit word (4 bytes) to memory address `0x20000001` (which is not a multiple of 4), the M4 hardware handles it silently with a slight performance penalty.
+
+  The Cortex-M0/M0+ is an ultra-stripped-down core. It *physically lacks* the silicon to perform unaligned accesses. If you attempt to read or write a 32-bit word to an address that is not perfectly aligned to a 4-byte boundary, the memory controller throws an immediate bus fault (Hard Fault).
+
+  If your `tensor_arena` or the specific pointer inside it happened to fall on an odd address, the DMA controller on the M0+ panicked and crashed the system.
+
+  **The Fix:** You must explicitly force memory alignment in your C++ code. Use compiler attributes (e.g., `__attribute__((aligned(4)))`) when declaring the `tensor_arena`, and ensure that the sub-pointers within the arena passed to the DMA are correctly calculated to be multiples of 4.
+
+  > **Napkin Math:** 32-bit architecture = 4 bytes per word. Addresses like 0x1000, 0x1004, 0x1008 are valid. An address like 0x1001 forces the CPU to read across two physical memory banks, which the M0+ physically cannot do, resulting in a 0-cycle crash.
+
+  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
