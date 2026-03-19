@@ -28,6 +28,8 @@ declare -A SUBSITES=(
   [slides]="slides"
   [instructors]="instructors"
   [newsletter]="newsletter"
+  [community]="community"
+  [about]="about"
 )
 
 # ── Compute prefix ────────────────────────────────────────────────────────────
