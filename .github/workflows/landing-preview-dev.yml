@@ -1,0 +1,101 @@
+name: '🏠 Landing · 👁️ Preview (Dev)'
+
+# Builds and deploys the ecosystem landing page independently.
+# Fast (~30s) — only renders one index.qmd file.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - 'book/quarto/landing_site/**'
+      - 'book/quarto/config/shared/html/navbar-common.yml'
+      - 'book/quarto/assets/styles/**'
+
+concurrency:
+  group: landing-dev-deploy
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: '🏠 Build & Deploy Landing (Dev)'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          sparse-checkout: |
+            .github/scripts/rewrite-dev-urls.sh
+            book/quarto/landing_site
+            book/quarto/config/shared/html/navbar-common.yml
+            book/quarto/assets/styles
+          sparse-checkout-cone-mode: false
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🏗️ Build landing site
+        run: |
+          cd book/quarto
+          quarto render landing_site/index.qmd
+          echo "✅ Landing site rendered"
+          ls -la _build/html-landing/
+
+      - name: 🔗 Rewrite URLs for dev site
+        run: |
+          bash .github/scripts/rewrite-dev-urls.sh root book/quarto/_build/html-landing
+          # Landing page has extra Quarto-generated relative links that need book/ prefix
+          cd book/quarto/_build/html-landing
+          for f in $(find . -name "*.html" -type f); do
+            sed -i 's|href="vol1/"|href="book/vol1/"|g' "$f"
+            sed -i 's|href="vol2/"|href="book/vol2/"|g' "$f"
+          done
+
+      - name: 🚀 Deploy to Dev Site via SSH
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning dev preview repository..."
+          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+          cd target-repo
+
+          echo "📄 Deploying landing site to root..."
+          LANDING_DIR="${{ github.workspace }}/book/quarto/_build/html-landing"
+
+          # Copy landing site to root, preserving all subsite directories
+          cp -r "$LANDING_DIR"/. ./
+          touch .nojekyll
+
+          if [ ! -f "index.html" ]; then
+            echo "❌ CRITICAL: Landing page index.html is missing. Aborting."
+            exit 1
+          fi
+
+          echo "📦 Committing and pushing..."
+          git add .
+          git commit -m "🏠 Deploy landing page dev preview from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+
+          for i in 1 2 3; do
+            if git push origin main 2>/dev/null; then
+              echo "✅ Push succeeded on attempt $i"
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin main || true
+          done
+
+          echo "✅ Landing page deployed to: https://harvard-edge.github.io/${{ vars.DEV_REPO }}/"
