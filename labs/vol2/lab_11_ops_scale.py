@@ -44,7 +44,7 @@ async def _():
 
     if sys.platform == "emscripten":
         import micropip
-        await micropip.install(["pydantic", "pint"], keep_going=False)
+        await micropip.install(["pydantic", "pint", "plotly"], keep_going=False)
         await micropip.install(
             "../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
         )
