@@ -51,6 +51,7 @@ async def _():
         if str(_root) not in sys.path:
             sys.path.insert(0, str(_root))
 
+    import plotly.graph_objects as go
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS
     from mlsysim.labs.components import DecisionLog
