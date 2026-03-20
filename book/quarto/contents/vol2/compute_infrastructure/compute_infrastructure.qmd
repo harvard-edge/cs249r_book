@@ -303,8 +303,15 @@ class H100PerformanceScenario:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     flops = H100_FLOPS_FP8_TENSOR
 
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    h100_tf = flops.m_as(TFLOPs/second)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(h100_tf > 1000, "H100 should have more than 1000 TFLOPs FP8")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_tflops = f"{flops.m_as(TFLOPs/second):.0f}"
+    h100_tflops = f"{h100_tf:.0f}"
 ```
 
 The H100's `{python} H100PerformanceScenario.h100_tflops` TFLOPS of FP8 Tensor Core throughput at 700 W represents a 6.8$\times$ efficiency improvement over V100, achieved through a combination of process technology (TSMC 4N), architectural innovation (Transformer Engine), and precision engineering (FP8 support).
@@ -580,9 +587,17 @@ class MemoryBandwidthScenario:
     ddr_bw = SYSTEM_MEMORY_BW
     hbm_bw = H100_MEM_BW
 
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    ddr_gbs = ddr_bw.m_as(GB/second)
+    hbm_tbs = hbm_bw.m_as(TB/second)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(hbm_tbs > ddr_gbs / 1000, "HBM should be significantly faster than DDR")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ddr_bw_str = f"{ddr_bw.m_as(GB/second):.0f}"
-    h100_bw = f"{hbm_bw.m_as(TB/second):.2f}"
+    ddr_bw_str = f"{ddr_gbs:.0f}"
+    h100_bw = f"{hbm_tbs:.2f}"
 ```
 
 | **Metric**          |                 **Host DRAM** (DDR5)                |             **Accelerator HBM** (HBM3e)              |     **Scaling Factor**    |
@@ -1259,6 +1274,10 @@ class RackPowerScenario:
     node_power = (h100_tdp * gpus_per_node).m_as(kilowatt) * system_overhead
     rack_power = node_power * nodes_per_rack
 
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(rack_power > 25, "Rack power should exceed 25 kW for modern ML nodes")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     rack_power_str = f"{rack_power:.0f}"
 ```
@@ -1320,6 +1339,10 @@ class GpuEfficiencyScenario:
     a100_eff = a100_f16.m_as(TFLOPs/second) / a100_tdp.m_as(watt)
     h100_eff = h100_f16.m_as(TFLOPs/second) / h100_tdp.m_as(watt)
     b200_eff = b200_f16.m_as(TFLOPs/second) / b200_tdp.m_as(watt)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(h100_eff > a100_eff > v100_eff, "Efficiency should strictly increase with newer generations for same precision")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     v100_ef_str = f"{v100_eff:.2f}"
@@ -1573,10 +1596,20 @@ class BandwidthHierarchyScenario:
     pcie = PCIE_GEN5_BW
     ib = INFINIBAND_NDR_BW
 
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    nvlink_gbs = nvlink.m_as(GB/second)
+    pcie_gbs = pcie.m_as(GB/second)
+    ib_gbs = (ib / 8).m_as(GB/second)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(nvlink_gbs > pcie_gbs, "NVLink should have higher bandwidth than PCIe")
+    check(pcie_gbs >= ib_gbs, "PCIe should have higher or equal bandwidth to a single IB link")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_bw_str = f"{nvlink.m_as(GB/second):.0f}"
-    pcie_bw_str = f"{pcie.m_as(GB/second):.0f}"
-    ib_bw_gbs = f"{(ib / 8).m_as(GB/second):.0f}"
+    nvlink_bw_str = f"{nvlink_gbs:.0f}"
+    pcie_bw_str = f"{pcie_gbs:.0f}"
+    ib_bw_gbs = f"{ib_gbs:.0f}"
 ```
 
 | **Domain**          | **Interconnect**   |                         **Bandwidth**                         | **Latency** | **Scaling Limit**  |
@@ -1741,6 +1774,10 @@ class NodeCapacityScenario:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_mem = mem * n_gpus
     total_flops = flops * n_gpus
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(total_mem.m_as(GB) > 500, "Node HBM capacity should exceed 500GB")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     node_hbm_cap = f"{total_mem.m_as(GB):.0f}"
@@ -3252,6 +3289,11 @@ class SummaryScaleScenario:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = params.m_as(param) / BILLION
     rack_power = (tdp * gpus_per_node).m_as(kilowatt) * 1.2 * 4 # 4 nodes per rack
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(params_b == 175, "GPT-3 params should be 175B")
+    check(rack_power > 25, "Rack power should exceed 25 kW")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b = f"{params_b:.0f}"

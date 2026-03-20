@@ -181,6 +181,10 @@ class ClusterEconomicsContext:
     annual_waste_m = (daily_waste * 365) / 1e6
     gpu_gain = cluster_size * (util_high - util_low) / util_low
 
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(annual_waste_m > 0, "Annual waste must be greater than zero")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     cluster_size_str = fmt(cluster_size, precision=0)
     daily_cost_str = fmt(daily_cost, precision=0)
@@ -524,6 +528,14 @@ The most pernicious of these is **priority inversion**, a scenario borrowed from
 Solving this requires a choice between prevention and detection. Prevention mechanisms, like strict gang scheduling and aggressive timeouts, eliminate deadlock states by construction but often sacrifice utilization. Detection mechanisms allow the system to enter potentially unsafe states to maximize throughput, relying on monitoring to identify and resolve deadlocks when they occur.
 
 For large-scale fleets, detection is computationally non-trivial. A cluster with 10,000 GPUs and 500 pending jobs has a state space exceeding $10^{15}$ possible allocations. Constructing and traversing a global "wait-for" graph to detect cycles in real time is often intractable. Production systems therefore rely on heuristics. **Lease-based resources** assign all allocations a time-to-live (TTL); if a job effectively deadlocks, its lease expires, and the scheduler reclaims the GPUs. **Progress monitoring** flags jobs whose GPU utilization drops to zero for a threshold period (e.g., 10 minutes) as "zombies" and terminates them regardless of their reported status. **Holistic preemption** reserves all necessary resources (CPU, network, storage bandwidth) for the victim to exit gracefully when preempting for high-priority jobs, preventing the priority inversion trap. These strategies accept a non-zero rate of false positives (killing healthy but slow jobs) to guarantee cluster liveness.
+
+### Heterogeneous Gang Scheduling {#sec-fleet-orchestration-heterogeneous-gang}
+
+The traditional gang scheduling model assumes a homogeneous Bulk Synchronous Parallel (BSP) workload: $N$ identical workers executing the exact same compute graph. However, advanced training paradigms fundamentally break this assumption. Reinforcement Learning from Human Feedback (RLHF) requires running four models of different sizes simultaneously: an Actor model (training), a Critic model (training), a Reference model (inference), and a Reward model (inference).
+
+::: {.callout-perspective title="Routing Over Synchrony"}
+This necessitates **Heterogeneous Gang Scheduling**. The scheduler must atomically allocate a diverse constellation of resources—high-HBM nodes optimized for memory-bound inference generation, alongside high-compute nodes for compute-bound backpropagation. The orchestration challenge shifts from static topological bin-packing to dynamic data routing. Activations and gradients are no longer just reduced within a homogeneous ring; instead, data must stream continuously between inference nodes generating rollouts and training nodes computing policy updates. If the heterogeneous gang allocation is not perfectly balanced across these distinct workload profiles, the entire cluster falls out of sync, leaving expensive accelerators starved for data.
+:::
 
 The tension between gang scheduling's safety guarantees and backfill's utilization gains defines the core trade-off in training cluster scheduling. Gang scheduling prevents deadlock but wastes resources; backfill improves utilization but requires runtime estimates that users cannot accurately provide. The next section examines how the two dominant orchestration paradigms resolve this tension through fundamentally different architectural philosophies.
 

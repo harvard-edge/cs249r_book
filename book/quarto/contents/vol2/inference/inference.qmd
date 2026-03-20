@@ -95,13 +95,26 @@ class InferenceSetup:
     """Namespace for localized inference hardware reference values."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # (Hardware constants)
+    mem_h100 = H100_MEM_CAPACITY
+    bw_h100 = H100_MEM_BW
+    bw_a100 = A100_MEM_BW
+    nvlink = NVLINK_H100_BW
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    h100_mem_gb = f"{H100_MEM_CAPACITY.m_as(GB):.0f}"       # "80"
-    h100_mem_bw_tbs = f"{H100_MEM_BW.m_as(TB / second)}"     # "3.35"
-    a100_mem_bw_tbs = f"{A100_MEM_BW.m_as(TB / second):.0f}" # "2"
-    nvlink_h100_gbs = f"{NVLINK_H100_BW.m_as(GB/second):.0f}" # "900"
+    h100_mem_gb_val = mem_h100.m_as(GB)
+    h100_bw_tbs_val = bw_h100.m_as(TB / second)
+    a100_bw_tbs_val = bw_a100.m_as(TB / second)
+    nvlink_gbs_val = nvlink.m_as(GB / second)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(h100_bw_tbs_val > a100_bw_tbs_val, "H100 bandwidth should exceed A100 bandwidth")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    h100_mem_gb = f"{h100_mem_gb_val:.0f}"
+    h100_mem_bw_tbs = f"{h100_bw_tbs_val:.2f}"
+    a100_mem_bw_tbs = f"{a100_bw_tbs_val:.0f}"
+    nvlink_h100_gbs = f"{nvlink_gbs_val:.0f}"
 ```
 
 ## The Economics and Architecture of Inference {#sec-inference-scale-scaling-inference-beyond-single-machines-54e6}
@@ -1018,8 +1031,15 @@ class Gpt3Scenario:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     params = GPT3_PARAMS
 
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    params_b = params.m_as(param) / BILLION
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(params_b == 175, "GPT-3 should have 175B parameters")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    gpt3_params_b = f"{params.m_as(param) / BILLION:.0f}"
+    gpt3_params_b = f"{params_b:.0f}"
 ```
 
 Consider serving a GPT-3 class model (`{python} Gpt3Scenario.gpt3_params_b`B parameters) with the following characteristics:
@@ -1676,13 +1696,26 @@ class A100HardwareScenario:
     """A100 hardware reference."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # (Hardware constants)
+    mem = A100_MEM_CAPACITY
+    bw = A100_MEM_BW
+    nvlink = NVLINK_A100_BW
+    pcie = PCIE_GEN4_BW
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    a100_mem_gb = f"{A100_MEM_CAPACITY.m_as(GB):.0f}"       # "80"
-    a100_mem_bw_tbs = f"{A100_MEM_BW.m_as(TB / second):.0f}" # "2"
-    nvlink_a100_gbs = f"{NVLINK_A100_BW.m_as(GB / second):.0f}"  # "600"
-    pcie_gen4_gbs = f"{PCIE_GEN4_BW.m_as(GB / second):.0f}"  # "32"
+    a100_mem_gb_val = mem.m_as(GB)
+    a100_mem_bw_tbs_val = bw.m_as(TB / second)
+    nvlink_a100_gbs_val = nvlink.m_as(GB / second)
+    pcie_gen4_gbs_val = pcie.m_as(GB / second)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(nvlink_a100_gbs_val > pcie_gen4_gbs_val, "NVLink should be faster than PCIe")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    a100_mem_gb = f"{a100_mem_gb_val:.0f}"
+    a100_mem_bw_tbs = f"{a100_mem_bw_tbs_val:.0f}"
+    nvlink_a100_gbs = f"{nvlink_a100_gbs_val:.0f}"
+    pcie_gen4_gbs = f"{pcie_gen4_gbs_val:.0f}"
 ```
 
 The system runs on 4 A100-`{python} A100HardwareScenario.a100_mem_gb`GB GPUs connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gbs` GB/s per GPU) rather than NVLink. The server has a dual-socket CPU with NUMA topology. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tbs` TB/s (HBM2e), adequate for decode operations. However, PCIe bandwidth limits tensor parallelism communication to `{python} A100HardwareScenario.pcie_gen4_gbs` GB/s versus NVLink's `{python} A100HardwareScenario.nvlink_a100_gbs` GB/s. For a batch requiring 100 MB activation transfers between GPUs, PCIe adds approximately 1.5 ms per synchronization point versus 0.17 ms for NVLink.
@@ -2881,7 +2914,17 @@ The schedule ensures decode latency remains bounded regardless of incoming promp
 
 :::
 
-KV Cache management enables a single GPU to handle many concurrent requests without crashing. When the model itself exceeds single-GPU capacity, as a 175-billion parameter foundation model does, fitting even the weights requires splitting the workload across multiple devices through model sharding for inference.
+KV Cache management enables a single GPU to handle many concurrent requests without crashing.
+
+### Dynamic Memory Swapping and Multi-Tenancy {#sec-inference-scale-lora-multi-tenancy}
+
+As serving platforms scale to support thousands of concurrent users on a single foundation model, fine-tuning introduces a new memory bottleneck. When 10,000 users each have a unique Low-Rank Adaptation (LoRA) weight matrix applied to a shared base model, replicating the 140 GB base weights for each user is physically impossible. Instead, the base model remains pinned in HBM, while user-specific LoRA adapters are dynamically swapped into SRAM on demand.
+
+::: {.callout-perspective title="The Context Switch of Machine Learning"}
+This multi-tenant serving pattern shifts the fundamental performance constraint from compute throughput to **SRAM cache trashing**. As the continuous batching scheduler interleaves requests from different users, the constant swapping of adapter weights from HBM to SRAM creates the machine learning equivalent of an operating system context switch. If the adapter swap latency exceeds the compute time of the generation step, the GPU compute cores stall. Efficient multi-tenancy requires integrating adapter scheduling directly with memory pagers like PagedAttention, batching requests by active adapter to minimize context-switching overhead.
+:::
+
+When the model itself exceeds single-GPU capacity, as a 175-billion parameter foundation model does, fitting even the weights requires splitting the workload across multiple devices through model sharding for inference.
 
 ## Model Sharding for Inference {#sec-inference-scale-model-sharding-inference-82b3}
 
@@ -5563,9 +5606,17 @@ class FinalSummaryHardware:
     h100_mem = H100_MEM_CAPACITY
     h100_bw = H100_MEM_BW
 
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    h100_mem_gb_val = h100_mem.m_as(GB)
+    h100_bw_tbs_val = h100_bw.m_as(TB / second)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(h100_mem_gb_val > 80, "H100 memory capacity should be > 80GB")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_mem_gb = f"{h100_mem.m_as(GB):.0f}"
-    h100_mem_bw_tbs = f"{h100_bw.m_as(TB / second)}"
+    h100_mem_gb = f"{h100_mem_gb_val:.0f}"
+    h100_mem_bw_tbs = f"{h100_bw_tbs_val:.2f}"
 ```
 
 While larger GPU memory enables larger batches for models that fit in memory, the bottleneck often shifts before memory is exhausted. Memory bandwidth limits throughput for bandwidth-bound operations (LLM decode). Compute limits throughput for compute-bound operations (prefill, vision inference). A 7B LLM on an H100 with `{python} FinalSummaryHardware.h100_mem_gb`GB memory achieves ~2,000 tokens/sec decode throughput regardless of batch size beyond 128 requests because HBM3 bandwidth (`{python} FinalSummaryHardware.h100_mem_bw_tbs` TB/s) saturates first. Adding memory to a bandwidth-bound workload provides no benefit. Understanding whether the workload is compute-bound, memory-bandwidth-bound, or capacity-bound guides appropriate resource allocation.

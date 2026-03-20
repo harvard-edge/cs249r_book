@@ -848,6 +848,10 @@ class ObjectStorageCost:
     s3_annual_val   = dataset_size_tb * 1000 * cost_s3_gb_mo * 12
     nvme_annual_val = dataset_size_tb * 1000 * cost_nvme_gb_mo * 12
 
+    # ┌── 3. GUARD ────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(nvme_annual_val > s3_annual_val, "NVMe cost should be higher than S3")
+
     # ┌── 4. OUTPUT ───────────────────────────────────────
     s3_annual_str   = f"{s3_annual_val:,.0f}"
     nvme_annual_str = f"{nvme_annual_val:,.0f}"
@@ -897,6 +901,10 @@ class GlacierCost:
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
     glacier_annual_val = dataset_size_tb * 1000 * cost_glacier_gb_mo * 12
+
+    # ┌── 3. GUARD ────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(glacier_annual_val > 0, "Glacier annual cost should be positive")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
     glacier_annual_str = f"{glacier_annual_val:,.0f}"
@@ -1638,6 +1646,14 @@ Prefetching hides *average* latency, not *tail* latency. Object storage P99 late
 **Pitfall:** *Using millions of small files for training data.*
 
 Storing each training sample as an individual file (one JPEG per image, one JSON per text sample) is natural for data collection but catastrophic for training at scale. Each file requires metadata operations (`open()`, `stat()`, `close()`) that serialize on the metadata server. At 10,000 concurrent workers, metadata operations become the bottleneck long before data bandwidth saturates. The solution is to aggregate samples into large sequential shards (TFRecord, WebDataset tar, Parquet) during preprocessing. This reduces metadata operations by 10,000 to 100,000$\times$ and transforms random access patterns into sequential streaming.
+
+### Retrieval Infrastructure: Vector Indexes and Hybrid Search {#sec-data-storage-retrieval-infrastructure}
+
+While model training relies heavily on streaming sequential blobs via formats like TFRecord or Parquet, modern inference architectures—particularly those leveraging Retrieval-Augmented Generation (RAG)—introduce a fundamentally different storage profile. Machine learning data in this context is not just sequential bytes, but rather high-dimensional vector graphs representing semantic embeddings.
+
+::: {.callout-perspective title="The IOPS Bottleneck in High-Dimensional Search"}
+This architectural pattern shifts the primary storage bottleneck from **sequential read bandwidth** to **random access memory IOPS**. Vector databases must traverse high-dimensional graphs (such as HNSW) to find approximate nearest neighbors across billions of embeddings. The performance is governed by a strict physical constraint: the **Recall vs. Latency vs. Capacity** tradeoff. Maximizing recall requires traversing a larger portion of the index, driving up IOPS and latency. Sustaining sub-100 ms latency at scale demands keeping the upper routing layers of the vector index pinned in host DRAM, while aggressively paging payload data from NVMe, treating the storage tier as a massive, low-latency key-value store rather than a sequential pipe.
+:::
 
 **Pitfall:** *Ignoring egress costs when designing the storage architecture.*
 
