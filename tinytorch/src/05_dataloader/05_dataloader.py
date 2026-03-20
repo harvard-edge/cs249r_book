@@ -68,7 +68,7 @@ import random
 import sys
 import time
 from abc import ABC, abstractmethod
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Tuple, Union, Any, Iterable, Callable
 
 import numpy as np
 
@@ -197,7 +197,7 @@ class Dataset(ABC):
         pass
 
     @abstractmethod
-    def __getitem__(self, idx: int):
+    def __getitem__(self, idx: int) -> Any:
         """
         Return the sample at the given index.
 
@@ -349,7 +349,7 @@ class TensorDataset(Dataset):
     - Return tuple of tensor[idx] for all tensors
     """
 
-    def __init__(self, *tensors):
+    def __init__(self, *tensors: Tensor):
         """
         Create dataset from multiple tensors.
 
@@ -637,7 +637,7 @@ class DataLoader:
         return (len(self.dataset) + self.batch_size - 1) // self.batch_size
         ### END SOLUTION
 
-    def __iter__(self) -> Iterator:
+    def __iter__(self) -> Iterator[Tuple[Tensor, ...]]:
         """
         Return iterator over batches.
 
@@ -806,7 +806,7 @@ class RandomHorizontalFlip:
         p: Probability of flipping (default: 0.5)
     """
 
-    def __init__(self, p=0.5):
+    def __init__(self, p: float = 0.5) -> None:
         """
         Initialize RandomHorizontalFlip.
 
@@ -832,7 +832,7 @@ class RandomHorizontalFlip:
         self.p = p
         ### END SOLUTION
 
-    def __call__(self, x):
+    def __call__(self, x: Union[np.ndarray, Tensor]) -> Union[np.ndarray, Tensor]:
         """
         Apply random horizontal flip to input.
 
@@ -914,7 +914,7 @@ We must pad ONLY spatial dimensions, never the channel dimension.
 
 # %% nbgrader={"grade": false, "grade_id": "dataloader-pad-image", "solution": true}
 #| export
-def _pad_image(data, padding):
+def _pad_image(data: np.ndarray, padding: int) -> np.ndarray:
     """
     Detect image format and apply zero-padding to spatial dimensions only.
 
@@ -1034,7 +1034,7 @@ computing two random integers within valid bounds.
 
 # %% nbgrader={"grade": false, "grade_id": "dataloader-crop-region", "solution": true}
 #| export
-def _random_crop_region(padded_h, padded_w, target_h, target_w):
+def _random_crop_region(padded_h: int, padded_w: int, target_h: int, target_w: int) -> Tuple[int, int]:
     """
     Sample a random (top, left) position for cropping.
 
@@ -1140,7 +1140,7 @@ class RandomCrop:
         padding: Pixels to pad on each side before cropping (default: 4)
     """
 
-    def __init__(self, size, padding=4):
+    def __init__(self, size: Union[int, Tuple[int, int]], padding: int = 4) -> None:
         """
         Initialize RandomCrop.
 
@@ -1164,7 +1164,7 @@ class RandomCrop:
         self.padding = padding
         ### END SOLUTION
 
-    def __call__(self, x):
+    def __call__(self, x: Union[np.ndarray, Tensor]) -> Union[np.ndarray, Tensor]:
         """
         Apply random crop after padding.
 
@@ -1235,7 +1235,7 @@ class Compose:
         transforms: List of transform callables
     """
 
-    def __init__(self, transforms):
+    def __init__(self, transforms: Iterable[Callable[[Union[np.ndarray, Tensor]], Union[np.ndarray, Tensor]]]) -> None:
         """
         Initialize Compose with list of transforms.
 
@@ -1247,7 +1247,7 @@ class Compose:
         """
         self.transforms = transforms
 
-    def __call__(self, x):
+    def __call__(self, x: Union[np.ndarray, Tensor]) -> Union[np.ndarray, Tensor]:
         """Apply all transforms in sequence."""
         for transform in self.transforms:
             x = transform(x)
