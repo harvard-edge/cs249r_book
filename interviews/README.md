@@ -17,7 +17,7 @@ Content may be incomplete or change without notice. The published curriculum liv
 # The ML Systems Interview Playbook
 
 <p align="center">
-  <b>1,000+ systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
+  <b>1,063 systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
   <i>You can generate the code, but you cannot prompt your way out of a silicon bottleneck.</i>
 </p>
 
@@ -56,7 +56,7 @@ Pick your level and start drilling:
   <tbody>
     <tr>
       <td><b>Preparing for a screen</b> (Junior/Mid)</td>
-      <td>🟢 Green-tagged questions in any round</td>
+      <td>🟢 Green-tagged questions in any topic file</td>
     </tr>
     <tr>
       <td><b>Building applied skills</b> (Mid)</td>
@@ -64,7 +64,7 @@ Pick your level and start drilling:
     </tr>
     <tr>
       <td><b>Targeting Senior (L5)</b></td>
-      <td>🟡 Yellow-tagged questions + <a href="cloud/01_compute_and_memory.md">1. Compute & Memory</a> & <a href="cloud/03_inference_and_serving.md">3. Inference & Serving</a></td>
+      <td>🟡 Yellow-tagged questions + <a href="cloud/01_single_machine.md">1. Single Machine</a> & <a href="cloud/03_serving_stack.md">3. Serving Stack</a></td>
     </tr>
     <tr>
       <td><b>Targeting Staff+ (L6+)</b></td>
@@ -90,7 +90,7 @@ Each track targets a different deployment regime — different physics, differen
       <th width="25%">Focus</th>
       <th width="20%">Primary Constraint</th>
       <th width="10%">Questions</th>
-      <th width="15%">Rounds</th>
+      <th width="15%">Topics</th>
       <th width="15%">Scale</th>
     </tr>
   </thead>
@@ -99,32 +99,32 @@ Each track targets a different deployment regime — different physics, differen
       <td><b><a href="cloud/README.md">☁️ Cloud</a></b></td>
       <td>Data center training & serving</td>
       <td>Memory bandwidth / network</td>
-      <td>253</td>
-      <td>6 + visual</td>
+      <td>296</td>
+      <td>5</td>
       <td>PFLOPS, 80 GB HBM</td>
     </tr>
     <tr>
       <td><b><a href="edge/README.md">🤖 Edge</a></b></td>
       <td>Autonomous vehicles, robotics</td>
       <td>Thermal envelope / real-time</td>
-      <td>207</td>
-      <td>5</td>
+      <td>268</td>
+      <td>4</td>
       <td>TOPS, 8–32 GB</td>
     </tr>
     <tr>
       <td><b><a href="mobile/README.md">📱 Mobile</a></b></td>
       <td>On-device AI for smartphones</td>
       <td>Battery life / shared resources</td>
-      <td>177</td>
-      <td>5</td>
+      <td>261</td>
+      <td>4</td>
       <td>TOPS, 6–12 GB</td>
     </tr>
     <tr>
       <td><b><a href="tinyml/README.md">🔬 TinyML</a></b></td>
       <td>Microcontroller & ultra-low-power</td>
       <td>SRAM capacity / hard real-time</td>
-      <td>171</td>
-      <td>5</td>
+      <td>238</td>
+      <td>4</td>
       <td>MFLOPS, 256 KB–2 MB</td>
     </tr>
   </tbody>
@@ -284,7 +284,7 @@ Every question is tagged with a mastery level. These levels mirror engineering l
 
 ## Topic Index
 
-Every question is tagged with a topic. Use this index to study a specific concept across all rounds. The examples below highlight key questions from across the tracks.
+Every question is tagged with a topic. Use this index to study a specific concept across all topic files. The examples below highlight key questions from across the tracks.
 
 <table>
   <thead>
@@ -302,7 +302,7 @@ Every question is tagged with a topic. Use this index to study a specific concep
     </tr>
     <tr>
       <td><b><code>memory</code></b> — VRAM accounting, memory hierarchy, energy</td>
-      <td><b>Cloud:</b> The Sequence Length Trap · <b>Mobile:</b> The Background Kill · <b>TinyML:</b> The Flash-SRAM Boundary</td>
+      <td><b>Cloud:</b> The Sequence Length Trap · <b>Mobile:</b> The App Memory Pressure Levels · <b>TinyML:</b> The Flash-SRAM Boundary</td>
       <td>✅ Strong</td>
     </tr>
     <tr>
@@ -312,7 +312,7 @@ Every question is tagged with a topic. Use this index to study a specific concep
     </tr>
     <tr>
       <td><b><code>precision</code></b> — FP16/BF16/INT8, quantization, underflow</td>
-      <td><b>Cloud:</b> The Underflow Crisis · <b>Edge:</b> The QAT Cliff · <b>TinyML:</b> The Requantization Pipeline</td>
+      <td><b>Cloud:</b> The Underflow Crisis · <b>Edge:</b> The QAT Cliff · <b>TinyML:</b> The 100-Layer Quantization Drift</td>
       <td>✅ Strong</td>
     </tr>
     <tr>
@@ -322,7 +322,7 @@ Every question is tagged with a topic. Use this index to study a specific concep
     </tr>
     <tr>
       <td><b><code>frameworks</code></b> — JIT compilation, graph tracing, kernels</td>
-      <td><b>Cloud:</b> The Compilation Overhead · <b>Mobile:</b> The Single-Op Delegation Fix</td>
+      <td><b>Cloud:</b> The Compilation Overhead · <b>Mobile:</b> The NPU Delegation Failure Modes</td>
       <td>✅ Strong</td>
     </tr>
     <tr>
@@ -347,7 +347,7 @@ Every question is tagged with a topic. Use this index to study a specific concep
     </tr>
     <tr>
       <td><b><code>latency</code></b> — TTFT, TPOT, tail latency, queueing theory</td>
-      <td><b>Cloud:</b> The Serving Inversion · <b>Mobile:</b> The Jank Explanation · <b>TinyML:</b> The Interrupt Deadline</td>
+      <td><b>Cloud:</b> The Serving Inversion · <b>Mobile:</b> The Jank Budget · <b>TinyML:</b> Interrupt Overhead Impact on Inference</td>
       <td>✅ Strong</td>
     </tr>
     <tr>
@@ -367,12 +367,12 @@ Every question is tagged with a topic. Use this index to study a specific concep
     </tr>
     <tr>
       <td><b><code>security</code></b> — Prompt injection, adversarial attacks</td>
-      <td><b>Cloud:</b> The Trust Boundary · <b>Edge:</b> The Adversarial Patch Attack</td>
+      <td><b>Cloud:</b> The Guardrail Latency Tax · <b>Edge:</b> The Adversarial Patch Attack</td>
       <td>✅ Strong</td>
     </tr>
     <tr>
       <td><b><code>privacy</code></b> — DP-SGD, membership inference</td>
-      <td><b>Cloud:</b> The Privacy Audit · <b>Mobile:</b> The Federated Keyboard</td>
+      <td><b>Cloud:</b> The Privacy Throughput Cliff · <b>Mobile:</b> The Federated Keyboard</td>
       <td>✅ Strong</td>
     </tr>
   </tbody>
@@ -387,7 +387,7 @@ Each question includes a **📖 Deep Dive** link to the relevant chapter of [Mac
 <table>
   <thead>
     <tr>
-      <th width="25%">Round</th>
+      <th width="25%">Topic Area</th>
       <th width="75%">Textbook Chapters Referenced</th>
     </tr>
   </thead>
@@ -417,7 +417,7 @@ Each question includes a **📖 Deep Dive** link to the relevant chapter of [Mac
 
 We welcome questions from recent AI systems interviews.
 
-1. **Pull Request:** Click the **➕ Add a Flashcard** link at the top of any round file and submit a question using the format below.
+1. **Pull Request:** Click the **➕ Add a Flashcard** link at the top of any topic file and submit a question using the format below.
 2. **Issue:** [Open an issue](https://github.com/harvard-edge/cs249r_book/issues/new) with your question and we'll work with you to shape it.
 
 ### Question Format

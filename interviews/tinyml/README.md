@@ -1,149 +1,94 @@
 # 🔬 TinyML Track — Microcontroller & Ultra-Low-Power AI
 
 <div align="center">
-  <a href="../README.md">🏠 Playbook Home</a> ·
+  <a href="../README.md">🏠 Home</a> ·
   <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
-  <a href="../cloud/README.md">☁️ Cloud</a> ·
-  <a href="../edge/README.md">🤖 Edge</a> ·
-  <a href="../mobile/README.md">📱 Mobile</a> ·
-  <b>🔬 TinyML</b>
+  <a href="../cloud/README.md">☁️ Cloud</a> · <a href="../edge/README.md">🤖 Edge</a> · <a href="../mobile/README.md">📱 Mobile</a> · <b>🔬 TinyML</b>
 </div>
 
 ---
 
-The TinyML track covers ML systems running on microcontrollers — where the entire model, runtime, and inference engine must fit in kilobytes of SRAM, execute in microseconds, and run on milliwatts of power.
+The TinyML track covers ML systems that run on microcontrollers and ultra-low-power devices — always-on sensing, energy harvesting, hard real-time inference in kilobytes of SRAM.
 
 ### The Constraint Regime
 
 <table>
-  <thead>
-    <tr>
-      <th width="25%">Dimension</th>
-      <th width="75%">TinyML Reality</th>
-    </tr>
-  </thead>
+  <thead><tr><th width="25%">Dimension</th><th width="75%">TinyML Reality</th></tr></thead>
   <tbody>
-    <tr>
-      <td><b>Compute</b></td>
-      <td>MFLOPS (Cortex-M4/M7, RISC-V, ESP32) — often no FPU</td>
-    </tr>
-    <tr>
-      <td><b>Memory</b></td>
-      <td>256 KB–2 MB SRAM, 1–16 MB Flash</td>
-    </tr>
-    <tr>
-      <td><b>Interconnect</b></td>
-      <td>SPI, I2C, UART — kilobytes/second</td>
-    </tr>
-    <tr>
-      <td><b>Power budget</b></td>
-      <td>1–100 mW (often battery or energy harvesting)</td>
-    </tr>
-    <tr>
-      <td><b>Primary bottleneck</b></td>
-      <td>SRAM capacity — the model must fit entirely on-chip</td>
-    </tr>
-    <tr>
-      <td><b>Failure mode</b></td>
-      <td>Model doesn't fit, misses hard real-time deadline, exceeds power budget</td>
-    </tr>
+    <tr><td><b>Compute</b></td><td>MFLOPS (Cortex-M, RISC-V, custom accelerators)</td></tr>
+    <tr><td><b>Memory</b></td><td>256 KB – 2 MB SRAM, 1–16 MB flash</td></tr>
+    <tr><td><b>Interconnect</b></td><td>SPI, I2C, UART, GPIO</td></tr>
+    <tr><td><b>Power budget</b></td><td>Microwatts to milliwatts</td></tr>
+    <tr><td><b>Primary bottleneck</b></td><td>SRAM capacity and hard real-time deadlines</td></tr>
+    <tr><td><b>Failure mode</b></td><td>Model doesn't fit in SRAM, missed interrupt deadlines, energy budget exceeded</td></tr>
   </tbody>
 </table>
 
-### What Makes TinyML Different from Everything Else
 
-In the cloud, you optimize for throughput. On mobile, you optimize for battery. In TinyML, you optimize for **existence** — can the model even fit? There is no operating system, no virtual memory, no dynamic allocation. The entire inference pipeline — weights, activations, scratch buffers, and application code — must coexist in a flat memory space measured in kilobytes. Every byte is a design decision.
+### The Learning Journey
 
-### Topics That Need Questions
-
-These are the areas where TinyML-specific interview questions would be most valuable. Each maps to real interview scenarios at companies like Arduino, Edge Impulse, Qualcomm (for always-on sensing), or embedded AI teams at larger companies.
+Each file represents a **system scope** — the system you're reasoning about. Within each file, questions are organized by competency topic and mastery level.
 
 <table>
   <thead>
     <tr>
-      <th width="22%">Topic</th>
-      <th width="28%">What TinyML interviews test</th>
-      <th width="50%">Example scenario</th>
+      <th width="5%">#</th>
+      <th width="30%">Scope</th>
+      <th width="35%">What you're studying</th>
+      <th width="10%">L3</th>
+      <th width="10%">L4</th>
+      <th width="10%">L5</th>
+      <th width="10%">L6+</th>
+      <th width="10%">Total</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td><b>Memory layout</b></td>
-      <td>SRAM partitioning, activation reuse, operator scheduling for peak RAM</td>
-      <td>"Your model needs 300 KB peak RAM but you only have 256 KB SRAM. How do you fit it without changing the model?"</td>
-    </tr>
-    <tr>
-      <td><b>Quantization</b></td>
-      <td>INT8, INT4, binary/ternary, fixed-point arithmetic, post-training vs QAT</td>
-      <td>"Your keyword spotting model loses 8% accuracy going from INT8 to INT4. Is that acceptable? How do you recover it?"</td>
-    </tr>
-    <tr>
-      <td><b>Integer-only inference</b></td>
-      <td>No floating point — all math in fixed-point, requantization between layers</td>
-      <td>"Explain how a quantized Conv2D executes on a Cortex-M4 with no FPU."</td>
-    </tr>
-    <tr>
-      <td><b>Model architecture</b></td>
-      <td>MobileNet, MCUNet, depth-wise separable convolutions, NAS for MCUs</td>
-      <td>"Why does MobileNetV2 use inverted residuals, and why does that matter on a microcontroller?"</td>
-    </tr>
-    <tr>
-      <td><b>Power & energy</b></td>
-      <td>Active vs sleep power, duty cycling, energy harvesting budgets</td>
-      <td>"Your sensor wakes up every 10 seconds, runs inference, and sleeps. What's the average power draw?"</td>
-    </tr>
-    <tr>
-      <td><b>Compiler & runtime</b></td>
-      <td>TFLite Micro, TVM, CMSIS-NN, ahead-of-time compilation, no dynamic allocation</td>
-      <td>"Why can't TFLite Micro use malloc? What does it use instead?"</td>
-    </tr>
-    <tr>
-      <td><b>Sensor pipelines</b></td>
-      <td>Audio (keyword spotting), accelerometer (gesture), image (person detection)</td>
-      <td>"Your microphone samples at 16 kHz. How do you extract Mel spectrograms in real-time on a Cortex-M4?"</td>
-    </tr>
-  </tbody>
-</table>
-
-### The Rounds
-
-<table>
-  <thead>
-    <tr>
-      <th width="45%">Round</th>
-      <th width="40%">Focus</th>
-      <th width="15%">Questions</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><b><a href="01_micro_architectures.md">1. TinyML Systems — Inference at the Edge of Physics</a></b></td>
-      <td>Memory layout, quantization, integer inference, power, CMSIS-NN, sensor pipelines</td>
+      <td><b>01</b></td>
+      <td><b><a href="01_microcontroller.md">The Microcontroller</a></b></td>
+      <td><i>What fits in 256 KB of SRAM?</i></td>
       <td>27</td>
-    </tr>
-    <tr>
-      <td><b><a href="02_compute_and_memory.md">2. Constraints & Trade-offs</a></b></td>
-      <td>Compute analysis, memory systems, numerical representation, architecture costs, latency, power</td>
       <td>62</td>
+      <td>40</td>
+      <td>16</td>
+      <td><b>145</b></td>
     </tr>
     <tr>
-      <td><b><a href="03_data_and_deployment.md">3. Operations & Deployment</a></b></td>
-      <td>FOTA updates, SRAM overflow, bootloader design, watchdog timers, security, fleet management, power profiling</td>
-      <td>25</td>
+      <td><b>02</b></td>
+      <td><b><a href="02_sensing_pipeline.md">The Sensing Pipeline</a></b></td>
+      <td><i>From sensor input to inference output</i></td>
+      <td>7</td>
+      <td>26</td>
+      <td>17</td>
+      <td>6</td>
+      <td><b>56</b></td>
     </tr>
     <tr>
-      <td><b><a href="04_visual_debugging.md">4. Visual Architecture Debugging</a></b></td>
-      <td>Mermaid diagram challenges: spot the flaw in TinyML system designs</td>
-      <td>11</td>
+      <td><b>03</b></td>
+      <td><b><a href="03_deployed_device.md">The Deployed Device</a></b></td>
+      <td><i>How you update firmware and keep it alive for years</i></td>
+      <td>6</td>
+      <td>9</td>
+      <td>9</td>
+      <td>2</td>
+      <td><b>26</b></td>
     </tr>
     <tr>
-      <td><b><a href="05_advanced_systems.md">5. Advanced TinyML Systems</a></b></td>
-      <td>NAS for MCUs, energy harvesting, multi-sensor fusion, compiler design, federated learning, always-on detection</td>
-      <td>46</td>
+      <td><b>04</b></td>
+      <td><b><a href="04_visual_debugging.md">Visual Architecture Debugging</a></b></td>
+      <td><i>Can you spot the bottleneck in a TinyML system diagram?</i></td>
+      <td>1</td>
+      <td>5</td>
+      <td>5</td>
+      <td>—</td>
+      <td><b>11</b></td>
+    </tr>
+    <tr>
+      <td></td><td><b>Total</b></td><td></td><td></td><td></td><td></td><td></td><td><b>238</b></td>
     </tr>
   </tbody>
 </table>
 
-### Contributing
+### Who This Track Is For
 
-We need more TinyML questions — especially from engineers at Edge Impulse, Arduino, and embedded AI teams. See the [question format](../README.md#question-format) and submit a PR.
+Engineers interviewing at sensor companies, IoT platforms, wearable tech firms, and embedded AI startups deploying ML to devices that run on batteries or harvested energy.

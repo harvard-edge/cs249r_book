@@ -1,12 +1,9 @@
 # 🤖 Edge Track — Autonomous Systems & Industrial AI
 
 <div align="center">
-  <a href="../README.md">🏠 Playbook Home</a> ·
+  <a href="../README.md">🏠 Home</a> ·
   <a href="../00_The_Architects_Rubric.md">📋 Rubric</a> ·
-  <a href="../cloud/README.md">☁️ Cloud</a> ·
-  <b>🤖 Edge</b> ·
-  <a href="../mobile/README.md">📱 Mobile</a> ·
-  <a href="../tinyml/README.md">🔬 TinyML</a>
+  <a href="../cloud/README.md">☁️ Cloud</a> · <b>🤖 Edge</b> · <a href="../mobile/README.md">📱 Mobile</a> · <a href="../tinyml/README.md">🔬 TinyML</a>
 </div>
 
 ---
@@ -16,92 +13,82 @@ The Edge track covers ML systems deployed on dedicated hardware at the point of 
 ### The Constraint Regime
 
 <table>
-  <thead>
-    <tr>
-      <th width="25%">Dimension</th>
-      <th width="75%">Edge Reality</th>
-    </tr>
-  </thead>
+  <thead><tr><th width="25%">Dimension</th><th width="75%">Edge Reality</th></tr></thead>
   <tbody>
-    <tr>
-      <td><b>Compute</b></td>
-      <td>TOPS (Jetson Orin, Hailo-8, Intel Movidius, Google Coral)</td>
-    </tr>
-    <tr>
-      <td><b>Memory</b></td>
-      <td>8–32 GB DRAM, shared with sensor pipelines</td>
-    </tr>
-    <tr>
-      <td><b>Interconnect</b></td>
-      <td>PCIe, MIPI CSI (camera), CAN bus (automotive)</td>
-    </tr>
-    <tr>
-      <td><b>Power budget</b></td>
-      <td>15–75W per module</td>
-    </tr>
-    <tr>
-      <td><b>Primary bottleneck</b></td>
-      <td>Thermal envelope and real-time deadlines</td>
-    </tr>
-    <tr>
-      <td><b>Failure mode</b></td>
-      <td>Missing a hard real-time deadline, thermal throttling under sustained load</td>
-    </tr>
+    <tr><td><b>Compute</b></td><td>TOPS (Jetson Orin, Hailo-8, Intel Movidius, Google Coral)</td></tr>
+    <tr><td><b>Memory</b></td><td>8–32 GB DRAM, shared with sensor pipelines</td></tr>
+    <tr><td><b>Interconnect</b></td><td>PCIe, MIPI CSI (camera), CAN bus (automotive)</td></tr>
+    <tr><td><b>Power budget</b></td><td>15–75W per module</td></tr>
+    <tr><td><b>Primary bottleneck</b></td><td>Thermal envelope and real-time deadlines</td></tr>
+    <tr><td><b>Failure mode</b></td><td>Missing a hard real-time deadline, thermal throttling under sustained load</td></tr>
   </tbody>
 </table>
 
-### What Makes Edge Different from Cloud
 
-In the cloud, you can always add more GPUs. At the edge, the hardware is fixed and the environment is hostile. An autonomous vehicle running object detection at 30 FPS cannot drop frames when the sun angle changes. A robotic arm running pose estimation cannot pause for garbage collection. The physics of edge is the physics of **hard constraints under uncertainty**.
+### The Learning Journey
 
-### The Rounds
+Each file represents a **system scope** — the system you're reasoning about. Within each file, questions are organized by competency topic and mastery level.
 
 <table>
   <thead>
     <tr>
-      <th width="35%">Round</th>
-      <th width="45%">Focus</th>
-      <th width="20%">Questions</th>
+      <th width="5%">#</th>
+      <th width="30%">Scope</th>
+      <th width="35%">What you're studying</th>
+      <th width="10%">L3</th>
+      <th width="10%">L4</th>
+      <th width="10%">L5</th>
+      <th width="10%">L6+</th>
+      <th width="10%">Total</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td><b><a href="01_systems_and_real_time.md">1. Edge Systems & Real-Time Physics</a></b></td>
-      <td>Roofline, real-time deadlines, thermal management, sensor fusion, OTA</td>
-      <td>40</td>
+      <td><b>01</b></td>
+      <td><b><a href="01_hardware_platform.md">The Hardware Platform</a></b></td>
+      <td><i>What silicon are you working with and what are its limits?</i></td>
+      <td>18</td>
+      <td>39</td>
+      <td>34</td>
+      <td>12</td>
+      <td><b>103</b></td>
     </tr>
     <tr>
-      <td><b><a href="02_compute_and_memory.md">2. Constraints & Trade-offs</a></b></td>
-      <td>Compute analysis, memory budgets, quantization, architecture, latency, power, edge LLMs</td>
-      <td>63</td>
+      <td><b>02</b></td>
+      <td><b><a href="02_realtime_pipeline.md">The Real-Time Pipeline</a></b></td>
+      <td><i>How you meet deadlines with sensor data</i></td>
+      <td>16</td>
+      <td>33</td>
+      <td>28</td>
+      <td>12</td>
+      <td><b>89</b></td>
     </tr>
     <tr>
-      <td><b><a href="03_data_and_deployment.md">3. Operations & Deployment</a></b></td>
-      <td>Model optimization, fleet management, monitoring, security, economics</td>
-      <td>47</td>
+      <td><b>03</b></td>
+      <td><b><a href="03_deployed_system.md">The Deployed System</a></b></td>
+      <td><i>How you get it into the field and keep it running</i></td>
+      <td>12</td>
+      <td>24</td>
+      <td>17</td>
+      <td>12</td>
+      <td><b>65</b></td>
     </tr>
     <tr>
-      <td><b><a href="04_visual_debugging.md">4. Visual Architecture Debugging</a></b></td>
-      <td>Spot the bottleneck in edge system diagrams</td>
-      <td>11</td>
+      <td><b>04</b></td>
+      <td><b><a href="04_visual_debugging.md">Visual Architecture Debugging</a></b></td>
+      <td><i>Can you spot the bottleneck in an edge system diagram?</i></td>
+      <td>1</td>
+      <td>7</td>
+      <td>3</td>
+      <td>—</td>
+      <td><b>11</b></td>
     </tr>
     <tr>
-      <td><b><a href="05_heterogeneous_and_advanced.md">5. Advanced Edge Systems</a></b></td>
-      <td>Safety certification, multi-sensor fusion, privacy, long-term reliability, edge-cloud hybrid, heterogeneous accelerators, thermal, fleet ops</td>
-      <td>46</td>
-    </tr>
-    <tr>
-      <td><b>Total</b></td>
-      <td></td>
-      <td><b>207</b></td>
+      <td></td><td><b>Total</b></td><td></td><td></td><td></td><td></td><td></td><td><b>268</b></td>
     </tr>
   </tbody>
 </table>
 
 ### Who This Track Is For
 
-Engineers interviewing at autonomous vehicle companies (Tesla, Waymo, Cruise), robotics firms (Boston Dynamics, Agility), industrial AI startups, and edge computing platforms (NVIDIA, Qualcomm, Hailo). Also valuable for anyone deploying ML to devices that must operate reliably in the physical world.
-
-### Contributing
-
-We need more edge questions — especially from engineers at Tesla, Waymo, Boston Dynamics, and industrial AI companies. See the [question format](../README.md#question-format) and submit a PR.
+Engineers interviewing at autonomous vehicle companies (Tesla, Waymo, Cruise), robotics firms (Boston Dynamics, Agility), industrial AI startups, and edge computing platforms (NVIDIA, Qualcomm, Hailo).

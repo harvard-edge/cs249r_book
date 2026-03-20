@@ -3,11 +3,10 @@
 <div align="center">
   <a href="README.md">🏠 Home</a> ·
   <a href="00_The_Architects_Rubric.md">📋 Rubric</a> ·
-  <a href="cloud/01_compute_and_memory.md">🧱 1. Compute & Memory</a> ·
-  <a href="cloud/02_network_and_distributed.md">🚀 2. Network & Distributed</a> ·
-  <a href="cloud/03_inference_and_serving.md">⚡ 3. Inference & Serving</a> ·
-  <a href="cloud/04_data_and_mlops.md">💼 4. Data & MLOps</a> ·
-  <a href="cloud/05_visual_debugging.md">🖼️ 5. Visual Debugging</a>
+  <a href="cloud/README.md">☁️ Cloud</a> ·
+  <a href="edge/README.md">🤖 Edge</a> ·
+  <a href="mobile/README.md">📱 Mobile</a> ·
+  <a href="tinyml/README.md">🔬 TinyML</a>
 </div>
 
 ---

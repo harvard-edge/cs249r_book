@@ -155,18 +155,18 @@ Each competency is tested at **4 mastery levels** (L3 → L6+), reflecting incre
 
 ## Coverage Matrix — Current State
 
-This matrix shows the coverage for each competency × track. Following the March 2026 expansion, all tracks have been fully fleshed out with 150+ questions each.
+This matrix shows the coverage for each competency × track. Each track is organized by **system scope** (the system the learner is reasoning about), with competency sub-sections and mastery levels (L3 → L6+) within each scope file.
 
-### ☁️ Cloud Track (217 questions)
-✅ **Status:** Fully fleshed out across 6 rounds + visual debugging.
+### ☁️ Cloud Track (296 questions)
+✅ The Single Machine (130) · The Distributed System (71) · The Serving Stack (48) · Production Ops (37) · Visual Debugging (10)
 
-### 🤖 Edge Track (189 questions)
-✅ **Status:** Fully fleshed out across 5 rounds.
+### 🤖 Edge Track (268 questions)
+✅ The Hardware Platform (103) · The Real-Time Pipeline (89) · The Deployed System (65) · Visual Debugging (11)
 
-### 📱 Mobile Track (174 questions)
-✅ **Status:** Fully fleshed out across 5 rounds.
+### 📱 Mobile Track (261 questions)
+✅ The Device & SoC (132) · The App Experience (74) · Ship & Update (44) · Visual Debugging (11)
 
-### 🔬 TinyML Track (168 questions)
-✅ **Status:** Fully fleshed out across 5 rounds.
+### 🔬 TinyML Track (238 questions)
+✅ The Microcontroller (145) · The Sensing Pipeline (56) · The Deployed Device (26) · Visual Debugging (11)
 
 ---
