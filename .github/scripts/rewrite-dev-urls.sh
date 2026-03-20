@@ -27,6 +27,7 @@ declare -A SUBSITES=(
   [mlsysim]="mlsysim"
   [slides]="slides"
   [instructors]="instructors"
+  [interviews]="interviews"
   [newsletter]="newsletter"
   [community]="community"
   [about]="about"

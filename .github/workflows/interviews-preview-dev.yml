@@ -1,48 +1,50 @@
-name: '🏠 Landing · 👁️ Preview (Dev)'
+name: '🧠 Interviews · 👁️ Preview (Dev)'
 
-# Builds and deploys the ecosystem landing page independently.
-# Fast (~30s) — only renders one index.qmd file.
+# Builds and deploys The Blueprint interview playbook to dev preview
 
 on:
   workflow_dispatch:
   push:
     branches: [dev]
     paths:
-      - 'landing/**'
-      - 'book/quarto/config/shared/html/navbar-common.yml'
-      - 'book/quarto/assets/styles/**'
+      - 'interviews/**'
+
+permissions:
+  contents: read
+  actions: read
 
 concurrency:
-  group: landing-dev-deploy
+  group: interviews-dev-deploy
   cancel-in-progress: true
 
 jobs:
   build-and-deploy:
-    name: '🏠 Build & Deploy Landing (Dev)'
+    name: '🧠 Build & Deploy Interviews (Dev)'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
 
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v6
-        with:
-          ref: dev
 
       - name: 🔧 Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
-      - name: 🏗️ Build landing site
+      - name: 🔨 Build Interview Playbook
+        working-directory: interviews
         run: |
-          cd landing
           quarto render
-          echo "✅ Landing site rendered"
-          ls -la _build/
+          touch _build/.nojekyll
 
       - name: 🔗 Rewrite URLs for dev site
+        run: bash .github/scripts/rewrite-dev-urls.sh interviews interviews/_build
+
+      - name: 🔍 Validate build
         run: |
-          bash .github/scripts/rewrite-dev-urls.sh root landing/_build
+          if [ ! -f "interviews/_build/index.html" ]; then
+            echo "❌ CRITICAL: index.html missing. Aborting deployment."
+            exit 1
+          fi
+          echo "✅ Site built: $(find interviews/_build -name '*.html' | wc -l) pages"
 
       - name: 🚀 Deploy to Dev Site via SSH
         env:
@@ -51,6 +53,7 @@ jobs:
           echo "🔐 Starting ssh-agent..."
           eval "$(ssh-agent -s)"
           echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+
           mkdir -p ~/.ssh
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
@@ -61,22 +64,23 @@ jobs:
           git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
           cd target-repo
 
-          echo "📄 Deploying landing site to root..."
-          LANDING_DIR="${{ github.workspace }}/landing/_build"
+          echo "🧹 Cleaning interviews directory..."
+          rm -rf interviews
+          mkdir -p interviews
 
-          # Copy landing site to root, preserving all subsite directories
-          cp -r "$LANDING_DIR"/. ./
-          touch .nojekyll
+          echo "🚚 Copying interview playbook content..."
+          cp -r "${{ github.workspace }}/interviews/_build/." interviews/
 
-          if [ ! -f "index.html" ]; then
-            echo "❌ CRITICAL: Landing page index.html is missing. Aborting."
+          if [ ! -f "interviews/index.html" ]; then
+            echo "❌ CRITICAL: interviews/index.html missing. Aborting."
             exit 1
           fi
 
           echo "📦 Committing and pushing..."
           git add .
-          git commit -m "🏠 Deploy landing page dev preview from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+          git commit -m "🧠 Deploy Interviews dev to /interviews/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
 
+          # Retry push with rebase to handle concurrent deploys
           for i in 1 2 3; do
             if git push origin main 2>/dev/null; then
               echo "✅ Push succeeded on attempt $i"
@@ -86,4 +90,4 @@ jobs:
             git pull --rebase origin main || true
           done
 
-          echo "✅ Landing page deployed to: https://harvard-edge.github.io/${{ vars.DEV_REPO }}/"
+          echo "✅ Interview playbook deployed to dev preview"

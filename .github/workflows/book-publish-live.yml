@@ -990,13 +990,25 @@ jobs:
           fi
 
           # =================================================================
-          # Prepare Landing Page (copy from repo)
+          # Landing page is rendered separately (see next step)
           # =================================================================
-          if [ -d "${{ github.workspace }}/landing" ]; then
-            echo "🔄 Preparing landing page..."
-            mkdir -p landing-page
-            cp -r ${{ github.workspace }}/landing/* landing-page/
-            echo "✅ Landing page prepared"
+          echo "ℹ️ Landing page will be rendered in next step"
+
+      - name: 🔧 Setup Quarto (for landing page)
+        if: github.event.inputs.deploy_target == 'all'
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🏠 Build Landing Page
+        if: github.event.inputs.deploy_target == 'all'
+        run: |
+          if [ -d "landing" ] && [ -f "landing/index.qmd" ]; then
+            echo "🏗️ Rendering landing page with Quarto..."
+            cd landing
+            quarto render
+            echo "✅ Landing page rendered"
+            ls -la _build/
+          else
+            echo "⚠️ Landing page source not found — will use redirect fallback"
           fi
 
       - name: 🚀 Deploy Combined Site to GitHub Pages (Production)
@@ -1074,13 +1086,24 @@ jobs:
           # Deploy Landing Page to root (if target is all)
           # =================================================================
           if [[ "$DEPLOY_TARGET" == "all" ]]; then
-            if [ -f "../landing-page/index.html" ]; then
-              echo "📦 Deploying landing page to root..."
-              cp ../landing-page/index.html .
-              cp ../landing-page/logo.png . 2>/dev/null || true
+            LANDING_BUILD="${{ github.workspace }}/landing/_build"
+            if [ -f "$LANDING_BUILD/index.html" ]; then
+              echo "📦 Deploying rendered landing page to root..."
+              # Copy all landing page output (HTML, CSS, JS, covers, assets)
+              # but preserve existing subsite directories (book/, kits/, etc.)
+              for item in "$LANDING_BUILD"/*; do
+                basename="$(basename "$item")"
+                # Skip site_libs — the gh-pages root already has its own from the book
+                if [[ "$basename" == "site_libs" ]]; then continue; fi
+                # Skip files that would conflict with subsite directories
+                if [[ -d "$basename" ]] && [[ "$basename" =~ ^(book|kits|tinytorch|labs|mlsysim|slides|instructors|interviews)$ ]]; then
+                  continue
+                fi
+                cp -r "$item" .
+              done
               echo "✅ Landing page deployed to root"
             else
-              echo "⚠️ Landing page not found - creating redirect to /book/vol1/"
+              echo "⚠️ Landing page build not found — creating redirect to /book/vol1/"
               echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0;url=/book/vol1/"><link rel="canonical" href="https://mlsysbook.ai/book/vol1/"><title>Redirecting...</title></head><body><p>Redirecting to <a href="/book/vol1/">ML Systems Volume I</a>...</p></body></html>' > index.html
             fi
           else
