@@ -21,9 +21,9 @@ async def _():
     # WASM bootstrap: install mlsysim from hosted wheel when running in browser
     if sys.platform == "emscripten":
         import micropip
-        await micropip.install(["pydantic", "pint", "plotly"], keep_going=False)
+        await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
         await micropip.install(
-            "../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
+            "../../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
         )
     elif "mlsysim" not in sys.modules:
         _root = Path(__file__).resolve().parents[2]
