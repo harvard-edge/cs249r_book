@@ -5,7 +5,7 @@ Merge contributor data from GitHub API with .all-contributorsrc names.
 Produces a contributors.json file that the About page consumes.
 
 Usage:
-  python3 scripts/merge_contributors.py
+  python3 .github/workflows/contributors/merge_contributors.py
 
 Typically run by GitHub Actions (weekly cron) or manually.
 Requires: gh CLI authenticated, or GITHUB_TOKEN env var.
@@ -18,8 +18,9 @@ import sys
 from pathlib import Path
 
 REPO = "harvard-edge/cs249r_book"
-OUTPUT = Path(__file__).parent.parent / "about" / "contributors.json"
-ALLCONTRIB = Path(__file__).parent.parent / ".all-contributorsrc"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+OUTPUT = REPO_ROOT / "about" / "contributors.json"
+ALLCONTRIB = REPO_ROOT / ".all-contributorsrc"
 
 
 def fetch_api_contributors() -> list[dict]:

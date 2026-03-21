@@ -11,7 +11,7 @@ Buttondown returns HTML bodies (from its "fancy" editor). This script:
   3. Skips files that already exist (idempotent / incremental sync)
 
 Usage:
-  BUTTONDOWN_API_KEY=your-key python3 scripts/sync_newsletter.py
+  BUTTONDOWN_API_KEY=your-key python3 .github/scripts/sync_newsletter.py
 
 The API key can be found at: https://buttondown.com/requests
 """
@@ -28,7 +28,8 @@ import requests
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 API_BASE = "https://api.buttondown.com/v1"
-NEWSLETTER_DIR = Path(__file__).parent.parent / "newsletter" / "posts"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+NEWSLETTER_DIR = REPO_ROOT / "newsletter" / "posts"
 API_KEY = os.environ.get("BUTTONDOWN_API_KEY", "")
 
 
