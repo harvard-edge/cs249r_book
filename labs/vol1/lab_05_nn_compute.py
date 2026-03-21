@@ -31,6 +31,7 @@ async def _():
     import plotly.graph_objects as go
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import FailureBanner
     import mlsysim
 
     # ── Hardware constants ─────────────────────────────────────────────────
@@ -616,10 +617,10 @@ from L2 (5 ns) to HBM (100 ns): a **20x latency jump**, not 2x.
 
         _oom = _tensor_kb > _tiers["HBM"]
         if _oom:
-            items.append(mo.callout(mo.md(
-                f"**OOM -- Activation tensor ({_tensor_kb:,.0f} KB) exceeds device memory "
-                f"({_tiers['HBM']:,} KB).** Reduce batch size or layer width."
-            ), kind="danger"))
+            items.append(FailureBanner(
+                condition=True,
+                message=f"OOM -- Activation tensor ({_tensor_kb:,.0f} KB) exceeds device memory ({_tiers['HBM']:,} KB). Reduce batch size or layer width."
+            ))
 
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
