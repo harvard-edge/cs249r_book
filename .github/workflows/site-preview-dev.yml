@@ -1,34 +1,17 @@
 name: '🌐 Site · 👁️ Preview (Dev)'
 
 # =============================================================================
-# Unified dev preview for site subsites: about, community, landing, newsletter.
-# Detects which subsites changed and builds/deploys only those.
-# Instructors has its own workflow (instructors-preview-dev.yml).
-# Newsletter sync has its own workflow (sync-newsletter.yml).
+# Dev preview for the unified site (landing + about + community + newsletter).
+# Builds the entire site as one Quarto project and deploys to the dev site.
 # =============================================================================
 
 on:
-  workflow_dispatch:
-    inputs:
-      subsite:
-        description: 'Which subsite to build (or "all")'
-        type: choice
-        options:
-          - all
-          - about
-          - community
-          - landing
-          - newsletter
-        default: all
+  workflow_dispatch: {}
   push:
     branches: [dev]
     paths:
-      - 'site/about/**'
-      - 'site/community/**'
-      - 'site/landing/**'
-      - 'site/newsletter/**'
-      - 'book/quarto/config/shared/html/navbar-common.yml'
-      - 'book/quarto/assets/styles/**'
+      - 'site/**'
+      - 'shared/**'
 
 permissions:
   contents: read
@@ -39,85 +22,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ==========================================================================
-  # Step 1: Determine which subsites need building
-  # ==========================================================================
-  detect-changes:
-    name: '🔍 Detect Changed Subsites'
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 2
-
-      - name: 🔍 Detect changes and build matrix
-        id: set-matrix
-        run: |
-          SUBSITES=()
-
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            CHOICE="${{ inputs.subsite }}"
-            if [[ "$CHOICE" == "all" ]]; then
-              SUBSITES=(about community landing newsletter)
-            else
-              SUBSITES=("$CHOICE")
-            fi
-          else
-            # Check which subsites have changes
-            CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
-
-            for site in about community landing newsletter; do
-              if echo "$CHANGED" | grep -q "^site/${site}/"; then
-                SUBSITES+=("$site")
-              fi
-            done
-
-            # Shared style/navbar changes → rebuild all
-            if echo "$CHANGED" | grep -qE "^book/quarto/(config/shared/html/navbar-common|assets/styles)/"; then
-              SUBSITES=(about community landing newsletter)
-            fi
-          fi
-
-          # Deduplicate
-          SUBSITES=($(echo "${SUBSITES[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
-
-          if [ ${#SUBSITES[@]} -eq 0 ]; then
-            echo "ℹ️ No site subsites changed"
-            echo 'matrix={"include":[]}' >> $GITHUB_OUTPUT
-          else
-            echo "🔨 Building: ${SUBSITES[*]}"
-            JSON='{"include":['
-            FIRST=true
-            for s in "${SUBSITES[@]}"; do
-              if [[ "$s" == "landing" ]]; then
-                REWRITE_KEY="root"
-                DEPLOY_DIR="."
-              else
-                REWRITE_KEY="$s"
-                DEPLOY_DIR="$s"
-              fi
-              $FIRST || JSON+=','
-              JSON+="{\"subsite\":\"$s\",\"rewrite_key\":\"$REWRITE_KEY\",\"deploy_dir\":\"$DEPLOY_DIR\"}"
-              FIRST=false
-            done
-            JSON+=']}'
-            echo "matrix=$JSON" >> $GITHUB_OUTPUT
-          fi
-
-  # ==========================================================================
-  # Step 2: Build and deploy each changed subsite
-  # ==========================================================================
   build-and-deploy:
-    name: '🔨 ${{ matrix.subsite }}'
-    needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.matrix != '{"include":[]}' }}
+    name: '🔨 Build & Deploy Site'
     runs-on: ubuntu-latest
-    strategy:
-      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
-      fail-fast: false
 
     steps:
       - name: 📥 Checkout
@@ -128,24 +35,31 @@ jobs:
       - name: 🔧 Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
-      - name: 🔨 Build ${{ matrix.subsite }}
-        working-directory: site/${{ matrix.subsite }}
+      - name: 🔨 Build unified site
+        working-directory: site
         run: |
           quarto render
-          touch _build/.nojekyll 2>/dev/null || true
-          echo "✅ ${{ matrix.subsite }} rendered"
+          touch _build/.nojekyll
+          echo "✅ Site rendered: $(find _build -name '*.html' | wc -l) pages"
 
       - name: 🔗 Rewrite URLs for dev site
-        run: bash .github/scripts/rewrite-dev-urls.sh ${{ matrix.rewrite_key }} site/${{ matrix.subsite }}/_build
+        run: |
+          # Rewrite each subsite directory with correct relative prefix
+          for subsite in about community newsletter; do
+            bash .github/scripts/rewrite-dev-urls.sh "$subsite" "site/_build/$subsite"
+          done
+          # Rewrite root-level files (landing page) — shallow to avoid re-processing subdirs
+          bash .github/scripts/rewrite-dev-urls.sh root site/_build --shallow
 
       - name: 🔍 Validate build
         run: |
-          BUILD_DIR="site/${{ matrix.subsite }}/_build"
-          if [ ! -f "$BUILD_DIR/index.html" ]; then
-            echo "❌ CRITICAL: index.html missing from ${{ matrix.subsite }}. Aborting."
-            exit 1
-          fi
-          echo "✅ Site built: $(find $BUILD_DIR -name '*.html' | wc -l) pages"
+          for page in index.html about/index.html community/index.html newsletter/index.html; do
+            if [ ! -f "site/_build/$page" ]; then
+              echo "❌ CRITICAL: $page missing from build. Aborting."
+              exit 1
+            fi
+          done
+          echo "✅ All site pages validated"
 
       - name: 🚀 Deploy to Dev Site via SSH
         env:
@@ -165,43 +79,29 @@ jobs:
           git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
           cd target-repo
 
-          BUILD_DIR="${{ github.workspace }}/site/${{ matrix.subsite }}/_build"
-          DEPLOY_DIR="${{ matrix.deploy_dir }}"
+          BUILD_DIR="${{ github.workspace }}/site/_build"
 
-          if [[ "$DEPLOY_DIR" == "." ]]; then
-            # Landing page: deploy to root, preserving subsite directories
-            echo "📄 Deploying landing to root..."
-            for item in "$BUILD_DIR"/*; do
-              basename="$(basename "$item")"
-              if [[ "$basename" == "site_libs" ]]; then continue; fi
-              if [[ -d "$basename" ]] && [[ "$basename" =~ ^(book|kits|tinytorch|labs|mlsysim|slides|instructors|interviews|about|community|newsletter)$ ]]; then
-                continue
-              fi
-              cp -r "$item" .
-            done
-            touch .nojekyll
-          else
-            echo "🧹 Cleaning $DEPLOY_DIR directory..."
-            rm -rf "$DEPLOY_DIR"
-            mkdir -p "$DEPLOY_DIR"
-            echo "🚚 Copying ${{ matrix.subsite }} site content..."
-            cp -r "$BUILD_DIR/." "$DEPLOY_DIR/"
-          fi
+          # Copy build output, preserving directories managed by other workflows
+          for item in "$BUILD_DIR"/*; do
+            basename="$(basename "$item")"
+            # Skip Quarto's site_libs (handled separately below)
+            [[ "$basename" == "site_libs" ]] && continue
+            # Skip directories managed by other workflows
+            if [[ -d "$basename" ]] && [[ "$basename" =~ ^(book|kits|tinytorch|labs|mlsysim|slides|instructors|interviews)$ ]]; then
+              continue
+            fi
+            cp -r "$item" .
+          done
 
-          if [[ "$DEPLOY_DIR" == "." ]]; then
-            [ -f "index.html" ] || { echo "❌ CRITICAL: Landing index.html missing."; exit 1; }
-          else
-            [ -f "$DEPLOY_DIR/index.html" ] || { echo "❌ CRITICAL: $DEPLOY_DIR/index.html missing."; exit 1; }
-          fi
+          # Copy shared site_libs for CSS/JS
+          cp -r "$BUILD_DIR/site_libs" . 2>/dev/null || true
+          touch .nojekyll
+
+          [ -f "index.html" ] || { echo "❌ CRITICAL: Landing index.html missing."; exit 1; }
 
           echo "📦 Committing and pushing..."
           git add .
-          EMOJI="🌐"
-          [[ "${{ matrix.subsite }}" == "about" ]] && EMOJI="📋"
-          [[ "${{ matrix.subsite }}" == "community" ]] && EMOJI="🌍"
-          [[ "${{ matrix.subsite }}" == "landing" ]] && EMOJI="🏠"
-          [[ "${{ matrix.subsite }}" == "newsletter" ]] && EMOJI="📬"
-          git commit -m "$EMOJI Deploy ${{ matrix.subsite }} dev preview from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+          git commit -m "🌐 Deploy site dev preview from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
 
           for i in 1 2 3; do
             if git push origin main 2>/dev/null; then
@@ -212,4 +112,4 @@ jobs:
             git pull --rebase origin main || true
           done
 
-          echo "✅ ${{ matrix.subsite }} deployed to dev preview"
+          echo "✅ Site deployed to dev preview"

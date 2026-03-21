@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 # Rewrite absolute mlsysbook.ai URLs to relative paths for the dev preview site.
 #
-# Usage: rewrite-dev-urls.sh <subsite> <build-dir>
+# Usage: rewrite-dev-urls.sh <subsite> <build-dir> [--shallow]
 #
 #   subsite   — the caller's subsite name on the dev site (e.g. "slides", "instructors").
 #               Use "root" for content deployed at the dev site root (the landing page).
 #   build-dir — path to the directory containing rendered HTML files to rewrite.
+#   --shallow — only process HTML files directly in build-dir (no recursion into subdirs).
+#               Useful for unified site builds where subsites are rewritten separately.
 #
 # The script knows the full site map and computes relative paths automatically.
 # When a new subsite is added, update SUBSITES below — one place, all workflows.
 
 set -euo pipefail
 
-SUBSITE="${1:?Usage: rewrite-dev-urls.sh <subsite> <build-dir>}"
-BUILD_DIR="${2:?Usage: rewrite-dev-urls.sh <subsite> <build-dir>}"
+SUBSITE="${1:?Usage: rewrite-dev-urls.sh <subsite> <build-dir> [--shallow]}"
+BUILD_DIR="${2:?Usage: rewrite-dev-urls.sh <subsite> <build-dir> [--shallow]}"
+SHALLOW="${3:-}"
 
 # ── Site map ──────────────────────────────────────────────────────────────────
 # Maps mlsysbook.ai/<key>/ to the dev site path <value>/.
@@ -46,7 +49,12 @@ fi
 # ── Rewrite ───────────────────────────────────────────────────────────────────
 echo "🔗 Rewriting mlsysbook.ai URLs for dev site (subsite=$SUBSITE)..."
 
-find "$BUILD_DIR" -name "*.html" -type f | while read -r f; do
+FIND_DEPTH=""
+if [[ "$SHALLOW" == "--shallow" ]]; then
+  FIND_DEPTH="-maxdepth 1"
+fi
+
+find "$BUILD_DIR" $FIND_DEPTH -name "*.html" -type f | while read -r f; do
   for key in "${!SUBSITES[@]}"; do
     dev_path="${SUBSITES[$key]}"
     if [[ "$SUBSITE" != "root" && "$dev_path" == "$SUBSITE" ]]; then
@@ -64,4 +72,4 @@ find "$BUILD_DIR" -name "*.html" -type f | while read -r f; do
   fi
 done
 
-echo "✅ URL rewriting complete ($(find "$BUILD_DIR" -name '*.html' -type f | wc -l) files processed)"
+echo "✅ URL rewriting complete ($(find "$BUILD_DIR" $FIND_DEPTH -name '*.html' -type f | wc -l) files processed)"
