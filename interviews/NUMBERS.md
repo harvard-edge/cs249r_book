@@ -10,7 +10,7 @@
 
 ---
 
-Adapted from the textbook's [Machine Foundations](https://mlsysbook.ai/vol1/) appendix. **Memorize the ratios; they're physics. Use the absolute numbers as sanity checks.** All hardware values sourced from [`mlsysim/core/constants.py`](../mlsysim/core/constants.py), the single source of truth for the book.
+Adapted from the textbook's [Machine Foundations](https://mlsysbook.ai/vol1/) appendix. **Memorize the ratios; they're physics. Use the absolute numbers as sanity checks.** All hardware values sourced from [`mlsysim/core/constants.py`](../mlsysim/core/constants.py) and [`mlsysim/core/defaults.py`](../mlsysim/core/defaults.py), the single sources of truth for the book.
 
 ---
 
@@ -27,7 +27,24 @@ The defining characteristic of ML Systems Engineering is that the physics change
 
 ---
 
-## 1. The Invariants (Physics — Will Not Change)
+## 1. The ML Latency Hierarchy (2025 Update)
+
+*The modern equivalent of Jeff Dean's classic latency numbers, updated for the AI datacenter.*
+
+| Operation | Latency | Scaled to Human Time (1ns = 1 second) |
+|---|---|---|
+| L1 Cache / Register | ~1 ns | 1 second |
+| L2 Cache | ~4 ns | 4 seconds |
+| HBM3 Memory Access | ~300 ns | 5 minutes |
+| NVLink 4.0 Transfer | ~500 ns | 8 minutes |
+| PCIe Gen5 Transfer | ~1,000 ns (1 µs) | 16 minutes |
+| InfiniBand NDR (cross-rack) | ~5,000 ns (5 µs) | 1.4 hours |
+| NVMe SSD Read | ~100,000 ns (100 µs) | 1.1 days |
+| Cross-country Fiber (US) | ~40,000,000 ns (40 ms) | 1.2 years |
+
+---
+
+## 2. The Invariants (Physics — Will Not Change)
 
 <table>
   <thead>
@@ -78,18 +95,33 @@ The defining characteristic of ML Systems Engineering is that the physics change
 
 ---
 
-## 2. Scaling Rules (Arithmetic — Hardware Independent)
+## 3. Reliability & Fleet Math
+
+*At 10,000 GPUs, rare events become continuous background noise.*
+
+| Metric | Value | Fleet Impact (10,000 GPUs) |
+|---|---|---|
+| **GPU MTTF (Mean Time To Failure)** | ~50,000 hours | 1 GPU dies every ~5 hours. |
+| **Optical Cable MTTF** | ~50,000 hours | Optics fail as often as the compute. |
+| **Silent Data Corruption (SDC)** | ~1 in 10⁶ GPU-hours | 1 undetected bit-flip every ~4 days. |
+| **Typical Checkpoint Overhead** | ~3% - 5% wall time | Unavoidable tax to save state to NVMe/Network. |
+| **Scaling Efficiency ($\eta$) at 8k GPUs**| ~35% - 50% | Diminishing returns from communication overhead. |
+
+---
+
+## 4. Scaling Rules (Arithmetic — Hardware Independent)
 
 These formulas let you estimate memory, compute, and power requirements from basic model specs.
 
-### Cloud / LLM
+### Cloud / LLM (Chinchilla Physics)
 | What you're estimating | Formula | Example |
 |---|---|---|
+| **Optimal Training Tokens** | $D \approx 20 \times P$ | 70B model requires ~1.4T tokens |
+| **Training compute (FLOPs)** | $C \approx 6 \times P \times D$ | 70B on 1.4T tokens → **~5.8×10²³ FLOPs** |
 | **Inference memory (FP16)** | 2 bytes × params | 7B params × 2 bytes = **14 GB** |
 | **Inference memory (INT8)** | 1 byte × params | 7B params × 1 byte = **7 GB** |
 | **Training memory (Adam)** | **16 bytes × params** | 7B params × 16 bytes = **112 GB** |
 | **Inference compute** | ~2 FLOPs × params per token | 7B → **~14 GFLOPs/token** |
-| **Training compute** | ~6 FLOPs × params × tokens | 7B on 1T tokens → **4×10²² FLOPs** |
 | **KV-cache per token** | 2 × layers × heads × head_dim × 2 bytes | Llama 70B, 128k tokens → **~335 GB** |
 
 ### Edge / Vision
@@ -115,7 +147,7 @@ These formulas let you estimate memory, compute, and power requirements from bas
 
 ---
 
-## 3. Current Hardware Snapshots (2024–2025)
+## 5. Current Hardware Snapshots (2024–2025)
 
 ### ☁️ Cloud (Data Center)
 | Category | Metric | Value |
@@ -167,4 +199,18 @@ These formulas let you estimate memory, compute, and power requirements from bas
 | | Sleep (Deep) | ~1 µW – 10 µW |
 | **Latency** | Flash Read | ~50 ns |
 
-> **Source:** All values from the textbook's `constants.py`. When hardware generations change, update the constants file and every calculation in the book (and this playbook) updates automatically.
+---
+
+## 6. Economics, Energy, & Carbon (Constraints)
+
+*Physics dictates power; power dictates cost.*
+
+| Metric | Value | Note |
+|---|---|---|
+| **H100 Unit Cost (CapEx)** | ~$30,000 | The baseline hardware cost. |
+| **PUE (Power Usage Effectiveness)** | 1.06 - 1.2 | Liquid-cooled AI datacenters. For every 1W to the GPU, ~0.1W goes to cooling. |
+| **Rack Power Density** | 70 kW - 120 kW | AI racks exceed the ~30kW air-cooling limit, mandating liquid cooling. |
+| **Annual Maintenance Ratio** | ~5% of CapEx | Rule of thumb for hardware upkeep. |
+| **Carbon Intensity (US Avg)** | ~429 gCO₂/kWh | The environmental cost of training without green energy. |
+
+> **Source:** All values from the textbook's `constants.py` and `defaults.py`. When hardware generations change, update the constants file and every calculation in the book (and this playbook) updates automatically.
