@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, Any, Annotated
+from typing import Optional, Any, Annotated, List
 from .constants import ureg, Q_, BYTES_FP32, BYTES_FP16, BYTES_INT8, BYTES_INT4, PRECISION_MAP
 from .defaults import HFU_MFU_RATIO
 from .formulas import calc_bottleneck
@@ -25,6 +25,10 @@ class PerformanceProfile(BaseModel):
     mfu: float # Model FLOPs Utilization
     hfu: float # Hardware FLOPs Utilization
     feasible: bool
+    constraint_trace: Optional[List[str]] = Field(
+        default=None,
+        description="A trace of physical constraints evaluated during the solve. If feasible=False, this explains why."
+    )
     # Offload fields — populated when model spills beyond HBM to host memory
     offload_spill_bytes: Optional[Quantity] = None
     offload_effective_bw: Optional[Quantity] = None
@@ -44,20 +48,6 @@ class PerformanceProfile(BaseModel):
             f"Memory Footprint: {self.memory_footprint:~P}",
         ]
         return "\n".join(lines)
-
-    def plot(self, mode="latency"):
-        """Generates a visualization of this profile.
-        
-        Args:
-            mode (str): 'latency' for breakdown, 'roofline' for roofline plot.
-        """
-        from ..viz import plot_latency_breakdown, plot_roofline
-        if mode == "latency":
-            return plot_latency_breakdown(self)
-        elif mode == "roofline":
-            return plot_roofline(self)
-        else:
-            raise ValueError(f"Unknown plot mode: {mode}")
 
 
 class Engine:
@@ -150,6 +140,12 @@ class Engine:
         feasible = memory_footprint <= hardware.memory.capacity
         offload_spill = None
         offload_bw = None
+        constraint_trace = []
+
+        if feasible:
+            constraint_trace.append(f"Memory Wall: Passed. Required {memory_footprint.to('GB'):~P} <= Available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
+        else:
+            constraint_trace.append(f"Memory Wall: FAILED. Required {memory_footprint.to('GB'):~P} > Available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
 
         if not feasible and raise_errors:
             raise OOMError(
@@ -196,9 +192,18 @@ class Engine:
         )
         bottleneck = roofline["bottleneck"]
 
-        # 6. Latency = max(compute, memory) + dispatch overhead
+        # 6. Latency = max(compute, memory) + dispatch overhead + layer tax
         dispatch_tax = hardware.dispatch_tax
-        latency = max(compute_time.to("ms").magnitude, memory_time.to("ms").magnitude) * ureg.ms + dispatch_tax
+        
+        # Calculate layer-wise software tax
+        # Source: Reddi et al. (2025), Wall 7 (Framework Overhead)
+        num_layers = getattr(model, 'layers', 1) or 1
+        from .defaults import FRAMEWORK_LAYER_TAX_MS
+        # Training has ~3x the launches of inference (Fwd, GradW, GradA)
+        launch_multiplier = 3 if is_training else 1
+        layer_tax = Q_(num_layers * FRAMEWORK_LAYER_TAX_MS * launch_multiplier, "ms")
+        
+        latency = max(compute_time.to("ms").magnitude, memory_time.to("ms").magnitude) * ureg.ms + dispatch_tax + layer_tax
 
         # 7. Throughput
         if latency.magnitude > 0:
@@ -235,6 +240,7 @@ class Engine:
             mfu=mfu,
             hfu=hfu,
             feasible=feasible,
+            constraint_trace=constraint_trace,
             offload_spill_bytes=offload_spill,
             offload_effective_bw=offload_bw,
         )

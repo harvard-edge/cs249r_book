@@ -1,0 +1,1860 @@
+% =============================================================================
+% Chapter 7: ML Frameworks — ML Systems Lecture Slides
+% =============================================================================
+% IMAGES:
+%   - ch07-three-framework-problems.pdf  - ch07-eager-vs-static-graph.pdf
+%   - ch07-compilation-continuum.pdf     - ch07-autograd-tape.pdf
+%   - ch07-framework-stack.pdf           - ch07-kernel-fusion.pdf
+%   - ch07-framework-comparison.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume   = {Volume I},
+  chapter  = {Chapter 7},
+  logo = {../../assets/img/logo-mlsysbook.png},
+  instlogo = {../../assets/img/logo-harvard.png},
+  chaptertitle = {ML Frameworks},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{7}
+
+\title{ML Frameworks}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{ML Frameworks}{The Layer Between Math and Hardware}{cover_ml_frameworks.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Read through objectives. ``Frameworks are compilers for the Silicon
+Contract we signed in Ch6. When you write \texttt{loss.backward()}, the
+framework translates your architecture into thousands of GPU kernel
+launches. By the end of today, you will know exactly what happens
+between those two lines of Python.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``When you write \texttt{loss.backward()}, what actually happens?''
+Cold-call one student. Most will say ``computes gradients''---push for
+\emph{how}: tape traversal, kernel launches, memory allocation.
+
+% -- FLEX: [CORE] Sets the framing for the entire lecture.
+[CORE] Emphasize that frameworks are compilers, not libraries.
+IF SHORT: Read objectives 1, 2, and 5 aloud; let students read the rest.
+}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item Explain how frameworks solve three core problems: \textbf{execution}, \textbf{differentiation}, and \textbf{abstraction}
+  \item Compare \textbf{eager}, \textbf{static}, and \textbf{JIT} execution using the \textbf{Compilation Continuum}
+  \item Describe the \textbf{autograd tape} mechanism for reverse-mode automatic differentiation
+  \item Analyze how the \textbf{Memory Wall} drives \textbf{kernel fusion} and other optimizations
+  \item Evaluate \textbf{PyTorch}, \textbf{TensorFlow}, and \textbf{JAX} based on execution models and deployment
+  \item Apply framework selection criteria matching \textbf{hardware constraints} and \textbf{deployment targets}
+\end{enumerate}
+
+\end{frame}
+
+\begin{frame}{Visual Language}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Point to each card: ``Same color system as Ch6. Blue = compute,
+green = data flow, orange = scheduling, red = bottleneck. You will
+see these in every framework diagram today.''
+
+% -- FLEX: [CORE] Reinforces the visual vocabulary established in Ch6.
+[CORE] Brief---30 seconds max. Students have seen this before.
+}
+
+\small
+Throughout this course, colors carry meaning:
+
+\vspace{0.3cm}
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Blue} --- Compute / Processing\\
+    {\footnotesize GPU ops, forward/backward pass, inference}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Green} --- Data / Memory\\
+    {\footnotesize Data flow, caches, healthy paths}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Orange} --- Routing / Scheduling\\
+    {\footnotesize Load balancers, batch windows}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Red} --- Error / Cost / Bottleneck\\
+    {\footnotesize Loss, decode phase, waste}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\end{frame}
+
+
+% =============================================================================
+\section{Three Problems}
+% =============================================================================
+
+\begin{frame}{The Invisible Layer}
+\note{
+% -- LINK: What prior concept connects to this slide
+Ch6 ended with ``the contract with physics is enforced by the compiler.''
+This slide reveals what that compiler actually does between two lines
+of Python.
+
+% -- NARRATE: What to SAY while showing this slide
+``Two lines of Python. Between them, the framework orchestrates billions
+of FLOPs, computes exact gradients through millions of parameters,
+schedules thousands of GPU kernel launches, and manages gigabytes of
+intermediate state. A framework is not a library---it is a compiler
+that translates model definitions into hardware-specific execution plans.''
+Point to the card on the right for the compiler analogy.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``How many GPU kernel launches does \texttt{loss.backward()} trigger
+for a single Transformer layer?'' Give 10 seconds.
+[Expected answer: hundreds---each MatMul, activation, and normalization
+is a separate kernel launch in eager mode.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think frameworks are just API wrappers around NumPy.
+Correct framing: frameworks manage execution scheduling, automatic
+differentiation, and hardware abstraction simultaneously.
+
+% -- FLEX: [CORE] Establishes the ``framework as compiler'' thesis.
+[CORE] This framing governs the entire lecture.
+IF AHEAD: ``What would happen if you tried to implement backward()
+by hand for a 100-layer model?''
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    Two lines of Python:
+    \begin{mlsyscode}
+model = Transformer(...)
+loss.backward()
+    \end{mlsyscode}
+
+    \vspace{0.1cm}
+    Between them, the framework:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Orchestrates \textbf{billions} of FLOPs across memory hierarchies
+      \item Computes exact gradients through \textbf{millions} of parameters
+      \item Schedules \textbf{thousands} of GPU kernel launches
+      \item Manages \textbf{gigabytes} of intermediate state
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{crimson}
+    {\footnotesize A framework is to ML what a \textbf{compiler} is to traditional programming: it translates model definitions into hardware-specific execution plans.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: What Must a Framework Solve?}
+\note{
+% -- LINK: What prior concept connects to this slide
+The previous slide showed that frameworks do far more than students expect.
+This prediction exercise asks them to categorize \emph{what} a framework
+must solve before the taxonomy is revealed.
+
+% -- NARRATE: What to SAY while showing this slide
+``Between \texttt{model = Transformer(...)} and \texttt{loss.backward()},
+what three engineering problems must a framework solve? Write down 3
+problems---60 seconds. Then compare with a neighbor.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students write individually for 60 seconds, then share with a neighbor.
+Cold-call 2--3 students to share before moving to the reveal.
+[Expected answers vary: ``run operations on GPU,'' ``compute gradients,''
+``manage memory,'' ``provide a Python API.'' Map these to the three
+problems on the next slide.]
+
+% -- FLEX: [CORE] Prediction must precede the reveal.
+[CORE] Do not skip---this primes the three-problem taxonomy.
+IF SHORT: Reduce to 30 seconds writing, skip neighbor sharing.
+}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.5cm}
+{\large Between \texttt{model = Transformer(...)} and \texttt{loss.backward()},\\
+what three engineering problems must a framework solve?}
+
+\vspace{0.5cm}
+{\normalsize Write down 3 problems. \textcolor{midgray}{(60 seconds)}}
+
+\vspace{0.5cm}
+{\small\textcolor{lightgray}{Compare with a neighbor.}}
+
+\end{frame}
+
+\begin{frame}{Three Problems Every Framework Must Solve}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just predicted the three problems. This slide reveals the
+canonical taxonomy: execution, differentiation, abstraction.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through each panel in the diagram: ``Execution: how to run operations
+on hardware efficiently. Differentiation: how to compute gradients
+automatically. Abstraction: how to expose this to programmers.
+These are interconnected---execution determines what differentiation can
+optimize, which determines what abstraction must support.''
+Point to the Iron Law connection: ``Execution maps to $L_{\text{lat}}$,
+differentiation to $D_{\text{vol}}$ (stored intermediates), abstraction
+to $\eta$ (how well the programmer can exploit hardware).''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which of the three problems do you think is hardest to get right?''
+Take a show-of-hands. [No single right answer---this surfaces assumptions.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think the three problems are independent.
+Correct framing: they form a dependency chain. Static graphs enable
+better execution optimization; eager graphs enable better debugging
+(abstraction). You cannot optimize one without affecting the others.
+
+% -- FLEX: [CORE] The three-problem taxonomy organizes the entire lecture.
+[CORE] Every subsequent section maps to one of these three problems.
+IF SHORT: Name the three problems and the Iron Law mapping; skip the
+interconnection discussion.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch07-three-framework-problems.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Iron Law connection:}{Execution $\to$ $L_{\text{lat}}$, Differentiation $\to$ $D_{\text{vol}}$, Abstraction $\to$ $\eta$.}
+
+\end{frame}
+
+% =============================================================================
+\section{Execution}
+% =============================================================================
+
+\begin{frame}{The Memory Wall}
+\note{
+% -- LINK: What prior concept connects to this slide
+The three-problem taxonomy identified execution as the first problem.
+The Memory Wall is the fundamental physical constraint that drives
+framework execution design.
+
+% -- NARRATE: What to SAY while showing this slide
+``The A100 computes 312 TFLOPS but memory feeds only 2 TB/s. That is
+a 156:1 ratio. For a ReLU---0.125 FLOPs per byte---the GPU achieves
+under 1\% utilization. The ALUs finish instantly and then wait for
+memory. Most operations in a neural network are like this: memory-bound.
+Only large GEMMs cross the ridge point into compute-bound territory.''
+Point to the table: ``ReLU, LayerNorm, Dropout---all memory-bound.
+GEMM is the exception, not the rule.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If the GPU can compute 150x faster than memory can deliver data,
+what is the actual bottleneck for most operations?''
+Give 10 seconds. [Expected answer: memory bandwidth---the GPU sits idle
+waiting for data.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students assume GPU utilization is high because the
+hardware is expensive.
+Correct framing: for element-wise ops, utilization can be under 1\%.
+The Memory Wall means frameworks must fuse operations to reduce
+memory traffic.
+
+% -- FLEX: [CORE] The Memory Wall motivates kernel fusion, compilation,
+and every execution optimization in this chapter.
+[CORE] The 156 FLOPs/byte ridge point is referenced throughout.
+IF AHEAD: ``How does FlashAttention exploit this principle?''
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    Modern GPUs face a fundamental gap:
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{A100 GPU:}\\[0.05cm]
+    {\footnotesize Compute: \textbf{312 TFLOPS}\\
+    Bandwidth: \textbf{2.0 TB/s}\\
+    Ridge point: \textbf{$\sim$156 FLOPs/byte}}
+    \end{mlsyscard}
+
+    \vspace{0.15cm}
+    {\footnotesize
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item ReLU: 0.125 FLOPs/byte $\to$ \textbf{$<$1\% utilization}
+      \item Large GEMM: 200+ FLOPs/byte $\to$ compute-bound
+      \item Most ops are \textcolor{errorstroke}{\textbf{memory-bound}}
+    \end{itemize}
+    }
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.2cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Operation} & \textbf{FLOPs/B} \\
+      \midrule
+      ReLU       & 0.125 \\
+      LayerNorm  & $\sim$5 \\
+      Dropout    & 0 \\
+      GEMM       & 200+ \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.2cm}
+    \mlsysalert{Key:}{The optimization is \textbf{kernel fusion}---combining ops to reduce memory traffic.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Kernel Fusion: Closing the Memory Wall}
+\note{
+% -- LINK: What prior concept connects to this slide
+The Memory Wall showed that element-wise ops waste GPU cycles on memory
+traffic. Kernel fusion is the primary framework technique to close
+that gap.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the diagram: ``Left: three separate kernels. Each reads
+from HBM, computes, writes back. Three round-trips to slow global memory.
+Right: one fused kernel. Read once, compute all three ops in registers,
+write once. Same FLOPs, 3x less memory traffic.''
+``FlashAttention is the extreme example: fuses the entire attention
+computation into tiles that fit in SRAM, achieving 10--20x less HBM
+traffic.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why can't the framework fuse kernels in eager mode?''
+Give 15 seconds. [Expected answer: in eager mode, each op dispatches
+independently---the framework cannot see the next op to fuse with it.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think fusion always helps.
+Correct framing: fusion helps memory-bound ops. For compute-bound ops
+(large GEMMs), fusion provides minimal benefit because memory is not
+the bottleneck.
+IF STUCK: ``What condition must hold for fusion to help?'' [The op must
+be memory-bound.]
+
+% -- FLEX: [CORE] Kernel fusion is the most important framework optimization.
+[CORE] Directly connects to the eager-vs-static trade-off next.
+IF SHORT: Focus on the 3x memory traffic reduction; skip FlashAttention.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch07-kernel-fusion.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Iron Law:}{Fusion reduces $D_{\text{vol}}$ without changing $O$---same compute, less waiting.}
+
+\end{frame}
+
+\begin{frame}{Eager vs.\ Static Graph Execution}
+\note{
+% -- LINK: What prior concept connects to this slide
+Kernel fusion requires seeing multiple ops together. This slide shows
+the fundamental execution trade-off: eager mode dispatches ops one at
+a time (no fusion), static mode builds a graph first (enables fusion).
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the comparison diagram: ``Left: eager mode. Each op
+dispatched individually with ~5 $\mu$s overhead per launch. You can
+set breakpoints, print intermediates, debug interactively. But the
+framework sees only one op at a time---no fusion possible.
+Right: static mode. The graph is built first, then the framework
+optimizes and fuses before executing. Faster execution, harder debugging.''
+``Key insight: a framework can only fuse operations it can \emph{see
+together}.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which would you choose for debugging a new architecture: eager
+or static?'' Give 10 seconds.
+[Expected answer: eager---interactive debugging is essential for
+development. Switch to compiled for production.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think eager mode is always worse because it is
+slower. Correct framing: eager is optimal for development (fast iteration,
+easy debugging). Static is optimal for production (fast execution).
+The Compilation Continuum (next section) formalizes this trade-off.
+
+% -- FLEX: [CORE] The eager-vs-static trade-off is foundational.
+[CORE] Sets up the Compilation Continuum and the framework comparison.
+IF SHORT: State the trade-off in one sentence; let the diagram speak.
+}
+
+% --- Layout: FULL-WIDTH comparison ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch07-eager-vs-static-graph.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{A framework can only fuse operations it can \emph{see together}.}
+
+\end{frame}
+
+\begin{frame}{The Dispatch Tax}
+\note{
+% -- LINK: What prior concept connects to this slide
+Eager mode dispatches ops individually. This slide quantifies the
+per-operation overhead that makes eager mode expensive for small ops.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the table: ``Each operation pays ~1 $\mu$s Python dispatch,
+~0.5 $\mu$s kernel selection, ~5 $\mu$s CUDA launch. Total: 6.5 $\mu$s
+overhead. For a small op that takes 2 $\mu$s on the GPU, overhead is
+76\% of total time. The GPU finishes the math and then waits for Python
+to send the next instruction.''
+Point to the card: ``The solution is batching operations via compilation---
+\texttt{torch.compile} captures multiple ops into a single graph.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``At what GPU compute time does dispatch overhead drop below 10\%
+of total time?'' Give 15 seconds.
+[Expected answer: $T_{\text{compute}} > 58.5$ $\mu$s, so roughly 60 $\mu$s.
+This is a medium-sized GEMM.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students blame Python for being ``slow'' without understanding
+that the overhead is dominated by CUDA launch latency (5 $\mu$s), not
+Python interpretation (1 $\mu$s).
+Correct framing: even a C++ frontend would face the 5 $\mu$s launch cost.
+Compilation amortizes launch overhead across fused op graphs.
+
+% -- FLEX: [OPTIONAL] Provides quantitative depth on eager overhead.
+[OPTIONAL] Safe to abbreviate if running behind.
+IF SHORT: State the 76\% number and the solution (\texttt{torch.compile});
+skip the breakeven calculation.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Per-operation overhead:}
+
+    \vspace{0.15cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.2}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Stage} & \textbf{Time} \\
+      \midrule
+      Python dispatch  & $\sim$1 $\mu$s \\
+      Kernel selection & $\sim$0.5 $\mu$s \\
+      CUDA launch      & $\sim$5 $\mu$s \\
+      \midrule
+      \textbf{Total overhead} & \textbf{$\sim$6.5 $\mu$s} \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    {\footnotesize For a small op (GPU work: 2 $\mu$s),\\
+    overhead = \textbf{76\%} of total time.}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Dispatch Overhead Law:}\\[0.1cm]
+    {\footnotesize
+    $T_{\text{op}} = T_{\text{dispatch}} + T_{\text{compute}}$\\[0.1cm]
+    When $T_{\text{dispatch}} \gg T_{\text{compute}}$,\\
+    the GPU sits idle waiting for Python.\\[0.1cm]
+    \textbf{Solution}: Batch operations via\\
+    compilation (\texttt{torch.compile}).
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Quick Check}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Quick check---no peeking. Name the three problems every ML framework
+must solve. 30 seconds.'' After 30 seconds, take one answer aloud.
+[Expected answer: execution, differentiation, abstraction.]
+
+% -- FLEX: [OPTIONAL] Micro-retrieval for spaced practice.
+[OPTIONAL] If running behind, skip and move to the Compilation Continuum.
+}
+
+\centering
+\Large\bfseries Quick check --- no peeking.\\[0.5cm]
+\normalsize Name the three problems every ML framework must solve.\\[0.3cm]
+{\small 30 seconds --- then we continue.}
+\end{frame}
+
+
+
+\begin{frame}{The Compilation Continuum}
+\note{
+% -- LINK: What prior concept connects to this slide
+Eager mode is debuggable but slow; static mode is fast but rigid. The
+Compilation Continuum formalizes the spectrum between them and provides
+a quantitative decision rule.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the four stops in the diagram: ``Eager: every op dispatched
+individually. JIT: framework captures and compiles hot paths at runtime.
+AOT: full graph compiled before deployment. Custom HW: burned into silicon.
+Each step trades flexibility for performance.''
+Point to the formula: ``Compile when the benefit ratio exceeds 1. The
+numerator is time saved across production runs. The denominator is
+compilation cost plus recompilation from code changes.''
+``Three regimes: research (stay eager, many code changes), training
+(JIT pays off, moderate runs), inference (maximize compilation, deploy
+once).''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Where on this continuum does \texttt{torch.compile} sit?''
+Give 10 seconds. [Expected answer: JIT---it captures the graph at
+runtime and compiles it, recompiling on shape changes.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think ``always compile for maximum speed.''
+Correct framing: compilation has a cost (compile time + recompilation
+on code changes). For rapid prototyping with frequent changes,
+compilation overhead dominates and the benefit ratio is $\ll 1$.
+
+% -- FLEX: [CORE] The Compilation Continuum is the chapter's key framework.
+[CORE] The formula is used in the exercise on the next slide.
+IF SHORT: Focus on the three regime zones; skip the formula derivation.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch07-compilation-continuum.pdf}
+
+\vspace{0.1cm}
+{\small Compile when $\frac{N_{\text{prod}} \cdot (T_{\text{eager}} - T_{\text{compiled}})}{T_{\text{compile}} + N_{\text{dev}} \cdot T_{\text{compile}}} > 1$}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Should You Compile?}
+\note{
+% -- LINK: What prior concept connects to this slide
+The Compilation Continuum provided the formula. This exercise asks
+students to apply it to two concrete scenarios.
+
+% -- NARRATE: What to SAY while showing this slide
+``ResNet-50 on A100. Eager: 1,450 img/sec. Compiled: 2,150 img/sec.
+Compilation takes 30 seconds. Calculate the benefit for Scenario A
+(100K images, 5 code changes) and Scenario B (100 images, 50 code
+changes).'' Present the problem (30s). Individual work (60s).
+Use peer instruction: if 30--70\% correct, pair discussion (90s),
+then re-vote. Then reveal.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Scenario A: Benefit = 100,000 * 0.22ms / (30s + 5*30s) = 22,000ms / 180s
+$\approx$ 122. Benefit $\gg$ 1, so compile.
+Scenario B: Benefit = 100 * 0.22ms / (30s + 50*30s) = 22ms / 1530s
+$\approx$ 0.014. Benefit $\ll$ 1, stay eager.
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students forget to include recompilation costs ($N_{\text{dev}}
+\times T_{\text{compile}}$) in the denominator. They compute only the
+single compilation cost and overestimate the benefit.
+IF STUCK: ``What happens to the denominator when you change code 50 times?''
+
+% -- FLEX: [CORE] This exercise makes the Compilation Continuum concrete.
+[CORE] The two scenarios demonstrate opposite regimes clearly.
+IF AHEAD: ``At what number of images does Scenario B break even?''
+[Answer: ~7,000 images.]
+IF SHORT: Show the solution immediately; walk through the arithmetic.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\small\bfseries Should You Compile?}
+
+    \vspace{0.1cm}
+    A ResNet-50 training run on A100:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Eager: 1,450 img/sec ($T_{\text{eager}}$ = 0.69 ms/img)
+      \item Compiled: 2,150 img/sec ($T_{\text{compiled}}$ = 0.47 ms/img)
+      \item $T_{\text{compile}}$ = 30 seconds
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Scenario A}: 100,000 images, 5 code changes\\
+    \textbf{Scenario B}: 100 images, 50 code changes
+
+    \vspace{0.05cm}
+    \textbf{Calculate} the Compilation Benefit for each.
+    {\textcolor{midgray}{(90 seconds)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.05cm]
+    {\footnotesize
+    \textbf{A}: $\frac{10^5 \times 0.22\text{ms}}{180\text{s}}$ $\approx$ \textbf{122}\\
+    $\gg 1$ $\to$ \textcolor{datastroke}{\textbf{Compile!}}\\[0.1cm]
+    \textbf{B}: $\frac{100 \times 0.22\text{ms}}{1530\text{s}}$ $\approx$ \textbf{0.014}\\
+    $\ll 1$ $\to$ \textcolor{errorstroke}{\textbf{Stay eager!}}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Differentiation}
+% =============================================================================
+
+\begin{frame}{The Differentiation Problem}
+\note{
+% -- LINK: What prior concept connects to this slide
+Execution is the first problem (how to run ops). Differentiation is the
+second: how to compute gradients for training. This connects to the
+$D_{\text{vol}}$ term in the Iron Law---stored intermediates are data
+that must be moved.
+
+% -- NARRATE: What to SAY while showing this slide
+``Training requires $\partial \mathcal{L} / \partial \theta_i$ for every
+parameter. Forward mode: one pass per parameter---for 1 billion parameters,
+that is 1 billion passes. Impossible. Reverse mode: one backward pass
+computes ALL gradients simultaneously. This asymmetry---many parameters,
+one scalar loss---is why every framework uses reverse mode.''
+Point to the table: ``The cost of reverse mode: you must store all
+forward-pass intermediates for the backward traversal. Memory scales
+with network depth.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why is forward-mode AD impractical for training a model with
+1 billion parameters?'' Give 10 seconds.
+[Expected answer: it requires $10^9$ forward passes, one per parameter.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students confuse automatic differentiation with symbolic
+differentiation or numerical finite differences.
+Correct framing: AD applies the chain rule mechanically at each operation,
+producing exact (not approximate) derivatives. It is neither symbolic
+(no expression explosion) nor numerical (no approximation error).
+
+% -- FLEX: [CORE] The forward-vs-reverse asymmetry explains all of autograd.
+[CORE] Students must understand why reverse mode wins before seeing the tape.
+IF SHORT: Focus on the $O(1)$ vs $O(N)$ comparison; skip the memory column.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    Training requires: $\frac{\partial \mathcal{L}}{\partial \theta_i}$ for all $i = 1, \ldots, N$
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      & \textbf{Forward AD} & \textbf{Reverse AD} \\
+      \midrule
+      Passes   & $N$ (one per param)  & \textbf{1 (all params)} \\
+      Memory   & $O(1)$              & $O(\text{depth})$ \\
+      Use case & Sensitivity analysis & \textbf{Training} \\
+      \bottomrule
+    \end{tabular}
+
+    \vspace{0.1cm}
+    For $N = 10^9$ parameters:\\
+    Forward: $10^9$ passes (impossible)\\
+    Reverse: \textbf{1 pass} (tractable)
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{crimson}
+    {\footnotesize \textbf{Reverse-mode AD} exploits the many-to-one topology: many parameters, one scalar loss.\\[0.05cm]
+    \textbf{Cost}: must store all forward-pass intermediates for backward traversal.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \mlsysconcept{Trade-off:}{Compute ($O(1)$) vs.\ memory ($O(\text{depth})$).}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Autograd: The Tape Mechanism}
+\note{
+% -- LINK: What prior concept connects to this slide
+Reverse-mode AD needs to store forward-pass intermediates. The ``tape''
+is how PyTorch implements this: recording operations during forward,
+replaying in reverse during backward.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the tape lifecycle in the diagram: ``Forward pass: every
+operation is recorded on the tape along with the intermediate values
+needed for its gradient. Backward pass: traverse the tape in reverse
+order, applying the chain rule at each node. After backward: the tape
+is destroyed and memory is freed for the next iteration.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What happens if you modify a tensor in-place (\texttt{x += 1})
+after it has been recorded on the tape?''
+Give 10 seconds. [Expected answer: the original value is lost, so the
+backward pass computes wrong gradients or crashes.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think in-place operations are safe optimizations.
+Correct framing: in-place ops (\texttt{x += 1}) overwrite the tensor
+without creating a new tape node. The backward pass cannot recover the
+original value. Use \texttt{x = x + 1} instead.
+IF STUCK: ``What does the tape need to compute $\partial y / \partial x$
+for $y = x * 2$?'' [The value of $x$ at the time of the multiplication.]
+
+% -- FLEX: [CORE] The tape mechanism is central to understanding autograd.
+[CORE] Students must understand record-then-replay before writing code.
+IF SHORT: Focus on the in-place pitfall---it is the most common bug.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{ch07-autograd-tape.pdf}
+
+\vspace{0.15cm}
+\mlsysalert{Pitfall:}{In-place ops (\texttt{x += 1}) destroy tape history $\to$ silently wrong gradients.}
+
+\end{frame}
+
+\begin{frame}{Autograd: Worked Example $y = x^2 + 3x$}
+\note{
+% -- LINK: What prior concept connects to this slide
+The previous slide showed the tape mechanism visually. This slide
+traces a richer function through the computation graph with concrete values.
+
+% -- NARRATE: What to SAY while showing this slide
+``We compute $y = x^2 + 3x$ at $x = 2$. The tape records: \texttt{a = x * x}
+(PowBackward), \texttt{b = 3 * x} (MulBackward), \texttt{y = a + b}
+(AddBackward). Forward: $a = 4$, $b = 6$, $y = 10$. Backward traverses
+in reverse: $\partial y/\partial a = 1$, $\partial a/\partial x = 2x = 4$.
+$\partial y/\partial b = 1$, $\partial b/\partial x = 3$. Total:
+$\partial y/\partial x = 4 + 3 = 7$. Verify: $dy/dx = 2x + 3 = 7$.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What is x.grad if we change to $y = x^3 + 2x$ at $x = 2$?''
+Give 15 seconds. [Expected answer: $3x^2 + 2 = 14$.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think the tape persists across iterations.
+Correct framing: the tape is rebuilt every forward pass and destroyed
+after every backward pass. This is ``define-by-run.''
+
+% -- FLEX: [CORE] This concrete trace makes autograd tangible.
+[CORE] Students must trace through at least one example before assignments.
+IF SHORT: Show the code; emphasize that the result matches calculus exactly.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Forward: Build tape}
+    \begin{mlsyscode}
+x = torch.tensor([2.0],
+    requires\_grad=True)
+a = x * x     \textrm{\textcolor{midgray}{\scriptsize PowBackward}}
+b = 3 * x     \textrm{\textcolor{midgray}{\scriptsize MulBackward}}
+y = a + b     \textrm{\textcolor{midgray}{\scriptsize AddBackward}}
+    \end{mlsyscode}
+
+    \vspace{0.1cm}
+    \textbf{Backward: Traverse}
+    \begin{mlsyscode}
+y.backward()
+print(x.grad) \textrm{\textcolor{midgray}{\scriptsize tensor([7.])}}
+    \end{mlsyscode}
+
+    \vspace{0.05cm}
+    {\footnotesize Verify: $\frac{dy}{dx} = 2x + 3 = 2(2) + 3 = 7$ \checkmark}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \vspace{0.1cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}llll@{}}
+      \toprule
+      \textbf{Node} & \textbf{Fwd} & \textbf{Local $\partial$} & \textbf{Chain} \\
+      \midrule
+      $x$       & 2.0 & --- & \textbf{7.0} \\
+      $a = x^2$ & 4.0 & $2x = 4$ & $1 \times 4$ \\
+      $b = 3x$  & 6.0 & $3$ & $1 \times 3$ \\
+      $y = a+b$ & 10.0 & $1, 1$ & seed \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize Tape destroyed after \texttt{backward()}. Rebuilt next iteration---graph can change dynamically.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Memory Cost of Differentiation}
+\note{
+% -- LINK: What prior concept connects to this slide
+The tape stores all forward-pass intermediates. This slide quantifies
+how much memory that costs and introduces the key trade-off: activation
+checkpointing.
+
+% -- NARRATE: What to SAY while showing this slide
+``Reverse AD stores every intermediate activation from the forward pass.
+For deep models, these activations consume 3--4x more memory than the
+weights themselves. A 1.5B-parameter model with 6 GB of weights needs
+18--24 GB just for activations. The solution: activation checkpointing.
+Save activations only at layer boundaries, recompute the rest during
+backward. Trade: ~33\% more compute for up to 10x memory reduction.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Would you trade 33\% more compute time to fit a model that is
+10x too large for your GPU memory?'' Give 10 seconds.
+[Expected answer: yes---without checkpointing, you cannot train at all.
+33\% slowdown is better than not training.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think ``free gradients'' means differentiation
+has no cost. Correct framing: reverse AD is $O(1)$ in compute passes
+but $O(\text{depth})$ in memory. The memory cost is the binding constraint
+for deep models.
+
+% -- FLEX: [CORE] Previews activation checkpointing, which is central to Ch8.
+[CORE] The 3--4x memory multiplier is referenced in Ch8's memory breakdown.
+IF SHORT: State the 3--4x number and mention checkpointing; skip the
+detailed trade-off.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{The cost of ``free'' gradients:}
+
+    \vspace{0.1cm}
+    Reverse AD stores every forward intermediate:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Activations: 3--4$\times$ weight memory
+      \item Deep networks: tape can exceed model size
+      \item Memory scales with \textbf{network depth}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \mlsysconcept{Iron Law:}{Stored intermediates increase $D_{\text{vol}}$.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    {\footnotesize \textbf{Activation Checkpointing}\\[0.05cm]
+    Save activations only at boundaries.\\
+    Recompute the rest in backward.\\[0.05cm]
+    \textbf{Trade}: $\sim$33\% more compute\\
+    \textbf{Gain}: up to 10$\times$ less memory}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Abstraction}
+% =============================================================================
+
+\begin{frame}{The Framework Stack}
+\note{
+% -- LINK: What prior concept connects to this slide
+Execution and differentiation are solved. Abstraction is the third
+problem: how to expose these capabilities to programmers through a
+coherent API stack.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the 7-layer stack in the diagram: ``Layer 1: Python API---
+\texttt{torch.matmul(A, B)}. Layer 2: operator dispatch. Layer 3: kernel
+selection. Layer 4: CUDA/cuDNN. Layer 5: device driver. Layer 6: hardware
+scheduler. Layer 7: silicon. A single \texttt{torch.matmul} traverses
+all 7 layers in microseconds.''
+``Productivity increases going up the stack; performance increases going
+down. The framework's job is to bridge that gap.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``At which layer does the framework decide to use Tensor Cores
+instead of CUDA cores?'' Give 10 seconds.
+[Expected answer: Layer 3--4, kernel selection---the framework chooses
+the kernel based on dtype (FP16/BF16 triggers Tensor Core kernels).]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think the Python API directly controls the GPU.
+Correct framing: there are 5+ layers of translation between Python
+and silicon. Each layer adds latency but also adds optimization
+opportunities.
+
+% -- FLEX: [CORE] The 7-layer stack shows why frameworks are complex systems.
+[CORE] Students must understand the full path from Python to silicon.
+IF SHORT: Name layers 1, 4, and 7; let students read the rest from
+the diagram.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{ch07-framework-stack.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Key:}{\texttt{torch.matmul(A, B)} traverses all 7 layers in microseconds.}
+
+\end{frame}
+
+\begin{frame}{The Ladder of Abstraction}
+\note{
+% -- LINK: What prior concept connects to this slide
+The framework stack shows the layers \emph{within} a framework. The
+Ladder of Abstraction shows the \emph{historical} progression: each
+generation automated what the previous one exposed.
+
+% -- NARRATE: What to SAY while showing this slide
+``BLAS (1979): hid assembly, gave near-peak GEMM. NumPy (2006): hid
+memory management, gave Python + C speed. Theano (2007): hid GPU
+programming, auto-compiled to CUDA. TensorFlow (2015): hid distribution.
+PyTorch (2016): hid graph construction with dynamic graphs. JAX (2018):
+hid AD composition with functional transforms.''
+``Each generation solved one problem and exposed a new one.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What problem does the \emph{next} generation of frameworks need
+to solve?'' Give 15 seconds.
+[No single right answer---multi-modal, multi-device scheduling, or
+automated hardware mapping are all reasonable.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think older frameworks are obsolete.
+Correct framing: BLAS is still the foundation underneath every modern
+framework. The layers accumulate; they do not replace each other.
+
+% -- FLEX: [OPTIONAL] Historical context enriches understanding but is
+not strictly required.
+[OPTIONAL] Safe to abbreviate if running behind.
+IF SHORT: Focus on the three eras (BLAS, NumPy, deep learning); skip
+individual framework entries.
+}
+
+\scriptsize
+\renewcommand{\arraystretch}{0.95}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Era} & \textbf{Year} & \textbf{Solved} & \textbf{Exposed} \\
+  \midrule
+  \textbf{BLAS/LAPACK} & 1979 & Near-peak GEMM & Fixed interface \\
+  \textbf{NumPy} & 2006 & Python + C speed & Manual differentiation \\
+  \textbf{Theano} & 2007 & Auto-compile to GPU & Define-then-run rigidity \\
+  \textbf{TensorFlow} & 2015 & Distributed training & Complex graph debugging \\
+  \textbf{PyTorch} & 2016 & Dynamic graphs & No graph optimization \\
+  \textbf{JAX} & 2018 & Composable AD & Functional purity \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\mlsysinsight{Pattern:}{Each generation automated what the previous one exposed.}
+
+\end{frame}
+
+\begin{frame}{Tensors and Hardware Abstraction}
+\note{
+% -- LINK: What prior concept connects to this slide
+The Ladder of Abstraction showed frameworks hiding complexity over time.
+The tensor is the universal data structure that makes this abstraction
+work---same API, different backends.
+
+% -- NARRATE: What to SAY while showing this slide
+``A tensor is an n-dimensional array with four key properties: dtype
+(FP32, FP16, BF16, INT8), device (CPU, CUDA, TPU), layout (contiguous
+or strided), and requires\_grad (enables autograd). The same
+\texttt{torch.matmul} dispatches to completely different BLAS kernels
+depending on dtype and device.''
+Point to the card: ``Memory layout matters more than students expect.
+NCHW vs NHWC can yield a 30\% performance difference on the same hardware
+because cuDNN's Tensor Core kernels prefer NHWC.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why would changing memory layout from NCHW to NHWC speed up
+a convolution by 30\%?'' Give 10 seconds.
+[Expected answer: NHWC places channels last, matching Tensor Core
+access patterns. NCHW requires transposition, adding memory traffic.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students treat tensors as ``just arrays'' and ignore
+dtype and layout.
+Correct framing: dtype determines which hardware units execute (FP32
+uses CUDA cores, FP16 uses Tensor Cores at 16x throughput). Layout
+determines memory access patterns and cache efficiency.
+
+% -- FLEX: [OPTIONAL] Provides depth on hardware abstraction.
+[OPTIONAL] The NCHW/NHWC detail is valuable but not essential.
+IF SHORT: State that tensors abstract hardware; skip the layout detail.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Tensors}: n-dimensional arrays with:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textbf{dtype}: FP32, FP16, BF16, INT8
+      \item \textbf{device}: CPU, CUDA, TPU
+      \item \textbf{layout}: contiguous, strided
+      \item \textbf{requires\_grad}: enables autograd
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscode}
+x = torch.randn(32, 3, 224, 224,
+    dtype=torch.float16,
+    device="cuda")
+    \end{mlsyscode}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    {\footnotesize \textbf{Memory Layout Matters}\\[0.05cm]
+    NCHW vs NHWC can yield\\
+    \textbf{30\% performance difference}\\[0.05cm]
+    cuDNN prefers NHWC for Tensor Cores.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    Same \texttt{torch.matmul} dispatches to different BLAS kernels by dtype and device.
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{nn.Module}
+% =============================================================================
+
+\begin{frame}{The nn.Module Pattern}
+\note{
+% -- LINK: What prior concept connects to this slide
+Tensors are the data structure; \texttt{nn.Module} is the programming
+pattern that organizes tensors into trainable models. This bridges
+abstraction (Problem 3) with differentiation (Problem 2).
+
+% -- NARRATE: What to SAY while showing this slide
+``Three design principles. First: automatic parameter discovery.
+When you write \texttt{optimizer = Adam(model.parameters())}, the
+framework recursively traverses the module tree and finds every trainable
+tensor. One call captures millions of parameters---you never manually
+enumerate them.
+Second: mode-dependent behavior. \texttt{model.train()} enables dropout
+and batch norm statistics. \texttt{model.eval()} disables them. Same
+code, different execution paths.
+Third: hierarchical composition. Modules contain modules. A Transformer
+contains attention modules, which contain linear modules. Serialization
+(\texttt{torch.save}) captures the entire tree.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why must the framework discover parameters automatically rather
+than requiring the programmer to list them?'' Give 10 seconds.
+[Expected answer: manual enumeration is error-prone at scale---a
+Transformer has hundreds of parameter tensors across nested modules.
+Missing one breaks training silently.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students forget to call \texttt{model.eval()} before
+inference, leaving dropout active and getting noisy predictions.
+Correct framing: train/eval mode switching is a correctness requirement,
+not a performance optimization. Forgetting it produces wrong answers.
+
+% -- FLEX: [CORE] The nn.Module pattern is universal across frameworks.
+[CORE] Students will use this pattern in every assignment and project.
+IF SHORT: Focus on parameter discovery; mention train/eval briefly.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Three design principles:}
+
+    \vspace{0.1cm}
+    \textcolor{computestroke}{\textbf{1. Parameter Discovery}}\\
+    {\footnotesize Recursively finds all trainable parameters.\\
+    \texttt{optimizer = Adam(model.parameters())}\\
+    One call captures millions of params.}
+
+    \vspace{0.1cm}
+    \textcolor{datastroke}{\textbf{2. Mode-Dependent Behavior}}\\
+    {\footnotesize \texttt{model.train()} enables dropout + BN stats.\\
+    \texttt{model.eval()} disables them.\\
+    Same code, different behavior.}
+
+    \vspace{0.1cm}
+    \textcolor{routingstroke}{\textbf{3. Hierarchical Composition}}\\
+    {\footnotesize Modules contain modules (tree structure).\\
+    \texttt{torch.save(model.state\_dict())} serializes all.}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscode}
+class MLP(nn.Module):
+  def \_\_init\_\_(self):
+    super().\_\_init\_\_()
+    self.fc1 = nn.Linear(784, 256)
+    self.fc2 = nn.Linear(256, 10)
+
+  def forward(self, x):
+    x = F.relu(self.fc1(x))
+    return self.fc2(x)
+
+model = MLP()
+    \end{mlsyscode}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{nn.Module Tree: ResNet-18}
+\note{
+% -- LINK: Students just saw the three nn.Module principles. This slide
+% shows what the module tree looks like for a real architecture---ResNet-18.
+
+% -- NARRATE: Walk through the tree structure.
+``ResNet-18 has a root module containing 4 sequential blocks, each with
+2 BasicBlock sub-modules, each with 2 Conv2d layers plus BatchNorm and
+a skip connection. Total: 60 sub-modules, 11.7M parameters.
+When you call \texttt{model.parameters()}, the framework recursively
+traverses this tree and returns all 11.7M parameters in one call.''
+
+% -- ENGAGE: ``How many lines of code would it take to manually list
+% all 60 sub-modules?'' Give 10 seconds.
+% [Expected answer: at least 60 lines. The tree structure automates this.]
+
+% -- WARN: Students think nn.Module is just a container.
+% Correct framing: it is a recursive tree with automatic parameter
+% discovery, mode switching, and serialization. The tree structure is
+% what makes frameworks scalable to models with thousands of layers.
+
+% -- FLEX: [OPTIONAL] Concrete example of the module tree pattern.
+% IF SHORT: Show the table for 20 seconds; emphasize the recursive discovery.
+}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.0}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{ResNet-18 Module Tree:}
+
+    \vspace{0.1cm}
+    \begin{mlsyscode}
+ResNet
+├── conv1 (9,408 params)
+├── bn1 (128 params)
+├── layer1 [BasicBlock x2]
+│   ├── conv1 (36,864)
+│   ├── bn1 (128)
+│   ├── conv2 (36,864)
+│   └── bn2 (128)
+├── layer2 [BasicBlock x2]
+├── layer3 [BasicBlock x2]
+├── layer4 [BasicBlock x2]
+└── fc (5,130 params)
+    \end{mlsyscode}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \vspace{0.1cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.05}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Component} & \textbf{Params} \\
+      \midrule
+      conv1 + bn1 & 9,536 \\
+      layer1 (2 blocks) & 147,968 \\
+      layer2 (2 blocks) & 525,568 \\
+      layer3 (2 blocks) & 2,099,712 \\
+      layer4 (2 blocks) & 8,394,752 \\
+      fc & 5,130 \\
+      \midrule
+      \textbf{Total} & \textbf{11.7M} \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize \textbf{72\% of params} in layer4. Deeper layers dominate---just like MNIST Layer 1.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Anatomy of a Training Step}
+\note{
+% -- LINK: What prior concept connects to this slide
+\texttt{nn.Module} defines the model. This slide traces 8 lines of
+Python through the entire framework stack, integrating all three
+problems (execution, differentiation, abstraction) into one example.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to each code line: ``Line 1--4: create data on GPU. Line 5--6:
+forward pass---each operation dispatches a kernel (~1 $\mu$s Python,
+~5 $\mu$s launch, ~15 $\mu$s compute) and records on the autograd tape.
+Line 7: \texttt{loss.backward()}---reverse topological traversal of the
+tape, chain rule at each node, gradients stored in \texttt{.grad}.
+Line 8: \texttt{optimizer.step()}---updates all parameters via
+hardware-optimized fused kernels.''
+Point to the crimson card: ``8 lines of Python exercise the entire
+framework stack.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which of the three framework problems does each phase exercise?''
+Give 15 seconds.
+[Expected answer: Forward = execution + differentiation (tape recording).
+Backward = differentiation. Update = abstraction (optimizer API).]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think \texttt{optimizer.step()} just subtracts
+the gradient. Correct framing: Adam's step involves reading $m$, $v$,
+computing bias corrections, and writing updated weights---multiple
+memory accesses per parameter, which is why optimizer steps can be
+memory-bound.
+
+% -- FLEX: [CORE] This integrative example ties the lecture together.
+[CORE] Students must trace the full path at least once.
+IF SHORT: Walk through forward and backward only; mention optimizer briefly.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscode}
+x = torch.randn(32, 784,
+    device="cuda")
+y = torch.randint(0, 10, (32,),
+    device="cuda")
+\textrm{\textcolor{midgray}{\footnotesize Forward pass}}
+h = F.relu(x @ W1 + b1)
+logits = h @ W2 + b2
+loss = cross\_entropy(logits, y)
+\textrm{\textcolor{midgray}{\footnotesize Backward + Update}}
+loss.backward()
+optimizer.step()
+    \end{mlsyscode}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    {\scriptsize
+    \textbf{Phase 1: Forward} (Execution)\\
+    Python dispatch ($\sim$1 $\mu$s) $\to$ kernel select $\to$ GPU exec ($\sim$15 $\mu$s). Autograd records each op.
+
+    \vspace{0.1cm}
+    \textbf{Phase 2: Backward} (Differentiation)\\
+    Reverse topological traversal. Chain rule at each node. Gradients stored in \texttt{.grad}.
+
+    \vspace{0.1cm}
+    \textbf{Phase 3: Update} (Abstraction)\\
+    \texttt{optimizer.step()} updates all parameters via hardware-optimized kernels.
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{crimson}
+    {\scriptsize 8 lines of Python exercise the \textbf{entire framework stack}: execution, differentiation, and abstraction.}
+    \end{mlsyscard}
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Frameworks}
+% =============================================================================
+
+\begin{frame}{PyTorch, TensorFlow, JAX}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students understand the three problems and the execution trade-offs.
+This slide shows how three real frameworks make different architectural
+choices in response to those same problems.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the comparison diagram: ``PyTorch: execution-first. Eager
+by default, debug interactively, \texttt{torch.compile} for production.
+TensorFlow: abstraction-first. Graph-based for deployment everywhere---
+server, mobile, microcontroller. JAX: differentiation-first. Composable
+functional transforms (\texttt{grad}, \texttt{vmap}, \texttt{jit}).
+These are not competing APIs---they are different design philosophies
+prioritizing different problems.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If you are building a research prototype that changes every day,
+which framework philosophy do you want?'' Give 10 seconds.
+[Expected answer: execution-first (PyTorch)---eager mode for fast
+iteration and debugging.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think one framework is ``best'' for everything.
+Correct framing: framework choice is an infrastructure commitment.
+Each excels at its priority and trades off the others. Migration
+costs 3--6 engineer-months.
+
+% -- FLEX: [CORE] The three-framework comparison is the section's core content.
+[CORE] This directly feeds the discussion exercise.
+IF SHORT: Name the three philosophies; let the diagram carry the detail.
+}
+
+% --- Layout: FULL-WIDTH comparison ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ch07-framework-comparison.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Key:}{Framework choice is an \textbf{infrastructure commitment}, not a tooling preference.}
+
+\end{frame}
+
+\begin{frame}{Quantitative Performance Gaps}
+\note{
+% -- LINK: What prior concept connects to this slide
+The comparison showed qualitative differences. This slide puts numbers
+on the gap: how much performance varies across framework configurations.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the table: ``Same model, same hardware. PyTorch eager: 52 ms,
+32\% utilization. \texttt{torch.compile}: 35 ms, 48\%. TensorRT (fully
+compiled): 3 ms, 88\%. That is a 17x latency gap between naive eager
+and fully optimized.''
+Point to the memory cards: ``PyTorch Mobile: 220 MB runtime. TFLite
+Micro: 32 KB. A 6,875x memory difference. These are not edge cases---
+they represent the range of what framework choice determines.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If TensorRT is 17x faster, why doesn't everyone use it?''
+Give 10 seconds. [Expected answer: TensorRT requires static graphs,
+AOT compilation, and NVIDIA hardware. It trades flexibility and
+portability for performance.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students assume the performance gap is small because
+``it is the same math.'' Correct framing: the math is identical, but
+execution scheduling, memory management, and kernel selection create
+order-of-magnitude differences.
+
+% -- FLEX: [CORE] The 17x and 6,875x numbers are key quantitative anchors.
+[CORE] Referenced in Key Takeaways and Fallacies.
+IF SHORT: Focus on the 17x number; mention the memory gap in passing.
+}
+
+\footnotesize
+\textbf{ResNet-50 inference on A100:}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  \textbf{Framework} & \textbf{Latency} & \textbf{Util.} & \textbf{Memory} \\
+  \midrule
+  PyTorch (eager)    & 52 ms   & 32\% & 220 MB \\
+  torch.compile      & 35 ms   & 48\% & 220 MB \\
+  TensorRT           & 3 ms    & 88\% & --- \\
+  TFLite Micro       & ---     & ---  & 32 KB \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{17$\times$ latency gap}\\
+    PyTorch vs.\ TensorRT on same hardware.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{6,875$\times$ memory gap}\\
+    PyTorch Mobile vs.\ TFLite Micro.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Framework Selection Criteria}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students saw the performance gaps. This slide provides the structured
+decision process for choosing a framework, analogous to the architecture
+selection framework from Ch6.
+
+% -- NARRATE: What to SAY while showing this slide
+``Evaluate in order. First: deployment target. Cloud, edge, mobile, MCU?
+This eliminates most options immediately. TFLite Micro is the only choice
+for MCUs. TensorRT for cloud inference. Second: execution model---rapid
+iteration needs eager; production needs compiled. Third: hardware---JAX
+for TPUs, PyTorch for NVIDIA GPUs. Fourth: ecosystem---TF Serving for
+zero-downtime deployment.''
+Point to the card: ``Evaluate deployment target first. Migration
+invalidates pipelines, checkpoints, and team expertise---3 to 6
+engineer-months.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``A team chose PyTorch for research. Now they need to deploy on
+a microcontroller. What happens?'' Give 10 seconds.
+[Expected answer: they face a 3--6 month migration to TFLite Micro.
+The research framework does not support the deployment target.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students choose frameworks based on familiarity or
+popularity rather than deployment constraints.
+Correct framing: deployment target is the primary filter. Everything
+else is secondary. Choosing wrong means expensive migration later.
+
+% -- FLEX: [OPTIONAL] The decision table reinforces the framework comparison.
+[OPTIONAL] Students can reference this table later.
+IF SHORT: State the ``deployment target first'' rule and move to Discussion.
+}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{@{}lp{3.5cm}p{4cm}@{}}
+  \toprule
+  \textbf{Criterion} & \textbf{Question} & \textbf{Implication} \\
+  \midrule
+  \textbf{Deploy target} & Cloud? Edge? Mobile? MCU? & TFLite Micro for MCU; TensorRT for cloud \\
+  \textbf{Exec model} & Rapid iteration? Production? & Eager for research; compiled for prod \\
+  \textbf{Hardware} & GPU? TPU? Custom? & JAX for TPU; PyTorch for NVIDIA \\
+  \textbf{Ecosystem} & Serving? Monitoring? & TF Serving for zero-downtime \\
+  \textbf{Migration} & Lock-in risk? & 3--6 months for production migration \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{crimson}
+{\scriptsize \textbf{Decision rule}: Evaluate \textbf{deployment target first}---it eliminates most options. Migration invalidates pipelines, checkpoints, and team expertise.}
+\end{mlsyscard}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Choose a Framework}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students have the framework comparison and the selection criteria.
+This exercise forces them to apply both to a dual-deployment scenario.
+
+% -- NARRATE: What to SAY while showing this slide
+``Turn and talk---90 seconds. A startup needs speech recognition on
+two targets: a cloud server (20 ms latency, 1M requests/day) and a
+mobile app (100 ms latency, 512 MB RAM). Which framework(s) for each?''
+After 90 seconds, cold-call 2--3 pairs for their reasoning.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students discuss in pairs for 90 seconds. No single right answer.
+The point: deployment target dominates the decision, and the two targets
+may require different frameworks.
+[Reasonable answers: Cloud = PyTorch + TorchServe or TensorRT; Mobile =
+TensorFlow + TFLite. Some may argue for a single framework to avoid
+migration---discuss the trade-off.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students pick one framework for both targets to ``keep
+things simple.'' Correct framing: if the mobile app needs 512 MB RAM
+and PyTorch Mobile's runtime is 220 MB, that leaves only 292 MB for the
+model. TFLite's 32 KB runtime gives far more headroom.
+
+% -- FLEX: [CORE] This is the chapter's primary application exercise.
+[CORE] Must complete before moving to Wrap-Up.
+IF SHORT: Do a show-of-hands poll (30s) instead of full turn-and-talk.
+}
+
+\centering
+\vspace{0.5cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.4cm}
+{\large A startup needs to deploy a speech recognition model.\\[0.2cm]
+\textbf{Cloud server}: 20 ms latency SLA, 1M requests/day.\\
+\textbf{Mobile app}: 100 ms latency, 512 MB RAM budget.\\[0.3cm]
+\alert{Which framework(s) would you choose for each?}}
+
+\vspace{0.4cm}
+\begin{columns}[c]
+  \begin{column}{0.25\textwidth}\centering\small PyTorch +\\ TorchServe\end{column}
+  \begin{column}{0.25\textwidth}\centering\small TensorFlow +\\ TF Serving\end{column}
+  \begin{column}{0.25\textwidth}\centering\small TensorFlow +\\ TF Lite\end{column}
+  \begin{column}{0.25\textwidth}\centering\small JAX +\\ XLA\end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students applied framework selection in the discussion. These fallacies
+show what goes wrong when the selection process is skipped.
+
+% -- NARRATE: What to SAY while showing this slide
+Read each fallacy with its number: ``Fallacy 1: all frameworks give
+equivalent performance. PyTorch eager vs TensorRT: 17x gap on identical
+hardware. The framework implementation, not the math, determines speed.''
+``Fallacy 2: abstractions eliminate systems knowledge. ReLU achieves
+0.125 FLOPs/byte regardless of framework---under 0.1\% of peak compute.
+Engineers without Roofline intuition leave 80--90\% of hardware unused.''
+``Fallacy 3: increasing batch size is always free. A 7B model in FP16
+consumes 14 GB. Quadrupling batch size triggers recomputation that
+reduces throughput by 20--30\%.''
+
+% -- FLEX: [CORE] Fallacies reinforce quantitative reasoning.
+[CORE] Each maps to a concept from the lecture.
+IF SHORT: Cover fallacies 1 and 2; skip fallacy 3.
+}
+
+\small
+\textbf{Fallacy:} \textit{All frameworks provide equivalent performance for the same model.}\\
+{\footnotesize PyTorch: 52 ms / 32\% util. TensorRT: 3 ms / 88\% util. A \textbf{17$\times$} gap on identical hardware---framework implementation, not math.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Framework abstractions eliminate the need for systems knowledge.}\\
+{\footnotesize ReLU achieves 0.125 FLOPs/byte = \textbf{under 0.1\%} of peak compute regardless of framework. Engineers who lack Roofline Model intuition leave 80--90\% of hardware unused.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Increasing batch size is always a free throughput optimization.}\\
+{\footnotesize A 7B model in FP16 consumes 14 GB. Quadrupling batch size triggers recomputation that \textbf{reduces throughput by 20--30\%} despite larger batches.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{
+% -- LINK: What prior concept connects to this slide
+Fallacies are wrong beliefs; pitfalls are operational mistakes.
+These three pitfalls map to framework selection, compilation, and
+migration.
+
+% -- NARRATE: What to SAY while showing this slide
+``Pitfall 1: choosing by popularity. PyTorch Mobile: 220 MB runtime.
+TFLite Micro: 32 KB. A 6,875x memory difference. Teams that prototype
+with PyTorch for edge face 2--3 month migrations.''
+``Pitfall 2: treating compilation as negligible. 10,000 images with
+10 code changes: eager wins by 50x because recompilation dominates.''
+``Pitfall 3: ignoring vendor lock-in. Converting TensorFlow SavedModel
+to PyTorch: 3--6 engineer-months. ONNX covers only 80--85\% of
+operations.''
+
+% -- FLEX: [CORE] Operational pitfalls students will encounter in projects.
+[CORE] All three are common in industry.
+IF SHORT: Cover pitfalls 1 and 3; skip pitfall 2.
+}
+
+\small
+\textbf{Pitfall:} \textit{Choosing frameworks based on popularity rather than deployment targets.}\\
+{\footnotesize PyTorch Mobile: 220 MB runtime. TFLite Micro: 32 KB. A \textbf{6,875$\times$} memory difference. Teams that prototype with PyTorch for edge face 2--3 month migrations.}
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Treating compilation overhead as negligible.}\\
+{\footnotesize 10,000 images with 10 code changes: Eager = 6.9 s. Compiled = 304.7 s (recompilation dominates). Enable \texttt{torch.compile} only when $N_{\text{prod}}$ is large.}
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Ignoring vendor lock-in from framework-specific formats.}\\
+{\footnotesize Converting TensorFlow SavedModel to PyTorch: \textbf{3--6 engineer-months}. ONNX covers only 80--85\% of operations. Plan for portability early.}
+
+\end{frame}
+
+
+\begin{frame}{Muddiest Point}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``One-minute paper. Write down the muddiest point---the concept that was
+most confusing or unclear. Hand it in or submit digitally. I will address
+the top muddiest points at the start of Ch8.''
+
+% -- FLEX: [CORE] Diagnostic for the instructor.
+[CORE] Collect responses to open Ch8 with targeted clarification.
+IF SHORT: Ask students to submit digitally after class.
+}
+
+\centering
+\Large\bfseries One-minute paper\\[0.5cm]
+\normalsize Write down the \textbf{muddiest point} from today's lecture.\\[0.2cm]
+{\small What concept was most confusing or unclear?}\\[0.5cm]
+{\footnotesize\textcolor{midgray}{(Hand in on your way out --- or submit digitally)}}
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Close your notes. Write down the four most important concepts from today.
+90 seconds, no peeking.'' Walk around the room to monitor engagement.
+Do NOT show the Key Takeaways slide yet.
+
+% -- FLEX: [CORE] Retrieval practice is the highest-impact learning activity.
+[CORE] Students must write before seeing the answer slide.
+IF SHORT: Reduce to 60 seconds.
+}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just did retrieval practice. This slide reveals the answers.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through each bullet with its quantitative anchor:
+``Three problems: execution, differentiation, abstraction---each maps to
+an Iron Law term.''
+``Memory Wall: 312 TFLOPS vs 2 TB/s. Kernel fusion reduces $D_{\text{vol}}$
+by 3x+. FlashAttention: 10--20x less HBM traffic.''
+``Compilation Continuum: compile when Benefit > 1. Research = eager,
+training = JIT, production = AOT.''
+``Reverse-mode AD: one backward pass for all gradients, but stores all
+intermediates (3--4x weight memory).''
+``nn.Module: parameter discovery + mode switching + composition.''
+``Frameworks are not interchangeable: 17x latency gap, 6,875x memory gap.''
+
+% -- FLEX: [CORE] Consolidates the lecture.
+[CORE] Read all bullets; emphasize the quantitative anchors.
+IF SHORT: Read bullets 1, 2, and 6; let students read the rest.
+}
+
+\footnotesize
+\begin{itemize}\setlength\itemsep{1pt}
+  \item \textbf{Three problems}: Execution ($L_{\text{lat}}$), differentiation ($D_{\text{vol}}$), abstraction ($\eta$). Every framework prioritizes one.
+  \item \textbf{Memory Wall drives optimization}: 312 TFLOPS compute vs.\ 2 TB/s bandwidth. Kernel fusion reduces $D_{\text{vol}}$ by 3$\times$+. FlashAttention: 10--20$\times$ less HBM traffic.
+  \item \textbf{Compilation Continuum}: Compile when $\text{Benefit} > 1$. Research: eager. Training: JIT. Production: AOT.
+  \item \textbf{Reverse-mode AD}: One backward pass for all gradients. Cost: store all intermediates (3--4$\times$ weight memory).
+  \item \textbf{nn.Module pattern}: Parameter discovery + mode switching + hierarchical composition. Universal across frameworks.
+  \item \textbf{Frameworks are not interchangeable}: 17$\times$ latency gap (PyTorch vs TensorRT), 6,875$\times$ memory gap (Mobile vs Micro). Deployment target determines framework.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Canonical papers: Paszke et al.\ for PyTorch, Abadi et al.\ for
+TensorFlow, Bradbury et al.\ for JAX, Dao et al.\ for FlashAttention.
+Read at least the PyTorch and FlashAttention abstracts before Ch8.''
+
+% -- FLEX: [OPTIONAL] Reference slides are for student self-study.
+[OPTIONAL] Do not read citations aloud; point students to the slide.
+}
+
+\small
+\mlsysref{Paszke+19}{Paszke et al. ``PyTorch: An Imperative Style.'' NeurIPS 2019.}
+\mlsysref{Abadi+16}{Abadi et al. ``TensorFlow: A System for Large-Scale ML.'' OSDI 2016.}
+\mlsysref{Bradbury+18}{Bradbury et al. ``JAX: Composable Transformations.'' 2018.}
+\mlsysref{Dao+22}{Dao et al. ``FlashAttention: Fast and Memory-Efficient Attention.'' NeurIPS 2022.}
+\mlsysref{Baydin+18}{Baydin et al. ``Automatic Differentiation in Machine Learning: A Survey.'' JMLR 2018.}
+\mlsysref{Bergstra+10}{Bergstra et al. ``Theano: A CPU and GPU Math Compiler.'' SciPy 2010.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Model Training}
+\note{
+% -- LINK: What prior concept connects to this slide
+Frameworks are the control room---they translate architecture into
+execution. Ch8 puts this control room to work at scale: mixed precision,
+gradient checkpointing, compilation pipelines, and distributed training.
+
+% -- NARRATE: What to SAY while showing this slide
+``Frameworks give us the control room. The next chapter puts it to work.
+Mixed precision exploits Tensor Cores for 2x throughput. Gradient
+checkpointing trades compute for memory. Distributed training splits
+work across multiple GPUs. Everything builds on the framework internals
+we learned today.''
+
+% -- FLEX: [CORE] Forward hook must connect to Ch8.
+[CORE] Keep to 1 minute. End on ``from control room to power plant.''
+}
+
+\small
+\centering
+\vspace{0.3cm}
+{\normalsize Frameworks give us the \textbf{control room}.\\
+The next chapter puts it to \textbf{work}.}
+
+\vspace{0.4cm}
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\normalsize\bfseries Mixed\\Precision}\\[0.1cm]
+    {\footnotesize FP16/BF16 for 2$\times$ throughput}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{datastroke}
+    {\normalsize\bfseries Gradient\\Checkpointing}\\[0.1cm]
+    {\footnotesize Trade compute for memory}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    {\normalsize\bfseries Distributed\\Training}\\[0.1cm]
+    {\footnotesize Multi-GPU orchestration}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.3cm}
+{\small\textbf{From control room to power plant.}}
+
+\end{frame}
+
+
+% =============================================================================
+% BACKUP SLIDES
+% =============================================================================
+\appendix
+
+\begin{frame}{Backup: Autograd Pitfalls}
+\note{
+% -- NARRATE: Use if students encounter in-place operation errors.
+In-place ops (\texttt{x += 1}) modify the tensor without creating a new
+node on the tape. The backward pass cannot compute the correct gradient
+because the original value is lost. Fix: use \texttt{x = x + 1} (creates
+a new tensor and records the AddBackward node).
+
+% -- FLEX: [OPTIONAL] Backup slide for debugging common autograd errors.
+}
+\small
+Use if students encounter in-place operation errors.\\small In-place ops (\texttt{x += 1}) modify the tensor without creating a new node on the tape.\\ The backward pass cannot compute the correct gradient because the original value is lost.\\ Fix: use \texttt{x = x + 1} (creates a new tensor and records the AddBackward node).
+\end{frame}
+
+\begin{frame}{Backup: Eager vs Graph Mode Breakeven}
+\note{
+% -- NARRATE: Use for additional quantitative practice with dispatch overhead.
+
+% -- FLEX: [OPTIONAL] Backup exercise for students who want more practice.
+}
+\footnotesize
+\textbf{Exercise:} Eager mode runs 1000 ops with 0.1 ms overhead each.
+Graph mode: 50 ms compile + 1000 ops at 0.01 ms each.
+
+\vspace{0.1cm}
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Per iteration:}\\
+    Eager: $1000 \times 0.1 = $ \textbf{100 ms}\\
+    Graph: $1000 \times 0.01 = $ \textbf{10 ms}\\
+    Savings per iteration: \textbf{90 ms}
+
+    \vspace{0.1cm}
+    \textbf{Breakeven:}\\
+    $50\text{ ms} / 90\text{ ms} = 0.56$ iterations\\
+    \textbf{Graph mode wins after just 1 iteration!}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize But if code changes 10$\times$ (recompiles):\\
+    Cost: $10 \times 50 = 500$ ms\\
+    Breakeven: $500 / 90 \approx 6$ iterations\\[0.1cm]
+    \textbf{Key:} Recompilation cost grows linearly with code changes.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Backup: Theano to PyTorch --- The Framework Shift}
+\note{
+% -- NARRATE: War story about framework migration.
+% Use when students ask ``why did the industry switch frameworks?''
+
+% -- FLEX: [OPTIONAL] Historical context for framework evolution.
+}
+\footnotesize
+\textbf{War Story: How Define-by-Run Won}
+
+\vspace{0.1cm}
+In 2016, most ML research used TensorFlow 1.x (static graphs). Debugging required \texttt{tf.Session}, \texttt{tf.placeholder}, and opaque graph errors. PyTorch launched with eager execution: standard Python debugging, \texttt{pdb} breakpoints, print statements.
+
+\vspace{0.1cm}
+\scriptsize
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lrr@{}}
+  \toprule
+  & \textbf{2017 (NeurIPS papers)} & \textbf{2023 (NeurIPS papers)} \\
+  \midrule
+  TensorFlow & 75\% & 15\% \\
+  PyTorch & 20\% & 80\% \\
+  JAX & 0\% & 5\% \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\footnotesize
+\begin{mlsyscard}{crimson}
+{\scriptsize \textbf{Lesson}: Developer productivity (debugging speed) beat execution performance. TensorFlow 2.0 adopted eager mode---validating PyTorch's design choice.}
+\end{mlsyscard}
+\end{frame}
+
+\end{document}

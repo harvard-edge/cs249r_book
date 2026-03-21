@@ -18,7 +18,6 @@ scripts/
 ├── common/           Shared base classes, config, logging, validators
 ├── content/          Content validation, formatting, and editing tools
 ├── docs/             Script documentation
-├── genai/            AI-assisted tools (quizzes, footnotes, dash fixes)
 ├── glossary/         Glossary generation and consolidation
 ├── images/           Image processing, compression, validation
 ├── infrastructure/   CI/CD and Docker utilities
@@ -61,10 +60,6 @@ scripts/
 ### Glossary
 - `glossary/build_global_glossary.py` - Build master glossary from chapters
 - `glossary/consolidate_similar_terms.py` - Merge near-duplicate terms
-
-### AI Tools
-- `genai/quizzes.py` - Generate quiz questions
-- `genai/footnote_assistant.py` - AI-assisted footnote writing
 
 ## Usage
 

@@ -1,0 +1,1673 @@
+% =============================================================================
+% Chapter 8: Fleet Orchestration — ML Systems Lecture Slides (Volume II)
+% =============================================================================
+% IMAGES NEEDED (SVGs converted to PDF):
+%   - gang-scheduling.pdf         - fragmentation-problem.pdf
+%   - slurm-vs-k8s.pdf            - topology-hierarchy.pdf
+%   - elastic-training.pdf        - cost-optimization.pdf
+%   - scheduling-objectives.pdf   - ml-schedulers.pdf
+%   - hybrid-slurm-k8s.pdf        - queue-utilization-curve.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Volume II},
+  chapter      = {Chapter 8},
+  logo         = {../../assets/img/logo-mlsysbook.png},
+  instlogo     = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Fleet Orchestration},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\GPUhr}{GPU-hour}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation ---
+\setcounter{mlsystotalsections}{7}
+
+\title{Fleet Orchestration}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Fleet Orchestration}{Extracting Useful Work from Shared Infrastructure}{cover_orchestration.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{
+% -- LINK: What prior concept connects to this slide
+Chapter 7 built fault tolerance --- the cluster can survive failures.
+This chapter asks: who decides which jobs run where and when?
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through each objective. Emphasize that orchestration is where
+infrastructure meets organizational policy. Scheduling determines
+whether \$175M/yr of GPU capacity produces useful work or sits idle.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``How many of you have waited hours for GPU resources that were
+sitting idle?'' Show of hands reveals the scheduling problem firsthand.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think scheduling is a solved problem (just use FIFO or
+fair-share). ML workloads have unique properties (gang requirements,
+heavy-tailed durations, topology sensitivity) that break generic schedulers.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Sets the roadmap for the lecture.
+IF SHORT: Read objectives quickly without elaboration.
+}
+
+\small
+\begin{enumerate}\setlength\itemsep{1pt}
+  \item Explain why \textbf{gang scheduling} prevents deadlock in distributed training
+  \item Compare \textbf{Slurm} and \textbf{Kubernetes} scheduling paradigms and their CAP trade-offs
+  \item Apply \textbf{topology-aware scheduling} to match parallelism to communication hierarchy
+  \item Design \textbf{elastic training} policies that allow jobs to grow and shrink dynamically
+  \item Quantify the economics of \textbf{spot instances} including hidden interruption costs
+  \item Evaluate \textbf{custom ML schedulers} (Tiresias, Gandiva, Pollux) and their innovations
+  \item Architect \textbf{multi-tenant quota systems} balancing fairness and utilization
+\end{enumerate}
+
+\end{frame}
+
+\begin{frame}{Visual Language}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Point to each color card briefly. Students have seen this in Ch 7.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Students know the palette from prior chapters.
+IF SHORT: Skip entirely.
+}
+
+\small
+Throughout this course, colors carry meaning:
+
+\vspace{0.3cm}
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Blue} --- Compute / Processing\\
+    {\footnotesize GPU ops, forward/backward pass, inference}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Green} --- Data / Memory\\
+    {\footnotesize Data flow, caches, healthy paths}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Orange} --- Routing / Scheduling\\
+    {\footnotesize Load balancers, batch windows}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Red} --- Error / Cost / Bottleneck\\
+    {\footnotesize Loss, decode phase, waste}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\end{frame}
+
+
+
+% =============================================================================
+\section{The Scheduling Problem}
+% =============================================================================
+
+\begin{frame}{Why Scheduling Matters: The Economics}
+\note{
+% -- LINK: What prior concept connects to this slide
+Chapter 7 showed that GPU clusters fail frequently. This slide shows
+the economic stakes: even when hardware is healthy, poor scheduling
+wastes millions in idle capacity.
+
+% -- NARRATE: What to SAY while showing this slide
+Open with the dollar figure: ``A 10,000-GPU cluster at \$2 per GPU-hour
+costs \$480,000 per day, \$175M per year. If 30\% sits idle, that is
+\$53M wasted annually. Improving utilization from 50\% to 80\%
+effectively adds 6,000 GPUs without purchasing hardware.'' Then walk
+through the scheduling challenge: Team A wants 512 GPUs for a month,
+Team B wants hundreds of 8-GPU jobs. FCFS starves large jobs;
+fair-share fragments GPUs.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If 30\% of your cluster is idle, what does that cost per year?''
+Give 10 seconds. Expected: 0.30 times \$175M = \$53M.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think ``buy more GPUs'' solves scheduling problems. In
+reality, scheduling is the highest-leverage investment because it
+extracts more useful work from existing hardware.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Economic motivation for the entire chapter.
+IF AHEAD: ``What is the utilization of your lab's GPU cluster?''
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    A 10,000-GPU cluster at \$2/\GPUhr:
+
+    \vspace{0.2cm}
+    \renewcommand{\arraystretch}{1.2}
+    {\footnotesize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Metric} & \textbf{Value} \\
+      \midrule
+      Daily operating cost     & \$480,000 \\
+      Annual operating cost    & \$175M \\
+      30\% idle $\to$ waste    & \$144K/day \\
+      Annual waste             & \$53M \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.2cm}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize Improving utilization from 50\% to 80\% effectively adds \textbf{6,000 GPUs} of productive capacity --- without purchasing hardware.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \textbf{The scheduling challenge:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\footnotesize Team A: 512-GPU job for 1 month}
+      \item {\footnotesize Team B: hundreds of 8-GPU jobs, 1 hour each}
+      \item {\footnotesize FCFS? B starves A.}
+      \item {\footnotesize Fair-share? Fragments GPUs.}
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \mlsysconcept{Key insight:}{Scheduling is the highest-leverage engineering investment in ML infrastructure.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Four Scheduling Objectives}
+\note{
+% -- LINK: What prior concept connects to this slide
+The economics showed why scheduling matters. This slide reveals the
+fundamental impossibility: you cannot optimize all four objectives
+simultaneously.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the four objectives in the diagram: ``Utilization ---
+keep GPUs busy. Fairness --- give each team their share. Throughput
+--- minimize average job completion time. Latency --- minimize wait
+time for urgent jobs.'' Then the punchline: ``Every scheduling policy
+is a specific point in this four-dimensional trade-off space.
+Optimizing all four is impossible.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which objective would you prioritize for a research lab?
+For a production serving fleet?'' Expected: research = fairness and
+latency (interactive use); production = utilization and throughput.
+
+% -- WARN: What students will get wrong on THIS topic
+Students want a scheduler that maximizes all four simultaneously.
+This is a fundamental impossibility --- every policy trades one
+objective for another.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Establishes the trade-off framework for evaluating all schedulers.
+IF SHORT: Show diagram and state the impossibility; skip discussion.
+}
+
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{scheduling-objectives.pdf}
+
+\vspace{0.1cm}
+{\small Every scheduling policy is a specific point in this four-dimensional trade-off space.}
+
+\end{frame}
+
+\begin{frame}{The Queuing Theory of GPU Clusters}
+\note{
+% -- LINK: What prior concept connects to this slide
+The four objectives showed the trade-off space. This slide provides
+the quantitative model: queuing theory explains why ML clusters feel
+``broken'' at 80\% utilization.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the Pollaczek-Khinchine formula: ``Wait time depends on
+utilization rho, service variability C\_s, and mean service rate.
+The key: ML clusters have C\_s of 3--5 because job durations are
+heavy-tailed (many short jobs plus a few massive runs). At 80\%
+utilization, wait time is 20x mean service time for ML vs. 4x for
+web servers.''
+ANALOGY: ``A grocery store with 10 express lanes and 1 bulk buyer
+creates the same queuing problem.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why does your ML cluster feel slow at 80\% utilization while
+web servers handle it fine?'' Expected: the heavy tail of job durations
+(C\_s = 3--5) creates a 5x latency multiplier vs. uniform workloads.
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume 80\% utilization leaves 20\% headroom. With heavy-tailed
+job distributions, 80\% feels like 95\%. The cluster must run at
+60--70\% to stay responsive.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Explains the counter-intuitive ``utilization wall.''
+IF SHORT: Show only the formula and the comparison table; skip the analogy.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \textbf{Pollaczek-Khinchine formula} (M/G/1 queue):
+
+    \vspace{0.1cm}
+    $$W_q = \frac{\rho}{1-\rho} \cdot \frac{1+C_s^2}{2\mu}$$
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \begin{tabular}{@{}ll@{}}
+      $\rho$    & Cluster utilization \\
+      $C_s$     & Coefficient of variation \\
+      $\mu$     & Mean service rate \\
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysalert{The ``utilization wall'':}{ML clusters must run at 60--70\% to stay responsive.}
+  \end{column}
+  \begin{column}{0.46\textwidth}
+    \textbf{At 80\% utilization ($\rho = 0.8$):}
+
+    \vspace{0.15cm}
+    \renewcommand{\arraystretch}{1.2}
+    {\footnotesize
+    \begin{tabular}{@{}lcc@{}}
+      \toprule
+      \textbf{Workload} & $C_s$ & $W_q$ \\
+      \midrule
+      Web serving     & 1 & $4\times$ \\
+      ML cluster      & 3 & $20\times$ \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.2cm}
+    \begin{mlsyscard}{computestroke}
+    {\footnotesize The heavy tail (many short jobs + few massive runs) creates a \textbf{5$\times$ latency multiplier} vs.\ uniform workloads.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: The Deadlock Scenario}
+\note{
+% -- LINK: What prior concept connects to this slide
+Queuing theory showed wait times. This exercise reveals a worse problem:
+deadlock --- where no job makes progress despite 100\% allocation.
+
+% -- NARRATE: What to SAY while showing this slide
+``A 1,024-GPU cluster. Two jobs each need 512 GPUs. A naive scheduler
+gives each 256. What happens next?'' Give 60 seconds. Do NOT reveal
+the answer yet --- the next slide resolves it.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students write their prediction. Expected answers range from ``both run
+slowly'' to ``deadlock.'' The correct answer is deadlock: both jobs hold
+256 GPUs and wait for 256 more. Neither can proceed. 100\% allocated,
+0\% productive.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think partial allocation is always better than waiting. For
+distributed training that requires exact GPU counts, partial allocation
+causes deadlock --- worse than no allocation at all.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Prediction that motivates gang scheduling on the next slide.
+IF SHORT: Reduce to 30 seconds and move quickly to the reveal.
+}
+
+\centering
+\vspace{0.8cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.4cm}
+{\large A 1,024-GPU cluster. Two jobs each need 512 GPUs.\\
+A naive scheduler gives each job 256 GPUs.\\[0.2cm]
+\alert{What happens next?}}
+
+\vspace{0.4cm}
+{\normalsize Write your answer. \textcolor{midgray}{(60 seconds)}}
+
+\vspace{0.3cm}
+{\small\textcolor{lightgray}{Turn to a neighbor and compare.}}
+
+\end{frame}
+
+\begin{frame}{Gang Scheduling: All-or-Nothing Allocation}
+\note{
+% -- LINK: What prior concept connects to this slide
+The prediction exercise set up the deadlock scenario. This slide
+reveals the answer and the solution: gang scheduling.
+
+% -- NARRATE: What to SAY while showing this slide
+``The answer: deadlock. Both jobs hold 256 GPUs and wait for 256 more.
+Neither can proceed. 100\% of the cluster is allocated but 0\% is
+productive.'' Point to the diagram: ``Gang scheduling eliminates this
+by requiring atomic allocation. If a job cannot get ALL its GPUs, it
+gets NONE and waits in the queue. This eliminates the hold-and-wait
+condition that causes deadlock.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students think gang scheduling wastes resources by making jobs wait.
+The alternative (partial allocation leading to deadlock) wastes 100\%
+of resources. Waiting is better than deadlocking.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Gang scheduling is the foundational scheduling concept for ML.
+IF AHEAD: ``What if a job needs 600 GPUs on a 1024-GPU cluster and
+another needs 500? Gang scheduling cannot run both simultaneously.
+How do you decide who goes first?''
+}
+
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{gang-scheduling.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Key principle:}{A job either gets all $N$ GPUs simultaneously, or it waits holding \emph{zero} resources.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: Micro-Retrieval Cue ---
+\begin{frame}{Quick Check}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Read the question aloud. Wait 15 seconds. Cold-call.
+Expected: all-or-nothing allocation eliminates the hold-and-wait
+condition, one of the four necessary conditions for deadlock.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Reinforces gang scheduling before moving to fragmentation.
+}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Quick Check}
+
+\vspace{0.6cm}
+{\large Why does gang scheduling prevent deadlock\\in distributed training?}
+
+\vspace{0.5cm}
+{\normalsize\textcolor{midgray}{15 seconds --- then I will cold-call.}}
+
+\end{frame}
+
+
+
+\begin{frame}{The Fragmentation Problem}
+\note{
+% -- LINK: What prior concept connects to this slide
+Gang scheduling prevents deadlock but introduces a new problem:
+fragmentation. All-or-nothing allocation can leave scattered free GPUs
+that no job can use.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the heatmap: ``30\% of GPUs are free, but the largest
+contiguous block is only 3 GPUs. An 8-GPU job cannot be scheduled
+even though 300 GPUs are idle.'' Solutions: backfill scheduling
+(run small jobs in gaps), periodic defragmentation (migrate jobs),
+over-subscription (1.4x at 70\% average utilization).
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which solution would you try first?'' Expected: backfill ---
+it is the least disruptive and most commonly implemented.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think high utilization means no fragmentation. A cluster can
+be 70\% utilized and still unable to schedule an 8-GPU job because
+free GPUs are scattered across nodes.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Fragmentation is the primary failure mode after gang scheduling.
+IF SHORT: Show the heatmap and state the problem; skip solutions detail.
+}
+
+\centering
+\safeimg[width=0.85\textwidth,height=4.5cm,keepaspectratio]{fragmentation-problem.pdf}
+
+\vspace{0.1cm}
+{\small \textbf{Solutions:} Backfill scheduling $\cdot$ Periodic defragmentation $\cdot$ Over-subscription (1.4$\times$ at 70\% avg utilization)}
+
+\end{frame}
+
+% =============================================================================
+\section{Slurm vs.\ Kubernetes}
+% =============================================================================
+
+\begin{frame}{Orchestration Paradigms}
+\note{
+% -- LINK: What prior concept connects to this slide
+Gang scheduling and fragmentation showed what the scheduler must do.
+This slide introduces the two dominant systems that implement it.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the two sides of the diagram: ``Slurm comes from HPC:
+imperative, centralized, consistency-first. Kubernetes comes from
+cloud: declarative, distributed, availability-first. Different CAP
+trade-offs for different workloads. Many production organizations use
+both --- Slurm for training, K8s for serving.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume one system is universally better. The choice depends
+on workload: batch training favors Slurm's consistency, serving
+favors K8s's self-healing.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Frames the Slurm-vs-K8s comparison for the next two slides.
+IF SHORT: Show diagram, state the hybrid conclusion, skip details.
+}
+
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{slurm-vs-k8s.pdf}
+
+\vspace{0.1cm}
+{\small Most production environments use \textbf{both}: Slurm for batch training, Kubernetes for serving.}
+
+\end{frame}
+
+\begin{frame}{Slurm: The HPC Heritage}
+\note{
+% -- LINK: What prior concept connects to this slide
+The paradigm overview introduced Slurm as the HPC-native option.
+This slide shows its architecture and ML-specific capabilities.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the left column: ``Central daemon (slurmctld), per-node
+daemons (slurmd), accounting database (slurmdbd). For ML: GRES
+manages GPUs as first-class resources. Native gang scheduling,
+topology-aware placement, backfill with runtime estimates, and
+multi-factor priority.'' Show the sbatch script on the right:
+``8 nodes, 8 GPUs each, 64 GPUs total, all allocated atomically
+before the job starts.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students from CS backgrounds assume Slurm is outdated. It handles
+multi-thousand-GPU jobs with sub-second scheduling decisions because
+of its centralized design --- exactly the consistency that distributed
+training requires.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Architecture details are secondary to the paradigm comparison.
+IF SHORT: Skip the code example; focus on GRES and gang scheduling.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Architecture:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \texttt{slurmctld}: central controller
+      \item \texttt{slurmd}: per-node daemon
+      \item \texttt{slurmdbd}: accounting database
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \textbf{Key ML capabilities:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item GRES (Generic RESource) for GPUs
+      \item Native gang scheduling
+      \item Topology-aware placement
+      \item Backfill with runtime estimates
+      \item Multi-factor priority (fairshare + age + QoS)
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscode}
+\#!/bin/bash
+\#SBATCH --job-name=train-175b
+\#SBATCH --nodes=8
+\#SBATCH --gres=gpu:8
+\#SBATCH --ntasks-per-node=8
+\#SBATCH --partition=training
+\#SBATCH --qos=high
+
+srun torchrun \\
+  --nproc\_per\_node=8 \\
+  train.py
+    \end{mlsyscode}
+
+    \vspace{0.1cm}
+    \textcolor{midgray}{\scriptsize Slurm ensures all 64 GPUs are allocated atomically before the job starts.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Kubernetes: The Cloud Native Standard}
+\note{
+% -- LINK: What prior concept connects to this slide
+Slurm showed the HPC approach. Kubernetes takes the opposite philosophy:
+declarative state reconciliation instead of imperative allocation.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the architecture: ``kube-scheduler makes placement
+decisions, kubelet runs on each node, etcd stores distributed state.
+Key difference from Slurm: self-healing via reconciliation loops ---
+you declare desired state and K8s continuously works to match it.''
+For ML: ``Kubeflow Training Operator, Volcano for gang scheduling
+(a plugin, not native), GPU device plugins. Weakness: no native gang
+scheduling or topology awareness --- these must be added via plugins.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students from cloud backgrounds assume K8s handles everything. For
+large distributed training, K8s lacks native gang scheduling and
+topology awareness --- the two most critical features. Volcano and
+custom schedulers fill the gap but add complexity.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Architecture details complement the Slurm slide.
+IF SHORT: Skip the YAML example; state K8s strengths and weaknesses.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Architecture:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \texttt{kube-scheduler}: placement decisions
+      \item \texttt{kubelet}: per-node agent
+      \item \texttt{etcd}: distributed state store
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \textbf{ML ecosystem:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Kubeflow Training Operator
+      \item Volcano (gang scheduling plugin)
+      \item GPU device plugins (NVIDIA)
+      \item Taints/tolerations for GPU isolation
+      \item HPA/VPA for autoscaling
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscode}
+apiVersion: batch/v1
+kind: Job
+spec:
+  parallelism: 8
+  template:
+    spec:
+      containers:
+      - name: trainer
+        resources:
+          limits:
+            nvidia.com/gpu: 8
+    \end{mlsyscode}
+
+    \vspace{0.1cm}
+    \textcolor{midgray}{\scriptsize K8s reconciles actual state toward desired state continuously.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Choosing Between Paradigms}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students have seen both systems in detail. This table provides a
+direct comparison for decision-making.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through key rows: ``Scheduling model: imperative vs. declarative.
+CAP trade-off: Slurm favors consistency, K8s favors availability.
+Gang scheduling: native in Slurm, plugin in K8s. The real answer is
+hybrid --- Slurm for training, K8s for serving, connected via shared
+storage and model registries.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Decision framework students will use in practice.
+IF SHORT: Point to the crimson card and state the hybrid conclusion.
+}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Dimension} & \textbf{Slurm} & \textbf{Kubernetes} \\
+  \midrule
+  Scheduling model   & Imperative (allocate then run) & Declarative (desired state) \\
+  CAP trade-off      & \textcolor{computestroke}{Consistency} & \textcolor{routingstroke}{Availability} \\
+  Gang scheduling    & Native support                 & Plugin (Volcano) \\
+  Topology awareness & GRES + tree topology            & Limited (improving) \\
+  Failure recovery   & Manual resubmit                & Self-healing reconciliation \\
+  Autoscaling        & Manual + HPC tools              & Native (HPA, VPA, CA) \\
+  Best fit           & Large batch training            & Serving + mixed workloads \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{crimson}
+{\footnotesize \textbf{Production:} Most organizations run Slurm for training and Kubernetes for serving, bridging via shared storage and model registries.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Hybrid Architectures in Practice}
+\note{
+% -- LINK: What prior concept connects to this slide
+The comparison concluded with ``most organizations run both.'' This slide shows how hybrid Slurm+K8s actually works in production.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the diagram: ``Training jobs submit to Slurm via sbatch. Serving endpoints deploy on Kubernetes. The bridge is shared storage: trained models write checkpoints to a parallel file system or object store. A model registry tracks versions. K8s serving pods pull the latest checkpoint. The key challenge: resource partitioning. Training needs guaranteed, exclusive GPU access. Serving needs elastic autoscaling. Most organizations statically partition their cluster: 70\% Slurm (training), 30\% K8s (serving), with overflow policies.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What happens when the training partition is idle but serving needs more GPUs?'' Expected: without a bridge, those GPUs sit idle. Advanced setups use Slurm's ``power save'' mode or K8s cluster autoscaler to dynamically rebalance.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think you must choose one. In practice, the two systems serve fundamentally different workload patterns (batch vs. request-response) and coexist on the same physical cluster.
+
+% -- FLEX: [OPTIONAL] Extends the Slurm-vs-K8s comparison.
+IF SHORT: State the 70/30 partition pattern and shared storage bridge.
+}
+
+\centering
+\safeimg[width=0.92\textwidth,height=4.2cm,keepaspectratio]{hybrid-slurm-k8s.pdf}
+
+\vspace{0.1cm}
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \centering
+    \textbf{Slurm partition} (70\%)\\
+    {\scriptsize Batch training, gang scheduling,\\topology-aware placement}
+  \end{column}
+  \begin{column}{0.10\textwidth}
+    \centering
+    {\footnotesize Shared\\Storage}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \centering
+    \textbf{K8s partition} (30\%)\\
+    {\scriptsize Model serving, autoscaling,\\canary deployments}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Topology-Aware Scheduling}
+% =============================================================================
+
+\begin{frame}{The Topology Hierarchy}
+\note{
+% -- LINK: What prior concept connects to this slide
+The Slurm/K8s comparison mentioned topology awareness. This slide
+shows why it matters: the bandwidth hierarchy creates a 18x penalty
+for poor placement.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to each tier in the diagram: ``NVLink within a node: 900 GB/s.
+InfiniBand within a rack: 50 GB/s. Cross-rack Ethernet: 12--50 GB/s.
+Tensor parallelism needs 900 GB/s, so it must stay intra-node. Pipeline
+parallelism needs 50 GB/s, so it spans nodes within a rack. Data
+parallelism tolerates lower bandwidth, so it goes cross-rack.
+Misplacement penalty: 15--30\% throughput loss for the same hardware
+allocation.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If tensor parallel communication accidentally crosses nodes,
+what happens to bandwidth?'' Expected: drops from 900 to 50 GB/s ---
+an 18x reduction.
+
+% -- WARN: What students will get wrong on THIS topic
+Students treat GPUs as interchangeable. Two 8-GPU allocations on
+different nodes give the same hardware but can yield 30\% different
+throughput due to interconnect topology.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Topology awareness is the key differentiator for ML scheduling.
+IF SHORT: State the 18x penalty and show only the top-level hierarchy.
+}
+
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{topology-hierarchy.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Misplacement penalty:}{15--30\% throughput loss for the same hardware allocation.}
+
+\end{frame}
+
+\begin{frame}{Topology-Aware Placement}
+\note{
+% -- LINK: What prior concept connects to this slide
+The hierarchy showed the bandwidth tiers. This slide applies it to a
+concrete 32-GPU job placement problem.
+
+% -- NARRATE: What to SAY while showing this slide
+``A 32-GPU job with 8-way tensor parallelism. The scheduler must place
+4 tensor-parallel groups, each entirely within one NVLink domain. If
+it scatters GPUs across nodes, tensor parallel communication uses
+InfiniBand instead of NVLink --- 18x slower, 25--30\% throughput drop.''
+Point to the anti-pattern card on the right.
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume any 32 GPUs are equivalent. The communication pattern
+(which GPUs talk to which) determines whether placement is correct.
+A topology-unaware scheduler can ``succeed'' in allocating GPUs while
+causing a 30\% performance regression.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Concrete example reinforces the hierarchy concept.
+IF SHORT: Skip; the hierarchy slide is sufficient.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{Example:} 32-GPU job, 8-way TP
+
+    \vspace{0.15cm}
+    \renewcommand{\arraystretch}{1.2}
+    {\footnotesize
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      \textbf{Parallelism} & \textbf{Scope} & \textbf{Bandwidth} \\
+      \midrule
+      Tensor (8-way) & Intra-node & 900 GB/s \\
+      Pipeline (4-way) & Intra-rack & 50 GB/s \\
+      Data (any) & Cross-rack & 12--50 GB/s \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysconcept{Rule:}{Confine highest-bandwidth communication to the fastest interconnect tier.}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Anti-pattern:} Tensor parallel group spanning two nodes.
+
+    \vspace{0.1cm}
+    {\footnotesize
+    NVLink: 900 GB/s\\
+    InfiniBand: 50 GB/s\\
+    \textbf{18$\times$ bandwidth reduction}\\
+    $\to$ Training throughput drops 25--30\%
+    }
+    \end{mlsyscard}
+
+    \vspace{0.15cm}
+    {\footnotesize Rail-optimized topologies further improve cross-rack AllReduce by dedicating each GPU rank to a specific spine switch.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: Topology Placement Exercise ---
+\begin{frame}{Your Turn: Topology-Aware vs.\ Random Placement}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just learned the bandwidth hierarchy and anti-pattern. This exercise makes them calculate the concrete cost of poor placement using the alpha-beta model.
+
+% -- NARRATE: What to SAY while showing this slide
+Read the problem. Give 90 seconds. Solution: ``Same pod: 8 AllReduce calls at 900 GB/s NVLink. Time = 8 * (alpha + 2GB/900) = 8 * 2.2 ms = 17.6 ms. Cross-pod: 8 AllReduce calls but at 12 GB/s cross-rack Ethernet. Time = 8 * (alpha + 2GB/12) = 8 * 167 ms = 1,336 ms. Ratio: 1,336/17.6 = 76x slower. Even with hierarchical AllReduce reducing inter-pod data, the 75x bandwidth gap between NVLink and cross-rack Ethernet is devastating for tensor-parallel workloads.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+After revealing the answer, ask: ``Would you accept a 2-hour queue wait to get same-pod placement vs. immediate cross-pod allocation?'' Expected: yes for training runs longer than a few hours, since the 76x communication penalty compounds.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will use InfiniBand (50 GB/s) for cross-pod. In many clusters, cross-rack traffic uses Ethernet (12 GB/s), not InfiniBand.
+
+% -- FLEX: [CORE] Quantifies the topology placement penalty.
+IF SHORT: Show the solution immediately and state the 76x number.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Calculate Placement Cost}
+
+    \vspace{0.15cm}
+    A 64-GPU job with 8-way tensor parallelism.\\
+    Each TP group does 8 AllReduce ops per step (2 GB each).
+
+    \vspace{0.1cm}
+    \begin{enumerate}
+      \item \textbf{Same pod}: All TP groups on NVLink (900 GB/s)
+      \item \textbf{Cross-pod}: TP groups span racks (12 GB/s)
+      \item What is the communication time ratio?
+    \end{enumerate}
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- use the $\alpha$-$\beta$ model)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    Same pod: $8 \times 2.2$ ms $=$ \textbf{17.6 ms}\\
+    Cross-pod: $8 \times 167$ ms $=$ \textbf{1,336 ms}\\[0.1cm]
+    Ratio: \textcolor{errorstroke}{\textbf{76$\times$ slower}}\\[0.1cm]
+    The scheduler's placement decision is worth more than any kernel optimization.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Elastic Training}
+% =============================================================================
+
+\begin{frame}{Elastic Training: Dynamic Worker Scaling}
+\note{
+% -- LINK: What prior concept connects to this slide
+Gang scheduling requires all-or-nothing allocation. Elastic training
+relaxes this constraint: jobs can start with fewer workers and grow
+when resources become available.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the diagram: ``Three benefits: faster start (begin with
+minimum workers instead of waiting for all), opportunistic scaling
+(grab resources when other jobs finish), and graceful preemption (lose
+workers instead of dying).'' Key constraint: works for data parallelism
+but NOT tensor parallelism, which needs a fixed GPU count per group.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why can data parallelism be elastic but tensor parallelism
+cannot?'' Expected: data parallelism replicates the model --- any
+number of replicas works. Tensor parallelism splits layers across
+a fixed number of GPUs --- changing the count requires resharding.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think elastic training replaces gang scheduling. It
+complements it: tensor parallelism is still gang-scheduled within
+each group, while data parallelism is elastic across groups.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Elastic training is the bridge between Ch 7 fault tolerance
+and Ch 8 scheduling.
+IF SHORT: Show diagram and the one-line summary only.
+}
+
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{elastic-training.pdf}
+
+\vspace{0.1cm}
+{\small Elastic training degrades \emph{throughput}, not \emph{correctness}. The job continues at reduced speed.}
+
+\end{frame}
+
+\begin{frame}{The Elastic Training Contract}
+\note{
+% -- LINK: What prior concept connects to this slide
+The previous slide showed the concept. This slide specifies the three
+requirements that a framework must satisfy for elasticity.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the three requirements: ``Min/max workers --- the job
+specifies a range. Membership change protocol --- workers synchronize
+on resize. Data redistribution --- reshard state across the new count.''
+Point to the red card: ``This does NOT replace gang scheduling.
+Tensor parallelism needs exactly N GPUs per group. A 175B model with
+8-way TP needs 8 GPUs per group --- elasticity cannot relax this.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume elastic means ``any number of GPUs.'' The min/max
+range and the TP constraint limit elasticity significantly.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Details supplement the elastic concept.
+IF SHORT: Focus on the red card --- the TP limitation is the key insight.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Three requirements:}
+
+    \vspace{0.1cm}
+    \begin{enumerate}\setlength\itemsep{0pt}
+      \item \textbf{Min/max workers}: job specifies range (e.g., 4--32)
+      \item \textbf{Membership change}: workers synchronize on resize
+      \item \textbf{Data redistribution}: reshard across new worker count
+    \end{enumerate}
+
+    \vspace{0.1cm}
+    \textbf{Framework support:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \texttt{torchrun} with \texttt{--rdzv\_backend=etcd}
+      \item Elastic Horovod
+      \item Kubernetes + Volcano elastic plugin
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize \textbf{Does NOT replace gang scheduling.}
+
+    \vspace{0.05cm}
+    \textbf{Data parallelism:} elastic (variable replicas)\\
+    \textbf{Tensor parallelism:} gang (fixed GPUs/group)
+
+    \vspace{0.05cm}
+    A 175B model with 8-way TP needs exactly 8 GPUs per group --- elasticity cannot relax this.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    On resize, learning rate and batch size must be adjusted to maintain convergence.
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Spot Instance Economics}
+\note{
+% -- LINK: What prior concept connects to this slide
+Elastic training enables spot instances by handling preemption. This
+exercise quantifies the real cost of spot, which is much less than
+the advertised discount.
+
+% -- NARRATE: What to SAY while showing this slide
+``Spot instances advertise 65\% discount. But each interruption costs
+15 minutes of checkpoint plus 30 minutes of restart. At one
+interruption every 2 hours, that is 45/120 = 37.5\% overhead. Net
+savings: 65\% minus 37.5\% = 27.5\%, not 65\%.'' Give 90 seconds to
+calculate.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students calculate effective savings. Expected answer: 45 min overhead
+per interruption, 37.5\% overhead rate, 28\% net savings. The shock
+is that a 65\% discount yields only 28\% real savings.
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume the spot discount is the effective savings. They
+forget checkpoint time, restart time, and the lost work between the
+last checkpoint and the interruption.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Quantitative exercise that teaches cost reasoning.
+IF SHORT: Give 45 seconds instead of 90 and reveal immediately.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Calculate the True Cost of Spot Instances}
+
+    \vspace{0.2cm}
+    A large model training job uses spot instances:
+    \begin{itemize}
+      \item Spot discount: 65\% off on-demand price
+      \item Checkpoint time: 15 minutes
+      \item Restart time: 30 minutes
+      \item Interruption frequency: every 2 hours
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \textbf{Calculate} the effective savings.
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    Overhead per interrupt: 45 min\\
+    Interrupts per 2h: 1\\
+    Effective overhead: 45/120 = \textbf{37.5\%}\\[0.1cm]
+    Advertised savings: 65\%\\
+    Net savings: $65\% - 37.5\%$ $\approx$ \textbf{28\%}\\[0.1cm]
+    \textcolor{errorstroke}{\textbf{Not the 65\% you expected!}}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Cost \& Schedulers}
+% =============================================================================
+
+\begin{frame}{Cost Optimization: Three-Tier Strategy}
+\note{
+% -- LINK: What prior concept connects to this slide
+The spot instance exercise showed that spot is cheaper but not free.
+This slide presents the full cost optimization strategy.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the three tiers in the diagram: ``Reserved instances for
+baseline load (40\% of fleet) --- predictable cost, no interruptions.
+On-demand for critical training runs (30\%) --- flexibility at full
+price. Spot for burst and fault-tolerant workloads (30\%) --- cheap
+but interruptible.'' Key: instance diversification, two-tier
+checkpointing, grace period optimization.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think spot is always the best choice for cost savings. For
+100B+ models with long checkpoint times, on-demand can be cheaper
+because interruption overhead exceeds the spot discount.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Cost strategy completes the spot instance discussion.
+IF SHORT: Show diagram and the one-line summary only.
+}
+
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{cost-optimization.pdf}
+
+\vspace{0.1cm}
+{\small The effective cost of spot depends on interruption frequency, checkpoint overhead, and restart time.}
+
+\end{frame}
+
+\begin{frame}{Custom ML Schedulers}
+\note{
+% -- LINK: What prior concept connects to this slide
+Slurm and K8s are general-purpose. Four research schedulers exploit
+ML workload structure for 40--60\% better job completion time.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to each scheduler in the diagram: ``Tiresias: no runtime
+estimates needed --- uses Multi-Level Feedback Queues, observes
+behavior instead of asking users to predict. Gandiva: time-slices
+at iteration boundaries so preemption is free. Themis: finish-time
+fairness instead of resource-time fairness. Pollux: co-optimizes
+batch size and GPU count together.'' Common insight: ML jobs are not
+opaque --- they have predictable iteration times and heavy-tailed
+durations.
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume custom schedulers are too complex for production.
+Tiresias's core insight (MLFQ) is a one-page algorithm that gives
+5.5x better JCT. Complexity is not the barrier --- integration is.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Shows that ML-specific scheduling is a major research opportunity.
+IF SHORT: Mention only Tiresias and Pollux; skip the other two.
+}
+
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{ml-schedulers.pdf}
+
+\vspace{0.1cm}
+{\small ML-specific scheduling outperforms generic approaches by \textbf{40--60\%} in average job completion time.}
+
+\end{frame}
+
+\begin{frame}{Tiresias: Duration-Agnostic Scheduling}
+\note{
+% -- LINK: What prior concept connects to this slide
+The scheduler overview mentioned Tiresias. This deep dive shows why
+duration-agnostic scheduling matters: users systematically lie about
+runtimes.
+
+% -- NARRATE: What to SAY while showing this slide
+``Users overestimate runtimes to avoid preemption. Backfill
+effectiveness degrades with bad estimates. Tiresias's insight: do not
+ask users to predict --- observe. Multi-Level Feedback Queues start
+every job at highest priority and demote based on observed GPU-time.
+Short jobs finish fast in the top queue; long jobs sink to lower
+priority. Result: 5.5x better average JCT vs. FIFO, 2.7x vs. Optimus.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students think accurate runtime estimates would solve the problem.
+Even with perfect estimates, MLFQ is competitive because it handles
+the heavy-tailed distribution naturally without any user input.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Deep dive for students interested in scheduler research.
+IF SHORT: State the 5.5x result and the MLFQ insight; skip details.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Problem:} Runtime estimates are unreliable.
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Users overestimate (incentive: avoid preemption)
+      \item Backfill effectiveness degrades
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Solution:} Multi-Level Feedback Queue
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Jobs start in highest-priority queue
+      \item Demoted based on observed GPU-time
+      \item Short jobs finish fast; long jobs get lower priority
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{computestroke}
+    {\footnotesize \textbf{Results:}\\[0.05cm]
+    $5.5\times$ better avg.\ JCT vs.\ FIFO\\
+    $2.7\times$ better avg.\ JCT vs.\ Optimus\\[0.05cm]
+    \textbf{Key insight:} Observe behavior, do not ask for predictions.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    The scheduling analog of: \emph{measure, do not model.}
+  \end{column}
+\end{columns}
+\mlsyscite{Gu et al., ``Tiresias,'' NSDI 2019}
+
+\end{frame}
+
+% =============================================================================
+\section{Serving \& Multi-Tenancy}
+% =============================================================================
+
+\begin{frame}{Autoscaling for Inference}
+\note{
+% -- LINK: What prior concept connects to this slide
+Previous sections focused on training scheduling. Inference serving
+has fundamentally different requirements: latency-critical instead of
+throughput-oriented.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the comparison table: ``Training is deterministic and
+throughput-optimized. Serving is bursty and latency-critical.'' Then
+point to the pitfall card: ``GPU utilization is a POOR proxy for
+inference health. A 90\% utilized GPU can violate SLOs if there is
+a backlog. A 40\% utilized GPU may be perfectly healthy.'' Better
+metrics: queue depth, P99 latency, KV cache memory pressure.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If GPU utilization is 90\%, is the system healthy?'' Expected:
+it depends --- you need to check queue depth and P99 latency. High
+utilization with growing queues means overloaded.
+
+% -- WARN: What students will get wrong on THIS topic
+Students autoscale on GPU utilization because it is the easiest
+metric to collect. But utilization is a lagging indicator --- by the
+time it spikes, SLO violations have already occurred. Queue depth is
+the leading indicator.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Training-vs-serving distinction is critical for scheduling.
+IF SHORT: Show only the pitfall card and the three better metrics.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \textbf{Training vs.\ Serving:}
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      & \textbf{Training} & \textbf{Serving} \\
+      \midrule
+      Objective    & Throughput     & P99 latency \\
+      Traffic      & Deterministic  & Bursty \\
+      Failure mode & Lost progress  & SLO violation \\
+      Scaling      & Elastic (slow) & Autoscale (fast) \\
+      \bottomrule
+    \end{tabular}
+
+    \vspace{0.1cm}
+    \mlsysalert{Cold start:}{New replica takes 30--120s to load weights.}
+  \end{column}
+  \begin{column}{0.47\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize \textbf{Pitfall:} Autoscaling on GPU utilization alone.
+
+    \vspace{0.05cm}
+    90\% utilized GPU can violate SLOs (backlog).\\
+    40\% utilized GPU may be perfectly healthy.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \textbf{Better metrics:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Queue depth (leading indicator)
+      \item P99 latency vs.\ SLO margin
+      \item KV cache memory pressure (LLMs)
+    \end{itemize}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Multi-Tenancy and Quotas}
+\note{
+% -- LINK: What prior concept connects to this slide
+Autoscaling handles dynamic demand. Multi-tenancy handles competing
+teams sharing the same cluster.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the left column: ``Hierarchical fair-share with borrowing.
+Each team gets a guaranteed floor. When one team is idle, others borrow
+that capacity. When the owning team needs it back, borrowed resources
+are preempted.'' Show the table: ``Static peak provisioning needs 800
+GPUs with 25--40\% waste. Fair-share with borrowing needs 600 GPUs
+with under 10\% waste.'' Right side: MIG for hardware partitions,
+MPS for time-sharing, chargeback for governance.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think static quotas are fair. Static quotas waste 25--40\%
+because teams' peak usage rarely coincides. Borrowing with preemption
+achieves both fairness and efficiency.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Multi-tenancy details are important for large organizations
+but secondary to the core scheduling concepts.
+IF SHORT: State the fair-share-with-borrowing result and skip MIG/MPS.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \textbf{Hierarchical fair-share:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textbf{Guaranteed share}: floor for each team
+      \item \textbf{Borrowing}: use idle capacity from others
+      \item \textbf{Preemption}: return borrowed on demand
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{Policy} & \textbf{Cluster} & \textbf{Waste} \\
+      \midrule
+      Static (peak)     & 800 GPUs & 25--40\% \\
+      Fair-share+borrow & 600 GPUs & $<$10\% \\
+      \bottomrule
+    \end{tabular}
+  \end{column}
+  \begin{column}{0.47\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    {\footnotesize \textbf{GPU sharing for inference:}
+
+    \vspace{0.05cm}
+    \textbf{MIG}: Hardware partitions (H100: 7 slices)\\
+    \textbf{MPS}: Time-sharing (fine-grained)\\
+    Co-locate low-util models: 2--4$\times$ cost reduction.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \textbf{Governance:} Chargeback models make waste visible. Quarterly quota reviews prevent drift.
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Diagnose the Utilization Problem}
+\note{
+% -- LINK: What prior concept connects to this slide
+Multi-tenancy and scheduling concepts are now complete. This discussion
+synthesizes them: given a symptom (low utilization + full queue), what
+is the root cause?
+
+% -- NARRATE: What to SAY while showing this slide
+``Your 1,000-GPU cluster shows 40\% utilization but the queue is full.
+Three possible root causes: (A) hardware fragmentation --- free GPUs
+are scattered, no contiguous block for large jobs. (B) policy
+misconfiguration --- users requesting wrong GPU types or excessive
+resources. (C) zombie jobs --- abandoned processes holding resources.''
+Turn-and-talk 90 seconds. Cold-call 2--3 pairs.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students discuss three possible root causes. The point: low utilization
+is a symptom, not a diagnosis. You must investigate before prescribing
+a solution. ``Buy more GPUs'' is almost never the answer.
+
+% -- WARN: What students will get wrong on THIS topic
+Students default to ``the cluster is too small.'' Low utilization with
+a full queue is a scheduling/policy problem, not a capacity problem.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Diagnostic discussion that synthesizes the chapter.
+IF SHORT: Do a show-of-hands poll for root cause A/B/C instead of
+turn-and-talk.
+}
+
+\centering
+\vspace{0.8cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.5cm}
+{\large Your 1,000-GPU cluster shows 40\% utilization.\\
+The queue is full of pending jobs.\\[0.3cm]
+\alert{What are three possible root causes?}}
+
+\vspace{0.5cm}
+\begin{columns}[c]
+  \begin{column}{0.28\textwidth}\centering\small Fragmentation?\end{column}
+  \begin{column}{0.28\textwidth}\centering\small Policy\\misconfiguration?\end{column}
+  \begin{column}{0.28\textwidth}\centering\small Zombie\\jobs?\end{column}
+\end{columns}
+
+\vspace{0.3cm}
+{\footnotesize\textcolor{midgray}{Hint: the answer is usually not ``buy more GPUs.''}}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{
+% -- LINK: What prior concept connects to this slide
+The chapter covered scheduling, topology, elasticity, and cost
+optimization. These fallacies challenge common beliefs.
+
+% -- NARRATE: What to SAY while showing this slide
+Read each fallacy and rebuttal. Emphasize: ``Sophisticated algorithms
+lose to simple FIFO with correct policies. Spot savings are 28\%, not
+65\%. Elastic training cannot relax tensor parallelism constraints.
+And 95\% utilization means 19x wait time --- the optimal target is
+70--85\%.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Quantitative rebuttals reinforce the chapter's key numbers.
+IF SHORT: Cover only the spot instance and utilization fallacies.
+}
+
+\footnotesize
+\textbf{Fallacy:} \textit{More sophisticated algorithms always improve utilization.}\\
+Root cause is usually policy misconfiguration. A simple FIFO with correct policies often outperforms a sophisticated scheduler with wrong policies.
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Spot instances are always cheaper for training.}\\
+65\% discount $-$ 37\% interruption overhead = only 28\% net savings. For 100B+ models, on-demand can be cheaper.
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Elastic training eliminates the need for gang scheduling.}\\
+Elastic training adjusts data-parallel replicas but tensor parallelism requires exactly $N$ GPUs per group --- a gang constraint.
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{High utilization means the cluster is well-managed.}\\
+At 95\% utilization, average wait is 19$\times$ service time (M/M/1). Optimal target: 70--85\%.
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{
+% -- LINK: What prior concept connects to this slide
+Fallacies addressed beliefs. Pitfalls address operational mistakes
+in scheduling and monitoring.
+
+% -- NARRATE: What to SAY while showing this slide
+``First: not all GPU-hours are equal. Distinguish allocated, compute,
+and productive utilization. Second: topology matters --- 15--30\%
+throughput penalty accumulates over multi-week runs. Third: autoscale
+on queue depth and P99, not GPU utilization. Fourth: tune scheduler
+parameters --- gang timeouts, topology weights, preemption grace
+periods improve utilization 15--25\%.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Operational pitfalls for scheduling systems.
+IF SHORT: Cover only the first two pitfalls.
+}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Treating all GPU-hours as equal when measuring utilization.}\\
+Distinguish \textbf{allocated} (assigned), \textbf{compute} (executing kernels), and \textbf{productive} (useful work). Only the last correlates with value.
+
+\vspace{0.1cm}
+\textbf{Pitfall:} \textit{Ignoring topology when scheduling distributed training.}\\
+15--30\% throughput penalty from poor placement accumulates over multi-week runs.
+
+\vspace{0.1cm}
+\textbf{Pitfall:} \textit{Autoscaling inference on GPU utilization alone.}\\
+Queue depth and P99 latency margin are leading indicators; utilization is lagging.
+
+\vspace{0.1cm}
+\textbf{Pitfall:} \textit{Treating the scheduler as a black box.}\\
+ML-specific tuning (gang timeouts, topology weights, preemption grace periods) improves utilization by 15--25\%.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+
+% --- MUDDIEST POINT ---
+\begin{frame}{Muddiest Point}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Write down the one concept that was most confusing today. Anonymous,
+one sentence. I will address the top confusions at the start of next
+lecture.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Feedback loop closes the learning cycle.
+}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries What was the \alert{muddiest point} today?}
+
+\vspace{0.8cm}
+{\normalsize Write down the concept you found \textbf{most confusing}.}
+
+\vspace{0.5cm}
+{\small\textcolor{midgray}{Anonymous. One sentence. Submit before you leave.}}
+
+\end{frame}
+
+\begin{frame}{What Were the Key Ideas?}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Close your notes. 90 seconds. Write the 4 most important concepts.''
+Walk around the room. Do NOT show the next slide yet.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Retrieval practice consolidates learning.
+}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just attempted retrieval. Now reveal so they can self-correct.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through each bullet with the quantitative anchors: ``Scheduling
+is systems engineering. Gang scheduling prevents deadlock. Topology
+creates 15--30\% throughput differences. ML schedulers improve JCT by
+40--60\%. Utilization from 50\% to 80\% adds 6,000 effective GPUs.
+Spot savings are 28\%, not 65\%. Policies must evolve with hardware.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Summary after retrieval practice.
+IF SHORT: Read bullets quickly.
+}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{Scheduling is systems engineering}: Partial failures, partitions, and CAP trade-offs make cluster scheduling fundamentally harder than single-machine scheduling.
+  \item \textbf{Gang scheduling prevents deadlock}: All-or-nothing allocation eliminates hold-and-wait. Backfill and elastic training complement it.
+  \item \textbf{Topology determines performance}: NVLink vs.\ InfiniBand placement creates 15--30\% throughput differences for the same hardware.
+  \item \textbf{ML-specific scheduling wins}: Tiresias, Gandiva, Pollux improve JCT by 40--60\% by exploiting iterative computation and heavy-tailed durations.
+  \item \textbf{Utilization is economic}: 50\% $\to$ 80\% on 10K GPUs = 6,000 effective GPUs added without buying hardware.
+  \item \textbf{Spot economics are subtle}: 65\% discount $-$ 37\% overhead = 28\% net. Always quantify interruption cost.
+  \item \textbf{Policies must evolve}: Infrastructure changes demand policy re-evaluation; defaults are never optimal.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Key papers on ML scheduling. Tiresias and Pollux are the most
+influential for modern cluster management. Slurm is the foundational
+HPC scheduler.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Reference slide for student self-study.
+}
+
+\small
+\mlsysref{Gu+19}{Gu et al. ``Tiresias: A GPU Cluster Manager for Distributed DL.'' NSDI 2019.}
+\mlsysref{Xiao+18}{Xiao et al. ``Gandiva: Introspective Cluster Scheduling for DL.'' OSDI 2018.}
+\mlsysref{Mahajan+20}{Mahajan et al. ``Themis: Fair and Efficient GPU Cluster Scheduling.'' NSDI 2020.}
+\mlsysref{Qiao+21}{Qiao et al. ``Pollux: Co-Adaptive Cluster Scheduling for Goodput.'' OSDI 2021.}
+\mlsysref{Zhao+22}{Zhao et al. ``Multi-Resource Interleaving for DL Training.'' SIGCOMM 2022.}
+\mlsysref{Yoo+03}{Yoo et al. ``SLURM: Simple Linux Utility for Resource Management.'' JSSPP 2003.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Performance Engineering}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``We have orchestrated the fleet --- the right jobs on the right GPUs.
+Now: how do we make each GPU work at maximum efficiency? Operator
+fusion, precision engineering, graph compilation, speculative decoding.
+The orchestration layer ensures the right resources; performance
+engineering ensures those resources are used effectively.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Forward hook plants the question for next lecture.
+}
+
+\footnotesize
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    \centering
+    {\large\bfseries Operator Fusion}\\[0.1cm]
+    {\footnotesize Eliminate memory round-trips}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    \centering
+    {\large\bfseries Precision Eng.}\\[0.1cm]
+    {\footnotesize FP16, INT8, FP4 trade-offs}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{datastroke}
+    \centering
+    {\large\bfseries Speculative\\Decoding}\\[0.1cm]
+    {\footnotesize Parallel token generation}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.3cm}
+\centering
+{\normalsize Orchestration allocates the right resources.}\\[0.1cm]
+{\normalsize\textbf{Performance engineering ensures those resources are used effectively.}}
+
+\end{frame}
+
+
+
+\appendix
+
+\begin{frame}{Backup: Scheduling Algorithm Comparison}
+\note{
+% -- NARRATE: Four ML-specific schedulers compared on key metrics.
+% -- FLEX: [OPTIONAL] Use when discussing advanced scheduling in office hours.
+}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lp{2.5cm}rp{3.5cm}@{}}
+  \toprule
+  \textbf{Scheduler} & \textbf{Key Insight} & \textbf{JCT Gain} & \textbf{Limitation} \\
+  \midrule
+  \textbf{Tiresias}  & MLFQ without runtime estimates & 40\% & No topology awareness \\
+  \textbf{Gandiva}   & Time-slicing + migration & 50\% & Migration overhead for large models \\
+  \textbf{Pollux}    & Co-adaptive batch size + allocation & 60\% & Requires convergence oracle \\
+  \textbf{Themis}    & Finish-time fairness & 35\% & Assumes honest reporting \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{routingstroke}
+{\scriptsize\textbf{Practical note:} Most production clusters use Slurm FIFO + priority queues with topology constraints. Research schedulers are not yet widely deployed due to integration complexity.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Backup: Spot Instance Decision Framework}
+\note{
+% -- NARRATE: When to use spot vs on-demand for ML workloads.
+% -- FLEX: [OPTIONAL] Use for cost optimization discussions.
+}
+
+\footnotesize
+\textbf{When is spot cost-effective for ML training?}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Factor} & \textbf{Spot-Friendly} & \textbf{On-Demand Only} \\
+  \midrule
+  Checkpoint overhead & $<$5\% of step time & $>$15\% of step time \\
+  Preemption rate     & $<$10\% per hour    & $>$25\% per hour \\
+  Job duration        & $<$24 hours         & $>$1 week \\
+  Resumability        & Full checkpoint/resume & Stateful long-running \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+{\footnotesize\textbf{Net savings formula:} $\text{Savings} = \text{Discount} - \text{Preemption overhead} - \text{Checkpoint cost}$.\\
+Typical: 65\% discount $-$ 25\% overhead $-$ 12\% checkpoint = \textbf{28\% net savings}.}
+
+\end{frame}
+
+
+\end{document}

@@ -63,10 +63,19 @@ For capstone tests to pass, students must have:
 
 ## What This Tests That Unit Tests Don't
 
-| Aspect | Unit Tests | Capstone Tests |
-|--------|------------|----------------|
-| Scope | Single module | All 19 modules together |
-| Integration | Module isolation | Cross-module integration |
-| Real workflows | Synthetic checks | Production ML pipelines |
-| Learning | Correctness only | Models must converge |
-| Deployment | Not tested | Quantization, pruning tested |
+<table>
+<thead>
+<tr>
+<th width="25%"><b>Aspect</b></th>
+<th width="35%">Unit Tests</th>
+<th width="40%">Capstone Tests</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>Scope</b></td><td>Single module</td><td>All 19 modules together</td></tr>
+<tr><td><b>Integration</b></td><td>Module isolation</td><td>Cross-module integration</td></tr>
+<tr><td><b>Real workflows</b></td><td>Synthetic checks</td><td>Production ML pipelines</td></tr>
+<tr><td><b>Learning</b></td><td>Correctness only</td><td>Models must converge</td></tr>
+<tr><td><b>Deployment</b></td><td>Not tested</td><td>Quantization, pruning tested</td></tr>
+</tbody>
+</table>

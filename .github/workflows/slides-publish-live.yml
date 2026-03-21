@@ -1,0 +1,218 @@
+name: '📊 Slides · 🌐 Publish (Live)'
+
+# =============================================================================
+# Lecture Slides — Build PDFs, Create Release, Deploy Portal
+# =============================================================================
+#
+# On push to main:
+#   1. Builds all 35 slide deck PDFs (xelatex + inkscape)
+#   2. Creates a GitHub Release with all PDFs as downloadable assets
+#   3. Builds and deploys the Quarto slides portal
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'slides/**'
+      - '.github/workflows/slides-*.yml'
+
+permissions:
+  contents: write
+  deployments: write
+
+concurrency:
+  group: slides-publish-live
+  cancel-in-progress: false
+
+jobs:
+  # ===========================================================================
+  # Stage 1: Build all PDFs
+  # ===========================================================================
+  build-pdfs:
+    name: '📄 Build PDFs'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Install TeX Live + Inkscape + Poppler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            texlive-xetex texlive-fonts-recommended texlive-fonts-extra \
+            texlive-latex-extra texlive-latex-recommended lmodern \
+            fonts-liberation inkscape poppler-utils
+
+      - name: 🔧 Install Fonts
+        run: |
+          wget -q https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip
+          unzip -q JetBrainsMono-2.304.zip -d /tmp/jbmono
+          sudo mkdir -p /usr/share/fonts/truetype/jetbrains-mono
+          sudo cp /tmp/jbmono/fonts/ttf/*.ttf /usr/share/fonts/truetype/jetbrains-mono/
+          sudo fc-cache -f -v > /dev/null 2>&1
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 📦 Install PPTX dependencies
+        run: pip install python-pptx Pillow
+
+      - name: 📄 Build All Slides
+        working-directory: slides
+        run: |
+          make svgs
+          for vol in vol1 vol2; do
+            mkdir -p _build/$vol
+            for ch_dir in $vol/*_*/; do
+              tex_file=$(ls $ch_dir/*.tex 2>/dev/null | head -1)
+              [ -z "$tex_file" ] && continue
+              tex_name=$(basename "$tex_file" .tex)
+              cd "$ch_dir"
+              xelatex -interaction=nonstopmode "$tex_name.tex" > /dev/null 2>&1 || true
+              xelatex -interaction=nonstopmode "$tex_name.tex" > /dev/null 2>&1 || true
+              cd - > /dev/null
+              [ -f "$ch_dir/$tex_name.pdf" ] && cp "$ch_dir/$tex_name.pdf" "_build/$vol/"
+              rm -f $ch_dir/*.aux $ch_dir/*.nav $ch_dir/*.out $ch_dir/*.snm \
+                    $ch_dir/*.toc $ch_dir/*.vrb $ch_dir/*.fls $ch_dir/*.log \
+                    $ch_dir/$tex_name.pdf 2>/dev/null
+            done
+          done
+
+      - name: 📊 Convert PDFs to PPTX
+        working-directory: slides
+        run: |
+          echo "Converting PDFs to PowerPoint..."
+          for vol in vol1 vol2; do
+            if ls _build/$vol/*.pdf 1>/dev/null 2>&1; then
+              python3 scripts/pdf2pptx.py _build/$vol/*.pdf --output-dir _build/$vol --dpi 300
+            fi
+          done
+
+      - name: 📦 Upload slide artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-slide-builds
+          path: slides/_build/
+
+  # ===========================================================================
+  # Stage 2: Create GitHub Release with PDFs
+  # ===========================================================================
+  create-release:
+    name: '🏷️ Create Release'
+    needs: build-pdfs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Download slide builds
+        uses: actions/download-artifact@v4
+        with:
+          name: all-slide-builds
+          path: builds/
+
+      - name: 📦 Package slides for release
+        run: |
+          cd builds
+
+          # PDF archives
+          zip -r ../MLSysBook-Slides-Vol1-PDF.zip vol1/*.pdf
+          zip -r ../MLSysBook-Slides-Vol2-PDF.zip vol2/*.pdf
+          zip -r ../MLSysBook-Slides-All-PDF.zip vol1/*.pdf vol2/*.pdf
+
+          # PPTX archives
+          zip -r ../MLSysBook-Slides-Vol1-PPTX.zip vol1/*.pptx
+          zip -r ../MLSysBook-Slides-Vol2-PPTX.zip vol2/*.pptx
+          zip -r ../MLSysBook-Slides-All-PPTX.zip vol1/*.pptx vol2/*.pptx
+
+          cd ..
+          echo "📦 Archives created:"
+          ls -lh MLSysBook-Slides-*.zip
+
+      - name: 🏷️ Create or Update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: slides-latest
+          name: "Lecture Slides (Latest)"
+          body: |
+            ## ML Systems Lecture Slides
+
+            Complete Beamer slide decks for both volumes of the ML Systems textbook.
+
+            **Volume I** (17 decks): Introduction through Conclusion — single-machine ML systems
+            **Volume II** (18 decks): Introduction through Conclusion — distributed ML at scale
+
+            Each deck includes speaker notes, active learning exercises, and original SVG diagrams.
+
+            ### Downloads — PDF
+            - **MLSysBook-Slides-All-PDF.zip** — All 35 decks
+            - **MLSysBook-Slides-Vol1-PDF.zip** — Volume I only
+            - **MLSysBook-Slides-Vol2-PDF.zip** — Volume II only
+
+            ### Downloads — PowerPoint
+            Image-based PPTX (not editable text) — use for presenter mode and annotations.
+            - **MLSysBook-Slides-All-PPTX.zip** — All 35 decks
+            - **MLSysBook-Slides-Vol1-PPTX.zip** — Volume I only
+            - **MLSysBook-Slides-Vol2-PPTX.zip** — Volume II only
+
+            Individual chapter files (PDF + PPTX) are also attached below.
+
+            ### Source
+            LaTeX source and SVGs: [slides/](https://github.com/harvard-edge/cs249r_book/tree/main/slides)
+          draft: false
+          prerelease: false
+          files: |
+            MLSysBook-Slides-All-PDF.zip
+            MLSysBook-Slides-Vol1-PDF.zip
+            MLSysBook-Slides-Vol2-PDF.zip
+            MLSysBook-Slides-All-PPTX.zip
+            MLSysBook-Slides-Vol1-PPTX.zip
+            MLSysBook-Slides-Vol2-PPTX.zip
+            builds/vol1/*.pdf
+            builds/vol2/*.pdf
+            builds/vol1/*.pptx
+            builds/vol2/*.pptx
+          make_latest: true
+
+  # ===========================================================================
+  # Stage 3: Deploy Quarto portal
+  # ===========================================================================
+  deploy-portal:
+    name: '🌐 Deploy Portal'
+    needs: build-pdfs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build Slides Portal
+        working-directory: slides
+        run: quarto render
+
+      - name: 🔍 Validate build
+        run: |
+          if [ ! -f "slides/_build/html/index.html" ]; then
+            echo "❌ Build failed"
+            exit 1
+          fi
+          echo "✅ Portal built: $(find slides/_build/html -name '*.html' | wc -l) pages"
+
+      # Placeholder: Replace with your deployment provider
+      # - name: 🌐 Deploy to Cloudflare Pages
+      #   uses: cloudflare/pages-action@v1
+      #   with:
+      #     apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      #     accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      #     projectName: mlsysbook-slides
+      #     directory: slides/_build/html
+      #     branch: main

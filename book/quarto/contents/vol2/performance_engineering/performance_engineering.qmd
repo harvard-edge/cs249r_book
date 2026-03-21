@@ -192,6 +192,10 @@ class MemoryWallScenario:
     ridge_fp8 = (flops_fp8 / bw).m_as(flop/byte)
     energy_ratio = energy_dram / energy_sram
 
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(energy_ratio > 100, "DRAM energy cost should be at least 100x SRAM cost")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_fp8_str = f"{flops_fp8.m_as(TFLOPs/second):.0f}"
     h100_hbm_bw_str = f"{bw.m_as(TB/second):.2f}"
@@ -221,6 +225,19 @@ High Bandwidth Memory (HBM) is the main off-chip memory, providing `{python} Mem
 The energy cost of data movement has a direct economic consequence at datacenter scale. Consider a training cluster of 1,000 H100 GPUs, each performing approximately $10^{12}$ memory accesses per second during a memory-bound workload. If each access reads from HBM at 640 pJ, the memory subsystem alone consumes approximately 640 W per GPU, a significant fraction of the H100's 700 W TDP. If operator fusion moves half of those accesses from HBM to SRAM (at 0.5 pJ each), the per-GPU memory power drops by approximately 320 W. Across 1,000 GPUs, this saves 320 kW, equivalent to powering roughly 250 homes. This is not a secondary consideration; at cloud electricity prices, the annual cost difference is substantial, and it scales linearly with cluster size. The physics of data movement is not merely a performance constraint; it is an economic one.
 
 The performance engineering challenge reduces to a data placement problem: keep the data that the compute units need in the fastest memory that can hold it. When a kernel reads a tensor from HBM, processes it, and writes the result back to HBM, the HBM round-trip dominates execution time for any operation with low arithmetic intensity. Every technique in this chapter shares the same goal: keeping data closer to compute for longer.
+
+::: {.callout-perspective title="Analogy: The Scholar's Library"}
+
+The GPU memory hierarchy is identical to a scholar researching in a library:
+
+*   **Registers (33 MB)** are your *own memory*: instant access, but you can only hold a few numbers in your head.
+*   **Shared Memory (SRAM)** is your *desk*: very fast to reach, but you can only fit a few open books.
+*   **L2 Cache (50 MB)** is a *book cart* next to your desk: takes a moment to grab a book, holds a moderate amount.
+*   **HBM (`{python} MemoryWallScenario.h100_mem_str` GB)** is the *library basement*: holds everything you could possibly need, but walking down there takes an eternity (300 ns).
+
+Performance engineering is the art of minimizing trips to the basement.
+
+:::
 
 ### The Widening Gap {#sec-performance-engineering-widening-gap}
 
@@ -400,13 +417,39 @@ for name, peak_tflops, bw_tbs, color in gpus:
     # Mark ridge point
     ax.plot(ridge, peak_tflops, "o", color=color, markersize=8, zorder=5)
     # Label ridge point
-    offset_y = 1.25 if name != "B200" else 0.75
-    ax.annotate(f"{name} ridge\n{ridge:.0f} FLOP/byte",
-                xy=(ridge, peak_tflops), fontsize=7.5,
-                color=color, fontweight="bold",
-                ha="center", va="bottom" if name != "B200" else "top",
-                xytext=(0, 8 if name != "B200" else -8),
-                textcoords="offset points")
+    # Label ridge point
+label_pos = {
+    "V100":  (10, -25, "left", "bottom"),
+    "A100":  (13, -23, "left",   "bottom"),
+    "H100":  (5, -25, "left", "bottom"),
+    "B200":  (8, -7, "left", "top"),
+}
+
+for name, peak_tflops, bw_tbs, color in gpus:
+    bw_bytes = bw_tbs * 1e12
+    peak_flops = peak_tflops * 1e12
+    ridge = peak_flops / bw_bytes
+
+    attainable_tflops = np.minimum(peak_tflops, bw_tbs * ai_range)
+
+    ax.plot(ai_range, attainable_tflops, color=color, linewidth=2.0, label=f"{name}")
+
+    ax.plot(ridge, peak_tflops, "o", color=color, markersize=8, zorder=5)
+
+    # 👉 individual control
+    dx, dy, ha, va = label_pos[name]
+
+    ax.annotate(
+        f"{name} ridge\n{ridge:.0f} FLOP/byte",
+        xy=(ridge, peak_tflops),
+        xytext=(dx, dy),
+        textcoords="offset points",
+        fontsize=7.5,
+        color=color,
+        fontweight="bold",
+        ha=ha,
+        va=va,
+    )
 
 # Example ML operations as vertical dashed lines
 ops = [
@@ -425,12 +468,22 @@ for label, ai_val, va_pos in ops:
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.annotate("",
-            xy=(625, 4200), xytext=(139, 160),
-            arrowprops=dict(arrowstyle="->", color="crimson", lw=2.0, linestyle="-"))
-ax.text(90, 500, "Ridge point shifted\n4.5x in 7 years",
-        fontsize=9, color="crimson", fontweight="bold",
+            xy=(625, 4620),
+            xytext=(141, 140),
+            arrowprops=dict(
+                arrowstyle="->",
+                color="crimson",
+                lw=1.0,
+                linestyle="-"
+            )
+)
+
+ax.text(105, 600, "Ridge point shifted\n4.5x in 7 years",
+        fontsize=8, color="crimson", fontweight="bold",
         ha="center", va="center",
-        bbox=dict(boxstyle="round,pad=0.3", facecolor=COLORS["RedL"], edgecolor="crimson", alpha=0.8))
+        bbox=dict(boxstyle="round,pad=0.5",
+       facecolor="#fadadd", edgecolor="crimson", alpha=0.8))
+
 
 ax.set_xscale("log")
 ax.set_yscale("log")
@@ -438,10 +491,21 @@ ax.set_xlabel("Arithmetic Intensity (FLOP/byte)")
 ax.set_ylabel("Attainable Performance (TFLOPS)")
 ax.set_xlim(1, 10000)
 ax.set_ylim(0.5, 10000)
-ax.legend(loc="lower right", fontsize=9, title="GPU Generation")
+ax.legend(
+    loc='lower right',
+    fontsize=8,
+    frameon=True,
+    facecolor='white',
+    framealpha=0.95,
+    edgecolor='gray',
+    fancybox=True,
+    title="GPU Generation",
+    borderpad=0.6
+)
 
 plt.tight_layout()
 plt.show()
+plt.close()
 ```
 
 :::
@@ -629,7 +693,7 @@ $$
 
 This yields approximately `{python} RooflineDiagnostic.tps_str` tokens/second per GPU, or about `{python} RooflineDiagnostic.tps_str` tokens/second for the model (since tensor parallelism does not multiply throughput for memory-bound decode). In practice, overheads from KV cache reads and NVLink synchronization reduce this to 40--70 tokens/second.
 
-**Takeaway**: At batch size 1, fewer than 0.4% of the H100's FP16 FLOPS are in use. The only ways to improve are: (a) increase batch size to amortize weight reads, (b) reduce weight bytes via quantization, or (c) use speculative decoding to generate multiple tokens per weight read.
+**The Systems Insight**: At batch size 1, fewer than 0.4% of the H100's FP16 FLOPS are in use. The only ways to improve are: (a) increase batch size to amortize weight reads, (b) reduce weight bytes via quantization, or (c) use speculative decoding to generate multiple tokens per weight read.
 
 :::
 
@@ -638,6 +702,14 @@ The roofline model establishes the physics that constrains all subsequent optimi
 ## Operator Fusion and Kernel Engineering {#sec-performance-engineering-fusion}
 
 Consider the simple sequence of operations $Y = \text{LayerNorm}(\text{GELU}(XW + b))$. In a naive implementation, the GPU writes the output of the matrix multiply back to main memory, reads it back for the GELU, writes it out again, and reads it one final time for the LayerNorm. This redundant data movement shatters performance. Operator fusion eliminates these intermediate round-trips by keeping results in ultra-fast registers, executing the entire sequence in a single trip to memory.
+
+::: {.callout-perspective title="Analogy: The Short-Order Cook"}
+
+Imagine a kitchen where one chef chops vegetables, puts them in the fridge (HBM), then another chef takes them out to boil them, puts them back in the fridge, and a third chef takes them out to plate them. This is an **unfused execution**: the bottleneck is not the cooking but the constant walking to the fridge.
+
+**Operator Fusion** assigns the recipe to a single chef who keeps the ingredients on their cutting board (SRAM/Registers) and performs all three steps consecutively without ever returning to the fridge until the final dish is ready.
+
+:::
 
 ### The Kernel Launch Problem {#sec-performance-engineering-kernel-launch}
 
@@ -858,14 +930,26 @@ plt.ylabel('Attention Memory (GB)')
 plt.title('FlashAttention Memory Savings: O(N²) → O(N)', fontsize=14)
 
 plt.axvline(x=8192, color='gray', linestyle='--', linewidth=1.5)
-plt.text(8192, plt.ylim()[0]*1.5, ' Typical LLM context (8K)', rotation=90,
+plt.text(8600, plt.ylim()[0]*1.5, ' Typical LLM context (8K)', rotation=90,
+         verticalalignment='bottom', color='black',
+             bbox=dict(
+                facecolor='white',
+                edgecolor='none',
+                alpha=0.6
+            )
+         )
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-         verticalalignment='bottom', color='black')
 
 plt.axvline(x=65536, color='gray', linestyle='--', linewidth=1.5)
-plt.text(65536, plt.ylim()[0]*1.5, ' Long context (65K)', rotation=90,
-         verticalalignment='bottom', color='black')
+plt.text(69000, plt.ylim()[0]*1.5, ' Long context (65K)', rotation=90,
+         verticalalignment='bottom', color='black',
+            bbox=dict(
+                facecolor='white',
+                edgecolor='none',
+                alpha=0.6
+            )
+    )
 
 def annotate_ratio(n_val):
     ratio = n_val / 2
@@ -875,12 +959,21 @@ def annotate_ratio(n_val):
                  xytext=(n_val, mem_val * 0.25),
                  arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=6),
                  ha='center', va='top', fontsize=9,
-                 bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="black", lw=0.5))
+                 bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="black", lw=0.5))
 
 annotate_ratio(8192)
 annotate_ratio(65536)
 
-plt.legend()
+plt.legend(
+    loc='upper left',
+    fontsize=8,
+    frameon=True,
+    facecolor='white',
+    framealpha=0.95,
+    edgecolor='gray',
+    fancybox=True,
+    borderpad=0.6
+)
 plt.grid(True, which="both", ls="-", alpha=0.7)
 plt.tight_layout()
 fig = plt.gcf()
@@ -1044,7 +1137,7 @@ class KVCacheAnalysis:
 - KV cache per request (INT8): `{python} f"{KVCacheAnalysis.kv_fp16_gb_val / 2:.1f}"` GB $\div$ 4 $\approx$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val / 2 / 4:.1f}"` GB/GPU
 - Maximum batch size: $\lfloor$ `{python} KVCacheAnalysis.avail_int8_gb_str` $/$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val / 2 / 4:.1f}"` $\rfloor \approx$ `{python} KVCacheAnalysis.max_batch_int8_str` requests
 
-**Takeaway**: Precision engineering changes serving economics by enabling larger batch sizes. Larger batches amortize the fixed cost of weight loading, shifting operations from memory-bound toward compute-bound. This single optimization can increase throughput by `{python} KVCacheAnalysis.batch_ratio_str`$\times$ or more.
+**The Systems Insight**: Precision engineering changes serving economics by enabling larger batch sizes. Larger batches amortize the fixed cost of weight loading, shifting operations from memory-bound toward compute-bound. This single optimization can increase throughput by `{python} KVCacheAnalysis.batch_ratio_str`$\times$ or more.
 
 :::
 
@@ -1261,7 +1354,7 @@ Original time per token: $1/120 =$ `{python} CompilationDividend.tpt_str` ms.
 
 New time per token: `{python} CompilationDividend.gemm_ms_str` $+$ `{python} CompilationDividend.elem_ms_str` $+$ `{python} CompilationDividend.launch_ms_str` $=$ `{python} CompilationDividend.new_time_str` ms, yielding approximately `{python} CompilationDividend.new_tps_str` tokens/second.
 
-**Takeaway**: torch.compile delivers a `{python} CompilationDividend.speedup_str`$\times$ speedup by fusing element-wise operations and reducing launch overhead, without touching the GEMM kernels. The remaining bottleneck is now the GEMM itself (`{python} CompilationDividend.gemm_share_str`% of step time), indicating that further improvement requires either precision reduction or batching.
+**The Systems Insight**: torch.compile delivers a `{python} CompilationDividend.speedup_str`$\times$ speedup by fusing element-wise operations and reducing launch overhead, without touching the GEMM kernels. The remaining bottleneck is now the GEMM itself (`{python} CompilationDividend.gemm_share_str`% of step time), indicating that further improvement requires either precision reduction or batching.
 
 :::
 
@@ -1497,10 +1590,27 @@ ax1.set_title('The Overlap Budget: Distributed Training Scaling', fontsize=14, p
 
 lines, labels = ax1.get_legend_handles_labels()
 lines2, labels2 = ax2.get_legend_handles_labels()
-ax1.legend(lines + lines2, labels + labels2, loc='upper left', frameon=True, fancybox=True, framealpha=0.9)
+ax1.legend(lines + lines2, labels + labels2,
+    loc='upper left',
+    fontsize=8,
+    frameon=True,
+    facecolor='white',
+    framealpha=0.95,
+    edgecolor='gray',
+    fancybox=True,
+    borderpad=0.6
+)
 
-ax1.text(0, compute_budget + 5, 'NVLink\nIntra-node', ha='center', fontsize=9, color='#555')
-ax1.text(7, compute_budget + 130, 'InfiniBand\nInter-node', ha='center', fontsize=9, color='#555')
+ax1.text(0, compute_budget + 9, 'NVLink\nIntra-node',
+ ha='center',
+ fontsize=9,
+ color='#555'
+)
+ax1.text(6.5, 300, 'InfiniBand\nInter-node',
+ha='center',
+fontsize=9,
+bbox=dict(facecolor='white',boxstyle='round', alpha=0.9, edgecolor='none')
+)
 
 plt.tight_layout()
 fig = plt.gcf()
@@ -1699,7 +1809,7 @@ CPU-bound data loading causes GPU utilization to drop periodically to zero while
 - Kernel launch gaps (10% of time) come from 120+ individual kernel launches per layer. *Fix*: Apply `torch.compile` to fuse element-wise operations, reducing to ~30 kernels per layer.
 - Layer normalization and activation kernels are unfused. *Fix*: Fused LayerNorm-GELU kernel via Triton.
 
-**Takeaway**: The dominant GEMM is near-optimal, but secondary operations and launch overhead consume over half the execution time. Systematic profiling reveals that the bottleneck is not where intuition suggests (the largest kernel) but in the accumulated overhead of many small operations.
+**The Systems Insight**: The dominant GEMM is near-optimal, but secondary operations and launch overhead consume over half the execution time. Systematic profiling reveals that the bottleneck is not where intuition suggests (the largest kernel) but in the accumulated overhead of many small operations.
 
 :::
 
@@ -1802,7 +1912,7 @@ class FleetEfficiencyCalc:
 *   **Local Node Baseline**: A single 8-GPU node achieves **`{python} FleetEfficiencyCalc.fleet_local_mfu_str`% MFU**.
 *   **Fleet Performance**: At 128 GPUs, the step time increases to **`{python} FleetEfficiencyCalc.fleet_t_step_ms_str` ms**, dropping MFU to **`{python} FleetEfficiencyCalc.fleet_global_mfu_str`%**.
 
-**The Diagnosis**: The **`{python} FleetEfficiencyCalc.fleet_scaling_tax_str`% Scaling Tax** represents the cost of inter-node communication (InfiniBand latency) and synchronization barriers. In a healthy fleet, this tax should remain stable; a sudden increase in the scaling tax signals a **Scaling Regression**—typically caused by a misaligned parallelization strategy or a "gray failure" in the network fabric.
+**The Systems Insight**: The **`{python} FleetEfficiencyCalc.fleet_scaling_tax_str`% Scaling Tax** represents the cost of inter-node communication (InfiniBand latency) and synchronization barriers. In a healthy fleet, this tax should remain stable; a sudden increase in the scaling tax signals a **Scaling Regression**—typically caused by a misaligned parallelization strategy or a "gray failure" in the network fabric.
 
 :::
 

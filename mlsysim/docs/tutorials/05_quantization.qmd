@@ -87,14 +87,13 @@ load means lower inter-token latency:
 
 ```{python}
 from mlsysim import ServingModel
+from mlsysim.show import table, info
 
 model = mlsysim.Models.Llama3_8B
 hardware = mlsysim.Hardware.Cloud.H100
 solver = ServingModel()
 
-print(f"{'Precision':>10}  {'ITL':>10}  {'Weights':>10}  {'Speedup vs FP16':>16}")
-print("-" * 52)
-
+rows = []
 baseline_itl = None
 for prec in ["fp16", "int8", "int4"]:
     r = solver.solve(
@@ -105,12 +104,9 @@ for prec in ["fp16", "int8", "int4"]:
     if baseline_itl is None:
         baseline_itl = itl_ms
     speedup = baseline_itl / itl_ms
-    print(
-        f"{prec:>10}  "
-        f"{r.itl.to('ms'):>10.3f~}  "
-        f"{r.model_weights_size:>10.2f~}  "
-        f"{speedup:>14.1f}x"
-    )
+    rows.append([prec, r.itl.to('ms'), r.model_weights_size, f"{speedup:.1f}x"])
+
+table(["Precision", "ITL", "Weights", "Speedup vs FP16"], rows)
 ```
 
 INT8 gives roughly 2x speedup. INT4 gives roughly 4x. The speedup tracks the byte
@@ -131,9 +127,7 @@ train_model = mlsysim.Models.ResNet50
 train_hw = mlsysim.Hardware.Cloud.A100
 train_solver = SingleNodeModel()
 
-print(f"{'Precision':>10}  {'Latency':>10}  {'Throughput':>12}  {'Speedup':>10}")
-print("-" * 48)
-
+rows = []
 baseline_lat = None
 for prec in ["fp16", "int8", "int4"]:
     p = train_solver.solve(
@@ -144,12 +138,9 @@ for prec in ["fp16", "int8", "int4"]:
     if baseline_lat is None:
         baseline_lat = lat_ms
     speedup = baseline_lat / lat_ms if lat_ms > 0 else 0
-    print(
-        f"{prec:>10}  "
-        f"{p.latency.to('ms'):>10.2f~}  "
-        f"{p.throughput:>10.0f} img/s  "
-        f"{speedup:>8.1f}x"
-    )
+    rows.append([prec, p.latency.to('ms'), f"{p.throughput:.0f} img/s", f"{speedup:.1f}x"])
+
+table(["Precision", "Latency", "Throughput", "Speedup"], rows)
 ```
 
 The speedup is negligible. Why? Because at batch 256, ResNet-50 training is
@@ -176,29 +167,25 @@ second-order effect that depends on hardware-specific Tensor Core support.
 Let's put the results side by side to make the contrast stark:
 
 ```{python}
-print(f"{'Workload':<24} {'FP16':>8} {'INT8':>8} {'INT4':>8}  {'Regime':<16}")
-print("-" * 72)
+rows = []
 
 # Memory-bound: LLM decode
+decode_row = ["Llama-3 8B decode"]
 for prec in ["fp16", "int8", "int4"]:
     r = solver.solve(model=model, hardware=hardware, seq_len=2048, batch_size=1, precision=prec)
-    if prec == "fp16":
-        fp16_itl = r.itl.to("ms").magnitude
-        print(f"{'Llama-3 8B decode':<24} {fp16_itl:>7.2f}ms", end="")
-    elif prec == "int8":
-        print(f" {r.itl.to('ms').magnitude:>7.2f}ms", end="")
-    else:
-        print(f" {r.itl.to('ms').magnitude:>7.2f}ms  {'Memory-bound':<16}")
+    decode_row.append(r.itl.to('ms'))
+decode_row.append("Memory-bound")
+rows.append(decode_row)
 
 # Compute-bound: training
+train_row = ["ResNet-50 train bs=256"]
 for prec in ["fp16", "int8", "int4"]:
     p = train_solver.solve(model=train_model, hardware=train_hw, batch_size=256, precision=prec)
-    if prec == "fp16":
-        print(f"{'ResNet-50 train bs=256':<24} {p.latency.to('ms').magnitude:>7.2f}ms", end="")
-    elif prec == "int8":
-        print(f" {p.latency.to('ms').magnitude:>7.2f}ms", end="")
-    else:
-        print(f" {p.latency.to('ms').magnitude:>7.2f}ms  {'Compute-bound':<16}")
+    train_row.append(p.latency.to('ms'))
+train_row.append("Compute-bound")
+rows.append(train_row)
+
+table(["Workload", "FP16", "INT8", "INT4", "Regime"], rows)
 ```
 
 ::: {.callout-important}
@@ -224,21 +211,21 @@ from mlsysim import CompressionModel
 
 comp_solver = CompressionModel()
 
-print(f"{'Bits':>6}  {'Compressed':>12}  {'Compression':>12}  {'Accuracy':>12}  {'Savings':>10}")
-print("-" * 58)
-
+rows = []
 for bits in [16, 8, 4]:
     c = comp_solver.solve(
         model=model, hardware=hardware,
         method="quantization", target_bitwidth=bits
     )
-    print(
-        f"{bits:>6}  "
-        f"{c.compressed_size_gb:>12.2f~}  "
-        f"{c.compression_ratio:>11.1f}x  "
-        f"{c.estimated_accuracy_delta:>+11.1%}  "
-        f"{c.memory_savings_pct:>9.1f}%"
-    )
+    rows.append([
+        bits,
+        c.compressed_size_gb,
+        f"{c.compression_ratio:.1f}x",
+        f"{c.estimated_accuracy_delta:+.1%}",
+        f"{c.memory_savings_pct:.1f}%"
+    ])
+
+table(["Bits", "Compressed", "Compression", "Accuracy", "Savings"], rows)
 ```
 
 INT8 has minimal accuracy loss (< 1%). INT4 can degrade accuracy by 2-5% depending on the
