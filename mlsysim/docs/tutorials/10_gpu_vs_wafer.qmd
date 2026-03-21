@@ -88,6 +88,7 @@ reload the entire model from HBM.
 
 ```{python}
 from mlsysim import SingleNodeModel, WeightStreamingModel, SensitivitySolver
+from mlsysim.show import table, info, banner
 
 model = mlsysim.Models.Language.GPT3
 gpu_hw = mlsysim.Hardware.Cloud.H100
@@ -98,13 +99,13 @@ gpu_result = gpu_solver.solve(
     batch_size=1, precision="fp16"
 )
 
-print(f"Model:       {model.name} ({model.parameters.to('Gparam'):.0f})")
-print(f"Hardware:    {gpu_hw.name}")
-print(f"")
-print(f"Bottleneck:  {gpu_result.bottleneck}")
-print(f"Latency:     {gpu_result.latency.to('ms'):~.2f}")
-print(f"HBM BW:      {gpu_hw.memory.bandwidth.to('TB/s'):.2f~}")
-print(f"Peak FLOPS:  {gpu_hw.compute.peak_flops.to('TFLOPs/s'):.0f~}")
+info("GPU Baseline",
+     Model=f"{model.name} ({model.parameters.to('Gparam'):.0f})",
+     Hardware=gpu_hw.name,
+     Bottleneck=gpu_result.bottleneck,
+     Latency=gpu_result.latency.to('ms'),
+     HBM_BW=gpu_hw.memory.bandwidth.to('TB/s'),
+     Peak_FLOPS=gpu_hw.compute.peak_flops.to('TFLOPs/s'))
 ```
 
 At batch size 1, GPT-3 requires 2 FLOPs per parameter per token but must load all 175B
@@ -128,15 +129,15 @@ ws_result = ws_solver.solve(
     seq_len=2048, batch_size=1, precision="fp16"
 )
 
-print(f"Hardware:              {ws_hw.name}")
-print(f"Feasible:              {ws_result.feasible}")
-print(f"Bottleneck:            {ws_result.bottleneck}")
-print(f"Throughput:            {ws_result.throughput_tokens_per_sec:.0f} tokens/sec")
-print(f"")
-print(f"Layer compute time:    {ws_result.layer_compute_time.to('ms'):~.4f}")
-print(f"Layer injection time:  {ws_result.layer_injection_time.to('ms'):~.4f}")
-print(f"Optimal batch size:    {ws_result.optimal_batch_size}")
-print(f"SRAM utilization:      {ws_result.wafer_memory_utilization:.1%}")
+info("Cerebras WSE-3",
+     Hardware=ws_hw.name,
+     Feasible=ws_result.feasible,
+     Bottleneck=ws_result.bottleneck,
+     Throughput=f"{ws_result.throughput_tokens_per_sec:.0f} tokens/sec",
+     Layer_compute_time=ws_result.layer_compute_time.to('ms'),
+     Layer_injection_time=ws_result.layer_injection_time.to('ms'),
+     Optimal_batch_size=ws_result.optimal_batch_size,
+     SRAM_utilization=f"{ws_result.wafer_memory_utilization:.1%}")
 ```
 
 The WSE-3 reports two times per layer: how long the wafer takes to **compute** the layer's
@@ -148,10 +149,6 @@ is whichever is slower.
 ## 4. Side-by-Side: Where the Wall Shifts
 
 ```{python}
-print(f"{'Metric':>28s}  {'H100 (GPU)':>14}  {'CS-3 (WSE)':>14}")
-print("-" * 60)
-print(f"{'Bottleneck':>28s}  {gpu_result.bottleneck:>14}  {ws_result.bottleneck:>14}")
-
 gpu_lat_ms = gpu_result.latency.to('ms').magnitude
 # Cerebras total decode: max(inject, compute) per layer * num_layers
 ws_layer_time = max(
@@ -159,11 +156,17 @@ ws_layer_time = max(
     ws_result.layer_compute_time.to('ms').magnitude
 )
 ws_total_ms = ws_layer_time * model.layers
-
-print(f"{'Total decode time (ms)':>28s}  {gpu_lat_ms:>14.2f}  {ws_total_ms:>14.2f}")
 speedup = gpu_lat_ms / ws_total_ms if ws_total_ms > 0 else 0
-print(f"{'Speedup':>28s}  {'1.0x':>14}  {speedup:>13.1f}x")
-print(f"{'Optimal batch B*':>28s}  {'N/A':>14}  {ws_result.optimal_batch_size:>14}")
+
+table(
+    ["Metric", "H100 (GPU)", "CS-3 (WSE)"],
+    [
+        ["Bottleneck", gpu_result.bottleneck, ws_result.bottleneck],
+        ["Total decode time (ms)", f"{gpu_lat_ms:.2f}", f"{ws_total_ms:.2f}"],
+        ["Speedup", "1.0x", f"{speedup:.1f}x"],
+        ["Optimal batch B*", "N/A", ws_result.optimal_batch_size],
+    ]
+)
 ```
 
 The GPU and WSE-3 hit **fundamentally different walls**:
@@ -195,21 +198,20 @@ dominates. At the optimal batch size B*, the two pipelines overlap perfectly. Bu
 activations must fit in 44 GB of on-wafer SRAM --- this is the SRAM ceiling.
 
 ```{python}
-print(f"{'Batch':>6}  {'Bottleneck':>30}  {'Throughput':>14}  {'SRAM Util':>10}  {'Feasible':>8}")
-print("-" * 76)
-
+rows = []
 for batch in [1, 2, 4, 8, 16, 32, 64, 128]:
     r = ws_solver.solve(
         model=model, hardware=ws_hw,
         seq_len=2048, batch_size=batch, precision="fp16"
     )
-    print(
-        f"{batch:>6}  "
-        f"{r.bottleneck:>30}  "
-        f"{r.throughput_tokens_per_sec:>12.0f}/s  "
-        f"{r.wafer_memory_utilization:>10.1%}  "
-        f"{'YES' if r.feasible else 'OOM':>8}"
-    )
+    rows.append([
+        batch, r.bottleneck,
+        f"{r.throughput_tokens_per_sec:.0f}/s",
+        f"{r.wafer_memory_utilization:.1%}",
+        "YES" if r.feasible else "OOM"
+    ])
+
+table(["Batch", "Bottleneck", "Throughput", "SRAM Util", "Feasible"], rows)
 ```
 
 Watch for where the bottleneck transitions from injection-bound to compute-bound. At that
@@ -229,17 +231,19 @@ gpu_sens = sens_solver.solve(
     model=model, hardware=gpu_hw, precision="fp16"
 )
 
-print(f"GPU Sensitivity ({gpu_hw.name}):")
-print(f"  Baseline latency:     {gpu_sens.baseline_latency.to('ms'):~.2f}")
-for param, val in gpu_sens.sensitivities.items():
-    print(f"  {param:<22} {val:>+.4f}")
-print(f"  Binding constraint:   {gpu_sens.binding_constraint}")
-print(f"")
-print(f"Cerebras WSE-3:")
-print(f"  Binding constraint:   injection bandwidth (MemoryX -> wafer)")
-print(f"  Optimization lever:   increase batch size to overlap inject/compute")
-print(f"")
-print(f"Different architectures -> different walls -> different strategies.")
+banner(f"GPU Sensitivity ({gpu_hw.name})")
+info(Baseline_latency=gpu_sens.baseline_latency.to('ms'),
+     Binding_constraint=gpu_sens.binding_constraint)
+
+sens_rows = [[param, f"{val:+.4f}"] for param, val in gpu_sens.sensitivities.items()]
+table(["Parameter", "Sensitivity"], sens_rows)
+
+banner("Cerebras WSE-3")
+info(Binding_constraint="injection bandwidth (MemoryX -> wafer)",
+     Optimization_lever="increase batch size to overlap inject/compute")
+
+print()
+print("Different architectures -> different walls -> different strategies.")
 ```
 
 ::: {.callout-warning}

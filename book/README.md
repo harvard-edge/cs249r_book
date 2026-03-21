@@ -21,50 +21,163 @@ This directory contains the textbook source and build system for contributors.
 
 ## What You Will Learn
 
-| ML Concepts | Systems Engineering |
-|-------------|---------------------|
-| Neural networks and deep learning | Memory hierarchies and caching |
-| Model architectures (CNNs, Transformers) | Hardware accelerators (GPUs, TPUs, NPUs) |
-| Training and optimization | Distributed systems and parallelism |
-| Inference and deployment | Power and thermal management |
-| Compression and quantization | Latency, throughput, and efficiency |
+<table>
+  <thead>
+    <tr>
+      <th width="50%">ML Concepts</th>
+      <th width="50%">Systems Engineering</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Neural networks and deep learning</td>
+      <td>Memory hierarchies and caching</td>
+    </tr>
+    <tr>
+      <td>Model architectures (CNNs, Transformers)</td>
+      <td>Hardware accelerators (GPUs, TPUs, NPUs)</td>
+    </tr>
+    <tr>
+      <td>Training and optimization</td>
+      <td>Distributed systems and parallelism</td>
+    </tr>
+    <tr>
+      <td>Inference and deployment</td>
+      <td>Power and thermal management</td>
+    </tr>
+    <tr>
+      <td>Compression and quantization</td>
+      <td>Latency, throughput, and efficiency</td>
+    </tr>
+  </tbody>
+</table>
 
 ### The ML ↔ Systems Bridge
 
-| You know... | You will learn... |
-|-------------|-------------------|
-| How to train a model | How training scales across GPU clusters |
-| That quantization shrinks models | How INT8 math maps to silicon |
-| What a transformer is | Why KV-cache dominates memory |
-| Models run on GPUs | How schedulers balance latency vs throughput |
-| Edge devices have limits | How to co-design models and hardware |
+<table>
+  <thead>
+    <tr>
+      <th width="50%">You know...</th>
+      <th width="50%">You will learn...</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>How to train a model</td>
+      <td>How training scales across GPU clusters</td>
+    </tr>
+    <tr>
+      <td>That quantization shrinks models</td>
+      <td>How INT8 math maps to silicon</td>
+    </tr>
+    <tr>
+      <td>What a transformer is</td>
+      <td>Why KV-cache dominates memory</td>
+    </tr>
+    <tr>
+      <td>Models run on GPUs</td>
+      <td>How schedulers balance latency vs throughput</td>
+    </tr>
+    <tr>
+      <td>Edge devices have limits</td>
+      <td>How to co-design models and hardware</td>
+    </tr>
+  </tbody>
+</table>
 
 ### Book Structure
 
 This textbook is organized into **two volumes** following the Hennessy & Patterson pedagogical model:
 
-| Volume | Theme | Focus |
-|--------|-------|-------|
-| **Volume I** | Build, Optimize, Deploy | Single-machine ML systems, foundational principles |
-| **Volume II** | Scale, Distribute, Govern | Distributed systems at production scale |
+<table>
+  <thead>
+    <tr>
+      <th width="20%">Volume</th>
+      <th width="30%">Theme</th>
+      <th width="50%">Focus</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Volume I</b></td>
+      <td>Build, Optimize, Deploy</td>
+      <td>Single-machine ML systems, foundational principles</td>
+    </tr>
+    <tr>
+      <td><b>Volume II</b></td>
+      <td>Scale, Distribute, Govern</td>
+      <td>Distributed systems at production scale</td>
+    </tr>
+  </tbody>
+</table>
 
 #### Volume I: Build, Optimize, Deploy
 
-| Part | Focus | Chapters |
-|------|-------|----------|
-| **Foundations** | Core concepts | Introduction, ML Systems, DL Primer, Architectures |
-| **Development** | Building blocks | Workflow, Data Engineering, Frameworks, Training |
-| **Optimization** | Making it fast | Efficient AI, Optimizations, HW Acceleration, Benchmarking |
-| **Deployment** | Making it work | Serving, MLOps, Responsible Engineering |
+<table>
+  <thead>
+    <tr>
+      <th width="20%">Part</th>
+      <th width="25%">Focus</th>
+      <th width="55%">Chapters</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Foundations</b></td>
+      <td>Core concepts</td>
+      <td>Introduction, ML Systems, DL Primer, Architectures</td>
+    </tr>
+    <tr>
+      <td><b>Development</b></td>
+      <td>Building blocks</td>
+      <td>Workflow, Data Engineering, Frameworks, Training</td>
+    </tr>
+    <tr>
+      <td><b>Optimization</b></td>
+      <td>Making it fast</td>
+      <td>Efficient AI, Optimizations, HW Acceleration, Benchmarking</td>
+    </tr>
+    <tr>
+      <td><b>Deployment</b></td>
+      <td>Making it work</td>
+      <td>Serving, MLOps, Responsible Engineering</td>
+    </tr>
+  </tbody>
+</table>
 
 #### Volume II: Scale, Distribute, Govern
 
-| Part | Focus | Chapters |
-|------|-------|----------|
-| **Foundations of Scale** | Infrastructure | Infrastructure, Storage, Communication |
-| **Distributed Systems** | Coordination | Distributed Training, Fault Tolerance, Inference, Edge Intelligence |
-| **Production Challenges** | Operations | On-device Learning, Privacy & Security, Robust AI, Ops at Scale |
-| **Responsible Deployment** | Trust | Responsible AI, Sustainable AI, AI for Good, Frontiers |
+<table>
+  <thead>
+    <tr>
+      <th width="25%">Part</th>
+      <th width="20%">Focus</th>
+      <th width="55%">Chapters</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Foundations of Scale</b></td>
+      <td>Infrastructure</td>
+      <td>Infrastructure, Storage, Communication</td>
+    </tr>
+    <tr>
+      <td><b>Distributed Systems</b></td>
+      <td>Coordination</td>
+      <td>Distributed Training, Fault Tolerance, Inference, Edge Intelligence</td>
+    </tr>
+    <tr>
+      <td><b>Production Challenges</b></td>
+      <td>Operations</td>
+      <td>On-device Learning, Privacy & Security, Robust AI, Ops at Scale</td>
+    </tr>
+    <tr>
+      <td><b>Responsible Deployment</b></td>
+      <td>Trust</td>
+      <td>Responsible AI, Sustainable AI, AI for Good, Frontiers</td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 
@@ -143,11 +256,28 @@ book/
 
 ## Documentation
 
-| Audience | Resources |
-|----------|-----------|
-| **Readers** | [Online Book](https://mlsysbook.ai/book/) ・ [Volume I](https://mlsysbook.ai/vol1/) ・ [Volume II](https://mlsysbook.ai/vol2/) ・ [PDF](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf) |
-| **Contributors** | [CONTRIBUTING.md](docs/CONTRIBUTING.md) ・ [BUILD.md](docs/BUILD.md) |
-| **Developers** | [DEVELOPMENT.md](docs/DEVELOPMENT.md) ・ [BINDER.md](docs/BINDER.md) |
+<table>
+  <thead>
+    <tr>
+      <th width="20%">Audience</th>
+      <th width="80%">Resources</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Readers</b></td>
+      <td><a href="https://mlsysbook.ai/book/">Online Book</a> ・ <a href="https://mlsysbook.ai/vol1/">Volume I</a> ・ <a href="https://mlsysbook.ai/vol2/">Volume II</a> ・ <a href="https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf">PDF</a></td>
+    </tr>
+    <tr>
+      <td><b>Contributors</b></td>
+      <td><a href="docs/CONTRIBUTING.md">CONTRIBUTING.md</a> ・ <a href="docs/BUILD.md">BUILD.md</a></td>
+    </tr>
+    <tr>
+      <td><b>Developers</b></td>
+      <td><a href="docs/DEVELOPMENT.md">DEVELOPMENT.md</a> ・ <a href="docs/BINDER.md">BINDER.md</a></td>
+    </tr>
+  </tbody>
+</table>
 
 Binder is the public automation API for book build/validate/maintenance workflows.
 Use Binder subcommands in editor integrations and CI where possible.
@@ -169,12 +299,32 @@ We welcome contributions! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for g
 
 ## Related
 
-| Component | Description |
-|-----------|-------------|
-| **[Main README](../README.md)** | Project overview and ecosystem |
-| **[TinyTorch](../tinytorch/)** | Build ML frameworks from scratch |
-| **[Hardware Kits](../kits/)** | Deploy to Arduino, Raspberry Pi, edge devices |
-| **[Website](https://mlsysbook.ai/book/)** | Read the book online |
+<table>
+  <thead>
+    <tr>
+      <th width="30%">Component</th>
+      <th width="70%">Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b><a href="../README.md">Main README</a></b></td>
+      <td>Project overview and ecosystem</td>
+    </tr>
+    <tr>
+      <td><b><a href="../tinytorch/">TinyTorch</a></b></td>
+      <td>Build ML frameworks from scratch</td>
+    </tr>
+    <tr>
+      <td><b><a href="../kits/">Hardware Kits</a></b></td>
+      <td>Deploy to Arduino, Raspberry Pi, edge devices</td>
+    </tr>
+    <tr>
+      <td><b><a href="https://mlsysbook.ai/book/">Website</a></b></td>
+      <td>Read the book online</td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 
@@ -193,9 +343,9 @@ Thanks to these wonderful people who helped improve the book!
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧠 🔎 🧪 🛠️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Mjrovai"><img src="https://avatars.githubusercontent.com/Mjrovai?v=4?s=80" width="80px;" alt="Marcelo Rovai"/><br /><sub><b>Marcelo Rovai</b></sub></a><br />🧑‍💻 🎨 🧪</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/GabrielAmazonas"><img src="https://avatars.githubusercontent.com/GabrielAmazonas?v=4?s=80" width="80px;" alt="Gabriel Amazonas"/><br /><sub><b>Gabriel Amazonas</b></sub></a><br />🪲 ✍️ 🧠</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/hzeljko"><img src="https://avatars.githubusercontent.com/hzeljko?v=4?s=80" width="80px;" alt="Zeljko Hrcek"/><br /><sub><b>Zeljko Hrcek</b></sub></a><br />🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/kai4avaya"><img src="https://avatars.githubusercontent.com/kai4avaya?v=4?s=80" width="80px;" alt="Kai Kleinbard"/><br /><sub><b>Kai Kleinbard</b></sub></a><br />🧑‍💻 🛠️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/didier-durand"><img src="https://avatars.githubusercontent.com/didier-durand?v=4?s=80" width="80px;" alt="Didier Durand"/><br /><sub><b>Didier Durand</b></sub></a><br />✍️ 🪲</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/hzeljko"><img src="https://avatars.githubusercontent.com/hzeljko?v=4?s=80" width="80px;" alt="Zeljko Hrcek"/><br /><sub><b>Zeljko Hrcek</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/jasonjabbour"><img src="https://avatars.githubusercontent.com/jasonjabbour?v=4?s=80" width="80px;" alt="Jason Jabbour"/><br /><sub><b>Jason Jabbour</b></sub></a><br />✍️</td>
     </tr>
     <tr>
@@ -264,7 +414,7 @@ Thanks to these wonderful people who helped improve the book!
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/BrunoScaglione"><img src="https://avatars.githubusercontent.com/BrunoScaglione?v=4?s=80" width="80px;" alt="Bruno Scaglione"/><br /><sub><b>Bruno Scaglione</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Allen-Kuang"><img src="https://avatars.githubusercontent.com/Allen-Kuang?v=4?s=80" width="80px;" alt="Allen-Kuang"/><br /><sub><b>Allen-Kuang</b></sub></a><br />✍️</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/4ad8cdf19eb3b666ace97d3eedb19278?d=identicon&s=100?v=4?s=80" width="80px;" alt="Tess314"/><br /><sub><b>Tess314</b></sub></a><br />✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Tess314"><img src="https://www.gravatar.com/avatar/4ad8cdf19eb3b666ace97d3eedb19278?d=identicon&s=100?v=4?s=80" width="80px;" alt="Tess314"/><br /><sub><b>Tess314</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/taunoe"><img src="https://avatars.githubusercontent.com/taunoe?v=4?s=80" width="80px;" alt="Tauno Erik"/><br /><sub><b>Tauno Erik</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/gnodipac886"><img src="https://avatars.githubusercontent.com/gnodipac886?v=4?s=80" width="80px;" alt="gnodipac886"/><br /><sub><b>gnodipac886</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/serco425"><img src="https://avatars.githubusercontent.com/serco425?v=4?s=80" width="80px;" alt="Sercan Aygün"/><br /><sub><b>Sercan Aygün</b></sub></a><br />✍️</td>

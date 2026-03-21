@@ -322,6 +322,66 @@ class DistributedModel(BaseModel):
             parallelism={"dp": dp_size, "tp": tp_size, "pp": pp_size, "ep": ep_size},
         )
 
+class NetworkRooflineModel(BaseModel):
+    """
+    Analyzes the Distributed Performance Bounds (The Network Wall).
+    
+    This model elevates the single-node Roofline analysis to the fleet scale. 
+    It calculates the Communication Intensity (CI) of a workload and identifies 
+    if the fleet is Compute-Bound (Wall 1) or Network-Bound (Wall 2).
+
+    Literature Source:
+    1. Reddi et al. (2025), "Machine Learning Systems," Volume 2, Chapter 1.
+    2. Williams et al. (2009), "Roofline Model." (Theoretical basis)
+    3. Ghose et al. (2019), "A Survey of Communication-Efficient Distributed 
+       Training."
+    """
+    requires = ("workload", "fleet")
+    produces = PerformanceProfile # Reusing PerformanceProfile for consistency
+
+    def solve(self, model: Workload, fleet: Fleet, precision: str = "fp16", efficiency: float = 0.5) -> PerformanceProfile:
+        """
+        Solves for the distributed performance bound.
+        """
+        # 1. Supply (Fleet Capacity)
+        total_flops = (fleet.node.accelerator.compute.precision_flops.get(precision, fleet.node.accelerator.compute.peak_flops) * fleet.total_accelerators).to("TFLOPs/s")
+        # Bisection Bandwidth (total data movement capacity per step)
+        bisection_bw = (fleet.fabric.bandwidth / fleet.fabric.oversubscription_ratio).to("GB/s")
+        
+        # 2. Demand (Workload Characteristics)
+        # For training, total ops = 6 * parameters * dataset_size_per_step
+        # To normalize per-step, we use 1 sample.
+        # But CI is better defined as Total Ops / Total Sync Bytes.
+        # For Data Parallel sync: Bytes = 2 * Parameters * Precision_Bytes
+        prec_bytes = PRECISION_MAP.get(precision, BYTES_FP16)
+        sync_bytes = (2 * model.parameters.to(ureg.count).magnitude * prec_bytes.to(ureg.byte).magnitude) * ureg.byte
+        
+        # Total OPS for one training step (approx 6 * P FLOPs per sample)
+        # We assume CI is independent of batch size for basic All-Reduce sync.
+        training_ops = (6 * model.parameters.to(ureg.count).magnitude) * ureg.flop
+        
+        # CI = FLOPs / Byte
+        ci = (training_ops / sync_bytes).to("flop/byte")
+        
+        # 3. Physics (The Ridge)
+        # Ridge = Peak_FLOPs / Bisection_BW
+        # Convert BW to Byte/s for units to cancel to FLOP/Byte
+        network_ridge = (total_flops / bisection_bw.to("byte/s")).to("flop/byte")
+        
+        # 4. Results
+        is_network_bound = ci < network_ridge
+        achievable_flops = min(total_flops, bisection_bw.to("byte/s") * ci) * efficiency
+        
+        # Return results in a standardized PerformanceProfile
+        return PerformanceProfile(
+            latency=(training_ops / achievable_flops).to("ms") if achievable_flops.magnitude > 0 else Q_("0 ms"),
+            throughput=(achievable_flops / training_ops).to("1/s"),
+            arithmetic_intensity=ci,
+            peak_flops=total_flops,
+            achievable_flops=achievable_flops,
+            bottleneck="Network-Bound" if is_network_bound else "Compute-Bound"
+        )
+
 class ReliabilityModel(BaseModel):
     """
     Calculates Mean Time Between Failures (MTBF) and optimal checkpointing intervals.
@@ -576,8 +636,13 @@ class ServingModel(BaseModel):
         # 3. Decode Phase
         model_weights_bytes = model.size_in_bytes(bpp)
         t_decode_per_token = ((model_weights_bytes + kv_cache_bytes) / decode_hw.memory.bandwidth).to("ms")
+        
+        # 4. Framework Tax (Per-token decode also incurs launch overhead)
+        from .defaults import FRAMEWORK_LAYER_TAX_MS
+        layer_tax = Q_(model.layers * FRAMEWORK_LAYER_TAX_MS, "ms")
+        t_decode_per_token += layer_tax
 
-        # 4. Speculative Decoding
+        # 5. Speculative Decoding
         if draft_model:
             # Time to generate 1 token with draft model
             draft_weights_bytes = draft_model.size_in_bytes(bpp)
@@ -607,10 +672,17 @@ class ServingModel(BaseModel):
             total_memory_required += draft_model.size_in_bytes(bpp)
         feasible = total_memory_required <= decode_hw.memory.capacity
         
+        constraint_trace = []
+        if feasible:
+            constraint_trace.append(f"Memory Wall: Passed. Required {total_memory_required.to('GB'):~P} (Weights: {model_weights_bytes.to('GB'):~P}, KV Cache: {kv_cache_bytes.to('GB'):~P}) <= Available {decode_hw.memory.capacity.to('GB'):~P} on {decode_hw.name}.")
+        else:
+            constraint_trace.append(f"Memory Wall: FAILED. Required {total_memory_required.to('GB'):~P} (Weights: {model_weights_bytes.to('GB'):~P}, KV Cache: {kv_cache_bytes.to('GB'):~P}) > Available {decode_hw.memory.capacity.to('GB'):~P} on {decode_hw.name}.")
+
         cache_hit_ratio = cached_prefix_len / seq_len if seq_len > 0 else 0.0
 
         return ServingResult(
             feasible=feasible,
+            constraint_trace=constraint_trace,
             ttft=t_prefill,
             itl=t_decode_per_token,
             kv_cache_size=kv_cache_bytes.to("GB"),
@@ -653,7 +725,9 @@ class ContinuousBatchingModel(BaseModel):
         
         if max_memory_for_kv.magnitude <= 0:
             return ContinuousBatchingResult(
-                feasible=False, throughput_tokens_per_sec=0.0, max_active_requests=0,
+                feasible=False, 
+                constraint_trace=[f"Memory Wall: FAILED. Weights ({model_weights_bytes.to('GB'):~P}) exceed available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}."],
+                throughput_tokens_per_sec=0.0, max_active_requests=0,
                 memory_fragmentation_pct=0.0, paged_kv_cache_size=Q_("0 GB"),
                 ttft=t_prefill, itl=Q_("1000000 ms"), speedup_vs_static=1.0
             )
@@ -673,6 +747,12 @@ class ContinuousBatchingModel(BaseModel):
         max_possible_requests = int((max_memory_for_kv / bytes_per_seq).to_base_units().magnitude)
         active_requests = min(max_possible_requests, max_batch_size)
         
+        constraint_trace = []
+        if active_requests > 0:
+            constraint_trace.append(f"Memory Wall: Passed. Can fit {active_requests} concurrent requests (Weights: {model_weights_bytes.to('GB'):~P}, Max KV available: {max_memory_for_kv.to('GB'):~P}) on {hardware.name}.")
+        else:
+            constraint_trace.append(f"Memory Wall: FAILED. Cannot fit even 1 request. Weights ({model_weights_bytes.to('GB'):~P}) exceed or leave no room for KV cache in available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
+
         total_kv_cache = bytes_per_seq * active_requests
         
         # Throughput
@@ -693,6 +773,7 @@ class ContinuousBatchingModel(BaseModel):
             
         return ContinuousBatchingResult(
             feasible=active_requests > 0,
+            constraint_trace=constraint_trace,
             throughput_tokens_per_sec=throughput,
             max_active_requests=active_requests,
             memory_fragmentation_pct=frag_pct,
@@ -742,6 +823,12 @@ class WeightStreamingModel(BaseModel):
         feasible = total_memory_required <= hardware.memory.capacity
         utilization = (total_memory_required / hardware.memory.capacity).magnitude if hardware.memory.capacity.magnitude > 0 else 1.0
         
+        constraint_trace = []
+        if feasible:
+            constraint_trace.append(f"SRAM Wall: Passed. Required {total_memory_required.to('GB'):~P} (KV + 10% Overhead) <= Available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
+        else:
+            constraint_trace.append(f"SRAM Wall: FAILED. Required {total_memory_required.to('GB'):~P} (KV + 10% Overhead) > Available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
+
         # 2. Injection Bottleneck vs Compute Bottleneck per Layer
         layer_params = model.parameters / model.layers
         layer_weight_bytes = layer_params.to(ureg.count).magnitude * bpp.magnitude * ureg.byte
@@ -782,6 +869,7 @@ class WeightStreamingModel(BaseModel):
 
         return WeightStreamingResult(
             feasible=feasible,
+            constraint_trace=constraint_trace,
             throughput_tokens_per_sec=tps,
             bottleneck=bottleneck,
             layer_compute_time=layer_compute_time,
@@ -1655,13 +1743,24 @@ class ParallelismOptimizer(BaseOptimizer):
                 dp = n_gpus // (tp * pp)
                 
                 try:
+                    # Memory feasibility: per-GPU model shard must fit in HBM.
+                    # TP shards weights across tp GPUs; PP shards layers across pp stages.
+                    # Gradients and optimizer states are sharded across DP ranks (ZeRO-1+).
+                    # Conservative check: weights + gradients per GPU < 90% HBM capacity.
+                    per_gpu_weights = model.size_in_bytes() / tp / pp
+                    per_gpu_grads = per_gpu_weights  # gradients same size as weights
+                    per_gpu_mem = per_gpu_weights + per_gpu_grads
+                    gpu_capacity = fleet.node.accelerator.memory.capacity
+                    if per_gpu_mem > gpu_capacity * 0.9:
+                        continue  # Infeasible: model shard doesn't fit in GPU memory
+
                     # Evaluate this config
                     res = dist_model.solve(
                         model, fleet, batch_size=batch_size,
                         precision=precision, efficiency=efficiency,
                         tp_size=tp, pp_size=pp, overlap_comm=overlap_comm
                     )
-                    
+
                     # Store candidate
                     candidates.append({
                         "config": {"tp": tp, "pp": pp, "dp": dp},
@@ -1708,60 +1807,58 @@ class BatchingOptimizer(BaseOptimizer):
               num_replicas: int = 1, precision: str = "fp16", 
               efficiency: float = 0.5, max_search_batch: int = 256) -> BatchingOptimizerResult:
         
+        from .optimization.registry import OptimizationRegistry
         serving_model = ServingModel()
         tail_model = TailLatencyModel()
         
-        best_batch = 0
-        max_tps = 0.0
-        best_p99 = Q_("0 ms")
-        best_viol = 0.0
-        
-        candidates = []
-        
-        for b in range(1, max_search_batch + 1):
-            # 1. Base inference performance
+        def objective(b_array):
+            b = int(b_array[0])
             res = serving_model.solve(model, hardware, seq_len=seq_len, batch_size=b, precision=precision, efficiency=efficiency)
             if not res.feasible:
-                break
+                return 1e12 # Infeasible due to memory
                 
-            # Service latency for the batch
-            # Note: For continuous batching, service latency is TTFT + (seq_len * ITL)
             service_latency = res.ttft + (res.itl * seq_len)
+            tail_res = tail_model.solve(arrival_rate_qps / b, service_latency.m_as("ms"), num_replicas)
             
-            # 2. Queueing tail latency
-            tail_res = tail_model.solve(arrival_rate_qps, service_latency.m_as("ms"), num_replicas)
+            if not tail_res.is_stable or tail_res.p99_latency.m_as("ms") > sla_latency_ms:
+                return 1e12 # Infeasible due to queueing instability or SLA violation
+                
+            # We want to maximize batch size (which maximizes valid throughput), so minimize -b
+            return -b
             
-            if not tail_res.is_stable:
-                break
-                
-            p99 = tail_res.p99_latency
+        backend = OptimizationRegistry.get_backend("exhaustive")
+        backend.compile(objective_fn=objective, ranges=[(1, max_search_batch)], grid_size=max_search_batch)
+        opt_res = backend.solve()
+
+        if not opt_res.feasible:
+            return BatchingOptimizerResult(
+                objective_value=0.0,
+                best_config={"max_batch_size": 0},
+                best_batch_size=0,
+                max_throughput=0.0,
+                p99_latency=Q_("0 ms"),
+                slo_violation_probability=0.0,
+                is_feasible=False,
+                total_searched=max_search_batch
+            )
             
-            if p99.m_as("ms") <= sla_latency_ms:
-                # Throughput is bounded by arrival rate (if stable) or max capacity
-                throughput = arrival_rate_qps * seq_len
-                
-                candidates.append({
-                    "batch_size": b,
-                    "throughput": throughput,
-                    "p99": p99,
-                    "viol": tail_res.slo_violation_probability
-                })
-                
-                if throughput > max_tps:
-                    max_tps = throughput
-                    best_batch = b
-                    best_p99 = p99
-                    best_viol = tail_res.slo_violation_probability
-                    
+        best_b = int(opt_res.best_configuration["optimal_variable"])
+        max_tps = arrival_rate_qps * seq_len
+        
+        # Resolve final exact metrics for the optimal batch size
+        res = serving_model.solve(model, hardware, seq_len=seq_len, batch_size=best_b, precision=precision, efficiency=efficiency)
+        service_latency = res.ttft + (res.itl * seq_len)
+        tail_res = tail_model.solve(arrival_rate_qps / best_b, service_latency.m_as("ms"), num_replicas)
+
         return BatchingOptimizerResult(
             objective_value=max_tps,
-            best_config={"max_batch_size": best_batch},
-            best_batch_size=best_batch,
+            best_config={"max_batch_size": best_b},
+            best_batch_size=best_b,
             max_throughput=max_tps,
-            p99_latency=best_p99,
-            slo_violation_probability=best_viol,
-            is_feasible=best_batch > 0,
-            total_searched=len(candidates)
+            p99_latency=tail_res.p99_latency,
+            slo_violation_probability=tail_res.slo_violation_probability,
+            is_feasible=True,
+            total_searched=max_search_batch
         )
 
 

@@ -230,6 +230,140 @@ def plot_roofline(hardware_node, workloads=None):
     ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
     return fig, ax
 
+def plot_distributed_roofline(fleet_system, workloads=None):
+    """
+    Plots a Distributed (Network) Roofline Model for a given fleet.
+    Maps Performance (TFLOP/s) against Communication Intensity (FLOP/Byte).
+    
+    Timeless Principle: The Network Wall is hit when gradient/activation
+    synchronization exceeds the fleet's bisection bandwidth.
+    """
+    # 1. PARAMETERS (Fleet Specs)
+    peak_flops = fleet_system.hardware.compute.peak_flops.to("TFLOPs/s").magnitude * fleet_system.num_nodes
+    # Bisection Bandwidth (total network capacity for All-Reduce)
+    peak_network_bw = fleet_system.network.bandwidth.to("GB/s").magnitude
+    ridge_point = peak_flops / (peak_network_bw / 1000) # FLOP/Byte
+
+    # 2. AXIS RANGE
+    x_min, x_max = 0.1, 10000
+    x = np.logspace(np.log10(x_min), np.log10(x_max), 500)
+
+    # 3. ROOFLINE CURVES
+    y_net = peak_network_bw * x / 1000  # Network BW * CI, converted to TFLOP/s
+    y_compute = np.full_like(x, peak_flops)
+    y_roof = np.minimum(y_net, y_compute)
+
+    # 4. PLOT
+    fig, ax, colors, _ = setup_plot(figsize=(9, 5.5))
+
+    # Shaded regions
+    net_mask = x <= ridge_point
+    comp_mask = x >= ridge_point
+    ax.fill_between(
+        x[net_mask],
+        y_roof[net_mask] * 0.001,
+        y_roof[net_mask],
+        color=colors["RedL"],
+        alpha=0.5,
+        label="Network-bound region",
+    )
+    ax.fill_between(
+        x[comp_mask],
+        y_roof[comp_mask] * 0.001,
+        y_roof[comp_mask],
+        color=colors["BlueFill"],
+        alpha=0.5,
+        label="Compute-bound region",
+    )
+
+    # Roofline line
+    ax.loglog(
+        x,
+        y_roof,
+        color=colors["VioletLine"],
+        linewidth=2.5,
+        zorder=5,
+    )
+
+    # Network bandwidth ceiling label
+    slope_x = ridge_point * 0.08
+    slope_y = peak_network_bw * slope_x / 1000
+    ax.text(
+        slope_x,
+        slope_y * 1.6,
+        f"Bisection BW: {peak_network_bw:.0f} GB/s",
+        color=colors["RedLine"],
+        fontsize=8.5,
+        fontweight="bold",
+        rotation=38,
+        ha="center",
+        va="bottom",
+    )
+
+    # Fleet Compute ceiling label
+    ax.text(
+        ridge_point * 8,
+        peak_flops * 1.12,
+        f"Fleet Compute: {peak_flops:.0f} TFLOP/s",
+        color=colors["BlueLine"],
+        fontsize=8.5,
+        fontweight="bold",
+        ha="center",
+        va="bottom",
+    )
+
+    # Ridge point
+    ax.plot(
+        ridge_point,
+        peak_flops,
+        "X",
+        color=colors["crimson"],
+        markersize=10,
+        zorder=10,
+    )
+    ax.annotate(
+        f"Network Ridge\n{ridge_point:.1f} FLOP/Byte",
+        xy=(ridge_point, peak_flops),
+        xytext=(ridge_point * 2, peak_flops * 0.25),
+        fontsize=8.5,
+        fontweight="bold",
+        color=colors["crimson"],
+        ha="center",
+        arrowprops=dict(arrowstyle="->", color=colors["crimson"], lw=1.2),
+    )
+
+    # Region labels
+    ax.text(
+        x_min * 1.5,
+        peak_flops * 0.6,
+        "NETWORK\nBOUND",
+        color=colors["RedLine"],
+        fontsize=11,
+        fontweight="bold",
+        alpha=0.25,
+        ha="left",
+        va="center",
+    )
+    ax.text(
+        x_max * 0.4,
+        peak_flops * 0.6,
+        "COMPUTE\nBOUND",
+        color=colors["BlueLine"],
+        fontsize=11,
+        fontweight="bold",
+        alpha=0.25,
+        ha="right",
+        va="center",
+    )
+
+    ax.set_xlabel("Communication Intensity (FLOP/Byte)")
+    ax.set_ylabel("Fleet Performance (TFLOP/s)")
+    ax.set_title(f"Distributed Roofline: {fleet_system.num_nodes}x {fleet_system.hardware.name}")
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(peak_flops * 0.001, peak_flops * 2)
+    ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
+    return fig, ax
+
 def plot_evaluation_scorecard(evaluation):
     """
     Visualizes the supply-vs-demand scorecard for a SystemEvaluation.

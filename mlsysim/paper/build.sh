@@ -10,6 +10,20 @@ if [[ "${1:-}" == "clean" ]]; then
     exit 0
 fi
 
+# Convert all SVG figures to PDF (rsvg-convert required)
+if command -v rsvg-convert &>/dev/null; then
+    for svg in figures/*.svg; do
+        [ -f "$svg" ] || continue
+        pdf="${svg%.svg}.pdf"
+        if [ "$svg" -nt "$pdf" ]; then
+            rsvg-convert -f pdf -o "$pdf" "$svg"
+            echo "Converted: $(basename "$svg") → $(basename "$pdf")"
+        fi
+    done
+else
+    echo "Warning: rsvg-convert not found, skipping SVG→PDF conversion"
+fi
+
 echo "Pass 1/4: pdflatex..."
 pdflatex -interaction=nonstopmode paper.tex > /dev/null 2>&1 || true
 

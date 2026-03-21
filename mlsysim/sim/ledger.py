@@ -9,7 +9,6 @@ Performance, Sustainability, Economics, and Reliability.
 
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
-import pandas as pd
 from ..core.constants import ureg, Q_
 
 @dataclass(frozen=True)
@@ -79,6 +78,7 @@ class SystemLedger:
             "goodput_pct": self.reliability.goodput * 100
         }
 
-    def to_df(self) -> pd.DataFrame:
+    def to_df(self):
         """Converts the metrics to a single-row Pandas DataFrame for easy plotting."""
+        import pandas as pd
         return pd.DataFrame([self.to_dict()])

@@ -40,7 +40,7 @@ Let's build a custom `PowerEfficiencyModel` that calculates TFLOPs per Watt.
 ```python
 from mlsysim.core.solver import BaseModel
 from mlsysim.core.results import SolverResult
-from pydantic import Field
+from mlsysim.core.constants import Q_
 from mlsysim.hardware.types import HardwareNode
 from mlsysim.core.types import Quantity
 
@@ -61,7 +61,6 @@ class PowerEfficiencyModel(BaseModel):
 
         fpw = hardware.compute.peak_flops / hardware.tdp
 
-        # Arbitrary threshold for "efficient"
         threshold = Q_("1 TFLOPs/s / W")
         is_eff = fpw > threshold
 
@@ -156,5 +155,55 @@ class CheapestHardwareOptimizer(BaseOptimizer):
         )
 ```
 
-### Why strict typing?
-By forcing inputs and outputs to use `pint.Quantity`, mlsysim guarantees dimensional consistency. The `Pipeline` module uses these class signatures (`requires` and `produces`) to automatically stitch different Models, Solvers, and Optimizers together into a single execution DAG.
+---
+
+## 4. Testing Your Extension
+
+Every custom resolver should have at least one unit test that verifies dimensional correctness and expected output:
+
+```python
+import pytest
+from mlsysim import Hardware
+
+def test_power_efficiency_h100():
+    model = PowerEfficiencyModel()
+    result = model.solve(hardware=Hardware.Cloud.H100)
+
+    assert result.flops_per_watt.units == "TFLOPs/s/W"
+    assert result.flops_per_watt.magnitude > 0
+    assert isinstance(result.is_efficient, bool)
+
+def test_power_efficiency_no_tdp():
+    """Hardware without TDP should raise ValueError."""
+    from mlsysim.hardware.types import HardwareNode, ComputeCore, MemoryHierarchy
+    from mlsysim.core.constants import Q_
+
+    hw = HardwareNode(
+        name="NoTDP",
+        release_year=2024,
+        compute=ComputeCore(peak_flops=Q_("100 TFLOPs/s")),
+        memory=MemoryHierarchy(capacity=Q_("80 GB"), bandwidth=Q_("2 TB/s")),
+        tdp=None,
+    )
+    with pytest.raises(ValueError, match="has no TDP"):
+        PowerEfficiencyModel().solve(hardware=hw)
+```
+
+Run tests with:
+
+```bash
+pytest tests/test_my_extension.py -v
+```
+
+---
+
+## Why Strict Typing?
+
+By forcing inputs and outputs to use `pint.Quantity`, MLSys·im guarantees dimensional consistency. The `Pipeline` module uses these class signatures (`requires` and `produces`) to automatically stitch different Models, Solvers, and Optimizers together into a single execution DAG.
+
+This means your custom extension automatically works with:
+
+- **`Engine.sweep()`** — sweep your model across hardware
+- **`SystemEvaluator.evaluate()`** — include your model in the full scorecard
+- **The CLI** — expose your extension via `mlsysim eval` with YAML input
+- **MCP agents** — AI agents can discover and invoke your extension

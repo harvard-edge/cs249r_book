@@ -85,6 +85,7 @@ fabric, no cross-node communication. This is our ceiling for scaling efficiency.
 from mlsysim import DistributedModel, Models, Systems
 from mlsysim.systems.types import Fleet, Node, NetworkFabric
 from mlsysim.core.constants import Q_
+from mlsysim.show import table, info
 
 model = Models.Llama3_70B
 solver = DistributedModel()
@@ -102,10 +103,11 @@ baseline = solver.solve(
     batch_size=64, precision="fp16", tp_size=8, pp_size=1
 )
 
-print(f"GPUs:                {single_node.total_accelerators}")
-print(f"Compute latency:     {baseline.node_profile.latency.to('ms'):~.1f}")
-print(f"Communication:       {baseline.communication_latency.to('ms'):~.2f}")
-print(f"Scaling efficiency:  {baseline.scaling_efficiency:.1%}")
+info("Single-Node Baseline",
+     GPUs=single_node.total_accelerators,
+     Compute_latency=baseline.node_profile.latency.to('ms'),
+     Communication=baseline.communication_latency.to('ms'),
+     Scaling_efficiency=f"{baseline.scaling_efficiency:.1%}")
 ```
 
 With 8 GPUs on a single node, NVLink provides enough bandwidth that communication
@@ -131,9 +133,7 @@ overhead (AllReduce + pipeline bubbles) as a fraction of total step time.
 ```{python}
 gpu_counts = [8, 32, 64, 128, 256, 512, 1024]
 
-print(f"{'GPUs':>6}  {'Nodes':>6}  {'Comm (ms)':>10}  {'Bubble (ms)':>12}  {'Efficiency':>11}")
-print("-" * 55)
-
+rows = []
 results = {}
 for n_gpus in gpu_counts:
     n_nodes = n_gpus // 8
@@ -150,12 +150,14 @@ for n_gpus in gpu_counts:
         precision="fp16", tp_size=8, pp_size=1
     )
     results[n_gpus] = r
-    print(
-        f"{n_gpus:>6}  {n_nodes:>6}  "
-        f"{r.communication_latency.to('ms').magnitude:>10.1f}  "
-        f"{r.pipeline_bubble_latency.to('ms').magnitude:>12.1f}  "
-        f"{r.scaling_efficiency:>11.1%}"
-    )
+    rows.append([
+        n_gpus, n_nodes,
+        f"{r.communication_latency.to('ms').magnitude:.1f}",
+        f"{r.pipeline_bubble_latency.to('ms').magnitude:.1f}",
+        f"{r.scaling_efficiency:.1%}"
+    ])
+
+table(["GPUs", "Nodes", "Comm (ms)", "Bubble (ms)", "Efficiency"], rows)
 ```
 
 Communication overhead grows with GPU count, but scaling efficiency degrades
@@ -183,9 +185,7 @@ from mlsysim import ReliabilityModel
 
 rel_solver = ReliabilityModel()
 
-print(f"{'GPUs':>6}  {'Nodes':>6}  {'Cluster MTBF':>14}  {'Failures/30d':>14}  {'Optimal Ckpt':>13}")
-print("-" * 60)
-
+rows = []
 rel_results = {}
 for n_gpus in gpu_counts:
     n_nodes = n_gpus // 8
@@ -199,12 +199,14 @@ for n_gpus in gpu_counts:
     r = rel_solver.solve(fleet=fleet, job_duration_hours=30*24, checkpoint_time_s=60.0)
     rel_results[n_gpus] = r
     mtbf_h = r.fleet_mtbf.to("hour").magnitude
-    print(
-        f"{n_gpus:>6}  {n_nodes:>6}  "
-        f"{mtbf_h:>12.1f} h  "
-        f"{r.expected_failures:>14.1f}  "
-        f"{r.optimal_checkpoint_interval.to('hour').magnitude:>11.1f} h"
-    )
+    rows.append([
+        n_gpus, n_nodes,
+        f"{mtbf_h:.1f} h",
+        f"{r.expected_failures:.1f}",
+        f"{r.optimal_checkpoint_interval.to('hour').magnitude:.1f} h"
+    ])
+
+table(["GPUs", "Nodes", "Cluster MTBF", "Failures/30d", "Optimal Ckpt"], rows)
 ```
 
 At 512+ GPUs, something fails roughly every day. The optimal checkpoint interval
@@ -224,9 +226,7 @@ from mlsysim import CheckpointModel
 ckpt_solver = CheckpointModel()
 job_hours = 30 * 24  # 30 days
 
-print(f"{'GPUs':>6}  {'Comm Loss (h)':>14}  {'Ckpt Loss (h)':>14}  {'Ckpt/Comm':>10}")
-print("-" * 50)
-
+rows = []
 for n_gpus in [64, 256, 512, 1024]:
     dist_r = results[n_gpus]
     rel_r = rel_results[n_gpus]
@@ -254,12 +254,9 @@ for n_gpus in [64, 256, 512, 1024]:
     total_ckpt_loss_h = total_ckpt_write_h + total_rollback_h
     ratio = total_ckpt_loss_h / comm_loss_hours if comm_loss_hours > 0 else 0
 
-    print(
-        f"{n_gpus:>6}  "
-        f"{comm_loss_hours:>14.1f}  "
-        f"{total_ckpt_loss_h:>14.1f}  "
-        f"{ratio:>10.1f}x"
-    )
+    rows.append([n_gpus, f"{comm_loss_hours:.1f}", f"{total_ckpt_loss_h:.1f}", f"{ratio:.1f}x"])
+
+table(["GPUs", "Comm Loss (h)", "Ckpt Loss (h)", "Ckpt/Comm"], rows)
 ```
 
 ::: {.callout-important}
@@ -290,11 +287,12 @@ ckpt_result = ckpt_solver.solve(
     checkpoint_interval_hours=1.0
 )
 
-print(f"Model:              {model.name}")
-print(f"Checkpoint size:    {ckpt_result.checkpoint_size.to('GB'):~.1f}")
-print(f"Write time:         {ckpt_result.write_time_seconds.to('second'):~.1f}")
-print(f"MFU penalty (1h):   {ckpt_result.mfu_penalty_pct:.2%}")
-print(f"Storage bottleneck: {ckpt_result.storage_bottleneck}")
+info("Checkpoint Analysis",
+     Model=model.name,
+     Checkpoint_size=ckpt_result.checkpoint_size.to('GB'),
+     Write_time=ckpt_result.write_time_seconds.to('second'),
+     MFU_penalty_1h=f"{ckpt_result.mfu_penalty_pct:.2%}",
+     Storage_bottleneck=ckpt_result.storage_bottleneck)
 ```
 
 A single checkpoint for a 70B model with Adam optimizer states is hundreds of
