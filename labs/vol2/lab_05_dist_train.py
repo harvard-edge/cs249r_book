@@ -4,64 +4,91 @@ __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LAB 05: THE PARALLELISM PARADOX
+# LAB V2-05: THE PARALLELISM PUZZLE
 #
 # Chapter: Distributed Training Systems (@sec-distributed-training-systems)
-# Core Invariant: The Parallelism Paradox — adding more GPUs to data parallel
-#                 training increases communication overhead, which can decrease
-#                 MFU below single-GPU levels for large models. 3D parallelism
-#                 (Tensor + Pipeline + Data) is required for models that don't
-#                 fit on a single GPU, but each dimension adds overhead.
+# Core Invariant: Each parallelism strategy (DP, ZeRO, PP) solves one
+#                 constraint while creating another. The Conservation of
+#                 Overhead governs every choice. 3D parallelism maps
+#                 strategies to the bandwidth hierarchy.
 #
 # 2-Act Structure (35-40 minutes):
-#   Act I  — The Data Parallel Wall (12-15 min)
-#             A 7B model trained with DP across 8→64→512 GPUs shows MFU
-#             collapsing from 52% to 19%. The central question: why does MFU
-#             fall as we add more GPUs? Students must confront that communication
-#             time grows relative to compute time as cluster size grows.
+#   Act I  — The Communication Wall (12-15 min)
+#             Pure DP on 256 GPUs with IB NDR: 175B model achieves only
+#             ~50-55% efficiency because AllReduce consumes half the step.
 #
-#   Act II — 3D Parallelism Design Challenge (20-25 min)
-#             Design the TP×PP×DP configuration for GPT-3 175B on 1024 H100s.
-#             The failure state: per-GPU memory exceeds 80 GB (model doesn't fit)
-#             and a bandwidth penalty warning when TP crosses node boundaries.
+#   Act II — ZeRO + Pipeline + 3D Design Challenge (20-25 min)
+#             Design the full 3D config for 175B on 256 H100s. ZeRO alone
+#             cannot train 175B (activations push OOM). Pipeline bubbles
+#             impose a minimum microbatch count. 3D parallelism is the
+#             only viable approach.
 #
 # Deployment Contexts:
 #   DP:         Data Parallel — replicate model, sync gradients via AllReduce
-#   3D Parallel: TP×PP×DP — within-node TP (NVLink), cross-node PP (IB), DP
+#   3D Parallel: TP x PP x DP — within-node TP (NVLink), cross-node PP/DP
 #
-# Hardware Constants:
-#   H100_TFLOPS_FP16  = 989     # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
-#   H100_BW_GBS       = 3350    # GB/s HBM3e; source: NVIDIA H100 spec sheet
-#   H100_RAM_GB       = 80      # GB HBM3e; source: NVIDIA H100 spec sheet
-#   NVLINK4_BW_GBS    = 900     # GB/s NVLink 4; source: NVIDIA DGX H100 spec
-#   IB_HDR200_BW_GBS  = 400     # GB/s InfiniBand HDR200; source: Mellanox spec
-#   GPUS_PER_NODE     = 8       # Standard DGX H100 node size
-#
-# Design Ledger: saves chapter="v2_05" with DP vs 3D context, parallelism
-#                degrees, MFU achieved, prediction accuracy, failure states.
+# Hardware Constants (sourced from mlsysim registry):
+#   H100_TFLOPS_FP16  = 989     TFLOPS (NVIDIA H100 SXM5 spec)
+#   H100_BW_GBS       = 3350    GB/s HBM3e
+#   H100_RAM_GB       = 80      GB HBM3e
+#   NVLINK4_BW_GBS    = 900     GB/s NVLink 4 (DGX H100)
+#   IB_NDR_BW_GBS     = 50      GB/s InfiniBand NDR per port
+#   GPUS_PER_NODE     = 8       Standard DGX H100 node
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-# ─── CELL 0: SETUP (hide_code=False — leave visible for instructor inspection) ─
+# ─── CELL 0: SETUP ─────────────────────────────────────────────────────────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
     import math
     from pathlib import Path
-    import plotly.graph_objects as go
     import numpy as np
     from plotly.subplots import make_subplots
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    # WASM bootstrap
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
+        await micropip.install(
+            "../../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
+        )
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    import plotly.graph_objects as go
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    from mlsysim.labs.components import DecisionLog
+    import mlsysim
+    from mlsysim.core.defaults import (
+        GPU_MTTF_HOURS, INFINIBAND_NDR_BW_GBS, IB_NDR_LATENCY_US,
+        SCALING_EFF_256GPU, OVERHEAD_PIPELINE_BUBBLE,
+    )
+
+    # ── Hardware constants ────────────────────────────────────────────────
+    H100_TFLOPS_FP16  = 989.0     # NVIDIA H100 SXM5 spec
+    H100_BW_GBS       = 3350.0    # GB/s HBM3e
+    H100_RAM_GB       = 80.0      # GB HBM3e
+    NVLINK4_BW_GBS    = 900.0     # GB/s NVLink 4 (DGX H100)
+    IB_NDR_BW_GBS     = 50.0      # GB/s InfiniBand NDR per port
+    IB_HDR_BW_GBS     = 25.0      # GB/s InfiniBand HDR per port
+    ETH_100G_BW_GBS   = 12.5      # GB/s 100GbE
+    GPUS_PER_NODE     = 8
 
     ledger = DesignLedger()
-    return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, make_subplots
+    if getattr(ledger, "is_wasm", False):
+        await ledger.load_async()
+    return (
+        COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np,
+        make_subplots, mlsysim, DecisionLog,
+        H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB,
+        NVLINK4_BW_GBS, IB_NDR_BW_GBS, IB_HDR_BW_GBS, ETH_100G_BW_GBS,
+        GPUS_PER_NODE,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -87,18 +114,19 @@ def _(COLORS, LAB_CSS, mo):
                     Vol 2 &middot; Lab 05 &middot; Distributed Training Systems
                 </div>
                 <div style="font-size: 2.0rem; font-weight: 800; color: #f1f5f9; line-height: 1.15; margin-bottom: 10px;">
-                    The Parallelism Paradox
+                    The Parallelism Puzzle
                 </div>
                 <div style="font-size: 0.95rem; color: #94a3b8; max-width: 600px; line-height: 1.6;">
-                    Adding GPUs to a data-parallel job can reduce MFU (Model FLOPS Utilization)
-                    below single-GPU levels. This lab forces you to confront the
-                    communication-computation ratio and design the 3D parallelism
-                    configuration that keeps 1024 H100s productive.
+                    Each parallelism strategy solves one constraint while creating another.
+                    Data parallelism hits a communication wall. ZeRO trades memory for
+                    communication. Pipeline parallelism creates bubbles. Only 3D parallelism,
+                    mapped to the bandwidth hierarchy, can train frontier models.
                 </div>
             </div>
             <div style="display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;">
-                <span class="badge badge-info">Parallelism Paradox</span>
-                <span class="badge badge-info">AllReduce Bandwidth Model</span>
+                <span class="badge badge-info">Communication Wall</span>
+                <span class="badge badge-info">ZeRO Memory Sharding</span>
+                <span class="badge badge-info">Pipeline Bubbles</span>
                 <span class="badge badge-info">3D Parallel: TP &times; PP &times; DP</span>
                 <span class="badge badge-warn">35&ndash;40 minutes &middot; 2 Acts</span>
             </div>
@@ -106,13 +134,13 @@ def _(COLORS, LAB_CSS, mo):
         <div style="display: flex; gap: 16px; margin-top: 20px; flex-wrap: wrap;">
             <div style="background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.35);
                         border-radius: 8px; padding: 10px 16px; font-size: 0.82rem;">
-                <span style="color: {_c_dp}; font-weight: 700;">Context A — Data Parallel</span>
-                <span style="color: #94a3b8;"> &mdash; 7B model &middot; 8&ndash;512 GPUs &middot; AllReduce via NVLink / IB</span>
+                <span style="color: {_c_dp}; font-weight: 700;">Context A &mdash; Data Parallel</span>
+                <span style="color: #94a3b8;"> &mdash; 175B model &middot; 1&ndash;512 GPUs &middot; AllReduce via IB NDR</span>
             </div>
             <div style="background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.35);
                         border-radius: 8px; padding: 10px 16px; font-size: 0.82rem;">
-                <span style="color: {_c_3d}; font-weight: 700;">Context B — 3D Parallel</span>
-                <span style="color: #94a3b8;"> &mdash; 175B model &middot; 1024 H100s &middot; TP&times;PP&times;DP design</span>
+                <span style="color: {_c_3d}; font-weight: 700;">Context B &mdash; 3D Parallel</span>
+                <span style="color: #94a3b8;"> &mdash; 175B model &middot; 256 H100s &middot; TP&times;PP&times;DP design</span>
             </div>
         </div>
     </div>
@@ -129,23 +157,18 @@ def _(mo, COLORS):
                 background: white; border-radius: 0 12px 12px 0;
                 padding: 20px 28px; margin: 8px 0 16px 0;
                 box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-
-        <!-- LEARNING OBJECTIVES -->
         <div style="margin-bottom: 16px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                 Learning Objectives
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the communication wall:</strong> derive the AllReduce transfer time as a function of model size, GPU count, and interconnect bandwidth, and explain why DP (Data Parallelism) parallel efficiency collapses when crossing the intra-node to inter-node boundary.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Identify the budget-optimal configuration:</strong> use the scaling efficiency formula to determine whether gradient accumulation on fewer GPUs can match the effective batch size of a larger cluster at lower cost, and explain when TP (Tensor Parallelism) within-node and PP (Pipeline Parallelism) across-node are required.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Diagnose pipeline bubble waste:</strong> apply the bubble fraction formula B = (PP &minus; 1) / (PP &times; m) to evaluate when pipeline overhead renders a configuration infeasible.</div>
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the communication wall:</strong> calculate Ring-AllReduce time for a 175B model and explain why DP efficiency collapses to ~50% at 256 GPUs on IB NDR.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose why ZeRO-3 alone cannot train 175B:</strong> compute per-GPU memory with and without activation sharding to identify the OOM boundary.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Design a 3D parallelism configuration:</strong> select TP, PP, and DP degrees that satisfy memory, bubble, and bandwidth constraints simultaneously.</div>
             </div>
         </div>
-
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <!-- PREREQUISITES + DURATION (side by side) -->
         <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 220px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
@@ -153,8 +176,8 @@ def _(mo, COLORS):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Scaling efficiency formula and data parallelism from @sec-distributed-training-systems &middot;
-                    AllReduce communication volume (2&times; gradient size) from @sec-collective-communication
+                    Ring-AllReduce bandwidth model from @sec-collective-communication &middot;
+                    Data parallelism and scaling efficiency from @sec-distributed-training-systems
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -168,10 +191,7 @@ def _(mo, COLORS):
                 </div>
             </div>
         </div>
-
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <!-- CORE QUESTION -->
         <div style="margin-top: 16px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
@@ -179,7 +199,9 @@ def _(mo, COLORS):
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                "You have a fixed training budget and need to complete GPT-2 training as fast as possible &mdash; does adding more GPUs always help, and at what point does the communication overhead of a larger cluster outweigh the compute benefit?"
+                "If data parallelism, ZeRO, and pipeline parallelism each solve part of the scaling
+                puzzle, why does every frontier model require all three simultaneously &mdash; and what
+                determines the correct ratio?"
             </div>
         </div>
     </div>
@@ -191,20 +213,21 @@ def _(mo, COLORS):
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
-    **Recommended Reading** — Complete the following before this lab:
+    **Recommended Reading** -- Complete the following before this lab:
 
-    - **@sec-distributed-training-systems-systems-multimachine-scaling-fundamentals-ff96** — The Iron Law of Scale: `T_step(N) = T_compute/N + T_comm(N) - T_overlap` and the Communication-Computation Ratio
-    - **@sec-distributed-training-systems** — Why distribution is necessary: memory exhaustion, training duration, and dataset scale thresholds
-    - The Data Parallelism section — AllReduce gradient synchronization, Ring-AllReduce bandwidth formula, gradient bucketing
-    - The 3D Parallelism section — Tensor Parallelism (within-node), Pipeline Parallelism (across nodes), pipeline bubble fraction `B = (PP-1)/(PP * m)`
+    - **@sec-distributed-training-systems** -- Data parallelism, the Communication-Computation Ratio,
+      and the Iron Law of Scale: `T_step(N) = T_compute/N + T_comm(N) - T_overlap`
+    - **@sec-collective-communication** -- Ring-AllReduce bandwidth formula, gradient bucketing
+    - The ZeRO section -- Memory sharding stages (ZeRO-1/2/3), activation memory
+    - The Pipeline Parallelism section -- Microbatching, bubble fraction `B = (PP-1)/(PP*m)`
+    - The 3D Parallelism section -- TP within NVLink, PP across IB, DP for throughput
     """), kind="info")
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE ─────────────────────────────────────────────────────
+# ─── CELL 4: CONTEXT TOGGLE ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, mo):
-    _c_muted = COLORS["TextMuted"]
     context_toggle = mo.ui.radio(
         options={
             "Data Parallel (DP)": "dp",
@@ -216,7 +239,7 @@ def _(COLORS, mo):
     )
     mo.hstack([
         mo.Html(f"""
-        <div style="font-size:0.78rem; font-weight:700; color:{_c_muted};
+        <div style="font-size:0.78rem; font-weight:700; color:{COLORS['TextMuted']};
                     text-transform:uppercase; letter-spacing:0.08em;
                     margin-right:8px; padding-top:2px;">
             Active Context:
@@ -228,22 +251,21 @@ def _(COLORS, mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: ACT I — CALIBRATION
+# ZONE B: ACT I -- THE COMMUNICATION WALL
 # ═══════════════════════════════════════════════════════════════════════════════
 
-
-# ─── CELL 5: ACT1_BANNER (hide_code=True) ─────────────────────────────────────
+# ─── CELL 5: ACT1_BANNER ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
     _act_num      = "I"
     _act_color    = COLORS["BlueLine"]
-    _act_title    = "The Data Parallel Wall"
+    _act_title    = "The Communication Wall"
     _act_duration = "12&ndash;15 min"
     _act_why      = (
-        "You expect that moving from 8 intra-node GPUs to 32 inter-node GPUs roughly quadruples "
-        "training throughput. Quantify how parallel efficiency changes when data parallelism crosses "
-        "the intra-node NVLink boundary to inter-node Ethernet, and identify the dominant term "
-        "in the AllReduce cost that causes the efficiency cliff."
+        "You expect InfiniBand NDR to handle gradient synchronization for a 175B model "
+        "across 256 GPUs with minimal overhead. The data will show that AllReduce consumes "
+        "nearly half of every training step &mdash; capping efficiency at ~50-55% even on "
+        "the fastest interconnect available."
     )
     mo.Html(f"""
     <div style="margin: 32px 0 12px 0;">
@@ -270,57 +292,48 @@ def _(mo, COLORS):
     return
 
 
-# ─── ACT I: STAKEHOLDER MESSAGE ────────────────────────────────────────────────
+# ─── ACT1: STAKEHOLDER MESSAGE ────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, mo):
-    _color = COLORS["BlueLine"]
-    _bg    = COLORS["BlueL"]
     mo.Html(f"""
-    <div style="border-left: 4px solid {_color}; background: {_bg};
+    <div style="border-left: 4px solid {COLORS['BlueLine']}; background: {COLORS['BlueLL']};
                 border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; color: {_color};
+        <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['BlueLine']};
                     text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
             Incoming Message &middot; Training Infrastructure Lead
         </div>
         <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-            "We are training a 7B parameter model using data parallelism. I measured MFU at
-            8 GPUs = 52%. At 64 GPUs it dropped to 38%. At 512 GPUs it's 19%. The model
-            hasn't changed. The batch size per GPU hasn't changed. We just added more GPUs
-            and it got worse. We're wasting $40,000 per day in idle compute. Can you tell
-            me exactly why MFU falls as we scale data parallelism?"
+            "We are scaling a 175B parameter model with pure data parallelism on 256 H100s
+            connected via InfiniBand NDR (50 GB/s per port). InfiniBand is the fastest
+            interconnect money can buy. I expect scaling efficiency above 90%. Am I wrong?"
         </div>
     </div>
     """)
     return
 
 
-# ─── ACT I: CONCEPT FRAMING ────────────────────────────────────────────────────
+# ─── ACT1: CONCEPT FRAMING ────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
-    The training lead's observation is not a software bug. It is the **Parallelism Paradox**:
-    the physical law that governs every data-parallel training job.
+    The stakeholder's expectation sounds reasonable: InfiniBand NDR is the fastest
+    datacenter interconnect. But the critical variable is not the absolute bandwidth
+    -- it is the **ratio** of communication time to compute time.
 
-    Data parallel training replicates the model on every GPU, runs a forward and backward
-    pass on each device's local batch, then synchronizes gradients across all devices via
-    **AllReduce** before the optimizer step. The AllReduce is unavoidable — without it,
-    each replica would diverge. The critical question is how long AllReduce takes relative
-    to the compute step.
+    For a 175B model in FP16, the gradient tensor is ~350 GB. Ring-AllReduce transfers
+    approximately `2 x (N-1)/N x gradient_bytes` per step. At N=256, this saturates
+    at ~700 GB of data traversing 50 GB/s InfiniBand -- a transfer that takes ~14 seconds.
 
-    The **Communication-Computation Ratio** from @sec-distributed-training-systems determines
-    whether a cluster behaves as a supercomputer or as a collection of idling heaters:
+    If the compute step (forward + backward) on each GPU takes ~10 seconds, the
+    communication/compute ratio is 1.4. Efficiency = 1 / (1 + ratio) = ~42%.
+    Even with 50% overlap via gradient bucketing, efficiency reaches only ~55%.
 
-    - **Compute-Bound (Low Ratio)**: `T_compute >> T_comm`. GPUs spend most time on matrix
-      multiplications. This is the ideal state.
-    - **Communication-Bound (High Ratio)**: `T_comm ≈ T_compute`. GPUs spend significant
-      time waiting for gradients. This is the common state for LLMs at scale.
-
-    Before looking at any numbers, commit to a prediction about what causes MFU to fall.
+    Before seeing the numbers, commit to your prediction.
     """)
     return
 
 
-# ─── ACT I: PREDICTION LOCK ────────────────────────────────────────────────────
+# ─── ACT1: PREDICTION LOCK ────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("### Your Prediction")
@@ -329,23 +342,23 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(mo):
-    act1_pred = mo.ui.radio(
+    partA_prediction = mo.ui.radio(
         options={
-            "A) Software overhead in NCCL and collective libraries grows with cluster size": "A",
-            "B) AllReduce communication time grows with cluster size while compute time stays constant — the comm/compute ratio rises": "B",
-            "C) Larger clusters cause L2 cache pressure and HBM bandwidth saturation per GPU": "C",
-            "D) 512 GPUs exceeds optimal batch size — gradient quality degrades and more steps are needed": "D",
+            "A) ~90% -- InfiniBand is fast enough to handle the gradients": "A",
+            "B) ~70% -- moderate communication overhead": "B",
+            "C) ~50-55% -- communication is nearly half of step time": "C",
+            "D) ~25% -- communication dominates": "D",
         },
-        label="Why does Model FLOPs Utilization (MFU) fall as we scale a data-parallel job from 8 to 512 GPUs?",
+        label="You train a 175B model with pure data parallelism on 256 GPUs with InfiniBand NDR. What scaling efficiency do you achieve?",
     )
-    act1_pred
-    return (act1_pred,)
+    partA_prediction
+    return (partA_prediction,)
 
 
 @app.cell(hide_code=True)
-def _(act1_pred, mo):
+def _(partA_prediction, mo):
     mo.stop(
-        act1_pred.value is None,
+        partA_prediction.value is None,
         mo.callout(
             mo.md("Select your prediction above to unlock the Act I instruments."),
             kind="warn",
@@ -355,176 +368,108 @@ def _(act1_pred, mo):
     return
 
 
-# ─── ACT I: INSTRUMENT PANEL INTRO ─────────────────────────────────────────────
+# ─── ACT1: INSTRUMENTS ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
     ### Data Parallel Scaling Explorer
 
-    Adjust the parameters below to see how AllReduce communication time compares to
-    compute time — and how their ratio determines MFU at each scale point.
+    Adjust GPU count and model size to see how AllReduce communication time
+    compares to compute time -- and how the ratio determines efficiency.
     """)
     return
 
 
-# ─── ACT I: SLIDERS ────────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
-    dp_model_b = mo.ui.slider(
-        start=1, stop=175, value=7, step=1,
-        label="Model size (B params)",
+    a1_model_select = mo.ui.dropdown(
+        options={"1B": 1.0, "7B": 7.0, "70B": 70.0, "175B": 175.0},
+        value="175B",
+        label="Model size (parameters)",
     )
-    dp_gpus = mo.ui.slider(
-        start=8, stop=1024, value=8, step=8,
+    a1_gpu_slider = mo.ui.slider(
+        start=1, stop=512, value=256, step=1,
         label="Number of GPUs (DP degree)",
     )
-    dp_batch_per_gpu = mo.ui.slider(
-        start=8, stop=128, value=32, step=8,
-        label="Micro-batch size per GPU",
+    a1_interconnect = mo.ui.dropdown(
+        options={
+            "IB NDR (50 GB/s)": 50.0,
+            "IB HDR (25 GB/s)": 25.0,
+            "100GbE (12.5 GB/s)": 12.5,
+        },
+        value="IB NDR (50 GB/s)",
+        label="Interconnect",
     )
-    dp_interconnect = mo.ui.dropdown(
-        options={"NVLink 4 (within DGX node, 8 GPUs)": "nvlink", "InfiniBand HDR200 (cross-node)": "ib"},
-        value="NVLink 4 (within DGX node, 8 GPUs)",
-        label="Interconnect fabric",
-    )
-    mo.hstack([
-        mo.vstack([dp_model_b, dp_gpus]),
-        mo.vstack([dp_batch_per_gpu, dp_interconnect]),
-    ], justify="center", gap=2)
-    return dp_batch_per_gpu, dp_gpus, dp_interconnect, dp_model_b
+    mo.hstack([a1_model_select, a1_gpu_slider, a1_interconnect], justify="center", gap=2)
+    return (a1_model_select, a1_gpu_slider, a1_interconnect)
 
 
-# ─── ACT I: PHYSICS ENGINE ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, apply_plotly_theme, dp_batch_per_gpu, dp_gpus, dp_interconnect, dp_model_b, go, math, mo, np):
-    # ── Hardware constants ───────────────────────────────────────────────────────
-    # Source: NVIDIA H100 SXM5 spec sheet, Mellanox InfiniBand HDR200 spec
-    H100_TFLOPS_FP16  = 989.0     # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
-    H100_RAM_GB       = 80.0      # GB HBM3e; NVIDIA H100 spec sheet
-    NVLINK4_BW_GBS    = 900.0     # GB/s NVLink 4 (per-direction); NVIDIA DGX H100 spec
-    IB_HDR200_BW_GBS  = 400.0     # GB/s InfiniBand HDR200 (per-direction); Mellanox spec
-    GPUS_PER_NODE     = 8         # DGX H100 node size; standard industry config
-    BYTES_PER_PARAM   = 2         # FP16: 2 bytes per parameter
-    BYTES_PER_GRAD    = 2         # FP16 gradients: 2 bytes per gradient
+def _(COLORS, apply_plotly_theme, a1_model_select, a1_gpu_slider, a1_interconnect, go, math, mo, np, H100_TFLOPS_FP16):
+    _params_b   = a1_model_select.value
+    _n_gpus     = a1_gpu_slider.value
+    _bw_gbs     = a1_interconnect.value
 
-    # ── Extract widget values ────────────────────────────────────────────────────
-    _params_b  = dp_model_b.value          # billions of params
-    _gpus      = dp_gpus.value
-    _batch_gpu = dp_batch_per_gpu.value
-    _fabric    = dp_interconnect.value
+    # ── Physics: Ring-AllReduce ────────────────────────────────────────────
+    _grad_bytes     = _params_b * 1e9 * 2                    # FP16 gradients
+    _grad_gb        = _grad_bytes / 1e9
+    _ring_factor    = 2.0 * (_n_gpus - 1) / max(_n_gpus, 1)  # saturates at ~2
+    _allreduce_gb   = _ring_factor * _grad_gb
+    _allreduce_s    = _allreduce_gb / _bw_gbs if _bw_gbs > 0 else 999
 
-    # ── Derived quantities ───────────────────────────────────────────────────────
-    _params     = _params_b * 1e9          # total parameters
-    _grad_bytes = _params * BYTES_PER_GRAD # gradient tensor size in bytes
-    _grad_gb    = _grad_bytes / 1e9        # gradient size in GB
+    # Compute time: 6 * params * tokens_per_batch / (peak_flops * MFU_ref)
+    # Simplified: per-GPU FLOPs / (peak_TFLOPS * 1e12 * 0.50)
+    _flops_per_step = 6.0 * _params_b * 1e9 * 2048         # 6PD with seq_len=2048, micro_batch=1
+    _compute_s      = _flops_per_step / (_n_gpus * H100_TFLOPS_FP16 * 1e12 * 0.50)
 
-    # ── AllReduce bandwidth model ────────────────────────────────────────────────
-    # Ring-AllReduce transfers 2*(N-1)/N * data per device
-    # Source: @sec-distributed-training-systems AllReduce bandwidth analysis
-    # Effective bytes per GPU = 2*(N-1)/N * grad_gb
-    _allreduce_factor = 2.0 * (_gpus - 1) / _gpus
-    _allreduce_data_gb = _grad_gb * _allreduce_factor   # GB transferred per GPU
+    # Overlap: gradient bucketing hides ~50% of AllReduce
+    _overlap_frac   = 0.50
+    _effective_comm = _allreduce_s * (1 - _overlap_frac)
+    _step_time_s    = _compute_s + _effective_comm
+    _efficiency     = _compute_s / _step_time_s if _step_time_s > 0 else 0
+    _efficiency_pct = _efficiency * 100
 
-    # Interconnect selection and effective bandwidth
-    # Note: when >8 GPUs, traffic crosses node boundary via InfiniBand even if NVLink selected
-    _effective_bw     = NVLINK4_BW_GBS if (_fabric == "nvlink" and _gpus <= GPUS_PER_NODE) else IB_HDR200_BW_GBS
-    _fabric_label     = "NVLink 4" if _effective_bw == NVLINK4_BW_GBS else "InfiniBand HDR200"
-    _forced_ib        = (_fabric == "nvlink" and _gpus > GPUS_PER_NODE)
-
-    _allreduce_time_s  = _allreduce_data_gb / _effective_bw   # seconds
-
-    # ── Compute step time ────────────────────────────────────────────────────────
-    # Forward + backward pass FLOPs ≈ 6 * params * batch_size
-    # Source: standard transformer FLOP count estimate (6N approximation)
-    _seq_len      = 2048        # typical sequence length for a 7B-class model
-    _hidden_dim   = 4096        # typical for 7B models
-    _flops_step   = 6.0 * _params * _batch_gpu   # forward + backward FLOPs
-    _mfu_ref      = 0.52        # reference MFU at 8 GPUs (from stakeholder message)
-
-    # Compute time at reference MFU to anchor the physics
-    _compute_time_s = _flops_step / (H100_TFLOPS_FP16 * 1e12 * _mfu_ref)
-
-    # ── Effective MFU with AllReduce overhead ────────────────────────────────────
-    # MFU = T_compute / (T_compute + T_allreduce)
-    # When T_allreduce grows relative to T_compute, MFU falls
-    _total_time_s     = _compute_time_s + _allreduce_time_s
-    _mfu_effective    = (_compute_time_s / _total_time_s) * _mfu_ref  # fractional
-    _mfu_pct          = _mfu_effective * 100.0
-
-    # ── Comm/Compute ratio ───────────────────────────────────────────────────────
-    _cc_ratio         = _allreduce_time_s / _compute_time_s
-
-    # ── Color coding ─────────────────────────────────────────────────────────────
-    _mfu_color  = COLORS["GreenLine"] if _mfu_pct >= 45 else (COLORS["OrangeLine"] if _mfu_pct >= 25 else COLORS["RedLine"])
-    _cc_color   = COLORS["GreenLine"] if _cc_ratio <= 0.3 else (COLORS["OrangeLine"] if _cc_ratio <= 0.8 else COLORS["RedLine"])
-
-    # ── Build MFU vs GPU count curve ─────────────────────────────────────────────
-    _gpu_range     = [8, 16, 32, 64, 128, 256, 512, 1024]
-    _mfu_curve     = []
+    # ── Sweep: efficiency vs GPU count ────────────────────────────────────
+    _gpu_range = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+    _eff_curve = []
     for _g in _gpu_range:
-        _ar_factor_g = 2.0 * (_g - 1) / _g
-        _bw_g        = NVLINK4_BW_GBS if _g <= GPUS_PER_NODE else IB_HDR200_BW_GBS
-        _ar_time_g   = (_grad_gb * _ar_factor_g) / _bw_g
-        _total_g     = _compute_time_s + _ar_time_g
-        _mfu_g       = (_compute_time_s / _total_g) * _mfu_ref * 100.0
-        _mfu_curve.append(_mfu_g)
+        _c_s = _flops_per_step / (_g * H100_TFLOPS_FP16 * 1e12 * 0.50)
+        _ar_s = (2.0 * (_g - 1) / max(_g, 1) * _grad_gb) / _bw_gbs
+        _st = _c_s + _ar_s * (1 - _overlap_frac)
+        _eff_curve.append((_c_s / _st * 100) if _st > 0 else 100)
 
     _fig = go.Figure()
     _fig.add_trace(go.Scatter(
-        x=_gpu_range, y=_mfu_curve,
+        x=_gpu_range, y=_eff_curve,
         mode="lines+markers",
         line=dict(color=COLORS["BlueLine"], width=2.5),
-        marker=dict(size=8, color=COLORS["BlueLine"]),
-        name="MFU (model)",
-        hovertemplate="<b>%{x} GPUs</b><br>MFU: %{y:.1f}%<extra></extra>",
+        marker=dict(size=7),
+        name="Scaling efficiency",
+        hovertemplate="<b>%{x} GPUs</b><br>Efficiency: %{y:.1f}%<extra></extra>",
     ))
-    # Mark the current selection
     _fig.add_trace(go.Scatter(
-        x=[_gpus], y=[_mfu_pct],
+        x=[_n_gpus], y=[_efficiency_pct],
         mode="markers",
-        marker=dict(size=16, color=COLORS["RedLine"], symbol="diamond",
+        marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond",
                     line=dict(color="white", width=2)),
         name="Current config",
-        hovertemplate="<b>Current: %{x} GPUs</b><br>MFU: %{y:.1f}%<extra></extra>",
     ))
-    # Reference points from stakeholder message
-    _ref_x = [8, 64, 512]
-    _ref_y = [52, 38, 19]
-    _fig.add_trace(go.Scatter(
-        x=_ref_x, y=_ref_y,
-        mode="markers",
-        marker=dict(size=12, color=COLORS["OrangeLine"], symbol="x",
-                    line=dict(color=COLORS["OrangeLine"], width=3)),
-        name="Measured (stakeholder)",
-        hovertemplate="<b>Measured: %{x} GPUs</b><br>MFU: %{y:.0f}%<extra></extra>",
-    ))
-    _fig.add_hline(y=40.0, line=dict(color=COLORS["GreenLine"], width=1.5, dash="dash"),
-                   annotation_text="40% — practical floor", annotation_position="bottom right")
+    _fig.add_hline(y=50, line=dict(color=COLORS["OrangeLine"], width=1.5, dash="dash"),
+                   annotation_text="50% efficiency", annotation_position="bottom right")
     _fig.update_layout(
         height=320,
         xaxis=dict(title="GPU Count (DP degree)", type="log",
-                   tickvals=[8, 16, 32, 64, 128, 256, 512, 1024],
-                   ticktext=["8", "16", "32", "64", "128", "256", "512", "1024"]),
-        yaxis=dict(title="Model FLOPs Utilization (%)", range=[0, 65]),
+                   tickvals=[1, 2, 4, 8, 16, 32, 64, 128, 256, 512]),
+        yaxis=dict(title="Scaling Efficiency (%)", range=[0, 105]),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(t=40, b=50, l=50, r=20),
     )
     apply_plotly_theme(_fig)
 
-    # ── Forced-IB warning ────────────────────────────────────────────────────────
-    _ib_warn = ""
-    if _forced_ib:
-        _ib_warn = f"""
-        <div style="background:{COLORS['OrangeLL']}; border:1px solid {COLORS['OrangeLine']};
-                    border-radius:8px; padding:10px 14px; margin:8px 0; font-size:0.85rem;">
-            <strong style="color:{COLORS['OrangeLine']};">Interconnect Upgrade Applied:</strong>
-            NVLink 4 operates within a single DGX node (8 GPUs). At {_gpus} GPUs, traffic crosses
-            node boundaries. Effective bandwidth is InfiniBand HDR200 ({IB_HDR200_BW_GBS:.0f} GB/s)
-            &mdash; {NVLINK4_BW_GBS/IB_HDR200_BW_GBS:.1f}&times; slower than NVLink 4.
-        </div>
-        """
+    # Color coding
+    _eff_color = COLORS["GreenLine"] if _efficiency_pct >= 70 else (COLORS["OrangeLine"] if _efficiency_pct >= 40 else COLORS["RedLine"])
+    _comm_color = COLORS["GreenLine"] if _effective_comm < _compute_s * 0.3 else (COLORS["OrangeLine"] if _effective_comm < _compute_s else COLORS["RedLine"])
 
-    # ── Physics display ──────────────────────────────────────────────────────────
     mo.vstack([
         mo.Html(f"""
         <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
@@ -533,347 +478,273 @@ def _(COLORS, apply_plotly_theme, dp_batch_per_gpu, dp_gpus, dp_interconnect, dp
             <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;
                         font-family:sans-serif;">
-                Physics — AllReduce Bandwidth Model
+                Physics &mdash; Ring-AllReduce Communication Model
             </div>
-            <div>Gradient tensor = {_params_b}B params &times; {BYTES_PER_GRAD} bytes/param = <strong>{_grad_gb:.1f} GB</strong></div>
-            <div>Ring-AllReduce factor = 2&times;(N-1)/N = 2&times;({_gpus}-1)/{_gpus} = <strong>{_allreduce_factor:.4f}</strong></div>
-            <div>Data transferred per GPU = {_grad_gb:.1f} GB &times; {_allreduce_factor:.4f} = <strong>{_allreduce_data_gb:.2f} GB</strong></div>
-            <div>Interconnect = <strong>{_fabric_label}</strong> &mdash; bandwidth = <strong>{_effective_bw:.0f} GB/s</strong></div>
-            <div>T_allreduce = {_allreduce_data_gb:.2f} GB / {_effective_bw:.0f} GB/s = <strong>{_allreduce_time_s*1000:.1f} ms</strong></div>
-            <div>T_compute (at {_mfu_ref*100:.0f}% MFU ref) = <strong>{_compute_time_s*1000:.1f} ms</strong></div>
-            <div>Comm/Compute ratio = {_allreduce_time_s*1000:.1f} / {_compute_time_s*1000:.1f} = <strong>{_cc_ratio:.2f}</strong></div>
-            <div>MFU_effective = T_compute / (T_compute + T_allreduce) &times; MFU_ref</div>
-            <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = {_compute_time_s*1000:.1f} / {_total_time_s*1000:.1f} &times; {_mfu_ref*100:.0f}% = <strong>{_mfu_pct:.1f}%</strong></div>
+            <div>Gradient size = {_params_b}B &times; 2 bytes (FP16) = <strong>{_grad_gb:.1f} GB</strong></div>
+            <div>Ring-AllReduce volume = 2 &times; ({_n_gpus}-1)/{_n_gpus} &times; {_grad_gb:.1f} GB = <strong>{_allreduce_gb:.1f} GB</strong></div>
+            <div>AllReduce time = {_allreduce_gb:.1f} GB / {_bw_gbs} GB/s = <strong>{_allreduce_s:.2f}s</strong> (raw)</div>
+            <div>Compute time per step = <strong>{_compute_s:.2f}s</strong> (at 50% MFU reference)</div>
+            <div>Effective comm (50% overlap) = <strong>{_effective_comm:.2f}s</strong></div>
+            <div>Efficiency = T_compute / (T_compute + T_comm_eff) = {_compute_s:.2f} / {_step_time_s:.2f} = <strong style="color:{_eff_color};">{_efficiency_pct:.1f}%</strong></div>
         </div>
-        {_ib_warn}
         """),
         mo.Html(f"""
         <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
                 <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600;
-                            text-transform:uppercase; letter-spacing:0.06em;">MFU</div>
-                <div style="font-size:2.2rem; font-weight:800; color:{_mfu_color};
-                            font-family:monospace;">{_mfu_pct:.1f}%</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">model FLOPs utilization</div>
+                            text-transform:uppercase; letter-spacing:0.06em;">Efficiency</div>
+                <div style="font-size:2.2rem; font-weight:800; color:{_eff_color};
+                            font-family:monospace;">{_efficiency_pct:.1f}%</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">scaling efficiency</div>
             </div>
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
                 <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600;
-                            text-transform:uppercase; letter-spacing:0.06em;">Comm / Compute</div>
-                <div style="font-size:2.2rem; font-weight:800; color:{_cc_color};
-                            font-family:monospace;">{_cc_ratio:.2f}</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">ratio (lower = better)</div>
+                            text-transform:uppercase; letter-spacing:0.06em;">AllReduce</div>
+                <div style="font-size:2.2rem; font-weight:800; color:{_comm_color};
+                            font-family:monospace;">{_allreduce_s:.1f}s</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">per step (raw)</div>
             </div>
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
                 <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600;
-                            text-transform:uppercase; letter-spacing:0.06em;">AllReduce Time</div>
+                            text-transform:uppercase; letter-spacing:0.06em;">Compute</div>
                 <div style="font-size:2.2rem; font-weight:800; color:{COLORS['BlueLine']};
-                            font-family:monospace;">{_allreduce_time_s*1000:.1f}ms</div>
+                            font-family:monospace;">{_compute_s:.1f}s</div>
                 <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">per step</div>
             </div>
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
                 <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600;
-                            text-transform:uppercase; letter-spacing:0.06em;">Compute Time</div>
-                <div style="font-size:2.2rem; font-weight:800; color:{COLORS['BlueLine']};
-                            font-family:monospace;">{_compute_time_s*1000:.1f}ms</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">per step (ref MFU)</div>
+                            text-transform:uppercase; letter-spacing:0.06em;">Comm/Compute</div>
+                <div style="font-size:2.2rem; font-weight:800; color:{_comm_color};
+                            font-family:monospace;">{_effective_comm / _compute_s:.2f}x</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">ratio (lower = better)</div>
             </div>
         </div>
         """),
         mo.ui.plotly(_fig),
     ])
-    return (
-        H100_RAM_GB,
-        H100_TFLOPS_FP16,
-        IB_HDR200_BW_GBS,
-        NVLINK4_BW_GBS,
-        GPUS_PER_NODE,
-    )
-
-
-# ─── ACT I: PREDICTION REVEAL ──────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(act1_pred, mo):
-    _correct = act1_pred.value == "B"
-    if _correct:
-        mo.callout(mo.md(
-            "**Correct.** Option B identifies the root cause: the Ring-AllReduce transfer volume "
-            "is essentially constant (approximately 2 × gradient size regardless of N for large N), "
-            "but it must traverse InfiniBand at 400 GB/s when the cluster spans multiple nodes "
-            "instead of NVLink at 900 GB/s within a node. The compute time per GPU does not change "
-            "as you add GPUs. Therefore the comm/compute ratio rises with cluster size, "
-            "directly reducing MFU. The simulator above shows this as the cliff in the MFU curve "
-            "between 8 and 64 GPUs where traffic transitions from NVLink to InfiniBand."
-        ), kind="success")
-    elif act1_pred.value == "A":
-        mo.callout(mo.md(
-            "**Not the primary cause.** NCCL is highly optimized and adds minimal overhead "
-            "relative to wire transfer time. The dominant factor is the physical bandwidth "
-            "of the interconnect, not the software library overhead. At 512 GPUs, "
-            "the AllReduce transfer itself consumes ~140 ms on InfiniBand while the compute "
-            "step takes ~60 ms — NCCL overhead is negligible compared to this ratio."
-        ), kind="warn")
-    elif act1_pred.value == "C":
-        mo.callout(mo.md(
-            "**Not the primary cause.** Each GPU's local computation is unchanged — the "
-            "same model, same batch size per GPU, same forward and backward pass. "
-            "Cache pressure and HBM bandwidth utilization per GPU are essentially identical "
-            "regardless of whether you are running with 8 or 512 GPUs. The bottleneck "
-            "is between nodes, not within them."
-        ), kind="warn")
-    elif act1_pred.value == "D":
-        mo.callout(mo.md(
-            "**A real phenomenon, but not the cause here.** Gradient quality degradation "
-            "with very large global batch sizes is a real concern (the linear scaling rule "
-            "breaks above a critical batch size), but the stakeholder explicitly notes that "
-            "batch size per GPU is unchanged. Total global batch = 512 GPUs × 32 = 16,384. "
-            "For a 7B model this is well within the stable scaling regime. The MFU drop "
-            "is communication-bound, not convergence-bound."
-        ), kind="warn")
-    else:
-        mo.callout(mo.md("Select a prediction above to see the reveal."), kind="info")
     return
 
 
-# ─── ACT I: ACT I MATHPEEK ─────────────────────────────────────────────────────
+# ─── ACT1: PREDICTION REVEAL ──────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(partA_prediction, mo):
+    _correct = partA_prediction.value == "C"
+    if _correct:
+        mo.callout(mo.md(
+            "**Correct.** At 256 GPUs on IB NDR, the 175B model's gradient AllReduce "
+            "transfers ~700 GB per step. Even at 50 GB/s, this takes ~14 seconds raw. "
+            "Compute per GPU (~10s at this scale) cannot hide such a large transfer. "
+            "With 50% overlap, efficiency reaches ~55%. The communication wall is real "
+            "even on the fastest interconnect."
+        ), kind="success")
+    elif partA_prediction.value == "A":
+        mo.callout(mo.md(
+            "**Too optimistic.** InfiniBand NDR is fast (50 GB/s), but 175B parameters "
+            "produce 350 GB of FP16 gradients. Ring-AllReduce transfers ~700 GB per step. "
+            "At 50 GB/s, that is ~14 seconds -- comparable to the compute time itself. "
+            "90% efficiency would require communication to be <11% of compute time."
+        ), kind="warn")
+    elif partA_prediction.value == "B":
+        mo.callout(mo.md(
+            "**Close, but still optimistic.** 70% efficiency requires comm/compute ratio "
+            "below 0.43. With 700 GB of AllReduce traffic and only 50% overlap, the "
+            "effective communication is ~7 seconds against ~10 seconds of compute. "
+            "The actual ratio is ~0.7, yielding ~55% efficiency."
+        ), kind="warn")
+    elif partA_prediction.value == "D":
+        mo.callout(mo.md(
+            "**Too pessimistic.** 25% would mean communication is 3x compute time. "
+            "InfiniBand NDR is genuinely fast -- the issue is that gradient size for "
+            "175B models is so large that even fast interconnects are overwhelmed, but "
+            "not to the point of 3x domination. With overlap, efficiency stabilizes ~55%."
+        ), kind="warn")
+    return
+
+
+# ─── ACT1: MATHPEEK ────────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.accordion({
-        "The governing equations — AllReduce bandwidth model and DP efficiency": mo.md("""
-        **Ring-AllReduce Transfer Volume (per GPU)**
+        "The governing equations -- Ring-AllReduce and DP efficiency": mo.md("""
+        **Ring-AllReduce Transfer Volume**
 
         ```
-        T_allreduce = [2 × (N-1)/N × grad_bytes] / BW_interconnect
+        V_allreduce = 2 * (N-1)/N * gradient_bytes
+        T_allreduce = V_allreduce / BW_interconnect
         ```
 
-        - `N` — number of data-parallel replicas (GPU count)
-        - `grad_bytes` — gradient tensor size = params × 2 bytes (FP16)
-        - `BW_interconnect` — 900 GB/s (NVLink 4, within node) or 400 GB/s (IB HDR200, cross-node)
-        - For large N: the factor 2×(N-1)/N → 2, so AllReduce volume saturates at ~2× gradient size
-        - **Key insight**: AllReduce volume does NOT grow linearly with N — it saturates. But the
-          bandwidth cliff when crossing the node boundary (NVLink → IB) creates a step-change in latency.
+        - For large N, the factor 2*(N-1)/N approaches 2
+        - 175B FP16 gradients = 350 GB; AllReduce volume = ~700 GB
+        - At IB NDR (50 GB/s): T_allreduce = 14.0 seconds
 
-        **DP Efficiency Formula**
+        **DP Scaling Efficiency**
 
         ```
-        MFU_effective = (T_compute / (T_compute + T_allreduce)) × MFU_ref
+        eta = T_compute / (T_compute + T_comm_effective)
+        T_comm_effective = T_allreduce * (1 - overlap_fraction)
         ```
 
-        - `T_compute` — forward + backward FLOPs / (peak_TFLOPS × MFU_ref)
-        - `T_allreduce` — grows as cluster spans more nodes (IB replaces NVLink)
-        - When T_allreduce ≈ T_compute (ratio ≈ 1), effective MFU ≈ MFU_ref / 2
-
-        **Gradient Bucketing Analysis**
-
-        ```
-        T_effective = max(T_compute_late_layers, T_allreduce_early_gradients)
-        ```
-
-        Gradient bucketing starts AllReduce for early-layer gradients while later layers
-        are still computing. Ideal overlap: T_effective → T_compute (hiding communication).
-        In practice, overlapping achieves 60–80% communication hiding for large models.
+        - Gradient bucketing achieves ~50% overlap for large models
+        - At 256 GPUs: eta = 10s / (10s + 7s) = 58.8%
+        - The communication wall appears when T_comm approaches T_compute
         """)
     })
     return
 
 
-# ─── ACT I: REFLECTION ─────────────────────────────────────────────────────────
+# ─── ACT1: REFLECTION ─────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md("""
-    ### Reflection
-
-    Now that you have explored the AllReduce bottleneck, consider the primary technique
-    practitioners use to reclaim efficiency: overlapping communication with computation.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    act1_reflect = mo.ui.radio(
+    partA_reflection = mo.ui.radio(
         options={
-            "A) Use faster GPUs to reduce compute time — this shrinks the total step time": "A",
-            "B) Gradient bucketing + async AllReduce — begin communicating early-layer gradients while computing late-layer gradients": "B",
-            "C) Reduce batch size per GPU to reduce the gradient tensor size and shorten AllReduce": "C",
-            "D) Quantize gradients to INT8 for AllReduce communication, then dequantize before the optimizer step": "D",
+            "A) Use faster GPUs -- reduce compute time so communication is a smaller fraction": "A",
+            "B) Shard the model across GPUs so each holds only a fraction -- this is ZeRO or model parallelism": "B",
+            "C) Use gradient compression to reduce AllReduce volume by 4-8x": "C",
+            "D) Accept the wall -- 55% efficiency is good enough for production": "D",
         },
-        label="What is the primary technique to overlap communication with computation in data parallel training?",
+        label="What is the most effective strategy to overcome the DP communication wall for frontier models?",
     )
-    act1_reflect
-    return (act1_reflect,)
+    partA_reflection
+    return (partA_reflection,)
 
 
 @app.cell(hide_code=True)
-def _(act1_reflect, mo):
+def _(partA_reflection, mo):
     mo.stop(
-        act1_reflect.value is None,
+        partA_reflection.value is None,
         mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"),
     )
-    if act1_reflect.value == "B":
+    if partA_reflection.value == "B":
         mo.callout(mo.md(
-            "**Correct.** Gradient bucketing partitions the gradient tensor into chunks. "
-            "During the backward pass, as soon as the gradients for the last few layers are "
-            "computed, AllReduce begins on those buckets while the backward pass continues "
-            "computing gradients for earlier layers. This overlaps the two operations. "
-            "PyTorch DDP implements this via `bucket_cap_mb` (default: 25 MB). "
-            "For a 7B model with 14 GB of gradients, effective overlap can hide 60–80% of "
-            "the AllReduce latency, recovering significant MFU at scale."
+            "**Correct.** Model parallelism (TP, PP) and ZeRO sharding reduce the "
+            "gradient AllReduce volume by distributing the model itself. With TP=8 "
+            "within a node, each TP group handles 175B/8 parameters, and the DP "
+            "AllReduce is over a smaller DP degree, dramatically reducing the "
+            "communication wall. This is why 3D parallelism exists."
         ), kind="success")
-    elif act1_reflect.value == "A":
+    elif partA_reflection.value == "A":
         mo.callout(mo.md(
-            "**This does not reduce the comm/compute ratio.** A faster GPU shortens T_compute, "
-            "which makes the numerator in the ratio smaller — but it also reduces the time "
-            "available to overlap communication. The ratio T_allreduce/T_compute can actually "
-            "worsen as compute gets faster while interconnect bandwidth stays constant. "
-            "This is a common misconception: hardware upgrades on the compute side do not "
-            "solve interconnect-bound scaling."
+            "**Counterproductive.** Faster GPUs reduce T_compute, but the comm/compute "
+            "ratio actually *worsens* because T_allreduce stays the same. Each GPU "
+            "generation doubles compute TFLOPS but interconnect bandwidth grows slower. "
+            "The communication wall gets *worse* with faster GPUs, not better."
         ), kind="warn")
-    elif act1_reflect.value == "C":
+    elif partA_reflection.value == "C":
         mo.callout(mo.md(
-            "**This reduces the wrong dimension.** Gradient dimensions are determined by model "
-            "architecture, not batch size. A 7B model has 7B parameters regardless of whether "
-            "the local batch is 8 or 128 samples. Reducing batch size per GPU does reduce "
-            "gradient noise (smaller effective batch = higher gradient variance), but it does "
-            "not reduce AllReduce volume. The gradient tensor size is `params × 2 bytes` in FP16."
+            "**Partially effective but not the primary solution.** INT8 gradient compression "
+            "can halve AllReduce volume, but it introduces convergence risk for sensitive "
+            "training runs. The standard approach is to restructure the parallelism itself "
+            "(TP/PP) rather than compromise gradient fidelity."
         ), kind="warn")
-    elif act1_reflect.value == "D":
+    elif partA_reflection.value == "D":
         mo.callout(mo.md(
-            "**Partially true, but not the primary technique.** INT8 gradient compression "
-            "can reduce AllReduce volume by 2× compared to FP16, but it introduces gradient "
-            "quantization error that can harm convergence for sensitive training runs. "
-            "BF16 gradients are standard in modern training. The more reliable approach is "
-            "gradient bucketing and async AllReduce, which hides rather than reduces "
-            "communication — recovering throughput without precision loss."
+            "**Not viable at frontier scale.** At 55% efficiency, you are paying for 256 "
+            "H100s but getting the throughput of ~140. At $3/GPU-hour, the wasted compute "
+            "costs ~$350/hour. Over a 90-day training run, that is $756,000 in idle GPUs."
         ), kind="warn")
     return
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: ACT II — DESIGN CHALLENGE
+# ZONE C: ACT II -- 3D PARALLELISM DESIGN CHALLENGE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-
-# ─── CELL 12: ACT2_BANNER (hide_code=True) ────────────────────────────────────
+# ─── CELL 12: ACT2_BANNER ────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
-    _act_num      = "II"
-    _act_color    = COLORS["OrangeLine"]
-    _act_title    = "3D Parallelism Design Challenge"
-    _act_duration = "20&ndash;25 min"
-    _act_why      = (
-        "Act I showed that data parallelism collapses at inter-node scale. Now tackle a "
-        "model that does not fit on a single GPU: GPT-3 (175B parameters) on 1,024 H100s. "
-        "3D parallelism (TP&times;PP&times;DP) is the only option &mdash; but each "
-        "dimension adds its own overhead, and violating the bandwidth hierarchy triggers "
-        "OOM failures that no amount of clever scheduling can fix."
-    )
     mo.Html(f"""
     <div style="margin: 32px 0 12px 0; border-top: 2px solid {COLORS['Border']}; padding-top: 32px;">
         <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {_act_color}; color: white; border-radius: 50%;
+            <div style="background: {COLORS['OrangeLine']}; color: white; border-radius: 50%;
                         width: 32px; height: 32px; display: inline-flex; align-items: center;
                         justify-content: center; font-size: 0.9rem; font-weight: 800;
-                        flex-shrink: 0;">{_act_num}</div>
+                        flex-shrink: 0;">II</div>
             <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
             <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em;">
-                Act {_act_num} &middot; {_act_duration}</div>
+                Act II &middot; 20&ndash;25 min</div>
         </div>
         <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
                     margin-top: 8px; line-height: 1.2;">
-            {_act_title}
+            ZeRO, Pipelines, and the 3D Design Challenge
         </div>
         <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
                     line-height: 1.55; max-width: 700px;">
-            {_act_why}
+            Act I showed that pure DP collapses at scale. Now discover that ZeRO-3 alone
+            cannot train a 175B model (activation memory pushes OOM), that pipeline bubbles
+            waste 43% of GPU cycles at naive settings, and that 3D parallelism is the only
+            viable configuration &mdash; if you map it correctly to the bandwidth hierarchy.
         </div>
     </div>
     """)
     return
 
 
-# ─── ACT II: STAKEHOLDER MESSAGE ───────────────────────────────────────────────
+# ─── ACT2: STAKEHOLDER MESSAGE ────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, mo):
-    _color = COLORS["Cloud"]
-    _bg    = COLORS["BlueLL"]
     mo.Html(f"""
-    <div style="border-left: 4px solid {_color}; background: {_bg};
+    <div style="border-left: 4px solid {COLORS['Cloud']}; background: {COLORS['BlueLL']};
                 border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; color: {_color};
+        <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['Cloud']};
                     text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
             Incoming Message &middot; MLOps Architect
         </div>
         <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-            "We need to train GPT-3 (175B parameters). A single H100 holds 80 GB of HBM3e.
-            With FP16 weights, FP32 optimizer states, and activation buffers, a 175B model
-            needs roughly 10 bytes per parameter in practice — about 1.75 TB total, which
-            doesn't fit in any single GPU. We have 1024 H100s available across 128 DGX nodes.
-            Design the 3D parallel configuration (TP × PP × DP) that maximizes MFU without
-            exceeding per-GPU memory or creating a pipeline bubble fraction above 10%."
+            "My team says ZeRO-3 can shard everything across 64 A100 GPUs (80 GB each).
+            The static memory math works: 175B x 14 bytes / 64 = 38 GB per GPU. That
+            fits in 80 GB HBM. So ZeRO-3 alone should handle this model. Right?"
         </div>
     </div>
     """)
     return
 
 
-# ─── ACT II: CONCEPT FRAMING ───────────────────────────────────────────────────
+# ─── ACT2: CONCEPT FRAMING ────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
-    When a model exceeds single-GPU memory capacity, data parallelism alone cannot help.
-    Three orthogonal strategies exist for distributing a model:
+    The stakeholder computed only **static memory**: parameters + gradients + optimizer states.
+    ZeRO-3 shards all three across workers, reducing per-GPU static memory to ~38 GB.
 
-    - **Tensor Parallelism (TP)**: Split individual matrix operations across GPUs within a layer.
-      Every forward pass requires an AllReduce across the TP group. TP must operate at high
-      bandwidth — otherwise the AllReduce overhead dominates. This constrains TP to
-      **within a single DGX node** (NVLink, 900 GB/s).
+    But **activation memory is NOT sharded** by ZeRO. Each GPU stores activations for its
+    own micro-batch during the forward pass, needed for the backward pass. For a 175B
+    Transformer at seq_len=2048 and batch_size=1, activations consume ~50 GB per GPU.
 
-    - **Pipeline Parallelism (PP)**: Assign consecutive layers to consecutive GPUs.
-      Requires microbatching to keep all pipeline stages busy. Introduces **bubble overhead**:
-      `B = (PP - 1) / (PP × m)` where `m` is the number of microbatches.
+    Total per-GPU memory: 38 GB (ZeRO-3 static) + 50 GB (activations) = **88 GB > 80 GB HBM**.
 
-    - **Data Parallelism (DP)**: Replicate the TP×PP model group and distribute the
-      global batch. This scales to the remaining GPU budget after TP and PP are fixed.
-      `DP = total_GPUs / (TP × PP)`.
-
-    The 3D configuration space has a hard constraint: `TP × PP × DP = 1024`.
-
-    Before using the configurator, predict the optimal configuration.
+    This is the OOM trap: ZeRO-3 is necessary but not sufficient for frontier models.
+    Pipeline parallelism (PP) reduces per-GPU layers, reducing activation memory.
+    Tensor parallelism (TP) shards each layer's activations across the TP group.
+    Only the combination (3D parallelism) makes training feasible.
     """)
     return
 
 
-# ─── ACT II: PREDICTION LOCK ───────────────────────────────────────────────────
+# ─── ACT2: PREDICTION LOCK ────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md("### Your Configuration Prediction")
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    act2_pred = mo.ui.radio(
+    partB_prediction = mo.ui.radio(
         options={
-            "A) TP=128, PP=1, DP=8 — maximize tensor parallelism to spread every layer across 128 GPUs": "A",
-            "B) TP=8, PP=4, DP=32 — within-node TP on NVLink, pipeline across nodes, DP for throughput scale": "B",
-            "C) TP=1, PP=1024, DP=1 — pure pipeline parallelism to avoid AllReduce entirely": "C",
-            "D) TP=4, PP=256, DP=1 — deep pipeline to maximize layer-level parallelism": "D",
+            "A) TP=1, PP=1, DP=256 -- Pure DP: maximize data parallelism": "A",
+            "B) TP=8, PP=4, DP=8 -- Full 3D parallelism mapped to bandwidth hierarchy": "B",
+            "C) TP=8, PP=1, DP=32 -- TP within node + DP only": "C",
+            "D) TP=8, PP=32, DP=1 -- Aggressive pipeline, no DP": "D",
         },
-        label="Which 3D parallel configuration (TP × PP × DP) best balances memory, compute, and communication for GPT-3 175B on 1024 H100s?",
+        label="Which 3D configuration (TP x PP x DP = 256) best trains a 175B model on 256 H100s?",
     )
-    act2_pred
-    return (act2_pred,)
+    partB_prediction
+    return (partB_prediction,)
 
 
 @app.cell(hide_code=True)
-def _(act2_pred, mo):
+def _(partB_prediction, mo):
     mo.stop(
-        act2_pred.value is None,
+        partB_prediction.value is None,
         mo.callout(
             mo.md("Select your configuration prediction above to unlock the Act II instruments."),
             kind="warn",
@@ -883,459 +754,349 @@ def _(act2_pred, mo):
     return
 
 
-# ─── ACT II: INSTRUMENT PANEL INTRO ────────────────────────────────────────────
+# ─── ACT2: INSTRUMENTS ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
     ### 3D Parallelism Configurator
 
-    Adjust TP and PP degrees. DP is computed automatically from the constraint
-    `TP × PP × DP = 1024`. The configurator will enforce per-GPU memory and
-    pipeline bubble constraints.
+    Adjust TP and PP degrees below. DP is computed automatically from `TP x PP x DP = 256`.
+    The configurator enforces per-GPU memory and pipeline bubble constraints.
     """)
     return
 
 
-# ─── ACT II: SLIDERS ───────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
-    tp_degree = mo.ui.slider(
-        start=1, stop=64, value=8, step=1,
-        label="Tensor Parallelism degree (TP)",
-    )
-    pp_degree = mo.ui.slider(
-        start=1, stop=64, value=4, step=1,
-        label="Pipeline Parallelism degree (PP)",
-    )
-    n_microbatches = mo.ui.slider(
-        start=1, stop=64, value=8, step=1,
-        label="Microbatches per pipeline flush (m)",
+    a2_tp = mo.ui.slider(start=1, stop=16, value=8, step=1, label="Tensor Parallelism (TP)")
+    a2_pp = mo.ui.slider(start=1, stop=32, value=4, step=1, label="Pipeline Parallelism (PP)")
+    a2_microbatches = mo.ui.slider(start=1, stop=64, value=16, step=1, label="Microbatches per flush (m)")
+    a2_zero_stage = mo.ui.dropdown(
+        options={"ZeRO-0 (no sharding)": 0, "ZeRO-1 (optimizer)": 1, "ZeRO-2 (+gradients)": 2, "ZeRO-3 (+parameters)": 3},
+        value="ZeRO-3 (+parameters)",
+        label="ZeRO Stage",
     )
     mo.hstack([
-        mo.vstack([tp_degree, pp_degree]),
-        mo.vstack([n_microbatches]),
+        mo.vstack([a2_tp, a2_pp]),
+        mo.vstack([a2_microbatches, a2_zero_stage]),
     ], justify="center", gap=2)
-    return n_microbatches, pp_degree, tp_degree
+    return (a2_tp, a2_pp, a2_microbatches, a2_zero_stage)
 
 
-# ─── ACT II: PHYSICS ENGINE ────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(
-    COLORS,
-    GPUS_PER_NODE,
-    H100_RAM_GB,
-    H100_TFLOPS_FP16,
-    IB_HDR200_BW_GBS,
-    NVLINK4_BW_GBS,
-    apply_plotly_theme,
-    go,
-    math,
-    mo,
-    n_microbatches,
-    np,
-    pp_degree,
-    tp_degree,
-):
-    # ── Model constants — GPT-3 175B ─────────────────────────────────────────────
-    # Source: @sec-distributed-training-systems, Brown et al. 2020 (GPT-3 paper)
-    GPT3_PARAMS_B       = 175.0       # 175B parameters; Brown et al. 2020
-    GPT3_LAYERS         = 96          # transformer layers; Brown et al. 2020
-    BYTES_PER_PARAM_FP16 = 2          # FP16 model weights
-    OPTIMIZER_OVERHEAD   = 8          # FP32 optimizer states (m1+m2+master) ≈ 8 bytes/param
-    ACTIVATION_BYTES_GB  = 8.0        # activation buffers per pipeline stage (estimate)
-    TOTAL_BYTES_PER_PARAM = 10        # practical: weights + grads + optimizer ≈ 10 bytes/param
-    TOTAL_GPUS           = 1024       # available H100s
-    MFU_BASE             = 0.52       # reference MFU for calibration
-    TP_ALLREDUCE_LAYERS  = GPT3_LAYERS  # TP AllReduce happens every layer
+def _(COLORS, apply_plotly_theme, a2_tp, a2_pp, a2_microbatches, a2_zero_stage, go, math, mo, np, H100_RAM_GB, NVLINK4_BW_GBS, GPUS_PER_NODE):
+    # ── Model constants: 175B ────────────────────────────────────────────
+    _PARAMS_B        = 175.0
+    _LAYERS          = 96
+    _TOTAL_GPUS      = 256
+    _BYTES_WEIGHT    = 2          # FP16
+    _BYTES_OPTIMIZER = 12         # FP32 m1+m2+master = 4+4+4 = 12 bytes/param
+    _BYTES_GRADIENT  = 2          # FP16
+    _ACTIVATION_BASE = 50.0       # GB base activation for 175B at seq=2048, batch=1
 
-    # ── Extract widget values ────────────────────────────────────────────────────
-    _tp = tp_degree.value
-    _pp = pp_degree.value
-    _m  = n_microbatches.value
+    _tp = a2_tp.value
+    _pp = a2_pp.value
+    _m  = a2_microbatches.value
+    _zero = a2_zero_stage.value
 
-    # ── Constraint: TP × PP × DP = 1024 ─────────────────────────────────────────
-    _tp_pp_product = _tp * _pp
-    _dp = TOTAL_GPUS // _tp_pp_product if _tp_pp_product <= TOTAL_GPUS else 0
-    _dp_remainder  = TOTAL_GPUS % _tp_pp_product if _tp_pp_product > 0 else 1
-    _config_valid  = (_dp > 0) and (_dp_remainder == 0)
+    # ── DP degree ─────────────────────────────────────────────────────────
+    _tp_pp = _tp * _pp
+    _dp = _TOTAL_GPUS // _tp_pp if _tp_pp <= _TOTAL_GPUS and _TOTAL_GPUS % _tp_pp == 0 else 0
+    _config_valid = _dp > 0
 
-    # ── Memory analysis ──────────────────────────────────────────────────────────
-    # Per-GPU memory = model shards + optimizer + activations
-    # TP shards model parameters: each GPU holds 1/TP of each tensor
-    # PP assigns GPT3_LAYERS/PP layers to each stage
-    _params_per_gpu_b  = GPT3_PARAMS_B / (_tp * _pp)   # billions
-    _params_per_gpu    = _params_per_gpu_b * 1e9
-    _model_mem_gb      = _params_per_gpu * BYTES_PER_PARAM_FP16 / 1e9
-    _optim_mem_gb      = _params_per_gpu * OPTIMIZER_OVERHEAD / 1e9
-    _activ_mem_gb      = ACTIVATION_BYTES_GB / (_tp if _tp > 1 else 1)  # TP partitions activations
-    _total_mem_gb      = _model_mem_gb + _optim_mem_gb + _activ_mem_gb
+    # ── Memory analysis per GPU ───────────────────────────────────────────
+    _params_per_gpu_b = _PARAMS_B / (_tp * _pp)
 
-    # ── Failure state: OOM ───────────────────────────────────────────────────────
+    # ZeRO sharding of static memory across DP workers
+    _dp_shard = max(_dp, 1)
+    if _zero == 0:
+        _weight_gb = _params_per_gpu_b * _BYTES_WEIGHT
+        _grad_gb = _params_per_gpu_b * _BYTES_GRADIENT
+        _optim_gb = _params_per_gpu_b * _BYTES_OPTIMIZER
+    elif _zero == 1:
+        _weight_gb = _params_per_gpu_b * _BYTES_WEIGHT
+        _grad_gb = _params_per_gpu_b * _BYTES_GRADIENT
+        _optim_gb = _params_per_gpu_b * _BYTES_OPTIMIZER / _dp_shard
+    elif _zero == 2:
+        _weight_gb = _params_per_gpu_b * _BYTES_WEIGHT
+        _grad_gb = _params_per_gpu_b * _BYTES_GRADIENT / _dp_shard
+        _optim_gb = _params_per_gpu_b * _BYTES_OPTIMIZER / _dp_shard
+    else:  # ZeRO-3
+        _weight_gb = _params_per_gpu_b * _BYTES_WEIGHT / _dp_shard
+        _grad_gb = _params_per_gpu_b * _BYTES_GRADIENT / _dp_shard
+        _optim_gb = _params_per_gpu_b * _BYTES_OPTIMIZER / _dp_shard
+
+    # Activations: reduced by TP (partitioned across TP group) and PP (fewer layers)
+    _act_gb = _ACTIVATION_BASE / (_tp * (_pp if _pp > 1 else 1))
+    _total_mem_gb = _weight_gb + _grad_gb + _optim_gb + _act_gb
     _oom = _total_mem_gb > H100_RAM_GB
 
-    # ── Pipeline bubble fraction ─────────────────────────────────────────────────
-    # Source: @sec-distributed-training-systems pipeline parallelism section
-    # B = (PP - 1) / (PP × m)
+    # ── Pipeline bubble ───────────────────────────────────────────────────
     _bubble_frac = (_pp - 1) / (_pp * _m) if _pp > 1 else 0.0
-    _bubble_pct  = _bubble_frac * 100.0
-    _bubble_warn = _bubble_pct > 10.0
+    _bubble_pct = _bubble_frac * 100
 
-    # ── TP communication overhead ────────────────────────────────────────────────
-    # TP AllReduce volume per layer = 2 × hidden_dim × seq_len × 2 bytes (FP16)
-    # Simplified: TP communication time relative to compute
-    # Each TP AllReduce per layer uses NVLink (within node) or IB (cross-node)
+    # ── TP bandwidth penalty ──────────────────────────────────────────────
     _tp_crosses_node = _tp > GPUS_PER_NODE
-    _tp_fabric_bw    = IB_HDR200_BW_GBS if _tp_crosses_node else NVLINK4_BW_GBS
-    _tp_bw_penalty   = NVLINK4_BW_GBS / _tp_fabric_bw  # 1.0 if NVLink, 2.25 if IB
-    _tp_warn         = _tp_crosses_node
+    _tp_penalty_x = 1.0 if not _tp_crosses_node else (NVLINK4_BW_GBS / 50.0)
 
-    # ── Effective MFU estimation ─────────────────────────────────────────────────
-    # TP penalty: communication overhead from intra-layer AllReduce
-    # PP penalty: pipeline bubble fraction
-    # DP penalty: AllReduce for gradients (small for large DP with gradient bucketing)
-    _tp_comm_penalty  = 1.0 - (0.05 * math.log2(max(_tp, 1)) * _tp_bw_penalty)   # rough empirical model
-    _pp_efficiency    = 1.0 - _bubble_frac
-    _dp_comm_penalty  = 1.0 - (0.02 * math.log2(max(_dp, 1)))  # gradient AllReduce overhead
-    _mfu_effective    = MFU_BASE * _tp_comm_penalty * _pp_efficiency * _dp_comm_penalty
-    _mfu_effective    = max(0.0, min(_mfu_effective, MFU_BASE))
-    _mfu_pct_3d       = _mfu_effective * 100.0
+    # ── Effective MFU ─────────────────────────────────────────────────────
+    _mfu_base = 0.52
+    _tp_eff = 1.0 - (0.04 * math.log2(max(_tp, 1)) * (1 if not _tp_crosses_node else 2.25))
+    _pp_eff = 1.0 - _bubble_frac
+    _dp_eff = 1.0 - (0.02 * math.log2(max(_dp, 1)))
+    _mfu_eff = max(0.0, min(_mfu_base * _tp_eff * _pp_eff * _dp_eff, _mfu_base))
+    _mfu_pct = _mfu_eff * 100
 
-    # ── Color coding ─────────────────────────────────────────────────────────────
-    _mem_color    = COLORS["RedLine"]  if _oom           else (COLORS["OrangeLine"] if _total_mem_gb > 60 else COLORS["GreenLine"])
-    _bubble_color = COLORS["RedLine"]  if _bubble_warn   else (COLORS["OrangeLine"] if _bubble_pct > 5 else COLORS["GreenLine"])
-    _mfu_color_3d = COLORS["RedLine"]  if _mfu_pct_3d < 25 else (COLORS["OrangeLine"] if _mfu_pct_3d < 40 else COLORS["GreenLine"])
-    _cfg_color    = COLORS["GreenLine"] if _config_valid else COLORS["RedLine"]
+    # ── Colors ────────────────────────────────────────────────────────────
+    _mem_color = COLORS["RedLine"] if _oom else (COLORS["OrangeLine"] if _total_mem_gb > 60 else COLORS["GreenLine"])
+    _bubble_color = COLORS["RedLine"] if _bubble_pct > 10 else (COLORS["OrangeLine"] if _bubble_pct > 5 else COLORS["GreenLine"])
+    _mfu_color = COLORS["RedLine"] if _mfu_pct < 25 else (COLORS["OrangeLine"] if _mfu_pct < 40 else COLORS["GreenLine"])
+    _cfg_color = COLORS["GreenLine"] if _config_valid else COLORS["RedLine"]
 
-    # ── FAILURE STATE: OOM ───────────────────────────────────────────────────────
+    # ── Failure banners ───────────────────────────────────────────────────
     _oom_banner = ""
     if _oom:
         _oom_banner = f"""
         <div style="background:{COLORS['RedLL']}; border:2px solid {COLORS['RedLine']};
                     border-radius:10px; padding:14px 18px; margin:10px 0;">
             <div style="font-size:0.88rem; font-weight:800; color:{COLORS['RedLine']}; margin-bottom:4px;">
-                OOM — Configuration Infeasible
+                OOM &mdash; Configuration Infeasible
             </div>
             <div style="font-size:0.85rem; color:#7f1d1d; line-height:1.6;">
                 <strong>Required per GPU: {_total_mem_gb:.1f} GB</strong> &mdash; exceeds H100 limit: {H100_RAM_GB:.0f} GB.<br>
-                Model shard: {_model_mem_gb:.1f} GB &nbsp;|&nbsp; Optimizer states: {_optim_mem_gb:.1f} GB &nbsp;|&nbsp; Activations: {_activ_mem_gb:.1f} GB.<br>
-                Increase TP or PP to reduce the per-GPU model shard below {H100_RAM_GB - _activ_mem_gb:.0f} GB (leaving room for activations).
+                Weights: {_weight_gb:.1f} GB | Gradients: {_grad_gb:.1f} GB | Optimizer: {_optim_gb:.1f} GB | Activations: {_act_gb:.1f} GB<br>
+                Increase TP or PP to reduce per-GPU memory, or enable a higher ZeRO stage.
             </div>
         </div>
         """
 
-    # ── WARNING STATE: TP crosses node boundary ───────────────────────────────────
-    _tp_bw_banner = ""
-    if _tp_warn:
-        _penalty_x = NVLINK4_BW_GBS / IB_HDR200_BW_GBS
-        _tp_bw_banner = f"""
+    _tp_banner = ""
+    if _tp_crosses_node:
+        _tp_banner = f"""
         <div style="background:{COLORS['OrangeLL']}; border:1px solid {COLORS['OrangeLine']};
                     border-radius:8px; padding:12px 16px; margin:8px 0;">
-            <div style="font-size:0.85rem; font-weight:700; color:{COLORS['OrangeLine']}; margin-bottom:4px;">
-                Tensor Parallelism Crosses Node Boundary
-            </div>
-            <div style="font-size:0.83rem; color:#7c2d12; line-height:1.6;">
-                TP={_tp} exceeds GPUS_PER_NODE={GPUS_PER_NODE}. TP AllReduce uses
-                InfiniBand HDR200 ({IB_HDR200_BW_GBS:.0f} GB/s) instead of NVLink 4
-                ({NVLINK4_BW_GBS:.0f} GB/s) &mdash; a <strong>{_penalty_x:.1f}&times; bandwidth penalty</strong>
-                on every layer's AllReduce. TP should remain &le; {GPUS_PER_NODE} to exploit
-                NVLink within a single DGX node.
+            <div style="font-size:0.85rem; font-weight:700; color:{COLORS['OrangeLine']};">
+                TP Crosses Node Boundary &mdash; {_tp_penalty_x:.1f}x bandwidth penalty on every layer's AllReduce
             </div>
         </div>
         """
 
-    # ── Config validity warning ───────────────────────────────────────────────────
     _cfg_banner = ""
     if not _config_valid:
         _cfg_banner = f"""
         <div style="background:{COLORS['RedLL']}; border:1px solid {COLORS['RedLine']};
                     border-radius:8px; padding:12px 16px; margin:8px 0;">
             <div style="font-size:0.85rem; font-weight:700; color:{COLORS['RedLine']};">
-                Invalid Configuration: TP &times; PP = {_tp} &times; {_pp} = {_tp_pp_product}
-                does not divide 1024 evenly. Choose TP and PP such that 1024 / (TP &times; PP)
-                is a positive integer.
+                Invalid: TP({_tp}) &times; PP({_pp}) = {_tp_pp} does not divide 256 evenly.
             </div>
         </div>
         """
 
-    # ── Build bubble fraction vs PP/m chart ──────────────────────────────────────
-    _pp_range = list(range(1, 33))
-    _bubble_m1  = [(_p - 1) / (_p * 1)  * 100 for _p in _pp_range]
-    _bubble_m4  = [(_p - 1) / (_p * 4)  * 100 for _p in _pp_range]
-    _bubble_m8  = [(_p - 1) / (_p * 8)  * 100 for _p in _pp_range]
-    _bubble_m16 = [(_p - 1) / (_p * 16) * 100 for _p in _pp_range]
+    # ── Stacked memory bar chart ──────────────────────────────────────────
+    _fig_mem = go.Figure()
+    _categories = ["Weights", "Gradients", "Optimizer", "Activations"]
+    _values = [_weight_gb, _grad_gb, _optim_gb, _act_gb]
+    _bar_colors = [COLORS["BlueLine"], COLORS["GreenLine"], COLORS["OrangeLine"], COLORS["Cloud"]]
+    if _oom:
+        _bar_colors = [COLORS["RedLine"]] * 4
 
-    _fig2 = go.Figure()
-    for _vals, _label, _clr in [
-        (_bubble_m1,  "m=1 microbatch",  "#cb202d"),
-        (_bubble_m4,  "m=4 microbatches", "#cc5500"),
-        (_bubble_m8,  "m=8 microbatches", "#006395"),
-        (_bubble_m16, "m=16 microbatches", "#008f45"),
-    ]:
-        _fig2.add_trace(go.Scatter(
-            x=_pp_range, y=_vals, mode="lines", name=_label,
-            line=dict(color=_clr, width=2),
-            hovertemplate=f"PP=%{{x}} {_label}<br>Bubble: %{{y:.1f}}%<extra></extra>",
+    for _cat, _val, _clr in zip(_categories, _values, _bar_colors):
+        _fig_mem.add_trace(go.Bar(
+            x=[_cat], y=[_val], name=_cat,
+            marker_color=_clr,
+            hovertemplate=f"{_cat}: %{{y:.1f}} GB<extra></extra>",
         ))
-    _fig2.add_hline(y=10.0, line=dict(color="#1e293b", width=1.5, dash="dash"),
-                    annotation_text="10% bubble ceiling", annotation_position="top right")
-    # Mark current config
-    _fig2.add_trace(go.Scatter(
-        x=[_pp], y=[_bubble_pct],
-        mode="markers", name="Current config",
-        marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond",
-                    line=dict(color="white", width=2)),
-        hovertemplate=f"PP={_pp}, m={_m}<br>Bubble: {_bubble_pct:.1f}%<extra></extra>",
-    ))
-    _fig2.update_layout(
-        height=300,
-        xaxis=dict(title="Pipeline Parallelism (PP stages)", range=[1, 32]),
-        yaxis=dict(title="Pipeline Bubble Fraction (%)", range=[0, 55]),
+    _fig_mem.add_hline(y=H100_RAM_GB, line=dict(color=COLORS["RedLine"], width=2, dash="dash"),
+                       annotation_text=f"H100 HBM: {H100_RAM_GB:.0f} GB", annotation_position="top right")
+    _fig_mem.update_layout(
+        height=280, barmode="stack",
+        xaxis=dict(title=""), yaxis=dict(title="Per-GPU Memory (GB)", range=[0, max(_total_mem_gb * 1.2, 90)]),
+        showlegend=False, margin=dict(t=30, b=40, l=50, r=20),
+    )
+    apply_plotly_theme(_fig_mem)
+
+    # ── Bubble chart ──────────────────────────────────────────────────────
+    _pp_range = list(range(1, 33))
+    _fig_bubble = go.Figure()
+    for _mval, _label, _clr in [(4, "m=4", COLORS["OrangeLine"]), (8, "m=8", COLORS["BlueLine"]),
+                                  (16, "m=16", COLORS["GreenLine"]), (32, "m=32", "#8b5cf6")]:
+        _bvals = [(_p - 1) / (_p * _mval) * 100 for _p in _pp_range]
+        _fig_bubble.add_trace(go.Scatter(x=_pp_range, y=_bvals, mode="lines", name=_label,
+                                          line=dict(color=_clr, width=2)))
+    _fig_bubble.add_trace(go.Scatter(x=[_pp], y=[_bubble_pct], mode="markers", name="Current",
+                                      marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond")))
+    _fig_bubble.add_hline(y=10, line=dict(color="#1e293b", width=1.5, dash="dash"),
+                          annotation_text="10% ceiling", annotation_position="top right")
+    _fig_bubble.update_layout(
+        height=260, xaxis=dict(title="Pipeline Stages (PP)"), yaxis=dict(title="Bubble %", range=[0, 55]),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(t=40, b=50, l=50, r=20),
     )
-    apply_plotly_theme(_fig2)
+    apply_plotly_theme(_fig_bubble)
 
-    # ── Render all outputs ────────────────────────────────────────────────────────
+    # ── Render ────────────────────────────────────────────────────────────
     mo.vstack([
         mo.Html(f"""
+        {_oom_banner}{_tp_banner}{_cfg_banner}
         <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
                     border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
                     font-size:0.83rem; line-height:1.8;">
             <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;
-                        font-family:sans-serif;">
-                Physics — 3D Parallel Memory and Bubble Analysis
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
+                Physics &mdash; 3D Parallel Memory + Bubble Analysis
             </div>
-            <div>Configuration: TP={_tp} &times; PP={_pp} &times; DP={_dp if _config_valid else "N/A"}
-                 {'= ' + str(TOTAL_GPUS) if _config_valid else '(INVALID: TP&times;PP=' + str(_tp_pp_product) + ' does not divide 1024)'}</div>
-            <div>Params per GPU = {GPT3_PARAMS_B}B / (TP={_tp} &times; PP={_pp}) = <strong>{_params_per_gpu_b:.2f}B params</strong></div>
-            <div>Model memory (FP16) = {_params_per_gpu_b:.2f}B &times; 2 bytes = <strong>{_model_mem_gb:.1f} GB</strong></div>
-            <div>Optimizer states (FP32) = {_params_per_gpu_b:.2f}B &times; 8 bytes = <strong>{_optim_mem_gb:.1f} GB</strong></div>
-            <div>Activation buffer = <strong>{_activ_mem_gb:.1f} GB</strong> (estimated)</div>
-            <div>Total per-GPU memory = <strong style="color:{_mem_color};">{_total_mem_gb:.1f} GB</strong> / {H100_RAM_GB:.0f} GB limit</div>
-            <div>Pipeline bubble B = (PP-1)/(PP&times;m) = ({_pp}-1)/({_pp}&times;{_m}) = <strong style="color:{_bubble_color};">{_bubble_pct:.1f}%</strong></div>
-            <div>TP bandwidth = <strong>{'InfiniBand ' + str(IB_HDR200_BW_GBS) + ' GB/s (CROSS-NODE)' if _tp_crosses_node else 'NVLink 4 ' + str(NVLINK4_BW_GBS) + ' GB/s (within node)'}</strong></div>
-            <div>Effective MFU = <strong style="color:{_mfu_color_3d};">{_mfu_pct_3d:.1f}%</strong></div>
+            <div>Config: TP={_tp} &times; PP={_pp} &times; DP={_dp if _config_valid else 'N/A'} {'= 256' if _config_valid else ''} | ZeRO Stage {_zero}</div>
+            <div>Params/GPU = 175B / (TP={_tp} &times; PP={_pp}) = <strong>{_params_per_gpu_b:.2f}B</strong></div>
+            <div>Per-GPU memory = <strong style="color:{_mem_color};">{_total_mem_gb:.1f} GB</strong> / {H100_RAM_GB:.0f} GB limit</div>
+            <div>Bubble = (PP-1)/(PP&times;m) = ({_pp}-1)/({_pp}&times;{_m}) = <strong style="color:{_bubble_color};">{_bubble_pct:.1f}%</strong></div>
+            <div>Effective MFU = <strong style="color:{_mfu_color};">{_mfu_pct:.1f}%</strong></div>
         </div>
-        {_oom_banner}
-        {_tp_bw_banner}
-        {_cfg_banner}
         """),
         mo.Html(f"""
         <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600;
-                            text-transform:uppercase; letter-spacing:0.06em;">Per-GPU Memory</div>
-                <div style="font-size:2.2rem; font-weight:800; color:{_mem_color};
-                            font-family:monospace;">{_total_mem_gb:.0f}GB</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">/ {H100_RAM_GB:.0f} GB limit</div>
+                        width:150px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Per-GPU Mem</div>
+                <div style="font-size:2rem; font-weight:800; color:{_mem_color}; font-family:monospace;">{_total_mem_gb:.0f}GB</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">/ {H100_RAM_GB:.0f} GB</div>
             </div>
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600;
-                            text-transform:uppercase; letter-spacing:0.06em;">Pipeline Bubble</div>
-                <div style="font-size:2.2rem; font-weight:800; color:{_bubble_color};
-                            font-family:monospace;">{_bubble_pct:.1f}%</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">ceiling: 10%</div>
+                        width:150px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Bubble</div>
+                <div style="font-size:2rem; font-weight:800; color:{_bubble_color}; font-family:monospace;">{_bubble_pct:.1f}%</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">ceiling: 10%</div>
             </div>
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600;
-                            text-transform:uppercase; letter-spacing:0.06em;">Effective MFU</div>
-                <div style="font-size:2.2rem; font-weight:800; color:{_mfu_color_3d};
-                            font-family:monospace;">{_mfu_pct_3d:.1f}%</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">3D parallel</div>
+                        width:150px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">MFU</div>
+                <div style="font-size:2rem; font-weight:800; color:{_mfu_color}; font-family:monospace;">{_mfu_pct:.1f}%</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">3D parallel</div>
             </div>
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600;
-                            text-transform:uppercase; letter-spacing:0.06em;">DP degree</div>
-                <div style="font-size:2.2rem; font-weight:800; color:{_cfg_color};
-                            font-family:monospace;">{_dp if _config_valid else 'N/A'}</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">= 1024 / (TP&times;PP)</div>
+                        width:150px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">DP degree</div>
+                <div style="font-size:2rem; font-weight:800; color:{_cfg_color}; font-family:monospace;">{_dp if _config_valid else 'N/A'}</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">= 256/(TP&times;PP)</div>
             </div>
         </div>
         """),
-        mo.ui.plotly(_fig2),
+        mo.ui.plotly(_fig_mem),
+        mo.ui.plotly(_fig_bubble),
     ])
-    return (
-        _bubble_pct,
-        _config_valid,
-        _dp,
-        _mfu_pct_3d,
-        _oom,
-        _total_mem_gb,
-        _tp_crosses_node,
-    )
+    return (_bubble_pct, _config_valid, _dp, _mfu_pct, _oom, _total_mem_gb)
 
 
-# ─── ACT II: PREDICTION REVEAL ─────────────────────────────────────────────────
+# ─── ACT2: PREDICTION REVEAL ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(act2_pred, mo):
-    _correct = act2_pred.value == "B"
+def _(partB_prediction, mo):
+    _correct = partB_prediction.value == "B"
     if _correct:
         mo.callout(mo.md(
-            "**Correct.** TP=8, PP=4, DP=32 is the principled baseline for GPT-3 scale training. "
-            "TP=8 maps exactly to one DGX node (8 GPUs per node), keeping TP AllReduce on "
-            "NVLink at 900 GB/s. PP=4 assigns 96/4=24 transformer layers per stage, "
-            "requiring 4 nodes per pipeline. With 8 microbatches, the pipeline bubble "
-            "B=(4-1)/(4×8)=9.375% stays just under the 10% ceiling. DP=32 then "
-            "replicates the TP×PP group 32 times across the remaining 1024/(8×4)=32 GPU groups. "
-            "This matches the configuration used in real GPT-3-scale training runs "
-            "on DGX clusters (Megatron-LM, 2021)."
+            "**Correct.** TP=8 maps to one DGX node (8 GPUs on NVLink at 900 GB/s), keeping "
+            "the per-layer AllReduce fast. PP=4 assigns 96/4=24 layers per stage, cutting "
+            "activation memory by 4x. With m=16 microbatches, bubble = 3/64 = 4.7%. "
+            "DP=8 replicates across 8 groups for throughput. This matches Megatron-LM practice."
         ), kind="success")
-    elif act2_pred.value == "A":
+    elif partB_prediction.value == "A":
         mo.callout(mo.md(
-            "**Infeasible.** TP=128 distributes each layer across 128 GPUs. Each tensor "
-            "parallel AllReduce must traverse 16 DGX nodes (128/8=16), using InfiniBand "
-            "instead of NVLink — a 2.25× bandwidth penalty on every single layer forward and "
-            "backward pass. The AllReduce occurs 96 times per forward pass (once per transformer "
-            "layer). At IB bandwidth this becomes the dominant bottleneck, crushing MFU. "
-            "Configure TP in the simulator with TP > 8 to observe the bandwidth penalty warning."
+            "**Pure DP cannot train 175B.** Each of 256 GPUs must hold the full model "
+            "(175B x 2 bytes = 350 GB in FP16 weights alone), which exceeds 80 GB HBM "
+            "by 4.4x. Even ZeRO-3 sharding across 256 GPUs leaves 38 GB static + 50 GB "
+            "activations = 88 GB > 80 GB. TP or PP must reduce per-GPU model size."
         ), kind="warn")
-    elif act2_pred.value == "C":
+    elif partB_prediction.value == "C":
         mo.callout(mo.md(
-            "**Catastrophic bubble overhead.** PP=1024 with a single microbatch gives "
-            "B=(1024-1)/(1024×1)≈99.9% bubble fraction — the cluster is 99.9% idle. "
-            "Even with m=64 microbatches: B=(1024-1)/(1024×64)≈1.5%, but now each "
-            "gradient accumulation step is enormous, harming optimizer convergence. "
-            "Pure pipeline parallelism with depth matching GPU count is never used in practice. "
-            "Use the configurator to set PP=1024 and observe the bubble fraction."
+            "**Memory infeasible.** Without PP, each GPU holds all 96 layers' activations. "
+            "TP=8 reduces weights to 175B/8 = 21.9B per GPU, but activation memory "
+            "remains ~50/8 = 6.25 GB (TP partitions activations). Static memory: "
+            "21.9B x 14 bytes / 32 (ZeRO-3) = 9.6 GB. Total ~16 GB -- feasible, "
+            "but DP=32 means AllReduce of 21.9B x 2 bytes across 32 nodes, still a "
+            "significant communication wall. PP would reduce this further."
         ), kind="warn")
-    elif act2_pred.value == "D":
+    elif partB_prediction.value == "D":
         mo.callout(mo.md(
-            "**Pipeline bubble too large.** PP=256 with m=8 microbatches gives "
-            "B=(256-1)/(256×8)=12.4% — already over the 10% ceiling. "
-            "You would need m=32 microbatches to bring the bubble to 3.1%, "
-            "but that requires a batch size of 32×256=8,192 sequences through the pipeline "
-            "before each optimizer step, creating a very large effective batch. "
-            "With DP=1, there is no data parallelism to amortize the batch size requirement. "
-            "This is an over-pipelined design."
+            "**DP=1 wastes the cluster.** With DP=1, there is no data parallelism for "
+            "throughput scaling. PP=32 requires m >> 32 microbatches to keep bubble "
+            "fraction below 10%, implying an enormous global batch size. This is "
+            "an over-pipelined design that wastes most of the cluster on bubbles."
         ), kind="warn")
-    else:
-        mo.callout(mo.md("Select a configuration prediction above to see the analysis."), kind="info")
     return
 
 
-# ─── ACT II: MATHPEEK ──────────────────────────────────────────────────────────
+# ─── ACT2: MATHPEEK ───────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.accordion({
-        "The governing equations — 3D parallel memory, bubble fraction, and TP communication": mo.md("""
-        **3D Parallel Per-GPU Memory**
+        "Governing equations -- ZeRO memory, bubble fraction, 3D parallelism": mo.md("""
+        **ZeRO-3 Per-GPU Memory**
 
         ```
-        mem_per_gpu = (params / (TP × PP)) × bytes_per_param
-                    + (params / (TP × PP)) × optimizer_bytes_per_param
-                    + activation_buffer
+        Static memory = (P / (TP * PP)) * (2 + 2/DP + 12/DP) bytes
+                       = params_per_gpu * (2 + 14/DP) bytes
+        Activation memory = base_activation / (TP * PP)
+        Total = static + activation
         ```
 
-        - `params` — total model parameters (e.g. 175B for GPT-3)
-        - `TP × PP` — reduces the parameter shard on each GPU
-        - `bytes_per_param` — FP16 = 2 bytes; FP32 master copy = 4 bytes
-        - `optimizer_bytes_per_param` — Adam states: 2 FP32 moments + master = ~8 bytes/param
-        - **Key insight**: TP and PP jointly reduce per-GPU memory — TP shards each matrix
-          horizontally, PP shards the depth (layers). DP does NOT reduce memory: every DP replica
-          holds the full TP×PP model shard.
+        For 175B, TP=8, PP=4, DP=8, ZeRO-3:
+        - params_per_gpu = 175B/(8*4) = 5.47B
+        - Static = 5.47B * (2 + 14/8) = 5.47B * 3.75 = 20.5 GB
+        - Activations = 50 GB / (8*4) = 1.56 GB
+        - Total = ~22 GB -- fits in 80 GB HBM
 
         **Pipeline Bubble Fraction**
 
         ```
-        B = (PP - 1) / (PP × m)
+        B = (PP - 1) / (PP * m)
         ```
 
-        - `PP` — pipeline parallelism degree (stages)
-        - `m` — number of microbatches per pipeline flush
-        - At PP=4, m=8: B = 3/32 = 9.375%
-        - **Key insight**: increasing m (microbatches) reduces bubble but increases pipeline latency
-          and may harm optimizer convergence at very large effective batch sizes.
-        - Practical ceiling: B < 10% is standard in production (Megatron-LM guidelines).
+        At PP=4, m=16: B = 3/64 = 4.7% (under 10% ceiling)
 
-        **Tensor Parallelism Communication Volume (per layer)**
-
-        ```
-        TP AllReduce per layer = 2 × (TP - 1)/TP × hidden_dim × seq_len × 2 bytes (FP16)
-        ```
-
-        - Occurs **every layer** in both forward and backward passes
-        - At 900 GB/s (NVLink): ~0.5 ms per layer for a 175B model configuration
-        - At 400 GB/s (IB): ~1.1 ms per layer — 2.25× slower, applied 96 times per forward pass
-        - **Key insight**: TP communication is not a one-time cost — it is a per-layer tax.
-          This is why TP > 8 (crossing node boundary to IB) destroys MFU.
+        **Conservation of Overhead**: Each parallelism dimension eliminates one
+        bottleneck while introducing another. 3D parallelism is not overhead-free;
+        it distributes overhead across the bandwidth hierarchy where each type
+        can be absorbed most efficiently.
         """)
     })
     return
 
 
-# ─── ACT II: REFLECTION ────────────────────────────────────────────────────────
+# ─── ACT2: REFLECTION ─────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md("""
-    ### Reflection
-
-    You observed that TP=8 is the natural constraint boundary. Before finishing, confirm
-    your understanding of why this boundary is fundamental.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    act2_reflect = mo.ui.radio(
+    partB_reflection = mo.ui.radio(
         options={
-            "A) PyTorch does not support cross-node tensor parallelism in its distributed primitives": "A",
-            "B) Tensor parallel AllReduce happens every layer — at InfiniBand bandwidth this becomes the dominant bottleneck": "B",
-            "C) Tensor parallelism requires shared GPU memory, which is unavailable across separate nodes": "C",
-            "D) Cross-node tensor parallelism causes numerical instability due to floating-point rounding across nodes": "D",
+            "A) TP handles inter-layer communication, PP handles intra-layer, DP handles gradient sync": "A",
+            "B) TP maps to NVLink (highest BW), PP maps to IB (moderate BW), DP AllReduce uses remaining BW": "B",
+            "C) The mapping is arbitrary -- any assignment of TP/PP/DP to the hierarchy works equally well": "C",
+            "D) TP and PP should both use NVLink; DP should use Ethernet for cost savings": "D",
         },
-        label="Why must tensor parallelism be confined within a single DGX node (TP ≤ 8)?",
+        label="Why must TP map to NVLink, PP to InfiniBand, and DP to the remaining bandwidth?",
     )
-    act2_reflect
-    return (act2_reflect,)
+    partB_reflection
+    return (partB_reflection,)
 
 
 @app.cell(hide_code=True)
-def _(act2_reflect, mo):
+def _(partB_reflection, mo):
     mo.stop(
-        act2_reflect.value is None,
+        partB_reflection.value is None,
         mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"),
     )
-    if act2_reflect.value == "B":
+    if partB_reflection.value == "B":
         mo.callout(mo.md(
-            "**Correct.** Tensor parallelism introduces an AllReduce after every transformer "
-            "layer's matrix operations — both in the forward pass and the backward pass. "
-            "For a 96-layer model like GPT-3, that is 192 AllReduce calls per training step. "
-            "At NVLink bandwidth (900 GB/s) this adds ~1 ms per step — tolerable. "
-            "At InfiniBand bandwidth (400 GB/s), the penalty is 2.25× higher and accumulates "
-            "across all 96 layers, making TP communication the dominant step time. "
-            "The constraint TP ≤ GPUS_PER_NODE (≤ 8) is not a software limitation; "
-            "it is a bandwidth physics constraint."
+            "**Correct.** TP performs AllReduce after every layer (96 times per forward pass). "
+            "This requires the highest bandwidth -- NVLink at 900 GB/s. PP transfers only "
+            "small activation tensors (~200 MB) between pipeline stages -- IB's 50 GB/s "
+            "handles this in milliseconds. DP AllReduce is performed once per step on the "
+            "reduced model shard (after TP+PP partitioning), so the smaller DP degree and "
+            "reduced gradient volume can tolerate the remaining bandwidth."
         ), kind="success")
-    elif act2_reflect.value == "A":
+    else:
         mo.callout(mo.md(
-            "**Incorrect.** PyTorch (via Megatron-LM's column/row parallel linear layers) "
-            "and frameworks like DeepSpeed fully support cross-node tensor parallelism "
-            "using the standard NCCL AllReduce over InfiniBand. The constraint is physical, "
-            "not a software limitation. The code works fine; the bandwidth penalty is what "
-            "makes cross-node TP undesirable."
-        ), kind="warn")
-    elif act2_reflect.value == "C":
-        mo.callout(mo.md(
-            "**Incorrect.** Tensor parallelism does not require shared memory. It is a "
-            "message-passing strategy: each GPU holds a shard of the weight matrix, "
-            "computes a partial matrix multiply on its shard, then the partial results are "
-            "reduced via AllReduce across all TP ranks. This works equally over NVLink "
-            "or InfiniBand — the difference is only bandwidth and therefore latency."
-        ), kind="warn")
-    elif act2_reflect.value == "D":
-        mo.callout(mo.md(
-            "**Incorrect.** Floating-point arithmetic in distributed training uses deterministic "
-            "reduction primitives (NCCL's AllReduce). The numerical behavior is identical whether "
-            "the AllReduce traverses NVLink or InfiniBand — both use the same FP16/BF16 precision "
-            "operations. Numerical instability in distributed training typically arises from "
-            "gradient accumulation order (non-associative floating-point operations), not from "
-            "the physical transport medium."
+            "**Not quite.** The key insight is that TP has the highest communication frequency "
+            "(once per layer), PP has moderate frequency (once per pipeline stage), and DP has "
+            "the lowest frequency (once per step). The bandwidth hierarchy must match: "
+            "highest frequency -> highest bandwidth. TP -> NVLink, PP -> IB, DP -> remaining."
         ), kind="warn")
     return
 
@@ -1349,8 +1110,6 @@ def _(act2_reflect, mo):
 def _(mo, COLORS):
     mo.vstack([
         mo.md("---"),
-
-        # ── KEY TAKEAWAYS ──
         mo.Html(f"""
         <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
                     border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
@@ -1360,229 +1119,126 @@ def _(mo, COLORS):
             </div>
             <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                 <div style="margin-bottom: 10px;">
-                    <strong>1. Scaling from 8 to 32 GPUs on 10GbE collapses parallel efficiency from 97% to 13%.</strong>
-                    The 5.6 GB gradient sync at 1.25 GB/s takes 4,805 ms per step against 1,800 ms of compute.
-                    GPUs spend 73% of each step waiting for gradients. The 720&times; bandwidth gap between NVLink
-                    (900 GB/s) and 10GbE (1.25 GB/s) is the root cause &mdash; not the GPU count.
+                    <strong>1. The communication wall caps pure DP at ~55% efficiency for 175B models on IB NDR.</strong>
+                    Ring-AllReduce transfers ~700 GB per step. Even at 50 GB/s with 50% overlap,
+                    communication consumes nearly half the step time. No interconnect upgrade
+                    eliminates this wall for frontier model sizes.
                 </div>
                 <div style="margin-bottom: 10px;">
-                    <strong>2. Eight GPUs with gradient accumulation beats 32 GPUs at 87% lower cost.</strong>
-                    8 GPUs with 4-step accumulation achieves the same effective batch size of 512 as 32 GPUs,
-                    costs $422 vs. $3,021, and keeps all communication on NVLink (overhead &lt;0.1%).
-                    The cheapest configuration often uses the fewest GPUs connected by the fastest network.
+                    <strong>2. ZeRO-3 is necessary but not sufficient: activation memory pushes OOM.</strong>
+                    ZeRO-3 shards static memory to ~38 GB per GPU, but activations (~50 GB)
+                    are not sharded. Total = 88 GB > 80 GB HBM. Pipeline or tensor parallelism
+                    must reduce per-GPU activation memory.
                 </div>
                 <div>
-                    <strong>3. Pipeline bubble waste scales as (PP &minus; 1) / (PP &times; m) and exceeds 40% when PP &gg; m.</strong>
-                    At 8 pipeline stages and 32 microbatches, bubble fraction is (8&minus;1)/(8&times;32) = 2.7% &mdash; acceptable.
-                    At 16 stages and 8 microbatches, it rises to (16&minus;1)/(16&times;8) = 11.7% &mdash; over the 10% ceiling.
-                    Keeping m &gg; PP is the constraint that determines pipeline parallelism feasibility.
+                    <strong>3. 3D parallelism maps each strategy to its natural bandwidth tier.</strong>
+                    TP (per-layer AllReduce) -> NVLink (900 GB/s). PP (inter-stage activation transfer)
+                    -> IB (50 GB/s). DP (per-step gradient AllReduce) -> remaining bandwidth.
+                    This mapping is physics, not convention.
                 </div>
             </div>
         </div>
         """),
-
-        # ── CONNECTIONS ──
         mo.Html(f"""
         <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-
-            <!-- What's Next -->
             <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
                     What's Next
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab V2-06: The Bandwidth Invariant</strong> &mdash; This lab showed that
-                    AllReduce communication dominates training cost at scale. The next lab asks: which
-                    AllReduce algorithm (Ring vs. Tree) wins for large gradient payloads, and where
-                    exactly is the crossover where Tree outperforms Ring?
+                    <strong>Lab V2-06: When Failure is Routine</strong> &mdash; You designed a 256-GPU
+                    training configuration. But at this scale, hardware fails every few hours.
+                    The next lab asks: how often should you checkpoint, and what happens when the
+                    checkpoint storm itself becomes the bottleneck?
                 </div>
             </div>
-
-            <!-- Textbook Connection -->
             <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-distributed-training-systems for the full scaling
-                    efficiency derivation, gradient accumulation analysis, and pipeline bubble formula.<br/>
-                    <strong>Build:</strong> TinyTorch distributed training module &mdash; implement
-                    data parallelism with gradient accumulation in <code>tinytorch/src/distributed/</code>.
+                    <strong>Read:</strong> @sec-distributed-training-systems for the full 3D parallelism
+                    derivation and the Conservation of Overhead principle.<br/>
+                    <strong>Build:</strong> TinyTorch distributed module &mdash; implement data parallelism
+                    with gradient accumulation in <code>tinytorch/src/distributed/</code>.
                 </div>
             </div>
-
         </div>
         """),
-
         mo.accordion({
-
-
             "Self-Assessment": mo.md("""
-**Check your understanding:**
+1. Why does pure DP efficiency collapse for 175B models even on InfiniBand NDR?
+2. Why can ZeRO-3 on 64 A100s not train a 175B model despite static memory fitting?
+3. For TP=8, PP=4, DP=8 on 256 H100s, what is the pipeline bubble fraction at m=16?
+4. Why must TP be confined within a single DGX node?
 
-1. Scaling from 8 intra-node GPUs (NVLink) to 32 cross-node GPUs (10GbE) collapses parallel efficiency from 97% to 13%. What is the gradient sync time on 10GbE versus compute time, and at what GPU count does adding more hardware yield negative returns?
-2. Pipeline bubble waste follows the formula (PP - 1) / (PP x m). At 8 pipeline stages, what microbatch count keeps bubble fraction below 10%? Why does this formula, not software tuning, determine pipeline parallelism feasibility?
-3. Eight GPUs with gradient accumulation achieve the same effective batch size as 32 GPUs at 87% lower cost. What makes this possible, and why is the cheapest configuration often the one using the fewest GPUs on the fastest interconnect?
-
-**You're ready to move on if you can:**
-- Calculate parallel efficiency given compute time and gradient synchronization time for a specific interconnect
-- Use the pipeline bubble formula to determine feasible PP-stage and microbatch configurations
-- Compare cost-effectiveness of gradient accumulation versus scaling out across a slow network
+*If you cannot answer all four from memory, revisit Acts I and II.*
 """)
-
-
         }),
     ])
     return
 
 
 # ─── CELL 21: LEDGER_HUD ─────────────────────────────────────────────────────
-# ─── LEDGER SAVE + HUD ─────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(
-    COLORS,
-    _bubble_pct,
-    _config_valid,
-    _dp,
-    _mfu_pct_3d,
-    _oom,
-    _total_mem_gb,
-    _tp_crosses_node,
-    act1_pred,
-    act2_pred,
-    act2_reflect,
-    act1_reflect,
-    ledger,
-    mo,
-    n_microbatches,
-    pp_degree,
-    tp_degree,
-):
-    # ── Save to Design Ledger ────────────────────────────────────────────────────
-    _context = "3d_parallel" if tp_degree.value > 1 or pp_degree.value > 1 else "data_parallel"
+def _(mo):
+    decision_input, decision_ui = DecisionLog()
+    return (decision_input, decision_ui)
+
+
+@app.cell(hide_code=True)
+def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partB_reflection,
+      a2_tp, a2_pp, ledger, mo, decision_input, decision_ui):
+    _bubble_pct=0
+    _config_valid=False
+    _dp=0
+    _mfu_pct=0
+    _oom=False
+    _total_mem_gb=0
+    _context = "3d_parallel" if a2_tp.value > 1 or a2_pp.value > 1 else "data_parallel"
 
     ledger.save(
         chapter="v2_05",
         design={
-            "context":         _context,
-            "tp_degree":       tp_degree.value,
-            "pp_degree":       pp_degree.value,
-            "dp_degree":       _dp,
-            "total_gpus":      1024,
-            "mfu_percent":     round(_mfu_pct_3d, 2),
-            "act1_prediction": act1_pred.value if act1_pred.value else "no_selection",
-            "act1_correct":    act1_pred.value == "B",
-            "act1_reflect":    act1_reflect.value if act1_reflect.value else "no_selection",
-            "act2_result":     round(_mfu_pct_3d, 2),
-            "act2_decision":   act2_pred.value if act2_pred.value else "no_selection",
-            "constraint_hit":  _oom or _tp_crosses_node,
+            "context": _context,
+            "tp_degree": a2_tp.value,
+            "pp_degree": a2_pp.value,
+            "dp_degree": _dp,
+            "total_gpus": 256,
+            "mfu_percent": round(_mfu_pct, 2),
+            "partA_prediction": partA_prediction.value or "no_selection",
+            "partA_correct": partA_prediction.value == "C",
+            "partA_reflection": partA_reflection.value or "no_selection",
+            "partB_prediction": partB_prediction.value or "no_selection",
+            "partB_correct": partB_prediction.value == "B",
+            "partB_reflection": partB_reflection.value or "no_selection",
+            "student_justification": str(decision_input.value),
             "memory_feasible": not _oom,
+            "oom_hit": _oom,
         },
     )
 
-    # ── Determine overall performance tier ──────────────────────────────────────
-    _act1_ok  = act1_pred.value == "B"
-    _act2_ok  = act2_pred.value == "B"
-    _mfu_ok   = _mfu_pct_3d >= 40.0 and not _oom and _bubble_pct <= 10.0
-
-    _tier = "Optimal" if (_act1_ok and _act2_ok and _mfu_ok) else ("Partial" if (_act1_ok or _act2_ok) else "Developing")
+    _a1_ok = partA_prediction.value == "C"
+    _a2_ok = partB_prediction.value == "B"
+    _tier = "Optimal" if (_a1_ok and _a2_ok) else ("Partial" if (_a1_ok or _a2_ok) else "Developing")
     _tier_color = COLORS["GreenLine"] if _tier == "Optimal" else (COLORS["OrangeLine"] if _tier == "Partial" else COLORS["TextMuted"])
 
-    # ── HUD Footer ───────────────────────────────────────────────────────────────
-    _hud = mo.Html(f"""
+    decision_ui
+    mo.Html(f"""
     <div class="lab-hud">
-        <div>
-            <span class="hud-label">LAB</span>&nbsp;
-            <span class="hud-value">Vol2 · Lab 05</span>
-        </div>
-        <div>
-            <span class="hud-label">CHAPTER</span>&nbsp;
-            <span class="hud-value">v2_05 · Distributed Training</span>
-        </div>
-        <div>
-            <span class="hud-label">CONTEXT</span>&nbsp;
-            <span class="hud-value">{_context.upper()}</span>
-        </div>
-        <div>
-            <span class="hud-label">CONFIG</span>&nbsp;
-            <span class="hud-value">TP={tp_degree.value} &times; PP={pp_degree.value} &times; DP={_dp}</span>
-        </div>
-        <div>
-            <span class="hud-label">MFU</span>&nbsp;
-            <span style="color:{COLORS['GreenLine'] if _mfu_pct_3d >= 40 else COLORS['OrangeLine']}; font-family:var(--font-mono); font-size:0.8rem;">
-                {_mfu_pct_3d:.1f}%
-            </span>
-        </div>
-        <div>
-            <span class="hud-label">ACT I</span>&nbsp;
-            <span class="{'hud-active' if _act1_ok else 'hud-none'}">&nbsp;{"CORRECT" if _act1_ok else "REVIEW"}</span>
-        </div>
-        <div>
-            <span class="hud-label">ACT II</span>&nbsp;
-            <span class="{'hud-active' if _act2_ok else 'hud-none'}">&nbsp;{"CORRECT" if _act2_ok else "REVIEW"}</span>
-        </div>
-        <div>
-            <span class="hud-label">TIER</span>&nbsp;
-            <span style="color:{_tier_color}; font-family:var(--font-mono); font-size:0.8rem;">{_tier.upper()}</span>
-        </div>
-        <div>
-            <span class="hud-label">OOM</span>&nbsp;
-            <span class="{'hud-none' if _oom else 'hud-active'}">&nbsp;{"YES" if _oom else "NO"}</span>
-        </div>
+        <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab 05</span></div>
+        <div><span class="hud-label">CHAPTER</span> <span class="hud-value">v2_05 &middot; Distributed Training</span></div>
+        <div><span class="hud-label">CONFIG</span> <span class="hud-value">TP={a2_tp.value}&times;PP={a2_pp.value}&times;DP={_dp}</span></div>
+        <div><span class="hud-label">MFU</span> <span style="color:{COLORS['GreenLine'] if _mfu_pct >= 40 else COLORS['OrangeLine']}; font-family:var(--font-mono);">{_mfu_pct:.1f}%</span></div>
+        <div><span class="hud-label">ACT I</span> <span class="{'hud-active' if _a1_ok else 'hud-none'}">{"CORRECT" if _a1_ok else "REVIEW"}</span></div>
+        <div><span class="hud-label">ACT II</span> <span class="{'hud-active' if _a2_ok else 'hud-none'}">{"CORRECT" if _a2_ok else "REVIEW"}</span></div>
+        <div><span class="hud-label">TIER</span> <span style="color:{_tier_color}; font-family:var(--font-mono);">{_tier.upper()}</span></div>
+        <div><span class="hud-label">OOM</span> <span class="{'hud-none' if _oom else 'hud-active'}">{"YES" if _oom else "NO"}</span></div>
     </div>
-    """)
-    _hud
-    return
-
-
-# ─── CONNECTIONS ──────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ---
-    ## Connections
-
-    **Textbook:** This lab explores the core concepts of
-    @sec-distributed-training-systems — the Iron Law of Scale, the
-    Communication-Computation Ratio, and the 3D Parallelism Cube
-    (@fig-3d-parallelism-cube).
-
-    **Prior Labs:** Lab 03 (Network Fabrics) established the physical bandwidth
-    limits — NVLink vs InfiniBand — that constrain TP degree here.
-    Lab 04 (Data Storage) established the I/O pipeline that feeds each DP replica.
-
-    **Next Lab:** Vol2 Lab 06 (Collective Communications) examines the
-    Ring-AllReduce and Tree-AllReduce algorithms in detail, quantifying
-    why Ring-AllReduce achieves near-linear scaling efficiency while
-    parameter-server approaches hit coordination bottlenecks.
-    """)
-    return
-
-
-# ─── KEY TAKEAWAYS ─────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ## Key Takeaways
-
-    1. **The Parallelism Paradox is a bandwidth ratio, not a software bug.**
-       AllReduce volume saturates at approximately 2× gradient size regardless of GPU count,
-       but the transition from NVLink (900 GB/s, within node) to InfiniBand (400 GB/s, cross-node)
-       creates a step-change in communication time that drives the MFU cliff observed at
-       8→64 GPUs. MFU falls because T_allreduce grows while T_compute stays constant.
-
-    2. **The 3D parallelism constraint TP ≤ GPUS_PER_NODE is physics, not convention.**
-       Tensor parallelism performs AllReduce after every transformer layer. At 96 layers,
-       the per-layer AllReduce penalty accumulates into a step-time budget that InfiniBand
-       cannot satisfy. Confine TP within a single DGX node to keep every layer's
-       synchronization on NVLink. Then PP crosses nodes over InfiniBand — but PP
-       AllReduce happens only once per pipeline stage, not once per layer.
     """)
     return
 

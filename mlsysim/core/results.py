@@ -9,13 +9,17 @@ models and analysis solvers.
 from __future__ import annotations
 
 from typing import Any, Dict, Optional, List
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from .types import Quantity
 
 
 class SolverResult(BaseModel):
     """Base class for all model and solver results."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    constraint_trace: Optional[List[str]] = Field(
+        default=None,
+        description="A trace of physical constraints evaluated during the solve. If feasible=False, this explains why."
+    )
 
 
 # ── Supply Layer Results ──────────────────────────────────────────

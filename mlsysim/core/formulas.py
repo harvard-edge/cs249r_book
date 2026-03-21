@@ -6,11 +6,26 @@ import math
 import pint
 from .constants import ureg, Q_, SPEED_OF_LIGHT_FIBER_KM_S, MS, MB, GB, hour, second, byte
 
-def _ensure_unit(val, unit):
-    """Helper to attach unit if value is a raw number."""
+def _ensure_unit(val, expected_unit, param_name="Value"):
+    """
+    Helper to attach a unit if a value is a raw number, and verify 
+    dimensional correctness if it is already a Pint Quantity.
+    
+    This function acts as a guardrail for students using the framework,
+    ensuring they do not accidentally mix up units (e.g., passing Bytes 
+    when Bandwidth is expected).
+    """
     if isinstance(val, (int, float)):
-        return val * unit
-    return val
+        return val * expected_unit
+    elif isinstance(val, ureg.Quantity):
+        if not val.check(expected_unit):
+            raise pint.DimensionalityError(
+                val.units, expected_unit,
+                extra_msg=f"\n[Pedagogical Error] '{param_name}' requires units of {expected_unit.dimensionality}. You provided '{val.units}'."
+            )
+        return val
+    else:
+        raise TypeError(f"Expected a number or Pint Quantity for {param_name}, got {type(val).__name__}")
 
 def calc_network_latency_ms(distance_km):
     """
@@ -18,7 +33,7 @@ def calc_network_latency_ms(distance_km):
     
     Source: Standard networking physics (c/1.5 refractive index).
     """
-    d = _ensure_unit(distance_km, ureg.kilometer)
+    d = _ensure_unit(distance_km, ureg.kilometer, "distance_km")
     round_trip_s = (d * 2) / SPEED_OF_LIGHT_FIBER_KM_S
     return round_trip_s.m_as(ureg.millisecond)
 
@@ -56,7 +71,7 @@ def calc_amdahls_speedup(p, s):
 
 def calc_monthly_egress_cost(bytes_per_sec, cost_per_gb):
     """Calculates monthly cloud egress cost based on standard cloud egress rates."""
-    b_s = _ensure_unit(bytes_per_sec, ureg.byte / ureg.second)
+    b_s = _ensure_unit(bytes_per_sec, ureg.byte / ureg.second, "bytes_per_sec")
     monthly_bytes = b_s * (30 * ureg.day)
     cost = monthly_bytes * cost_per_gb
     return cost.m_as(ureg.dollar)
@@ -67,10 +82,10 @@ def calc_fleet_tco(unit_cost, power_w, quantity, years, kwh_price):
     
     Source: Barroso et al. (2018), "The Datacenter as a Computer."
     """
-    u_cost = _ensure_unit(unit_cost, ureg.dollar)
-    p_w = _ensure_unit(power_w, ureg.watt)
-    price = _ensure_unit(kwh_price, ureg.dollar / ureg.kilowatt_hour)
-    time = _ensure_unit(years, ureg.year)
+    u_cost = _ensure_unit(unit_cost, ureg.dollar, "unit_cost")
+    p_w = _ensure_unit(power_w, ureg.watt, "power_w")
+    price = _ensure_unit(kwh_price, ureg.dollar / ureg.kilowatt_hour, "kwh_price")
+    time = _ensure_unit(years, ureg.year, "years")
     fleet_capex = u_cost * quantity
     total_energy = p_w * quantity * time
     power_opex = total_energy * price
@@ -171,9 +186,9 @@ def calc_ring_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
     Returns:
         Quantity[second]: Estimated AllReduce time
     """
-    msg = _ensure_unit(message_bytes, ureg.byte)
-    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second)
-    lat = _ensure_unit(latency_s, ureg.second)
+    msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
+    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s")
+    lat = _ensure_unit(latency_s, ureg.second, "latency_s")
     n = n_gpus
     bw_term = 2 * (n - 1) / n * msg / bw
     lat_term = 2 * (n - 1) * lat
@@ -195,9 +210,9 @@ def calc_tree_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
     Returns:
         Quantity[second]: Estimated AllReduce time
     """
-    msg = _ensure_unit(message_bytes, ureg.byte)
-    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second)
-    lat = _ensure_unit(latency_s, ureg.second)
+    msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
+    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s")
+    lat = _ensure_unit(latency_s, ureg.second, "latency_s")
     log_n = math.log2(n_gpus)
     bw_term = 2 * log_n * msg / bw
     lat_term = 2 * log_n * lat
@@ -219,9 +234,9 @@ def calc_all_to_all_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s):
     Returns:
         Quantity[second]: Estimated All-to-All time
     """
-    msg = _ensure_unit(message_bytes, ureg.byte)
-    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second)
-    lat = _ensure_unit(latency_s, ureg.second)
+    msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
+    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s")
+    lat = _ensure_unit(latency_s, ureg.second, "latency_s")
     n = n_gpus
     bw_term = (n - 1) / n * msg / bw
     lat_term = (n - 1) * lat
@@ -243,8 +258,8 @@ def calc_transformer_training_flops(n_params, n_tokens):
     Returns:
         Quantity[flop]: Total training FLOPs
     """
-    p = _ensure_unit(n_params, ureg.param).to(ureg.count).magnitude
-    d = _ensure_unit(n_tokens, ureg.count).magnitude
+    p = _ensure_unit(n_params, ureg.param, "n_params").to(ureg.count).magnitude
+    d = _ensure_unit(n_tokens, ureg.count, "n_tokens").magnitude
     return (6 * p * d) * ureg.flop
 
 
@@ -335,8 +350,8 @@ def calc_young_daly_interval(checkpoint_cost_s, mtbf_s):
     Returns:
         Quantity[second]: Optimal checkpoint interval
     """
-    delta = _ensure_unit(checkpoint_cost_s, ureg.second)
-    mtbf  = _ensure_unit(mtbf_s, ureg.second)
+    delta = _ensure_unit(checkpoint_cost_s, ureg.second, "checkpoint_cost_s")
+    mtbf  = _ensure_unit(mtbf_s, ureg.second, "mtbf_s")
     seconds = math.sqrt(2 * delta.m_as(ureg.second) * mtbf.m_as(ureg.second))
     return seconds * ureg.second
 
@@ -354,7 +369,7 @@ def calc_mtbf_cluster(component_mtbf_hours, n_components):
     Returns:
         Quantity[hour]: Cluster MTBF
     """
-    mtbf = _ensure_unit(component_mtbf_hours, ureg.hour)
+    mtbf = _ensure_unit(component_mtbf_hours, ureg.hour, "component_mtbf_hours")
     return (mtbf / n_components).to(ureg.hour)
 
 
@@ -378,12 +393,12 @@ def calc_mtbf_node(gpu_mtbf_h, n_gpus, nic_mtbf_h, n_nics,
     Returns:
         Quantity[hour]: Node MTBF
     """
-    gpu = _ensure_unit(gpu_mtbf_h, ureg.hour)
-    nic = _ensure_unit(nic_mtbf_h, ureg.hour)
-    psu = _ensure_unit(psu_mtbf_h, ureg.hour)
+    gpu = _ensure_unit(gpu_mtbf_h, ureg.hour, "gpu_mtbf_h")
+    nic = _ensure_unit(nic_mtbf_h, ureg.hour, "nic_mtbf_h")
+    psu = _ensure_unit(psu_mtbf_h, ureg.hour, "psu_mtbf_h")
     rate = n_gpus / gpu + n_nics / nic + n_psus / psu
     if other_mtbf_h is not None and n_other > 0:
-        rate += n_other / _ensure_unit(other_mtbf_h, ureg.hour)
+        rate += n_other / _ensure_unit(other_mtbf_h, ureg.hour, "other_mtbf_h")
     return (1.0 / rate).to(ureg.hour)
 
 
@@ -421,7 +436,7 @@ def calc_checkpoint_size(n_params, bytes_per_param=14):
     Returns:
         Quantity[byte]: Checkpoint size
     """
-    bpp = _ensure_unit(bytes_per_param, ureg.byte)
+    bpp = _ensure_unit(bytes_per_param, ureg.byte, "bytes_per_param")
     return (n_params * bpp).to(ureg.byte)
 
 
@@ -445,7 +460,7 @@ def calc_kv_cache_size(n_layers, n_heads, head_dim, seq_len, batch_size,
     Returns:
         Quantity[byte]: KV cache size
     """
-    bpe = _ensure_unit(bytes_per_elem, ureg.byte)
+    bpe = _ensure_unit(bytes_per_elem, ureg.byte, "bytes_per_elem")
     return (2 * n_layers * n_heads * head_dim * seq_len * batch_size * bpe).to(ureg.byte)
 
 
@@ -511,7 +526,7 @@ def calc_effective_flops(peak_flops, mfu, scaling_eff, goodput_ratio):
     Returns:
         Effective FLOPS in same units as peak_flops
     """
-    pf = _ensure_unit(peak_flops, ureg.flop / ureg.second)
+    pf = _ensure_unit(peak_flops, ureg.flop / ureg.second, "peak_flops")
     return (pf * mfu * scaling_eff * goodput_ratio).to(ureg.flop / ureg.second)
 
 
@@ -543,7 +558,7 @@ def calc_paged_kv_cache_size(n_layers, n_heads, head_dim, seq_len, batch_size,
     Returns:
         tuple: (Quantity[byte] size, float fragmentation_percent)
     """
-    bpe = _ensure_unit(bytes_per_elem, ureg.byte)
+    bpe = _ensure_unit(bytes_per_elem, ureg.byte, "bytes_per_elem")
     padded_seq_len = math.ceil(seq_len / page_size_tokens) * page_size_tokens
     
     internal_frag = max(0, padded_seq_len - seq_len)
@@ -568,8 +583,8 @@ def calc_queue_latency_mmc(arrival_rate_hz, service_rate_hz, num_servers):
     Returns:
         tuple: (utilization, Quantity[second] p50_wait_time, Quantity[second] p99_wait_time)
     """
-    lam = _ensure_unit(arrival_rate_hz, ureg.hertz).magnitude
-    mu = _ensure_unit(service_rate_hz, ureg.hertz).magnitude
+    lam = _ensure_unit(arrival_rate_hz, ureg.hertz, "arrival_rate_hz").magnitude
+    mu = _ensure_unit(service_rate_hz, ureg.hertz, "service_rate_hz").magnitude
     c = max(1, int(num_servers))
     
     if lam >= c * mu or mu == 0:

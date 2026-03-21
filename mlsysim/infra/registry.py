@@ -15,6 +15,9 @@ class Grids:
         pue=PUE_LIQUID_COOLED,
         wue=WUE_LIQUID,
         primary_source="hydro",
+        lat=52.9399,
+        lon=-73.5491,
+        renewable_pct=99.0,
         metadata={"source_url": "https://www.hydroquebec.com/about/our-energy.html", "last_verified": "2025-03-06"}
     )
     Norway = GridProfile(
@@ -22,21 +25,30 @@ class Grids:
         carbon_intensity_g_kwh=CARBON_NORWAY_GCO2_KWH,
         pue=PUE_LIQUID_COOLED,
         wue=WUE_LIQUID,
-        primary_source="hydro"
+        primary_source="hydro",
+        lat=60.472,
+        lon=8.4689,
+        renewable_pct=98.0
     )
     US_Avg = GridProfile(
         name="US Average",
         carbon_intensity_g_kwh=CARBON_US_AVG_GCO2_KWH,
         pue=PUE_BEST_AIR,
         wue=WUE_EVAPORATIVE,
-        primary_source="mixed"
+        primary_source="mixed",
+        lat=39.8283,
+        lon=-98.5795,
+        renewable_pct=21.0
     )
     Poland = GridProfile(
         name="Poland (Coal)",
         carbon_intensity_g_kwh=CARBON_POLAND_GCO2_KWH,
         pue=PUE_LEGACY,
         wue=WUE_EVAPORATIVE,
-        primary_source="coal"
+        primary_source="coal",
+        lat=51.9194,
+        lon=19.1451,
+        renewable_pct=17.0
     )
 
 class Racks:

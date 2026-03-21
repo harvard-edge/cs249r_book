@@ -7,6 +7,10 @@ on:
         description: 'Optional: Specific commit SHA to deploy. Deploys the latest successful `dev` build if empty. IMPORTANT: Select the `dev` branch before running.'
         required: false
         type: string
+      run_id:
+        description: 'Optional: Specific validate workflow run ID to pull artifacts from (bypasses success check).'
+        required: false
+        type: string
   workflow_run:
     workflows: ["📚 Book · ✅ Validate (Dev)"]
     types:
@@ -34,6 +38,16 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
             echo "run_id=${{ github.event.workflow_run.id }}" >> $GITHUB_OUTPUT
             echo "head_sha=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # If a specific run_id is provided, use it directly (bypasses success check)
+          RUN_ID_INPUT=$(echo "${{ github.event.inputs.run_id }}" | xargs)
+          if [[ -n "$RUN_ID_INPUT" ]]; then
+            echo "📌 Using provided run ID: $RUN_ID_INPUT"
+            echo "run_id=$RUN_ID_INPUT" >> $GITHUB_OUTPUT
+            RUN_SHA=$(gh api repos/${{ github.repository }}/actions/runs/${RUN_ID_INPUT} --jq '.head_sha')
+            echo "head_sha=$RUN_SHA" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -124,23 +138,30 @@ jobs:
           echo "📦 Preparing volume preview site..."
           mkdir -p ./preview-site/vol1 ./preview-site/vol2
 
-          cp -r ./html-vol1-artifact/* ./preview-site/vol1/
-          cp -r ./html-vol2-artifact/* ./preview-site/vol2/
+          echo "📋 Vol1 artifact contents:"
+          ls -la ./html-vol1-artifact/ 2>/dev/null || echo "  (empty or missing)"
+          echo "📋 Vol2 artifact contents:"
+          ls -la ./html-vol2-artifact/ 2>/dev/null || echo "  (empty or missing)"
+
+          # Use rsync-style copy that handles both flat and nested artifact layouts
+          cp -r ./html-vol1-artifact/. ./preview-site/vol1/
+          cp -r ./html-vol2-artifact/. ./preview-site/vol2/
 
           mkdir -p ./preview-site/vol1/assets/downloads ./preview-site/vol2/assets/downloads
 
-          # Copy PDF/EPUB downloads (find by extension, rename to consistent volume-specific names)
-          VOL1_PDF=$(find ./pdf-vol1-artifact -name "*.pdf" -type f 2>/dev/null | head -1)
-          [ -n "$VOL1_PDF" ] && cp "$VOL1_PDF" "./preview-site/vol1/assets/downloads/Machine-Learning-Systems-Vol1.pdf"
+          # Copy PDF/EPUB downloads by exact name (artifact dirs contain many files;
+          # a wildcard find can pick up a tiny figure PDF instead of the book)
+          VOL1_PDF=$(find ./pdf-vol1-artifact -name "Machine-Learning-Systems-Vol1.pdf" -type f 2>/dev/null | head -1)
+          [ -n "$VOL1_PDF" ] && cp "$VOL1_PDF" "./preview-site/vol1/assets/downloads/Machine-Learning-Systems-Vol1.pdf" || true
 
-          VOL1_EPUB=$(find ./epub-vol1-artifact -name "*.epub" -type f 2>/dev/null | head -1)
-          [ -n "$VOL1_EPUB" ] && cp "$VOL1_EPUB" "./preview-site/vol1/assets/downloads/Machine-Learning-Systems-Vol1.epub"
+          VOL1_EPUB=$(find ./epub-vol1-artifact -name "Machine-Learning-Systems-Vol1.epub" -type f 2>/dev/null | head -1)
+          [ -n "$VOL1_EPUB" ] && cp "$VOL1_EPUB" "./preview-site/vol1/assets/downloads/Machine-Learning-Systems-Vol1.epub" || true
 
-          VOL2_PDF=$(find ./pdf-vol2-artifact -name "*.pdf" -type f 2>/dev/null | head -1)
-          [ -n "$VOL2_PDF" ] && cp "$VOL2_PDF" "./preview-site/vol2/assets/downloads/Machine-Learning-Systems-Vol2.pdf"
+          VOL2_PDF=$(find ./pdf-vol2-artifact -name "Machine-Learning-Systems-Vol2.pdf" -type f 2>/dev/null | head -1)
+          [ -n "$VOL2_PDF" ] && cp "$VOL2_PDF" "./preview-site/vol2/assets/downloads/Machine-Learning-Systems-Vol2.pdf" || true
 
-          VOL2_EPUB=$(find ./epub-vol2-artifact -name "*.epub" -type f 2>/dev/null | head -1)
-          [ -n "$VOL2_EPUB" ] && cp "$VOL2_EPUB" "./preview-site/vol2/assets/downloads/Machine-Learning-Systems-Vol2.epub"
+          VOL2_EPUB=$(find ./epub-vol2-artifact -name "Machine-Learning-Systems-Vol2.epub" -type f 2>/dev/null | head -1)
+          [ -n "$VOL2_EPUB" ] && cp "$VOL2_EPUB" "./preview-site/vol2/assets/downloads/Machine-Learning-Systems-Vol2.epub" || true
 
       - name: 📝 Create .nojekyll file
         run: touch ./preview-site/.nojekyll
@@ -151,15 +172,36 @@ jobs:
           ls -la ./preview-site
           echo "::endgroup::"
 
-          echo "::group::Assets/Downloads Contents"
-          if [ -d "./preview-site/assets/downloads" ]; then
-            ls -la ./preview-site/assets/downloads
+          echo "::group::Vol1 Downloads"
+          if [ -d "./preview-site/vol1/assets/downloads" ]; then
+            ls -lh ./preview-site/vol1/assets/downloads
           else
-            echo "No assets/downloads directory"
+            echo "⚠️ No vol1/assets/downloads directory"
           fi
           echo "::endgroup::"
 
-      - name: ⬇️ Checkout repository (for scripts and landing site)
+          echo "::group::Vol2 Downloads"
+          if [ -d "./preview-site/vol2/assets/downloads" ]; then
+            ls -lh ./preview-site/vol2/assets/downloads
+          else
+            echo "⚠️ No vol2/assets/downloads directory"
+          fi
+          echo "::endgroup::"
+
+          # Sanity check: PDFs should be >1MB (a figure PDF would be <100KB)
+          for vol in vol1 vol2; do
+            PDF="./preview-site/$vol/assets/downloads/Machine-Learning-Systems-$(echo $vol | sed 's/vol/Vol/').pdf"
+            if [ -f "$PDF" ]; then
+              SIZE=$(stat -c%s "$PDF" 2>/dev/null || stat -f%z "$PDF" 2>/dev/null)
+              if [ "$SIZE" -lt 1000000 ]; then
+                echo "::error::$vol PDF is only ${SIZE} bytes — likely a figure, not the book!"
+              else
+                echo "✅ $vol PDF looks correct: $(du -h "$PDF" | cut -f1)"
+              fi
+            fi
+          done
+
+      - name: ⬇️ Checkout repository (for scripts)
         uses: actions/checkout@v6
         with:
           ref: dev
@@ -167,45 +209,7 @@ jobs:
           sparse-checkout: |
             ${{ vars.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py
             .github/dev-landing/book-index.html
-            book/quarto/landing_site
-            book/quarto/assets/styles
           sparse-checkout-cone-mode: false
-
-      - name: 🔧 Install Quarto
-        uses: quarto-dev/quarto-actions/setup@v2
-
-      - name: 🏠 Build and prepare landing site
-        run: |
-          echo "🏗️ Rendering Quarto landing site..."
-          cd ./repo-scripts/book/quarto
-          quarto render landing_site/index.qmd
-          echo "✅ Landing site rendered"
-          ls -la _build/html-landing/
-
-          echo "🔧 Rewriting URLs for dev site..."
-          # The landing page hardcodes mlsysbook.ai URLs — rewrite for dev site structure.
-          # The rendered index.html will be served from the ROOT of the dev site, so
-          # relative paths use no ../ prefix (e.g. book/vol1/, tinytorch/).
-          cd _build/html-landing
-          for f in $(find . -name "*.html" -type f); do
-            # Volume links: mlsysbook.ai/vol1/ -> book/vol1/
-            sed -i 's|https://mlsysbook.ai/vol1/|book/vol1/|g' "$f"
-            sed -i 's|https://mlsysbook.ai/vol2/|book/vol2/|g' "$f"
-            # Other subsite links
-            sed -i 's|https://mlsysbook.ai/tinytorch/|tinytorch/|g' "$f"
-            sed -i 's|https://mlsysbook.ai/kits/|kits/|g' "$f"
-            sed -i 's|https://mlsysbook.ai/labs/|labs/|g' "$f"
-            sed -i 's|https://mlsysbook.ai/mlsysim/|mlsysim/|g' "$f"
-            # Navbar relative links (href="vol1/" etc. produced by Quarto from _quarto.yml)
-            sed -i 's|href="vol1/"|href="book/vol1/"|g' "$f"
-            sed -i 's|href="vol2/"|href="book/vol2/"|g' "$f"
-            # Download links
-            sed -i 's|https://mlsysbook.ai/vol1/assets/downloads/|book/vol1/assets/downloads/|g' "$f"
-            sed -i 's|https://mlsysbook.ai/vol2/assets/downloads/|book/vol2/assets/downloads/|g' "$f"
-            # Remaining mlsysbook.ai base URL (e.g. site-url, og tags) -> dev site root
-            sed -i 's|https://mlsysbook.ai/|./|g' "$f"
-          done
-          echo "✅ URL rewriting complete"
 
       - name: 🔧 Modify announcement for dev preview
         run: |
@@ -244,23 +248,13 @@ jobs:
           echo "🔄 Entering target repository..."
           cd target-repo
 
-          echo "🧹 Cleaning /${{ vars.DEV_BOOK_PATH }}/ subdirectory only (preserving /${{ vars.DEV_TINYTORCH_PATH }}/ and landing page)..."
-          # Only remove book subdirectory, preserve other content
+          echo "🧹 Cleaning /${{ vars.DEV_BOOK_PATH }}/ subdirectory only (preserving other subsites)..."
           rm -rf ${{ vars.DEV_BOOK_PATH }}
           mkdir -p ${{ vars.DEV_BOOK_PATH }}
 
           echo "🚚 Copying book content to /${{ vars.DEV_BOOK_PATH }}/ subdirectory..."
           cp -r "${{ github.workspace }}/preview-site/." ${{ vars.DEV_BOOK_PATH }}/
 
-          echo "📄 Deploying Quarto landing site to root..."
-          # Copy rendered landing site to root (preserves tinytorch/ and book/ if they exist)
-          LANDING_DIR="${{ github.workspace }}/repo-scripts/book/quarto/_build/html-landing"
-          if [ -d "$LANDING_DIR" ]; then
-            cp -r "$LANDING_DIR"/. ./
-            echo "✅ Quarto landing site deployed to root"
-          else
-            echo "⚠️ Landing site not found, falling back to book-index.html"
-          fi
           # Copy book volume chooser page so /book/ doesn't 404
           cp "${{ github.workspace }}/repo-scripts/.github/dev-landing/book-index.html" ${{ vars.DEV_BOOK_PATH }}/index.html
           touch .nojekyll
@@ -276,11 +270,6 @@ jobs:
             exit 1
           fi
 
-          if [ ! -f "index.html" ]; then
-            echo "❌ CRITICAL: Landing page index.html is missing. Aborting deployment."
-            exit 1
-          fi
-
           echo "📦 Repository structure:"
           ls -la
           echo ""
@@ -290,7 +279,16 @@ jobs:
           echo "📦 Committing and pushing changes..."
           git add .
           git commit -m "🚀 Deploy book dev preview to /${{ vars.DEV_BOOK_PATH }}/ from ${{ steps.run_info.outputs.head_sha }}" --allow-empty || echo "🟡 Nothing to commit"
-          git push origin main
+
+          # Retry push with rebase to handle concurrent deploys
+          for i in 1 2 3; do
+            if git push origin main 2>/dev/null; then
+              echo "✅ Push succeeded on attempt $i"
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin main || true
+          done
 
           # DEV_REPO contains org/repo format, extract just repo name for GitHub Pages URL
           REPO_NAME="${{ vars.DEV_REPO }}"

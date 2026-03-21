@@ -87,6 +87,7 @@ data loading, no preprocessing, just pure compute:
 ```{python}
 from mlsysim import SingleNodeModel
 from mlsysim.core.constants import Q_
+from mlsysim.show import table, info
 
 model = mlsysim.Models.ResNet50
 hardware = mlsysim.Hardware.Cloud.A100
@@ -95,12 +96,13 @@ solver = SingleNodeModel()
 # Baseline: ResNet-50 on A100, batch 256, FP16
 profile = solver.solve(model=model, hardware=hardware, batch_size=256, precision="fp16")
 
-print(f"Model:          {model.name}")
-print(f"Hardware:       {hardware.name}")
-print(f"Batch size:     256")
-print(f"Step latency:   {profile.latency.to('ms'):~.2f}")
-print(f"Throughput:     {profile.throughput:.0f} img/s")
-print(f"Bottleneck:     {profile.bottleneck}")
+info("GPU Compute Baseline",
+     Model=model.name,
+     Hardware=hardware.name,
+     Batch_size=256,
+     Step_latency=profile.latency.to('ms'),
+     Throughput=f"{profile.throughput:.0f} img/s",
+     Bottleneck=profile.bottleneck)
 ```
 
 The GPU can process this batch in tens of milliseconds. That is the ceiling. Now let's
@@ -127,10 +129,11 @@ demand_rate = Q_(data_per_step / step_time_s, "GB/s")
 data_solver = DataModel()
 data_result = data_solver.solve(workload_data_rate=demand_rate, hardware=hardware)
 
-print(f"Data demand:    {demand_rate:.3f}")
-print(f"Storage supply: {data_result.supply_bw:.2f}")
-print(f"Utilization:    {data_result.utilization:.1%}")
-print(f"Is stalled:     {data_result.is_stalled}")
+info("Storage I/O Check",
+     Data_demand=f"{demand_rate:.3f}",
+     Storage_supply=f"{data_result.supply_bw:.2f}",
+     Utilization=f"{data_result.utilization:.1%}",
+     Is_stalled=data_result.is_stalled)
 ```
 
 Storage I/O is fine — modern NVMe SSDs can deliver multi-GB/s easily. The bottleneck is
@@ -157,11 +160,12 @@ t = transform_solver.solve(
     accelerator_step_time=profile.latency
 )
 
-print(f"CPU transform time:     {t.transform_time:~.2f}")
-print(f"GPU step time:          {t.accelerator_step_time:~.2f}")
-print(f"CPU is bottleneck:      {t.is_bottleneck}")
-print(f"GPU utilization:        {t.accelerator_utilization:.1%}")
-print(f"Slowdown factor:        {t.slowdown_factor:.2f}x")
+info("CPU vs GPU Pipeline",
+     CPU_transform_time=t.transform_time,
+     GPU_step_time=t.accelerator_step_time,
+     CPU_is_bottleneck=t.is_bottleneck,
+     GPU_utilization=f"{t.accelerator_utilization:.1%}",
+     Slowdown_factor=f"{t.slowdown_factor:.2f}x")
 ```
 
 ::: {.callout-important}
@@ -184,9 +188,7 @@ small batches, the GPU is slower and data arrives in time. At large batches, the
 becomes more efficient but the CPU falls behind:
 
 ```{python}
-print(f"{'Batch':>6}  {'GPU Step':>10}  {'CPU Xform':>10}  {'Binding':>14}  {'GPU Util':>9}")
-print("-" * 58)
-
+rows = []
 for bs in [32, 64, 128, 256, 512, 1024]:
     p = solver.solve(model=model, hardware=hardware, batch_size=bs, precision="fp16")
 
@@ -198,13 +200,15 @@ for bs in [32, 64, 128, 256, 512, 1024]:
     )
 
     binding = "Transformation" if t.is_bottleneck else p.bottleneck
-    print(
-        f"{bs:>6}  "
-        f"{p.latency.to('ms').magnitude:>8.2f}ms  "
-        f"{t.transform_time.to('ms').magnitude:>8.2f}ms  "
-        f"{binding:>14}  "
-        f"{t.accelerator_utilization:>8.1%}"
-    )
+    rows.append([
+        bs,
+        f"{p.latency.to('ms').magnitude:.2f} ms",
+        f"{t.transform_time.to('ms').magnitude:.2f} ms",
+        binding,
+        f"{t.accelerator_utilization:.1%}"
+    ])
+
+table(["Batch", "GPU Step", "CPU Xform", "Binding", "GPU Util"], rows)
 ```
 
 Watch the crossover: at small batch sizes the GPU is the bottleneck (100% utilization).
@@ -218,9 +222,7 @@ sub-linearly. Eventually Wall 9 becomes the binding constraint and GPU utilizati
 The simplest fix for a CPU bottleneck is more workers. Let's compare 8 vs. 16 vs. 32:
 
 ```{python}
-print(f"{'Workers':>8}  {'Throughput':>12}  {'GPU Util @ bs=512':>18}")
-print("-" * 44)
-
+rows = []
 for n_workers in [8, 16, 32]:
     cpu_tp = Q_(f"{n_workers * 250} MB/s")
 
@@ -233,11 +235,9 @@ for n_workers in [8, 16, 32]:
         accelerator_step_time=p.latency
     )
 
-    print(
-        f"{n_workers:>8}  "
-        f"{cpu_tp.to('GB/s'):>12.1f~}  "
-        f"{t.accelerator_utilization:>17.1%}"
-    )
+    rows.append([n_workers, cpu_tp.to('GB/s'), f"{t.accelerator_utilization:.1%}"])
+
+table(["Workers", "Throughput", "GPU Util @ bs=512"], rows)
 ```
 
 Doubling workers doubles throughput — but you eventually hit either storage I/O limits

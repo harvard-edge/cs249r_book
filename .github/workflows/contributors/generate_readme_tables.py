@@ -16,6 +16,7 @@ from pathlib import Path
 
 PROJECTS = {
     "book": "book/",
+    "interviews": "interviews/",
     "kits": "kits/",
     "labs": "labs/",
     "tinytorch": "tinytorch/",

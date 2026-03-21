@@ -3,6 +3,8 @@
 mlsysim: Machine Learning Systems Infrastructure and Modeling Platform
 """
 
+__version__ = "0.1.0"
+
 from . import core
 from . import hardware
 from . import models
@@ -18,11 +20,17 @@ from . import hardware as hardware_mod
 from . import models as models_mod
 from . import infra as infra_mod
 from . import systems as systems_mod
+from .core.scenarios import Scenarios, Applications, Archetypes
+
+# backward compatibility
+from .core import constants
+from .systems.registry import Tiers
 
 # Export primary API objects for convenience
 from .hardware.types import HardwareNode
 from .models.types import Workload, TransformerWorkload, CNNWorkload
 from .systems.types import Fleet, Node, NetworkFabric, DeploymentTier
+from .core.evaluation import SystemEvaluator, SystemEvaluation
 from .core.scenarios import Scenario, Scenarios, Applications
 from .core.config import SimulationConfig, load_config
 from .core.engine import PerformanceProfile, Engine
@@ -57,7 +65,7 @@ from .core.solver import (
 from .hardware.registry import Hardware
 from .models.registry import Models
 from .infra.registry import Infra
-from .systems.registry import Systems
+from .systems.registry import Systems, Tiers
 
 # Export unit registry for custom workload definitions
 from .core.constants import ureg
@@ -80,13 +88,13 @@ __all__ = [
     "SingleNodeModel", "DistributedModel", "ReliabilityModel",
     "SustainabilityModel", "EconomicsModel", "ServingModel",
     "ContinuousBatchingModel", "WeightStreamingModel", "TailLatencyModel",
-    "CheckpointModel", "DataModel", "ScalingModel", "OrchestrationModel", 
+    "CheckpointModel", "DataModel", "ScalingModel", "OrchestrationModel",
     "CompressionModel", "EfficiencyModel", "TransformationModel", "TopologyModel",
     "InferenceScalingModel", "SensitivitySolver", "SynthesisSolver",
     "ResponsibleEngineeringModel", "ParallelismOptimizer",
     "BatchingOptimizer", "PlacementOptimizer",
     # Registries
-    "Hardware", "Models", "Infra", "Systems",
+    "Hardware", "Models", "Infra", "Systems", "Tiers",
     # Units
     "ureg",
     # Visualization
