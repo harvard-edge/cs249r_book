@@ -142,147 +142,216 @@ Monitoring, drift detection, deployment strategies, security, power management, 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Thermal Memory Wall</b> · <code>hardware</code> <code>reliability</code></summary>
 
 ### HBM Junction Overheating
 
-**Common Mistake:** "The memory bandwidth must be bottlenecked by the PCIe bus." PCIe is irrelevant for internal HBM bandwidth.
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph TD
+    classDef safe fill:#e0f2fe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef danger fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#991b1b,stroke-dasharray: 5 5
 
-**Realistic Solution:** You are monitoring the GPU Core temperature, but ignoring the **HBM Junction Temperature**. HBM3e is stacked 8 to 12 layers high directly adjacent to the GPU die. Because it is a dense 3D stack, it is incredibly difficult to cool.
+    subgraph "H100 GPU Package"
+        Logic["Compute Die<br/>(68°C: SAFE)"]:::safe
+        HBM["HBM3 Stacks<br/>(95°C: HOT)"]:::danger
+    end
 
-HBM modules have a strict maximum operating temperature (typically around 95°C). While the GPU die might be at 68°C, a heavy memory-bound workload (like large-batch LLM prefill) generates massive heat within the memory stacks. If the HBM junction hits its thermal limit, the memory controller automatically downclocks the memory frequency to prevent physical damage, silently tanking your memory bandwidth while the core GPU temperature looks perfectly healthy.
+    Sensor["Thermal Sensor"] -- "🚨 OVERTEMP" --> DVFS["DVFS Controller"]
+    DVFS -- "THROTTLE" --> HBM
+    HBM -- "BW DROP" --> Logic
 
-> **Napkin Math:** Theoretical HBM3e bandwidth = 4.8 TB/s. If the HBM stack hits 95°C, the memory controller might drop the clock from ~6 GHz to ~3.5 GHz. Effective bandwidth drops proportionally: 4.8 * (3.5/6.0) = ~2.8 TB/s. You lose 40% of your performance without a single error message.
+    Note["🚨 SILENT PERFORMANCE DROP<br/>Memory bandwidth slashed to 2.8 TB/s<br/>(40% Throttled)"]:::danger
+```
 
-📖 **Deep Dive:** [Volume II: Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+- **Interviewer:** "Your H200 cluster is processing a massive batch inference job. `nvidia-smi` shows the GPU core temperature is a very safe 68°C. However, your memory bandwidth benchmark shows you are only achieving 2.8 TB/s instead of the rated 4.8 TB/s. What thermal component are you failing to monitor?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The memory bandwidth must be bottlenecked by the PCIe bus." PCIe is irrelevant for internal HBM bandwidth.
+
+  **Realistic Solution:** You are monitoring the GPU Core temperature, but ignoring the **HBM Junction Temperature**. HBM3e is stacked 8 to 12 layers high directly adjacent to the GPU die. Because it is a dense 3D stack, it is incredibly difficult to cool. HBM modules have a strict maximum operating temperature (~95°C). While the GPU die is at 68°C, a heavy memory-bound workload generates massive heat within the memory stacks. If the HBM hits its limit, the memory controller downclocks the frequency, silently tanking your bandwidth.
+
+  > **Napkin Math:** Theoretical HBM3e bandwidth = 4.8 TB/s. If the HBM hits 95°C, the controller may drop the clock from 6 GHz to 3.5 GHz. Effective bandwidth = $4.8 \times (3.5/6.0) = \sim 2.8 \text{ TB/s}$. You lose 40% of performance with no error message.
+
+  📖 **Deep Dive:** [Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+
+  </details>
+
 </details>
 
 
 #### 🔵 L4 — Apply & Identify
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Attention Skew</b> · <code>parallelism</code> <code>memory</code></summary>
 
 ### The Causal Mask Asymmetry
 
-**Common Mistake:** "Ring Attention shouldn't have an imbalance; the communication is a perfect ring." The communication is symmetrical, but the *causal mask* of the attention mechanism is not.
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph LR
+    classDef used fill:#e0f2fe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef empty fill:#f3f4f6,stroke:#94a3b8,stroke-width:1px,color:#64748b
+    classDef danger fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#991b1b,stroke-dasharray: 5 5
 
-**Realistic Solution:** In causal autoregressive modeling (like GPT), a token can only attend to itself and prior tokens.
-GPU 0 holds tokens [0 to 15,624]. These tokens can only attend to tokens within GPU 0's chunk. The upper triangle of the attention matrix is masked out.
-GPU 63 holds tokens [984,375 to 1,000,000]. These tokens must attend to *all 1 million tokens* that preceded them.
+    subgraph "Ring Attention Pipeline (Chunked Sequence)"
+        direction TB
+        subgraph "GPU 0 (Start of Seq)"
+            M0["Minimal KV History<br/>(Idle Capacity)"]:::empty
+        end
+        subgraph "GPU 63 (End of Seq)"
+            M63["Massive KV History<br/>(Max Compute/Mem)"]:::danger
+        end
+    end
 
-Even with FlashAttention, the backward pass must store the Log-Sum-Exp (LSE) statistics and intermediate values for the gradients. Because GPU 63 computes attention against 64x more KV blocks than GPU 0, its activation memory for the backward pass is drastically higher. GPU 63 OOMs while GPU 0 is mostly idle.
+    Note["🚨 LOAD IMBALANCE<br/>GPU 63 OOMs while GPU 0 is empty<br/>Due to causal triangle masking"]:::danger
+```
 
-> **Napkin Math:** For a single attention head doing the backward pass, the memory required scales with the number of unmasked query-key comparisons. GPU 0 computes ~(15K)^2 / 2 unmasked comparisons. GPU 63 computes ~15K * 1M - (15K)^2 / 2 comparisons. GPU 63 is doing nearly 64x the math and storing 64x the block-level intermediate statistics. You must use load-balancing sequence parallelism (like Striped Attention) where each GPU gets interleaved chunks.
+- **Interviewer:** "You are using Ring Attention to train a model with a 1-million token context window across 64 GPUs. The sequence is chunked evenly. Yet, profiling shows GPU 63 runs out of memory, while GPU 0 has 40 GB of free VRAM. Why does an evenly chunked sequence cause an asymmetric memory footprint?"
 
-📖 **Deep Dive:** [Volume I: Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Ring Attention shouldn't have an imbalance; the communication is a perfect ring." The communication is symmetrical, but the *causal mask* of the attention mechanism is not.
+
+  **Realistic Solution:** In autoregressive LLMs, tokens can only attend to prior tokens (causal masking). GPU 0 holds the start of the sequence and attends to almost nothing outside its chunk. GPU 63 holds the end of the sequence and must attend to the full KV-cache of all 63 preceding GPUs as they flow through the ring. This creates a massive imbalance in activation memory during the backward pass. The fix is **Zig-Zag Ring Attention** or **Striped Attention**, which interleaves sequence chunks to balance the causal computation load.
+
+  > **Napkin Math:** For a 1M sequence, GPU 0 processes 1/64th of the causal triangle. GPU 63 processes its own chunk plus checks against all 63 previous chunks. GPU 63 stores nearly 64x more block-level statistics for the backward pass than GPU 0.
+
+  📖 **Deep Dive:** [Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Compilation Wall</b> · <code>frameworks</code> <code>compiler</code></summary>
 
 ### The Graph Compilation Wall
 
-**Common Mistake:** "Trainium just has slower interconnects than NVLink." The interconnect isn't the issue here; the execution paradigm is.
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph LR
+    classDef process fill:#f3f4f6,stroke:#4b5563,stroke-width:2px,color:#1f2937
+    classDef danger fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#991b1b,stroke-dasharray: 5 5
 
-**Realistic Solution:** You hit the **Graph Compilation Wall**. Unlike NVIDIA GPUs where PyTorch executes eagerly (kernel by kernel), AI accelerators like Trainium, Inferentia, and TPUs rely on XLA (Accelerated Linear Algebra) or Neuron compilers. They must capture the entire computation graph, optimize it, and compile it into specific machine code for their systolic arrays.
+    subgraph "Custom Silicon Pipeline (XLA/Neuron)"
+        Code["PyTorch Code<br/>(Dynamic Shapes)"]
+        Comp["Neuron Compiler<br/>(Static Graph Ops)"]:::danger
+        Exec["ASIC Execution<br/>(Systolic Array)"]
+    end
 
-Two things happened:
-1. **Compilation Time:** Compiling a large, dynamic model for a custom ASIC can literally take hours. The "48 hours to start" was the compiler trying to map your Python loops into a static graph.
-2. **Dynamic Shapes:** If your PyTorch code has dynamic batch sizes, dynamic sequence lengths, or data-dependent control flow (like `if x.sum() > 0`), the compiler cannot create a single static graph. It is forced to re-compile the graph on the fly during training (JIT thrashing), or fall back to the host CPU for those operations. This destroys throughput.
+    Code -->|Step 1: Seq=512| Comp
+    Comp --> Exec
+    Code -->|Step 2: Seq=514| Comp
+    Comp -- "🚨 RECOMPILE" --> Comp
+    Comp --> Exec
 
-> **Napkin Math:** If an XLA compilation takes 30 seconds, and your data loader yields a slightly different sequence length every batch due to bucketing (e.g., 512, then 514, then 500), the Neuron compiler triggers a recompile every step. 1,000 steps * 30 seconds = 8.3 hours of pure compiling, yielding a catastrophic tokens/second rate.
+    Note["🚨 JIT THRASHING<br/>Dynamic shapes trigger re-compiles<br/>Overhead destroys throughput"]:::danger
+```
 
-📖 **Deep Dive:** [Volume I: ML Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+- **Interviewer:** "You migrate a PyTorch model to a custom AI accelerator (e.g. AWS Trainium). The hardware is cheaper per TFLOPS than an A100, but the first epoch takes 48 hours to start, and training is 3x slower. Your sequence lengths vary slightly per batch. What is 'killing' your performance?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Custom silicon just has slower interconnects than NVIDIA." The interconnect isn't the issue; the execution paradigm is.
+
+  **Realistic Solution:** You hit the **Graph Compilation Wall**. Unlike NVIDIA GPUs which execute eagerly, accelerators like Trainium/TPU rely on compilers (XLA/Neuron) to map code into static graphs for systolic arrays. The "48 hours" was the initial compilation. Because your sequence lengths vary, the compiler triggers a **Re-compile (JIT Thrashing)** on every batch, destroying throughput. The fix is to use **Static Padding**: pad all sequences to a fixed power-of-two length to reuse the same compiled graph.
+
+  > **Napkin Math:** If an XLA compile takes 30s and a training step takes 0.5s, a single re-compile adds 60x overhead to that step. Even a 5% re-compile rate will cut your overall tokens/sec by half.
+
+  📖 **Deep Dive:** [Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
 </details>
 
 
 #### 🟡 L5 — Analyze & Predict
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Root Complex Choke</b> · <code>hardware</code> <code>storage</code></summary>
 
 ### The PCIe Root Complex Saturation
 
-**Common Mistake:** "14 GB/s is too slow, we need more NVMe drives." While true, adding more drives won't help if you hit the root bottleneck: the PCIe switch topology and CPU root complex.
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph TD
+    classDef compute fill:#e0f2fe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef bottleneck fill:#fee2e2,stroke:#dc2626,stroke-width:4px,color:#991b1b,stroke-dasharray: 5 5
 
-**Realistic Solution:** ZeRO-Infinity streams massive amounts of data from the GPU to the NVMe drives. On a standard 8-GPU node, the GPUs communicate with each other via NVSwitch, but to reach the NVMe drives, traffic must go through the PCIe switch network and often traverse the CPU root complex.
+    subgraph "CPU Root Complex (128 Lanes Total)"
+        Root["PCIe Switch / Root Complex"]:::bottleneck
+    end
 
-A typical dual-socket server might have 128 PCIe Gen5 lanes total from the CPUs. 8x H100s already consume 128 lanes (16 lanes each). The NVMe drives are competing for the exact same PCIe lanes and CPU interconnect bandwidth (UPI). If you try to write 8x GPU gradients to 8x NVMe drives simultaneously, the CPU's PCIe root complex becomes totally saturated. The GPUs stall waiting for DMA transfers to complete over a congested bus.
+    subgraph "High Bandwidth Demand"
+        direction LR
+        G1["8x H100 GPUs<br/>(128 Lanes Req)"]:::compute
+        S1["8x NVMe SSDs<br/>(32 Lanes Req)"]:::compute
+    end
 
-> **Napkin Math:** 1T parameters = 2 TB of gradients (FP16). Sharded across 128 GPUs = 15.6 GB per GPU. At the end of a layer's backward pass, the GPU must write its 15.6 GB shard to NVMe. Theoretical NVMe speed: 14 GB/s -> ~1.1s. But if 4 GPUs on one CPU socket try to write 14 GB/s (56 GB/s total), they hit the CPU's internal bus limit. The effective transfer drops to ~3-4 GB/s per GPU, creating a 4-5 second stall per layer.
+    G1 --> Root
+    S1 --> Root
 
-📖 **Deep Dive:** [Volume II: Distributed Training](https://harvard-edge.github.io/cs249r_book_dev/contents/distributed_training/distributed_training.html)
-</details>
+    Note["🚨 BUS CONGESTION<br/>Total demand: 160 Lanes<br/>Physical limit: 128 Lanes"]:::bottleneck
+```
 
-
-#### 🔴 L6+ — Synthesize & Derive
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Stale Feature Anomaly</b> · <code>real-time-feature-store</code></summary>
-
-- **Interviewer:** "You are designing a low-latency real-time fraud detection system. The model relies on features like 'number of transactions in the last 5 minutes' and 'average transaction amount in the last hour.' Initially, these features were pre-computed in daily batch jobs and stored in a data warehouse. However, your team observes that the model's performance significantly degrades in the first few hours of each day, showing a 'staleness' effect. How would you redesign the feature serving architecture to ensure features are fresh and consistent for real-time inference?"
+- **Interviewer:** "You use DeepSpeed ZeRO-Infinity to offload optimizer states to NVMe SSDs during 1-Trillion parameter model training. You have 8x H100s and 8x top-tier Gen5 NVMe drives. During the backward pass, GPU utilization drops to 12%. Based on the PCIe diagram, why didn't adding more drives fix the IO bottleneck?"
 
   <details>
   <summary><b>🔍 Reveal Answer</b></summary>
 
-  **Common Mistake:** "We need to run the batch jobs more frequently, e.g., hourly." While more frequent batching reduces staleness, it doesn't eliminate it and introduces increasing computational overhead. It also doesn't solve for features that truly need second-level freshness.
+  **Common Mistake:** "14 GB/s is too slow, we need more NVMe drives." Adding drives won't help if you hit the root bottleneck: the PCIe switch topology and CPU root complex.
 
-  **Realistic Solution:** The problem highlights the mismatch between batch-generated features and real-time inference needs. The solution requires a **real-time feature store** and a stream processing pipeline to calculate and serve fresh features.
+  **Realistic Solution:** You have **Root Complex Saturation**. A dual-socket server has a fixed number of PCIe lanes (e.g. 128 lanes). 8x H100s already consume the entire 128-lane budget. When you add NVMe drives, they must share these lanes via a PCIe switch or compete for the same CPU-to-Switch bandwidth. The root complex becomes a bottleneck, and the GPUs stall waiting for DMA transfers. The fix is to use **GPUDirect Storage** to bypass the CPU or move to a multi-node setup where the IO load is sharded.
 
-  **Redesign Steps:**
-    1.  **Stream Processing for Feature Calculation:** Ingest raw event data (e.g., transactions, user actions) into a real-time stream processing platform (e.g., Apache Kafka, Amazon Kinesis, Google Cloud Pub/Sub). Use stream processing engines (e.g., Apache Flink, Spark Streaming, ksqlDB) to compute time-windowed and aggregate features (e.g., 'transactions in last 5 mins') as events happen.
-    2.  **Real-time Feature Store:** Store the freshly computed features in a low-latency, high-throughput key-value store optimized for online lookups (e.g., Redis, DynamoDB, Cassandra, or a dedicated feature store like Feast). This store should be accessible by the inference service with single-digit millisecond latency.
-    3.  **Dual-Write/Hybrid Architecture:** For historical features or those that can tolerate higher latency, maintain the existing batch pipeline to populate an offline feature store (e.g., S3, data warehouse). Ensure consistency between online and offline stores for training/serving parity.
-    4.  **Point-in-Time Correctness:** Crucially, the feature store must support retrieving features as they existed at a specific point in time. This is vital for replaying events, backtesting models, and ensuring that features used for training accurately reflect those available during historical inference.
-    5.  **Feature Versioning and Monitoring:** Implement versioning for features and monitor feature freshness, distribution, and drift in real-time.
+  > **Napkin Math:** 8 GPUs @ 16 lanes each = 128 lanes. 8 NVMe @ 4 lanes each = 32 lanes. Total demand = 160 lanes. You are 25% oversubscribed at the physical layer before any software overhead.
 
-  > **Napkin Math:** If batch features update daily at 3 AM, a request at 4 AM uses features that are 1 hour old. A request at 2 AM the next day uses features that are nearly 23 hours old.
-  > With stream processing and a real-time feature store, the feature staleness can be reduced to `(processing_latency + ingestion_latency)`, typically in the order of `tens to hundreds of milliseconds`.
-  > For example, a feature updated within 500ms of the event occurrence.
-
-  > **Key Equation:** `FeatureStaleness = Max(EventToFeatureCalculationLatency, FeatureIngestionToStoreLatency)`
-
-  📖 **Deep Dive:** [Volume I: Real-time Feature Stores for ML](https://mlsysbook.ai/vol1/data/feature-stores)
+  📖 **Deep Dive:** [Hardware Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
 
   </details>
 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Power Stranding Crisis</b> · <code>datacenter-ops</code></summary>
-
-- **Interviewer:** "You build a new cluster with 1,000 H100 GPUs. The facility has a strict 1 Megawatt (1MW) power limit. You calculate that each GPU uses 700W, so `1000 * 700W = 700kW`. You assume you have 300kW of headroom for CPUs and networking. Yet, the moment you launch a massive distributed AllReduce, the main datacenter breaker trips and the entire cluster goes dark. What macro-physics did you miss?"
-
-  <details>
-  <summary><b>🔍 Reveal Answer</b></summary>
-
-  **Common Mistake:** "Treating Thermal Design Power (TDP) as a flat, continuous draw, and forgetting the infrastructure required to move the heat away from the chips."
-
-  **Realistic Solution:** You ignored Power Usage Effectiveness (PUE) and transient power spikes. First, TDP is an average. During intense synchronized operations like AllReduce, GPUs can experience millisecond-level power excursions (spikes) that pull 1.5x to 2x their rated TDP. If 1,000 GPUs spike simultaneously, your 700kW draw instantly spikes to 1.2MW. Second, PUE accounts for cooling. A typical PUE is 1.2, meaning for every 1 Watt of compute, you need 0.2 Watts to run the CRAC units, chillers, and pumps. 700kW of compute requires 140kW of cooling. You mathematically exceeded the facility's physical limit before the job even started.
-
-  > **Napkin Math:** `Compute Power = 1000 GPUs * 700W = 700kW`. `Facility Overhead (PUE 1.2) = 700kW * 1.2 = 840kW`. Add CPUs, switches, and optics (~150kW) -> `990kW`. You are right at the 1MW edge. When the distributed sync happens, a 20% transient power spike hits `990kW * 1.2 = ~1.18 MW`. The main breaker physically trips to prevent the wires from melting.
-
-  📖 **Deep Dive:** [Volume I: ML Operations](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_ops/ml_ops.html)
-
-  </details>
-
-</details>
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Memory Illusion</b> · <code>hardware</code> <code>memory-hierarchy</code></summary>
 
 ### The C2C Bandwidth Choke
 
-**Common Mistake:** "Unified memory means the GPU can read all 480 GB at HBM speeds." Unified memory means the GPU can address the CPU memory directly without explicit copies, but it does NOT bypass the physical bandwidth limitations of the interconnect.
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph LR
+    classDef compute fill:#e0f2fe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef host fill:#f3f4f6,stroke:#4b5563,stroke-width:2px,color:#1f2937
+    classDef bottleneck fill:#fee2e2,stroke:#dc2626,stroke-width:4px,color:#991b1b,stroke-dasharray: 5 5
 
-**Realistic Solution:** The GH200 connects the GPU to CPU RAM via a 900 GB/s bidirectional NVLink-C2C. During autoregressive decoding, the GPU must read the entire 400 GB model to generate a single token. Since 72 GB is in HBM3 (at 4 TB/s) and the remaining 328 GB is in LPDDR5X, the GPU must fetch 328 GB over the NVLink-C2C for *every single token*.
+    subgraph "NVIDIA GH200 Superchip"
+        GPU["Grace GPU<br/>(HBM3: 4 TB/s)"]:::compute
+        Link[["NVLink-C2C<br/>(900 GB/s)"]]:::bottleneck
+        CPU["Hopper CPU<br/>(LPDDR5X: 500 GB/s)"]:::host
+    end
 
-The bottleneck shifts from HBM bandwidth to the C2C link bandwidth. At 900 GB/s, reading 328 GB takes a massive 364 milliseconds per token, capping your throughput at less than 3 tokens per second—completely unacceptable for production serving. To serve a 200B model efficiently, you still need tensor parallelism across multiple GPUs to keep all weights in HBM. GH200's extended memory is phenomenal for offloading KV-caches or running massive graph databases, but it is a trap for dense LLM decode weights.
+    Note["🚨 BANDWIDTH TAPER<br/>HBM is 4.4x faster than C2C<br/>Unified memory != Unified speed"]:::bottleneck
+```
 
-> **Napkin Math:** 400 GB model. 72 GB in HBM (4 TB/s) = 18ms. 328 GB in LPDDR5X accessed via C2C (900 GB/s) = 364ms. Total time per token = ~382ms. Max throughput = 2.6 tokens/sec. Conversely, spreading the 400 GB across 8x H100s (80GB each) gives an aggregate HBM bandwidth of 26.8 TB/s. 400 GB / 26.8 TB/s = 15ms per token (66 tokens/sec).
+- **Interviewer:** "We are deploying a 200B parameter model on an NVIDIA GH200 Grace Hopper Superchip. It has 72 GB of HBM3 and 480 GB of LPDDR5X CPU RAM, sharing a unified memory space. The weights are 400 GB in FP16. Your colleague says we can serve this on a single chip without tensor parallelism since it 'fits' in memory. What is the throughput reality of this design?"
 
-📖 **Deep Dive:** [Volume I: Hardware Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Unified memory means the GPU can read all 480 GB at HBM speeds." Unified memory means addressing is shared, but physical bandwidth limits still apply.
+
+  **Realistic Solution:** You will hit the **C2C Bandwidth Wall**. While the model "fits," the GPU must fetch weights from the CPU's LPDDR5X memory over the 900 GB/s C2C link for every token during the decode phase. This is ~4.4x slower than fetching from local HBM3 (4,000 GB/s). Your token-per-second throughput will be limited by the C2C link, not the GPU's compute. For high-throughput serving, you still need Tensor Parallelism to keep weights in HBM.
+
+  > **Napkin Math:** In Decode, latency is roughly $\text{Weights} / \text{Bandwidth}$. HBM3 (4 TB/s) → ~0.1s per token. C2C (0.9 TB/s) → ~0.44s per token. Your "fits on one chip" design is 4x slower than a standard multi-GPU HBM design.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
 </details>
 
 

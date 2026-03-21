@@ -17,178 +17,435 @@ Mobile system architecture diagrams with hidden bottlenecks.
 ---
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Launch Blocker</b> · <code>serving</code> <code>ux</code></summary>
 
 ### Synchronous Download Blocks the Critical Path
 
-**Common Mistake:** "Show a progress bar instead of a spinner." A progress bar is better UX, but users still abandon — 70 seconds is too long regardless of visual feedback.
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph TD
+    classDef safe fill:#e0f2fe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef danger fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#991b1b,stroke-dasharray: 5 5
+    classDef process fill:#f3f4f6,stroke:#4b5563,stroke-width:2px,color:#1f2937
 
-The architecture forces users to wait for three sequential operations (download + validate + compile) before they can use the app. Each step blocks the next, and the user sees nothing useful during the entire sequence.
+    T1["Launch: App UI Loaded"]:::safe
+    T2["Step 1: Download Model<br/>(Wait: 60s)"]:::danger
+    T3["Step 2: Validate Checksum<br/>(Wait: 2s)"]:::process
+    T4["Step 3: Compile for NPU<br/>(Wait: 8s)"]:::process
+    T5["READY: User can Translate"]:::safe
 
-**The Fix:** Decouple model availability from app usability with a **progressive launch architecture**: (1) **Instant value** — ship a tiny fallback model (~3 MB, INT4 quantized) in the app bundle. It's less accurate but provides immediate functionality. Users can translate text within 2 seconds of first launch. (2) **Background pipeline** — download, validate, and compile the full model entirely in the background using `BGProcessingTask` (iOS) or `WorkManager` (Android). The user is using the app the entire time. (3) **Pre-compilation** — use Apple's Core ML Model Deployment to push pre-compiled `.mlmodelc` bundles (compiled for each chip family). This eliminates the 8-second on-device compilation step. (4) **Seamless upgrade** — when the full model is ready, hot-swap it on the next inference call. The user notices improved quality but experiences no interruption. (5) **Pre-download** — if your app is advertised, use App Store pre-order or Background Assets (iOS 16+) to download the model before the user even opens the app.
+    T1 --> T2
+    T2 --> T3
+    T3 --> T4
+    T4 --> T5
 
-**📖 Deep Dive:** [Volume I: Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
-</details>
+    Note["🚨 CRITICAL FRICTION<br/>Total blocked time: 70 seconds<br/>Status: 95% User Abandonment"]:::danger
+    T2 --- Note
+```
 
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
-
-### NPU-CPU Ping-Pong Creates Pipeline Bubbles
-
-**Common Mistake:** "The NPU is slow — use a bigger model." The NPU compute is fine. The 4.8ms is hiding in the DMA transfers between NPU and CPU memory.
-
-Each NPU→CPU→NPU round-trip costs ~2.4ms (1.2ms each way) for the intermediate tensor transfer across the on-chip NoC. With two unsupported ops splitting the graph into three NPU segments, there are 4 DMA transfers: 4 × 1.2ms = 4.8ms. That's 32% of total latency spent moving data, not computing. Worse, the NPU sits completely idle during each transfer — it can't start the next segment until the CPU finishes and the data returns.
-
-**The Fix:** Eliminate the partition boundaries. Replace GELU with the NPU-supported sigmoid approximation: GELU(x) ≈ x × σ(1.702x). Replace the dynamic shape op with a static-shape equivalent (pad to max size, mask the output). Now all 16 conv blocks run as a single NPU graph: 10ms compute, 0ms DMA overhead. Total: **10ms** — a 34% speedup from changing two ops.
-
-**📖 Deep Dive:** [Volume I: ML Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
-</details>
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
-
-### ML Model + Camera ISP Compete for the Same RAM Pool
-
-**Common Mistake:** "The model is too big — quantize it." Quantization helps, but the real issue is that the camera ISP's memory allocation is invisible to your app and uncontrollable.
-
-On iPhone 13, the jetsam limit per app is ~2.0 GB. Your app uses 822 MB. That fits. But the camera ISP (which runs in a separate process but shares the same physical RAM) consumes 1.2 GB for its multi-frame HDR pipeline. iOS + system services take 1.5 GB. Total: 1.5 + 1.2 + 2.0 = 4.7 GB > 4 GB. iOS kills your app to protect the camera.
-
-**The Fix:** (1) **Use `mmap` for model weights** — memory-mapped weights can be evicted by the OS without killing your process. When the camera ISP needs RAM, iOS evicts your weight pages. When inference needs them, they're faulted back in from flash. Your process survives. (2) **Reduce camera resolution during ML inference** — drop from 12 MP to 3 MP preview while the style transfer runs. ISP memory drops from 1.2 GB to ~400 MB. (3) **Sequential, not concurrent** — capture the photo first (camera ISP active, model not loaded), then dismiss the camera session (ISP memory freed), then load and run the model. Total peak: max(ISP, model), not ISP + model. (4) **Quantize to INT8** — 250 MB → 62.5 MB weights. Activations drop proportionally. Total app memory: ~300 MB.
-
-**📖 Deep Dive:** [Volume I: Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
-</details>
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
-
-### Benchmarking Peak Performance, Not Sustained Performance
-
-**Common Mistake:** "The phone is defective" or "Add a cooling fan." You can't attach a fan to a user's phone. The phone is working exactly as designed — DVFS (Dynamic Voltage and Frequency Scaling) protects the SoC from thermal damage.
-
-The team benchmarked for 10 seconds at peak performance. Mobile SoCs are designed for burst workloads (camera shutter, app launch) — they can sustain peak TOPS for 30-60 seconds before the thermal envelope fills. Sustained workloads (continuous video inference) must target the **sustained thermal design power (sTDP)**, which is typically 40-60% of peak.
-
-**The Fix:** (1) **Target sustained performance from day one** — benchmark for 10 minutes, not 10 seconds. Use the 5-minute mark as your design point. On Snapdragon 8 Gen 3, sustained NPU throughput is ~20 TOPS (not 45 TOPS peak). Design your model for 20 FPS at 20 TOPS. (2) **Adaptive frame rate** — monitor the thermal state via `ThermalService` (Android) or `ProcessInfo.thermalState` (iOS). At `.nominal`: run at 30 FPS. At `.fair`: drop to 20 FPS. At `.serious`: drop to 10 FPS and reduce model resolution. At `.critical`: pause inference entirely. (3) **Duty cycling** — instead of running every frame, run every 2nd frame (15 FPS effective) and interpolate the missing frames. NPU duty cycle drops to 50%, halving heat generation. Sustained performance: 15 FPS indefinitely. (4) **Use the NPU, not the GPU** — the NPU at 20 TOPS draws ~1.5W sustained. The GPU at equivalent throughput draws ~3W. Same FPS, half the heat.
-
-**📖 Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
-</details>
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
-
-### Three Copies of the Same Backbone
-
-**Common Mistake:** "Run the models in parallel on different cores." The phone has one NPU — parallel execution doesn't help. And you'd still waste 171 MB of memory.
-
-All three models share an identical MobileNetV3 backbone (12 MB weights, 45 MB activations). Because each team trained independently, the app loads three copies of the same backbone weights and computes the same backbone features three times per frame.
-
-**The Fix:** **Multi-task architecture with shared backbone.** Load the MobileNetV3 backbone once (12 MB weights). Run it once per frame (6ms). Branch into three lightweight task heads: face detection head (1 MB, 2ms), face mesh head (1.5 MB, 4ms), segmentation head (2 MB, 6ms). The heads run sequentially after the shared backbone.
-
-New memory: 12 MB (backbone) + 45 MB (shared activations) + 4.5 MB (3 heads) = **61.5 MB** (64% reduction). New latency: 6ms (backbone) + 2 + 4 + 6ms (heads) = **18ms** (40% reduction). Headroom for two more features before hitting the 33ms budget.
-
-The organizational fix matters as much as the technical one: create a shared "ML backbone" team that owns the backbone, and feature teams only own their task heads.
-
-**📖 Deep Dive:** [Volume I: Network Architectures](https://harvard-edge.github.io/cs249r_book_dev/contents/network_architectures/network_architectures.html)
-</details>
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
-
-### No Atomicity Guarantee for Model Updates
-
-**Common Mistake:** "Check battery level before training — only train above 50%." Battery checks don't prevent interruption — the user can unplug at any time, iOS can kill background tasks for memory pressure, or the phone can reboot for a system update.
-
-The training pipeline writes the updated model directly to the active model file. If interrupted at step 30 of 50, the file contains a model where the first 60% of layers have new weights and the last 40% have old weights. This Frankenstein model produces unpredictable outputs.
-
-**The Fix:** Apply database-style atomicity to model updates: (1) **Write-ahead logging** — save each gradient step's weight delta to a separate journal file. If training completes, apply all deltas atomically. If interrupted, discard the journal on next launch — the original model is untouched. (2) **Shadow copy** — train on a copy of the model in a temporary directory. Only after all 50 steps complete AND validation passes (run inference on 10 known test inputs, verify outputs match expected ranges), atomically rename the temp file to replace the active model. `rename()` is atomic on both iOS and Android filesystems. (3) **Checkpoint + resume** — save a checkpoint every 10 steps. If interrupted, resume from the last checkpoint on the next training session. After all 50 steps, validate and promote. (4) **Rollback** — keep the previous model version for 7 days. If the new model's confidence distribution diverges >20% from baseline (measured over 100 inferences the next morning), automatically rollback.
-
-**📖 Deep Dive:** [Volume I: ML Operations](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_ops/ml_ops.html)
-</details>
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Asynchronous Pipeline Stall</b> · <code>cpu-npu-handoff</code></summary>
-
-- **Interviewer:** "You have a live video segmentation app. You meticulously put the camera fetch on Thread 1, the NPU inference on Thread 2, and the UI rendering on Thread 3, connected by queues. You expect a smooth 30 FPS. Instead, the UI stutters wildly, alternating between 60 FPS and 15 FPS. What pipeline synchronization error did you make?"
+- **Interviewer:** "A user downloads your new LLM-powered translation app. Upon first launch, the app shows a spinner for 70 seconds while it prepares the model. Based on the launch timeline, why are you seeing a 95% abandonment rate?"
 
   <details>
   <summary><b>🔍 Reveal Answer</b></summary>
 
-  **Common Mistake:** "Assuming that slapping threads and queues between components automatically creates a balanced, real-time pipeline."
+  **Common Mistake:** "Show a progress bar instead of a spinner." A progress bar is better UX, but 70 seconds is too long regardless of visual feedback.
 
-  **Realistic Solution:** You created a queue-bloat (bufferbloat) problem leading to backpressure. If the camera produces frames exactly every 33ms, but the NPU takes 40ms to process a complex frame, the queue between them starts filling up. Because Thread 1 (Camera) never drops frames, it keeps pushing. Thread 3 (UI) renders whatever is available. The UI gets smooth bursts when the NPU catches up on simple frames, and severe lag when the NPU struggles. The latency between physical reality and the screen grows infinitely until the app crashes from OOM.
+  **Realistic Solution:** The architecture has a **Synchronous Dependency on the Critical Path**. The app forces users to wait for sequential download, validation, and compilation before any functionality is available. The fix is a **Progressive Launch Architecture**: ship a tiny fallback model (~3 MB) in the app bundle for instant value, while downloading and compiling the high-quality model in the background.
 
-  > **Napkin Math:** Camera = 30 FPS (33ms). NPU = 25 FPS (40ms). Every second, the camera produces 30 frames, but the NPU only consumes 25. The queue grows by 5 frames per second. After 10 seconds of runtime, the queue has 50 frames in it. `50 frames * 33ms = 1.65 seconds`. The user is now seeing what happened 1.65 seconds ago in the real world, rendering the app completely unusable. You must implement a ring buffer that aggressively drops the oldest unread frame.
+  > **Napkin Math:** User attention span for a new app launch is ~2-5 seconds. A 70-second block is 14-35x longer than the tolerance threshold of a typical mobile user.
 
-  📖 **Deep Dive:** [Volume I: Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
+  📖 **Deep Dive:** [Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
 
   </details>
 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Operator Gap</b> · <code>frameworks</code> <code>latency</code></summary>
+
+### NPU-CPU Ping-Pong Creates Pipeline Bubbles
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph LR
+    classDef npu fill:#e0f2fe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef cpu fill:#f3f4f6,stroke:#4b5563,stroke-width:2px,color:#1f2937
+    classDef bounce fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#991b1b,stroke-dasharray: 5 5
+
+    NPU1["NPU Segment 1<br/>(8 Conv Blocks)"]:::npu
+    DMA1["DMA Bounce<br/>(Unsupported GELU)"]:::bounce
+    NPU2["NPU Segment 2<br/>(4 Conv Blocks)"]:::npu
+    DMA2["DMA Bounce<br/>(Dynamic Shape)"]:::bounce
+    NPU3["NPU Segment 3<br/>(4 Conv Blocks)"]:::npu
+
+    NPU1 -->|1.2ms| DMA1
+    DMA1 -->|1.2ms| NPU2
+    NPU2 -->|1.2ms| DMA2
+    DMA2 -->|1.2ms| NPU3
+
+    Note["🚨 HIDDEN OVERHEAD<br/>4.8ms spent in DMA<br/>32% of total latency"]:::bounce
+```
+
+- **Interviewer:** "You are deploying a model to a mobile NPU. The math should only take 10ms, but the actual inference latency is 15ms. You find two unsupported operators in your graph. Based on the DMA flow, why are these two ops causing a 50% latency penalty?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The NPU is slow — use a bigger model." The NPU compute is fine. The overhead is in the data movement.
+
+  **Realistic Solution:** You are hitting **Graph Partitioning Overhead**. Each unsupported operator forces the graph to 'ping-pong' data from the NPU to the CPU and back via DMA. This incurs a latency tax for the transfer and leaves the NPU idle while the CPU processes the single op. The fix is to eliminate partition boundaries by replacing unsupported ops with approximations (e.g., Sigmoid approximation for GELU) or static-shape equivalents.
+
+  > **Napkin Math:** Each NPU-CPU-NPU round-trip costs ~2.4ms in DMA overhead. With 2 such bounces, you spend 4.8ms just moving data—roughly 32% of your 15ms total budget—without doing any significant math.
+
+  📖 **Deep Dive:** [ML Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Jetsam Guillotine</b> · <code>memory</code> <code>reliability</code></summary>
+
+### ML Model + Camera ISP Compete for the Same RAM Pool
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph TD
+    classDef app fill:#e0f2fe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef sys fill:#f3f4f6,stroke:#4b5563,stroke-width:2px,color:#1f2937
+    classDef danger fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#991b1b,stroke-dasharray: 5 5
+
+    subgraph "Physical RAM (4 GB Total)"
+        direction TB
+        iOS["iOS + System Services<br/>(1.5 GB)"]:::sys
+        ISP["Camera ISP Service<br/>(1.2 GB)"]:::sys
+        App["Your App<br/>(822 MB)"]:::app
+        OOM["OUT OF MEMORY<br/>(Demand: 4.7 GB)"]:::danger
+    end
+
+    App -- "Allocation" --> OOM
+    ISP -- "Allocation" --> OOM
+    OOM -- "SIGKILL (Jetsam)" --> App
+
+    Note["🚨 SILENT KILLER<br/>ISP memory is invisible to your app<br/>Total demand exceeds 4GB limit"]:::danger
+```
+
+- **Interviewer:** "Your AR app crashes with a 'SIGKILL' (Jetsam kill) when users take a high-resolution photo, even though your app is only using 822 MB of its 2 GB memory limit. Based on the RAM diagram, what is the 'invisible' resource consumer causing the OS to kill your process?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The model is too big — quantize it." Quantization helps, but the real issue is that the camera ISP's memory allocation is invisible to your app and uncontrollable.
+
+  **Realistic Solution:** You are hitting a **Shared Resource RAM Collision**. The camera ISP service runs in a separate process but shares the same physical RAM pool. During photo capture, the ISP HDR pipeline can consume >1.2 GB. When combined with the OS and your app, total demand exceeds 4 GB, and the OS kills the app to protect the camera. The fix is to use **mmap** for weights (allowing OS eviction), reduce camera resolution during inference, or sequentialize the capture and ML phases.
+
+  > **Napkin Math:** Total Memory = 1.5 GB (OS) + 1.2 GB (ISP) + 0.82 GB (App) = 3.52 GB. This is dangerously close to the 4 GB limit. Any background task (like a notification or a message) will push the system over the edge.
+
+  📖 **Deep Dive:** [Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Burst Benchmarking Illusion</b> · <code>benchmarking</code> <code>power-thermal</code></summary>
+
+### Benchmarking Peak Performance, Not Sustained Performance
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph TD
+    classDef peak fill:#e0f2fe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef throttle fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#991b1b,stroke-dasharray: 5 5
+    classDef process fill:#f3f4f6,stroke:#4b5563,stroke-width:2px,color:#1f2937
+
+    T1["0-30s: PEAK STATE<br/>(45 TOPS / 30 FPS)"]:::peak
+    T2["30-60s: HEATING<br/>(SoC Junction @ 80°C)"]:::process
+    T3["60s+: THERMAL THROTTLE<br/>(20 TOPS / 12 FPS)"]:::throttle
+
+    T1 --> T2
+    T2 --> T3
+
+    Note["🚨 BENCHMARKING ERROR<br/>Model designed for Peak (30 FPS)<br/>Field reality: Sustained (12 FPS)"]:::throttle
+    T3 --- Note
+```
+
+- **Interviewer:** "Your mobile model runs at 30 FPS during internal demos, but users complain that it slows down to 12 FPS after a minute of use. Based on the performance timeline, what physical protection mechanism is engaging inside the smartphone?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The phone is defective" or "Add a cooling fan." You can't attach a fan to a user's phone. The phone is working exactly as designed — DVFS (Dynamic Voltage and Frequency Scaling) protects the SoC from thermal damage.
+
+  **Realistic Solution:** You are hitting the **Sustained Thermal Envelope**. Mobile SoCs support high TOPS only for short "bursts." For continuous inference, the device throttles to its sustained thermal design power (sTDP), often 40-60% of peak. The fix is to target sustained performance (e.g., design for 20 TOPS, not 45 TOPS peak), implement adaptive frame rates based on `ThermalState`, or use the NPU instead of the GPU to halve heat generation.
+
+  > **Napkin Math:** Sustained TOPS is typically ~50% of Peak. If your model requires 100% of peak TOPS to hit 30 FPS, you are guaranteed to drop to 15 FPS once the thermal envelope is saturated (~60 seconds).
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Backbone Bloat</b> · <code>architecture</code> <code>memory</code></summary>
+
+### Three Copies of the Same Backbone
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph TD
+    classDef weight fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#9a3412
+    classDef bottleneck fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#991b1b,stroke-dasharray: 5 5
+
+    subgraph "VRAM (Current: 171 MB)"
+        direction LR
+        subgraph "Team A"
+            B1["Backbone 1<br/>(12 MB)"]:::bottleneck
+            H1["Face Head"]
+        end
+        subgraph "Team B"
+            B2["Backbone 2<br/>(12 MB)"]:::bottleneck
+            H2["Mesh Head"]
+        end
+        subgraph "Team C"
+            B3["Backbone 3<br/>(12 MB)"]:::bottleneck
+            H3["Seg Head"]
+        end
+    end
+
+    Note["🚨 REDUNDANCY ERROR<br/>Identical weights loaded 3x<br/>Shared activations computed 3x"]:::bottleneck
+```
+
+- **Interviewer:** "Your mobile app has three different computer vision features (Face Detection, Face Mesh, and Segmentation). All three use the same MobileNetV3 backbone. Based on the VRAM diagram, what is the 'efficiency gap' in your model loading strategy?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Run the models in parallel on different cores." The phone has one NPU — parallel execution doesn't help. And you'd still waste 171 MB of memory.
+
+  **Realistic Solution:** You have **Backbone Redundancy**. The app loads three identical copies of the backbone weights and computes the same features three times per frame. The fix is a **Multi-Task Architecture with Shared Backbone**: load the backbone once (12 MB), run it once (6ms), and branch into three lightweight task heads. This reduces memory by 64% and latency by 40%.
+
+  > **Napkin Math:** Current: 3 backbones × 12 MB = 36 MB weights. Shared: 1 backbone × 12 MB = 12 MB. Latency: 3 × 6ms = 18ms (sequential backbone runs) vs 1 × 6ms = 6ms.
+
+  📖 **Deep Dive:** [Network Architectures](https://harvard-edge.github.io/cs249r_book_dev/contents/network_architectures/network_architectures.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Frankenstein Model</b> · <code>ml-ops</code> <code>reliability</code></summary>
+
+### No Atomicity Guarantee for Model Updates
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph LR
+    classDef safe fill:#e0f2fe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef partial fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#9a3412
+    classDef danger fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#991b1b,stroke-dasharray: 5 5
+
+    subgraph "Active Model File"
+        L1["Layer 1 (v2.0 NEW)"]:::safe
+        L2["Layer 2 (v2.0 NEW)"]:::safe
+        LX["CRASH / POWER LOST"]:::danger
+        L3["Layer 3 (v1.0 OLD)"]:::partial
+        L4["Layer 4 (v1.0 OLD)"]:::partial
+    end
+
+    Note["🚨 CORRUPT STATE<br/>Frankenstein Model: Mixed Weights<br/>Output: Numerical Garbage"]:::danger
+```
+
+- **Interviewer:** "During a background model update on a user's phone, the device suddenly reboots. Upon next launch, the app doesn't crash, but the ML model produces nonsensical 'garbage' outputs. Based on the file-write diagram, what state is the model file in?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Check battery level before training." Battery checks don't prevent interruptions like OS kills or reboots.
+
+  **Realistic Solution:** You have a **Frankenstein Model** caused by non-atomic updates. The pipeline wrote the updated model directly to the active file. If interrupted, the file contains a mix of new and old layers, which is numerically invalid. The fix is **Atomic Promotion (Shadow Copy)**: download/train the model in a temporary directory, and only after validation is complete, use an atomic `rename()` call to replace the active model file.
+
+  > **Napkin Math:** If 60% of layers are v2.0 and 40% are v1.0, the feature map distribution from Layer 2 will not match the weights expected by Layer 3, leading to catastrophic error propagation.
+
+  📖 **Deep Dive:** [ML Operations](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_ops/ml_ops.html)
+
+  </details>
+
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CPU Wake-Lock Tax</b> · <code>sustainable-ai</code> <code>power-thermal</code></summary>
 
 ### The CPU Wake-Lock Tax
 
-**Common Mistake:** "The model needs to be quantized to INT8 so it uses less power." The model's compute cost is practically zero; the power is being burned by *what is executing the model*.
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph TD
+    classDef sleep fill:#f3f4f6,stroke:#94a3b8,stroke-width:1px,color:#64748b
+    classDef active fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#9a3412
+    classDef danger fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#991b1b,stroke-dasharray: 5 5
 
-The battery is dying because you are keeping the **Main Application Processor (AP)** awake. Modern smartphones have aggressive power states. To run the model on the main CPU (the Cortex-A cores), the OS must acquire a "wake-lock," powering up the DDR RAM, the memory controllers, and the high-power CPU rails.
+    subgraph "Application Processor (AP)"
+        CPU["Cortex-A Core<br/>(AWAKE)"]:::active
+        RAM["DDR RAM<br/>(POWERED)"]:::active
+        Bus["Memory Bus<br/>(ACTIVE)"]:::active
+    end
 
-Even if the math takes 2ms, waking the AP up to listen to audio every few milliseconds prevents the phone from ever entering Deep Sleep. The system burns watts of power just keeping the lights on.
+    subgraph "Always-On Domain (AOD)"
+        DSP["DSP / micro-NPU<br/>(IDLE)"]:::sleep
+    end
 
-**The Fix:** Always-on models must be pushed down to the **Always-On Domain (AOD) / DSP**. Mobile SoCs feature an ultra-low-power DSP (like Qualcomm's Hexagon) or a dedicated micro-NPU that sits in an isolated power island. It reads the microphone directly into its own tiny SRAM, runs the wake-word model, and only issues a hardware interrupt to wake the main AP *if* the wake-word is detected.
+    Mic["Microphone"] --> CPU
+    Note["🚨 POWER TAX<br/>AP held awake via Wake-Lock<br/>Basal power: 80mW (vs 1mW sleep)"]:::danger
+```
 
-**📖 Deep Dive:** [Volume II: Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+- **Interviewer:** "You deploy a simple wake-word detection model. Even though the model uses very little CPU, users report that the app is the top battery consumer on their device. Based on the power domain diagram, where is the energy going?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The model needs to be quantized to INT8 so it uses less power." The model's compute cost is negligible; the power is being burned by the hardware state required to execute it.
+
+  **Realistic Solution:** You are suffering from **Application Processor Wake-Lock Tax**. To run the model on the main CPU, the OS must hold a wake-lock, powering up the high-power CPU rails and DDR RAM. This prevents the phone from entering Deep Sleep. The fix is to push always-on models down to the **Always-On Domain (AOD) / DSP**, which reads the microphone directly into tiny SRAM and only wakes the main AP if the wake-word is detected.
+
+  > **Napkin Math:** Basal AP power is ~80 mW. DSP power is ~1 mW. By failing to delegate to the AOD, you are using 80x more power than necessary just to keep the lights on for a simple task.
+
+  📖 **Deep Dive:** [Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+
+  </details>
+
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silicon Shared Oven</b> · <code>sustainable-ai</code> <code>power-thermal</code></summary>
 
 ### The Shared Silicon Thermal Envelope
 
-**Common Mistake:** "The game is stealing NPU cycles." The game is using the GPU, not the NPU. They are separate cores.
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph TD
+    classDef cooling fill:#e0f2fe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef heat fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#9a3412
+    classDef danger fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#991b1b,stroke-dasharray: 5 5
 
-The bottleneck is the **Shared Thermal Envelope**. In a mobile System-on-Chip (SoC), the CPU, GPU, and NPU all reside on the exact same piece of silicon (die).
+    subgraph "Single Silicon Die (SoC)"
+        direction LR
+        GPU["GPU<br/>(Heavy 3D Game)"]:::danger
+        CPU["CPU<br/>(Background)"]:::heat
+        NPU["NPU<br/>(Translation)"]:::danger
+    end
 
-A mobile phone has no active cooling (no fans). It can typically dissipate about 3-5 Watts of sustained heat. When the user plays a heavy 3D game, the GPU generates massive amounts of heat, soaking the entire silicon die.
+    Skin["Phone Surface<br/>(Limit: 45°C)"]
 
-To prevent the phone from literally burning the user's hand (skin temperature limits), the SoC's thermal management system engages. Because it cannot easily determine which component is "most important," it aggressively downclocks (DVFS) *the entire SoC*—including the NPU—to shed heat. The NPU's clock speed is slashed, tripling your translation latency, even though the NPU wasn't the component causing the heat.
+    GPU -- "Massive Heat" --> Skin
+    CPU -- "Heat" --> Skin
+    Skin -- "🚨 THERMAL EVENT" --> SoC_Control["DVFS Controller"]
+    SoC_Control -- "GLOBAL THROTTLE" --> GPU
+    SoC_Control -- "GLOBAL THROTTLE" --> NPU
 
-**The Fix:**
-For heavy gaming scenarios, translation models must be hyper-optimized (e.g., heavily quantized) so they can meet their deadlines even when the NPU is forced into its lowest power state.
+    Note["🚨 SILENT THROTTLE<br/>NPU latency triples because<br/>GPU generates the heat"]:::danger
+```
 
-**📖 Deep Dive:** [Volume II: Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+- **Interviewer:** "Your real-time translation app works perfectly until the user starts a 3D game in picture-in-picture mode. Suddenly, your NPU translation latency triples. Based on the SoC diagram, why is the game affecting the NPU speed?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The game is stealing NPU cycles." The game uses the GPU, not the NPU. They are separate physical cores.
+
+  **Realistic Solution:** You are hitting **Global Thermal Throttling**. In a mobile SoC, all cores share the same silicon die and thermal envelope. When the GPU generates massive heat from a game, the system's DVFS controller downclocks *the entire SoC*—including the NPU—to stay within safe skin-temperature limits. The fix is to use hyper-optimized, low-power models that can still meet deadlines even when the SoC is forced into its lowest frequency state.
+
+  > **Napkin Math:** A phone can only dissipate ~3-5 Watts sustained. If a 3D game pulls 4 Watts, the NPU is left with <1 Watt of thermal margin, triggering immediate frequency capping.
+
+  📖 **Deep Dive:** [Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+
+  </details>
+
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Radio Energy Wall</b> · <code>sustainable-ai</code> <code>power-thermal</code></summary>
 
 ### The Cellular Radio Wake Dominates Power, Not the Model
 
-**Common Mistake:** "Optimize the model further" or "Reduce inference frequency." The model uses 3 mW — it's already negligible. The two real power hogs are the cellular radio (800 mW) and the always-on CPU (80 mW).
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph TD
+    classDef model fill:#e0f2fe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef cpu fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#9a3412
+    classDef radio fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#991b1b,stroke-dasharray: 5 5
 
-The cellular radio consumes 800 mW every time it wakes from idle to transmit data. Waking it every 5 minutes means ~12 wake cycles per hour, each lasting ~10 seconds (including tail energy for the radio to return to idle). That's 120 seconds of 800 mW = 26.7 mWh per hour. The CPU staying awake at 80 mW for continuous buffering adds another 80 mWh per hour.
+    subgraph "Power Budget (mW)"
+        direction TB
+        M["ML Model Inference<br/>(3 mW)"]:::model
+        C["CPU Always-On<br/>(80 mW)"]:::cpu
+        R["Cellular Radio Wake<br/>(800 mW)"]:::radio
+    end
 
-**The Fix:** (1) **Batch uploads** — instead of uploading every 5 minutes, buffer activity labels locally and upload once per hour (or piggyback on other app network activity). Radio wakes drop from 12/hour to 1/hour. Power: 800 mW × 10s × 1 = 2.2 mWh (down from 26.7 mWh). (2) **Use CoreMotion/Activity Recognition API** — iOS and Android have built-in activity classifiers that run on a dedicated low-power coprocessor (Apple M-series motion coprocessor, ~1 mW). Use the OS API instead of your own model + accelerometer pipeline. CPU power drops from 80 mW to ~0 mW. (3) **If custom ML is required** — use the accelerometer's hardware FIFO buffer (most modern IMUs buffer 1000+ samples internally). The CPU sleeps while the FIFO fills, wakes only to process a batch. CPU duty cycle drops from 100% to ~5%. Power: 80 mW × 0.05 = 4 mW. (4) **Total after fixes:** 0.5 mW (accel) + 4 mW (CPU, batched) + 3 mW (NPU) + 2.2 mWh/hr (radio, hourly) = ~10 mW sustained. Battery drain: **0.08%/hour** — 86× improvement.
+    Note["🚨 ENERGY MISMATCH<br/>Radio uses 266x more power than ML<br/>Waking every 5m destroys battery"]:::radio
+```
 
-**📖 Deep Dive:** [Volume II: Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+- **Interviewer:** "You optimize your activity-tracking model down to 3 mW. However, the app still drains the battery by 10% per hour because it uploads labels to your server every 5 minutes. Based on the power breakdown, where is your optimization effort being wasted?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "Retrain the model to be even smaller." The model's 3 mW is already negligible compared to the system overhead.
+
+  **Realistic Solution:** You are hitting the **Radio Wake Overhead**. The cellular radio consumes ~800 mW every time it wakes from idle. Waking it every 5 minutes for a tiny payload prevents the radio from staying in its low-power state. The fix is **Batching and Delegation**: buffer results locally and upload once per hour, and use the OS's low-power activity co-processor (like Apple's M-series) instead of a custom always-on CPU loop.
+
+  > **Napkin Math:** Radio: 800 mW × 10s (wake + tail) × 12 times/hr = 26.7 mWh. Model: 3 mW × 1 hr = 3 mWh. The radio wake is ~9x more expensive than the actual ML work.
+
+  📖 **Deep Dive:** [Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
+
+  </details>
+
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> 🚨 Reveal the Bottleneck</b></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The UMA Bandwidth Wall</b> · <code>hardware</code> <code>memory</code></summary>
 
 ### UMA Bandwidth Contention
 
-**Common Mistake:** "The phone is overheating and thermal throttling." While thermals are a factor, the immediate drop occurs because of physics on the memory bus.
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'monospace', 'primaryColor': '#ffffff', 'edgeLabelBackground':'#ffffff'}}}%%
+graph TD
+    classDef device fill:#e0f2fe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef memory fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#9a3412
+    classDef bottleneck fill:#fee2e2,stroke:#dc2626,stroke-width:4px,color:#991b1b,stroke-dasharray: 5 5
 
-Mobile SoCs use **Unified Memory Architecture (UMA)**. The CPU, GPU, NPU, and Display Controller all share the exact same physical LPDDR memory chips and memory bus.
+    Disp["Display Controller<br/>(120Hz Refresh)"]:::device
+    GPU["GPU<br/>(Render Framebuffer)"]:::device
+    NPU["NPU<br/>(Style Transfer Model)"]:::device
 
-When you upgrade the display from 60Hz to 120Hz, the GPU and Display Controller must read and write framebuffers twice as fast. A 120Hz 4K display consumes a massive percentage of the phone's total memory bandwidth just shuffling pixels to the screen.
+    subgraph "Unified Memory Architecture (UMA)"
+        Bus[["Shared Memory Bus<br/>(ARB: Display Priority)"]]:::bottleneck
+    end
 
-Because the NPU's style-transfer model is typically memory-bandwidth bound (reading large image tensors in and out of RAM), the NPU suddenly finds itself starved. The memory controller prioritizes the display (otherwise the screen tears or stutters), forcing the NPU to stall.
+    RAM[("System RAM (LPDDR5)")]:::memory
 
-**The Fix:**
-1. **Reduce Precision/Resolution:** Run the NPU model on lower-resolution crops or INT8 to halve its bandwidth needs.
-2. **Variable Refresh Rate (VRR):** Drop the display refresh rate back to 60Hz when heavy AR features are active, as users cannot perceive 120Hz fluidity underneath heavy style-transfer effects anyway.
+    Disp -->|High BW / High Priority| Bus
+    GPU -->|High BW| Bus
+    NPU -->|Wait / Starved| Bus
+    Bus --> RAM
 
-**📖 Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+    Note["🚨 BUS SATURATION<br/>120Hz 4K display consumes 40% BW<br/>NPU bandwidth slashed -> Stutters"]:::bottleneck
+```
+
+- **Interviewer:** "Your AR app runs a real-time style transfer model. When the user upgrades to a Pro phone with a 120Hz 'ProMotion' display, the NPU inference suddenly starts stuttering and missing deadlines. Based on the UMA diagram, why is a faster screen slowing down your AI?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** "The phone is thermal throttling." While heat is a factor, the immediate drop is due to memory bus physics.
+
+  **Realistic Solution:** You are suffering from **Memory Bus Contention**. In a Unified Memory Architecture (UMA), the Display Controller, GPU, and NPU all share the same LPDDR5 bus. A 120Hz display must refresh the framebuffer twice as often as a 60Hz one, consuming a massive slice of the total bandwidth. The memory controller prioritizes the display to prevent tearing, starving the bandwidth-hungry NPU. The fix is to drop the refresh rate to 60Hz during heavy AR features or reduce NPU precision to INT8 to halve its bandwidth needs.
+
+  > **Napkin Math:** A 4K 120Hz display requires moving ~4.5 GB/s just for frame refresh. On a phone with 50 GB/s peak bandwidth, the display system (plus GPU rendering) can easily consume 40-50% of the practical bus capacity.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+
+  </details>
+
 </details>

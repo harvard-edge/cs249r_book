@@ -261,6 +261,8 @@ MCU architectures, SRAM partitioning, flash storage, integer arithmetic, instruc
 
   > **Napkin Math:** Naive A/B: (90 + 25 + 180) = 295 KB per slot. Total flash used for OTA: 590 KB. Decoupled with delta updates: Firmware A (115 KB) + Firmware B (115 KB) + Model (180 KB) + Patch Scratch (32 KB) = 442 KB. You just saved 148 KB of flash (15% of the entire 1 MB chip) simply by recognizing that ML models update independently of the OS and can be patched differentially.
 
+  📖 **Deep Dive:** [Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
+
   </details>
 
 </details>
@@ -1396,6 +1398,8 @@ MCU architectures, SRAM partitioning, flash storage, integer arithmetic, instruc
   If you quantize the model to INT8, the file size drops by exactly 4× to 100 KB. The OTA transfer now takes only 2 seconds. This 4× reduction in transfer time means a 4× reduction in radio energy consumed per update. Furthermore, the shorter transfer window reduces the probability of a connection drop (patient walking away from the phone) by 4×, drastically improving the fleet update success rate. In TinyML, quantization is not just an inference optimization; it is a critical lever for managing the fleet's energy budget and deployment reliability.
 
   > **Napkin Math:** FP32 model: 400 KB. BLE throughput: 50 KB/s. Transfer time: 8 seconds. Radio power: 8 mA at 3.3V = 26.4 mW. Energy per update: 26.4 mW × 8s = 211 mJ. INT8 model: 100 KB. Transfer time: 2 seconds. Energy per update: 52.8 mJ. Savings: 158 mJ per update. If you push weekly updates to a device with a 100 mAh coin cell (1,188 J), the FP32 updates consume ~1% of the battery over a year just in radio time. INT8 updates consume 0.25%. The 4× reduction in file size directly translates to longer battery life and fewer failed OTA attempts.
+
+  📖 **Deep Dive:** [Model Compression](https://harvard-edge.github.io/cs249r_book_dev/contents/model_compression/model_compression.html)
 
   </details>
 
