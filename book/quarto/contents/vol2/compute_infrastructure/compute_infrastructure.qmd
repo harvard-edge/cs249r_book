@@ -24,7 +24,7 @@ engine: jupyter
 
 _Why does infrastructure—not algorithms—increasingly determine who can participate in advancing machine learning?_
 
-Machine learning systems have a physical reality that transcends code. While the algorithms for training large models are open, the ability to execute them at scale is gated by the **physics of infrastructure**. Every training run is a race against thermal limits, power delivery stability, and the crushing cost of data movement. When algorithms were the primary bottleneck, progress could happen anywhere. Now that scale dominates, the constraint is who can build and operate the physical systems that make scale possible. Building an ML fleet requires engineering across four physical levels: the **Accelerator** (silicon physics), the **Node** (interconnect density), the **Rack** (thermal management), and the **Pod** (warehouse-scale networking). At each level, the goal is the same: to minimize the time data spends in transit and maximize the time it spends in computation. The economics are equally unforgiving: a large GPU cluster represents staggering capital expenditure and megawatts of continuous power. Infrastructure has become the moat that separates organizations that can define the frontier from those that can only follow it. This chapter maps that physical stack, from the stacking of memory dies to the stabilization of grid-scale power ramps.
+Machine learning systems have a physical reality that transcends code. While the algorithms for training large models are open, the ability to execute them at scale is gated by the **physics of infrastructure**. Every training run is a race against thermal limits, power delivery stability, and the crushing cost of data movement. When algorithms were the primary bottleneck, progress could happen anywhere. Now that scale dominates, the constraint is *who* can build and operate the physical systems that make scale possible. Building an ML fleet requires engineering across four physical levels: the **Accelerator** (silicon physics), the **Node** (interconnect density), the **Rack** (thermal management), and the **Pod** (warehouse-scale networking). At each level, the goal is the same: to minimize the time data spends in transit and maximize the time it spends in computation. The economics are equally unforgiving: a large GPU cluster represents staggering capital expenditure and megawatts of continuous power. Infrastructure has become the moat that separates organizations that can define the frontier from those that can only follow it. This chapter maps that physical stack, from the stacking of memory dies to the stabilization of grid-scale power ramps.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -34,7 +34,7 @@ Machine learning systems have a physical reality that transcends code. While the
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Explain the **Accelerator Spectrum** (GPU vs. TPU vs. ASIC) and how workload dataflows drive architectural specialization
+- Explain the **Accelerator Spectrum** (GPU vs. TPU vs. ASIC) and *how* workload dataflows drive architectural specialization
 - Quantify the **Memory Wall** by comparing HBM generations and calculating token generation latency
 - Apply the **Roofline Model** to diagnose whether a cluster is throttled by arithmetic units or memory bandwidth
 - Analyze the **Bandwidth Hierarchy** (HBM $\to$ NVLink $\to$ InfiniBand) and its impact on parallel strategy selection
@@ -101,7 +101,7 @@ from mlsysim.fmt import fmt, sci, check, md, md_math
 # │          InfraSetup.ddr_bw_str, InfraSetup.dominance_str,
 # │          InfraSetup.ib_bw_str, InfraSetup.t_comp_math, InfraSetup.t_mem_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models
+from mlsysim import Hardware, Models, Tiers
 from mlsysim.core.constants import (
     TFLOPs, second, GB, TB, byte, flop, BYTES_FP16, param, BILLION,
     NVLINK_H100_BW, INFINIBAND_NDR_BW, PCIE_GEN5_BW
@@ -152,9 +152,9 @@ class InfraSetup:
     t_mem_math = md_math(f"T_{{\\text{{mem}}}} \\approx \\mathbf{{{t_mem_ms:.1f} \\text{{ ms}}}}")
 ```
 
-Three physical constraints recur at every level of the infrastructure stack: the Memory Wall, the Power Wall, and the Communication Wall. @fig-three-walls-grid maps how these constraints cascade from the accelerator die to the warehouse-scale pod.
+Three physical constraints recur at every level of the infrastructure stack: the Memory Wall, the Power Wall, and the Communication Wall. @fig-three-walls-grid maps *how* these constraints cascade from the accelerator die to the warehouse-scale pod.
 
-::: {#fig-three-walls-grid fig-env="figure" fig-pos="htb" fig-cap="**The Three Walls Across Infrastructure Levels**. The Memory Wall, Power Wall, and Communication Wall are not independent problems; they interact at every level of the physical stack. Each row shows how the three constraints manifest at a given scale, and the downward arrows indicate that solving the constraint at one level creates the dominant constraint at the next. The rightmost column shows why the Communication Wall ultimately dominates at cluster scale." fig-alt="Grid with four rows for Accelerator, Node, Rack, and Pod levels and three columns for Memory, Power, and Communication walls. Downward arrows connect rows showing constraint cascade."}
+::: {#fig-three-walls-grid fig-env="figure" fig-pos="htb" fig-cap="**The Three Walls Across Infrastructure Levels**. The Memory Wall, Power Wall, and Communication Wall are not independent problems; they interact at every level of the physical stack. Each row shows *how* the three constraints manifest at a given scale, and the downward arrows indicate that solving the constraint at one level creates the dominant constraint at the next. The rightmost column shows *why* the Communication Wall ultimately dominates at cluster scale." fig-alt="Grid with four rows for Accelerator, Node, Rack, and Pod levels and three columns for Memory, Power, and Communication walls. Downward arrows connect rows showing constraint cascade."}
 
 ![](images/svg/infra-walls.svg)
 
@@ -303,8 +303,15 @@ class H100PerformanceScenario:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     flops = H100_FLOPS_FP8_TENSOR
 
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    h100_tf = flops.m_as(TFLOPs/second)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(h100_tf > 1000, "H100 should have more than 1000 TFLOPs FP8")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_tflops = f"{flops.m_as(TFLOPs/second):.0f}"
+    h100_tflops = f"{h100_tf:.0f}"
 ```
 
 The H100's `{python} H100PerformanceScenario.h100_tflops` TFLOPS of FP8 Tensor Core throughput at 700 W represents a 6.8$\times$ efficiency improvement over V100, achieved through a combination of process technology (TSMC 4N), architectural innovation (Transformer Engine), and precision engineering (FP8 support).
@@ -317,13 +324,13 @@ Blackwell also introduced fifth-generation NVLink at 1,800 GB/s per GPU, doublin
 
 The progression reveals a consistent pattern: each generation addresses the bottleneck exposed by the previous generation. Volta solved the compute bottleneck for matrix multiplication. Ampere solved the precision bottleneck for mixed-precision training. Hopper solved the Transformer-specific precision bottleneck with FP8. Blackwell is pushing against the die-size limit with multi-die packaging.
 
-At each step, the accelerator's design reflects the dominant workload of its era, illustrating how the physics of the workload drives the physics of the silicon. This co-evolution between workloads and hardware is not accidental: GPU architects profile production ML workloads to identify the next bottleneck, and then design the next generation to address it. The result is a hardware evolution that is tightly coupled to the model architecture evolution, which is why the Transformer's dominance since 2017 has so profoundly shaped the trajectory of accelerator design.
+At each step, the accelerator's design reflects the dominant workload of its era, illustrating *how* the physics of the workload drives the physics of the silicon. This co-evolution between workloads and hardware is not accidental: GPU architects profile production ML workloads to identify the next bottleneck, and then design the next generation to address it. The result is a hardware evolution that is tightly coupled to the model architecture evolution, which is *why* the Transformer's dominance since 2017 has so profoundly shaped the trajectory of accelerator design.
 
 The evolution also reveals a sobering trend for infrastructure planners: the useful lifetime of each generation is shrinking. The V100 remained the state of the art for approximately three years (2017--2020). The A100 held that position for roughly two years (2020--2022). The H100's reign is similarly expected to last two years before being superseded by Blackwell for new deployments.
 
 The accelerating cadence means that hardware deployed today will be two generations behind within three to four years, at which point the electricity cost of operating it may exceed the cost of replacing it. Hardware refresh planning is therefore an integral part of the initial procurement decision, not a future concern.
 
-A subtlety that affects fleet consistency is the **silicon lottery** -- the manufacturing reality where microscopic variance in 4nm lithography produces a distribution of chip quality across each wafer. NVIDIA manages this yield curve through aggressive binning: dies capable of sustaining high clock frequencies at strictly controlled voltages under the full TDP are designated as premium H100 SXM modules, while those with higher leakage currents or minor defects become H100 PCIe cards or are fused down to lower-tier products. Even within the top-tier SXM bin, the achievable boost clock varies based on silicon characteristics. In a synchronous training cluster, the collective communication primitives are blocked by the slowest participant. A single chip running 50 MHz below the fleet average can degrade the effective throughput of the entire cluster by 5--10%, which is why sophisticated fleet management systems track per-GPU performance metrics and quarantine underperforming silicon to inference pools where the impact of individual chip variance is less pronounced.
+A subtlety that affects fleet consistency is the **silicon lottery** -- the manufacturing reality where microscopic variance in 4nm lithography produces a distribution of chip quality across each wafer. NVIDIA manages this yield curve through aggressive binning: dies capable of sustaining high clock frequencies at strictly controlled voltages under the full TDP are designated as premium H100 SXM modules, while those with higher leakage currents or minor defects become H100 PCIe cards or are fused down to lower-tier products. Even within the top-tier SXM bin, the achievable boost clock varies based on silicon characteristics. In a synchronous training cluster, the collective communication primitives are blocked by the slowest participant. A single chip running 50 MHz below the fleet average can degrade the effective throughput of the entire cluster by 5--10%, which is *why* sophisticated fleet management systems track per-GPU performance metrics and quarantine underperforming silicon to inference pools where the impact of individual chip variance is less pronounced.
 
 | **Architecture**     | **Year** | **Key Innovation**      | **Peak Tensor** | **TDP** | **NVLink BW** |
 |:---------------------|:--------:|:------------------------|:---------------:|:-------:|:-------------:|
@@ -391,17 +398,32 @@ ax2.spines["right"].set_color(COLORS["GreenLine"])
 # --- Shade the divergence gap ---
 ax1.fill_between(years_arr, tflops, [e * tflops[0] / eff[0] for e in eff],
 
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+# ┌── 3. RENDER ────────────────────────────────────
                  alpha=0.08, color=COLORS["OrangeLine"])
 
 # --- Label each GPU ---
+offsets = [
+    (8,-15),  # P100
+    (5,-23),  # V100
+    (-20,9),  # A100
+    (-5,-28), # H100
+    (10,-5),  # B100
+    (-10,10)  # B200
+]
+
 for i, g in enumerate(gpus):
-    ax1.annotate(g, (years[i], tflops[i]), textcoords="offset points",
-                 xytext=(10, -5), fontsize=7.5, color=COLORS["BlueLine"])
+    ax1.annotate(
+        g,
+        (years[i], tflops[i]),
+        textcoords="offset points",
+        xytext=offsets[i],
+        fontsize=8.5,
+        color=COLORS["BlueLine"]
+    )
 
 # --- Growth annotations ---
 ax1.annotate("236$\\times$ raw TFLOPS",
-             xy=(2023.2, 3500), fontsize=9, color=COLORS["BlueLine"],
+             xy=(2021.9, 3500), fontsize=9, color=COLORS["BlueLine"],
              fontstyle="italic",
              bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=COLORS["BlueLine"], alpha=0.7))
 ax2.annotate("70$\\times$ efficiency",
@@ -419,13 +441,14 @@ ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left",
            frameon=True, fancybox=True, framealpha=0.9)
 ax1.set_title("")
 plt.show()
+plt.close()
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ```
 
 :::
 
-@fig-accelerator-efficiency-wall quantifies a critical asymmetry: while each GPU generation delivers dramatically more raw throughput, the power required to sustain that throughput grows nearly as fast. The 236$\times$ increase in FP16 TFLOPS from P100 to B200 is accompanied by only a 70$\times$ increase in TFLOPS per watt, which means that the datacenter's power grid and cooling infrastructure must absorb the difference. This divergence is the physical root of the Power Wall discussed in the next sections and explains why liquid cooling, megawatt-scale power delivery, and thermal management dominate modern datacenter design.
+@fig-accelerator-efficiency-wall quantifies a critical asymmetry: while each GPU generation delivers dramatically more raw throughput, the power required to sustain that throughput grows nearly as fast. The 236$\times$ increase in FP16 TFLOPS from P100 to B200 is accompanied by only a 70$\times$ increase in TFLOPS per watt, which means that the datacenter's power grid and cooling infrastructure must absorb the difference. This divergence is the physical root of the Power Wall discussed in the next sections and explains *why* liquid cooling, megawatt-scale power delivery, and thermal management dominate modern datacenter design.
 
 #### Evolution of TPU Architectures {#sec-compute-tpu-evolution}
 
@@ -533,9 +556,9 @@ The interposer itself is a passive silicon substrate with etched wiring layers t
 
 Verify your understanding of 3D-stacked memory:
 
-- [ ] Why does HBM achieve higher bandwidth than DDR5 despite having a lower clock frequency?
-- [ ] What is the "generality tax" of DDR memory, and how does vertical stacking (TSVs) eliminate it?
-- [ ] If an H100 has 80 GB of HBM and a 70B parameter model requires 140 GB for weights (FP16), where must the remaining 60 GB reside?
+- [ ] *Why* does HBM achieve higher bandwidth than DDR5 despite having a lower clock frequency?
+- [ ] *What* is the "generality tax" of DDR memory, and *how* does vertical stacking (TSVs) eliminate it?
+- [ ] If an H100 has 80 GB of HBM and a 70B parameter model requires 140 GB for weights (FP16), *where* must the remaining 60 GB reside?
 - [ ] True or False: HBM's primary benefit is increasing the total memory capacity available to the GPU.
 
 :::
@@ -564,9 +587,17 @@ class MemoryBandwidthScenario:
     ddr_bw = SYSTEM_MEMORY_BW
     hbm_bw = H100_MEM_BW
 
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    ddr_gbs = ddr_bw.m_as(GB/second)
+    hbm_tbs = hbm_bw.m_as(TB/second)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(hbm_tbs > ddr_gbs / 1000, "HBM should be significantly faster than DDR")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ddr_bw_str = f"{ddr_bw.m_as(GB/second):.0f}"
-    h100_bw = f"{hbm_bw.m_as(TB/second):.2f}"
+    ddr_bw_str = f"{ddr_gbs:.0f}"
+    h100_bw = f"{hbm_tbs:.2f}"
 ```
 
 | **Metric**          |                 **Host DRAM** (DDR5)                |             **Accelerator HBM** (HBM3e)              |     **Scaling Factor**    |
@@ -587,7 +618,7 @@ The supply chain dynamics of HBM production further affect its cost and availabi
 
 For infrastructure planners, this supply chain concentration means that HBM availability, not just its specifications, can determine the timeline for building a training cluster. Organizations planning large deployments must secure HBM allocations 12--18 months in advance, committing capital before the rest of the system is designed. This procurement lead time is longer than for any other component in the stack, making HBM the pacing element for fleet expansion.
 
-For our `{python} InfraSetup.frontier_params_b`B model, the HBM alone in a cluster of 1,000 accelerators might represent \$50--80 million in memory cost. This cost-capacity trade-off explains why accelerators typically offer 80--192 GB of HBM while the host server provides 512 GB to 2 TB of DDR: the *fast* memory holds the active computation (weights, activations, gradients that are accessed every cycle), and the *cheap* memory holds everything else (optimizer states, checkpoint buffers, data loading queues).
+For our `{python} InfraSetup.frontier_params_b`B model, the HBM alone in a cluster of 1,000 accelerators might represent \$50--80 million in memory cost. This cost-capacity trade-off explains *why* accelerators typically offer 80--192 GB of HBM while the host server provides 512 GB to 2 TB of DDR: the *fast* memory holds the active computation (weights, activations, gradients that are accessed every cycle), and the *cheap* memory holds everything else (optimizer states, checkpoint buffers, data loading queues).
 
 The boundary between what resides in HBM and what resides in DDR is a critical design parameter for training frameworks, and managing this boundary efficiently is one of the key challenges addressed by ZeRO optimization and offloading strategies (@sec-distributed-training-systems). Getting this boundary wrong in either direction is costly: placing too much data in HBM wastes expensive capacity, while placing too much in DDR creates bandwidth stalls that idle the arithmetic units.
 
@@ -604,9 +635,9 @@ The evolution of HBM tracks the growth of model sizes with close correspondence.
 
 : **Evolution of High Bandwidth Memory**. Each generation roughly doubles bandwidth, tracking the doubling of frontier model sizes every 12--18 months. The jump to HBM4 doubles the interface width for the first time since HBM's introduction, signaling that pin-rate increases alone can no longer sustain the required bandwidth growth. {#tbl-hbm-evolution}
 
-As @tbl-hbm-evolution shows, the transition from HBM3 to HBM3e is particularly significant for our running example. An A100 with 80 GB of HBM2e can hold only 23% of our `{python} InfraSetup.frontier_params_b`B model's weights (at FP16). An H100 with 80 GB of HBM3 can hold the same fraction but deliver the data 65% faster. A B200 with 192 GB of HBM3e can hold 55% of the weights and deliver them at over 4.8 TB/s. Neither can hold the full model, which is precisely why we need multiple accelerators in a node, a topic we address in @sec-compute-node.
+As @tbl-hbm-evolution shows, the transition from HBM3 to HBM3e is particularly significant for our running example. An A100 with 80 GB of HBM2e can hold only 23% of our `{python} InfraSetup.frontier_params_b`B model's weights (at FP16). An H100 with 80 GB of HBM3 can hold the same fraction but deliver the data 65% faster. A B200 with 192 GB of HBM3e can hold 55% of the weights and deliver them at over 4.8 TB/s. Neither can hold the full model, which is precisely *why* we need multiple accelerators in a node, a topic we address in @sec-compute-node.
 
-However, the capacity story changes significantly when quantization is applied. The same `{python} InfraSetup.frontier_params_b`B model quantized to INT8 requires only 175 GB, fitting in 3 H100 GPUs or a single B200. Quantized to INT4, it requires only 87.5 GB, fitting in a single H100. The capacity constraints that drive the need for multi-accelerator nodes for training (where FP16 or BF16 precision is typically required) are substantially relaxed for inference (where INT8 or INT4 quantization is often acceptable). This is another reason why training and inference infrastructure have different optimal configurations.
+However, the capacity story changes significantly when quantization is applied. The same `{python} InfraSetup.frontier_params_b`B model quantized to INT8 requires only 175 GB, fitting in 3 H100 GPUs or a single B200. Quantized to INT4, it requires only 87.5 GB, fitting in a single H100. The capacity constraints that drive the need for multi-accelerator nodes for training (where FP16 or BF16 precision is typically required) are substantially relaxed for inference (where INT8 or INT4 quantization is often acceptable). This is another reason *why* training and inference infrastructure have different optimal configurations.
 
 The bandwidth improvement matters independently of capacity. Each generation of HBM produces a nearly proportional reduction in per-token latency during autoregressive inference. A 70B model on an A100 (2.0 TB/s HBM2e bandwidth) generates tokens at roughly 70 GB / 2.0 TB/s = 35 ms per token. The same model on an H100 (3.35 TB/s HBM3) generates tokens at 70 GB / 3.35 TB/s = 20.9 ms per token, a 1.67$\times$ improvement. On a B200 (4.8 TB/s HBM3e), latency drops further to 70 GB / 4.8 TB/s = 14.6 ms per token. For interactive applications (chatbots, code assistants, real-time translation), where users perceive delays above 50 ms as "slow," these bandwidth improvements translate directly into better user experience and into the ability to serve larger models within latency budgets.
 
@@ -631,9 +662,7 @@ The distinction between memory *capacity* (how many gigabytes the HBM can store)
 2. **Memory Time**: Loading 140 GB of weights from HBM at 3.35 TB/s takes:
    `{python} InfraSetup.t_mem_math`
 
-**Conclusion**: The processor spends **`{python} InfraSetup.dominance_str`%** of its time waiting for data from memory. The arithmetic units are idle for almost the entire token generation. Even a hypothetical processor with *infinite* compute throughput would generate tokens only negligibly faster, because the memory transfer time dominates completely. This is why HBM bandwidth improvements deliver nearly linear speedups for inference workloads.
-
-::: {.callout-notebook title="The Memory Wall: H100 vs. H200"}
+**Conclusion**: The processor spends **`{python} InfraSetup.dominance_str`%** of its time waiting for data from memory. The arithmetic units are idle for almost the entire token generation. Even a hypothetical processor with *infinite* compute throughput would generate tokens only negligibly faster, because the memory transfer time dominates completely. This is *why* HBM bandwidth improvements deliver nearly linear speedups for inference workloads.
 
 ```{python}
 #| echo: false
@@ -659,7 +688,9 @@ class H200Comparison:
     speedup_str = fmt(speedup, precision=1) + "x"
 ```
 
-\index{NVIDIA H200!memory wall}\index{LLM inference!memory bottleneck}To understand why the "Memory Wall" is the primary constraint for modern LLMs, we compare the **NVIDIA H100** against its successor, the **H200**. While both chips share the same compute cores (same peak TFLOPS), the H200 provides `{python} H200Comparison.bw_gain_str` higher memory bandwidth and `{python} H200Comparison.cap_gain_str` more HBM capacity.
+::: {.callout-notebook title="The Memory Wall: H100 vs. H200"}
+
+\index{NVIDIA H200!memory wall}\index{LLM inference!memory bottleneck}To understand *why* the "Memory Wall" is the primary constraint for modern LLMs, we compare the **NVIDIA H100** against its successor, the **H200**. While both chips share the same compute cores (same peak TFLOPS), the H200 provides `{python} H200Comparison.bw_gain_str` higher memory bandwidth and `{python} H200Comparison.cap_gain_str` more HBM capacity.
 
 **Conclusion**: For LLM decoding, the H200 is **`{python} H200Comparison.speedup_str` faster** than the H100 despite having identical compute power. This proves that for large-scale autoregressive models, the "Wall" is the memory interface, not the arithmetic logic.
 
@@ -760,23 +791,28 @@ labels = [l.get_label() for l in lines]
 ax1.legend(lines, labels, loc='upper left', frameon=True, framealpha=0.9)
 
 ax1.annotate(
-    '~36x Compute Growth',
-    xy=(2024, 4500), xycoords='data',
-    xytext=(2021.5, 4500), textcoords='data',
+    "~36x Compute Growth",
+    xy=(2023.9, 4500),
+    xytext=(2021.7, 4200),
     arrowprops=dict(arrowstyle="->", color=color_compute, lw=1.5),
-    ha='right', va='center', fontsize=9, color=color_compute, fontweight='bold'
+    ha="right",
+    fontsize=9,
+    color=color_compute
 )
 
 ax2.annotate(
-    '~9x Bandwidth Growth',
-    xy=(2024, 8000), xycoords='data',
-    xytext=(2021.5, 12000), textcoords='data',
+    "~9x Bandwidth Growth",
+    xy=(2024, 7600),
+    xytext=(2023.8, 1900),
     arrowprops=dict(arrowstyle="->", color=color_mem, lw=1.5),
-    ha='right', va='center', fontsize=9, color=color_mem, fontweight='bold'
+    ha="right",
+    fontsize=9,
+    color=color_mem
 )
 
 plt.tight_layout()
 plt.show()
+plt.close()
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ```
@@ -792,9 +828,9 @@ For training workloads, where large batch sizes increase arithmetic intensity, t
 
 The token latency calculation above demonstrated that a 70B model on an H100 is overwhelmingly memory-bound. The question is how to determine this systematically for *any* workload on *any* hardware. The **Roofline Model**[^fn-roofline-origin-ci], introduced by Williams, Waterman, and Patterson [@williams2009roofline], provides a visual and analytical framework that answers this question with a single number: the arithmetic intensity of the workload.
 
-[^fn-roofline-origin-ci]: **Roofline Model**: Introduced by Williams, Waterman, and Patterson at UC Berkeley in 2009, the model plots attainable FLOPS against arithmetic intensity on a log-log scale, producing two intersecting lines whose crossover point -- the *ridge point* -- separates memory-bound from compute-bound regimes. For an H100 (989 TFLOPS FP16, 3.35 TB/s HBM), the ridge point is ~295 FLOP/byte; most LLM inference operators fall well below this threshold, which is why the Roofline remains the first diagnostic tool for identifying whether more compute or more bandwidth will improve performance. \index{Roofline Model!origin}
+[^fn-roofline-origin-ci]: **Roofline Model**: Introduced by Williams, Waterman, and Patterson at UC Berkeley in 2009, the model plots attainable FLOPS against arithmetic intensity on a log-log scale, producing two intersecting lines whose crossover point -- the *ridge point* -- separates memory-bound from compute-bound regimes. For an H100 (989 TFLOPS FP16, 3.35 TB/s HBM), the ridge point is ~295 FLOP/byte; most LLM inference operators fall well below this threshold, which is *why* the Roofline remains the first diagnostic tool for identifying whether more compute or more bandwidth will improve performance. \index{Roofline Model!origin}
 
-::: {.callout-note title="Arithmetic Intensity"}
+::: {.callout-perspective title="Arithmetic Intensity"}
 
 **Arithmetic Intensity** ($I$) is applied to fleet-scale performance analysis at @sec-performance-engineering-roofline. Briefly: $I = \text{FLOP}/\text{byte}$ — the ratio of computation to memory traffic that determines whether a workload is bandwidth-bound or compute-bound on the Roofline Model.
 
@@ -887,25 +923,45 @@ plt.fill_between(x, 0, y, where=(x > RIDGE_POINT),
 
 plt.axvline(x=RIDGE_POINT, color='#666666', linestyle='--', linewidth=1.5, alpha=0.7)
 plt.text(RIDGE_POINT * 1.1, 10, f'Ridge Point\n~{int(RIDGE_POINT)} FLOP/B',
-         color='#666666', verticalalignment='bottom')
+         color='#666666',fontsize=11, verticalalignment='bottom')
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 
+label_offsets = {
+    "LLM Decode\n(Batch=1)":  (10, -20, 'left'),
+    "LLM Decode\n(Batch=32)": (10, -20,  'left'),
+    "CNN Training\n(ResNet-50)": (-28, 12, 'center'),
+    "LLM Prefill": (0, 10, 'right'),
+    "LLM Training\n(175B)": (-5, -26, 'center')
+}
+
 for label, intensity in workloads.items():
+
     perf = min(BW_TBS * intensity, P_PEAK_TFLOPS)
-    if intensity < 10:
-        xytext = (10, -20)
-        ha = 'left'
-    elif intensity > 1000:
-        xytext = (-10, -30)
-        ha = 'right'
-    else:
-        xytext = (0, 15)
-        ha = 'center'
-    plt.scatter(intensity, perf, color='#D62728', s=80, zorder=5, edgecolors='white')
-    plt.annotate(label, (intensity, perf), xytext=xytext, textcoords='offset points',
-                 ha=ha, fontsize=9, fontweight='bold',
-                 bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.8))
+
+    xytext_x, xytext_y, ha = label_offsets[label]
+
+    plt.scatter(intensity, perf,
+                color='#D62728',
+                s=90,
+                zorder=5,
+                edgecolors='white')
+
+    plt.annotate(
+        label,
+        (intensity, perf),
+        xytext=(xytext_x, xytext_y),
+        textcoords='offset points',
+        ha=ha,
+        fontsize=9,
+        fontweight='bold',
+        bbox=dict(
+            boxstyle="round,pad=0.3",
+            fc="white",
+            ec="none",
+            alpha=0.7
+        )
+    )
 
 plt.xscale('log')
 plt.yscale('log')
@@ -915,10 +971,30 @@ plt.xlabel('Arithmetic Intensity (FLOPs / Byte)', fontweight='bold')
 plt.ylabel('Attainable Performance (TFLOPS)', fontweight='bold')
 plt.grid(True, which="both", ls="-", alpha=0.15)
 plt.grid(True, which="major", ls="-", alpha=0.3, color='#999999')
-plt.text(0.6, 2.5, f'Bandwidth Slope\n{BW_TBS:.2f} TB/s', rotation=45, color='#006395', fontsize=10)
-plt.text(3000, P_PEAK_TFLOPS * 1.1, r'$R_{\text{peak}}$' + f'\n{int(P_PEAK_TFLOPS)} TFLOPS', color='#006395', ha='right', fontsize=10)
+
+x_text = 4
+y_text = BW_TBS * 0.88*x_text
+
+plt.text(x_text, y_text,
+         f'Bandwidth Slope\n{BW_TBS:.2f} TB/s',
+         rotation=35,
+         color='#006395',
+         fontsize=10,
+         ha='center',
+         bbox=dict(fc="white", alpha=0.7, ec="none")
+)
+plt.text(
+    2200,
+    P_PEAK_TFLOPS * 1.23,
+    f'R_peak\n{int(P_PEAK_TFLOPS)} TFLOPS',
+    color='#006395',
+    ha='center',
+    fontsize=10,
+    bbox=dict(fc="white", alpha=0.7, ec="none")
+)
 plt.tight_layout()
 plt.show()
+plt.close()
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ```
@@ -939,8 +1015,6 @@ The Roofline Model also provides a quantitative framework for evaluating the ret
 
 The Roofline's diagnostic power makes it one of the most practically useful analytical tools in the infrastructure engineer's toolkit. Before committing to any hardware purchase or optimization effort, plotting the workload on the Roofline reveals immediately whether the investment will produce returns. Teams that skip this analysis risk spending months optimizing the wrong resource, an expensive mistake when GPU-hours cost thousands of dollars per day.
 
-::: {.callout-example title="Roofline Analysis: Training vs. Inference"}
-
 ```{python}
 #| label: roofline-scenario
 #| echo: false
@@ -958,6 +1032,7 @@ The Roofline's diagnostic power makes it one of the most practically useful anal
 # │ Exports: InfraSetup.gpt3_params_b, H100PerformanceScenario.h100_tflops, MemoryBandwidthScenario.h100_bw, InfraSetup.h100_ridge
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import H100_FLOPS_FP8_TENSOR, H100_MEM_BW, GPT3_PARAMS, TFLOPs, TB, second, param, BILLION, flop, byte
+from mlsysim.fmt import check
 
 class RooflineScenario:
     """H100 and GPT-3 specs for roofline analysis."""
@@ -970,6 +1045,10 @@ class RooflineScenario:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     ridge = (flops / bw).m_as(flop/byte)
     params_b = gpt3_params / BILLION
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(1.0 < ridge, "Narrative Violation: Batch-1 inference is no longer memory-bound!")
+    check(ridge / 1.0 > 50, "Narrative Violation: The gap between compute-bound and memory-bound is too small.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b = f"{params_b:.0f}"
@@ -1003,6 +1082,8 @@ class RooflineInferenceMath:
     inf_throughput_math = md_math(f"{InfraSetup.h100_bw} \\times 10^{{12}}")
     train_intensity_math = md_math(f"2048 \\times 1.0")
 ```
+
+::: {.callout-example title="Roofline Analysis: Training vs. Inference"}
 
 Consider our `{python} InfraSetup.frontier_params_b`B model on an H100 with `{python} RooflineScenario.h100_tflops` TFLOPS peak compute and `{python} RooflineScenario.h100_bw` TB/s memory bandwidth. The ridge point is `{python} RooflineScenario.h100_ridge` FLOP/byte.
 
@@ -1193,6 +1274,10 @@ class RackPowerScenario:
     node_power = (h100_tdp * gpus_per_node).m_as(kilowatt) * system_overhead
     rack_power = node_power * nodes_per_rack
 
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(rack_power > 25, "Rack power should exceed 25 kW for modern ML nodes")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     rack_power_str = f"{rack_power:.0f}"
 ```
@@ -1254,6 +1339,10 @@ class GpuEfficiencyScenario:
     a100_eff = a100_f16.m_as(TFLOPs/second) / a100_tdp.m_as(watt)
     h100_eff = h100_f16.m_as(TFLOPs/second) / h100_tdp.m_as(watt)
     b200_eff = b200_f16.m_as(TFLOPs/second) / b200_tdp.m_as(watt)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(h100_eff > a100_eff > v100_eff, "Efficiency should strictly increase with newer generations for same precision")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     v100_ef_str = f"{v100_eff:.2f}"
@@ -1507,10 +1596,20 @@ class BandwidthHierarchyScenario:
     pcie = PCIE_GEN5_BW
     ib = INFINIBAND_NDR_BW
 
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    nvlink_gbs = nvlink.m_as(GB/second)
+    pcie_gbs = pcie.m_as(GB/second)
+    ib_gbs = (ib / 8).m_as(GB/second)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(nvlink_gbs > pcie_gbs, "NVLink should have higher bandwidth than PCIe")
+    check(pcie_gbs >= ib_gbs, "PCIe should have higher or equal bandwidth to a single IB link")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_bw_str = f"{nvlink.m_as(GB/second):.0f}"
-    pcie_bw_str = f"{pcie.m_as(GB/second):.0f}"
-    ib_bw_gbs = f"{(ib / 8).m_as(GB/second):.0f}"
+    nvlink_bw_str = f"{nvlink_gbs:.0f}"
+    pcie_bw_str = f"{pcie_gbs:.0f}"
+    ib_bw_gbs = f"{ib_gbs:.0f}"
 ```
 
 | **Domain**          | **Interconnect**   |                         **Bandwidth**                         | **Latency** | **Scaling Limit**  |
@@ -1556,7 +1655,7 @@ class BandwidthStaircase:
     gap_hbm_nv = hbm_bw_gbs / nvlink_bw_gbs
     gap_nv_ib = nvlink_bw_gbs / ib_bw_gbs
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(gap_nv_ib == 18.0, f"Gap {gap_nv_ib} unexpected")
+    check(gap_nv_ib > 10, f"Narrative Violation: Bandwidth staircase collapsed! Ratio is only {gap_nv_ib:.1f}x (needs to be >10x)")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     bs_hbm_bw_str = f"{hbm_bw_gbs:,.0f}"
     bs_nvlink_bw_str = f"{nvlink_bw_gbs:.0f}"
@@ -1675,6 +1774,10 @@ class NodeCapacityScenario:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_mem = mem * n_gpus
     total_flops = flops * n_gpus
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(total_mem.m_as(GB) > 500, "Node HBM capacity should exceed 500GB")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     node_hbm_cap = f"{total_mem.m_as(GB):.0f}"
@@ -2476,6 +2579,10 @@ class CommScalingMath:
 
     _ib_gbs = BandwidthHierarchyScenario.ib_bw_gbs
 
+    # ┌── GUARD (Invariants) ──────────────────────────────────────────
+    _time_s = (2 * 350) / float(_ib_gbs)
+    check(_time_s > 5.0, f"Narrative Violation: Communication is too fast ({_time_s:.1f}s)! The 'bottleneck' narrative is broken.")
+
     comm_time_formula_math = md_math(f"2 \\times (N-1)/N \\times 350 / {_ib_gbs}")
     comm_approx_math = md_math(f"2 \\times 350 / {_ib_gbs}")
     compute_per_step_math = md_math(f"C = 6 \\times {InfraSetup.gpt3_params_b} \\times 10^{{18}}")
@@ -3182,6 +3289,11 @@ class SummaryScaleScenario:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     params_b = params.m_as(param) / BILLION
     rack_power = (tdp * gpus_per_node).m_as(kilowatt) * 1.2 * 4 # 4 nodes per rack
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(params_b == 175, "GPT-3 params should be 175B")
+    check(rack_power > 25, "Rack power should exceed 25 kW")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt3_params_b = f"{params_b:.0f}"

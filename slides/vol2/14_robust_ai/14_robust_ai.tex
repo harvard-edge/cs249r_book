@@ -1,0 +1,1566 @@
+% =============================================================================
+% Chapter 14: Robust AI — ML Systems Lecture Slides (Volume II)
+% =============================================================================
+% Covers: silent failure modes, distribution shift, adversarial attacks,
+% data poisoning, defense strategies, and the robustness-accuracy trade-off.
+%
+% IMAGES NEEDED (SVGs converted to PDF):
+%   - silent-failure-modes.pdf    - robustness-framework.pdf
+%   - distribution-shift-types.pdf - adversarial-attack-fgsm.pdf
+%   - robustness-tax.pdf          - sdc-at-scale.pdf
+%   - data-poisoning.pdf          - defense-layers.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Volume II},
+  chapter      = {Chapter 14},
+  logo         = {../../assets/img/logo-mlsysbook.png},
+  instlogo     = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Robust AI},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\eps}{\varepsilon}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation ---
+\setcounter{mlsystotalsections}{8}
+
+\title{Robust AI}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Robust AI}{Making the Invisible Visible}{cover_robust_ai.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Walk through each objective. Emphasize that robustness is a systems
+property, not just an algorithmic feature. ``This chapter makes the invisible
+visible --- silent failures that no alert catches.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``How would you know if your deployed model was silently failing right now?''
+Cold-call one student. [Expected: most will admit they would not know.]
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] This slide sets the chapter scope.
+IF SHORT: Read objectives 1, 2, and 5 aloud; let students scan the rest.
+}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item Classify robustness challenges into \textbf{environmental shifts}, \textbf{adversarial attacks}, and \textbf{data poisoning}
+  \item Explain why ML systems \textbf{fail silently} and quantify the \textbf{robustness--accuracy trade-off}
+  \item Evaluate adversarial attack techniques (\textbf{FGSM}, \textbf{PGD}, \textbf{C\&W}) and their threat models
+  \item Apply statistical methods (\textbf{MMD}, \textbf{PSI}, \textbf{KS tests}) to detect distribution shifts
+  \item Construct \textbf{multi-layered defenses} combining adversarial training, certified defenses, and input sanitization
+  \item Integrate robustness with \textbf{compute and accuracy trade-offs} across the ML lifecycle
+\end{enumerate}
+
+\end{frame}
+
+\begin{frame}{Visual Language}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[1 min] Point to each card. ``In this chapter, red dominates --- robustness
+failures are errors and bottlenecks. Green marks the healthy paths we are
+trying to protect.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Skip if students have seen this in a previous lecture.
+}
+
+\small
+Throughout this course, colors carry meaning:
+
+\vspace{0.3cm}
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Blue} --- Compute / Processing\\
+    {\footnotesize GPU ops, forward/backward pass, inference}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Green} --- Data / Memory\\
+    {\footnotesize Data flow, caches, healthy paths}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Orange} --- Routing / Scheduling\\
+    {\footnotesize Load balancers, batch windows}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Red} --- Error / Cost / Bottleneck\\
+    {\footnotesize Loss, decode phase, waste}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\end{frame}
+
+
+
+% =============================================================================
+\section{Silent Failures}
+% =============================================================================
+
+\begin{frame}{The Silent Failure Problem}
+\note{
+% -- LINK: What prior concept connects to this slide
+Ch 13 covered intentional attacks. This chapter opens with a different threat:
+the model fails on its own, without any adversary, because the world changed.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Point to the diagram: ``Traditional software crashes loudly with stack
+traces. ML models produce confident but wrong outputs --- no exception, no alert,
+no crash.'' The autonomous vehicle scenario makes this visceral: ``The model
+kept driving at full speed because it was 98\% confident the white trailer was sky.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What is more dangerous --- a system that crashes or one that keeps running
+while silently wrong?'' Give 10 seconds. [Expected: silently wrong, because no
+one knows to intervene.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think monitoring accuracy on a test set catches silent
+failures. Correct framing: the test set is i.i.d. --- it cannot detect failures
+on out-of-distribution inputs the model encounters in production.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] This is the chapter thesis --- do not skip.
+IF SHORT: State ``ML fails silently'' and show one line of the diagram.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{silent-failure-modes.pdf}
+
+\vspace{0.15cm}
+\mlsysalert{Key:}{No code changed. No crash. No alert. The \emph{world} changed.}
+
+\end{frame}
+
+\begin{frame}{Defining Robust AI}
+\note{
+% -- LINK: What prior concept connects to this slide
+The previous slide showed that ML fails silently. This slide defines what
+``robust'' means formally --- a measurable systems property, not a vague goal.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Read the definition card aloud. Then point to the table: ``Standard
+accuracy measures average-case on i.i.d.\ test data. Robustness measures
+worst-case under perturbation.'' Anchor on the key number: ``Epsilon = 8/255
+is invisible to humans but drops ResNet-50 from 76\% to 11\%.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think robustness = higher accuracy. Correct framing:
+95\% test accuracy can coexist with 100\% vulnerability to targeted
+perturbations. They measure fundamentally different things.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] The formal definition structures all subsequent slides.
+IF SHORT: Read the definition and the epsilon=8/255 number only.
+}
+
+\footnotesize
+\begin{mlsyscard}{crimson}
+\textbf{Robust AI:} The measurable systems property that predictions remain valid ---
+within specified error bounds --- under distribution shift, adversarial perturbation,
+and hardware/software faults.
+\end{mlsyscard}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.1}
+{\scriptsize
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  & \textbf{Standard Accuracy} & \textbf{Robustness} \\
+  \midrule
+  Measures     & Average-case (i.i.d.\ test) & Worst-case (adversarial / OOD) \\
+  Perturbation & None                         & $\eps = 8/255$ ($L_\infty$) \\
+  Accuracy     & 76\% (ResNet-50)             & 11\% after single bit flip \\
+  Failure mode & Visible in metrics           & Silent, high-confidence \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.1cm}
+\mlsysconcept{Distinction:}{95\% test accuracy can coexist with 100\% vulnerability to targeted perturbations.}
+
+\end{frame}
+
+% =============================================================================
+\section{Real-World Failures}
+% =============================================================================
+
+\begin{frame}{Cloud: AWS S3 Outage (2017)}
+\note{
+% -- LINK: What prior concept connects to this slide
+We defined robustness formally. Now we ground it in real failures --- starting
+with infrastructure failure that cascades into ML service outage.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] ``A single mistyped command during S3 maintenance cascaded through
+US-East-1, disabling 150+ services for 4 hours. Alexa --- 40 million devices ---
+went completely dark.'' Point to the card: ``ML services assume infrastructure
+availability as an invariant, not a probabilistic guarantee.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students treat infrastructure failures as ``not an ML problem.''
+Correct framing: ML services inherit all infrastructure fragility AND add
+model-specific failure modes on top.
+
+% -- FLEX: [OPTIONAL] or [CORE] + contingency
+[OPTIONAL] This is context-setting for the Tesla case study.
+IF SHORT: State the \$150M number and Alexa impact in one sentence, move on.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{What happened:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Engineer mistyped a maintenance command
+      \item US-East-1 region: 150+ services down for \textbf{4 hours}
+      \item Estimated \textbf{\$150M} in losses
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{ML Impact:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Alexa (40M+ devices): completely unresponsive
+      \item Voice recognition: 200--500 ms $\to$ total failure
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Systems Lesson}\\[0.05cm]
+    {\scriptsize ML services assume infrastructure availability as an \emph{invariant}, not a probabilistic guarantee. A single human error disables the entire ML fleet.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Edge: Tesla Autopilot (2016)}
+\note{
+% -- LINK: What prior concept connects to this slide
+S3 was infrastructure failure. Tesla is a model-level robustness failure ---
+the system worked correctly on inputs it had seen, but failed fatally on a
+novel scenario.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the bullet list: ``Camera: white trailer against bright
+sky --- missed. Radar: trailer classified as overhead sign --- ignored. Fusion
+logic: discarded both valid signals. Result: no braking at 74 mph.'' Key
+technical insight: ``Both sensors received valid data. The decision boundary
+failed on an input absent from training. This is not a sensor failure --- it
+is a robustness failure.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What would have prevented this crash at the systems level?'' Give 10
+seconds. [Expected: redundant decision logic, uncertainty quantification that
+triggers fallback when confidence is low on novel inputs.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students blame the camera or radar hardware. Correct framing:
+both sensors worked correctly --- the fusion logic's decision boundary had a
+gap on out-of-distribution inputs.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] This is the anchor case study for edge robustness failures.
+IF SHORT: Focus on the ``both sensors received valid data'' insight.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Fatal crash:} Tesla Model S at 74 mph
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Camera: white trailer vs.\ bright sky $\to$ missed
+      \item Radar: trailer classified as overhead sign $\to$ ignored
+      \item Fusion logic: discarded both valid signals
+      \item Result: no braking, underride collision
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize Both sensors received valid data. The \textbf{decision boundary} failed on an input absent from training.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Edge Fragility}\\[0.05cm]
+    {\scriptsize Edge devices lack fallback redundancy. No secondary cluster to route to. Must degrade gracefully within power and memory envelope.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\mlsyscite{NTSB, 2017}
+
+\end{frame}
+
+\begin{frame}{Silent Data Corruption at Scale}
+\note{
+% -- LINK: What prior concept connects to this slide
+Tesla showed an edge device failing on novel input. This slide shows a different
+failure mode: hardware silently corrupting model weights at datacenter scale.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the probability math in the diagram: ``P(at least 1 SDC)
+= 1 - (1-p) to the N. At 10K GPUs with Meta's reported per-device rate, you
+get 63\% probability of at least one silent data corruption per hour.'' Key
+punchline: ``A single bit flip can drop ResNet-50 from 76\% to 11\%.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Does ECC memory solve this?'' Give 5 seconds.
+[Expected: yes. Correct answer: no --- ECC catches correctable errors but not
+all silent data corruptions, especially in logic paths.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think ECC memory eliminates silent corruption. Correct
+framing: ECC catches DRAM bit flips but not logic-path SDC, GPU register
+corruption, or interconnect errors.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] The 63\% per hour number is the key quantitative anchor for scale risk.
+IF SHORT: State the probability and the 76\%-to-11\% impact number.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{sdc-at-scale.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Scale transforms negligible per-device risk into near-certain system-level failure.}{}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: What Makes ML Failures Unique?}
+\note{
+% -- LINK: What prior concept connects to this slide
+Three real-world failures (S3, Tesla, SDC) showed different robustness threats.
+This prediction exercise asks students to synthesize those into general causes.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Read the scenario aloud: ``95\% accuracy drops to 72\% over 3 months.
+No code changed. No alerts fired.'' Give 60 seconds of silent writing. Do NOT
+reveal the answer yet. Ask 2--3 students to share.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students must name 3 possible causes. [Expected answers: distribution shift,
+data pipeline corruption, hardware SDC, upstream feature changes, label drift.]
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] This active learning moment primes the unified framework on the next slide.
+IF SHORT: Reduce writing time to 30 seconds; still cold-call 2 students.
+}
+
+\centering
+\vspace{0.8cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.5cm}
+{\large A deployed model's accuracy drops from 95\% to 72\%\\
+over 3 months. No code changed. No alerts fired.\\[0.3cm]
+\alert{Name 3 possible causes.}}
+
+\vspace{0.5cm}
+{\normalsize Write them down. \textcolor{midgray}{(60 seconds)}}
+
+\vspace{0.3cm}
+{\small\textcolor{lightgray}{Then compare with a neighbor.}}
+
+\end{frame}
+
+% =============================================================================
+\section{Unified Framework}
+% =============================================================================
+
+\begin{frame}{A Unified Robustness Framework}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just predicted causes of silent degradation. This framework organizes
+all those causes (and their defenses) into a unified structure.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the diagram: ``Four threat sources on the left ---
+environmental shift, adversarial attack, data poisoning, hardware fault. Five
+defense layers on the right --- input sanitization, robust training, drift
+monitoring, data validation, uncertainty quantification. The model sits in the
+center.'' Key punchline: ``No single defense addresses all four threats.''
+Connect to prior chapters: ``Security (Ch 13) locks the front door. Fault
+tolerance (Ch 7) keeps training alive. Robustness faces what both miss.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think adversarial training alone makes a model robust.
+Correct framing: adversarial training addresses one threat (perturbations) but
+not distribution shift, hardware faults, or data poisoning.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] This framework is the chapter's organizing structure.
+IF SHORT: Name the four threats and five defenses without elaborating each.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{robustness-framework.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Pattern:}{Every threat demands a distinct defense. Multi-layered strategy is non-negotiable.}
+
+\end{frame}
+
+\mlsysfocus{Robust AI}{%
+$\text{Robustness} \neq \text{Accuracy}$\\[0.3cm]
+A model with 95\% test accuracy can be\\
+100\% vulnerable to targeted perturbations%
+}
+
+\begin{frame}{From Previous Chapters}
+\note{
+% -- LINK: What prior concept connects to this slide
+The framework showed four threat sources. This slide maps prior chapter knowledge
+to what robustness adds on top.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Point to the left column: ``You already know fault tolerance, security,
+serving, and operations.'' Point to the right: ``Robustness adds graceful degradation,
+adversarial resilience, and data integrity.'' Read the crimson card: ``A system that
+is secure but fragile is useless. Robustness closes the loop.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Bridging slide. IF SHORT: Skip --- the framework slide covered this.
+}
+
+\scriptsize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{What students already know:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textcolor{computestroke}{Fault Tolerance}: Checkpointing, recovery
+      \item \textcolor{datastroke}{Security}: Access control, threat models
+      \item \textcolor{routingstroke}{Serving}: Batching, pipeline parallelism
+      \item \textcolor{errorstroke}{Ops}: Monitoring, SLAs
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{What robustness adds:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \alert{Graceful degradation} under shift
+      \item \alert{Adversarial resilience} at inference
+      \item \alert{Data integrity} in training pipelines
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{crimson}
+    \textbf{The Robustness Gap}\\[0.05cm]
+    {\scriptsize A system that is secure but fragile is useless. One that tolerates faults but not drift will silently degrade. Robustness closes the loop.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Scale amplifies risk:} 175B-param model on 8+ GPU nodes $\to$ 8$\times$ fault surface. INT8 quantization reduces robustness margin.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Distribution Shift}
+% =============================================================================
+
+\begin{frame}{Three Types of Distribution Shift}
+\note{
+% -- LINK: What prior concept connects to this slide
+The framework listed environmental shift as threat source 1. This slide decomposes
+it into three types with different detection strategies.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the diagram: ``Covariate shift: P(X) changes. Label shift:
+P(Y) changes. Concept drift: P(Y|X) changes.'' Key distinction: ``Covariate and
+label shift are detectable from input statistics. Concept drift requires
+ground-truth comparison --- much harder in production.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which type is hardest to detect and why?'' Give 10 seconds.
+[Expected: concept drift --- input monitoring sees nothing unusual.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students assume all drift is detectable from input statistics.
+Correct framing: concept drift is invisible to feature monitoring because P(X)
+is unchanged.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] The three-type taxonomy structures detection methods on the next slide.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{distribution-shift-types.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Critical distinction:}{Concept drift changes P(Y$|$X) --- detectable \emph{only} with ground-truth feedback.}
+
+\end{frame}
+
+\begin{frame}{Detecting Drift: The Statistical Arsenal}
+\note{
+% -- LINK: What prior concept connects to this slide
+Three drift types need detection tools. This slide provides the statistical
+monitoring toolkit.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the table: ``KS test is fast but univariate. PSI bins
+features and compares proportions. MMD works in high dimensions but is
+compute-heavy.'' Point to the green card: ``PSI detects shifts 3--6 weeks
+before accuracy falls below SLA.'' Point to the red card: ``Concept drift is
+the blind spot --- invisible to all input-side methods.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students deploy one statistical test and assume full coverage.
+Correct framing: KS covers univariate, MMD covers joint distribution, but
+neither catches concept drift.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] The 3--6 week early warning is the key operational insight.
+IF SHORT: Point to the table and green card only.
+}
+
+\small
+\renewcommand{\arraystretch}{1.15}
+{\footnotesize
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Method} & \textbf{What It Detects} & \textbf{Strength} & \textbf{Limitation} \\
+  \midrule
+  \textbf{KS Test}  & Univariate shift   & Fast ($O(n \log n)$)  & 1D only \\
+  \textbf{PSI}      & Feature stability   & Easy to interpret     & Binning artifacts \\
+  \textbf{MMD}      & Joint distribution  & High-dimensional      & Compute-heavy \\
+  \textbf{Chi-sq}   & Categorical shift   & Standard test         & Discrete features \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.2cm}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Early Warning}\\[0.05cm]
+    {\footnotesize PSI detects shifts \textbf{3--6 weeks} before accuracy falls below SLA thresholds, enabling proactive retraining.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Blind Spot}\\[0.05cm]
+    {\footnotesize Concept drift ($P(Y|X)$ changes) is \emph{invisible} to input monitoring. Requires ground-truth comparison.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Worked Example: Is the World Changing?}
+\note{
+% -- LINK: What prior concept connects to this slide
+The statistical arsenal showed tools. This worked example applies them to a
+concrete production scenario.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Walk through the table row by row: ``Baseline mean 0.50, observed 0.55.
+Difference = 0.05, standard error = 0.009, Z-score = 5.5 sigma, p-value less
+than 0.001.'' Key insight: ``A 5\% shift sounds small, but with 1,000 samples
+it is 5.5 standard errors --- statistically certain.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students confuse statistical significance with practical significance.
+Correct framing: 5.5 sigma confirms the shift is real, but the engineering question
+is whether 0.05 shift matters for model accuracy.
+
+% -- FLEX: [OPTIONAL] or [CORE] + contingency
+[OPTIONAL] Reinforces the detection methods. IF SHORT: State the 5.5-sigma result.
+}
+
+\small
+\textbf{Scenario:} Baseline feature mean = 0.50. Last 1,000 requests: mean = 0.55.
+
+\vspace{0.15cm}
+\renewcommand{\arraystretch}{1.15}
+{\footnotesize
+\begin{tabular}{@{}llr@{}}
+  \toprule
+  \textbf{Step} & \textbf{Calculation} & \textbf{Value} \\
+  \midrule
+  Difference   & $0.55 - 0.50$               & 0.05 \\
+  Std.\ Error  & $0.3 / \sqrt{1000}$         & 0.009 \\
+  Z-score      & $0.05 / 0.009$              & \textbf{5.5$\sigma$} \\
+  P-value      & ---                          & \textbf{$< 0.001$} \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{errorstroke}
+\textbf{Verdict: Confirmed Regression.} A shift of 0.05 with 1,000 samples has $< 0.1\%$ probability of being noise. Trigger automated response: fallback model or emergency retraining.
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Adversarial Attacks}
+% =============================================================================
+
+\begin{frame}{Adversarial Attacks: Exploiting Decision Boundaries}
+\note{
+% -- LINK: What prior concept connects to this slide
+Distribution shift is accidental. Adversarial attacks are intentional --- they
+weaponize the same gradient used for training.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Point to the FGSM equation in the diagram: ``The same gradient used for
+training is weaponized for attack. Training minimizes loss; attack maximizes it.
+One gradient step is enough.'' Anchor on the number: ``Epsilon = 8/255 is
+invisible to humans but devastating to models.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think adversarial vulnerability is a bug to fix. Correct
+framing: it is an inherent property of high-dimensional decision boundaries ---
+the geometry of the space enables it.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] FGSM is the foundation for all adversarial attack discussion.
+IF AHEAD: ``Why does one gradient step suffice when training needs thousands?''
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{adversarial-attack-fgsm.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Not a bug:}{Adversarial vulnerability is an inherent property of high-dimensional decision boundaries.}
+
+\end{frame}
+
+\begin{frame}{Attack Taxonomy}
+\note{
+% -- LINK: What prior concept connects to this slide
+FGSM showed the mechanism. This slide organizes all adversarial attacks into
+four categories of increasing realism.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Walk through the table: ``Gradient-based requires white-box access ---
+unlikely in production. Transfer-based is the realistic threat: craft on a
+surrogate, transfer to production with 30--70\% success. Physical patches are
+the most visceral: stickers on stop signs.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students focus on white-box attacks because the math is cleaner.
+Correct framing: transfer and physical attacks are the production threats ---
+they require zero access to the target model.
+
+% -- FLEX: [OPTIONAL] or [CORE] + contingency
+[OPTIONAL] Extends the FGSM slide with taxonomy context.
+IF SHORT: Focus on transfer and physical rows only.
+}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Category} & \textbf{Mechanism} & \textbf{Access} & \textbf{Key Example} \\
+  \midrule
+  \textbf{Gradient}    & $\nabla_x J(\theta,x,y)$ & White-box    & FGSM, PGD, JSMA \\
+  \textbf{Optimization} & Min.\ perturbation    & White-box    & C\&W (broke distillation) \\
+  \textbf{Transfer}    & Surrogate $\to$ target    & \textcolor{errorstroke}{\textbf{Black-box}} & 30--70\% success rate \\
+  \textbf{Physical}    & Real-world patches        & \textcolor{errorstroke}{\textbf{No access}} & Stop sign stickers \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Transfer Attacks}: Train surrogate locally, craft attacks offline, transfer to production API. No queries needed.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize \textbf{Physical Patches}: Adversarial patches on clothing, stickers on stop signs. No digital access required.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Diagnose the Threat}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students learned drift types and adversarial attacks. This exercise tests whether
+they can diagnose a real-world scenario combining both concepts.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Read the scenario. Give 90 seconds. After pause reveal: ``This is concept
+drift --- P(Y|X) changed because fraud patterns evolved. Input features are
+unchanged, so KS test shows no signal. You need ground-truth comparison.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Three-part question forces precise reasoning: identify the shift type, explain
+why monitoring missed it, propose the correct response. [Expected: concept drift,
+invisible to input monitoring, retrain every 90--120 days.]
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Second required active learning moment.
+IF SHORT: Reduce to 60 seconds; skip pair comparison.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\small\bfseries Diagnose the Threat}
+
+    \vspace{0.1cm}
+    A fraud detection model deployed 6 months ago:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Input features: \textbf{unchanged}
+      \item Model confidence: \textbf{stable at 95\%+}
+      \item Fraud precision: \textbf{85\% $\to$ 68\%}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{1.} What type of shift is this?\\
+    \textbf{2.} Why did input monitoring miss it?\\
+    \textbf{3.} What is the correct response?
+
+    {\scriptsize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.05cm]
+    {\scriptsize
+    \textbf{1.} Concept drift: $P(Y|X)$ changed (fraud patterns evolved)\\[0.05cm]
+    \textbf{2.} $P(X)$ unchanged --- input monitoring only detects covariate/label shift\\[0.05cm]
+    \textbf{3.} Ground-truth feedback loop + retrain every 90--120 days\\[0.05cm]
+    \textcolor{errorstroke}{\textbf{Concept drift is invisible to feature monitoring!}}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Defenses}
+% =============================================================================
+
+\begin{frame}{The Robustness Tax}
+\note{
+% -- LINK: What prior concept connects to this slide
+We have cataloged threats. Now the defense section opens with the uncomfortable
+truth: every defense has a cost.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Point to the bar chart: ``Standard ResNet-50: 76\% accuracy. Adversarial
+training: 50\% --- a 26\% tax on clean accuracy. Certified smoothing: requires
+100K noise samples per inference.'' Key punchline: ``Robustness cannot be turned
+on for free. Every defense trades accuracy, compute, or both.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students assume robustness is additive --- just add a defense layer.
+Correct framing: adversarial training fundamentally changes what the model learns,
+sacrificing non-robust features that were predictive on clean data.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] The robustness tax frames all subsequent defense slides.
+IF SHORT: State the 26\% accuracy tax and the 100K inference cost.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{robustness-tax.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Fundamental:}{Robustness trades accuracy, compute, or both. Every defense has a cost.}
+
+\end{frame}
+
+\begin{frame}{Adversarial Training}
+\note{
+% -- LINK: What prior concept connects to this slide
+The robustness tax showed the cost. This slide explains the two primary defense
+mechanisms and why each costs what it does.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Point to the left column: ``Adversarial training augments each batch with
+PGD-generated perturbations. Cost: 8--10x compute per epoch. Clean accuracy drops
+from 76\% to 50\%.'' Point to the right column: ``Certified smoothing provides
+mathematical guarantees via randomized noise. But 100K samples per inference
+restricts it to offline auditing.''
+ANALOGY: ``Adversarial training is like sparring practice --- expensive but builds
+real resilience. Certified smoothing is like armor testing --- rigorous but slow.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think adversarial training protects against all attacks.
+Correct framing: it is threat-model-specific --- L-infinity training provides
+zero protection against L-2 or geometric attacks.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] These are the two primary defense paradigms.
+IF SHORT: Cover adversarial training only; mention certified smoothing as offline.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Empirical Defense:}
+
+    \vspace{0.1cm}
+    Adversarial training augments each batch with PGD-generated perturbations:
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Generate adversarial $x_{\text{adv}}$ for each $x$
+      \item Train on both clean and adversarial
+      \item Cost: \textbf{8--10$\times$} compute per epoch
+      \item Clean accuracy: 76\% $\to$ \textbf{50\%}
+    \end{itemize}
+    }
+
+    \vspace{0.1cm}
+    \mlsysconcept{Why it works:}{Model learns to ignore brittle, non-robust features.}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{Certified Defense:}
+
+    \vspace{0.1cm}
+    Randomized smoothing provides \emph{mathematical} guarantees:
+
+    \vspace{0.1cm}
+    {\footnotesize
+    $g(x) = \arg\max_c \mathbb{P}(f(x+\delta) = c)$\\
+    where $\delta \sim \mathcal{N}(0, \sigma^2 I)$
+    }
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Certified radius: $R = \sigma \Phi^{-1}(p_A)$
+      \item 49\% certified robustness
+      \item Cost: \textbf{100K samples/inference}
+      \item Restricted to offline auditing
+    \end{itemize}
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Data Poisoning: Attacking the Supply Chain}
+\note{
+% -- LINK: What prior concept connects to this slide
+Adversarial training defends inference. Data poisoning attacks training ---
+a different phase requiring different defenses (also covered in Ch 13).
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Point to the diagram: ``Clean-label attacks are the most insidious:
+labels are correct, but images contain invisible triggers. 0.1\% poisoned
+data achieves 95\% backdoor success.'' Key point: ``No pipeline access needed
+--- just contribute to a public dataset like ImageNet or LAION.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think poisoning requires admin access to training data.
+Correct framing: clean-label attacks embed triggers in publicly contributed
+data --- anyone can poison a crowdsourced dataset.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Supply chain attacks are the highest-leverage training-time threat.
+IF SHORT: State the 0.1\% number and the clean-label insight.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{data-poisoning.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Supply chain attack:}{0.1\% poisoned training data embeds a 95\%-effective backdoor.}
+
+\end{frame}
+
+\begin{frame}{Multi-Layered Defense}
+\note{
+% -- LINK: What prior concept connects to this slide
+Individual defenses each have blind spots. This slide assembles them into a
+layered defense where each ring catches what the others miss.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the concentric rings: ``Outer ring: feature squeezing ---
+eliminates 70--90\% of adversarial examples at negligible cost. Next: adversarial
+training provides worst-case guarantees. Drift monitoring gives 3--6 weeks of
+early warning. Center: uncertainty quantification --- the model should be able
+to say `I do not know.'\,''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Which layer provides the best cost-to-value ratio?'' Give 10 seconds.
+[Expected: feature squeezing --- 70--90\% effectiveness at negligible cost.]
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Defense-in-depth is the chapter's design pattern.
+IF SHORT: Name the layers and highlight feature squeezing as highest leverage.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{defense-layers.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Defense-in-depth:}{Each layer catches failures the others miss. No single technique is sufficient.}
+
+\end{frame}
+
+\begin{frame}{Detection Techniques}
+\note{
+% -- LINK: What prior concept connects to this slide
+The layered defense diagram showed the strategy. This slide provides the specific
+detection techniques that populate those layers.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Walk through the table: ``Statistical methods compare input to training
+distribution. Feature squeezing reduces precision from 256 to 16 colors ---
+70--90\% of adversarial examples filtered at negligible latency. MC dropout runs
+multiple forward passes for uncertainty estimates at 10--100x inference cost.''
+Point to the green card: ``Feature squeezing is the highest value-to-cost ratio.''
+
+% -- FLEX: [OPTIONAL] or [CORE] + contingency
+[OPTIONAL] Extends the defense layers slide with implementation detail.
+IF SHORT: Point to feature squeezing in the green card and move on.
+}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{@{}lp{2.8cm}p{2cm}p{2.8cm}@{}}
+  \toprule
+  \textbf{Approach} & \textbf{Mechanism} & \textbf{Effectiveness} & \textbf{Cost} \\
+  \midrule
+  \textbf{Statistical}    & Compare input to training dist.\ & KS, AD tests & Low (feature-level) \\
+  \textbf{Feature Squeeze} & Reduce precision (256$\to$16) & 70--90\% filtered & Negligible latency \\
+  \textbf{MC Dropout}      & Multiple forward passes & Uncertainty est.\ & 10--100$\times$ inference \\
+  \textbf{Ensembles}       & Multiple models, variance & Robust UQ & 3--5$\times$ compute \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{datastroke}
+{\scriptsize \textbf{Feature Squeezing} (highest value / lowest cost): Compare predictions on original vs.\ squeezed inputs. Large divergence flags adversarial. 95\%+ clean accuracy at negligible latency.}
+\end{mlsyscard}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Choose Your Defense}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just learned five defense techniques with different cost profiles. This
+discussion forces them to choose under real constraints.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Read the scenario: ``Medical imaging classifier. Budget: 2x training
+compute, 1.5x inference latency.'' Point to the five options. Give 90 seconds
+for pair discussion. Cold-call 2--3 pairs.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students must choose AND justify. [No single right answer --- the point is that
+defense choice depends on threat model and compute budget. Adversarial training
+fits the training budget but exceeds inference; feature squeezing fits inference
+but provides weaker guarantees.]
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Third required active learning moment.
+IF SHORT: Reduce to 60 seconds; cold-call 2 pairs.
+}
+
+\centering
+\vspace{0.6cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.5cm}
+{\large You are deploying a medical imaging classifier.\\
+Budget: 2$\times$ training compute, 1.5$\times$ inference latency.\\[0.3cm]
+\alert{Which defense strategy do you choose and why?}}
+
+\vspace{0.5cm}
+\begin{columns}[c]
+  \begin{column}{0.20\textwidth}\centering\small Adversarial\\ Training\end{column}
+  \begin{column}{0.20\textwidth}\centering\small Certified\\ Smoothing\end{column}
+  \begin{column}{0.20\textwidth}\centering\small Feature\\ Squeezing\end{column}
+  \begin{column}{0.20\textwidth}\centering\small Ensemble +\\ MC Dropout\end{column}
+  \begin{column}{0.20\textwidth}\centering\small Drift\\ Monitoring\end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Robustness in Generative AI}
+\note{
+% -- LINK: What prior concept connects to this slide
+Defense layers covered classification robustness. Generative AI introduces
+qualitatively different robustness challenges: hallucination, reward hacking,
+and distributional collapse are not captured by traditional accuracy metrics.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the three failure modes: ``Hallucination: confident
+generation of false information --- no analog in classification. Reward
+hacking: models exploit proxy objectives during RLHF, producing outputs
+that score well but are harmful. Distributional collapse: models trained
+on their own outputs degrade across generations.'' Key punchline: ``These
+failures are invisible to standard metrics because the model is fluent and
+confident while being wrong.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``How would you detect a hallucination that reads as perfectly fluent text?''
+Give 10 seconds. [Expected: fact-checking against external knowledge bases, but
+this does not scale to open-ended generation.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students assume perplexity or BLEU scores measure robustness.
+Correct framing: a model can have low perplexity and high BLEU while
+hallucinating --- fluency is not truthfulness.
+
+% -- FLEX: [CORE] + contingency
+[CORE] GenAI robustness extends the chapter to the dominant deployment paradigm.
+IF SHORT: Name the three failure modes and state ``fluency is not truthfulness.''
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Three GenAI-specific failure modes:}
+
+    \vspace{0.1cm}
+    \textcolor{errorstroke}{\textbf{1. Hallucination}}\\
+    {\scriptsize Confident generation of false information. No classification analog. Detection requires external grounding.}
+
+    \vspace{0.08cm}
+    \textcolor{routingstroke}{\textbf{2. Reward Hacking}}\\
+    {\scriptsize Models exploit RLHF proxy objectives. High reward scores + harmful outputs. Requires red-teaming beyond automated metrics.}
+
+    \vspace{0.08cm}
+    \textcolor{computestroke}{\textbf{3. Distributional Collapse}}\\
+    {\scriptsize Training on model-generated data degrades quality across generations. Self-consuming loops are unstable.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{crimson}
+    \textbf{The Core Problem}\\[0.05cm]
+    {\scriptsize Standard metrics (perplexity, BLEU) cannot detect these failures. A model can be \textbf{fluent and confident while being wrong}.\\[0.1cm]
+    \textbf{Defenses:}\\
+    Retrieval-augmented grounding\\
+    Constitutional AI constraints\\
+    Human-in-the-loop evaluation\\
+    Data provenance tracking}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: FGSM Robustness Tax Exercise ---
+\begin{frame}{Your Turn: Calculate the Robustness Tax}
+\note{
+% -- LINK: What prior concept connects to this slide
+The robustness tax slide showed 76\% to 50\% accuracy drop. This exercise
+makes students compute the tax themselves for a specific scenario.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Read the scenario. Give 90 seconds. After pause reveal:
+``Robustness tax = (76 - 42) / 76 = 44.7\%. With adversarial training:
+accuracy recovers to 62\% under attack, so new tax = (76 - 62) / 76 = 18.4\%.
+But clean accuracy drops to 50\%, so the clean tax = (76 - 50) / 76 = 34.2\%.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students calculate robustness tax before and after adversarial training.
+Key insight: adversarial training reduces the attack tax but introduces
+a clean accuracy tax --- you pay either way.
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students only compute the attack-time tax and ignore the
+clean accuracy cost. Correct framing: the total cost is the clean accuracy
+drop PLUS the remaining vulnerability.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Quantitative exercise for adversarial robustness.
+IF SHORT: Reduce to 60 seconds; show only the first calculation.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Calculate the Robustness Tax}
+
+    \vspace{0.15cm}
+    \textbf{ResNet-50 on ImageNet:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Clean accuracy: \textbf{76\%}
+      \item FGSM ($\epsilon$=0.01): accuracy drops to \textbf{42\%}
+      \item After adversarial training: clean = \textbf{50\%}, FGSM = \textbf{62\%}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Calculate:}\\
+    1. Robustness tax without defense\\
+    2. Robustness tax with adversarial training\\
+    3. Clean accuracy tax from defense
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    1. Attack tax: $(76-42)/76$\\
+    = \textcolor{errorstroke}{\textbf{44.7\%}}\\[0.1cm]
+    2. With defense: $(76-62)/76$\\
+    = \textcolor{routingstroke}{\textbf{18.4\%}} (attack)\\[0.1cm]
+    3. Clean tax: $(76-50)/76$\\
+    = \textcolor{errorstroke}{\textbf{34.2\%}} (always paid)\\[0.1cm]
+    Defense halves attack tax but imposes permanent clean cost.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Trade-offs}
+% =============================================================================
+
+\begin{frame}{The Robustness--Efficiency Tension}
+\note{
+% -- LINK: What prior concept connects to this slide
+Defenses have costs. This slide quantifies the aggregate overhead and connects
+robustness to sustainability (Ch 15).
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Walk through the overhead table: ``Error correction: 12--25\% bandwidth.
+Redundant processing: 2--3x energy. Monitoring: 5--15\% compute. Adversarial
+training: 8--10x per epoch.'' Point to the crimson card: ``Robustness is a
+resource allocation problem. A system that survives every failure yet consumes
+a city's worth of power is not viable.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Where does robustness investment provide the greatest value --- cloud,
+edge, or TinyML?'' [Expected: depends on criticality of the application.]
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Connects robustness costs to the sustainability chapter.
+IF SHORT: State the key overhead numbers from the table.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Robustness costs are real:}
+
+    \vspace{0.05cm}
+    \renewcommand{\arraystretch}{1.0}
+    {\scriptsize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Mechanism} & \textbf{Overhead} \\
+      \midrule
+      Error correction    & 12--25\% BW \\
+      Redundant processing & 2--3$\times$ energy \\
+      Monitoring           & 5--15\% compute \\
+      Adv.\ training       & 8--10$\times$/epoch \\
+      Certified inference  & 100K$\times$ latency \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.05cm}
+    {\scriptsize\mlsysalert{Decision:}{Where does robustness investment provide the greatest value?}}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{crimson}
+    \textbf{The Core Trade-off}\\[0.05cm]
+    {\scriptsize Robustness is a resource allocation problem. A system that survives every failure yet consumes a city's worth of power is not viable.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Deploy-Tier Matching}\\[0.05cm]
+    {\scriptsize Cloud: full redundancy + monitoring.\\
+    Edge: targeted hardening of critical paths.\\
+    TinyML: weaker guarantees on non-critical paths.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Compound Threats}
+\note{
+% -- LINK: What prior concept connects to this slide
+Individual threats were covered separately. The final insight: in production,
+they arrive together and interact.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Walk through the bullet list: ``A software fault creates a new adversarial
+vulnerability. A distribution shift masks a subtle poisoning attack. Quantization
+to INT8 reduces robustness margins. A pipeline bug mimics an adversarial attack
+in monitoring.'' Key statistic: ``60\%+ of ML incidents stem from pipeline and
+data issues, not models.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students analyze threats in isolation. Correct framing: compound
+threats are multiplicative, not additive --- a shift that also triggers a
+software bug is worse than either alone.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Compound threats justify the multi-layered defense approach.
+IF SHORT: State the 60\% pipeline statistic and the compounding principle.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Failures compound, not just add:}
+
+    \vspace{0.05cm}
+    {\scriptsize
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textcolor{computestroke}{\textbf{Software fault}} creates new adversarial vulnerability
+      \item \textcolor{routingstroke}{\textbf{Distribution shift}} masks subtle data poisoning
+      \item \textcolor{errorstroke}{\textbf{Quantization}} (INT8) reduces robustness margin
+      \item \textcolor{datastroke}{\textbf{Pipeline bug}} mimics adversarial attack in monitoring
+    \end{itemize}
+    }
+
+    \vspace{0.05cm}
+    {\scriptsize\mlsysconcept{Key:}{60\%+ of ML incidents stem from pipeline/data issues, not models.}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Defense Implication}: No single technique addresses compound threats. Combine:
+    \begin{enumerate}\setlength\itemsep{0pt}
+      \item Input sanitization
+      \item Robust training objectives
+      \item Output verification
+      \item Continuous monitoring
+      \item Uncertainty quantification
+    \end{enumerate}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Read each fallacy and its rebuttal. Emphasize quantitative evidence:
+physical patches on stop signs, 20--40\% OOD accuracy drops, 0.1\% poisoning
+from public datasets, L-infinity training offering zero L-2 protection.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Fallacies correct the most dangerous misconceptions.
+IF SHORT: Read fallacies 1 and 4 (academic curiosity and adversarial training).
+}
+
+\footnotesize
+\textbf{Fallacy:} \textit{Adversarial examples are an academic curiosity.}\\
+{\scriptsize Physical-world patches on stop signs reliably fool production vision systems. Defense requires 10--20\% additional compute.}
+
+\vspace{0.05cm}
+\textbf{Fallacy:} \textit{If the model passes the test set, it is robust.}\\
+{\scriptsize I.I.D.\ test sets cannot measure OOD resilience. Drift causes 20--40\% accuracy drops on out-of-distribution inputs.}
+
+\vspace{0.05cm}
+\textbf{Fallacy:} \textit{Data poisoning requires pipeline access.}\\
+{\scriptsize Clean-label attacks inject malicious samples into \emph{public} datasets. 0.1\% poisoned data $\to$ 95\% backdoor success.}
+
+\vspace{0.05cm}
+\textbf{Fallacy:} \textit{Adversarial training solves the problem.}\\
+{\scriptsize Robustness is threat-model-specific. $L_\infty$-trained models offer zero protection against $L_2$ or geometric attacks.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Read each pitfall. The first is critical: deploying without drift
+monitoring means silent degradation for weeks. The second: average accuracy
+hides 100\% vulnerability on critical edge cases. The third: 60\%+ of ML
+incidents are pipeline issues, not model failures.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Pitfalls are operational guidance students will use immediately.
+IF SHORT: Cover the first two pitfalls only.
+}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Deploying without distribution shift monitoring.}\\
+Models degrade silently while maintaining high confidence scores. PSI monitoring detects shifts \textbf{3--6 weeks} before accuracy falls below SLA thresholds.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Using average accuracy as the sole robustness metric.}\\
+95\% average accuracy can coexist with 100\% vulnerability on critical edge cases. Evaluate \textbf{worst-case accuracy} under a specific perturbation budget ($\eps = 8/255$).
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Ignoring software faults because the model is correct.}\\
+Over \textbf{60\%} of ML incidents stem from pipeline and data issues, not models. A model hardened against adversarial attacks remains fragile if a preprocessing bug silently corrupts its inputs.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+
+% --- MUDDIEST POINT ---
+\begin{frame}{Muddiest Point}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[2 min] ``Write down the single concept from today you found most confusing.
+Anonymous, one sentence.'' Collect responses. Scan for patterns --- likely
+candidates: robustness tax math, concept drift detection, or compound threats.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Closes the feedback loop. Do not skip.
+}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries What was the \alert{muddiest point} today?}
+
+\vspace{0.8cm}
+{\normalsize Write down the concept you found \textbf{most confusing}.}
+
+\vspace{0.5cm}
+{\small\textcolor{midgray}{Anonymous. One sentence. Submit before you leave.}}
+
+\end{frame}
+
+\begin{frame}{What Were the Key Ideas?}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[2 min] ``Close your notes. Write down the 4 most important concepts from today.
+90 seconds, no peeking.'' Walk around the room. Do NOT show next slide yet.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Retrieval practice is the highest-impact learning intervention.
+}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Reveal after retrieval. Walk through each bullet, anchoring on numbers:
+silent 15--25\% degradation, 8--10x adversarial training cost, 26\% clean accuracy
+tax, 3--6 week PSI early warning, 60\%+ pipeline incidents.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Synthesis slide. IF SHORT: Read bullets 1, 3, and 5.
+}
+
+\footnotesize
+\begin{itemize}\setlength\itemsep{1pt}
+  \item \textbf{Silent failure is the real threat}: ML systems degrade without crashes, alerts, or exceptions. Confidence stays high while accuracy drops 15--25\% over months.
+  \item \textbf{Robustness $\neq$ accuracy}: A model with 95\% test accuracy can be 100\% vulnerable to $\eps = 8/255$ perturbations. Standard test sets measure i.i.d.\ performance, not robustness.
+  \item \textbf{The robustness tax is real}: Adversarial training costs 8--10$\times$ compute and 26\% clean accuracy. Certified smoothing: 100K$\times$ inference latency.
+  \item \textbf{Three shift types}: Covariate (P(X) changes), label (P(Y) changes), concept (P(Y$|$X) changes). Only concept drift requires ground-truth feedback.
+  \item \textbf{Multi-layered defense}: Input sanitization, adversarial training, drift monitoring, data validation, and uncertainty quantification. Each catches what the others miss.
+  \item \textbf{Compound threats}: Software faults, distribution shift, and adversarial attacks interact and amplify each other. 60\%+ of incidents are pipeline/data issues.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[1 min] Highlight Madry+18 as the adversarial training foundation and Dixit+21
+for silent data corruption at scale. Students can photograph for later reading.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Do not read every entry aloud.
+}
+
+\small
+\mlsysref{Goodfellow+15}{Goodfellow et al. ``Explaining and Harnessing Adversarial Examples.'' ICLR 2015.}
+\mlsysref{Madry+18}{Madry et al. ``Towards Deep Learning Models Resistant to Adversarial Attacks.'' ICLR 2018.}
+\mlsysref{Carlini+17}{Carlini \& Wagner. ``Towards Evaluating the Robustness of Neural Networks.'' IEEE S\&P 2017.}
+\mlsysref{Cohen+19}{Cohen et al. ``Certified Adversarial Robustness via Randomized Smoothing.'' ICML 2019.}
+\mlsysref{Dixit+21}{Dixit et al. ``Silent Data Corruptions at Scale.'' arXiv 2021.}
+\mlsysref{NTSB17}{NTSB. ``Tesla Autopilot Fatal Crash Investigation.'' 2017.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Sustainable AI}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[1 min] ``We made the system robust --- but at what cost? Adversarial training,
+redundant processing, continuous monitoring all consume energy.'' Point to the
+three cards. ``If the fleet survives every failure but consumes a city's worth
+of power, that is not viable. Next lecture: sustainability as a hard constraint.''
+
+% -- FLEX: [CORE] + contingency
+[CORE] Forward hook motivates attendance at the next lecture.
+}
+
+\footnotesize
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\large\bfseries Carbon}\\[0.1cm]
+    {\footnotesize Lifecycle carbon accounting for ML training and inference}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{datastroke}
+    {\large\bfseries Efficiency}\\[0.1cm]
+    {\footnotesize Algorithmic efficiency and hardware utilization optimization}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    {\large\bfseries Scheduling}\\[0.1cm]
+    {\footnotesize Carbon-aware job scheduling and renewable energy alignment}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.2cm}
+\centering
+{\normalsize A system that survives every failure yet consumes a city's worth of power}\\[0.1cm]
+{\small\textbf{is not a viable long-term solution.}}
+
+\end{frame}
+
+
+
+\appendix
+
+\begin{frame}{Backup: Production Drift Detection Pipeline}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Backup. Concrete drift detection pipeline for production fraud detection,
+using PSI + KL divergence + KS test in combination.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Show when students ask how to implement drift monitoring.
+}
+
+\footnotesize
+\textbf{Production fraud model monitoring (textbook worked example):}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}llrl@{}}
+  \toprule
+  \textbf{Test} & \textbf{Detects} & \textbf{Threshold} & \textbf{Action} \\
+  \midrule
+  \textbf{PSI} (hourly)      & Covariate shift  & $> 0.25$ & Alert + investigate \\
+  \textbf{KL Divergence}     & Label shift       & $> 0.1$  & Flag for review \\
+  \textbf{KS Test}           & Feature drift     & $p < 0.01$ & Trigger retraining \\
+  \textbf{Ground-truth gap}  & Concept drift     & $> 5\%$  & Emergency retrain \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{datastroke}
+{\footnotesize PSI detects shifts \textbf{3--6 weeks} before accuracy falls below SLA. Running all four tests costs $<$5\% compute overhead --- far less than a single missed drift event.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Backup: Adversarial Training Cost Breakdown}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Backup. Detailed cost analysis of adversarial training at different PGD
+step counts, showing the compute-robustness Pareto frontier.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Show when students ask about practical adversarial training budgets.
+}
+
+\footnotesize
+\textbf{PGD adversarial training: cost vs.\ robustness}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  \textbf{PGD Steps} & \textbf{Compute Multiplier} & \textbf{Clean Acc.} & \textbf{Robust Acc.} \\
+  \midrule
+  0 (standard)  & 1$\times$   & \textbf{76\%} & 0\% \\
+  3-step PGD    & 4$\times$   & 58\%          & 38\% \\
+  7-step PGD    & 8$\times$   & 52\%          & 45\% \\
+  20-step PGD   & 21$\times$  & 50\%          & \textbf{47\%} \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+{\footnotesize Diminishing returns beyond 7 steps: doubling compute from 8$\times$ to 21$\times$ gains only 2\% robust accuracy. The 7-step sweet spot provides 90\%+ of the robustness at 40\% of the cost.}
+
+\end{frame}
+
+
+\end{document}

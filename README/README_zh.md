@@ -10,29 +10,32 @@
 
 <div align="center">
 
+<!-- Build Status -->
 <p align="center">
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&label=Book&logo=githubactions&cacheSeconds=300" alt="Book"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&label=TinyTorch&logo=python&cacheSeconds=300" alt="TinyTorch"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-preview-dev.yml?branch=dev&label=Kits&logo=arduino&cacheSeconds=300" alt="Kits"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/labs-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/labs-preview-dev.yml?branch=dev&label=Labs&logo=jupyter&cacheSeconds=300" alt="Labs"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/mlsysim-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/mlsysim-validate-dev.yml?branch=dev&label=MLSys%C2%B7im&logo=python&cacheSeconds=300" alt="MLSys·im"></a>
+  <img src="https://img.shields.io/github/last-commit/harvard-edge/cs249r_book/dev?label=Updated&logo=git&cacheSeconds=300" alt="Updated">
+</p>
 
-  [![Book](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&label=Book&logo=githubactions&cacheSeconds=300)](https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml)
-  [![TinyTorch](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&label=TinyTorch&logo=python&cacheSeconds=300)](https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml)
-  ![Updated](https://img.shields.io/github/last-commit/harvard-edge/cs249r_book/dev?label=Updated&logo=git&cacheSeconds=300)
-  [![License](https://img.shields.io/badge/License-CC--BY--NC--ND%204.0-blue.svg)](https://github.com/harvard-edge/cs249r_book/blob/dev/LICENSE.md)
-  [![Cite](https://img.shields.io/badge/Cite-IEEE%202024-blue?logo=ieee)](#-citation--license)
-  [![Fund Us](https://img.shields.io/badge/Fund%20Us-Open%20Collective-blue.svg?logo=open-collective)](https://opencollective.com/mlsysbook)
-
+<!-- Meta -->
+<p align="center">
+  <a href="https://github.com/harvard-edge/cs249r_book/blob/dev/LICENSE.md"><img src="https://img.shields.io/badge/License-CC--BY--NC--ND%204.0-blue.svg" alt="License"></a>
+  <a href="#-citation--license"><img src="https://img.shields.io/badge/Cite-IEEE%202024-blue?logo=ieee" alt="Cite"></a>
+  <a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Fund%20Us-Open%20Collective-blue.svg?logo=open-collective" alt="Fund Us"></a>
 </p>
 
 <p align="center">
-
-  <!-- Reader Navigation -->
-  **[📖 在线阅读](https://mlsysbook.ai)** •
-  **[Tiny🔥Torch](https://mlsysbook.ai/tinytorch)** •
-  **[📄 下载 PDF](https://mlsysbook.ai/assets/downloads/Machine-Learning-Systems.pdf)** •
-  **[📓 下载 EPUB](https://mlsysbook.ai/epub)** •
-  **[🌐 探索生态系统](https://mlsysbook.org)**
-
+  <b><a href="https://mlsysbook.ai/vol1/">📘 Volume I</a></b> •
+  <b><a href="https://mlsysbook.ai/vol2/">📙 Volume II <i>(Summer 2026)</i></a></b> •
+  <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
+  <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
+  <b><a href="https://mlsysbook.org">🌐 生态系统</a></b>
 </p>
 
-📚 **2026 年 MIT Press 将出版纸质版**
+<p align="center">📚 <b>2026 年 MIT Press 将出版纸质版</b></p>
 
 </div>
 
@@ -297,8 +300,8 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 <div align="center">
 
-**[⭐ 在 GitHub 上给我们加星](https://github.com/harvard-edge/cs249r_book#support-this-work) • [✉️ 订阅更新](https://buttondown.email/mlsysbook) • [💬 参与讨论](https://github.com/harvard-edge/cs249r_book/discussions) • [🌐 访问 mlsysbook.ai](https://mlsysbook.ai)**
+<b><a href="https://buttondown.email/mlsysbook">✉️ 订阅更新</a> • <a href="https://github.com/harvard-edge/cs249r_book/discussions">💬 参与讨论</a> • <a href="https://mlsysbook.ai/">🌐 访问 mlsysbook.ai</a></b>
 
-*本教材由 MLSysBook 社区倾情打造。*
+<i>本教材由 MLSysBook 社区倾情打造。</i>
 
 </div>

@@ -84,12 +84,37 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
 
 ## Current Status
 
-| Ready | In Progress | Coming Soon |
-|-------|-------------|-------------|
-| ✅ All 20 modules implemented | 🔧 Documentation polish | 📅 NBGrader integration |
-| ✅ Complete test suite (600+ tests) | 🔧 Edge case handling | 📅 Community leaderboard |
-| ✅ `tito` CLI for workflows | 🔧 Instructor resources | 📅 Binder/Colab support |
-| ✅ Historical milestone scripts | | |
+<table>
+  <thead>
+    <tr>
+      <th width="33%">Ready</th>
+      <th width="33%">In Progress</th>
+      <th width="34%">Coming Soon</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>✅ All 20 modules implemented</td>
+      <td>🔧 Documentation polish</td>
+      <td>📅 NBGrader integration</td>
+    </tr>
+    <tr>
+      <td>✅ Complete test suite (600+ tests)</td>
+      <td>🔧 Edge case handling</td>
+      <td>📅 Community leaderboard</td>
+    </tr>
+    <tr>
+      <td>✅ <code>tito</code> CLI for workflows</td>
+      <td>🔧 Instructor resources</td>
+      <td>📅 Binder/Colab support</td>
+    </tr>
+    <tr>
+      <td>✅ Historical milestone scripts</td>
+      <td></td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
 
 **Want to explore the code?** [Browse the repository structure](#repository-structure) to see how modules are organized.
 
@@ -97,16 +122,41 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
 
 ---
 
-## 20 Progressive Modules
+## 🏗️ 20 Progressive Modules
 
 Build your framework through four progressive parts:
 
-| Part | Modules | What You Build |
-|------|---------|----------------|
-| **I. Foundations** | 01-08 | Tensors, activations, layers, losses, dataloader, autograd, optimizers, training |
-| **II. Vision** | 09 | Conv2d, CNNs for image classification |
-| **III. Language** | 10-13 | Tokenization, embeddings, attention, transformers |
-| **IV. Optimization** | 14-20 | Profiling, quantization, compression, acceleration, benchmarking, capstone |
+<table>
+  <thead>
+    <tr>
+      <th width="20%">Part</th>
+      <th width="15%">Modules</th>
+      <th width="65%">What You Build</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><b>I. Foundations</b></td>
+      <td align="center">01-08</td>
+      <td>Tensors, activations, layers, losses, dataloader, autograd, optimizers, training</td>
+    </tr>
+    <tr>
+      <td align="center"><b>II. Vision</b></td>
+      <td align="center">09</td>
+      <td>Conv2d, CNNs for image classification</td>
+    </tr>
+    <tr>
+      <td align="center"><b>III. Language</b></td>
+      <td align="center">10-13</td>
+      <td>Tokenization, embeddings, attention, transformers</td>
+    </tr>
+    <tr>
+      <td align="center"><b>IV. Optimization</b></td>
+      <td align="center">14-20</td>
+      <td>Profiling, quantization, compression, acceleration, benchmarking, capstone</td>
+    </tr>
+  </tbody>
+</table>
 
 Each module asks: **"Can I build this capability from scratch?"**
 
@@ -114,18 +164,51 @@ Each module asks: **"Can I build this capability from scratch?"**
 
 ---
 
-## Historical Milestones
+## 🏆 Historical Milestones
 
 As you progress, unlock recreations of landmark ML achievements:
 
-| Year | Milestone | Your Achievement |
-|------|-----------|------------------|
-| 1958 | Perceptron | Binary classification with gradient descent |
-| 1969 | XOR Crisis | Multi-layer networks solve non-linear problems |
-| 1986 | Backpropagation | Multi-layer network training |
-| 1998 | CNN Revolution | **Image classification with convolutions** |
-| 2017 | Transformer Era | Language generation with self-attention |
-| 2018+ | MLPerf | Production-ready optimization |
+<table>
+  <thead>
+    <tr>
+      <th width="15%">Year</th>
+      <th width="35%">Milestone</th>
+      <th width="50%">Your Achievement</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><b>1958</b></td>
+      <td>Perceptron</td>
+      <td>Binary classification with gradient descent</td>
+    </tr>
+    <tr>
+      <td align="center"><b>1969</b></td>
+      <td>XOR Crisis</td>
+      <td>Multi-layer networks solve non-linear problems</td>
+    </tr>
+    <tr>
+      <td align="center"><b>1986</b></td>
+      <td>Backpropagation</td>
+      <td>Multi-layer network training</td>
+    </tr>
+    <tr>
+      <td align="center"><b>1998</b></td>
+      <td>CNN Revolution</td>
+      <td><b>Image classification with convolutions</b></td>
+    </tr>
+    <tr>
+      <td align="center"><b>2017</b></td>
+      <td>Transformer Era</td>
+      <td>Language generation with self-attention</td>
+    </tr>
+    <tr>
+      <td align="center"><b>2018+</b></td>
+      <td>MLPerf</td>
+      <td>Production-ready optimization</td>
+    </tr>
+  </tbody>
+</table>
 
 **These aren't toy demos** - they're historically significant ML achievements rebuilt with YOUR framework!
 
@@ -155,11 +238,28 @@ model.fit(X, y)  # Magic happens
 
 ## Documentation
 
-| Audience | Resources |
-|----------|-----------|
-| **Students** | [Course Website](https://mlsysbook.ai/tinytorch) ・ [Getting Started](site/getting-started.md) |
-| **Instructors** | [Instructor Guide](INSTRUCTOR.md) |
-| **Contributors** | [Contributing Guide](CONTRIBUTING.md) |
+<table>
+  <thead>
+    <tr>
+      <th width="25%">Audience</th>
+      <th width="75%">Resources</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Students</b></td>
+      <td><a href="https://mlsysbook.ai/tinytorch">Course Website</a> ・ <a href="site/getting-started.md">Getting Started</a></td>
+    </tr>
+    <tr>
+      <td><b>Instructors</b></td>
+      <td><a href="INSTRUCTOR.md">Instructor Guide</a></td>
+    </tr>
+    <tr>
+      <td><b>Contributors</b></td>
+      <td><a href="CONTRIBUTING.md">Contributing Guide</a></td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 
@@ -297,6 +397,7 @@ Thanks to these wonderful people who helped improve TinyTorch!
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/sotoblanco"><img src="https://avatars.githubusercontent.com/u/46135649?v=4?v=4?s=80" width="80px;" alt="Pastor Soto"/><br /><sub><b>Pastor Soto</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/salmanmkc"><img src="https://avatars.githubusercontent.com/u/32169182?v=4?v=4?s=80" width="80px;" alt="Salman Chishti"/><br /><sub><b>Salman Chishti</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/adityamulik"><img src="https://avatars.githubusercontent.com/u/10626835?v=4?v=4?s=80" width="80px;" alt="Aditya Mulik"/><br /><sub><b>Aditya Mulik</b></sub></a><br />✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=80" width="80px;" alt="asgalon"/><br /><sub><b>asgalon</b></sub></a><br />✍️</td>
     </tr>
   </tbody>
 </table>
@@ -327,8 +428,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**[📖 Full Documentation](https://mlsysbook.ai/tinytorch)** ・ **[💬 Discussions](https://github.com/harvard-edge/cs249r_book/discussions)** ・ **[🌐 ML Systems Book](https://mlsysbook.ai)**
+<b><a href="https://mlsysbook.ai/tinytorch">Full Documentation</a></b> ・ <b><a href="https://github.com/harvard-edge/cs249r_book/discussions">Discussions</a></b> ・ <b><a href="https://mlsysbook.ai">ML Systems Book</a></b>
 
-**Start Small. Go Deep. Build ML Systems.**
+<b>Start Small. Go Deep. Build ML Systems.</b>
 
 </div>

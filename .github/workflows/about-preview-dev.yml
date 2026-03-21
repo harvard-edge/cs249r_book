@@ -1,0 +1,101 @@
+name: '📋 About · 👁️ Preview (Dev)'
+
+# Builds and deploys the About page to dev preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - 'about/**'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: about-dev-deploy
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: '📋 Build & Deploy About (Dev)'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build About Site
+        working-directory: about
+        run: |
+          quarto render
+          touch _build/.nojekyll 2>/dev/null || true
+
+      - name: 🔗 Rewrite URLs for dev site
+        run: bash .github/scripts/rewrite-dev-urls.sh about about/_build
+
+      - name: 🔍 Validate build
+        run: |
+          # Find output directory (may vary based on _quarto.yml output-dir)
+          BUILD_DIR="about"
+          for d in about/_build book/quarto/_build/html-about; do
+            if [ -f "$d/index.html" ]; then
+              BUILD_DIR="$d"
+              break
+            fi
+          done
+          if [ ! -f "$BUILD_DIR/index.html" ]; then
+            echo "❌ CRITICAL: index.html missing. Aborting deployment."
+            exit 1
+          fi
+          echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
+          echo "✅ Site built: $(find $BUILD_DIR -name '*.html' | wc -l) pages"
+
+      - name: 🚀 Deploy to Dev Site via SSH
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning dev preview repository..."
+          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+          cd target-repo
+
+          echo "🧹 Cleaning about directory..."
+          rm -rf about
+          mkdir -p about
+
+          echo "🚚 Copying about site content..."
+          cp -r "${{ github.workspace }}/$BUILD_DIR/." about/
+
+          if [ ! -f "about/index.html" ]; then
+            echo "❌ CRITICAL: about/index.html missing. Aborting."
+            exit 1
+          fi
+
+          echo "📦 Committing and pushing..."
+          git add .
+          git commit -m "📋 Deploy About dev to /about/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+
+          for i in 1 2 3; do
+            if git push origin main 2>/dev/null; then
+              echo "✅ Push succeeded on attempt $i"
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin main || true
+          done
+
+          echo "✅ About page deployed to dev preview"
