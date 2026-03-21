@@ -34,6 +34,7 @@ app = marimo.App(width="full")
 # ZONE A: SETUP + OPENING
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 0: SETUP ─────────────────────────────────────────────────────────────
 @app.cell
 async def _():
     import marimo as mo
@@ -106,6 +107,7 @@ async def _():
     )
 
 
+# ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(LAB_CSS, mo):
     mo.vstack([
@@ -156,6 +158,7 @@ def _(LAB_CSS, mo):
     return
 
 
+# ─── CELL 2: BRIEFING ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, mo):
     mo.Html(f"""
@@ -220,6 +223,7 @@ def _(COLORS, mo):
     return
 
 
+# ─── CELL 3: READING ───────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -235,34 +239,10 @@ def _(mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: PART A — THE PRIVACY SCALING WALL
+# ZONE B: WIDGET DEFINITIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
-    <div id="part-a" style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {COLORS['BlueLine']}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;">A</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">Part A &middot; 10 min</div>
-        </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">The Privacy Scaling Wall</div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            DP noise magnitude is Sensitivity/epsilon, independent of dataset size. But the
-            error per person scales as 1/N. At N=100, per-person error is $2,000 &mdash; ten
-            times worse than at N=1,000. Privacy kills utility for small datasets.
-        </div>
-    </div>
-    """)
-    return
-
-
+# ─── WIDGET CELL 1: Part A prediction ─────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     pA_pred = mo.ui.radio(
@@ -278,79 +258,179 @@ def _(mo):
             "At N=100 records, what is the per-person error?"
         ),
     )
-    mo.vstack([mo.md("### Your Prediction"), pA_pred])
     return (pA_pred,)
 
 
+# ─── WIDGET CELL 2: Part A controls + Part B prediction ──────────────────────
 @app.cell(hide_code=True)
 def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None,
-            mo.callout(mo.md("Select your prediction to unlock the privacy scaling simulator."), kind="warn"))
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
     pA_epsilon = mo.ui.slider(start=0.1, stop=10.0, value=1.0, step=0.1, label="Epsilon")
     pA_N = mo.ui.slider(start=10, stop=10000, value=1000, step=10, label="Dataset size (N)")
-    mo.hstack([pA_epsilon, pA_N], gap="1.5rem")
-    return (pA_N, pA_epsilon)
 
+    # -- Part B widgets --
+    pB_pred = mo.ui.radio(
+        options={
+            "A: ~90% -- minimal loss": "A",
+            "B: ~82% -- significant but usable": "B",
+            "C: ~65% -- severely degraded": "C",
+            "D: ~40% -- unusable": "D",
+        },
+        label=(
+            "CIFAR-10 achieves 93% accuracy without DP. At epsilon=8 (weak privacy), "
+            "what accuracy does DP-SGD achieve?"
+        ),
+    )
+    return (pB_pred,)
+
+
+# ─── WIDGET CELL 3: Part C prediction ────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, pB_pred):
+    pC_pred = mo.ui.radio(
+        options={
+            "A: ~900 tok/s -- overhead is small": "A",
+            "B: ~850 tok/s -- MIG dominates": "B",
+            "C: ~700-750 tok/s -- compound overhead": "C",
+            "D: ~500 tok/s -- security halves throughput": "D",
+        },
+        label=(
+            "Baseline: 1,000 tok/s. You add MIG isolation (-15%), monitoring (+1.5ms/req), "
+            "output perturbation (+1.0ms/req), and rate limiting (-5%). Resulting throughput?"
+        ),
+    )
+    return (pC_pred,)
+
+
+# ─── WIDGET CELL 4: Part C controls + Part D prediction ─────────────────────
+@app.cell(hide_code=True)
+def _(mo, pC_pred):
+    pC_mig = mo.ui.checkbox(label="MIG Isolation (-15%)", value=True)
+    pC_monitor = mo.ui.checkbox(label="Monitoring (+1.5ms/req)", value=True)
+    pC_output = mo.ui.checkbox(label="Output Perturbation (+1.0ms/req)", value=True)
+    pC_rate = mo.ui.checkbox(label="Rate Limiting (-5%)", value=True)
+    pC_dpsgd = mo.ui.checkbox(label="DP-SGD Training (-20% throughput)", value=False)
+
+    # -- Part D widgets --
+    pD_pred = mo.ui.number(
+        start=0.01, stop=365, value=None, step=0.01,
+        label=(
+            "10,000 queries/day, epsilon=0.01 per query, total budget=10. "
+            "Using basic composition, how many days until budget is exhausted? "
+            "(Enter days, e.g., 0.1 for 2.4 hours.)"
+        ),
+    )
+    return (pD_pred,)
+
+
+# ─── WIDGET CELL 5: Part D controls ─────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, pD_pred):
+    pD_queries = mo.ui.slider(start=100, stop=100_000, value=10_000, step=100,
+                              label="Daily query volume")
+    pD_eps_q = mo.ui.slider(start=0.001, stop=0.1, value=0.01, step=0.001,
+                            label="Epsilon per query")
+    pD_budget = mo.ui.slider(start=1, stop=100, value=10, step=1,
+                             label="Total epsilon budget")
+    pD_comp = mo.ui.radio(
+        options={"Basic Composition": "basic", "Advanced Composition": "advanced"},
+        value="Basic Composition", label="Composition theorem", inline=True,
+    )
+    return (pD_queries, pD_eps_q, pD_budget, pD_comp)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: SINGLE TABS CELL
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
-def _(COLORS, DEFAULT_SENSITIVITY, apply_plotly_theme, go, mo, np,
-      pA_N, pA_epsilon):
-    _eps = pA_epsilon.value
-    _N = pA_N.value
+def _(mo, pD_queries, pD_eps_q, pD_budget, pD_comp):
 
-    # DP noise: Laplace(sensitivity / epsilon)
-    _noise_magnitude = DEFAULT_SENSITIVITY / _eps
-    _error_per_person = _noise_magnitude / _N
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART A: THE PRIVACY SCALING WALL
+    # ═════════════════════════════════════════════════════════════════════════
 
-    # Curves for three epsilon values
-    _n_range = np.logspace(1, 4, 100)  # 10 to 10,000
-    _eps_vals = [0.1, 1.0, 10.0]
-    _colors = [COLORS["RedLine"], COLORS["OrangeLine"], COLORS["GreenLine"]]
+    def build_part_a():
+        items = []
 
-    _fig = go.Figure()
-    for _e, _c in zip(_eps_vals, _colors):
-        _noise = DEFAULT_SENSITIVITY / _e
-        _errors = _noise / _n_range
+        items.append(mo.Html(f"""
+        <div id="part-a" style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {COLORS['BlueLine']}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;">A</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">Part A &middot; 10 min</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">The Privacy Scaling Wall</div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                DP noise magnitude is Sensitivity/epsilon, independent of dataset size. But the
+                error per person scales as 1/N. At N=100, per-person error is $2,000 &mdash; ten
+                times worse than at N=1,000. Privacy kills utility for small datasets.
+            </div>
+        </div>
+        """))
+
+        items.append(mo.md("### Your Prediction"))
+        items.append(pA_pred)
+        if pA_pred.value is None:
+            items.append(mo.callout(mo.md("Select your prediction to unlock the privacy scaling simulator."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([pA_epsilon, pA_N], gap="1.5rem"))
+
+        _eps = pA_epsilon.value
+        _N = pA_N.value
+
+        # DP noise: Laplace(sensitivity / epsilon)
+        _noise_magnitude = DEFAULT_SENSITIVITY / _eps
+        _error_per_person = _noise_magnitude / _N
+
+        # Curves for three epsilon values
+        _n_range = np.logspace(1, 4, 100)  # 10 to 10,000
+        _eps_vals = [0.1, 1.0, 10.0]
+        _colors = [COLORS["RedLine"], COLORS["OrangeLine"], COLORS["GreenLine"]]
+
+        _fig = go.Figure()
+        for _e, _c in zip(_eps_vals, _colors):
+            _noise = DEFAULT_SENSITIVITY / _e
+            _errors = _noise / _n_range
+            _fig.add_trace(go.Scatter(
+                x=_n_range, y=_errors, mode="lines",
+                name=f"epsilon={_e}", line=dict(color=_c, width=2),
+            ))
+
+        # Current point
         _fig.add_trace(go.Scatter(
-            x=_n_range, y=_errors, mode="lines",
-            name=f"epsilon={_e}", line=dict(color=_c, width=2),
+            x=[_N], y=[_error_per_person], mode="markers",
+            name=f"Current: eps={_eps}, N={_N}",
+            marker=dict(size=14, color=COLORS["BlueLine"], line=dict(color="white", width=2)),
         ))
 
-    # Current point
-    _fig.add_trace(go.Scatter(
-        x=[_N], y=[_error_per_person], mode="markers",
-        name=f"Current: eps={_eps}, N={_N}",
-        marker=dict(size=14, color=COLORS["BlueLine"], line=dict(color="white", width=2)),
-    ))
+        # Utility zones
+        _fig.add_hrect(y0=0, y1=100, fillcolor=COLORS["GreenLine"], opacity=0.08,
+                       annotation_text="Useful", annotation_position="top left")
+        _fig.add_hrect(y0=100, y1=1000, fillcolor=COLORS["OrangeLine"], opacity=0.08,
+                       annotation_text="Marginal", annotation_position="top left")
+        _fig.add_hrect(y0=1000, y1=100000, fillcolor=COLORS["RedLine"], opacity=0.08,
+                       annotation_text="Destroyed", annotation_position="top left")
 
-    # Utility zones
-    _fig.add_hrect(y0=0, y1=100, fillcolor=COLORS["GreenLine"], opacity=0.08,
-                   annotation_text="Useful", annotation_position="top left")
-    _fig.add_hrect(y0=100, y1=1000, fillcolor=COLORS["OrangeLine"], opacity=0.08,
-                   annotation_text="Marginal", annotation_position="top left")
-    _fig.add_hrect(y0=1000, y1=100000, fillcolor=COLORS["RedLine"], opacity=0.08,
-                   annotation_text="Destroyed", annotation_position="top left")
+        _fig.update_layout(
+            height=380,
+            xaxis=dict(title="Dataset Size (N)", type="log"),
+            yaxis=dict(title="Error per Person ($)", type="log"),
+            legend=dict(orientation="h", y=-0.2, font_size=11),
+            margin=dict(l=60, r=20, t=30, b=80),
+        )
+        apply_plotly_theme(_fig)
 
-    _fig.update_layout(
-        height=380,
-        xaxis=dict(title="Dataset Size (N)", type="log"),
-        yaxis=dict(title="Error per Person ($)", type="log"),
-        legend=dict(orientation="h", y=-0.2, font_size=11),
-        margin=dict(l=60, r=20, t=30, b=80),
-    )
-    apply_plotly_theme(_fig)
+        _err_color = COLORS["RedLine"] if _error_per_person > 1000 else COLORS["OrangeLine"] if _error_per_person > 100 else COLORS["GreenLine"]
+        _utility = "DESTROYED" if _error_per_person > 1000 else "MARGINAL" if _error_per_person > 100 else "USEFUL"
 
-    _err_color = COLORS["RedLine"] if _error_per_person > 1000 else COLORS["OrangeLine"] if _error_per_person > 100 else COLORS["GreenLine"]
-    _utility = "DESTROYED" if _error_per_person > 1000 else "MARGINAL" if _error_per_person > 100 else "USEFUL"
-
-    mo.vstack([
-        mo.as_html(_fig),
-        mo.Html(f"""
+        items.append(mo.as_html(_fig))
+        items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
                         text-align:center; background:white; border-top:3px solid {_err_color}; flex:1;">
@@ -367,8 +447,9 @@ def _(COLORS, DEFAULT_SENSITIVITY, apply_plotly_theme, go, mo, np,
                 <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Total Noise</div>
                 <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">${_noise_magnitude:,.0f}</div>
             </div>
-        </div>"""),
-        mo.md(f"""
+        </div>"""))
+
+        items.append(mo.md(f"""
 **Privacy Scaling Formula**
 
 ```
@@ -379,132 +460,103 @@ At N=1,000: ${_noise_magnitude:,.0f} / 1,000 = ${_noise_magnitude/1000:,.0f}
 At N=100:   ${_noise_magnitude:,.0f} / 100   = ${_noise_magnitude/100:,.0f}  (10x worse)
 ```
 *Source: @sec-security-privacy-differential-privacy-8c2b*
-"""),
-    ])
-    return
+"""))
 
+        # Prediction reveal
+        if pA_pred.value == "C":
+            _msg = "**Correct.** The noise is constant ($200K at epsilon=1). Dividing by N=100 instead of N=1,000 gives 10x worse error. DP is a technique for large datasets, not a universal privacy switch."
+            _kind = "success"
+        else:
+            _msg = "**Per-person error scales as 1/N.** The noise magnitude ($200K at epsilon=1) does not change with dataset size. But when you divide that constant noise by N people, each person's error grows as N shrinks. At N=100, error is $2,000 per person -- 10x worse than N=1,000."
+            _kind = "warn"
+        items.append(mo.callout(mo.md(_msg), kind=_kind))
 
-@app.cell(hide_code=True)
-def _(mo, pA_pred):
-    if pA_pred.value == "C":
-        _msg = "**Correct.** The noise is constant ($200K at epsilon=1). Dividing by N=100 instead of N=1,000 gives 10x worse error. DP is a technique for large datasets, not a universal privacy switch."
-        _kind = "success"
-    else:
-        _msg = "**Per-person error scales as 1/N.** The noise magnitude ($200K at epsilon=1) does not change with dataset size. But when you divide that constant noise by N people, each person's error grows as N shrinks. At N=100, error is $2,000 per person -- 10x worse than N=1,000."
-        _kind = "warn"
-    mo.callout(mo.md(_msg), kind=_kind)
-    return
+        return mo.vstack(items)
 
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART B: THE PRIVACY-ACCURACY FRONTIER
+    # ═════════════════════════════════════════════════════════════════════════
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: PART B — THE PRIVACY-ACCURACY FRONTIER
-# ═══════════════════════════════════════════════════════════════════════════════
+    def build_part_b():
+        items = []
 
-@app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
-    <div id="part-b" style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {COLORS['GreenLine']}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;">B</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">Part B &middot; 10 min</div>
+        items.append(mo.Html(f"""
+        <div id="part-b" style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {COLORS['GreenLine']}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;">B</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">Part B &middot; 10 min</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">The Privacy-Accuracy Frontier</div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                The "knee" at epsilon 1-3 marks the transition from practical to catastrophic
+                quality loss. MNIST retains 95% at epsilon~1; CIFAR-10 struggles to reach 82% at epsilon=8.
+            </div>
         </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">The Privacy-Accuracy Frontier</div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            The "knee" at epsilon 1-3 marks the transition from practical to catastrophic
-            quality loss. MNIST retains 95% at epsilon~1; CIFAR-10 struggles to reach 82% at epsilon=8.
-        </div>
-    </div>
-    """)
-    return
+        """))
 
+        items.append(mo.md("### Your Prediction"))
+        items.append(pB_pred)
+        if pB_pred.value is None:
+            items.append(mo.callout(mo.md("Select your prediction to unlock the privacy-accuracy frontier."), kind="warn"))
+            return mo.vstack(items)
 
-@app.cell(hide_code=True)
-def _(mo):
-    pB_pred = mo.ui.radio(
-        options={
-            "A: ~90% -- minimal loss": "A",
-            "B: ~82% -- significant but usable": "B",
-            "C: ~65% -- severely degraded": "C",
-            "D: ~40% -- unusable": "D",
-        },
-        label=(
-            "CIFAR-10 achieves 93% accuracy without DP. At epsilon=8 (weak privacy), "
-            "what accuracy does DP-SGD achieve?"
-        ),
-    )
-    mo.vstack([mo.md("### Your Prediction"), pB_pred])
-    return (pB_pred,)
+        # Privacy-accuracy curves (parameterized from published benchmarks)
+        _eps_range = np.logspace(-1, 2, 100)  # 0.1 to 100
 
+        # MNIST: relatively resilient to DP noise
+        _mnist_acc = MNIST_NO_DP - (MNIST_NO_DP - MNIST_EPS01) * np.exp(-_eps_range * 1.5)
+        _mnist_acc = np.clip(_mnist_acc, 50, MNIST_NO_DP)
 
-@app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None,
-            mo.callout(mo.md("Select your prediction to unlock the privacy-accuracy frontier."), kind="warn"))
-    return
+        # CIFAR-10: more sensitive to DP noise (weaker gradient signal)
+        _cifar_acc = CIFAR_NO_DP - (CIFAR_NO_DP - 45) * np.exp(-_eps_range * 0.3)
+        _cifar_acc = np.clip(_cifar_acc, 45, CIFAR_NO_DP)
 
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(
+            x=_eps_range, y=_mnist_acc, mode="lines",
+            name="MNIST (simple task)", line=dict(color=COLORS["GreenLine"], width=3),
+        ))
+        _fig.add_trace(go.Scatter(
+            x=_eps_range, y=_cifar_acc, mode="lines",
+            name="CIFAR-10 (complex task)", line=dict(color=COLORS["RedLine"], width=3),
+        ))
 
-@app.cell(hide_code=True)
-def _(CIFAR_EPS1, CIFAR_EPS8, CIFAR_NO_DP, COLORS,
-      MNIST_EPS01, MNIST_EPS1, MNIST_NO_DP,
-      apply_plotly_theme, go, mo, np):
-    # Privacy-accuracy curves (parameterized from published benchmarks)
-    _eps_range = np.logspace(-1, 2, 100)  # 0.1 to 100
+        # Reference points
+        _fig.add_trace(go.Scatter(
+            x=[1, 8], y=[MNIST_EPS1, CIFAR_EPS8],
+            mode="markers+text",
+            text=[f"MNIST eps=1: {MNIST_EPS1}%", f"CIFAR eps=8: {CIFAR_EPS8}%"],
+            textposition=["top center", "bottom center"],
+            marker=dict(size=12, color=[COLORS["GreenLine"], COLORS["RedLine"]]),
+            showlegend=False,
+        ))
 
-    # MNIST: relatively resilient to DP noise
-    _mnist_acc = MNIST_NO_DP - (MNIST_NO_DP - MNIST_EPS01) * np.exp(-_eps_range * 1.5)
-    _mnist_acc = np.clip(_mnist_acc, 50, MNIST_NO_DP)
+        # Knee region
+        _fig.add_vrect(x0=1, x1=3, fillcolor="#94a3b8", opacity=0.1,
+                       annotation_text="Knee (eps 1-3)", annotation_position="top left")
 
-    # CIFAR-10: more sensitive to DP noise (weaker gradient signal)
-    _cifar_acc = CIFAR_NO_DP - (CIFAR_NO_DP - 45) * np.exp(-_eps_range * 0.3)
-    _cifar_acc = np.clip(_cifar_acc, 45, CIFAR_NO_DP)
+        _fig.update_layout(
+            height=380,
+            xaxis=dict(title="Epsilon (privacy budget)", type="log"),
+            yaxis=dict(title="Accuracy (%)", range=[40, 100]),
+            legend=dict(orientation="h", y=-0.2),
+            margin=dict(l=50, r=20, t=30, b=80),
+        )
+        apply_plotly_theme(_fig)
 
-    _fig = go.Figure()
-    _fig.add_trace(go.Scatter(
-        x=_eps_range, y=_mnist_acc, mode="lines",
-        name="MNIST (simple task)", line=dict(color=COLORS["GreenLine"], width=3),
-    ))
-    _fig.add_trace(go.Scatter(
-        x=_eps_range, y=_cifar_acc, mode="lines",
-        name="CIFAR-10 (complex task)", line=dict(color=COLORS["RedLine"], width=3),
-    ))
+        # DP-SGD noise-to-signal ratio at epsilon=1
+        # sigma = C * sqrt(2*ln(1.25/delta)) / epsilon
+        _C = 1.0  # clipping norm
+        _sigma_eps1 = _C * math.sqrt(2 * math.log(1.25 / 1e-5)) / 1.0
 
-    # Reference points
-    _fig.add_trace(go.Scatter(
-        x=[1, 8], y=[MNIST_EPS1, CIFAR_EPS8],
-        mode="markers+text",
-        text=[f"MNIST eps=1: {MNIST_EPS1}%", f"CIFAR eps=8: {CIFAR_EPS8}%"],
-        textposition=["top center", "bottom center"],
-        marker=dict(size=12, color=[COLORS["GreenLine"], COLORS["RedLine"]]),
-        showlegend=False,
-    ))
-
-    # Knee region
-    _fig.add_vrect(x0=1, x1=3, fillcolor="#94a3b8", opacity=0.1,
-                   annotation_text="Knee (eps 1-3)", annotation_position="top left")
-
-    _fig.update_layout(
-        height=380,
-        xaxis=dict(title="Epsilon (privacy budget)", type="log"),
-        yaxis=dict(title="Accuracy (%)", range=[40, 100]),
-        legend=dict(orientation="h", y=-0.2),
-        margin=dict(l=50, r=20, t=30, b=80),
-    )
-    apply_plotly_theme(_fig)
-
-    # DP-SGD noise-to-signal ratio at epsilon=1
-    # sigma = C * sqrt(2*ln(1.25/delta)) / epsilon
-    _C = 1.0  # clipping norm
-    _sigma_eps1 = _C * math.sqrt(2 * math.log(1.25 / 1e-5)) / 1.0
-
-    mo.vstack([
-        mo.as_html(_fig),
-        mo.md(f"""
+        items.append(mo.as_html(_fig))
+        items.append(mo.md(f"""
 **DP-SGD Noise-to-Signal Ratio**
 
 ```
@@ -517,167 +569,128 @@ MNIST survives because it is a simple task (strong gradient signal).
 CIFAR-10 collapses because its gradient signal is weaker.
 ```
 *Source: @sec-security-privacy-differential-privacy-8c2b, Abadi et al. 2016*
-"""),
-    ])
-    return
+"""))
 
+        # Prediction reveal
+        if pB_pred.value == "B":
+            _msg = f"**Correct.** CIFAR-10 at epsilon=8 achieves ~{CIFAR_EPS8}% -- significant loss from 93% but still usable. The knee at epsilon 1-3 is where accuracy drops steeply. Harder tasks lose accuracy faster because the gradient signal is weaker relative to DP noise."
+            _kind = "success"
+        else:
+            _msg = f"**CIFAR-10 at epsilon=8 achieves ~{CIFAR_EPS8}%.** Students who predict ~90% expect 'epsilon=8 is weak privacy, so little cost.' But even weak privacy adds noise that degrades complex tasks. At epsilon=1, CIFAR-10 drops to ~65%. The knee region (epsilon 1-3) is the critical design boundary."
+            _kind = "warn"
+        items.append(mo.callout(mo.md(_msg), kind=_kind))
 
-@app.cell(hide_code=True)
-def _(CIFAR_EPS8, mo, pB_pred):
-    if pB_pred.value == "B":
-        _msg = f"**Correct.** CIFAR-10 at epsilon=8 achieves ~{CIFAR_EPS8}% -- significant loss from 93% but still usable. The knee at epsilon 1-3 is where accuracy drops steeply. Harder tasks lose accuracy faster because the gradient signal is weaker relative to DP noise."
-        _kind = "success"
-    else:
-        _msg = f"**CIFAR-10 at epsilon=8 achieves ~{CIFAR_EPS8}%.** Students who predict ~90% expect 'epsilon=8 is weak privacy, so little cost.' But even weak privacy adds noise that degrades complex tasks. At epsilon=1, CIFAR-10 drops to ~65%. The knee region (epsilon 1-3) is the critical design boundary."
-        _kind = "warn"
-    mo.callout(mo.md(_msg), kind=_kind)
-    return
+        return mo.vstack(items)
 
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART C: THE DEFENSE OVERHEAD STACK
+    # ═════════════════════════════════════════════════════════════════════════
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: PART C — THE DEFENSE OVERHEAD STACK
-# ═══════════════════════════════════════════════════════════════════════════════
+    def build_part_c():
+        items = []
 
-@app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
-    <div id="part-c" style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {COLORS['OrangeLine']}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;">C</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">Part C &middot; 12 min</div>
+        items.append(mo.Html(f"""
+        <div id="part-c" style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {COLORS['OrangeLine']}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;">C</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">Part C &middot; 12 min</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">The Defense Overhead Stack</div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                Every defense layer extracts measurable throughput. The full stack reduces
+                throughput by 30-40%. Find the combination that satisfies both the privacy
+                officer (epsilon &lt; 1.0) and the product manager (&gt;800 tokens/sec).
+            </div>
         </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">The Defense Overhead Stack</div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            Every defense layer extracts measurable throughput. The full stack reduces
-            throughput by 30-40%. Find the combination that satisfies both the privacy
-            officer (epsilon &lt; 1.0) and the product manager (&gt;800 tokens/sec).
-        </div>
-    </div>
-    """)
-    return
+        """))
 
+        items.append(mo.md("### Your Prediction"))
+        items.append(pC_pred)
+        if pC_pred.value is None:
+            items.append(mo.callout(mo.md("Select your prediction to unlock the defense stack builder."), kind="warn"))
+            return mo.vstack(items)
 
-@app.cell(hide_code=True)
-def _(mo):
-    pC_pred = mo.ui.radio(
-        options={
-            "A: ~900 tok/s -- overhead is small": "A",
-            "B: ~850 tok/s -- MIG dominates": "B",
-            "C: ~700-750 tok/s -- compound overhead": "C",
-            "D: ~500 tok/s -- security halves throughput": "D",
-        },
-        label=(
-            "Baseline: 1,000 tok/s. You add MIG isolation (-15%), monitoring (+1.5ms/req), "
-            "output perturbation (+1.0ms/req), and rate limiting (-5%). Resulting throughput?"
-        ),
-    )
-    mo.vstack([mo.md("### Your Prediction"), pC_pred])
-    return (pC_pred,)
+        items.append(mo.hstack([pC_mig, pC_monitor, pC_output, pC_rate, pC_dpsgd], gap="1rem"))
 
+        _throughput = float(BASELINE_THROUGHPUT)
+        _layers = []
 
-@app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None,
-            mo.callout(mo.md("Select your prediction to unlock the defense stack builder."), kind="warn"))
-    return
+        if pC_mig.value:
+            _reduction = _throughput * MIG_OVERHEAD
+            _throughput -= _reduction
+            _layers.append(("MIG Isolation", _reduction))
 
+        if pC_dpsgd.value:
+            _reduction = _throughput * DPSGD_OVERHEAD
+            _throughput -= _reduction
+            _layers.append(("DP-SGD", _reduction))
 
-@app.cell(hide_code=True)
-def _(mo):
-    pC_mig = mo.ui.checkbox(label="MIG Isolation (-15%)", value=True)
-    pC_monitor = mo.ui.checkbox(label="Monitoring (+1.5ms/req)", value=True)
-    pC_output = mo.ui.checkbox(label="Output Perturbation (+1.0ms/req)", value=True)
-    pC_rate = mo.ui.checkbox(label="Rate Limiting (-5%)", value=True)
-    pC_dpsgd = mo.ui.checkbox(label="DP-SGD Training (-20% throughput)", value=False)
-    mo.hstack([pC_mig, pC_monitor, pC_output, pC_rate, pC_dpsgd], gap="1rem")
-    return (pC_dpsgd, pC_mig, pC_monitor, pC_output, pC_rate)
+        if pC_monitor.value:
+            # Convert ms overhead to throughput loss
+            # At 1000 tok/s, each token takes 1ms. Adding 1.5ms monitoring per request
+            # increases effective per-request time by ~15%
+            _monitor_frac = MONITORING_OVERHEAD_MS / (1000 / BASELINE_THROUGHPUT + MONITORING_OVERHEAD_MS)
+            _reduction = _throughput * _monitor_frac * 0.5  # amortized across batch
+            _throughput -= _reduction
+            _layers.append(("Monitoring", _reduction))
 
+        if pC_output.value:
+            _output_frac = OUTPUT_PERTURB_MS / (1000 / BASELINE_THROUGHPUT + OUTPUT_PERTURB_MS)
+            _reduction = _throughput * _output_frac * 0.5
+            _throughput -= _reduction
+            _layers.append(("Output Perturbation", _reduction))
 
-@app.cell(hide_code=True)
-def _(BASELINE_THROUGHPUT, COLORS, DPSGD_OVERHEAD, MIG_OVERHEAD,
-      MONITORING_OVERHEAD_MS, OUTPUT_PERTURB_MS, RATE_LIMIT_OVERHEAD,
-      SLO_THROUGHPUT, apply_plotly_theme, go, mo,
-      pC_dpsgd, pC_mig, pC_monitor, pC_output, pC_rate):
-    _throughput = float(BASELINE_THROUGHPUT)
-    _layers = []
+        if pC_rate.value:
+            _reduction = _throughput * RATE_LIMIT_OVERHEAD
+            _throughput -= _reduction
+            _layers.append(("Rate Limiting", _reduction))
 
-    if pC_mig.value:
-        _reduction = _throughput * MIG_OVERHEAD
-        _throughput -= _reduction
-        _layers.append(("MIG Isolation", _reduction))
+        # Waterfall chart
+        _fig = go.Figure()
+        _names = ["Baseline"] + [l[0] for l in _layers] + ["Final"]
+        _values = [BASELINE_THROUGHPUT] + [-l[1] for l in _layers] + [0]
+        _measures = ["absolute"] + ["relative"] * len(_layers) + ["total"]
 
-    if pC_dpsgd.value:
-        _reduction = _throughput * DPSGD_OVERHEAD
-        _throughput -= _reduction
-        _layers.append(("DP-SGD", _reduction))
+        _fig.add_trace(go.Waterfall(
+            x=_names, y=_values, measure=_measures,
+            decreasing=dict(marker_color=COLORS["RedLine"]),
+            increasing=dict(marker_color=COLORS["GreenLine"]),
+            totals=dict(marker_color=COLORS["BlueLine"]),
+            text=[f"{abs(v):.0f}" for v in _values],
+            textposition="outside",
+        ))
+        _fig.add_hline(y=SLO_THROUGHPUT, line_dash="dash", line_color=COLORS["OrangeLine"],
+                       annotation_text=f"SLO: {SLO_THROUGHPUT} tok/s")
+        _fig.update_layout(
+            height=380,
+            yaxis=dict(title="Throughput (tok/s)", range=[0, BASELINE_THROUGHPUT + 100]),
+            margin=dict(l=60, r=20, t=30, b=80),
+        )
+        apply_plotly_theme(_fig)
 
-    if pC_monitor.value:
-        # Convert ms overhead to throughput loss
-        # At 1000 tok/s, each token takes 1ms. Adding 1.5ms monitoring per request
-        # increases effective per-request time by ~15%
-        _monitor_frac = MONITORING_OVERHEAD_MS / (1000 / BASELINE_THROUGHPUT + MONITORING_OVERHEAD_MS)
-        _reduction = _throughput * _monitor_frac * 0.5  # amortized across batch
-        _throughput -= _reduction
-        _layers.append(("Monitoring", _reduction))
+        _slo_met = _throughput >= SLO_THROUGHPUT
+        _tp_color = COLORS["GreenLine"] if _slo_met else COLORS["RedLine"]
+        _reduction_pct = (1 - _throughput / BASELINE_THROUGHPUT) * 100
 
-    if pC_output.value:
-        _output_frac = OUTPUT_PERTURB_MS / (1000 / BASELINE_THROUGHPUT + OUTPUT_PERTURB_MS)
-        _reduction = _throughput * _output_frac * 0.5
-        _throughput -= _reduction
-        _layers.append(("Output Perturbation", _reduction))
+        if _slo_met:
+            _banner = mo.callout(mo.md(
+                f"SLO met. {_throughput:.0f} tok/s exceeds {SLO_THROUGHPUT} tok/s minimum."
+            ), kind="success")
+        else:
+            _banner = mo.callout(mo.md(
+                f"**SLO VIOLATED.** {_throughput:.0f} tok/s is below the {SLO_THROUGHPUT} tok/s requirement. "
+                "Disable some defenses or accept the trade-off."
+            ), kind="danger")
 
-    if pC_rate.value:
-        _reduction = _throughput * RATE_LIMIT_OVERHEAD
-        _throughput -= _reduction
-        _layers.append(("Rate Limiting", _reduction))
-
-    # Waterfall chart
-    _fig = go.Figure()
-    _names = ["Baseline"] + [l[0] for l in _layers] + ["Final"]
-    _values = [BASELINE_THROUGHPUT] + [-l[1] for l in _layers] + [0]
-    _measures = ["absolute"] + ["relative"] * len(_layers) + ["total"]
-
-    _fig.add_trace(go.Waterfall(
-        x=_names, y=_values, measure=_measures,
-        decreasing=dict(marker_color=COLORS["RedLine"]),
-        increasing=dict(marker_color=COLORS["GreenLine"]),
-        totals=dict(marker_color=COLORS["BlueLine"]),
-        text=[f"{abs(v):.0f}" for v in _values],
-        textposition="outside",
-    ))
-    _fig.add_hline(y=SLO_THROUGHPUT, line_dash="dash", line_color=COLORS["OrangeLine"],
-                   annotation_text=f"SLO: {SLO_THROUGHPUT} tok/s")
-    _fig.update_layout(
-        height=380,
-        yaxis=dict(title="Throughput (tok/s)", range=[0, BASELINE_THROUGHPUT + 100]),
-        margin=dict(l=60, r=20, t=30, b=80),
-    )
-    apply_plotly_theme(_fig)
-
-    _slo_met = _throughput >= SLO_THROUGHPUT
-    _tp_color = COLORS["GreenLine"] if _slo_met else COLORS["RedLine"]
-    _reduction_pct = (1 - _throughput / BASELINE_THROUGHPUT) * 100
-
-    if _slo_met:
-        _banner = mo.callout(mo.md(
-            f"SLO met. {_throughput:.0f} tok/s exceeds {SLO_THROUGHPUT} tok/s minimum."
-        ), kind="success")
-    else:
-        _banner = mo.callout(mo.md(
-            f"**SLO VIOLATED.** {_throughput:.0f} tok/s is below the {SLO_THROUGHPUT} tok/s requirement. "
-            "Disable some defenses or accept the trade-off."
-        ), kind="danger")
-
-    mo.vstack([
-        mo.as_html(_fig),
-        _banner,
-        mo.Html(f"""
+        items.append(mo.as_html(_fig))
+        items.append(_banner)
+        items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
                         text-align:center; background:white; border-top:3px solid {_tp_color}; flex:1;">
@@ -689,8 +702,8 @@ def _(BASELINE_THROUGHPUT, COLORS, DPSGD_OVERHEAD, MIG_OVERHEAD,
                 <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Total Overhead</div>
                 <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_reduction_pct:.0f}%</div>
             </div>
-        </div>"""),
-        mo.md(f"""
+        </div>"""))
+        items.append(mo.md(f"""
 **Defense Stack Compound Throughput**
 
 ```
@@ -699,183 +712,145 @@ T_secure = T_baseline x product(1 - overhead_i)
          = {_throughput:.0f} tok/s  ({_reduction_pct:.0f}% reduction)
 ```
 *Source: @sec-security-privacy, defense selection framework*
-"""),
-    ])
-    return
+"""))
 
+        # Prediction reveal
+        if pC_pred.value == "C":
+            _msg = "**Correct.** Compound overhead from MIG (15%) + monitoring + perturbation + rate limiting yields 25-35% total reduction, resulting in ~700-750 tok/s. Students who predict ~900 add overheads linearly rather than multiplicatively."
+            _kind = "success"
+        else:
+            _msg = "**Compound overhead is 25-35%, yielding ~700-750 tok/s.** Each defense multiplies the remaining throughput, not the baseline. 0.85 x 0.93 x 0.95 x 0.95 = ~0.72, giving ~720 tok/s from a 1,000 tok/s baseline."
+            _kind = "warn"
+        items.append(mo.callout(mo.md(_msg), kind=_kind))
 
-@app.cell(hide_code=True)
-def _(mo, pC_pred):
-    if pC_pred.value == "C":
-        _msg = "**Correct.** Compound overhead from MIG (15%) + monitoring + perturbation + rate limiting yields 25-35% total reduction, resulting in ~700-750 tok/s. Students who predict ~900 add overheads linearly rather than multiplicatively."
-        _kind = "success"
-    else:
-        _msg = "**Compound overhead is 25-35%, yielding ~700-750 tok/s.** Each defense multiplies the remaining throughput, not the baseline. 0.85 x 0.93 x 0.95 x 0.95 = ~0.72, giving ~720 tok/s from a 1,000 tok/s baseline."
-        _kind = "warn"
-    mo.callout(mo.md(_msg), kind=_kind)
-    return
+        return mo.vstack(items)
 
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART D: THE PRIVACY BUDGET DEPLETION (ANCHOR)
+    # ═════════════════════════════════════════════════════════════════════════
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE E: PART D — THE PRIVACY BUDGET DEPLETION (ANCHOR)
-# ═══════════════════════════════════════════════════════════════════════════════
+    def build_part_d():
+        items = []
 
-@app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
-    <div id="part-d" style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {COLORS['RedLine']}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;">D</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">Part D &middot; 14 min</div>
+        items.append(mo.Html(f"""
+        <div id="part-d" style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {COLORS['RedLine']}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;">D</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">Part D &middot; 14 min</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">The Privacy Budget Depletion</div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                The epsilon budget is finite and non-renewable. Basic composition:
+                epsilon_total = T x epsilon_per_query. After enough queries, the cumulative
+                privacy loss exceeds any meaningful guarantee. Privacy is a depletable resource,
+                not a configuration setting.
+            </div>
         </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">The Privacy Budget Depletion</div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            The epsilon budget is finite and non-renewable. Basic composition:
-            epsilon_total = T x epsilon_per_query. After enough queries, the cumulative
-            privacy loss exceeds any meaningful guarantee. Privacy is a depletable resource,
-            not a configuration setting.
-        </div>
-    </div>
-    """)
-    return
+        """))
 
+        items.append(mo.md("### Your Prediction"))
+        items.append(pD_pred)
+        if pD_pred.value is None:
+            items.append(mo.callout(mo.md("Enter your prediction to unlock the budget depletion simulator."), kind="warn"))
+            return mo.vstack(items)
 
-@app.cell(hide_code=True)
-def _(mo):
-    pD_pred = mo.ui.number(
-        start=0.01, stop=365, value=None, step=0.01,
-        label=(
-            "10,000 queries/day, epsilon=0.01 per query, total budget=10. "
-            "Using basic composition, how many days until budget is exhausted? "
-            "(Enter days, e.g., 0.1 for 2.4 hours.)"
-        ),
-    )
-    mo.vstack([mo.md("### Your Prediction"), pD_pred])
-    return (pD_pred,)
+        items.append(mo.hstack([pD_queries, pD_eps_q, pD_budget, pD_comp], gap="1rem"))
 
+        _daily_q = pD_queries.value
+        _eps_q = pD_eps_q.value
+        _budget = pD_budget.value
+        _comp = pD_comp.value
 
-@app.cell(hide_code=True)
-def _(mo, pD_pred):
-    mo.stop(pD_pred.value is None,
-            mo.callout(mo.md("Enter your prediction to unlock the budget depletion simulator."), kind="warn"))
-    return
+        # Basic composition: eps_total = T * eps_q
+        # Advanced composition: eps_total = sqrt(2T * ln(1/delta)) * eps_q + T * eps_q * (exp(eps_q) - 1)
+        # Simplified advanced: eps_total ~ sqrt(2T * ln(1/delta)) * eps_q for small eps_q
 
+        if _comp == "basic":
+            # T queries to exhaust budget: T = budget / eps_q
+            _total_queries = _budget / _eps_q
+            _days = _total_queries / _daily_q
+            _comp_label = "Basic"
+        else:
+            # Advanced: budget = sqrt(2T * ln(1/delta)) * eps_q (dominant term)
+            # T = (budget / eps_q)^2 / (2 * ln(1/delta))
+            _ln_term = math.log(1 / DEFAULT_DELTA)
+            _total_queries = (_budget / _eps_q)**2 / (2 * _ln_term)
+            _days = _total_queries / _daily_q
+            _comp_label = "Advanced"
 
-@app.cell(hide_code=True)
-def _(mo):
-    pD_queries = mo.ui.slider(start=100, stop=100_000, value=10_000, step=100,
-                              label="Daily query volume")
-    pD_eps_q = mo.ui.slider(start=0.001, stop=0.1, value=0.01, step=0.001,
-                            label="Epsilon per query")
-    pD_budget = mo.ui.slider(start=1, stop=100, value=10, step=1,
-                             label="Total epsilon budget")
-    pD_comp = mo.ui.radio(
-        options={"Basic Composition": "basic", "Advanced Composition": "advanced"},
-        value="Basic Composition", label="Composition theorem", inline=True,
-    )
-    mo.hstack([pD_queries, pD_eps_q, pD_budget, pD_comp], gap="1rem")
-    return (pD_budget, pD_comp, pD_eps_q, pD_queries)
+        _hours = _days * 24
 
+        # Timeline chart: cumulative epsilon over days
+        _day_range = np.linspace(0, max(_days * 2, 30), 200)
+        _queries_cum = _day_range * _daily_q
 
-@app.cell(hide_code=True)
-def _(COLORS, DEFAULT_DELTA, apply_plotly_theme, go, math, mo, np,
-      pD_budget, pD_comp, pD_eps_q, pD_pred, pD_queries):
-    _daily_q = pD_queries.value
-    _eps_q = pD_eps_q.value
-    _budget = pD_budget.value
-    _comp = pD_comp.value
+        if _comp == "basic":
+            _eps_cum = _queries_cum * _eps_q
+        else:
+            _ln_term = math.log(1 / DEFAULT_DELTA)
+            _eps_cum = np.sqrt(2 * _queries_cum * _ln_term) * _eps_q + _queries_cum * _eps_q * (math.exp(_eps_q) - 1)
 
-    # Basic composition: eps_total = T * eps_q
-    # Advanced composition: eps_total = sqrt(2T * ln(1/delta)) * eps_q + T * eps_q * (exp(eps_q) - 1)
-    # Simplified advanced: eps_total ~ sqrt(2T * ln(1/delta)) * eps_q for small eps_q
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(
+            x=_day_range, y=_eps_cum, mode="lines",
+            name=f"Cumulative Epsilon ({_comp_label})",
+            line=dict(color=COLORS["RedLine"], width=3),
+        ))
+        _fig.add_hline(y=_budget, line_dash="dash", line_color=COLORS["OrangeLine"],
+                       annotation_text=f"Budget: epsilon={_budget}")
+        if _days < max(_days * 2, 30):
+            _fig.add_vline(x=_days, line_dash="dot", line_color=COLORS["RedLine"],
+                           annotation_text=f"Exhausted: {_days:.2f} days ({_hours:.1f} hrs)")
 
-    if _comp == "basic":
-        # T queries to exhaust budget: T = budget / eps_q
-        _total_queries = _budget / _eps_q
-        _days = _total_queries / _daily_q
-        _comp_label = "Basic"
-    else:
-        # Advanced: budget = sqrt(2T * ln(1/delta)) * eps_q (dominant term)
-        # T = (budget / eps_q)^2 / (2 * ln(1/delta))
-        _ln_term = math.log(1 / DEFAULT_DELTA)
-        _total_queries = (_budget / _eps_q)**2 / (2 * _ln_term)
-        _days = _total_queries / _daily_q
-        _comp_label = "Advanced"
-
-    _hours = _days * 24
-
-    # Timeline chart: cumulative epsilon over days
-    _day_range = np.linspace(0, max(_days * 2, 30), 200)
-    _queries_cum = _day_range * _daily_q
-
-    if _comp == "basic":
-        _eps_cum = _queries_cum * _eps_q
-    else:
-        _ln_term = math.log(1 / DEFAULT_DELTA)
-        _eps_cum = np.sqrt(2 * _queries_cum * _ln_term) * _eps_q + _queries_cum * _eps_q * (math.exp(_eps_q) - 1)
-
-    _fig = go.Figure()
-    _fig.add_trace(go.Scatter(
-        x=_day_range, y=_eps_cum, mode="lines",
-        name=f"Cumulative Epsilon ({_comp_label})",
-        line=dict(color=COLORS["RedLine"], width=3),
-    ))
-    _fig.add_hline(y=_budget, line_dash="dash", line_color=COLORS["OrangeLine"],
-                   annotation_text=f"Budget: epsilon={_budget}")
-    if _days < max(_days * 2, 30):
-        _fig.add_vline(x=_days, line_dash="dot", line_color=COLORS["RedLine"],
-                       annotation_text=f"Exhausted: {_days:.2f} days ({_hours:.1f} hrs)")
-
-    _fig.update_layout(
-        height=380,
-        xaxis=dict(title="Days"),
-        yaxis=dict(title="Cumulative Epsilon"),
-        margin=dict(l=60, r=20, t=30, b=40),
-    )
-    apply_plotly_theme(_fig)
-
-    _exhausted = _days < 1
-    _status_color = COLORS["RedLine"] if _exhausted else COLORS["OrangeLine"] if _days < 7 else COLORS["GreenLine"]
-    _status = "EXHAUSTED IN HOURS" if _exhausted else "DAYS" if _days < 30 else "SUSTAINABLE"
-
-    # Prediction comparison
-    _predicted_days = pD_pred.value if pD_pred.value else 1
-    _gap = abs(_days - _predicted_days) / max(_days, 0.001)
-
-    if _gap < 0.5:
-        _pred_msg = f"**Good estimate.** You predicted {_predicted_days:.2f} days. Actual ({_comp_label}): {_days:.2f} days."
-        _pred_kind = "success"
-    else:
-        _pred_msg = (
-            f"**You predicted {_predicted_days:.2f} days. Actual ({_comp_label}): {_days:.2f} days ({_hours:.1f} hours).** "
-            f"With basic composition, 10,000 queries/day x $0.01/query = 100 epsilon/day. "
-            f"Budget of 10 is exhausted in 0.1 days (2.4 hours)."
+        _fig.update_layout(
+            height=380,
+            xaxis=dict(title="Days"),
+            yaxis=dict(title="Cumulative Epsilon"),
+            margin=dict(l=60, r=20, t=30, b=40),
         )
-        _pred_kind = "warn"
+        apply_plotly_theme(_fig)
 
-    # Service unavailable banner
-    if _exhausted:
-        _service_banner = mo.callout(mo.md(
-            f"**SERVICE UNAVAILABLE: PRIVACY BUDGET EXHAUSTED.** "
-            f"After {_hours:.1f} hours, all subsequent queries must be rejected. "
-            f"Availability drops to 0% until budget is renewed."
-        ), kind="danger")
-    else:
-        _service_banner = mo.callout(mo.md(
-            f"Budget lasts {_days:.1f} days. Service remains available."
-        ), kind="info")
+        _exhausted = _days < 1
+        _status_color = COLORS["RedLine"] if _exhausted else COLORS["OrangeLine"] if _days < 7 else COLORS["GreenLine"]
+        _status = "EXHAUSTED IN HOURS" if _exhausted else "DAYS" if _days < 30 else "SUSTAINABLE"
 
-    mo.vstack([
-        mo.as_html(_fig),
-        _service_banner,
-        mo.callout(mo.md(_pred_msg), kind=_pred_kind),
-        mo.Html(f"""
+        # Prediction comparison
+        _predicted_days = pD_pred.value if pD_pred.value else 1
+        _gap = abs(_days - _predicted_days) / max(_days, 0.001)
+
+        if _gap < 0.5:
+            _pred_msg = f"**Good estimate.** You predicted {_predicted_days:.2f} days. Actual ({_comp_label}): {_days:.2f} days."
+            _pred_kind = "success"
+        else:
+            _pred_msg = (
+                f"**You predicted {_predicted_days:.2f} days. Actual ({_comp_label}): {_days:.2f} days ({_hours:.1f} hours).** "
+                f"With basic composition, 10,000 queries/day x $0.01/query = 100 epsilon/day. "
+                f"Budget of 10 is exhausted in 0.1 days (2.4 hours)."
+            )
+            _pred_kind = "warn"
+
+        # Service unavailable banner
+        if _exhausted:
+            _service_banner = mo.callout(mo.md(
+                f"**SERVICE UNAVAILABLE: PRIVACY BUDGET EXHAUSTED.** "
+                f"After {_hours:.1f} hours, all subsequent queries must be rejected. "
+                f"Availability drops to 0% until budget is renewed."
+            ), kind="danger")
+        else:
+            _service_banner = mo.callout(mo.md(
+                f"Budget lasts {_days:.1f} days. Service remains available."
+            ), kind="info")
+
+        items.append(mo.as_html(_fig))
+        items.append(_service_banner)
+        items.append(mo.callout(mo.md(_pred_msg), kind=_pred_kind))
+        items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
                         text-align:center; background:white; border-top:3px solid {_status_color}; flex:1;">
@@ -894,8 +869,8 @@ def _(COLORS, DEFAULT_DELTA, apply_plotly_theme, go, math, mo, np,
                 <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">
                     {_total_queries:,.0f}</div>
             </div>
-        </div>"""),
-        mo.md(f"""
+        </div>"""))
+        items.append(mo.md(f"""
 **Privacy Budget Composition ({_comp_label})**
 
 ```
@@ -905,20 +880,17 @@ Queries to exhaust = {_total_queries:,.0f}
 Days = {_total_queries:,.0f} / {_daily_q:,} = {_days:.2f} days ({_hours:.1f} hours)
 ```
 *Source: @sec-security-privacy-privacy-budget-composition-edbe*
-"""),
-    ])
-    return
+"""))
 
+        return mo.vstack(items)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE F: SYNTHESIS + LEDGER
-# ═══════════════════════════════════════════════════════════════════════════════
+    # ═════════════════════════════════════════════════════════════════════════
+    # SYNTHESIS
+    # ═════════════════════════════════════════════════════════════════════════
 
-@app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.vstack([
-        mo.md("---"),
-        mo.Html(f"""
+    def build_synthesis():
+        items = []
+        items.append(mo.Html(f"""
         <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
                     border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
@@ -945,8 +917,8 @@ def _(COLORS, mo):
                 </div>
             </div>
         </div>
-        """),
-        mo.Html(f"""
+        """))
+        items.append(mo.Html(f"""
         <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 280px; background: white;
                         border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
@@ -970,10 +942,27 @@ def _(COLORS, mo):
                 </div>
             </div>
         </div>
-        """),
-    ])
+        """))
+        return mo.vstack(items)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # TAB COMPOSITION
+    # ═════════════════════════════════════════════════════════════════════════
+
+    tabs = mo.ui.tabs({
+        "Part A -- The Privacy Scaling Wall": build_part_a(),
+        "Part B -- The Privacy-Accuracy Frontier": build_part_b(),
+        "Part C -- The Defense Overhead Stack": build_part_c(),
+        "Part D -- The Privacy Budget Depletion": build_part_d(),
+        "Synthesis": build_synthesis(),
+    })
+    tabs
     return
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: LEDGER HUD
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):

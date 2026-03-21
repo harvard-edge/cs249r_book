@@ -13,21 +13,27 @@ app = marimo.App(width="full")
 #                 pathological state where checkpointing takes longer than the
 #                 optimal interval.
 #
-# 2-Act Structure (35-40 minutes):
-#   Act I  — Reliability Recall + Young-Daly Sweet Spot (12-15 min)
+# Structure (35-40 minutes):
+#   Part A  — Young-Daly Sweet Spot (12-15 min)
 #             Quick recall: 10,000-GPU cluster fails every ~5 hours.
 #             Then the Young-Daly U-curve reveals the checkpoint interval.
 #
-#   Act II — The Checkpoint Storm + Serving Fault Tolerance (20-25 min)
+#   Part B  — The Checkpoint Storm (20-25 min)
 #             175B checkpoint on NFS takes 41 minutes -- longer than the
-#             optimal interval. Serving fault tolerance requires stateful
-#             KV cache recovery. Reliability budget design challenge.
+#             optimal interval. Checkpoint storms at frontier scale.
+#
+#   Synthesis — Key Takeaways + Decision Log
 #
 # Hardware Constants:
 #   GPU_MTTF_HOURS    = 50,000   (from mlsysim defaults)
 #   H100_RAM_GB       = 80       (NVIDIA H100 SXM5 spec)
 #   H100_COST_HR      = 3.0      ($3/GPU-hour cloud pricing)
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 # ─── CELL 0: SETUP ─────────────────────────────────────────────────────────────
@@ -63,15 +69,12 @@ async def _():
     return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, GPU_MTTF_HOURS, GPU_COST_HR, DecisionLog
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE A: OPENING
-# ═══════════════════════════════════════════════════════════════════════════════
-
 # ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, LAB_CSS, mo):
-    mo.Html(f"""
-    {LAB_CSS}
+    mo.vstack([
+        LAB_CSS,
+        mo.Html(f"""
     <div style="background: linear-gradient(135deg, {COLORS['Surface0']} 0%, {COLORS['Surface1']} 100%);
                 border-radius: 16px; padding: 32px 40px; margin-bottom: 8px;
                 border: 1px solid #2d3748;">
@@ -95,11 +98,12 @@ def _(COLORS, LAB_CSS, mo):
                 <span class="badge badge-info">MTBF Scaling</span>
                 <span class="badge badge-info">Young-Daly U-Curve</span>
                 <span class="badge badge-info">Checkpoint Storm</span>
-                <span class="badge badge-warn">35&ndash;40 minutes &middot; 2 Acts</span>
+                <span class="badge badge-warn">35&ndash;40 minutes &middot; 2 Parts + Synthesis</span>
             </div>
         </div>
     </div>
-    """)
+    """),
+    ])
     return
 
 
@@ -141,7 +145,7 @@ def _(mo, COLORS):
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
                     <strong>35-40 min</strong><br/>
-                    Act I: ~15 min &middot; Act II: ~25 min
+                    Part A: ~15 min &middot; Part B: ~25 min
                 </div>
             </div>
         </div>
@@ -178,44 +182,112 @@ def _(mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: ACT I -- RELIABILITY + YOUNG-DALY SWEET SPOT
+# ZONE B: WIDGET DEFINITIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ─── CELL 5: ACT1_BANNER ────────────────────────────────────────────────────
+
+# ─── CELL 4: PART A WIDGETS ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.Html(f"""
-    <div style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {COLORS['BlueLine']}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;
-                        flex-shrink: 0;">I</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act I &middot; 12&ndash;15 min</div>
-        </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">
-            The Young-Daly Sweet Spot
-        </div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            You think checkpointing every 10 minutes is safe. The Young-Daly formula will
-            reveal that the optimal interval for a 16,000-GPU cluster is ~27 minutes &mdash;
-            longer than your instinct suggests &mdash; because the square root law balances
-            checkpoint overhead against expected rework.
-        </div>
-    </div>
-    """)
-    return
+def _(mo):
+    partA_prediction = mo.ui.radio(
+        options={
+            "A) Every 2 minutes -- match the write time": "A",
+            "B) Every 10 minutes -- frequent saves": "B",
+            "C) Every ~27 minutes -- the square-root law": "C",
+            "D) Every 90 minutes -- halfway to MTBF": "D",
+        },
+        label="A 16,000-GPU cluster (MTBF ~3 hours). Checkpoint writes take 2 minutes. What is the optimal checkpoint interval?",
+    )
+    a1_cluster_gpus = mo.ui.slider(start=1000, stop=25000, value=16000, step=1000, label="Cluster GPUs")
+    a1_write_time_s = mo.ui.slider(start=10, stop=300, value=120, step=10, label="Checkpoint write time (seconds)")
+    a1_interval_s = mo.ui.slider(start=60, stop=10800, value=600, step=60, label="Your checkpoint interval (seconds)")
+    return (partA_prediction, a1_cluster_gpus, a1_write_time_s, a1_interval_s)
 
 
-# ─── ACT1: STAKEHOLDER MESSAGE ────────────────────────────────────────────────
+# ─── CELL 5: PART A REFLECTION + PART B PREDICTION WIDGETS ──────────────────
 @app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
+def _(mo, partA_prediction):
+    partA_reflection = mo.ui.radio(
+        options={
+            "A) Double the checkpoint frequency to protect against failures": "A",
+            "B) Reduce checkpoint write time through faster storage or async checkpointing": "B",
+            "C) Increase GPU MTTF by using higher-quality components": "C",
+            "D) Accept the waste -- it is a fixed cost of distributed training": "D",
+        },
+        label="The Young-Daly formula shows waste is sqrt(T_write / MTBF). Which lever most effectively reduces waste?",
+    )
+
+    partB_prediction = mo.ui.radio(
+        options={
+            "A) ~10 seconds -- fast with modern storage": "A",
+            "B) ~2 minutes -- manageable": "B",
+            "C) ~41 minutes -- longer than the Young-Daly optimal interval at this cluster size": "C",
+            "D) ~5 minutes -- within budget": "D",
+        },
+        label="A 175B model checkpoints on a 1,000-GPU cluster with NFS storage (1 GB/s). How long does one checkpoint take?",
+    )
+    return (partA_reflection, partB_prediction)
+
+
+# ─── CELL 6: PART B CONTROLS + SYNTHESIS WIDGETS ────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, partB_prediction):
+    a2_model_b = mo.ui.slider(start=1, stop=175, value=175, step=1, label="Model size (B params)")
+    a2_cluster_gpus = mo.ui.slider(start=100, stop=25000, value=1000, step=100, label="Cluster GPUs")
+    a2_storage = mo.ui.dropdown(
+        options={"NFS (1 GB/s)": 1.0, "Parallel FS (10 GB/s)": 10.0, "NVMe RAID (100 GB/s)": 100.0},
+        value="NFS (1 GB/s)",
+        label="Storage type",
+    )
+
+    partB_reflection = mo.ui.radio(
+        options={
+            "A) Asynchronous checkpointing -- overlap checkpoint writes with training compute": "A",
+            "B) Reduce model size so checkpoints are smaller": "B",
+            "C) Increase cluster MTBF by adding redundant GPUs": "C",
+            "D) Checkpoint only every hour regardless of the Young-Daly formula": "D",
+        },
+        label="What is the most practical solution to the checkpoint storm?",
+    )
+    return (a2_model_b, a2_cluster_gpus, a2_storage, partB_reflection)
+
+
+# ─── CELL 7: DECISION LOG WIDGET ────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(DecisionLog, mo, partB_reflection):
+    synth_decision_input, synth_decision_ui = DecisionLog(
+        placeholder="Based on what I learned in this lab, the most important insight about "
+                    "fault tolerance at scale is..."
+    )
+    return (synth_decision_input, synth_decision_ui)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: SINGLE TABS CELL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── CELL 8: TABS ───────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(
+    COLORS, apply_plotly_theme, go, math, mo, np,
+    GPU_MTTF_HOURS, GPU_COST_HR,
+    partA_prediction, a1_cluster_gpus, a1_write_time_s, a1_interval_s,
+    partA_reflection,
+    partB_prediction, a2_model_b, a2_cluster_gpus, a2_storage,
+    partB_reflection,
+    synth_decision_input, synth_decision_ui,
+    ledger,
+):
+    # ─────────────────────────────────────────────────────────────────────
+    # PART A BUILDER -- The Young-Daly Sweet Spot
+    # ─────────────────────────────────────────────────────────────────────
+
+    def build_part_a():
+        items = []
+
+        # ── Stakeholder message ────────────────────────────────────────
+        items.append(mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']}; background: {COLORS['BlueLL']};
                 border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
         <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['BlueLine']};
@@ -228,14 +300,10 @@ def _(COLORS, mo):
             My manager says that is too aggressive. Who is right?"
         </div>
     </div>
-    """)
-    return
+    """))
 
-
-# ─── ACT1: CONCEPT FRAMING ────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
+        # ── Concept framing ───────────────────────────────────────────
+        items.append(mo.md("""
     Checkpointing has two costs that pull in opposite directions:
 
     1. **Checkpoint overhead**: Writing checkpoints consumes time that could be used for
@@ -255,120 +323,79 @@ def _(mo):
 
     The engineer's 10-minute interval wastes 2/10 = 20% of time on checkpoint overhead alone.
     The optimal 27-minute interval wastes only 2/27 = 7.4% on overhead.
-    """)
-    return
+    """))
 
+        # ── Prediction lock ───────────────────────────────────────────
+        items.append(mo.md("### Your Prediction"))
+        items.append(partA_prediction)
 
-# ─── ACT1: PREDICTION LOCK ────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("### Your Prediction")
-    return
+        if partA_prediction.value is None:
+            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part A instruments."), kind="warn"))
+            return mo.vstack(items)
 
+        # ── Instruments ───────────────────────────────────────────────
+        items.append(mo.md("### Young-Daly Checkpoint Optimizer"))
+        items.append(mo.hstack([a1_cluster_gpus, a1_write_time_s, a1_interval_s], justify="center", gap=2))
 
-@app.cell(hide_code=True)
-def _(mo):
-    partA_prediction = mo.ui.radio(
-        options={
-            "A) Every 2 minutes -- match the write time": "A",
-            "B) Every 10 minutes -- frequent saves": "B",
-            "C) Every ~27 minutes -- the square-root law": "C",
-            "D) Every 90 minutes -- halfway to MTBF": "D",
-        },
-        label="A 16,000-GPU cluster (MTBF ~3 hours). Checkpoint writes take 2 minutes. What is the optimal checkpoint interval?",
-    )
-    partA_prediction
-    return (partA_prediction,)
+        _n_gpus = a1_cluster_gpus.value
+        _t_write = a1_write_time_s.value
+        _tau = a1_interval_s.value
 
+        # MTBF = component MTTF / N
+        _mtbf_s = GPU_MTTF_HOURS * 3600 / _n_gpus
+        _mtbf_h = _mtbf_s / 3600
 
-@app.cell(hide_code=True)
-def _(partA_prediction, mo):
-    mo.stop(
-        partA_prediction.value is None,
-        mo.callout(mo.md("Select your prediction above to unlock the Act I instruments."), kind="warn"),
-    )
-    mo.md("")
-    return
+        # Young-Daly optimal
+        _tau_opt = math.sqrt(2 * _t_write * _mtbf_s)
+        _tau_opt_min = _tau_opt / 60
 
+        # Waste components at current interval
+        _ckpt_overhead = _t_write / _tau if _tau > 0 else 1.0
+        _rework = _tau / (2 * _mtbf_s) if _mtbf_s > 0 else 1.0
+        _total_waste = _ckpt_overhead + _rework
+        _total_waste_pct = min(_total_waste * 100, 100)
 
-# ─── ACT1: INSTRUMENTS ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("### Young-Daly Checkpoint Optimizer")
-    return
+        # Waste at optimal
+        _waste_opt = _t_write / _tau_opt + _tau_opt / (2 * _mtbf_s)
+        _waste_opt_pct = _waste_opt * 100
 
+        # Dollar cost of waste per day
+        _compute_cost_day = _n_gpus * GPU_COST_HR * 24
+        _waste_cost_day = _compute_cost_day * _total_waste
+        _waste_cost_opt_day = _compute_cost_day * _waste_opt
 
-@app.cell(hide_code=True)
-def _(mo):
-    a1_cluster_gpus = mo.ui.slider(start=1000, stop=25000, value=16000, step=1000, label="Cluster GPUs")
-    a1_write_time_s = mo.ui.slider(start=10, stop=300, value=120, step=10, label="Checkpoint write time (seconds)")
-    a1_interval_s = mo.ui.slider(start=60, stop=10800, value=600, step=60, label="Your checkpoint interval (seconds)")
-    mo.hstack([a1_cluster_gpus, a1_write_time_s, a1_interval_s], justify="center", gap=2)
-    return (a1_cluster_gpus, a1_write_time_s, a1_interval_s)
+        # ── U-curve chart ─────────────────────────────────────────────
+        _tau_range = np.linspace(60, min(_mtbf_s, 10800), 200)
+        _overhead_curve = [_t_write / t * 100 for t in _tau_range]
+        _rework_curve = [t / (2 * _mtbf_s) * 100 for t in _tau_range]
+        _total_curve = [(_t_write / t + t / (2 * _mtbf_s)) * 100 for t in _tau_range]
 
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(x=_tau_range / 60, y=_overhead_curve, mode="lines",
+                                   name="Checkpoint overhead", line=dict(color=COLORS["BlueLine"], width=2)))
+        _fig.add_trace(go.Scatter(x=_tau_range / 60, y=_rework_curve, mode="lines",
+                                   name="Expected rework", line=dict(color=COLORS["RedLine"], width=2)))
+        _fig.add_trace(go.Scatter(x=_tau_range / 60, y=_total_curve, mode="lines",
+                                   name="Total waste", line=dict(color=COLORS["Text"], width=3)))
+        # Mark optimal
+        _fig.add_trace(go.Scatter(x=[_tau_opt_min], y=[_waste_opt_pct], mode="markers",
+                                   name="Young-Daly optimum", marker=dict(size=14, color=COLORS["GreenLine"], symbol="star")))
+        # Mark current
+        _fig.add_trace(go.Scatter(x=[_tau / 60], y=[_total_waste_pct], mode="markers",
+                                   name="Your interval", marker=dict(size=14, color=COLORS["OrangeLine"], symbol="diamond")))
+        _fig.update_layout(
+            height=340,
+            xaxis=dict(title="Checkpoint Interval (minutes)"),
+            yaxis=dict(title="Time Wasted (%)", range=[0, min(max(_total_curve) * 1.1, 100)]),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(t=40, b=50, l=50, r=20),
+        )
+        apply_plotly_theme(_fig)
 
-@app.cell(hide_code=True)
-def _(COLORS, apply_plotly_theme, a1_cluster_gpus, a1_write_time_s, a1_interval_s, go, math, mo, np, GPU_MTTF_HOURS, GPU_COST_HR):
-    _n_gpus = a1_cluster_gpus.value
-    _t_write = a1_write_time_s.value
-    _tau = a1_interval_s.value
+        # Colors
+        _waste_color = COLORS["GreenLine"] if _total_waste_pct < 15 else (COLORS["OrangeLine"] if _total_waste_pct < 30 else COLORS["RedLine"])
 
-    # MTBF = component MTTF / N
-    _mtbf_s = GPU_MTTF_HOURS * 3600 / _n_gpus
-    _mtbf_h = _mtbf_s / 3600
-
-    # Young-Daly optimal
-    _tau_opt = math.sqrt(2 * _t_write * _mtbf_s)
-    _tau_opt_min = _tau_opt / 60
-
-    # Waste components at current interval
-    _ckpt_overhead = _t_write / _tau if _tau > 0 else 1.0
-    _rework = _tau / (2 * _mtbf_s) if _mtbf_s > 0 else 1.0
-    _total_waste = _ckpt_overhead + _rework
-    _total_waste_pct = min(_total_waste * 100, 100)
-
-    # Waste at optimal
-    _waste_opt = _t_write / _tau_opt + _tau_opt / (2 * _mtbf_s)
-    _waste_opt_pct = _waste_opt * 100
-
-    # Dollar cost of waste per day
-    _compute_cost_day = _n_gpus * GPU_COST_HR * 24
-    _waste_cost_day = _compute_cost_day * _total_waste
-    _waste_cost_opt_day = _compute_cost_day * _waste_opt
-
-    # ── U-curve chart ─────────────────────────────────────────────────────
-    _tau_range = np.linspace(60, min(_mtbf_s, 10800), 200)
-    _overhead_curve = [_t_write / t * 100 for t in _tau_range]
-    _rework_curve = [t / (2 * _mtbf_s) * 100 for t in _tau_range]
-    _total_curve = [(_t_write / t + t / (2 * _mtbf_s)) * 100 for t in _tau_range]
-
-    _fig = go.Figure()
-    _fig.add_trace(go.Scatter(x=_tau_range / 60, y=_overhead_curve, mode="lines",
-                               name="Checkpoint overhead", line=dict(color=COLORS["BlueLine"], width=2)))
-    _fig.add_trace(go.Scatter(x=_tau_range / 60, y=_rework_curve, mode="lines",
-                               name="Expected rework", line=dict(color=COLORS["RedLine"], width=2)))
-    _fig.add_trace(go.Scatter(x=_tau_range / 60, y=_total_curve, mode="lines",
-                               name="Total waste", line=dict(color=COLORS["Text"], width=3)))
-    # Mark optimal
-    _fig.add_trace(go.Scatter(x=[_tau_opt_min], y=[_waste_opt_pct], mode="markers",
-                               name="Young-Daly optimum", marker=dict(size=14, color=COLORS["GreenLine"], symbol="star")))
-    # Mark current
-    _fig.add_trace(go.Scatter(x=[_tau / 60], y=[_total_waste_pct], mode="markers",
-                               name="Your interval", marker=dict(size=14, color=COLORS["OrangeLine"], symbol="diamond")))
-    _fig.update_layout(
-        height=340,
-        xaxis=dict(title="Checkpoint Interval (minutes)"),
-        yaxis=dict(title="Time Wasted (%)", range=[0, min(max(_total_curve) * 1.1, 100)]),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(t=40, b=50, l=50, r=20),
-    )
-    apply_plotly_theme(_fig)
-
-    # Colors
-    _waste_color = COLORS["GreenLine"] if _total_waste_pct < 15 else (COLORS["OrangeLine"] if _total_waste_pct < 30 else COLORS["RedLine"])
-
-    mo.vstack([
-        mo.Html(f"""
+        items.append(mo.Html(f"""
         <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
                     border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
                     font-size:0.83rem; line-height:1.8;">
@@ -381,8 +408,9 @@ def _(COLORS, apply_plotly_theme, a1_cluster_gpus, a1_write_time_s, a1_interval_
             <div>Your interval: {_tau}s ({_tau/60:.1f} min) &mdash; overhead: {_ckpt_overhead*100:.1f}% + rework: {_rework*100:.1f}% = <strong style="color:{_waste_color};">{_total_waste_pct:.1f}% waste</strong></div>
             <div>Optimal waste: <strong style="color:{COLORS['GreenLine']};">{_waste_opt_pct:.1f}%</strong> &mdash; savings vs your interval: <strong>${(_waste_cost_day - _waste_cost_opt_day):,.0f}/day</strong></div>
         </div>
-        """),
-        mo.Html(f"""
+        """))
+
+        items.append(mo.Html(f"""
         <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
@@ -409,48 +437,40 @@ def _(COLORS, apply_plotly_theme, a1_cluster_gpus, a1_write_time_s, a1_interval_
                 <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">per day</div>
             </div>
         </div>
-        """),
-        mo.ui.plotly(_fig),
-    ])
-    return
+        """))
 
+        items.append(mo.ui.plotly(_fig))
 
-# ─── ACT1: PREDICTION REVEAL ──────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(partA_prediction, mo):
-    if partA_prediction.value == "C":
-        mo.callout(mo.md(
-            "**Correct.** The Young-Daly formula gives tau_opt = sqrt(2 * 120s * 10,800s) = "
-            "~1,610 seconds = ~27 minutes. This is the geometric mean between write time and "
-            "MTBF, not the arithmetic mean. The square root law means the optimal interval "
-            "is much closer to the write time than to the MTBF."
-        ), kind="success")
-    elif partA_prediction.value == "A":
-        mo.callout(mo.md(
-            "**Far too aggressive.** Checkpointing every 2 minutes with a 2-minute write time "
-            "means 50% of wall time is spent checkpointing. Only 50% remains for training. "
-            "The optimal interval balances overhead against rework, not minimizes rework alone."
-        ), kind="warn")
-    elif partA_prediction.value == "B":
-        mo.callout(mo.md(
-            "**Too aggressive.** At 10-minute intervals, checkpoint overhead is 2/10 = 20%, "
-            "plus rework of 10/(2*180) = 2.8%, total = 22.8%. The optimal 27-minute interval "
-            "achieves only 12.3% waste -- saving nearly 10 percentage points of compute time."
-        ), kind="warn")
-    elif partA_prediction.value == "D":
-        mo.callout(mo.md(
-            "**Too conservative.** At 90 minutes with MTBF of 3 hours, expected rework is "
-            "90/(2*180) = 25%. Combined with 2/90 = 2.2% overhead, total waste is 27.2%. "
-            "The optimal 27-minute interval achieves 12.3% -- half the waste."
-        ), kind="warn")
-    return
+        # ── Prediction reveal ─────────────────────────────────────────
+        if partA_prediction.value == "C":
+            items.append(mo.callout(mo.md(
+                "**Correct.** The Young-Daly formula gives tau_opt = sqrt(2 * 120s * 10,800s) = "
+                "~1,610 seconds = ~27 minutes. This is the geometric mean between write time and "
+                "MTBF, not the arithmetic mean. The square root law means the optimal interval "
+                "is much closer to the write time than to the MTBF."
+            ), kind="success"))
+        elif partA_prediction.value == "A":
+            items.append(mo.callout(mo.md(
+                "**Far too aggressive.** Checkpointing every 2 minutes with a 2-minute write time "
+                "means 50% of wall time is spent checkpointing. Only 50% remains for training. "
+                "The optimal interval balances overhead against rework, not minimizes rework alone."
+            ), kind="warn"))
+        elif partA_prediction.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Too aggressive.** At 10-minute intervals, checkpoint overhead is 2/10 = 20%, "
+                "plus rework of 10/(2*180) = 2.8%, total = 22.8%. The optimal 27-minute interval "
+                "achieves only 12.3% waste -- saving nearly 10 percentage points of compute time."
+            ), kind="warn"))
+        elif partA_prediction.value == "D":
+            items.append(mo.callout(mo.md(
+                "**Too conservative.** At 90 minutes with MTBF of 3 hours, expected rework is "
+                "90/(2*180) = 25%. Combined with 2/90 = 2.2% overhead, total waste is 27.2%. "
+                "The optimal 27-minute interval achieves 12.3% -- half the waste."
+            ), kind="warn"))
 
-
-# ─── ACT1: MATHPEEK ────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.accordion({
-        "Governing equations -- Young-Daly checkpoint optimization": mo.md("""
+        # ── MathPeek ──────────────────────────────────────────────────
+        items.append(mo.accordion({
+            "Governing equations -- Young-Daly checkpoint optimization": mo.md("""
         **System MTBF**
 
         ```
@@ -481,87 +501,39 @@ def _(mo):
 
         - dW/d(tau) = 0 yields tau_opt = sqrt(2 * T_write * MTBF)
         """)
-    })
-    return
+        }))
 
+        # ── Reflection ────────────────────────────────────────────────
+        items.append(mo.md("### Reflection"))
+        items.append(partA_reflection)
 
-# ─── ACT1: REFLECTION ─────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    partA_reflection = mo.ui.radio(
-        options={
-            "A) Double the checkpoint frequency to protect against failures": "A",
-            "B) Reduce checkpoint write time through faster storage or async checkpointing": "B",
-            "C) Increase GPU MTTF by using higher-quality components": "C",
-            "D) Accept the waste -- it is a fixed cost of distributed training": "D",
-        },
-        label="The Young-Daly formula shows waste is sqrt(T_write / MTBF). Which lever most effectively reduces waste?",
-    )
-    partA_reflection
-    return (partA_reflection,)
+        if partA_reflection.value is None:
+            items.append(mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"))
+        elif partA_reflection.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Correct.** The optimal waste is proportional to sqrt(T_write / MTBF). Reducing "
+                "T_write by 4x (e.g., from NFS to parallel FS) reduces waste by 2x. Async "
+                "checkpointing effectively makes T_write appear near-zero for the training loop. "
+                "This is the most actionable lever because storage is within the team's control."
+            ), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Not the primary lever.** The Young-Daly waste formula is 2 * sqrt(T_write / (2 * MTBF)). "
+                "Reducing T_write has the most direct impact because storage technology is within "
+                "engineering control, unlike hardware reliability (MTBF)."
+            ), kind="warn"))
 
+        return mo.vstack(items)
 
-@app.cell(hide_code=True)
-def _(partA_reflection, mo):
-    mo.stop(
-        partA_reflection.value is None,
-        mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"),
-    )
-    if partA_reflection.value == "B":
-        mo.callout(mo.md(
-            "**Correct.** The optimal waste is proportional to sqrt(T_write / MTBF). Reducing "
-            "T_write by 4x (e.g., from NFS to parallel FS) reduces waste by 2x. Async "
-            "checkpointing effectively makes T_write appear near-zero for the training loop. "
-            "This is the most actionable lever because storage is within the team's control."
-        ), kind="success")
-    else:
-        mo.callout(mo.md(
-            "**Not the primary lever.** The Young-Daly waste formula is 2 * sqrt(T_write / (2 * MTBF)). "
-            "Reducing T_write has the most direct impact because storage technology is within "
-            "engineering control, unlike hardware reliability (MTBF)."
-        ), kind="warn")
-    return
+    # ─────────────────────────────────────────────────────────────────────
+    # PART B BUILDER -- The Checkpoint Storm
+    # ─────────────────────────────────────────────────────────────────────
 
+    def build_part_b():
+        items = []
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: ACT II -- THE CHECKPOINT STORM + RELIABILITY BUDGET
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 12: ACT2_BANNER ────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.Html(f"""
-    <div style="margin: 32px 0 12px 0; border-top: 2px solid {COLORS['Border']}; padding-top: 32px;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {COLORS['OrangeLine']}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;
-                        flex-shrink: 0;">II</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act II &middot; 20&ndash;25 min</div>
-        </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">
-            The Checkpoint Storm
-        </div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            Act I found the optimal checkpoint interval. Now discover a pathological state:
-            when storage bandwidth is too low, checkpoint write time exceeds the Young-Daly
-            interval. The system spends more time checkpointing than computing &mdash; a
-            checkpoint storm that no scheduling optimization can fix.
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT2: STAKEHOLDER MESSAGE ────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
+        # ── Stakeholder message ────────────────────────────────────────
+        items.append(mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['Cloud']}; background: {COLORS['BlueLL']};
                 border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
         <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['Cloud']};
@@ -574,14 +546,10 @@ def _(COLORS, mo):
             The training team says it is only a few minutes. I disagree."
         </div>
     </div>
-    """)
-    return
+    """))
 
-
-# ─── ACT2: CONCEPT + PREDICTION ───────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
+        # ── Concept framing ───────────────────────────────────────────
+        items.append(mo.md("""
     A 175B model checkpoint includes weights + optimizer states + gradients:
     - 175B parameters x 14 bytes (FP16 weights + FP32 Adam m1 + m2 + master) = **2.45 TB** per checkpoint
     - At NFS 1 GB/s aggregate write: 2,450 seconds = **~41 minutes**
@@ -594,117 +562,79 @@ def _(mo):
     the same checkpoint takes only 24.5 seconds.
 
     What happens at a larger cluster (10,000 GPUs) where MTBF drops to ~5 hours?
-    """)
-    return
+    """))
 
+        # ── Prediction lock ───────────────────────────────────────────
+        items.append(mo.md("### Your Prediction"))
+        items.append(partB_prediction)
 
-@app.cell(hide_code=True)
-def _(mo):
-    partB_prediction = mo.ui.radio(
-        options={
-            "A) ~10 seconds -- fast with modern storage": "A",
-            "B) ~2 minutes -- manageable": "B",
-            "C) ~41 minutes -- longer than the Young-Daly optimal interval at this cluster size": "C",
-            "D) ~5 minutes -- within budget": "D",
-        },
-        label="A 175B model checkpoints on a 1,000-GPU cluster with NFS storage (1 GB/s). How long does one checkpoint take?",
-    )
-    partB_prediction
-    return (partB_prediction,)
+        if partB_prediction.value is None:
+            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part B instruments."), kind="warn"))
+            return mo.vstack(items)
 
+        # ── Instruments ───────────────────────────────────────────────
+        items.append(mo.md("### Checkpoint Storm Analyzer"))
+        items.append(mo.hstack([a2_model_b, a2_cluster_gpus, a2_storage], justify="center", gap=2))
 
-@app.cell(hide_code=True)
-def _(partB_prediction, mo):
-    mo.stop(
-        partB_prediction.value is None,
-        mo.callout(mo.md("Select your prediction above to unlock the Act II instruments."), kind="warn"),
-    )
-    mo.md("")
-    return
+        _params_b = a2_model_b.value
+        _n_gpus = a2_cluster_gpus.value
+        _storage_bw = a2_storage.value
 
+        # Checkpoint size: 14 bytes per param (weights + optimizer)
+        _ckpt_bytes = _params_b * 1e9 * 14
+        _ckpt_tb = _ckpt_bytes / 1e12
+        _ckpt_gb = _ckpt_bytes / 1e9
 
-# ─── ACT2: INSTRUMENTS ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("### Checkpoint Storm Analyzer")
-    return
+        # Write time
+        _write_time_s = _ckpt_gb / _storage_bw
+        _write_time_min = _write_time_s / 60
 
+        # MTBF
+        _mtbf_s = GPU_MTTF_HOURS * 3600 / _n_gpus
+        _mtbf_h = _mtbf_s / 3600
 
-@app.cell(hide_code=True)
-def _(mo):
-    a2_model_b = mo.ui.slider(start=1, stop=175, value=175, step=1, label="Model size (B params)")
-    a2_cluster_gpus = mo.ui.slider(start=100, stop=25000, value=1000, step=100, label="Cluster GPUs")
-    a2_storage = mo.ui.dropdown(
-        options={"NFS (1 GB/s)": 1.0, "Parallel FS (10 GB/s)": 10.0, "NVMe RAID (100 GB/s)": 100.0},
-        value="NFS (1 GB/s)",
-        label="Storage type",
-    )
-    mo.hstack([a2_model_b, a2_cluster_gpus, a2_storage], justify="center", gap=2)
-    return (a2_model_b, a2_cluster_gpus, a2_storage)
+        # Young-Daly optimal
+        _tau_opt_s = math.sqrt(2 * _write_time_s * _mtbf_s)
+        _tau_opt_min = _tau_opt_s / 60
 
+        # Pathological: write time > optimal interval
+        _pathological = _write_time_s > _tau_opt_s
+        _ckpt_fraction = _write_time_s / _tau_opt_s if _tau_opt_s > 0 else 999
 
-@app.cell(hide_code=True)
-def _(COLORS, apply_plotly_theme, a2_model_b, a2_cluster_gpus, a2_storage, go, math, mo, np, GPU_MTTF_HOURS, GPU_COST_HR):
-    _params_b = a2_model_b.value
-    _n_gpus = a2_cluster_gpus.value
-    _storage_bw = a2_storage.value
+        # Dollar cost
+        _compute_cost_day = _n_gpus * GPU_COST_HR * 24
+        _ckpt_cost_per = _n_gpus * GPU_COST_HR * (_write_time_s / 3600)
+        _daily_ckpts = 86400 / _tau_opt_s if _tau_opt_s > 0 else 0
+        _daily_ckpt_cost = _ckpt_cost_per * _daily_ckpts
 
-    # Checkpoint size: 14 bytes per param (weights + optimizer)
-    _ckpt_bytes = _params_b * 1e9 * 14
-    _ckpt_tb = _ckpt_bytes / 1e12
-    _ckpt_gb = _ckpt_bytes / 1e9
+        # ── Storage comparison chart ──────────────────────────────────
+        _storages = [("NFS 1 GB/s", 1.0), ("Parallel FS 10 GB/s", 10.0), ("NVMe RAID 100 GB/s", 100.0)]
+        _write_times = [_ckpt_gb / bw for _, bw in _storages]
+        _bar_colors = [COLORS["RedLine"] if wt > _tau_opt_s else COLORS["GreenLine"] for wt in _write_times]
 
-    # Write time
-    _write_time_s = _ckpt_gb / _storage_bw
-    _write_time_min = _write_time_s / 60
+        _fig = go.Figure()
+        _fig.add_trace(go.Bar(
+            x=[n for n, _ in _storages], y=[wt / 60 for wt in _write_times],
+            marker_color=_bar_colors,
+            text=[f"{wt/60:.1f} min" for wt in _write_times],
+            textposition="auto",
+            hovertemplate="%{x}<br>Write time: %{y:.1f} min<extra></extra>",
+        ))
+        _fig.add_hline(y=_tau_opt_min, line=dict(color=COLORS["OrangeLine"], width=2, dash="dash"),
+                       annotation_text=f"Young-Daly optimal: {_tau_opt_min:.1f} min",
+                       annotation_position="top right")
+        _fig.update_layout(
+            height=300,
+            xaxis=dict(title="Storage System"),
+            yaxis=dict(title="Checkpoint Write Time (minutes)"),
+            margin=dict(t=30, b=50, l=50, r=20),
+            showlegend=False,
+        )
+        apply_plotly_theme(_fig)
 
-    # MTBF
-    _mtbf_s = GPU_MTTF_HOURS * 3600 / _n_gpus
-    _mtbf_h = _mtbf_s / 3600
-
-    # Young-Daly optimal
-    _tau_opt_s = math.sqrt(2 * _write_time_s * _mtbf_s)
-    _tau_opt_min = _tau_opt_s / 60
-
-    # Pathological: write time > optimal interval
-    _pathological = _write_time_s > _tau_opt_s
-    _ckpt_fraction = _write_time_s / _tau_opt_s if _tau_opt_s > 0 else 999
-
-    # Dollar cost
-    _compute_cost_day = _n_gpus * GPU_COST_HR * 24
-    _ckpt_cost_per = _n_gpus * GPU_COST_HR * (_write_time_s / 3600)
-    _daily_ckpts = 86400 / _tau_opt_s if _tau_opt_s > 0 else 0
-    _daily_ckpt_cost = _ckpt_cost_per * _daily_ckpts
-
-    # ── Storage comparison chart ──────────────────────────────────────────
-    _storages = [("NFS 1 GB/s", 1.0), ("Parallel FS 10 GB/s", 10.0), ("NVMe RAID 100 GB/s", 100.0)]
-    _write_times = [_ckpt_gb / bw for _, bw in _storages]
-    _bar_colors = [COLORS["RedLine"] if wt > _tau_opt_s else COLORS["GreenLine"] for wt in _write_times]
-
-    _fig = go.Figure()
-    _fig.add_trace(go.Bar(
-        x=[n for n, _ in _storages], y=[wt / 60 for wt in _write_times],
-        marker_color=_bar_colors,
-        text=[f"{wt/60:.1f} min" for wt in _write_times],
-        textposition="auto",
-        hovertemplate="%{x}<br>Write time: %{y:.1f} min<extra></extra>",
-    ))
-    _fig.add_hline(y=_tau_opt_min, line=dict(color=COLORS["OrangeLine"], width=2, dash="dash"),
-                   annotation_text=f"Young-Daly optimal: {_tau_opt_min:.1f} min",
-                   annotation_position="top right")
-    _fig.update_layout(
-        height=300,
-        xaxis=dict(title="Storage System"),
-        yaxis=dict(title="Checkpoint Write Time (minutes)"),
-        margin=dict(t=30, b=50, l=50, r=20),
-        showlegend=False,
-    )
-    apply_plotly_theme(_fig)
-
-    # ── Failure banner ────────────────────────────────────────────────────
-    _storm_banner = ""
-    if _pathological:
-        _storm_banner = f"""
+        # ── Failure banner ────────────────────────────────────────────
+        if _pathological:
+            items.append(mo.Html(f"""
         <div style="background:{COLORS['RedLL']}; border:2px solid {COLORS['RedLine']};
                     border-radius:10px; padding:14px 18px; margin:10px 0;">
             <div style="font-size:0.88rem; font-weight:800; color:{COLORS['RedLine']}; margin-bottom:4px;">
@@ -717,11 +647,9 @@ def _(COLORS, apply_plotly_theme, a2_model_b, a2_cluster_gpus, a2_storage, go, m
                 <strong>Upgrade storage bandwidth or reduce checkpoint size.</strong>
             </div>
         </div>
-        """
+        """))
 
-    mo.vstack([
-        mo.Html(f"""
-        {_storm_banner}
+        items.append(mo.Html(f"""
         <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
                     border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
                     font-size:0.83rem; line-height:1.8;">
@@ -736,8 +664,9 @@ def _(COLORS, apply_plotly_theme, a2_model_b, a2_cluster_gpus, a2_storage, go, m
             <div>Write/Optimal ratio = <strong style="color:{COLORS['RedLine'] if _pathological else COLORS['GreenLine']};">{_ckpt_fraction:.2f}x</strong>
                  {'(PATHOLOGICAL)' if _pathological else '(healthy)'}</div>
         </div>
-        """),
-        mo.Html(f"""
+        """))
+
+        items.append(mo.Html(f"""
         <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
@@ -760,49 +689,41 @@ def _(COLORS, apply_plotly_theme, a2_model_b, a2_cluster_gpus, a2_storage, go, m
                 <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']}; font-family:monospace;">{_mtbf_h:.1f}h</div>
             </div>
         </div>
-        """),
-        mo.ui.plotly(_fig),
-    ])
-    return (_pathological,)
+        """))
 
+        items.append(mo.ui.plotly(_fig))
 
-# ─── ACT2: PREDICTION REVEAL ─────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(partB_prediction, mo):
-    if partB_prediction.value == "C":
-        mo.callout(mo.md(
-            "**Correct.** 175B x 14 bytes = 2.45 TB per checkpoint. At 1 GB/s NFS, that is "
-            "2,450 seconds = ~41 minutes. With MTBF of ~50 hours for a 1,000-GPU cluster, "
-            "the Young-Daly optimal interval is ~2.6 hours, so 41 minutes is within budget. "
-            "But at 10,000 GPUs (MTBF ~5 hours), optimal interval drops to ~27 minutes "
-            "-- now the write time *exceeds* the optimal interval. Checkpoint storm."
-        ), kind="success")
-    elif partB_prediction.value == "A":
-        mo.callout(mo.md(
-            "**Off by orders of magnitude.** 175B x 14 bytes = 2.45 TB. At 1 GB/s NFS, "
-            "writing 2,450 GB takes 2,450 seconds -- not 10 seconds. Even NVMe RAID at "
-            "100 GB/s takes ~24.5 seconds. NFS cannot handle frontier-scale checkpoints."
-        ), kind="warn")
-    elif partB_prediction.value == "B":
-        mo.callout(mo.md(
-            "**Too optimistic by 20x.** 2.45 TB at 1 GB/s = 2,450 seconds = ~41 minutes, "
-            "not 2 minutes. 2 minutes would require 2,450 / 120 = 20 GB/s sustained write -- "
-            "faster than most parallel file systems."
-        ), kind="warn")
-    elif partB_prediction.value == "D":
-        mo.callout(mo.md(
-            "**Still 8x too optimistic.** 5 minutes = 300 seconds. But 2,450 GB / 300s = "
-            "8.2 GB/s required. NFS provides 1 GB/s. Even parallel FS at 10 GB/s "
-            "takes 4 minutes. NFS: 41 minutes."
-        ), kind="warn")
-    return
+        # ── Prediction reveal ─────────────────────────────────────────
+        if partB_prediction.value == "C":
+            items.append(mo.callout(mo.md(
+                "**Correct.** 175B x 14 bytes = 2.45 TB per checkpoint. At 1 GB/s NFS, that is "
+                "2,450 seconds = ~41 minutes. With MTBF of ~50 hours for a 1,000-GPU cluster, "
+                "the Young-Daly optimal interval is ~2.6 hours, so 41 minutes is within budget. "
+                "But at 10,000 GPUs (MTBF ~5 hours), optimal interval drops to ~27 minutes "
+                "-- now the write time *exceeds* the optimal interval. Checkpoint storm."
+            ), kind="success"))
+        elif partB_prediction.value == "A":
+            items.append(mo.callout(mo.md(
+                "**Off by orders of magnitude.** 175B x 14 bytes = 2.45 TB. At 1 GB/s NFS, "
+                "writing 2,450 GB takes 2,450 seconds -- not 10 seconds. Even NVMe RAID at "
+                "100 GB/s takes ~24.5 seconds. NFS cannot handle frontier-scale checkpoints."
+            ), kind="warn"))
+        elif partB_prediction.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Too optimistic by 20x.** 2.45 TB at 1 GB/s = 2,450 seconds = ~41 minutes, "
+                "not 2 minutes. 2 minutes would require 2,450 / 120 = 20 GB/s sustained write -- "
+                "faster than most parallel file systems."
+            ), kind="warn"))
+        elif partB_prediction.value == "D":
+            items.append(mo.callout(mo.md(
+                "**Still 8x too optimistic.** 5 minutes = 300 seconds. But 2,450 GB / 300s = "
+                "8.2 GB/s required. NFS provides 1 GB/s. Even parallel FS at 10 GB/s "
+                "takes 4 minutes. NFS: 41 minutes."
+            ), kind="warn"))
 
-
-# ─── ACT2: MATHPEEK ───────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.accordion({
-        "Governing equations -- checkpoint storm and storage requirements": mo.md("""
+        # ── MathPeek ──────────────────────────────────────────────────
+        items.append(mo.accordion({
+            "Governing equations -- checkpoint storm and storage requirements": mo.md("""
         **Checkpoint Size**
 
         ```
@@ -831,59 +752,39 @@ def _(mo):
         BW_min > C / tau_opt = C / sqrt(2 * T_write * MTBF)
         ```
         """)
-    })
-    return
+        }))
 
+        # ── Reflection ────────────────────────────────────────────────
+        items.append(mo.md("### Reflection"))
+        items.append(partB_reflection)
 
-# ─── ACT2: REFLECTION ─────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    partB_reflection = mo.ui.radio(
-        options={
-            "A) Asynchronous checkpointing -- overlap checkpoint writes with training compute": "A",
-            "B) Reduce model size so checkpoints are smaller": "B",
-            "C) Increase cluster MTBF by adding redundant GPUs": "C",
-            "D) Checkpoint only every hour regardless of the Young-Daly formula": "D",
-        },
-        label="What is the most practical solution to the checkpoint storm?",
-    )
-    partB_reflection
-    return (partB_reflection,)
+        if partB_reflection.value is None:
+            items.append(mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"))
+        elif partB_reflection.value == "A":
+            items.append(mo.callout(mo.md(
+                "**Correct.** Async checkpointing writes to fast local NVMe while training continues, "
+                "then drains to durable storage in the background. This makes T_write effectively "
+                "near-zero for the training loop, breaking the checkpoint storm. Combined with "
+                "parallel file systems (10-100 GB/s), this is the standard production solution."
+            ), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Not the primary solution.** Asynchronous checkpointing decouples checkpoint "
+                "writes from the training loop by writing to fast local NVMe first, then draining "
+                "to durable storage in the background. This makes T_write effectively zero for "
+                "the training loop, eliminating the checkpoint storm regardless of storage speed."
+            ), kind="warn"))
 
+        return mo.vstack(items)
 
-@app.cell(hide_code=True)
-def _(partB_reflection, mo):
-    mo.stop(
-        partB_reflection.value is None,
-        mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"),
-    )
-    if partB_reflection.value == "A":
-        mo.callout(mo.md(
-            "**Correct.** Async checkpointing writes to fast local NVMe while training continues, "
-            "then drains to durable storage in the background. This makes T_write effectively "
-            "near-zero for the training loop, breaking the checkpoint storm. Combined with "
-            "parallel file systems (10-100 GB/s), this is the standard production solution."
-        ), kind="success")
-    else:
-        mo.callout(mo.md(
-            "**Not the primary solution.** Asynchronous checkpointing decouples checkpoint "
-            "writes from the training loop by writing to fast local NVMe first, then draining "
-            "to durable storage in the background. This makes T_write effectively zero for "
-            "the training loop, eliminating the checkpoint storm regardless of storage speed."
-        ), kind="warn")
-    return
+    # ─────────────────────────────────────────────────────────────────────
+    # SYNTHESIS BUILDER
+    # ─────────────────────────────────────────────────────────────────────
 
+    def build_synthesis():
+        items = []
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.vstack([
-        mo.md("---"),
-        mo.Html(f"""
+        items.append(mo.Html(f"""
         <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
                     border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
@@ -911,8 +812,9 @@ def _(mo, COLORS):
                 </div>
             </div>
         </div>
-        """),
-        mo.Html(f"""
+        """))
+
+        items.append(mo.Html(f"""
         <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 280px; background: white;
                         border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
@@ -940,59 +842,75 @@ def _(mo, COLORS):
                 </div>
             </div>
         </div>
-        """),
-        mo.accordion({
+        """))
+
+        items.append(mo.accordion({
             "Self-Assessment": mo.md("""
 1. What is the system MTBF for a 10,000-GPU cluster with 50,000-hour component MTTF?
 2. Using the Young-Daly formula, what is the optimal checkpoint interval for MTBF=3h, T_write=2min?
 3. At what storage bandwidth does a 175B model checkpoint create a checkpoint storm on a 10,000-GPU cluster?
 
-*If you cannot answer all three from memory, revisit Acts I and II.*
+*If you cannot answer all three from memory, revisit Parts A and B.*
 """)
-        }),
-    ])
-    return
+        }))
 
+        items.append(mo.md("---"))
+        items.append(mo.md("### Decision Log"))
+        items.append(mo.md("Record the single most important insight from this lab. "
+                           "This entry carries forward to future labs via the Design Ledger."))
+        items.append(synth_decision_ui)
 
-# ─── CELL 21: LEDGER_HUD ─────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    decision_input, decision_ui = DecisionLog()
-    return (decision_input, decision_ui)
+        return mo.vstack(items)
 
+    # ─────────────────────────────────────────────────────────────────────
+    # COMPOSE TABS
+    # ─────────────────────────────────────────────────────────────────────
 
-@app.cell(hide_code=True)
-def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partB_reflection,
-      ledger, mo, decision_input, decision_ui):
-    _pathological = False
+    # Save ledger
+    _a1_ok = partA_prediction.value == "C"
+    _a2_ok = partB_prediction.value == "C"
     ledger.save(
         chapter="v2_06",
         design={
             "partA_prediction": partA_prediction.value or "no_selection",
-            "partA_correct": partA_prediction.value == "C",
+            "partA_correct": _a1_ok,
             "partA_reflection": partA_reflection.value or "no_selection",
             "partB_prediction": partB_prediction.value or "no_selection",
-            "partB_correct": partB_prediction.value == "C",
+            "partB_correct": _a2_ok,
             "partB_reflection": partB_reflection.value or "no_selection",
-            "student_justification": str(decision_input.value),
-            "checkpoint_storm_hit": _pathological,
+            "student_justification": str(synth_decision_input.value),
         },
     )
 
+    tabs = mo.ui.tabs({
+        "Part A -- The Young-Daly Sweet Spot":  build_part_a(),
+        "Part B -- The Checkpoint Storm":       build_part_b(),
+        "Synthesis":                            build_synthesis(),
+    })
+    tabs
+    return
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── CELL 9: LEDGER_HUD ─────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(COLORS, partA_prediction, partB_prediction, mo):
     _a1_ok = partA_prediction.value == "C"
     _a2_ok = partB_prediction.value == "C"
     _tier = "Optimal" if (_a1_ok and _a2_ok) else ("Partial" if (_a1_ok or _a2_ok) else "Developing")
     _tier_color = COLORS["GreenLine"] if _tier == "Optimal" else (COLORS["OrangeLine"] if _tier == "Partial" else COLORS["TextMuted"])
 
-    decision_ui
     mo.Html(f"""
     <div class="lab-hud">
         <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab 06</span></div>
         <div><span class="hud-label">CHAPTER</span> <span class="hud-value">v2_06 &middot; Fault Tolerance</span></div>
-        <div><span class="hud-label">ACT I</span> <span class="{'hud-active' if _a1_ok else 'hud-none'}">{"CORRECT" if _a1_ok else "REVIEW"}</span></div>
-        <div><span class="hud-label">ACT II</span> <span class="{'hud-active' if _a2_ok else 'hud-none'}">{"CORRECT" if _a2_ok else "REVIEW"}</span></div>
+        <div><span class="hud-label">PART A</span> <span class="{'hud-active' if _a1_ok else 'hud-none'}">{"CORRECT" if _a1_ok else "REVIEW"}</span></div>
+        <div><span class="hud-label">PART B</span> <span class="{'hud-active' if _a2_ok else 'hud-none'}">{"CORRECT" if _a2_ok else "REVIEW"}</span></div>
         <div><span class="hud-label">TIER</span> <span style="color:{_tier_color}; font-family:var(--font-mono);">{_tier.upper()}</span></div>
-        <div><span class="hud-label">STORM</span> <span class="{'hud-none' if _pathological else 'hud-active'}">{"YES" if _pathological else "NO"}</span></div>
     </div>
     """)
     return

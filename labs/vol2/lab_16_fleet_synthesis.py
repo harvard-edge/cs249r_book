@@ -32,6 +32,8 @@ app = marimo.App(width="full")
 # ZONE A: OPENING
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
+# ─── CELL 0: SETUP ────────────────────────────────────────────────────────
 @app.cell
 async def _():
     import marimo as mo
@@ -221,6 +223,8 @@ def _(mo, COLORS):
     return
 
 
+# ─── CELL 3: READING ───────────────────────────────────────────────────────
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -233,35 +237,11 @@ def _(mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: PART A — THE SENSITIVITY WALL
+# ZONE B: WIDGET CELLS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.Html(f"""
-    <div id="part-a" style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: #6366f1; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;">A</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">Part A &middot; 12 min</div>
-        </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px;">The Sensitivity Wall</div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            At fleet scale (1,000+ GPUs), communication &mdash; not computation &mdash; is the
-            most sensitive system dimension. A 10% network bandwidth improvement yields a larger
-            throughput gain than 10% more FLOPS. But this flips at small scale. Watch the
-            sensitivity ordering change as you scale.
-        </div>
-    </div>
-    """)
-    return
 
-
+# ─── CELL 4: Part A prediction + Part A fleet toggle ──────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     partA_pred = mo.ui.radio(
@@ -273,254 +253,322 @@ def _(mo):
         },
         label="A 1,000-GPU training cluster. Which 10% improvement yields the largest throughput gain?",
     )
-    mo.vstack([mo.md("### Your Prediction"), partA_pred])
-    return (partA_pred,)
-
-
-@app.cell(hide_code=True)
-def _(mo, partA_pred):
-    mo.stop(partA_pred.value is None,
-            mo.callout(mo.md("**Select your prediction to unlock.**"), kind="warn"))
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
     partA_fleet_toggle = mo.ui.radio(
         options={"8 GPUs": 8, "64 GPUs": 64, "1,000 GPUs": 1000, "10,000 GPUs": 10000},
         value="1,000 GPUs", label="Fleet size:", inline=True,
     )
-    mo.vstack([partA_fleet_toggle])
-    return (partA_fleet_toggle,)
+    return (partA_pred, partA_fleet_toggle,)
+
+
+# ─── CELL 5: Part B prediction + Part B sliders ──────────────────────────
+@app.cell(hide_code=True)
+def _(mo, partA_pred):
+    partB_pred = mo.ui.number(
+        start=0.01, stop=1000, value=100, step=1,
+        label="10,000 GPUs, each with 10,000-hour MTBF. What is the cluster MTBF (hours)?",
+    )
+    partB_fleet_slider = mo.ui.slider(start=10, stop=100000, value=10000, step=100, label="Fleet size (GPUs)")
+    partB_mtbf_slider = mo.ui.slider(start=1000, stop=100000, value=10000, step=1000, label="Per-GPU MTBF (hours)")
+    partB_ckpt_slider = mo.ui.slider(start=1, stop=30, value=10, step=1, label="Checkpoint interval (minutes)")
+    return (partB_pred, partB_fleet_slider, partB_mtbf_slider, partB_ckpt_slider,)
+
+
+# ─── CELL 6: Part C prediction + Part C sliders ──────────────────────────
+@app.cell(hide_code=True)
+def _(mo, partB_pred):
+    partC_pred = mo.ui.radio(
+        options={
+            "A) No effect -- they are independent": "independent",
+            "B) Slight degradation -- compressed checkpoints are less reliable": "slight",
+            "C) Significant degradation -- compressed gradients increase sensitivity to bit errors": "significant",
+            "D) Improvement -- faster communication means faster checkpointing": "improvement",
+        },
+        label="You push communication efficiency to 99% (aggressive gradient compression). What happens to fault tolerance?",
+    )
+    partC_compute = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Compute (%)")
+    partC_comm = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Communication (%)")
+    partC_fault = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Fault Tolerance (%)")
+    partC_sched = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Scheduling (%)")
+    partC_sustain = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Sustainability (%)")
+    partC_fair = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Fairness (%)")
+    return (partC_pred, partC_compute, partC_comm, partC_fault, partC_sched, partC_sustain, partC_fair,)
+
+
+# ─── CELL 7: Part D prediction + Part D controls ─────────────────────────
+@app.cell(hide_code=True)
+def _(mo, partC_pred):
+    partD_refl = mo.ui.radio(
+        options={
+            "A) Yes -- fairness overhead for communication efficiency": "yes_trade",
+            "B) No -- fairness is non-negotiable": "no_trade",
+            "C) It depends on the deployment context": "depends",
+        },
+        label="Would you trade fairness overhead for communication efficiency?",
+    )
+    partD_gpus = mo.ui.slider(start=8, stop=10000, value=1000, step=8, label="GPU count")
+    partD_comm_strategy = mo.ui.dropdown(
+        options={"AllReduce Ring": "ring", "AllReduce Tree": "tree", "Gradient Compression (10x)": "compress"},
+        value="AllReduce Ring", label="Communication strategy:",
+    )
+    partD_ckpt_freq = mo.ui.slider(start=1, stop=30, value=10, step=1, label="Checkpoint freq (min)")
+    partD_scheduling = mo.ui.dropdown(
+        options={"Static": "static", "Elastic": "elastic"},
+        value="Static", label="Scheduling mode:",
+    )
+    return (partD_refl, partD_gpus, partD_comm_strategy, partD_ckpt_freq, partD_scheduling,)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: SINGLE TABS CELL
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 @app.cell(hide_code=True)
-def _(mo, go, np, apply_plotly_theme, COLORS, partA_fleet_toggle,
-      H100_TFLOPS_FP16, IB_BW_GBPS, MTBF_GPU_HOURS, FAIRNESS_OVERHEAD_MS):
-    _N = partA_fleet_toggle.value
+def _(
+    mo, go, np, math, apply_plotly_theme, COLORS,
+    CARBON_CAP, CARBON_STRATEGY, FAIRNESS_METRIC,
+    FAIRNESS_OVERHEAD_MS, FAIRNESS_THRESHOLD,
+    H100_TFLOPS_FP16, H100_RAM_GB, H100_TDP_W,
+    NVLINK_BW_GBS, IB_BW_GBPS, MTBF_GPU_HOURS, CHECKPOINT_COST_S,
+    ALLREDUCE_RING_EFF, GRADIENT_COMPRESS,
+    partA_pred, partA_fleet_toggle,
+    partB_pred, partB_fleet_slider, partB_mtbf_slider, partB_ckpt_slider,
+    partC_pred, partC_compute, partC_comm, partC_fault, partC_sched, partC_sustain, partC_fair,
+    partD_refl, partD_gpus, partD_comm_strategy, partD_ckpt_freq, partD_scheduling,
+    ledger,
+):
+    # ─────────────────────────────────────────────────────────────────────
+    # PART A BUILDER -- The Sensitivity Wall
+    # ─────────────────────────────────────────────────────────────────────
 
-    # Sensitivity analysis: throughput impact of 10% improvement in each dimension
-    # At small scale, compute dominates. At large scale, communication dominates.
-    # Communication: allreduce time = 2(N-1)/N * G/BW ~ 2G/BW for large N
-    _comm_fraction = min(0.7, 0.05 + 0.65 * (1 - 8 / _N))  # scales with N
-    _compute_fraction = max(0.15, 0.8 - 0.65 * (1 - 8 / _N))
-    _fault_fraction = min(0.15, 0.01 + 0.14 * (_N / 10000))
-    _schedule_fraction = 0.05
-    _sustain_fraction = min(0.05, 0.01 + 0.04 * (_N / 10000))
-    _fairness_fraction = 0.02
+    def build_part_a():
+        items = []
 
-    # Normalize
-    _total = _comm_fraction + _compute_fraction + _fault_fraction + _schedule_fraction + _sustain_fraction + _fairness_fraction
-    _dims = ["Compute", "Communication", "Fault\nTolerance", "Scheduling", "Sustainability\nOverhead", "Fairness\nOverhead"]
-    _sensitivities = [
-        _compute_fraction / _total * 10,
-        _comm_fraction / _total * 10,
-        _fault_fraction / _total * 10,
-        _schedule_fraction / _total * 10,
-        _sustain_fraction / _total * 10,
-        _fairness_fraction / _total * 10,
-    ]
+        items.append(mo.Html(f"""
+        <div id="part-a" style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: #6366f1; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;">A</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">Part A &middot; 12 min</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px;">The Sensitivity Wall</div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                At fleet scale (1,000+ GPUs), communication &mdash; not computation &mdash; is the
+                most sensitive system dimension. A 10% network bandwidth improvement yields a larger
+                throughput gain than 10% more FLOPS. But this flips at small scale. Watch the
+                sensitivity ordering change as you scale.
+            </div>
+        </div>
+        """))
 
-    # Sort for tornado chart
-    _sorted_pairs = sorted(zip(_dims, _sensitivities), key=lambda x: x[1], reverse=True)
-    _sorted_dims = [p[0] for p in _sorted_pairs]
-    _sorted_vals = [p[1] for p in _sorted_pairs]
+        items.append(mo.md("### Your Prediction"))
+        items.append(partA_pred)
 
-    _bar_colors = []
-    for d in _sorted_dims:
-        if "Compute" in d:
-            _bar_colors.append(COLORS["BlueLine"])
-        elif "Comm" in d:
-            _bar_colors.append(COLORS["OrangeLine"])
-        elif "Fault" in d:
-            _bar_colors.append(COLORS["RedLine"])
-        elif "Sched" in d:
-            _bar_colors.append(COLORS["GreenLine"])
-        else:
-            _bar_colors.append(COLORS["TextMuted"])
+        if partA_pred.value is None:
+            items.append(mo.callout(mo.md("**Select your prediction to unlock.**"), kind="warn"))
+            return mo.vstack(items)
 
-    fig_sens = go.Figure()
-    fig_sens.add_trace(go.Bar(
-        y=_sorted_dims, x=_sorted_vals, orientation="h",
-        marker_color=_bar_colors,
-        text=[f"{v:.1f}%" for v in _sorted_vals],
-        textposition="outside",
-    ))
-    fig_sens.update_layout(
-        height=350,
-        xaxis=dict(title="Throughput Impact of 10% Improvement (%)"),
-        yaxis=dict(autorange="reversed"),
-        margin=dict(l=120),
-    )
-    apply_plotly_theme(fig_sens)
+        # Fleet toggle control
+        items.append(partA_fleet_toggle)
 
-    _top_dim = _sorted_dims[0].replace("\n", " ")
-    _top_val = _sorted_vals[0]
+        _N = partA_fleet_toggle.value
 
-    mo.vstack([
-        mo.md(f"### Sensitivity Tornado (N = {_N:,} GPUs)"),
-        mo.as_html(fig_sens),
-        mo.callout(mo.md(
+        # Sensitivity analysis: throughput impact of 10% improvement in each dimension
+        _comm_fraction = min(0.7, 0.05 + 0.65 * (1 - 8 / _N))
+        _compute_fraction = max(0.15, 0.8 - 0.65 * (1 - 8 / _N))
+        _fault_fraction = min(0.15, 0.01 + 0.14 * (_N / 10000))
+        _schedule_fraction = 0.05
+        _sustain_fraction = min(0.05, 0.01 + 0.04 * (_N / 10000))
+        _fairness_fraction = 0.02
+
+        _total = _comm_fraction + _compute_fraction + _fault_fraction + _schedule_fraction + _sustain_fraction + _fairness_fraction
+        _dims = ["Compute", "Communication", "Fault\nTolerance", "Scheduling", "Sustainability\nOverhead", "Fairness\nOverhead"]
+        _sensitivities = [
+            _compute_fraction / _total * 10,
+            _comm_fraction / _total * 10,
+            _fault_fraction / _total * 10,
+            _schedule_fraction / _total * 10,
+            _sustain_fraction / _total * 10,
+            _fairness_fraction / _total * 10,
+        ]
+
+        _sorted_pairs = sorted(zip(_dims, _sensitivities), key=lambda x: x[1], reverse=True)
+        _sorted_dims = [p[0] for p in _sorted_pairs]
+        _sorted_vals = [p[1] for p in _sorted_pairs]
+
+        _bar_colors = []
+        for d in _sorted_dims:
+            if "Compute" in d:
+                _bar_colors.append(COLORS["BlueLine"])
+            elif "Comm" in d:
+                _bar_colors.append(COLORS["OrangeLine"])
+            elif "Fault" in d:
+                _bar_colors.append(COLORS["RedLine"])
+            elif "Sched" in d:
+                _bar_colors.append(COLORS["GreenLine"])
+            else:
+                _bar_colors.append(COLORS["TextMuted"])
+
+        fig_sens = go.Figure()
+        fig_sens.add_trace(go.Bar(
+            y=_sorted_dims, x=_sorted_vals, orientation="h",
+            marker_color=_bar_colors,
+            text=[f"{v:.1f}%" for v in _sorted_vals],
+            textposition="outside",
+        ))
+        fig_sens.update_layout(
+            height=350,
+            xaxis=dict(title="Throughput Impact of 10% Improvement (%)"),
+            yaxis=dict(autorange="reversed"),
+            margin=dict(l=120),
+        )
+        apply_plotly_theme(fig_sens)
+
+        _top_dim = _sorted_dims[0].replace("\n", " ")
+        _top_val = _sorted_vals[0]
+
+        items.append(mo.md(f"### Sensitivity Tornado (N = {_N:,} GPUs)"))
+        items.append(mo.as_html(fig_sens))
+        items.append(mo.callout(mo.md(
             f"At **{_N:,} GPUs**, the most sensitive dimension is **{_top_dim}** ({_top_val:.1f}% "
             f"throughput gain per 10% improvement). "
             + ("At this scale, communication dominates because AllReduce synchronization barriers "
                "amplify bandwidth bottlenecks nonlinearly." if "Comm" in _top_dim else
                "At this scale, compute still dominates. Try increasing fleet size to see the crossover.")
-        ), kind="info"),
-        mo.callout(mo.md(
-            "**The thesis of this book:** Scale creates qualitative change. "
-            "At 8 GPUs, compute dominates. At 1,000+, communication dominates decisively. "
-            "The same system behaves differently at different scales."
-        ), kind="warn") if _N >= 1000 else mo.md(""),
-    ])
-    return
+        ), kind="info"))
 
+        if _N >= 1000:
+            items.append(mo.callout(mo.md(
+                "**The thesis of this book:** Scale creates qualitative change. "
+                "At 8 GPUs, compute dominates. At 1,000+, communication dominates decisively. "
+                "The same system behaves differently at different scales."
+            ), kind="warn"))
 
-@app.cell(hide_code=True)
-def _(mo, partA_pred):
-    _correct = partA_pred.value == "communication"
-    _msg = ("Correct. At 1,000 GPUs, network bandwidth (communication) is 2-3x more sensitive "
-            "than compute. Students default to 'compute is king' even after 15 labs of learning otherwise."
-            if _correct else
-            "The answer is (B): network bandwidth. At 1,000 GPUs, the AllReduce synchronization "
-            "cost dominates. The 2(N-1)/N * G/BW term approaches 2G/BW, making bandwidth the "
-            "irreducible floor.")
-    mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn")
-    return
+        # Prediction reveal
+        _correct = partA_pred.value == "communication"
+        _msg = ("Correct. At 1,000 GPUs, network bandwidth (communication) is 2-3x more sensitive "
+                "than compute. Students default to 'compute is king' even after 15 labs of learning otherwise."
+                if _correct else
+                "The answer is (B): network bandwidth. At 1,000 GPUs, the AllReduce synchronization "
+                "cost dominates. The 2(N-1)/N * G/BW term approaches 2G/BW, making bandwidth the "
+                "irreducible floor.")
+        items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn"))
 
+        return mo.vstack(items)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: PART B — THE FAILURE BUDGET
-# ═══════════════════════════════════════════════════════════════════════════════
+    # ─────────────────────────────────────────────────────────────────────
+    # PART B BUILDER -- The Failure Budget
+    # ─────────────────────────────────────────────────────────────────────
 
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.Html(f"""
-    <div id="part-b" style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {COLORS['OrangeLine']}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;">B</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">Part B &middot; 10 min</div>
+    def build_part_b():
+        items = []
+
+        items.append(mo.Html(f"""
+        <div id="part-b" style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {COLORS['OrangeLine']}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;">B</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">Part B &middot; 10 min</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px;">The Failure Budget</div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                Communication dominates at scale. But the fleet also fails at scale &mdash; with
+                mathematical certainty. Meta's Llama 3 training on 16,384 GPUs experienced 419
+                failures in 54 days (one every 3 hours). Checkpointing overhead and recovery
+                strategy dominate system design.
+            </div>
         </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px;">The Failure Budget</div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            Communication dominates at scale. But the fleet also fails at scale &mdash; with
-            mathematical certainty. Meta's Llama 3 training on 16,384 GPUs experienced 419
-            failures in 54 days (one every 3 hours). Checkpointing overhead and recovery
-            strategy dominate system design.
-        </div>
-    </div>
-    """)
-    return
+        """))
 
+        items.append(mo.md("### Your Prediction"))
+        items.append(partB_pred)
 
-@app.cell(hide_code=True)
-def _(mo):
-    partB_pred = mo.ui.number(
-        start=0.01, stop=1000, value=100, step=1,
-        label="10,000 GPUs, each with 10,000-hour MTBF. What is the cluster MTBF (hours)?",
-    )
-    mo.vstack([mo.md("### Your Prediction"), partB_pred])
-    return (partB_pred,)
+        if partB_pred.value is None:
+            items.append(mo.callout(mo.md("**Enter your prediction to unlock.**"), kind="warn"))
+            return mo.vstack(items)
 
+        # Controls
+        items.append(mo.hstack([partB_fleet_slider, partB_mtbf_slider, partB_ckpt_slider], justify="start", gap=1))
 
-@app.cell(hide_code=True)
-def _(mo, partB_pred):
-    mo.stop(partB_pred.value is None,
-            mo.callout(mo.md("**Enter your prediction to unlock.**"), kind="warn"))
-    return
+        _N = partB_fleet_slider.value
+        _mtbf_gpu = partB_mtbf_slider.value
+        _ckpt_min = partB_ckpt_slider.value
 
+        # Cluster MTBF = per-GPU MTBF / N
+        _mtbf_cluster = _mtbf_gpu / _N
+        _mtbf_cluster_min = _mtbf_cluster * 60  # minutes
 
-@app.cell(hide_code=True)
-def _(mo):
-    partB_fleet_slider = mo.ui.slider(start=10, stop=100000, value=10000, step=100, label="Fleet size (GPUs)")
-    partB_mtbf_slider = mo.ui.slider(start=1000, stop=100000, value=10000, step=1000, label="Per-GPU MTBF (hours)")
-    partB_ckpt_slider = mo.ui.slider(start=1, stop=30, value=10, step=1, label="Checkpoint interval (minutes)")
-    mo.hstack([partB_fleet_slider, partB_mtbf_slider, partB_ckpt_slider], justify="start", gap=1)
-    return (partB_fleet_slider, partB_mtbf_slider, partB_ckpt_slider,)
+        # P(all up for 1 hour) = (1 - 1/MTBF_gpu)^N
+        _p_all_up_1h = (1 - 1 / _mtbf_gpu) ** _N
 
+        # Goodput: Young-Daly model
+        _T_ckpt_min = CHECKPOINT_COST_S / 60  # minutes
+        _T_optimal = math.sqrt(2 * _T_ckpt_min * _mtbf_cluster_min) if _mtbf_cluster_min > 0 else 10
 
-@app.cell(hide_code=True)
-def _(mo, go, np, math, apply_plotly_theme, COLORS, CHECKPOINT_COST_S,
-      partB_fleet_slider, partB_mtbf_slider, partB_ckpt_slider):
-    _N = partB_fleet_slider.value
-    _mtbf_gpu = partB_mtbf_slider.value
-    _ckpt_min = partB_ckpt_slider.value
+        # Goodput at chosen interval
+        _ckpt_overhead = _T_ckpt_min / _ckpt_min if _ckpt_min > 0 else 1
+        _failure_waste = _ckpt_min / (2 * _mtbf_cluster_min) if _mtbf_cluster_min > 0 else 1
+        _goodput = max(0, 1 - _ckpt_overhead - _failure_waste)
 
-    # Cluster MTBF = per-GPU MTBF / N
-    _mtbf_cluster = _mtbf_gpu / _N
-    _mtbf_cluster_min = _mtbf_cluster * 60  # minutes
+        # Goodput at optimal interval
+        _ckpt_overhead_opt = _T_ckpt_min / _T_optimal if _T_optimal > 0 else 1
+        _failure_waste_opt = _T_optimal / (2 * _mtbf_cluster_min) if _mtbf_cluster_min > 0 else 1
+        _goodput_optimal = max(0, 1 - _ckpt_overhead_opt - _failure_waste_opt)
 
-    # P(all up for 1 hour) = (1 - 1/MTBF_gpu)^N
-    _p_all_up_1h = (1 - 1 / _mtbf_gpu) ** _N
+        # Goodput curve across intervals
+        _intervals = np.linspace(1, 30, 60)
+        _goodputs = []
+        for _t in _intervals:
+            _co = _T_ckpt_min / _t
+            _fw = _t / (2 * _mtbf_cluster_min) if _mtbf_cluster_min > 0 else 1
+            _goodputs.append(max(0, 1 - _co - _fw))
 
-    # Goodput: Young-Daly model
-    # goodput = 1 - T_ckpt / T_interval - T_wasted / T_interval
-    # T_wasted = average work lost per failure = T_interval / 2 (if failures uniform)
-    # Optimal T_interval ~ sqrt(2 * T_ckpt * MTBF_cluster)
-    _T_ckpt_min = CHECKPOINT_COST_S / 60  # minutes
-    _T_optimal = math.sqrt(2 * _T_ckpt_min * _mtbf_cluster_min) if _mtbf_cluster_min > 0 else 10
+        fig_goodput = go.Figure()
+        fig_goodput.add_trace(go.Scatter(
+            x=_intervals, y=_goodputs, name="Goodput",
+            line=dict(color=COLORS["BlueLine"], width=3),
+            fill="tozeroy", fillcolor="rgba(0,99,149,0.08)",
+        ))
 
-    # Goodput at chosen interval
-    _ckpt_overhead = _T_ckpt_min / _ckpt_min if _ckpt_min > 0 else 1
-    _failure_waste = _ckpt_min / (2 * _mtbf_cluster_min) if _mtbf_cluster_min > 0 else 1
-    _goodput = max(0, 1 - _ckpt_overhead - _failure_waste)
+        # Current operating point
+        fig_goodput.add_trace(go.Scatter(
+            x=[_ckpt_min], y=[_goodput], mode="markers",
+            marker=dict(size=14, color=COLORS["OrangeLine"], line=dict(color="white", width=2)),
+            name=f"Current ({_ckpt_min}min)",
+        ))
 
-    # Goodput at optimal interval
-    _ckpt_overhead_opt = _T_ckpt_min / _T_optimal if _T_optimal > 0 else 1
-    _failure_waste_opt = _T_optimal / (2 * _mtbf_cluster_min) if _mtbf_cluster_min > 0 else 1
-    _goodput_optimal = max(0, 1 - _ckpt_overhead_opt - _failure_waste_opt)
+        # Optimal point
+        fig_goodput.add_trace(go.Scatter(
+            x=[_T_optimal], y=[_goodput_optimal], mode="markers",
+            marker=dict(size=14, color=COLORS["GreenLine"], symbol="star",
+                        line=dict(color="white", width=2)),
+            name=f"Young-Daly Optimal ({_T_optimal:.1f}min)",
+        ))
 
-    # Goodput curve across intervals
-    _intervals = np.linspace(1, 30, 60)
-    _goodputs = []
-    for _t in _intervals:
-        _co = _T_ckpt_min / _t
-        _fw = _t / (2 * _mtbf_cluster_min) if _mtbf_cluster_min > 0 else 1
-        _goodputs.append(max(0, 1 - _co - _fw))
+        fig_goodput.update_layout(
+            height=380,
+            xaxis=dict(title="Checkpoint Interval (minutes)"),
+            yaxis=dict(title="Goodput (fraction of useful work)", range=[0, 1.05]),
+            legend=dict(orientation="h", y=1.15, x=0.5, xanchor="center"),
+        )
+        apply_plotly_theme(fig_goodput)
 
-    fig_goodput = go.Figure()
-    fig_goodput.add_trace(go.Scatter(
-        x=_intervals, y=_goodputs, name="Goodput",
-        line=dict(color=COLORS["BlueLine"], width=3),
-        fill="tozeroy", fillcolor="rgba(0,99,149,0.08)",
-    ))
+        _mtbf_color = COLORS["GreenLine"] if _mtbf_cluster > 10 else COLORS["OrangeLine"] if _mtbf_cluster > 1 else COLORS["RedLine"]
+        _goodput_color = COLORS["GreenLine"] if _goodput > 0.8 else COLORS["OrangeLine"] if _goodput > 0.5 else COLORS["RedLine"]
 
-    # Current operating point
-    fig_goodput.add_trace(go.Scatter(
-        x=[_ckpt_min], y=[_goodput], mode="markers",
-        marker=dict(size=14, color=COLORS["OrangeLine"], line=dict(color="white", width=2)),
-        name=f"Current ({_ckpt_min}min)",
-    ))
-
-    # Optimal point
-    fig_goodput.add_trace(go.Scatter(
-        x=[_T_optimal], y=[_goodput_optimal], mode="markers",
-        marker=dict(size=14, color=COLORS["GreenLine"], symbol="star",
-                    line=dict(color="white", width=2)),
-        name=f"Young-Daly Optimal ({_T_optimal:.1f}min)",
-    ))
-
-    fig_goodput.update_layout(
-        height=380,
-        xaxis=dict(title="Checkpoint Interval (minutes)"),
-        yaxis=dict(title="Goodput (fraction of useful work)", range=[0, 1.05]),
-        legend=dict(orientation="h", y=1.15, x=0.5, xanchor="center"),
-    )
-    apply_plotly_theme(fig_goodput)
-
-    _mtbf_color = COLORS["GreenLine"] if _mtbf_cluster > 10 else COLORS["OrangeLine"] if _mtbf_cluster > 1 else COLORS["RedLine"]
-    _goodput_color = COLORS["GreenLine"] if _goodput > 0.8 else COLORS["OrangeLine"] if _goodput > 0.5 else COLORS["RedLine"]
-
-    mo.vstack([
-        mo.md(f"### Fleet Reliability (N = {_N:,}, per-GPU MTBF = {_mtbf_gpu:,}h)"),
-        mo.as_html(fig_goodput),
-        mo.Html(f"""
+        items.append(mo.md(f"### Fleet Reliability (N = {_N:,}, per-GPU MTBF = {_mtbf_gpu:,}h)"))
+        items.append(mo.as_html(fig_goodput))
+        items.append(mo.Html(f"""
         <div style="display: flex; gap: 16px; justify-content: center; margin-top: 12px; flex-wrap: wrap;">
             <div style="padding: 14px 20px; border: 2px solid {_mtbf_color}; border-radius: 10px;
                         text-align: center; min-width: 160px;">
@@ -546,24 +594,20 @@ def _(mo, go, np, math, apply_plotly_theme, COLORS, CHECKPOINT_COST_S,
                 <div style="font-size: 0.72rem; color: {COLORS['TextSec']};">Young-Daly</div>
             </div>
         </div>
-        """),
-    ])
-    return
+        """))
 
+        # Prediction reveal
+        _actual = 1.0  # 10000 / 10000
+        _predicted = partB_pred.value
+        _diff = abs(_predicted - _actual)
+        _msg = (f"You predicted {_predicted:.1f} hours. Actual: {_actual:.1f} hour. "
+                + ("Excellent." if _diff < 2 else
+                   "Most students predict days or weeks. MTBF_cluster = MTBF_gpu / N. "
+                   "Even 99.99% per-GPU uptime yields only 37% probability that all 10,000 GPUs "
+                   "are simultaneously operational."))
+        items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _diff < 2 else "warn"))
 
-@app.cell(hide_code=True)
-def _(mo, partB_pred):
-    _actual = 1.0  # 10000 / 10000
-    _predicted = partB_pred.value
-    _diff = abs(_predicted - _actual)
-    _msg = (f"You predicted {_predicted:.1f} hours. Actual: {_actual:.1f} hour. "
-            + ("Excellent." if _diff < 2 else
-               "Most students predict days or weeks. MTBF_cluster = MTBF_gpu / N. "
-               "Even 99.99% per-GPU uptime yields only 37% probability that all 10,000 GPUs "
-               "are simultaneously operational."))
-    mo.vstack([
-        mo.callout(mo.md(f"**{_msg}**"), kind="success" if _diff < 2 else "warn"),
-        mo.accordion({
+        items.append(mo.accordion({
             "Math Peek: Fleet Failure Rate": mo.md("""
 ```
 MTBF_cluster = MTBF_gpu / N = 10,000h / 10,000 = 1 hour
@@ -578,166 +622,134 @@ T_opt = sqrt(2 * T_checkpoint * MTBF_cluster)
 
 Failure is not an exception at scale -- it is the baseline operating condition.
 """),
-        }),
-    ])
-    return
+        }))
 
+        return mo.vstack(items)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: PART C — THE PRINCIPLE INTERACTION MAP
-# ═══════════════════════════════════════════════════════════════════════════════
+    # ─────────────────────────────────────────────────────────────────────
+    # PART C BUILDER -- The Principle Interaction Map
+    # ─────────────────────────────────────────────────────────────────────
 
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.Html(f"""
-    <div id="part-c" style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {COLORS['GreenLine']}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;">C</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">Part C &middot; 15 min</div>
+    def build_part_c():
+        items = []
+
+        items.append(mo.Html(f"""
+        <div id="part-c" style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {COLORS['GreenLine']}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;">C</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">Part C &middot; 15 min</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px;">The Principle Interaction Map</div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                You have seen how individual principles behave. Now: how do they interact?
+                Push communication efficiency to 99% (aggressive gradient compression) and
+                watch fault tolerance degrade. Maximize sustainability and watch available
+                compute shrink. No configuration achieves maximum on all six axes.
+            </div>
         </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px;">The Principle Interaction Map</div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            You have seen how individual principles behave. Now: how do they interact?
-            Push communication efficiency to 99% (aggressive gradient compression) and
-            watch fault tolerance degrade. Maximize sustainability and watch available
-            compute shrink. No configuration achieves maximum on all six axes.
-        </div>
-    </div>
-    """)
-    return
+        """))
 
+        items.append(mo.md("### Your Prediction"))
+        items.append(partC_pred)
 
-@app.cell(hide_code=True)
-def _(mo):
-    partC_pred = mo.ui.radio(
-        options={
-            "A) No effect -- they are independent": "independent",
-            "B) Slight degradation -- compressed checkpoints are less reliable": "slight",
-            "C) Significant degradation -- compressed gradients increase sensitivity to bit errors": "significant",
-            "D) Improvement -- faster communication means faster checkpointing": "improvement",
-        },
-        label="You push communication efficiency to 99% (aggressive gradient compression). What happens to fault tolerance?",
-    )
-    mo.vstack([mo.md("### Your Prediction"), partC_pred])
-    return (partC_pred,)
+        if partC_pred.value is None:
+            items.append(mo.callout(mo.md("**Select your prediction to unlock.**"), kind="warn"))
+            return mo.vstack(items)
 
+        # Controls
+        items.append(mo.md("### Adjust Each Principle Axis"))
+        items.append(mo.hstack([partC_compute, partC_comm, partC_fault], justify="start", gap=1))
+        items.append(mo.hstack([partC_sched, partC_sustain, partC_fair], justify="start", gap=1))
 
-@app.cell(hide_code=True)
-def _(mo, partC_pred):
-    mo.stop(partC_pred.value is None,
-            mo.callout(mo.md("**Select your prediction to unlock.**"), kind="warn"))
-    return
+        _vals = {
+            "Compute": partC_compute.value,
+            "Communication": partC_comm.value,
+            "Fault Tolerance": partC_fault.value,
+            "Scheduling": partC_sched.value,
+            "Sustainability": partC_sustain.value,
+            "Fairness": partC_fair.value,
+        }
 
+        # Coupling interactions: pushing one axis degrades others
+        _effective = dict(_vals)
 
-@app.cell(hide_code=True)
-def _(mo):
-    partC_compute = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Compute (%)")
-    partC_comm = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Communication (%)")
-    partC_fault = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Fault Tolerance (%)")
-    partC_sched = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Scheduling (%)")
-    partC_sustain = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Sustainability (%)")
-    partC_fair = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Fairness (%)")
-    mo.vstack([
-        mo.md("### Adjust Each Principle Axis"),
-        mo.hstack([partC_compute, partC_comm, partC_fault], justify="start", gap=1),
-        mo.hstack([partC_sched, partC_sustain, partC_fair], justify="start", gap=1),
-    ])
-    return (partC_compute, partC_comm, partC_fault, partC_sched, partC_sustain, partC_fair,)
+        # Communication vs Fault Tolerance: aggressive compression reduces error margins
+        if _vals["Communication"] > 85:
+            _penalty = (_vals["Communication"] - 85) * 1.5
+            _effective["Fault Tolerance"] = max(20, _vals["Fault Tolerance"] - _penalty)
 
+        # Sustainability vs Compute: carbon caps limit GPU-hours
+        if _vals["Sustainability"] > 80:
+            _penalty = (_vals["Sustainability"] - 80) * 0.8
+            _effective["Compute"] = max(20, _vals["Compute"] - _penalty)
 
-@app.cell(hide_code=True)
-def _(mo, go, apply_plotly_theme, COLORS, CARBON_CAP, FAIRNESS_OVERHEAD_MS,
-      partC_compute, partC_comm, partC_fault, partC_sched, partC_sustain, partC_fair):
-    _vals = {
-        "Compute": partC_compute.value,
-        "Communication": partC_comm.value,
-        "Fault Tolerance": partC_fault.value,
-        "Scheduling": partC_sched.value,
-        "Sustainability": partC_sustain.value,
-        "Fairness": partC_fair.value,
-    }
+        # Fairness vs Scheduling: monitoring overhead consumes latency budget
+        if _vals["Fairness"] > 80:
+            _penalty = (_vals["Fairness"] - 80) * 0.5
+            _effective["Scheduling"] = max(20, _vals["Scheduling"] - _penalty)
 
-    # Coupling interactions: pushing one axis degrades others
-    _effective = dict(_vals)
+        # Compute vs Communication: more compute per GPU means larger gradients
+        if _vals["Compute"] > 85:
+            _penalty = (_vals["Compute"] - 85) * 0.6
+            _effective["Communication"] = max(20, _vals["Communication"] - _penalty)
 
-    # Communication vs Fault Tolerance: aggressive compression reduces error margins
-    if _vals["Communication"] > 85:
-        _penalty = (_vals["Communication"] - 85) * 1.5
-        _effective["Fault Tolerance"] = max(20, _vals["Fault Tolerance"] - _penalty)
+        # Effective system gain: multiplicative product of all efficiencies
+        _eff_product = 1.0
+        for v in _effective.values():
+            _eff_product *= (v / 100)
+        _effective_gain = _eff_product * 1000  # scale factor vs single GPU
 
-    # Sustainability vs Compute: carbon caps limit GPU-hours
-    if _vals["Sustainability"] > 80:
-        _penalty = (_vals["Sustainability"] - 80) * 0.8
-        _effective["Compute"] = max(20, _vals["Compute"] - _penalty)
+        # Radar chart
+        _categories = list(_effective.keys())
+        _eff_values = [_effective[c] for c in _categories]
+        _raw_values = [_vals[c] for c in _categories]
 
-    # Fairness vs Scheduling: monitoring overhead consumes latency budget
-    if _vals["Fairness"] > 80:
-        _penalty = (_vals["Fairness"] - 80) * 0.5
-        _effective["Scheduling"] = max(20, _vals["Scheduling"] - _penalty)
+        fig_radar = go.Figure()
 
-    # Compute vs Communication: more compute per GPU means larger gradients
-    if _vals["Compute"] > 85:
-        _penalty = (_vals["Compute"] - 85) * 0.6
-        _effective["Communication"] = max(20, _vals["Communication"] - _penalty)
+        # Target zone (minimum acceptable)
+        fig_radar.add_trace(go.Scatterpolar(
+            r=[50] * 7, theta=_categories + [_categories[0]],
+            fill="toself", fillcolor="rgba(203,32,45,0.08)",
+            line=dict(color=COLORS["RedLine"], width=1, dash="dash"),
+            name="Minimum Acceptable",
+        ))
 
-    # Effective system gain: multiplicative product of all efficiencies
-    _eff_product = 1.0
-    for v in _effective.values():
-        _eff_product *= (v / 100)
-    _effective_gain = _eff_product * 1000  # scale factor vs single GPU
+        # Raw settings (before coupling)
+        fig_radar.add_trace(go.Scatterpolar(
+            r=_raw_values + [_raw_values[0]], theta=_categories + [_categories[0]],
+            line=dict(color=COLORS["TextMuted"], width=1, dash="dot"),
+            name="Your Settings (raw)",
+        ))
 
-    # Radar chart
-    _categories = list(_effective.keys())
-    _eff_values = [_effective[c] for c in _categories]
-    _raw_values = [_vals[c] for c in _categories]
+        # Effective (after coupling)
+        fig_radar.add_trace(go.Scatterpolar(
+            r=_eff_values + [_eff_values[0]], theta=_categories + [_categories[0]],
+            fill="toself", fillcolor="rgba(0,99,149,0.12)",
+            line=dict(color=COLORS["BlueLine"], width=2.5),
+            name="Effective (after coupling)",
+        ))
 
-    fig_radar = go.Figure()
+        fig_radar.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+            height=420, showlegend=True,
+            legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"),
+        )
+        apply_plotly_theme(fig_radar)
 
-    # Target zone (minimum acceptable)
-    fig_radar.add_trace(go.Scatterpolar(
-        r=[50] * 7, theta=_categories + [_categories[0]],
-        fill="toself", fillcolor="rgba(203,32,45,0.08)",
-        line=dict(color=COLORS["RedLine"], width=1, dash="dash"),
-        name="Minimum Acceptable",
-    ))
+        # Check for any axis in red zone
+        _red_axes = [c for c, v in _effective.items() if v < 50]
+        _all_green = len(_red_axes) == 0
+        _gain_color = COLORS["GreenLine"] if _effective_gain >= 50 else COLORS["OrangeLine"] if _effective_gain >= 20 else COLORS["RedLine"]
 
-    # Raw settings (before coupling)
-    fig_radar.add_trace(go.Scatterpolar(
-        r=_raw_values + [_raw_values[0]], theta=_categories + [_categories[0]],
-        line=dict(color=COLORS["TextMuted"], width=1, dash="dot"),
-        name="Your Settings (raw)",
-    ))
-
-    # Effective (after coupling)
-    fig_radar.add_trace(go.Scatterpolar(
-        r=_eff_values + [_eff_values[0]], theta=_categories + [_categories[0]],
-        fill="toself", fillcolor="rgba(0,99,149,0.12)",
-        line=dict(color=COLORS["BlueLine"], width=2.5),
-        name="Effective (after coupling)",
-    ))
-
-    fig_radar.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-        height=420, showlegend=True,
-        legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"),
-    )
-    apply_plotly_theme(fig_radar)
-
-    # Check for any axis in red zone
-    _red_axes = [c for c, v in _effective.items() if v < 50]
-    _all_green = len(_red_axes) == 0
-    _gain_color = COLORS["GreenLine"] if _effective_gain >= 50 else COLORS["OrangeLine"] if _effective_gain >= 20 else COLORS["RedLine"]
-
-    mo.vstack([
-        mo.md("### Principle Interaction Map"),
-        mo.as_html(fig_radar),
-        mo.Html(f"""
+        items.append(mo.md("### Principle Interaction Map"))
+        items.append(mo.as_html(fig_radar))
+        items.append(mo.Html(f"""
         <div style="display: flex; gap: 16px; justify-content: center; margin-top: 12px; flex-wrap: wrap;">
             <div style="padding: 16px 24px; border: 2px solid {_gain_color}; border-radius: 12px;
                         text-align: center; min-width: 200px;">
@@ -757,197 +769,168 @@ def _(mo, go, apply_plotly_theme, COLORS, CARBON_CAP, FAIRNESS_OVERHEAD_MS,
                     {', '.join(_red_axes) if _red_axes else 'No violations'}</div>
             </div>
         </div>
-        """),
-        mo.callout(mo.md(
+        """))
+        items.append(mo.callout(mo.md(
             "**Coupling effects are visible:** The dotted line shows your raw settings. The solid "
             "line shows the effective values after principle interactions. Notice how pushing one "
             "axis to maximum pulls others down. Maximum on any single axis never produces maximum "
             "total gain."
-        ), kind="info"),
-    ])
-    return (_effective, _effective_gain, _all_green, _red_axes,)
+        ), kind="info"))
 
+        # Prediction reveal
+        _correct = partC_pred.value == "significant"
+        _msg = ("Correct. Aggressive gradient compression (99% communication efficiency) reduces "
+                "error detection capability and increases sensitivity to bit errors, significantly "
+                "degrading fault tolerance."
+                if _correct else
+                "The answer is (C): significant degradation. Students treat principles as independent "
+                "knobs. In reality, compressed gradients have less redundancy for error detection, "
+                "and lossy compression amplifies the impact of any bit flip.")
+        items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn"))
 
-@app.cell(hide_code=True)
-def _(mo, partC_pred):
-    _correct = partC_pred.value == "significant"
-    _msg = ("Correct. Aggressive gradient compression (99% communication efficiency) reduces "
-            "error detection capability and increases sensitivity to bit errors, significantly "
-            "degrading fault tolerance."
-            if _correct else
-            "The answer is (C): significant degradation. Students treat principles as independent "
-            "knobs. In reality, compressed gradients have less redundancy for error detection, "
-            "and lossy compression amplifies the impact of any bit flip.")
-    mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn")
-    return
+        return mo.vstack(items)
 
+    # ─────────────────────────────────────────────────────────────────────
+    # PART D BUILDER -- The Fleet Architecture Blueprint
+    # ─────────────────────────────────────────────────────────────────────
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE E: PART D — THE FLEET ARCHITECTURE BLUEPRINT
-# ═══════════════════════════════════════════════════════════════════════════════
+    def build_part_d():
+        items = []
 
-@app.cell(hide_code=True)
-def _(mo, COLORS, CARBON_CAP, FAIRNESS_METRIC, FAIRNESS_OVERHEAD_MS):
-    _metric_display = {"dp": "Demographic Parity", "eo": "Equalized Odds", "eqop": "Equal Opportunity"}.get(FAIRNESS_METRIC, "Equal Opportunity")
-    mo.Html(f"""
-    <div id="part-d" style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {COLORS['RedLine']}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;">D</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">Part D &middot; 15 min</div>
+        _metric_display = {"dp": "Demographic Parity", "eo": "Equalized Odds", "eqop": "Equal Opportunity"}.get(FAIRNESS_METRIC, "Equal Opportunity")
+
+        items.append(mo.Html(f"""
+        <div id="part-d" style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {COLORS['RedLine']}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;">D</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">Part D &middot; 15 min</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px;">The Fleet Architecture Blueprint</div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                The terminal synthesis of the entire two-volume curriculum. Design a fleet that
+                achieves &ge;50&times; effective gain while keeping all six axes green. Your carbon
+                cap from Lab 14 ({CARBON_CAP:.0%} of baseline) and fairness overhead from Lab 15
+                ({_metric_display}, {FAIRNESS_OVERHEAD_MS}ms) feed in as starting constraints.
+            </div>
         </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px;">The Fleet Architecture Blueprint</div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            The terminal synthesis of the entire two-volume curriculum. Design a fleet that
-            achieves &ge;50&times; effective gain while keeping all six axes green. Your carbon
-            cap from Lab 14 ({CARBON_CAP:.0%} of baseline) and fairness overhead from Lab 15
-            ({_metric_display}, {FAIRNESS_OVERHEAD_MS}ms) feed in as starting constraints.
-        </div>
-    </div>
-    """)
-    return
+        """))
 
+        # Fleet controls
+        items.append(mo.md("### Configure Your Fleet"))
+        items.append(mo.hstack([partD_gpus, partD_comm_strategy], justify="start", gap=1))
+        items.append(mo.hstack([partD_ckpt_freq, partD_scheduling], justify="start", gap=1))
 
-@app.cell(hide_code=True)
-def _(mo):
-    partD_gpus = mo.ui.slider(start=8, stop=10000, value=1000, step=8, label="GPU count")
-    partD_comm_strategy = mo.ui.dropdown(
-        options={"AllReduce Ring": "ring", "AllReduce Tree": "tree", "Gradient Compression (10x)": "compress"},
-        value="AllReduce Ring", label="Communication strategy:",
-    )
-    partD_ckpt_freq = mo.ui.slider(start=1, stop=30, value=10, step=1, label="Checkpoint freq (min)")
-    partD_scheduling = mo.ui.dropdown(
-        options={"Static": "static", "Elastic": "elastic"},
-        value="Static", label="Scheduling mode:",
-    )
-    mo.vstack([
-        mo.md("### Configure Your Fleet"),
-        mo.hstack([partD_gpus, partD_comm_strategy], justify="start", gap=1),
-        mo.hstack([partD_ckpt_freq, partD_scheduling], justify="start", gap=1),
-    ])
-    return (partD_gpus, partD_comm_strategy, partD_ckpt_freq, partD_scheduling,)
+        _N = partD_gpus.value
+        _comm = partD_comm_strategy.value
+        _ckpt = partD_ckpt_freq.value
+        _sched = partD_scheduling.value
 
+        # ── Compute axis ────────────────────────────────────────────────────
+        _compute_base = 80
+        _carbon_penalty = max(0, (1 - CARBON_CAP) * 30)
+        _compute = max(30, _compute_base - _carbon_penalty)
 
-@app.cell(hide_code=True)
-def _(mo, go, math, apply_plotly_theme, COLORS,
-      CARBON_CAP, FAIRNESS_OVERHEAD_MS, FAIRNESS_THRESHOLD,
-      H100_TFLOPS_FP16, MTBF_GPU_HOURS, CHECKPOINT_COST_S,
-      ALLREDUCE_RING_EFF, GRADIENT_COMPRESS,
-      partD_gpus, partD_comm_strategy, partD_ckpt_freq, partD_scheduling):
-    _N = partD_gpus.value
-    _comm = partD_comm_strategy.value
-    _ckpt = partD_ckpt_freq.value
-    _sched = partD_scheduling.value
+        # ── Communication axis ──────────────────────────────────────────────
+        _comm_eff = {"ring": 75, "tree": 80, "compress": 92}[_comm]
+        _scale_penalty = min(15, _N / 1000 * 5)
+        _communication = max(30, _comm_eff - _scale_penalty)
 
-    # ── Compute axis ────────────────────────────────────────────────────────
-    _compute_base = 80  # base efficiency
-    _carbon_penalty = max(0, (1 - CARBON_CAP) * 30)  # carbon cap reduces available compute
-    _compute = max(30, _compute_base - _carbon_penalty)
+        # ── Fault Tolerance axis ────────────────────────────────────────────
+        _mtbf_cluster = MTBF_GPU_HOURS / _N
+        _T_ckpt_min = CHECKPOINT_COST_S / 60
+        _T_optimal = math.sqrt(2 * _T_ckpt_min * _mtbf_cluster * 60) if _mtbf_cluster > 0 else 10
+        _ckpt_overhead = _T_ckpt_min / _ckpt if _ckpt > 0 else 1
+        _failure_waste = _ckpt / (2 * _mtbf_cluster * 60) if _mtbf_cluster > 0 else 1
+        _goodput = max(0, 1 - _ckpt_overhead - _failure_waste)
+        _fault_tol = min(95, _goodput * 100)
+        if _comm == "compress":
+            _fault_tol = max(30, _fault_tol - 12)
 
-    # ── Communication axis ──────────────────────────────────────────────────
-    _comm_eff = {"ring": 75, "tree": 80, "compress": 92}[_comm]
-    # Large fleets degrade communication
-    _scale_penalty = min(15, _N / 1000 * 5)
-    _communication = max(30, _comm_eff - _scale_penalty)
+        # ── Scheduling axis ────────────────────────────────────────────────
+        _sched_base = 65 if _sched == "static" else 82
+        _fairness_latency_penalty = FAIRNESS_OVERHEAD_MS / 100 * 10
+        _scheduling = max(30, _sched_base - _fairness_latency_penalty)
 
-    # ── Fault Tolerance axis ────────────────────────────────────────────────
-    _mtbf_cluster = MTBF_GPU_HOURS / _N
-    _T_ckpt_min = CHECKPOINT_COST_S / 60
-    _T_optimal = math.sqrt(2 * _T_ckpt_min * _mtbf_cluster * 60) if _mtbf_cluster > 0 else 10
-    _ckpt_overhead = _T_ckpt_min / _ckpt if _ckpt > 0 else 1
-    _failure_waste = _ckpt / (2 * _mtbf_cluster * 60) if _mtbf_cluster > 0 else 1
-    _goodput = max(0, 1 - _ckpt_overhead - _failure_waste)
-    _fault_tol = min(95, _goodput * 100)
-    # Compression degrades fault tolerance
-    if _comm == "compress":
-        _fault_tol = max(30, _fault_tol - 12)
+        # ── Sustainability axis ─────────────────────────────────────────────
+        _sustainability = min(95, CARBON_CAP * 100 + 10)
 
-    # ── Scheduling axis ────────────────────────────────────────────────────
-    _sched_base = 65 if _sched == "static" else 82
-    _fairness_latency_penalty = FAIRNESS_OVERHEAD_MS / 100 * 10
-    _scheduling = max(30, _sched_base - _fairness_latency_penalty)
+        # ── Fairness axis ───────────────────────────────────────────────────
+        _fairness = min(90, 60 + (1 - FAIRNESS_THRESHOLD) * 40)
 
-    # ── Sustainability axis ─────────────────────────────────────────────────
-    _sustainability = min(95, CARBON_CAP * 100 + 10)
+        # ── Effective gain ──────────────────────────────────────────────────
+        _axes = {
+            "Compute": _compute,
+            "Communication": _communication,
+            "Fault Tolerance": _fault_tol,
+            "Scheduling": _scheduling,
+            "Sustainability": _sustainability,
+            "Fairness": _fairness,
+        }
+        _eff_product = 1.0
+        for _v in _axes.values():
+            _eff_product *= (_v / 100)
+        _effective_gain = _eff_product * _N
 
-    # ── Fairness axis ───────────────────────────────────────────────────────
-    _fairness = min(90, 60 + (1 - FAIRNESS_THRESHOLD) * 40)
+        _red_axes = [c for c, _v in _axes.items() if _v < 50]
+        _all_green = len(_red_axes) == 0
+        _target_met = _effective_gain >= 50 and _all_green
 
-    # ── Effective gain ──────────────────────────────────────────────────────
-    _axes = {
-        "Compute": _compute,
-        "Communication": _communication,
-        "Fault Tolerance": _fault_tol,
-        "Scheduling": _scheduling,
-        "Sustainability": _sustainability,
-        "Fairness": _fairness,
-    }
-    _eff_product = 1.0
-    for _v in _axes.values():
-        _eff_product *= (_v / 100)
-    _effective_gain = _eff_product * _N  # scaled by fleet size
+        # Radar chart
+        _categories = list(_axes.keys())
+        _values = [_axes[c] for c in _categories]
 
-    _red_axes = [c for c, _v in _axes.items() if _v < 50]
-    _all_green = len(_red_axes) == 0
-    _target_met = _effective_gain >= 50 and _all_green
+        fig_fleet = go.Figure()
+        fig_fleet.add_trace(go.Scatterpolar(
+            r=[50] * 7, theta=_categories + [_categories[0]],
+            fill="toself", fillcolor="rgba(203,32,45,0.08)",
+            line=dict(color=COLORS["RedLine"], width=1, dash="dash"),
+            name="Minimum (50%)",
+        ))
+        fig_fleet.add_trace(go.Scatterpolar(
+            r=_values + [_values[0]], theta=_categories + [_categories[0]],
+            fill="toself",
+            fillcolor="rgba(0,143,69,0.12)" if _all_green else "rgba(203,32,45,0.12)",
+            line=dict(color=COLORS["GreenLine"] if _all_green else COLORS["RedLine"], width=2.5),
+            name="Your Fleet",
+        ))
 
-    # Radar chart
-    _categories = list(_axes.keys())
-    _values = [_axes[c] for c in _categories]
+        fig_fleet.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+            height=450, showlegend=True,
+            legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"),
+        )
+        apply_plotly_theme(fig_fleet)
 
-    fig_fleet = go.Figure()
-    fig_fleet.add_trace(go.Scatterpolar(
-        r=[50] * 7, theta=_categories + [_categories[0]],
-        fill="toself", fillcolor="rgba(203,32,45,0.08)",
-        line=dict(color=COLORS["RedLine"], width=1, dash="dash"),
-        name="Minimum (50%)",
-    ))
-    fig_fleet.add_trace(go.Scatterpolar(
-        r=_values + [_values[0]], theta=_categories + [_categories[0]],
-        fill="toself",
-        fillcolor="rgba(0,143,69,0.12)" if _all_green else "rgba(203,32,45,0.12)",
-        line=dict(color=COLORS["GreenLine"] if _all_green else COLORS["RedLine"], width=2.5),
-        name="Your Fleet",
-    ))
+        _gain_color = COLORS["GreenLine"] if _target_met else COLORS["OrangeLine"] if _effective_gain >= 20 else COLORS["RedLine"]
 
-    fig_fleet.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-        height=450, showlegend=True,
-        legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"),
-    )
-    apply_plotly_theme(fig_fleet)
+        _banner = ""
+        if _target_met:
+            _banner = f"""<div style="background: linear-gradient(135deg, {COLORS['GreenLL']}, #d1fae5);
+                         border: 2px solid {COLORS['GreenLine']}; border-radius: 12px; padding: 20px;
+                         text-align: center; margin-bottom: 16px;">
+                         <div style="font-size: 1.4rem; font-weight: 900; color: {COLORS['GreenLine']};">
+                         FLEET DEPLOYED SUCCESSFULLY</div>
+                         <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; margin-top: 4px;">
+                         {_effective_gain:.0f}x effective gain &middot; All axes green &middot;
+                         Constraints satisfied</div></div>"""
+        elif _red_axes:
+            _banner = f"""<div style="background: {COLORS['RedLL']}; border: 2px solid {COLORS['RedLine']};
+                         border-radius: 12px; padding: 16px; text-align: center; margin-bottom: 16px;">
+                         <div style="font-weight: 700; color: {COLORS['RedLine']}; font-size: 1.1rem;">
+                         CONSTRAINT VIOLATION: {', '.join(_red_axes)} below threshold</div></div>"""
 
-    _gain_color = COLORS["GreenLine"] if _target_met else COLORS["OrangeLine"] if _effective_gain >= 20 else COLORS["RedLine"]
+        if _banner:
+            items.append(mo.Html(_banner))
 
-    _banner = ""
-    if _target_met:
-        _banner = f"""<div style="background: linear-gradient(135deg, {COLORS['GreenLL']}, #d1fae5);
-                     border: 2px solid {COLORS['GreenLine']}; border-radius: 12px; padding: 20px;
-                     text-align: center; margin-bottom: 16px;">
-                     <div style="font-size: 1.4rem; font-weight: 900; color: {COLORS['GreenLine']};">
-                     FLEET DEPLOYED SUCCESSFULLY</div>
-                     <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; margin-top: 4px;">
-                     {_effective_gain:.0f}x effective gain &middot; All axes green &middot;
-                     Constraints satisfied</div></div>"""
-    elif _red_axes:
-        _banner = f"""<div style="background: {COLORS['RedLL']}; border: 2px solid {COLORS['RedLine']};
-                     border-radius: 12px; padding: 16px; text-align: center; margin-bottom: 16px;">
-                     <div style="font-weight: 700; color: {COLORS['RedLine']}; font-size: 1.1rem;">
-                     CONSTRAINT VIOLATION: {', '.join(_red_axes)} below threshold</div></div>"""
-
-    _binding = min(_axes, key=_axes.get) if _axes else "Unknown"
-    _binding_val = _axes[_binding] if _axes else 0
-
-    mo.vstack([
-        mo.Html(_banner) if _banner else mo.md(""),
-        mo.md("### Fleet Architecture Blueprint"),
-        mo.as_html(fig_fleet),
-        mo.Html(f"""
+        items.append(mo.md("### Fleet Architecture Blueprint"))
+        items.append(mo.as_html(fig_fleet))
+        items.append(mo.Html(f"""
         <div style="display: flex; gap: 16px; justify-content: center; margin-top: 16px; flex-wrap: wrap;">
             <div style="padding: 16px 24px; border: 2px solid {_gain_color}; border-radius: 12px;
                         text-align: center; min-width: 200px;">
@@ -974,64 +957,39 @@ def _(mo, go, math, apply_plotly_theme, COLORS,
                 <div style="font-size: 0.72rem; color: {COLORS['TextSec']};">useful work</div>
             </div>
         </div>
-        """),
-    ])
-    return (_all_green, _axes, _effective_gain, _red_axes, fig_fleet, _gain_color, _goodput, _categories, _values, _banner, _target_met, _ckpt, _comm, _communication, _compute, _compute_base, _eff_product, _fairness, _fault_tol, _N, _sched, _scheduling, _sustainability, _carbon_penalty, _comm_eff, _scale_penalty, _mtbf_cluster, _T_ckpt_min, _T_optimal, _ckpt_overhead, _failure_waste, _sched_base, _fairness_latency_penalty)
+        """))
 
+        # Final reflection
+        items.append(mo.md("### Final Reflection"))
+        items.append(partD_refl)
 
-# ─── PART D REFLECTION ──────────────────────────────────────────────────────
+        if partD_refl.value == "depends":
+            items.append(mo.callout(mo.md(
+                "**The mature answer.** There is no universally correct trade-off. In healthcare, "
+                "fairness is likely non-negotiable. In content recommendation, communication efficiency "
+                "might take priority. The binding constraint depends on the stakeholders, the deployment "
+                "context, and the consequences of violation. This is engineering judgment, not optimization."
+            ), kind="success"))
+        elif partD_refl.value is not None:
+            items.append(mo.callout(mo.md(
+                "**Consider the context.** Both absolute positions have merit, but the strongest "
+                "engineering answer is 'it depends' -- because the right trade-off changes with "
+                "the deployment context, the stakeholders, and the consequences of each violation."
+            ), kind="info"))
 
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _b = "Unknown"
-    _v = 0
-    partD_refl = mo.ui.radio(
-        options={
-            "A) Yes -- fairness overhead for communication efficiency": "yes_trade",
-            "B) No -- fairness is non-negotiable": "no_trade",
-            "C) It depends on the deployment context": "depends",
-        },
-        label=f"Your binding constraint is {_b} ({_v:.0f}%). Would you trade fairness overhead for communication efficiency?",
-    )
-    mo.vstack([
-        mo.md("### Final Reflection"),
-        partD_refl,
-    ])
-    return (partD_refl,)
+        return mo.vstack(items), _target_met, _effective_gain, _axes
 
+    # ─────────────────────────────────────────────────────────────────────
+    # SYNTHESIS BUILDER
+    # ─────────────────────────────────────────────────────────────────────
 
-@app.cell(hide_code=True)
-def _(mo, partD_refl, COLORS):
-    if partD_refl.value == "depends":
-        _fb = mo.callout(mo.md(
-            "**The mature answer.** There is no universally correct trade-off. In healthcare, "
-            "fairness is likely non-negotiable. In content recommendation, communication efficiency "
-            "might take priority. The binding constraint depends on the stakeholders, the deployment "
-            "context, and the consequences of violation. This is engineering judgment, not optimization."
-        ), kind="success")
-    elif partD_refl.value is not None:
-        _fb = mo.callout(mo.md(
-            "**Consider the context.** Both absolute positions have merit, but the strongest "
-            "engineering answer is 'it depends' -- because the right trade-off changes with "
-            "the deployment context, the stakeholders, and the consequences of each violation."
-        ), kind="info")
-    else:
-        _fb = mo.callout(mo.md("Select your reflection answer above."), kind="info")
-    _fb
-    return (_fb,)
+    def build_synthesis():
+        items = []
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE F: SYNTHESIS + LEDGER (GRADUATION)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.vstack([
-        mo.md("---"),
+        items.append(mo.md("---"))
 
         # ── GRADUATION BANNER ───────────────────────────────────────────────
-        mo.Html(f"""
+        items.append(mo.Html(f"""
         <div style="background: linear-gradient(135deg, #0f172a 0%, #1a1a2e 50%, #0f3460 100%);
                     border-radius: 16px; padding: 32px 40px; margin: 24px 0;
                     border: 1px solid rgba(99,102,241,0.3);
@@ -1056,10 +1014,10 @@ def _(mo, COLORS):
                 </div>
             </div>
         </div>
-        """),
+        """))
 
         # ── KEY TAKEAWAYS ───────────────────────────────────────────────────
-        mo.Html(f"""
+        items.append(mo.Html(f"""
         <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
                     border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
@@ -1091,10 +1049,10 @@ def _(mo, COLORS):
                 </div>
             </div>
         </div>
-        """),
+        """))
 
         # ── CONNECTIONS ─────────────────────────────────────────────────────
-        mo.Html(f"""
+        items.append(mo.Html(f"""
         <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 280px; background: white;
                         border: 1px solid {COLORS['Border']}; border-radius: 12px;
@@ -1125,18 +1083,38 @@ def _(mo, COLORS):
                 </div>
             </div>
         </div>
-        """),
-    ])
-    return
+        """))
+
+        return mo.vstack(items)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # TAB COMPOSITION
+    # ─────────────────────────────────────────────────────────────────────
+
+    _part_d_result = build_part_d()
+    _part_d_content = _part_d_result[0]
+    _target_met = _part_d_result[1]
+    _effective_gain = _part_d_result[2]
+    _axes = _part_d_result[3]
+
+    tabs = mo.ui.tabs({
+        "Part A -- The Sensitivity Wall": build_part_a(),
+        "Part B -- The Failure Budget": build_part_b(),
+        "Part C -- The Principle Interaction Map": build_part_c(),
+        "Part D -- The Fleet Architecture Blueprint": _part_d_content,
+        "Synthesis -- Graduation": build_synthesis(),
+    })
+    tabs
+    return (tabs, _target_met, _effective_gain, _axes,)
 
 
-# ─── LEDGER HUD (FINAL) ────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: LEDGER HUD
+# ═══════════════════════════════════════════════════════════════════════════════
+
 
 @app.cell(hide_code=True)
-def _(mo, ledger, COLORS):
-    _target_met = False
-    _effective_gain = 0.0
-    _axes = None
+def _(mo, ledger, COLORS, _target_met, _effective_gain, _axes):
     if _axes:
         ledger.save(chapter=16, design={
             "chapter": "v2_16",

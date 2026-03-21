@@ -14,12 +14,12 @@ app = marimo.App(width="full")
 #                 design challenge requires jointly optimizing quantization,
 #                 batching, and replica count under a latency SLO.
 #
-# 2-Act Structure (35-40 minutes):
-#   Act I  — The Serving Cost Inversion + Queuing Hockey Stick (12-15 min)
+# Tabbed Structure (35-40 minutes):
+#   Part A — The Serving Cost Inversion (12-15 min)
 #             Serving cost > training cost within ~6 weeks at 100 QPS.
 #             Batching trades latency for throughput along a hockey stick.
 #
-#   Act II — The KV Cache Wall + Fleet Design Challenge (20-25 min)
+#   Part B — The KV Cache Wall + Fleet Design Challenge (20-25 min)
 #             At 128K context, even 8xH100 can serve only 1 request for 70B.
 #             Design a fleet: INT4 + continuous batching + right replica count
 #             achieves the SLO at 40% lower cost than naive FP16 + static.
@@ -30,6 +30,10 @@ app = marimo.App(width="full")
 #   H100_COST_HR       = 3.0    $/GPU-hour cloud pricing
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # ─── CELL 0: SETUP ─────────────────────────────────────────────────────────────
 @app.cell
@@ -66,10 +70,6 @@ async def _():
     return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, H100_RAM_GB, H100_COST_HR, TRAINING_COST_2M, DecisionLog
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE A: OPENING
-# ═══════════════════════════════════════════════════════════════════════════════
-
 # ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, LAB_CSS, mo):
@@ -100,7 +100,7 @@ def _(COLORS, LAB_CSS, mo):
                 <span class="badge badge-info">KV Cache Memory Wall</span>
                 <span class="badge badge-info">Continuous Batching</span>
                 <span class="badge badge-info">Fleet Design Challenge</span>
-                <span class="badge badge-warn">35&ndash;40 minutes &middot; 2 Acts</span>
+                <span class="badge badge-warn">35&ndash;40 minutes &middot; 2 Parts</span>
             </div>
         </div>
     </div>
@@ -146,7 +146,7 @@ def _(mo, COLORS):
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
                     <strong>35-40 min</strong><br/>
-                    Act I: ~12 min &middot; Act II: ~25 min
+                    Part A: ~12 min &middot; Part B: ~25 min
                 </div>
             </div>
         </div>
@@ -183,76 +183,13 @@ def _(mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: ACT I -- SERVING COST INVERSION + KV CACHE WALL
+# ZONE B: WIDGET DEFINITIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ─── CELL 5: ACT1_BANNER ────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.Html(f"""
-    <div style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {COLORS['BlueLine']}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;
-                        flex-shrink: 0;">I</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act I &middot; 12&ndash;15 min</div>
-        </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">
-            The Serving Cost Inversion
-        </div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            You think training was the expensive part. The data will show that at 100 QPS
-            with $0.01 per query, serving cost crosses the $2M training cost in just 6 weeks.
-            A 10% inference optimization saves more money per month than the entire training run.
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT1: STAKEHOLDER ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']}; background: {COLORS['BlueLL']};
-                border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['BlueLine']};
-                    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-            Incoming Message &middot; VP of Engineering
-        </div>
-        <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-            "We spent $2M training our 70B LLM. Finance wants to know the total cost of
-            ownership. I told them the training cost is the big expense. Our serving team
-            says I am wrong. Who is right?"
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT1: PREDICTION ─────────────────────────────────────────────────────────
+# ─── CELL 4: Part A widgets ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md("""
-    At 100 QPS with a cost of $0.01 per query (GPU-hours amortized per request),
-    daily serving cost = 100 QPS x 86,400 s/day x $0.01 = **$86,400/day**.
-
-    The $2M training cost is a one-time capital expenditure. Serving cost accrues daily.
-    At $86,400/day, the crossover occurs at 2,000,000 / 86,400 = **~23 days = ~3.3 weeks**.
-
-    At higher QPS or cost-per-query, the crossover is even sooner.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
+    # -- Part A prediction --
     partA_prediction = mo.ui.radio(
         options={
             "A) 6 months -- training dominates for a long time": "A",
@@ -262,89 +199,192 @@ def _(mo):
         },
         label="You spent $2M training a 70B LLM. At 100 QPS and $0.01/query, when does cumulative serving cost exceed training cost?",
     )
-    partA_prediction
     return (partA_prediction,)
 
 
+# ─── CELL 5: Part A controls + Part A reflection + Part B prediction ─────────
 @app.cell(hide_code=True)
-def _(partA_prediction, mo):
-    mo.stop(
-        partA_prediction.value is None,
-        mo.callout(mo.md("Select your prediction above to unlock the Act I instruments."), kind="warn"),
-    )
-    mo.md("")
-    return
-
-
-# ─── ACT1: INSTRUMENTS ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("### Serving Cost Calculator")
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
+def _(mo, partA_prediction):
     a1_qps = mo.ui.slider(start=10, stop=1000, value=100, step=10, label="Queries per second (QPS)")
     a1_cost_query = mo.ui.slider(start=0.001, stop=0.05, value=0.01, step=0.001, label="Cost per query ($)")
     a1_weeks = mo.ui.slider(start=1, stop=52, value=26, step=1, label="Deployment duration (weeks)")
     a1_optimization = mo.ui.slider(start=0, stop=50, value=0, step=5, label="Inference optimization (%)")
-    mo.hstack([
-        mo.vstack([a1_qps, a1_cost_query]),
-        mo.vstack([a1_weeks, a1_optimization]),
-    ], justify="center", gap=2)
-    return (a1_qps, a1_cost_query, a1_weeks, a1_optimization)
 
+    # -- Part A reflection --
+    partA_reflection = mo.ui.radio(
+        options={
+            "A) Reduce QPS by throttling users": "A",
+            "B) Optimize inference efficiency (quantization, batching, caching)": "B",
+            "C) Train a smaller model": "C",
+            "D) Increase the price per query": "D",
+        },
+        label="What is the highest-ROI lever for controlling total cost of ownership?",
+    )
+
+    # -- Part B prediction --
+    partB_prediction = mo.ui.radio(
+        options={
+            "A) 16-32 concurrent requests -- GPUs have plenty of memory": "A",
+            "B) 4-8 concurrent requests -- some memory overhead": "B",
+            "C) 2-3 concurrent requests -- memory is tighter than expected": "C",
+            "D) Just 1 -- the KV cache consumes all available memory": "D",
+        },
+        label="70B model (FP16) on 8xH100 (640 GB). Weights = 140 GB. At 128K context, how many concurrent requests?",
+    )
+    return (a1_qps, a1_cost_query, a1_weeks, a1_optimization, partA_reflection, partB_prediction)
+
+
+# ─── CELL 6: Part B controls + Part B reflection ────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, partB_prediction):
+    a2_model_size = mo.ui.dropdown(
+        options={"7B (32L, 4096H)": (7, 32, 4096), "70B (80L, 8192H)": (70, 80, 8192), "175B (96L, 12288H)": (175, 96, 12288)},
+        value="70B (80L, 8192H)",
+        label="Model",
+    )
+    a2_precision = mo.ui.dropdown(
+        options={"FP16 (2 bytes)": 2, "INT8 (1 byte)": 1, "INT4 (0.5 bytes)": 0.5},
+        value="FP16 (2 bytes)",
+        label="Weight precision",
+    )
+    a2_context_len = mo.ui.slider(start=2048, stop=131072, value=131072, step=2048, label="Context length (tokens)")
+    a2_n_gpus = mo.ui.slider(start=1, stop=8, value=8, step=1, label="GPUs per replica")
+
+    # -- Part B reflection --
+    partB_reflection = mo.ui.radio(
+        options={
+            "A) INT4 weight quantization frees HBM for more KV cache, enabling larger batches": "A",
+            "B) Add more compute (faster GPUs) to process more requests per second": "B",
+            "C) Reduce model size from 70B to 7B": "C",
+            "D) Use CPU offloading to store KV cache in system RAM": "D",
+        },
+        label="What is the most effective way to increase concurrent serving capacity at 128K context?",
+    )
+    return (a2_model_size, a2_precision, a2_context_len, a2_n_gpus, partB_reflection)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: SINGLE TABS CELL
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
-def _(COLORS, apply_plotly_theme, a1_qps, a1_cost_query, a1_weeks, a1_optimization, go, mo, np, TRAINING_COST_2M):
-    _qps = a1_qps.value
-    _cpq = a1_cost_query.value
-    _weeks = a1_weeks.value
-    _opt_pct = a1_optimization.value / 100
+def _(
+    COLORS,
+    H100_RAM_GB,
+    TRAINING_COST_2M,
+    a1_cost_query,
+    a1_optimization,
+    a1_qps,
+    a1_weeks,
+    a2_context_len,
+    a2_model_size,
+    a2_n_gpus,
+    a2_precision,
+    apply_plotly_theme,
+    go,
+    math,
+    mo,
+    np,
+    partA_prediction,
+    partA_reflection,
+    partB_prediction,
+    partB_reflection,
+):
 
-    # Daily serving cost
-    _daily_cost = _qps * 86400 * _cpq * (1 - _opt_pct)
-    _weekly_cost = _daily_cost * 7
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART A: THE SERVING COST INVERSION
+    # ═════════════════════════════════════════════════════════════════════════
 
-    # Crossover week
-    _crossover_weeks = TRAINING_COST_2M / _weekly_cost if _weekly_cost > 0 else 999
-    _crossover_days = _crossover_weeks * 7
+    def build_part_a():
+        items = []
 
-    # Annual savings from optimization
-    _annual_savings = _qps * 86400 * 365 * _cpq * _opt_pct
+        # ── Stakeholder message ────────────────────────────────────────────
+        items.append(mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['BlueLine']}; background: {COLORS['BlueLL']};
+                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
+                Incoming Message &middot; VP of Engineering
+            </div>
+            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
+                "We spent $2M training our 70B LLM. Finance wants to know the total cost of
+                ownership. I told them the training cost is the big expense. Our serving team
+                says I am wrong. Who is right?"
+            </div>
+        </div>
+        """))
 
-    # ── Cost curves ───────────────────────────────────────────────────────
-    _week_range = np.arange(0, _weeks + 1)
-    _training_line = [TRAINING_COST_2M] * len(_week_range)
-    _serving_cumulative = [w * _weekly_cost for w in _week_range]
+        # ── Concept introduction ───────────────────────────────────────────
+        items.append(mo.md("""
+    At 100 QPS with a cost of $0.01 per query (GPU-hours amortized per request),
+    daily serving cost = 100 QPS x 86,400 s/day x $0.01 = **$86,400/day**.
 
-    _fig = go.Figure()
-    _fig.add_trace(go.Scatter(
-        x=_week_range, y=_training_line, mode="lines",
-        name="Training cost ($2M)", line=dict(color=COLORS["BlueLine"], width=2.5, dash="dash"),
-    ))
-    _fig.add_trace(go.Scatter(
-        x=_week_range, y=_serving_cumulative, mode="lines",
-        name="Cumulative serving cost", line=dict(color=COLORS["RedLine"], width=2.5),
-        fill="tonexty", fillcolor="rgba(203,32,45,0.1)",
-    ))
-    if _crossover_weeks <= _weeks:
-        _fig.add_vline(x=_crossover_weeks, line=dict(color=COLORS["OrangeLine"], width=2, dash="dot"),
-                       annotation_text=f"Crossover: week {_crossover_weeks:.1f}",
-                       annotation_position="top left")
+    The $2M training cost is a one-time capital expenditure. Serving cost accrues daily.
+    At $86,400/day, the crossover occurs at 2,000,000 / 86,400 = **~23 days = ~3.3 weeks**.
 
-    _fig.update_layout(
-        height=340,
-        xaxis=dict(title="Weeks Since Deployment"),
-        yaxis=dict(title="Cumulative Cost ($)", tickformat="$,.0f"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(t=40, b=50, l=70, r=20),
-    )
-    apply_plotly_theme(_fig)
+    At higher QPS or cost-per-query, the crossover is even sooner.
+        """))
 
-    mo.vstack([
-        mo.Html(f"""
+        # ── Prediction lock ────────────────────────────────────────────────
+        items.append(partA_prediction)
+        if partA_prediction.value is None:
+            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part A instruments."), kind="warn"))
+            return mo.vstack(items)
+
+        # ── Controls ───────────────────────────────────────────────────────
+        items.append(mo.md("### Serving Cost Calculator"))
+        items.append(mo.hstack([
+            mo.vstack([a1_qps, a1_cost_query]),
+            mo.vstack([a1_weeks, a1_optimization]),
+        ], justify="center", gap=2))
+
+        # ── Instruments ────────────────────────────────────────────────────
+        _qps = a1_qps.value
+        _cpq = a1_cost_query.value
+        _weeks = a1_weeks.value
+        _opt_pct = a1_optimization.value / 100
+
+        # Daily serving cost
+        _daily_cost = _qps * 86400 * _cpq * (1 - _opt_pct)
+        _weekly_cost = _daily_cost * 7
+
+        # Crossover week
+        _crossover_weeks = TRAINING_COST_2M / _weekly_cost if _weekly_cost > 0 else 999
+        _crossover_days = _crossover_weeks * 7
+
+        # Annual savings from optimization
+        _annual_savings = _qps * 86400 * 365 * _cpq * _opt_pct
+
+        # ── Cost curves ───────────────────────────────────────────────
+        _week_range = np.arange(0, _weeks + 1)
+        _training_line = [TRAINING_COST_2M] * len(_week_range)
+        _serving_cumulative = [w * _weekly_cost for w in _week_range]
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(
+            x=_week_range, y=_training_line, mode="lines",
+            name="Training cost ($2M)", line=dict(color=COLORS["BlueLine"], width=2.5, dash="dash"),
+        ))
+        _fig.add_trace(go.Scatter(
+            x=_week_range, y=_serving_cumulative, mode="lines",
+            name="Cumulative serving cost", line=dict(color=COLORS["RedLine"], width=2.5),
+            fill="tonexty", fillcolor="rgba(203,32,45,0.1)",
+        ))
+        if _crossover_weeks <= _weeks:
+            _fig.add_vline(x=_crossover_weeks, line=dict(color=COLORS["OrangeLine"], width=2, dash="dot"),
+                           annotation_text=f"Crossover: week {_crossover_weeks:.1f}",
+                           annotation_position="top left")
+
+        _fig.update_layout(
+            height=340,
+            xaxis=dict(title="Weeks Since Deployment"),
+            yaxis=dict(title="Cumulative Cost ($)", tickformat="$,.0f"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(t=40, b=50, l=70, r=20),
+        )
+        apply_plotly_theme(_fig)
+
+        items.append(mo.Html(f"""
         <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
                     border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
                     font-size:0.83rem; line-height:1.8;">
@@ -357,8 +397,9 @@ def _(COLORS, apply_plotly_theme, a1_qps, a1_cost_query, a1_weeks, a1_optimizati
             <div>Annual serving cost: <strong>${_daily_cost * 365:,.0f}</strong></div>
             {'<div>Annual savings from ' + str(a1_optimization.value) + '% optimization: <strong style=color:' + COLORS["GreenLine"] + ';>$' + f"{_annual_savings:,.0f}" + '</strong></div>' if _opt_pct > 0 else ''}
         </div>
-        """),
-        mo.Html(f"""
+        """))
+
+        items.append(mo.Html(f"""
         <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
@@ -379,48 +420,40 @@ def _(COLORS, apply_plotly_theme, a1_qps, a1_cost_query, a1_weeks, a1_optimizati
                 <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">{a1_optimization.value}% optimization</div>
             </div>
         </div>
-        """),
-        mo.ui.plotly(_fig),
-    ])
-    return
+        """))
 
+        items.append(mo.ui.plotly(_fig))
 
-# ─── ACT1: REVEAL ─────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(partA_prediction, mo):
-    if partA_prediction.value == "C":
-        mo.callout(mo.md(
-            "**Correct.** At 100 QPS and $0.01/query, daily serving cost is $86,400. "
-            "The $2M training cost is exceeded in ~23 days = ~3.3 weeks. At 500 QPS "
-            "it crosses within a week. A 10% inference optimization at 100 QPS saves "
-            "$3.15M/year -- more than the training cost itself."
-        ), kind="success")
-    elif partA_prediction.value == "A":
-        mo.callout(mo.md(
-            "**Far too conservative.** Students anchor on how expensive training *felt* "
-            "but underestimate the relentless compounding of per-query cost at scale. "
-            "At $86,400/day, the crossover is in weeks, not months."
-        ), kind="warn")
-    elif partA_prediction.value == "B":
-        mo.callout(mo.md(
-            "**In the right direction but too slow.** 3 months is possible at very low "
-            "QPS (~15 QPS), but 100 QPS crosses in under 4 weeks. Production LLM "
-            "services typically serve 100-10,000 QPS."
-        ), kind="warn")
-    elif partA_prediction.value == "D":
-        mo.callout(mo.md(
-            "**Categorically wrong.** Training is a one-time cost; serving is a continuous "
-            "operating expense. At any non-trivial QPS, serving dominates within weeks. "
-            "This is why inference optimization is the highest-ROI activity for deployed models."
-        ), kind="warn")
-    return
+        # ── Reveal ─────────────────────────────────────────────────────────
+        if partA_prediction.value == "C":
+            items.append(mo.callout(mo.md(
+                "**Correct.** At 100 QPS and $0.01/query, daily serving cost is $86,400. "
+                "The $2M training cost is exceeded in ~23 days = ~3.3 weeks. At 500 QPS "
+                "it crosses within a week. A 10% inference optimization at 100 QPS saves "
+                "$3.15M/year -- more than the training cost itself."
+            ), kind="success"))
+        elif partA_prediction.value == "A":
+            items.append(mo.callout(mo.md(
+                "**Far too conservative.** Students anchor on how expensive training *felt* "
+                "but underestimate the relentless compounding of per-query cost at scale. "
+                "At $86,400/day, the crossover is in weeks, not months."
+            ), kind="warn"))
+        elif partA_prediction.value == "B":
+            items.append(mo.callout(mo.md(
+                "**In the right direction but too slow.** 3 months is possible at very low "
+                "QPS (~15 QPS), but 100 QPS crosses in under 4 weeks. Production LLM "
+                "services typically serve 100-10,000 QPS."
+            ), kind="warn"))
+        elif partA_prediction.value == "D":
+            items.append(mo.callout(mo.md(
+                "**Categorically wrong.** Training is a one-time cost; serving is a continuous "
+                "operating expense. At any non-trivial QPS, serving dominates within weeks. "
+                "This is why inference optimization is the highest-ROI activity for deployed models."
+            ), kind="warn"))
 
-
-# ─── ACT1: MATHPEEK + REFLECTION ──────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.accordion({
-        "Governing equations -- serving cost model": mo.md("""
+        # ── MathPeek ───────────────────────────────────────────────────────
+        items.append(mo.accordion({
+            "Governing equations -- serving cost model": mo.md("""
         **Serving Cost**
 
         ```
@@ -442,104 +475,54 @@ def _(mo):
 
         At 100 QPS and $0.01/query, a 10% optimization saves $3.15M/year.
         The training cost was $2M. The optimization pays for itself in 8 months.
-        """)
-    })
-    return
+            """)
+        }))
 
+        # ── Reflection ─────────────────────────────────────────────────────
+        items.append(partA_reflection)
+        if partA_reflection.value is None:
+            items.append(mo.callout(mo.md("Select an answer."), kind="warn"))
+        elif partA_reflection.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Correct.** Inference optimization directly reduces cost_per_query. "
+                "A 10% improvement at 100 QPS saves $3.15M/year -- more than the training cost. "
+                "Quantization (INT4 frees KV cache memory for larger batches), continuous batching "
+                "(2-4x throughput), and KV cache optimization are the primary levers."
+            ), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Inference optimization is the highest-ROI lever** because it reduces "
+                "cost_per_query without reducing service quality or user access. "
+                "Quantization + continuous batching can achieve 2-4x cost reduction."
+            ), kind="warn"))
 
-@app.cell(hide_code=True)
-def _(mo):
-    partA_reflection = mo.ui.radio(
-        options={
-            "A) Reduce QPS by throttling users": "A",
-            "B) Optimize inference efficiency (quantization, batching, caching)": "B",
-            "C) Train a smaller model": "C",
-            "D) Increase the price per query": "D",
-        },
-        label="What is the highest-ROI lever for controlling total cost of ownership?",
-    )
-    partA_reflection
-    return (partA_reflection,)
+        return mo.vstack(items)
 
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART B: THE KV CACHE WALL AND FLEET DESIGN
+    # ═════════════════════════════════════════════════════════════════════════
 
-@app.cell(hide_code=True)
-def _(partA_reflection, mo):
-    mo.stop(partA_reflection.value is None, mo.callout(mo.md("Select an answer."), kind="warn"))
-    if partA_reflection.value == "B":
-        mo.callout(mo.md(
-            "**Correct.** Inference optimization directly reduces cost_per_query. "
-            "A 10% improvement at 100 QPS saves $3.15M/year -- more than the training cost. "
-            "Quantization (INT4 frees KV cache memory for larger batches), continuous batching "
-            "(2-4x throughput), and KV cache optimization are the primary levers."
-        ), kind="success")
-    else:
-        mo.callout(mo.md(
-            "**Inference optimization is the highest-ROI lever** because it reduces "
-            "cost_per_query without reducing service quality or user access. "
-            "Quantization + continuous batching can achieve 2-4x cost reduction."
-        ), kind="warn")
-    return
+    def build_part_b():
+        items = []
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: ACT II -- KV CACHE WALL + FLEET DESIGN CHALLENGE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 12: ACT2_BANNER ────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.Html(f"""
-    <div style="margin: 32px 0 12px 0; border-top: 2px solid {COLORS['Border']}; padding-top: 32px;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {COLORS['OrangeLine']}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;
-                        flex-shrink: 0;">II</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act II &middot; 20&ndash;25 min</div>
+        # ── Stakeholder message ────────────────────────────────────────────
+        items.append(mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['Cloud']}; background: {COLORS['BlueLL']};
+                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['Cloud']};
+                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
+                Incoming Message &middot; Inference Platform Lead
+            </div>
+            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
+                "We are deploying a 70B FP16 model on 8xH100 (640 GB total HBM). Weights take
+                ~140 GB. We planned to serve 16-32 concurrent users at 128K context. Our load
+                test failed -- we can only serve 1 user at a time. What went wrong?"
+            </div>
         </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">
-            The KV Cache Wall and Fleet Design
-        </div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            The KV cache grows linearly with both sequence length and batch size. At 128K
-            context, even 8xH100 (640 GB HBM) can serve only 1 concurrent request for a
-            70B model. Memory, not compute, is the binding constraint. Your challenge:
-            design a fleet that serves 10K QPS at 200ms P99 for minimum cost.
-        </div>
-    </div>
-    """)
-    return
+        """))
 
-
-# ─── ACT2: STAKEHOLDER ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['Cloud']}; background: {COLORS['BlueLL']};
-                border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['Cloud']};
-                    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-            Incoming Message &middot; Inference Platform Lead
-        </div>
-        <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-            "We are deploying a 70B FP16 model on 8xH100 (640 GB total HBM). Weights take
-            ~140 GB. We planned to serve 16-32 concurrent users at 128K context. Our load
-            test failed -- we can only serve 1 user at a time. What went wrong?"
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT2: PREDICTION ─────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
+        # ── Concept introduction ───────────────────────────────────────────
+        items.append(mo.md("""
     The KV cache formula for a transformer:
 
     **KV_cache = 2 x num_layers x hidden_dim x seq_len x batch_size x bytes_per_element**
@@ -550,125 +533,81 @@ def _(mo):
     - Max concurrent requests = floor(500 / 343) = **1 request**
 
     The KV cache alone exceeds what remains after loading the model weights.
-    """)
-    return
+        """))
 
+        # ── Prediction lock ────────────────────────────────────────────────
+        items.append(partB_prediction)
+        if partB_prediction.value is None:
+            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part B instruments."), kind="warn"))
+            return mo.vstack(items)
 
-@app.cell(hide_code=True)
-def _(mo):
-    partB_prediction = mo.ui.radio(
-        options={
-            "A) 16-32 concurrent requests -- GPUs have plenty of memory": "A",
-            "B) 4-8 concurrent requests -- some memory overhead": "B",
-            "C) 2-3 concurrent requests -- memory is tighter than expected": "C",
-            "D) Just 1 -- the KV cache consumes all available memory": "D",
-        },
-        label="70B model (FP16) on 8xH100 (640 GB). Weights = 140 GB. At 128K context, how many concurrent requests?",
-    )
-    partB_prediction
-    return (partB_prediction,)
+        # ── Controls ───────────────────────────────────────────────────────
+        items.append(mo.md("### KV Cache Memory Wall Explorer"))
+        items.append(mo.hstack([
+            mo.vstack([a2_model_size, a2_precision]),
+            mo.vstack([a2_context_len, a2_n_gpus]),
+        ], justify="center", gap=2))
 
+        # ── Instruments ────────────────────────────────────────────────────
+        _params_b, _layers, _hidden = a2_model_size.value
+        _bytes_per_elem = a2_precision.value
+        _seq_len = a2_context_len.value
+        _gpus = a2_n_gpus.value
 
-@app.cell(hide_code=True)
-def _(partB_prediction, mo):
-    mo.stop(
-        partB_prediction.value is None,
-        mo.callout(mo.md("Select your prediction above to unlock the Act II instruments."), kind="warn"),
-    )
-    mo.md("")
-    return
+        _total_hbm_gb = _gpus * H100_RAM_GB
+        _weight_gb = _params_b * 1e9 * _bytes_per_elem / 1e9
+        _available_gb = max(0, _total_hbm_gb - _weight_gb)
 
+        # KV cache per request (bytes)
+        # KV = 2 * layers * hidden * seq_len * 2 bytes (FP16 for KV regardless of weight precision)
+        _kv_per_req_bytes = 2 * _layers * _hidden * _seq_len * 2  # KV always FP16
+        _kv_per_req_gb = _kv_per_req_bytes / 1e9
 
-# ─── ACT2: INSTRUMENTS ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("### KV Cache Memory Wall Explorer")
-    return
+        _max_concurrent = math.floor(_available_gb / _kv_per_req_gb) if _kv_per_req_gb > 0 else 0
+        _oom = _max_concurrent < 1
 
+        # ── Stacked memory chart ──────────────────────────────────────────────
+        _n_requests = list(range(0, min(_max_concurrent + 3, 20)))
+        _weight_vals = [_weight_gb] * len(_n_requests)
+        _kv_vals = [n * _kv_per_req_gb for n in _n_requests]
+        _total_vals = [w + k for w, k in zip(_weight_vals, _kv_vals)]
 
-@app.cell(hide_code=True)
-def _(mo):
-    a2_model_size = mo.ui.dropdown(
-        options={"7B (32L, 4096H)": (7, 32, 4096), "70B (80L, 8192H)": (70, 80, 8192), "175B (96L, 12288H)": (175, 96, 12288)},
-        value="70B (80L, 8192H)",
-        label="Model",
-    )
-    a2_precision = mo.ui.dropdown(
-        options={"FP16 (2 bytes)": 2, "INT8 (1 byte)": 1, "INT4 (0.5 bytes)": 0.5},
-        value="FP16 (2 bytes)",
-        label="Weight precision",
-    )
-    a2_context_len = mo.ui.slider(start=2048, stop=131072, value=131072, step=2048, label="Context length (tokens)")
-    a2_n_gpus = mo.ui.slider(start=1, stop=8, value=8, step=1, label="GPUs per replica")
-    mo.hstack([
-        mo.vstack([a2_model_size, a2_precision]),
-        mo.vstack([a2_context_len, a2_n_gpus]),
-    ], justify="center", gap=2)
-    return (a2_model_size, a2_precision, a2_context_len, a2_n_gpus)
+        _fig = go.Figure()
+        _fig.add_trace(go.Bar(x=_n_requests, y=_weight_vals, name="Model weights",
+                               marker_color=COLORS["BlueLine"]))
+        _kv_colors = [COLORS["GreenLine"] if t <= _total_hbm_gb else COLORS["RedLine"] for t in _total_vals]
+        _fig.add_trace(go.Bar(x=_n_requests, y=_kv_vals, name="KV cache",
+                               marker_color=_kv_colors))
+        _fig.add_hline(y=_total_hbm_gb, line=dict(color=COLORS["RedLine"], width=2, dash="dash"),
+                       annotation_text=f"Total HBM: {_total_hbm_gb:.0f} GB", annotation_position="top right")
+        _fig.update_layout(
+            height=300, barmode="stack",
+            xaxis=dict(title="Concurrent Requests"),
+            yaxis=dict(title="Memory (GB)", range=[0, max(max(_total_vals) * 1.1, _total_hbm_gb * 1.1)]),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(t=40, b=50, l=50, r=20),
+        )
+        apply_plotly_theme(_fig)
 
-
-@app.cell(hide_code=True)
-def _(COLORS, apply_plotly_theme, a2_model_size, a2_precision, a2_context_len, a2_n_gpus, go, math, mo, np, H100_RAM_GB):
-    _params_b, _layers, _hidden = a2_model_size.value
-    _bytes_per_elem = a2_precision.value
-    _seq_len = a2_context_len.value
-    _gpus = a2_n_gpus.value
-
-    _total_hbm_gb = _gpus * H100_RAM_GB
-    _weight_gb = _params_b * 1e9 * _bytes_per_elem / 1e9
-    _available_gb = max(0, _total_hbm_gb - _weight_gb)
-
-    # KV cache per request (bytes)
-    # KV = 2 * layers * hidden * seq_len * 2 bytes (FP16 for KV regardless of weight precision)
-    _kv_per_req_bytes = 2 * _layers * _hidden * _seq_len * 2  # KV always FP16
-    _kv_per_req_gb = _kv_per_req_bytes / 1e9
-
-    _max_concurrent = math.floor(_available_gb / _kv_per_req_gb) if _kv_per_req_gb > 0 else 0
-    _oom = _max_concurrent < 1
-
-    # ── Stacked memory chart ──────────────────────────────────────────────
-    _n_requests = list(range(0, min(_max_concurrent + 3, 20)))
-    _weight_vals = [_weight_gb] * len(_n_requests)
-    _kv_vals = [n * _kv_per_req_gb for n in _n_requests]
-    _total_vals = [w + k for w, k in zip(_weight_vals, _kv_vals)]
-
-    _fig = go.Figure()
-    _fig.add_trace(go.Bar(x=_n_requests, y=_weight_vals, name="Model weights",
-                           marker_color=COLORS["BlueLine"]))
-    _kv_colors = [COLORS["GreenLine"] if t <= _total_hbm_gb else COLORS["RedLine"] for t in _total_vals]
-    _fig.add_trace(go.Bar(x=_n_requests, y=_kv_vals, name="KV cache",
-                           marker_color=_kv_colors))
-    _fig.add_hline(y=_total_hbm_gb, line=dict(color=COLORS["RedLine"], width=2, dash="dash"),
-                   annotation_text=f"Total HBM: {_total_hbm_gb:.0f} GB", annotation_position="top right")
-    _fig.update_layout(
-        height=300, barmode="stack",
-        xaxis=dict(title="Concurrent Requests"),
-        yaxis=dict(title="Memory (GB)", range=[0, max(max(_total_vals) * 1.1, _total_hbm_gb * 1.1)]),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(t=40, b=50, l=50, r=20),
-    )
-    apply_plotly_theme(_fig)
-
-    # ── OOM banner ────────────────────────────────────────────────────────
-    _oom_banner = ""
-    if _oom:
-        _oom_banner = f"""
-        <div style="background:{COLORS['RedLL']}; border:2px solid {COLORS['RedLine']};
-                    border-radius:10px; padding:14px 18px; margin:10px 0;">
-            <div style="font-size:0.88rem; font-weight:800; color:{COLORS['RedLine']}; margin-bottom:4px;">
-                OOM &mdash; Cannot Serve Even 1 Request
+        # ── OOM banner ────────────────────────────────────────────────────────
+        _oom_banner = ""
+        if _oom:
+            _oom_banner = f"""
+            <div style="background:{COLORS['RedLL']}; border:2px solid {COLORS['RedLine']};
+                        border-radius:10px; padding:14px 18px; margin:10px 0;">
+                <div style="font-size:0.88rem; font-weight:800; color:{COLORS['RedLine']}; margin-bottom:4px;">
+                    OOM &mdash; Cannot Serve Even 1 Request
+                </div>
+                <div style="font-size:0.85rem; color:#7f1d1d; line-height:1.6;">
+                    KV cache per request ({_kv_per_req_gb:.1f} GB) exceeds available memory ({_available_gb:.1f} GB).<br>
+                    Reduce context length, add GPUs, or use weight quantization to free HBM.
+                </div>
             </div>
-            <div style="font-size:0.85rem; color:#7f1d1d; line-height:1.6;">
-                KV cache per request ({_kv_per_req_gb:.1f} GB) exceeds available memory ({_available_gb:.1f} GB).<br>
-                Reduce context length, add GPUs, or use weight quantization to free HBM.
-            </div>
-        </div>
-        """
+            """
 
-    _conc_color = COLORS["RedLine"] if _max_concurrent <= 1 else (COLORS["OrangeLine"] if _max_concurrent <= 4 else COLORS["GreenLine"])
+        _conc_color = COLORS["RedLine"] if _max_concurrent <= 1 else (COLORS["OrangeLine"] if _max_concurrent <= 4 else COLORS["GreenLine"])
 
-    mo.vstack([
-        mo.Html(f"""
+        items.append(mo.Html(f"""
         {_oom_banner}
         <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
                     border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
@@ -682,8 +621,9 @@ def _(COLORS, apply_plotly_theme, a2_model_size, a2_precision, a2_context_len, a
             <div>Available HBM = {_total_hbm_gb:.0f} - {_weight_gb:.1f} = <strong>{_available_gb:.1f} GB</strong></div>
             <div>Max concurrent = floor({_available_gb:.1f} / {_kv_per_req_gb:.1f}) = <strong style="color:{_conc_color};">{_max_concurrent}</strong></div>
         </div>
-        """),
-        mo.Html(f"""
+        """))
+
+        items.append(mo.Html(f"""
         <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
@@ -707,49 +647,41 @@ def _(COLORS, apply_plotly_theme, a2_model_size, a2_precision, a2_context_len, a
                 <div style="font-size:2rem; font-weight:800; color:{COLORS['GreenLine']}; font-family:monospace;">{_available_gb:.0f}GB</div>
             </div>
         </div>
-        """),
-        mo.ui.plotly(_fig),
-    ])
-    return (_max_concurrent, _oom)
+        """))
 
+        items.append(mo.ui.plotly(_fig))
 
-# ─── ACT2: REVEAL ─────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(partB_prediction, mo):
-    if partB_prediction.value == "D":
-        mo.callout(mo.md(
-            "**Correct.** At 128K context, the KV cache per request is ~343 GB for a 70B "
-            "model. After loading 140 GB of FP16 weights on 8xH100 (640 GB total), only "
-            "~500 GB remains. 500 / 343 = 1.46, so max concurrent = 1. The KV cache, "
-            "not compute, is the binding constraint. INT4 weights (35 GB) free 605 GB, "
-            "allowing 1 concurrent request. Shorter context (32K) drops KV to ~86 GB, "
-            "allowing 5+ concurrent requests."
-        ), kind="success")
-    elif partB_prediction.value == "A":
-        mo.callout(mo.md(
-            "**Off by 16x.** Students think of GPUs as 'compute machines' and forget the "
-            "KV cache. At 128K context, each request's KV cache is ~343 GB -- larger than "
-            "the model weights themselves. Memory, not compute, is the wall."
-        ), kind="warn")
-    elif partB_prediction.value == "B":
-        mo.callout(mo.md(
-            "**Possible at shorter contexts.** At 32K context, KV cache drops to ~86 GB, "
-            "allowing floor(500/86) = 5 concurrent requests. But at 128K, KV is 343 GB "
-            "per request -- only 1 fits."
-        ), kind="warn")
-    elif partB_prediction.value == "C":
-        mo.callout(mo.md(
-            "**Close for some configurations.** At 64K context, KV is ~172 GB, allowing "
-            "floor(500/172) = 2 concurrent requests. But at 128K, it is 343 GB -- only 1."
-        ), kind="warn")
-    return
+        # ── Reveal ─────────────────────────────────────────────────────────
+        if partB_prediction.value == "D":
+            items.append(mo.callout(mo.md(
+                "**Correct.** At 128K context, the KV cache per request is ~343 GB for a 70B "
+                "model. After loading 140 GB of FP16 weights on 8xH100 (640 GB total), only "
+                "~500 GB remains. 500 / 343 = 1.46, so max concurrent = 1. The KV cache, "
+                "not compute, is the binding constraint. INT4 weights (35 GB) free 605 GB, "
+                "allowing 1 concurrent request. Shorter context (32K) drops KV to ~86 GB, "
+                "allowing 5+ concurrent requests."
+            ), kind="success"))
+        elif partB_prediction.value == "A":
+            items.append(mo.callout(mo.md(
+                "**Off by 16x.** Students think of GPUs as 'compute machines' and forget the "
+                "KV cache. At 128K context, each request's KV cache is ~343 GB -- larger than "
+                "the model weights themselves. Memory, not compute, is the wall."
+            ), kind="warn"))
+        elif partB_prediction.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Possible at shorter contexts.** At 32K context, KV cache drops to ~86 GB, "
+                "allowing floor(500/86) = 5 concurrent requests. But at 128K, KV is 343 GB "
+                "per request -- only 1 fits."
+            ), kind="warn"))
+        elif partB_prediction.value == "C":
+            items.append(mo.callout(mo.md(
+                "**Close for some configurations.** At 64K context, KV is ~172 GB, allowing "
+                "floor(500/172) = 2 concurrent requests. But at 128K, it is 343 GB -- only 1."
+            ), kind="warn"))
 
-
-# ─── ACT2: MATHPEEK ───────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.accordion({
-        "Governing equations -- KV cache and inference fleet design": mo.md("""
+        # ── MathPeek ───────────────────────────────────────────────────────
+        items.append(mo.accordion({
+            "Governing equations -- KV cache and inference fleet design": mo.md("""
         **KV Cache Formula**
 
         ```
@@ -776,144 +708,138 @@ def _(mo):
 
         - Static batching wastes (1 - avg/max) fraction of GPU cycles
         - Continuous batching fills freed slots immediately: fill_factor = 2-4x
-        """)
-    })
-    return
+            """)
+        }))
 
+        # ── Reflection ─────────────────────────────────────────────────────
+        items.append(partB_reflection)
+        if partB_reflection.value is None:
+            items.append(mo.callout(mo.md("Select an answer."), kind="warn"))
+        elif partB_reflection.value == "A":
+            items.append(mo.callout(mo.md(
+                "**Correct.** INT4 quantization reduces weight memory from 140 GB to 35 GB, "
+                "freeing 105 GB of HBM for KV cache. This increases max concurrent requests "
+                "from 1 to floor(605/343) = 1 at 128K context (still memory-bound), but at "
+                "32K context: floor(605/86) = 7 vs 5 with FP16. The freed memory directly "
+                "translates to higher throughput through larger batch sizes."
+            ), kind="success"))
+        elif partB_reflection.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Does not address the binding constraint.** The bottleneck is memory, not "
+                "compute. Faster GPUs do not increase HBM capacity. The KV cache fills all "
+                "available memory regardless of compute speed."
+            ), kind="warn"))
+        elif partB_reflection.value == "C":
+            items.append(mo.callout(mo.md(
+                "**Effective but changes the product.** A 7B model has lower quality than 70B. "
+                "The goal is to serve the 70B model efficiently, not to serve a different model."
+            ), kind="warn"))
+        elif partB_reflection.value == "D":
+            items.append(mo.callout(mo.md(
+                "**Technically possible but too slow.** CPU RAM has ~10x lower bandwidth than "
+                "HBM. Moving KV cache to CPU adds 10x latency to every attention computation, "
+                "violating the 200ms P99 SLO. PagedAttention uses CPU offloading as a last "
+                "resort, not as the primary strategy."
+            ), kind="warn"))
 
-# ─── ACT2: REFLECTION ─────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    partB_reflection = mo.ui.radio(
-        options={
-            "A) INT4 weight quantization frees HBM for more KV cache, enabling larger batches": "A",
-            "B) Add more compute (faster GPUs) to process more requests per second": "B",
-            "C) Reduce model size from 70B to 7B": "C",
-            "D) Use CPU offloading to store KV cache in system RAM": "D",
-        },
-        label="What is the most effective way to increase concurrent serving capacity at 128K context?",
-    )
-    partB_reflection
-    return (partB_reflection,)
+        return mo.vstack(items)
 
+    # ═════════════════════════════════════════════════════════════════════════
+    # SYNTHESIS
+    # ═════════════════════════════════════════════════════════════════════════
 
-@app.cell(hide_code=True)
-def _(partB_reflection, mo):
-    mo.stop(partB_reflection.value is None, mo.callout(mo.md("Select an answer."), kind="warn"))
-    if partB_reflection.value == "A":
-        mo.callout(mo.md(
-            "**Correct.** INT4 quantization reduces weight memory from 140 GB to 35 GB, "
-            "freeing 105 GB of HBM for KV cache. This increases max concurrent requests "
-            "from 1 to floor(605/343) = 1 at 128K context (still memory-bound), but at "
-            "32K context: floor(605/86) = 7 vs 5 with FP16. The freed memory directly "
-            "translates to higher throughput through larger batch sizes."
-        ), kind="success")
-    elif partB_reflection.value == "B":
-        mo.callout(mo.md(
-            "**Does not address the binding constraint.** The bottleneck is memory, not "
-            "compute. Faster GPUs do not increase HBM capacity. The KV cache fills all "
-            "available memory regardless of compute speed."
-        ), kind="warn")
-    elif partB_reflection.value == "C":
-        mo.callout(mo.md(
-            "**Effective but changes the product.** A 7B model has lower quality than 70B. "
-            "The goal is to serve the 70B model efficiently, not to serve a different model."
-        ), kind="warn")
-    elif partB_reflection.value == "D":
-        mo.callout(mo.md(
-            "**Technically possible but too slow.** CPU RAM has ~10x lower bandwidth than "
-            "HBM. Moving KV cache to CPU adds 10x latency to every attention computation, "
-            "violating the 200ms P99 SLO. PagedAttention uses CPU offloading as a last "
-            "resort, not as the primary strategy."
-        ), kind="warn")
-    return
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.vstack([
-        mo.md("---"),
-        mo.Html(f"""
-        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                Key Takeaways
-            </div>
-            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
-                <div style="margin-bottom: 10px;">
-                    <strong>1. Serving cost exceeds training cost within weeks, not months.</strong>
-                    At 100 QPS and $0.01/query, the $2M training cost is crossed in ~3 weeks.
-                    A 10% inference optimization saves $3.15M/year -- more than the training cost.
-                    Inference efficiency is the highest-ROI investment for deployed models.
+    def build_synthesis():
+        return mo.vstack([
+            mo.Html(f"""
+            <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                        border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                    Key Takeaways
                 </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>2. The KV cache, not compute, is the binding constraint on concurrency.</strong>
-                    At 128K context, a 70B model's KV cache is ~343 GB per request. On 8xH100
-                    (640 GB total), only 1 concurrent request fits after loading weights.
-                    Memory determines how many users you can serve, not how fast you can compute.
-                </div>
-                <div>
-                    <strong>3. Quantization + continuous batching transforms the economics.</strong>
-                    INT4 weights free HBM for larger KV cache batches. Continuous batching
-                    fills freed slots immediately, achieving 2-4x throughput over static batching.
-                    Combined, they enable serving at 40% lower cost per query.
+                <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                    <div style="margin-bottom: 10px;">
+                        <strong>1. Serving cost exceeds training cost within weeks, not months.</strong>
+                        At 100 QPS and $0.01/query, the $2M training cost is crossed in ~3 weeks.
+                        A 10% inference optimization saves $3.15M/year -- more than the training cost.
+                        Inference efficiency is the highest-ROI investment for deployed models.
+                    </div>
+                    <div style="margin-bottom: 10px;">
+                        <strong>2. The KV cache, not compute, is the binding constraint on concurrency.</strong>
+                        At 128K context, a 70B model's KV cache is ~343 GB per request. On 8xH100
+                        (640 GB total), only 1 concurrent request fits after loading weights.
+                        Memory determines how many users you can serve, not how fast you can compute.
+                    </div>
+                    <div>
+                        <strong>3. Quantization + continuous batching transforms the economics.</strong>
+                        INT4 weights free HBM for larger KV cache batches. Continuous batching
+                        fills freed slots immediately, achieving 2-4x throughput over static batching.
+                        Combined, they enable serving at 40% lower cost per query.
+                    </div>
                 </div>
             </div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    What's Next
+            """),
+            mo.Html(f"""
+            <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        What's Next
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Lab V2-09: The Optimization Trap</strong> &mdash; You discovered that
+                        inference is memory-bound. The next lab asks: if you apply the wrong
+                        optimization (e.g., more compute for a memory-bound workload), what happens?
+                        The roofline model diagnoses what optimization to apply and when.
+                    </div>
                 </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab V2-09: The Optimization Trap</strong> &mdash; You discovered that
-                    inference is memory-bound. The next lab asks: if you apply the wrong
-                    optimization (e.g., more compute for a memory-bound workload), what happens?
-                    The roofline model diagnoses what optimization to apply and when.
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        Textbook &amp; TinyTorch
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Read:</strong> @sec-inference-at-scale for the full KV cache derivation,
+                        continuous batching mechanics, and fleet design principles.<br/>
+                        <strong>Build:</strong> TinyTorch inference module &mdash; implement KV cache
+                        management and continuous batching in <code>tinytorch/src/inference/</code>.
+                    </div>
                 </div>
             </div>
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    Textbook &amp; TinyTorch
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-inference-at-scale for the full KV cache derivation,
-                    continuous batching mechanics, and fleet design principles.<br/>
-                    <strong>Build:</strong> TinyTorch inference module &mdash; implement KV cache
-                    management and continuous batching in <code>tinytorch/src/inference/</code>.
-                </div>
-            </div>
-        </div>
-        """),
-        mo.accordion({
-            "Self-Assessment": mo.md("""
+            """),
+            mo.accordion({
+                "Self-Assessment": mo.md("""
 1. At 100 QPS and $0.01/query, after how many weeks does serving cost exceed a $2M training cost?
 2. For a 70B model at 128K context on 8xH100, how many concurrent requests can you serve?
 3. Why does INT4 weight quantization increase serving throughput, even though it does not speed up compute?
 4. What is the throughput advantage of continuous batching over static batching, and why?
 
-*If you cannot answer all four from memory, revisit Acts I and II.*
+*If you cannot answer all four from memory, revisit Parts A and B.*
 """)
-        }),
-    ])
+            }),
+        ])
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # COMPOSE TABS
+    # ═════════════════════════════════════════════════════════════════════════
+
+    tabs = mo.ui.tabs({
+        "Part A -- The Serving Cost Inversion": build_part_a(),
+        "Part B -- The KV Cache Wall": build_part_b(),
+        "Synthesis": build_synthesis(),
+    })
+    tabs
     return
 
 
-# ─── CELL 21: LEDGER_HUD ─────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: LEDGER_HUD
+# ═══════════════════════════════════════════════════════════════════════════════
+
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, DecisionLog):
     decision_input, decision_ui = DecisionLog()
     return (decision_input, decision_ui)
 
@@ -921,8 +847,6 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partB_reflection,
       ledger, mo, decision_input, decision_ui):
-    _max_concurrent = 0
-    _oom = False
     ledger.save(
         chapter="v2_08",
         design={
@@ -933,8 +857,6 @@ def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partB_reflec
             "partB_correct": partB_prediction.value == "D",
             "partB_reflection": partB_reflection.value or "no_selection",
             "student_justification": str(decision_input.value),
-            "max_concurrent_requests": _max_concurrent,
-            "oom_hit": _oom,
         },
     )
 
@@ -948,11 +870,9 @@ def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partB_reflec
     <div class="lab-hud">
         <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab 08</span></div>
         <div><span class="hud-label">CHAPTER</span> <span class="hud-value">v2_08 &middot; Inference at Scale</span></div>
-        <div><span class="hud-label">ACT I</span> <span class="{'hud-active' if _a1_ok else 'hud-none'}">{"CORRECT" if _a1_ok else "REVIEW"}</span></div>
-        <div><span class="hud-label">ACT II</span> <span class="{'hud-active' if _a2_ok else 'hud-none'}">{"CORRECT" if _a2_ok else "REVIEW"}</span></div>
+        <div><span class="hud-label">PART A</span> <span class="{'hud-active' if _a1_ok else 'hud-none'}">{"CORRECT" if _a1_ok else "REVIEW"}</span></div>
+        <div><span class="hud-label">PART B</span> <span class="{'hud-active' if _a2_ok else 'hud-none'}">{"CORRECT" if _a2_ok else "REVIEW"}</span></div>
         <div><span class="hud-label">TIER</span> <span style="color:{_tier_color}; font-family:var(--font-mono);">{_tier.upper()}</span></div>
-        <div><span class="hud-label">MAX CONC</span> <span class="hud-value">{_max_concurrent}</span></div>
-        <div><span class="hud-label">OOM</span> <span class="{'hud-none' if _oom else 'hud-active'}">{"YES" if _oom else "NO"}</span></div>
     </div>
     """)
     return

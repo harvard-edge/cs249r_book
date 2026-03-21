@@ -12,12 +12,12 @@ app = marimo.App(width="full")
 #                 packing, topology sensitivity, and the impossibility of
 #                 simultaneously optimizing utilization, fairness, and latency.
 #
-# 2-Act Structure (35-40 minutes):
-#   Act I  — The Queuing Wall (12-15 min)
+# 2-Part Structure (35-40 minutes):
+#   Part A — The Queuing Wall (12-15 min)
 #             Heavy-tailed ML workloads (C_s=3-5) make queue wait times 5x
 #             worse than uniform workloads at 80% utilization.
 #
-#   Act II — Fragmentation + The Utilization Paradox (20-25 min)
+#   Part B — Fragmentation + The Utilization Paradox (20-25 min)
 #             77 idle GPUs cannot schedule a 64-GPU job due to fragmentation.
 #             Maximizing utilization, fairness, and latency simultaneously
 #             is impossible.
@@ -27,6 +27,10 @@ app = marimo.App(width="full")
 #   GPUS_PER_NODE = 8     (DGX H100)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING (4 cells)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # ─── CELL 0: SETUP ─────────────────────────────────────────────────────────────
 @app.cell
@@ -61,15 +65,12 @@ async def _():
     return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, GPUS_PER_NODE, GPU_COST_HR, DecisionLog
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE A: OPENING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
+# ─── CELL 1: HEADER ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, LAB_CSS, mo):
-    mo.Html(f"""
-    {LAB_CSS}
+    mo.vstack([
+        LAB_CSS,
+        mo.Html(f"""
     <div style="background: linear-gradient(135deg, {COLORS['Surface0']} 0%, {COLORS['Surface1']} 100%);
                 border-radius: 16px; padding: 32px 40px; margin-bottom: 8px;
                 border: 1px solid #2d3748;">
@@ -93,11 +94,12 @@ def _(COLORS, LAB_CSS, mo):
                 <span class="badge badge-info">Pollaczek-Khinchine Formula</span>
                 <span class="badge badge-info">GPU Fragmentation</span>
                 <span class="badge badge-info">Utilization Paradox</span>
-                <span class="badge badge-warn">35&ndash;40 minutes &middot; 2 Acts</span>
+                <span class="badge badge-warn">35&ndash;40 minutes &middot; 2 Parts</span>
             </div>
         </div>
     </div>
-    """)
+    """),
+    ])
     return
 
 
@@ -139,7 +141,7 @@ def _(mo, COLORS):
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
                     <strong>35-40 min</strong><br/>
-                    Act I: ~12 min &middot; Act II: ~25 min
+                    Part A: ~12 min &middot; Part B: ~25 min
                 </div>
             </div>
         </div>
@@ -176,44 +178,102 @@ def _(mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: ACT I -- THE QUEUING WALL
+# ZONE B: WIDGET DEFINITIONS (separate cells for Marimo dataflow)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ─── CELL 5: ACT1_BANNER ────────────────────────────────────────────────────
+# ─── CELL 4: Part A prediction + controls ────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.Html(f"""
-    <div style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {COLORS['BlueLine']}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;
-                        flex-shrink: 0;">I</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act I &middot; 12&ndash;15 min</div>
-        </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">
-            The Queuing Wall
-        </div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            Web service engineers operate at 80% utilization comfortably. ML workloads have
-            heavy-tailed duration distributions (coefficient of variation C_s = 3-5) that
-            make the same utilization feel like gridlock. The Pollaczek-Khinchine formula
-            reveals why: a (1 + C_s^2)/2 factor amplifies wait times by 5x.
-        </div>
-    </div>
-    """)
-    return
+def _(mo):
+    partA_prediction = mo.ui.radio(
+        options={
+            "A) ~5 minutes -- similar to web service queuing": "A",
+            "B) ~25 minutes -- 5x worse than uniform workloads": "B",
+            "C) ~1 hour -- significant delay": "C",
+            "D) ~2 minutes -- GPUs are fast": "D",
+        },
+        label="Your GPU cluster runs at 80% utilization. ML workloads have C_s=3 (heavy tail). What is the average queue wait?",
+    )
+    a1_utilization = mo.ui.slider(start=0.10, stop=0.99, value=0.80, step=0.01, label="Cluster utilization (rho)")
+    a1_workload = mo.ui.dropdown(
+        options={"Uniform (C_s=1)": 1.0, "ML Mixed (C_s=3)": 3.0, "Research (C_s=5)": 5.0},
+        value="ML Mixed (C_s=3)",
+        label="Workload type",
+    )
+    a1_service_min = mo.ui.slider(start=5, stop=120, value=30, label="Mean service time (minutes)")
+    partA_reflection = mo.ui.radio(
+        options={
+            "A) Run the cluster at lower utilization -- 50-60% keeps wait times manageable": "A",
+            "B) Preempt long-running jobs to serve short experiments faster": "B",
+            "C) Add more GPUs until utilization drops below 70%": "C",
+            "D) Use priority queues to separate long and short jobs": "D",
+        },
+        label="What is the most effective way to reduce queue wait for ML workloads?",
+    )
+    return (partA_prediction, a1_utilization, a1_workload, a1_service_min, partA_reflection)
 
 
-# ─── ACT1: STAKEHOLDER ────────────────────────────────────────────────────────
+# ─── CELL 5: Part B prediction + controls ────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
+def _(mo, partA_prediction):
+    partB_prediction = mo.ui.radio(
+        options={
+            "A) Yes -- a good scheduler can achieve all three simultaneously": "A",
+            "B) No -- these goals are fundamentally in conflict; improving one degrades another": "B",
+            "C) Yes, but only with preemption enabled": "C",
+            "D) Yes, but only at 50% utilization": "D",
+        },
+        label="Can you achieve >90% utilization AND <10 min wait AND fair access across 5 teams?",
+    )
+    a2_w_throughput = mo.ui.slider(start=0, stop=100, value=40, step=5, label="Priority: Throughput (%)")
+    a2_w_fairness = mo.ui.slider(start=0, stop=100, value=30, step=5, label="Priority: Fairness (%)")
+    a2_w_latency = mo.ui.slider(start=0, stop=100, value=30, step=5, label="Priority: Low Latency (%)")
+    a2_n_teams = mo.ui.slider(start=2, stop=10, value=5, step=1, label="Number of teams")
+    partB_reflection = mo.ui.radio(
+        options={
+            "A) Implement a single 'optimal' scheduling algorithm that maximizes all metrics": "A",
+            "B) Accept the trade-off and provide transparency -- let stakeholders choose which metric to sacrifice": "B",
+            "C) Use AI to predict optimal scheduling decisions": "C",
+            "D) Increase cluster size until all metrics are satisfied": "D",
+        },
+        label="Given the impossibility of simultaneous optimization, what is the best operational approach?",
+    )
+    return (partB_prediction, a2_w_throughput, a2_w_fairness, a2_w_latency, a2_n_teams, partB_reflection)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: SINGLE TABS CELL (all build_part_X functions + mo.ui.tabs)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.cell(hide_code=True)
+def _(
+    COLORS,
+    apply_plotly_theme,
+    go,
+    math,
+    mo,
+    np,
+    partA_prediction,
+    a1_utilization,
+    a1_workload,
+    a1_service_min,
+    partA_reflection,
+    partB_prediction,
+    a2_w_throughput,
+    a2_w_fairness,
+    a2_w_latency,
+    a2_n_teams,
+    partB_reflection,
+):
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART A: THE QUEUING WALL
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def build_part_a():
+        items = []
+
+        # ── Stakeholder message ──────────────────────────────────────────
+        items.append(mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']}; background: {COLORS['BlueLL']};
                 border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
         <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['BlueLine']};
@@ -226,14 +286,10 @@ def _(COLORS, mo):
             start. Our web service engineers say 80% is comfortable. Who is right?"
         </div>
     </div>
-    """)
-    return
+        """))
 
-
-# ─── ACT1: CONCEPT FRAMING ────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
+        # ── Concept framing ──────────────────────────────────────────────
+        items.append(mo.md("""
     The Pollaczek-Khinchine (P-K) formula for average wait time in an M/G/1 queue:
 
     **W_q = (rho / (1 - rho)) * ((1 + C_s^2) / (2 * mu))**
@@ -253,97 +309,58 @@ def _(mo):
     - C_s = 5: factor = 13.0 (13x worse wait)
 
     At rho = 0.80, this turns a 5-minute web wait into a 25-minute ML wait.
-    """)
-    return
+        """))
 
+        # ── Prediction ───────────────────────────────────────────────────
+        items.append(partA_prediction)
 
-# ─── ACT1: PREDICTION ─────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    partA_prediction = mo.ui.radio(
-        options={
-            "A) ~5 minutes -- similar to web service queuing": "A",
-            "B) ~25 minutes -- 5x worse than uniform workloads": "B",
-            "C) ~1 hour -- significant delay": "C",
-            "D) ~2 minutes -- GPUs are fast": "D",
-        },
-        label="Your GPU cluster runs at 80% utilization. ML workloads have C_s=3 (heavy tail). What is the average queue wait?",
-    )
-    partA_prediction
-    return (partA_prediction,)
+        if partA_prediction.value is None:
+            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part A instruments."), kind="warn"))
+            return mo.vstack(items)
 
+        # ── Controls ─────────────────────────────────────────────────────
+        items.append(mo.md("### Queuing Wall Explorer"))
+        items.append(mo.hstack([a1_utilization, a1_workload, a1_service_min], justify="center", gap=2))
 
-@app.cell(hide_code=True)
-def _(partA_prediction, mo):
-    mo.stop(
-        partA_prediction.value is None,
-        mo.callout(mo.md("Select your prediction above to unlock the Act I instruments."), kind="warn"),
-    )
-    mo.md("")
-    return
+        # ── Instruments ──────────────────────────────────────────────────
+        _rho = a1_utilization.value
+        _cs = a1_workload.value
+        _service_min = a1_service_min.value
+        _mu = 1.0 / _service_min  # jobs per minute
 
+        # P-K formula: W_q = (rho/(1-rho)) * ((1+Cs^2)/(2*mu))
+        _amplification = (1 + _cs ** 2) / 2
+        _wait_min = (_rho / (1 - _rho)) * (_amplification / _mu) if _rho < 1.0 else float('inf')
+        _wait_uniform = (_rho / (1 - _rho)) * (1.0 / _mu) if _rho < 1.0 else float('inf')
+        _ratio = _amplification
 
-# ─── ACT1: INSTRUMENTS ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("### Queuing Wall Explorer")
-    return
+        # ── Wait vs utilization curves ────────────────────────────────────
+        _rho_range = np.linspace(0.1, 0.98, 100)
+        _fig = go.Figure()
+        for _csv, _label, _clr in [(1.0, "Uniform (C_s=1)", COLORS["GreenLine"]),
+                                     (3.0, "ML Mixed (C_s=3)", COLORS["OrangeLine"]),
+                                     (5.0, "Research (C_s=5)", COLORS["RedLine"])]:
+            _amp = (1 + _csv ** 2) / 2
+            _waits = [(_r / (1 - _r)) * (_amp / _mu) for _r in _rho_range]
+            _fig.add_trace(go.Scatter(x=_rho_range * 100, y=_waits, mode="lines", name=_label,
+                                       line=dict(color=_clr, width=2.5 if _csv == _cs else 1.5)))
+        # Mark current
+        _fig.add_trace(go.Scatter(x=[_rho * 100], y=[min(_wait_min, 500)], mode="markers",
+                                   name="Current", marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond")))
+        _fig.add_hline(y=10, line=dict(color=COLORS["TextMuted"], width=1, dash="dot"),
+                       annotation_text="10 min threshold", annotation_position="top right")
+        _fig.update_layout(
+            height=340,
+            xaxis=dict(title="Cluster Utilization (%)", range=[10, 100]),
+            yaxis=dict(title="Average Wait Time (minutes)", range=[0, min(max(_wait_min * 1.5, 60), 500)]),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(t=40, b=50, l=50, r=20),
+        )
+        apply_plotly_theme(_fig)
 
+        _wait_color = COLORS["GreenLine"] if _wait_min < 10 else (COLORS["OrangeLine"] if _wait_min < 30 else COLORS["RedLine"])
 
-@app.cell(hide_code=True)
-def _(mo):
-    a1_utilization = mo.ui.slider(start=0.10, stop=0.99, value=0.80, step=0.01, label="Cluster utilization (rho)")
-    a1_workload = mo.ui.dropdown(
-        options={"Uniform (C_s=1)": 1.0, "ML Mixed (C_s=3)": 3.0, "Research (C_s=5)": 5.0},
-        value="ML Mixed (C_s=3)",
-        label="Workload type",
-    )
-    a1_service_min = mo.ui.slider(start=5, stop=120, value=30, label="Mean service time (minutes)")
-    mo.hstack([a1_utilization, a1_workload, a1_service_min], justify="center", gap=2)
-    return (a1_utilization, a1_workload, a1_service_min)
-
-
-@app.cell(hide_code=True)
-def _(COLORS, apply_plotly_theme, a1_utilization, a1_workload, a1_service_min, go, mo, np):
-    _rho = a1_utilization.value
-    _cs = a1_workload.value
-    _service_min = a1_service_min.value
-    _mu = 1.0 / _service_min  # jobs per minute
-
-    # P-K formula: W_q = (rho/(1-rho)) * ((1+Cs^2)/(2*mu))
-    _amplification = (1 + _cs ** 2) / 2
-    _wait_min = (_rho / (1 - _rho)) * (_amplification / _mu) if _rho < 1.0 else float('inf')
-    _wait_uniform = (_rho / (1 - _rho)) * (1.0 / _mu) if _rho < 1.0 else float('inf')
-    _ratio = _amplification
-
-    # ── Wait vs utilization curves ────────────────────────────────────────
-    _rho_range = np.linspace(0.1, 0.98, 100)
-    _fig = go.Figure()
-    for _csv, _label, _clr in [(1.0, "Uniform (C_s=1)", COLORS["GreenLine"]),
-                                 (3.0, "ML Mixed (C_s=3)", COLORS["OrangeLine"]),
-                                 (5.0, "Research (C_s=5)", COLORS["RedLine"])]:
-        _amp = (1 + _csv ** 2) / 2
-        _waits = [(_r / (1 - _r)) * (_amp / _mu) for _r in _rho_range]
-        _fig.add_trace(go.Scatter(x=_rho_range * 100, y=_waits, mode="lines", name=_label,
-                                   line=dict(color=_clr, width=2.5 if _csv == _cs else 1.5)))
-    # Mark current
-    _fig.add_trace(go.Scatter(x=[_rho * 100], y=[min(_wait_min, 500)], mode="markers",
-                               name="Current", marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond")))
-    _fig.add_hline(y=10, line=dict(color=COLORS["TextMuted"], width=1, dash="dot"),
-                   annotation_text="10 min threshold", annotation_position="top right")
-    _fig.update_layout(
-        height=340,
-        xaxis=dict(title="Cluster Utilization (%)", range=[10, 100]),
-        yaxis=dict(title="Average Wait Time (minutes)", range=[0, min(max(_wait_min * 1.5, 60), 500)]),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(t=40, b=50, l=50, r=20),
-    )
-    apply_plotly_theme(_fig)
-
-    _wait_color = COLORS["GreenLine"] if _wait_min < 10 else (COLORS["OrangeLine"] if _wait_min < 30 else COLORS["RedLine"])
-
-    mo.vstack([
-        mo.Html(f"""
+        items.append(mo.Html(f"""
         <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
                     border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
                     font-size:0.83rem; line-height:1.8;">
@@ -356,8 +373,9 @@ def _(COLORS, apply_plotly_theme, a1_utilization, a1_workload, a1_service_min, g
             <div>W_q = ({_rho:.2f} / {1-_rho:.2f}) &times; ({_amplification:.1f} / {_mu:.4f}) = <strong style="color:{_wait_color};">{min(_wait_min, 999):.1f} min</strong></div>
             <div>Uniform wait at same rho: {min(_wait_uniform, 999):.1f} min &mdash; ML is <strong>{_ratio:.1f}x worse</strong></div>
         </div>
-        """),
-        mo.Html(f"""
+        """))
+
+        items.append(mo.Html(f"""
         <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:160px; text-align:center; background:white;">
@@ -378,48 +396,40 @@ def _(COLORS, apply_plotly_theme, a1_utilization, a1_workload, a1_service_min, g
                 <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">cluster</div>
             </div>
         </div>
-        """),
-        mo.ui.plotly(_fig),
-    ])
-    return
+        """))
 
+        items.append(mo.ui.plotly(_fig))
 
-# ─── ACT1: REVEAL ─────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(partA_prediction, mo):
-    if partA_prediction.value == "B":
-        mo.callout(mo.md(
-            "**Correct.** At C_s=3, the amplification factor is (1+9)/2 = 5. This turns "
-            "a 5-minute uniform wait into a 25-minute ML wait at 80% utilization. The "
-            "heavy tail means rare but massive training jobs (months-long) coexist with "
-            "thousands of 1-hour experiments, creating extreme variance."
-        ), kind="success")
-    elif partA_prediction.value == "A":
-        mo.callout(mo.md(
-            "**That is the web service answer.** 5 minutes is correct for C_s=1 (uniform). "
-            "But ML workloads have C_s=3-5, which amplifies wait by 5-13x. The heavy tail "
-            "-- rare large jobs blocking many small ones -- is what makes ML scheduling "
-            "fundamentally harder than web service scheduling."
-        ), kind="warn")
-    elif partA_prediction.value == "C":
-        mo.callout(mo.md(
-            "**Possible at C_s=5, but C_s=3 gives ~25 min.** At C_s=5, the amplification "
-            "is 13x, and wait time at 80% utilization would be ~65 minutes. But typical "
-            "ML mixed workloads have C_s=3, giving ~25 minutes."
-        ), kind="warn")
-    elif partA_prediction.value == "D":
-        mo.callout(mo.md(
-            "**Far too optimistic.** 2 minutes would require very low utilization (~30%) "
-            "for ML workloads. At 80% with C_s=3, the P-K formula gives ~25 minutes."
-        ), kind="warn")
-    return
+        # ── Reveal ───────────────────────────────────────────────────────
+        if partA_prediction.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Correct.** At C_s=3, the amplification factor is (1+9)/2 = 5. This turns "
+                "a 5-minute uniform wait into a 25-minute ML wait at 80% utilization. The "
+                "heavy tail means rare but massive training jobs (months-long) coexist with "
+                "thousands of 1-hour experiments, creating extreme variance."
+            ), kind="success"))
+        elif partA_prediction.value == "A":
+            items.append(mo.callout(mo.md(
+                "**That is the web service answer.** 5 minutes is correct for C_s=1 (uniform). "
+                "But ML workloads have C_s=3-5, which amplifies wait by 5-13x. The heavy tail "
+                "-- rare large jobs blocking many small ones -- is what makes ML scheduling "
+                "fundamentally harder than web service scheduling."
+            ), kind="warn"))
+        elif partA_prediction.value == "C":
+            items.append(mo.callout(mo.md(
+                "**Possible at C_s=5, but C_s=3 gives ~25 min.** At C_s=5, the amplification "
+                "is 13x, and wait time at 80% utilization would be ~65 minutes. But typical "
+                "ML mixed workloads have C_s=3, giving ~25 minutes."
+            ), kind="warn"))
+        elif partA_prediction.value == "D":
+            items.append(mo.callout(mo.md(
+                "**Far too optimistic.** 2 minutes would require very low utilization (~30%) "
+                "for ML workloads. At 80% with C_s=3, the P-K formula gives ~25 minutes."
+            ), kind="warn"))
 
-
-# ─── ACT1: MATHPEEK ────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.accordion({
-        "Governing equations -- Pollaczek-Khinchine formula": mo.md("""
+        # ── MathPeek ─────────────────────────────────────────────────────
+        items.append(mo.accordion({
+            "Governing equations -- Pollaczek-Khinchine formula": mo.md("""
         **Pollaczek-Khinchine Mean Wait (M/G/1)**
 
         ```
@@ -439,104 +449,54 @@ def _(mo):
         - Full training runs: 1,000-100,000 GPU-hours
 
         This creates C_s = 3-5, amplifying queue wait by 5-13x vs uniform.
-        """)
-    })
-    return
+            """)
+        }))
 
+        # ── Reflection ───────────────────────────────────────────────────
+        items.append(partA_reflection)
 
-# ─── ACT1: REFLECTION ─────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    partA_reflection = mo.ui.radio(
-        options={
-            "A) Run the cluster at lower utilization -- 50-60% keeps wait times manageable": "A",
-            "B) Preempt long-running jobs to serve short experiments faster": "B",
-            "C) Add more GPUs until utilization drops below 70%": "C",
-            "D) Use priority queues to separate long and short jobs": "D",
-        },
-        label="What is the most effective way to reduce queue wait for ML workloads?",
-    )
-    partA_reflection
-    return (partA_reflection,)
+        if partA_reflection.value is not None:
+            if partA_reflection.value == "A":
+                items.append(mo.callout(mo.md(
+                    "**Correct, but expensive.** The P-K formula shows that wait time is rho/(1-rho), "
+                    "which diverges as rho -> 1. Dropping from 80% to 60% reduces the rho/(1-rho) "
+                    "factor from 4 to 1.5 -- a 2.7x reduction. But you are paying for 20% more idle "
+                    "GPUs. This is the utilization paradox: you must choose between GPU efficiency "
+                    "and researcher productivity."
+                ), kind="success"))
+            elif partA_reflection.value == "B":
+                items.append(mo.callout(mo.md(
+                    "**Effective but costly.** Preempting a long training job means killing it and "
+                    "restarting from the last checkpoint. If the job has been running for 2 hours "
+                    "since the last checkpoint, you lose 2 hours x N GPUs of compute. Preemption "
+                    "reduces wait time but increases total compute waste."
+                ), kind="warn"))
+            elif partA_reflection.value == "C":
+                items.append(mo.callout(mo.md(
+                    "**Correct in principle, expensive in practice.** Adding GPUs reduces utilization, "
+                    "which reduces wait. But each GPU costs ~$3/hour. Adding 100 GPUs = $7,200/day. "
+                    "The real question is whether researcher time saved justifies GPU cost -- and "
+                    "that depends on researcher salary vs GPU cost."
+                ), kind="warn"))
+            elif partA_reflection.value == "D":
+                items.append(mo.callout(mo.md(
+                    "**Helpful but does not solve the fundamental problem.** Priority queues can "
+                    "reduce wait for high-priority short jobs, but they increase wait for low-priority "
+                    "jobs. The total wait across all jobs is still governed by the P-K formula. "
+                    "You are redistributing pain, not eliminating it."
+                ), kind="warn"))
 
+        return mo.vstack(items)
 
-@app.cell(hide_code=True)
-def _(partA_reflection, mo):
-    mo.stop(
-        partA_reflection.value is None,
-        mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"),
-    )
-    if partA_reflection.value == "A":
-        mo.callout(mo.md(
-            "**Correct, but expensive.** The P-K formula shows that wait time is rho/(1-rho), "
-            "which diverges as rho -> 1. Dropping from 80% to 60% reduces the rho/(1-rho) "
-            "factor from 4 to 1.5 -- a 2.7x reduction. But you are paying for 20% more idle "
-            "GPUs. This is the utilization paradox: you must choose between GPU efficiency "
-            "and researcher productivity."
-        ), kind="success")
-    elif partA_reflection.value == "B":
-        mo.callout(mo.md(
-            "**Effective but costly.** Preempting a long training job means killing it and "
-            "restarting from the last checkpoint. If the job has been running for 2 hours "
-            "since the last checkpoint, you lose 2 hours x N GPUs of compute. Preemption "
-            "reduces wait time but increases total compute waste."
-        ), kind="warn")
-    elif partA_reflection.value == "C":
-        mo.callout(mo.md(
-            "**Correct in principle, expensive in practice.** Adding GPUs reduces utilization, "
-            "which reduces wait. But each GPU costs ~$3/hour. Adding 100 GPUs = $7,200/day. "
-            "The real question is whether researcher time saved justifies GPU cost -- and "
-            "that depends on researcher salary vs GPU cost."
-        ), kind="warn")
-    elif partA_reflection.value == "D":
-        mo.callout(mo.md(
-            "**Helpful but does not solve the fundamental problem.** Priority queues can "
-            "reduce wait for high-priority short jobs, but they increase wait for low-priority "
-            "jobs. The total wait across all jobs is still governed by the P-K formula. "
-            "You are redistributing pain, not eliminating it."
-        ), kind="warn")
-    return
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART B: FRAGMENTATION + THE UTILIZATION PARADOX
+    # ═════════════════════════════════════════════════════════════════════════
 
+    def build_part_b():
+        items = []
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: ACT II -- FRAGMENTATION + UTILIZATION PARADOX
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 12: ACT2_BANNER ────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.Html(f"""
-    <div style="margin: 32px 0 12px 0; border-top: 2px solid {COLORS['Border']}; padding-top: 32px;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {COLORS['OrangeLine']}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;
-                        flex-shrink: 0;">II</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act II &middot; 20&ndash;25 min</div>
-        </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">
-            Fragmentation and the Utilization Paradox
-        </div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            Free GPUs do not mean schedulable GPUs. Gang scheduling requires contiguous
-            blocks, but real clusters fragment into scattered 1-4 GPU fragments. Then
-            discover the impossibility: optimizing utilization, fairness, and latency
-            simultaneously cannot be achieved -- every policy makes a trade-off.
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT2: STAKEHOLDER ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
+        # ── Stakeholder message ──────────────────────────────────────────
+        items.append(mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['Cloud']}; background: {COLORS['BlueLL']};
                 border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
         <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['Cloud']};
@@ -549,14 +509,10 @@ def _(COLORS, mo):
             started. The dashboard is green. The researcher is furious. What is happening?"
         </div>
     </div>
-    """)
-    return
+        """))
 
-
-# ─── ACT2: CONCEPT ────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
+        # ── Concept framing ──────────────────────────────────────────────
+        items.append(mo.md("""
     The 77 idle GPUs are scattered across 12 nodes in fragments of 1-4 GPUs each.
     Gang scheduling requires all 64 GPUs to be allocated **simultaneously** in
     **contiguous** 8-GPU nodes. With fragments scattered across the cluster,
@@ -571,146 +527,110 @@ def _(mo):
     - **Management**: ensure fair access across 5 teams
 
     These goals are **fundamentally in conflict**. Improving one necessarily degrades another.
-    """)
-    return
+        """))
 
+        # ── Prediction ───────────────────────────────────────────────────
+        items.append(partB_prediction)
 
-# ─── ACT2: PREDICTION ─────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    partB_prediction = mo.ui.radio(
-        options={
-            "A) Yes -- a good scheduler can achieve all three simultaneously": "A",
-            "B) No -- these goals are fundamentally in conflict; improving one degrades another": "B",
-            "C) Yes, but only with preemption enabled": "C",
-            "D) Yes, but only at 50% utilization": "D",
-        },
-        label="Can you achieve >90% utilization AND <10 min wait AND fair access across 5 teams?",
-    )
-    partB_prediction
-    return (partB_prediction,)
+        if partB_prediction.value is None:
+            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part B instruments."), kind="warn"))
+            return mo.vstack(items)
 
+        # ── Controls ─────────────────────────────────────────────────────
+        items.append(mo.md("### Scheduling Policy Simulator"))
+        items.append(mo.hstack([
+            mo.vstack([a2_w_throughput, a2_w_fairness]),
+            mo.vstack([a2_w_latency, a2_n_teams]),
+        ], justify="center", gap=2))
 
-@app.cell(hide_code=True)
-def _(partB_prediction, mo):
-    mo.stop(
-        partB_prediction.value is None,
-        mo.callout(mo.md("Select your prediction above to unlock the Act II instruments."), kind="warn"),
-    )
-    mo.md("")
-    return
+        # ── Instruments ──────────────────────────────────────────────────
+        # Normalize weights
+        _wt = a2_w_throughput.value
+        _wf = a2_w_fairness.value
+        _wl = a2_w_latency.value
+        _total_w = max(_wt + _wf + _wl, 1)
+        _nt = _wt / _total_w
+        _nf = _wf / _total_w
+        _nl = _wl / _total_w
+        _teams = a2_n_teams.value
 
+        # Simulate metrics based on policy weights
+        # Throughput-biased: high utilization, long waits, unfair (big jobs favored)
+        # Fairness-biased: equal shares, moderate util, long waits for productive teams
+        # Latency-biased: short jobs first, low util, unfair to large jobs
 
-# ─── ACT2: INSTRUMENTS ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("### Scheduling Policy Simulator")
-    return
+        _utilization = 65 + 30 * _nt - 10 * _nl  # throughput boosts util, latency hurts it
+        _utilization = max(40, min(98, _utilization))
 
+        _avg_wait = 5 + 40 * _nt - 25 * _nl + 10 * _nf  # throughput hurts wait, latency helps
+        _avg_wait = max(2, min(120, _avg_wait))
 
-@app.cell(hide_code=True)
-def _(mo):
-    a2_w_throughput = mo.ui.slider(start=0, stop=100, value=40, step=5, label="Priority: Throughput (%)")
-    a2_w_fairness = mo.ui.slider(start=0, stop=100, value=30, step=5, label="Priority: Fairness (%)")
-    a2_w_latency = mo.ui.slider(start=0, stop=100, value=30, step=5, label="Priority: Low Latency (%)")
-    a2_n_teams = mo.ui.slider(start=2, stop=10, value=5, step=1, label="Number of teams")
-    mo.hstack([
-        mo.vstack([a2_w_throughput, a2_w_fairness]),
-        mo.vstack([a2_w_latency, a2_n_teams]),
-    ], justify="center", gap=2)
-    return (a2_w_throughput, a2_w_fairness, a2_w_latency, a2_n_teams)
+        _max_wait = _avg_wait * (2.5 + 3 * _nt)  # throughput creates extreme max waits
+        _max_wait = max(5, min(480, _max_wait))
 
+        # Jain's fairness index: 1.0 = perfectly fair, 1/N = maximally unfair
+        _fairness = 0.5 + 0.45 * _nf - 0.3 * _nt - 0.1 * _nl
+        _fairness = max(1.0 / _teams, min(1.0, _fairness))
 
-@app.cell(hide_code=True)
-def _(COLORS, apply_plotly_theme, a2_w_throughput, a2_w_fairness, a2_w_latency, a2_n_teams, go, math, mo, np):
-    # Normalize weights
-    _wt = a2_w_throughput.value
-    _wf = a2_w_fairness.value
-    _wl = a2_w_latency.value
-    _total_w = max(_wt + _wf + _wl, 1)
-    _nt = _wt / _total_w
-    _nf = _wf / _total_w
-    _nl = _wl / _total_w
-    _teams = a2_n_teams.value
+        # Fragmentation: percentage of GPUs stranded
+        _fragmentation = 15 + 20 * _nt - 10 * _nl  # throughput causes more fragmentation
+        _fragmentation = max(5, min(45, _fragmentation))
 
-    # Simulate metrics based on policy weights
-    # Throughput-biased: high utilization, long waits, unfair (big jobs favored)
-    # Fairness-biased: equal shares, moderate util, long waits for productive teams
-    # Latency-biased: short jobs first, low util, unfair to large jobs
+        # Check if all metrics meet targets
+        _util_ok = _utilization > 90
+        _wait_ok = _avg_wait < 10
+        _fair_ok = _fairness > 0.85
+        _all_green = _util_ok and _wait_ok and _fair_ok
 
-    _utilization = 65 + 30 * _nt - 10 * _nl  # throughput boosts util, latency hurts it
-    _utilization = max(40, min(98, _utilization))
+        # Colors
+        _util_color = COLORS["GreenLine"] if _util_ok else (COLORS["OrangeLine"] if _utilization > 75 else COLORS["RedLine"])
+        _wait_color = COLORS["GreenLine"] if _wait_ok else (COLORS["OrangeLine"] if _avg_wait < 30 else COLORS["RedLine"])
+        _fair_color = COLORS["GreenLine"] if _fair_ok else (COLORS["OrangeLine"] if _fairness > 0.7 else COLORS["RedLine"])
+        _frag_color = COLORS["GreenLine"] if _fragmentation < 15 else (COLORS["OrangeLine"] if _fragmentation < 30 else COLORS["RedLine"])
 
-    _avg_wait = 5 + 40 * _nt - 25 * _nl + 10 * _nf  # throughput hurts wait, latency helps
-    _avg_wait = max(2, min(120, _avg_wait))
+        # ── Radar chart ───────────────────────────────────────────────────
+        _categories = ["Utilization", "Low Wait", "Fairness", "Low Fragmentation"]
+        _values = [
+            _utilization / 100,                          # normalize to 0-1
+            max(0, 1 - _avg_wait / 60),                  # invert: lower wait = better
+            _fairness,
+            max(0, 1 - _fragmentation / 50),             # invert: lower frag = better
+        ]
+        _values.append(_values[0])  # close the polygon
+        _categories.append(_categories[0])
 
-    _max_wait = _avg_wait * (2.5 + 3 * _nt)  # throughput creates extreme max waits
-    _max_wait = max(5, min(480, _max_wait))
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatterpolar(
+            r=_values, theta=_categories, fill="toself",
+            line=dict(color=COLORS["BlueLine"], width=2),
+            fillcolor="rgba(0,99,149,0.15)",
+            name="Current policy",
+        ))
+        # Target overlay
+        _fig.add_trace(go.Scatterpolar(
+            r=[0.9, 0.83, 0.85, 0.7, 0.9], theta=_categories, fill="none",
+            line=dict(color=COLORS["GreenLine"], width=1.5, dash="dash"),
+            name="Target",
+        ))
+        _fig.update_layout(
+            height=320,
+            polar=dict(radialaxis=dict(range=[0, 1], tickvals=[0.25, 0.5, 0.75, 1.0])),
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
+            margin=dict(t=30, b=60, l=60, r=60),
+        )
+        apply_plotly_theme(_fig)
 
-    # Jain's fairness index: 1.0 = perfectly fair, 1/N = maximally unfair
-    _fairness = 0.5 + 0.45 * _nf - 0.3 * _nt - 0.1 * _nl
-    _fairness = max(1.0 / _teams, min(1.0, _fairness))
-
-    # Fragmentation: percentage of GPUs stranded
-    _fragmentation = 15 + 20 * _nt - 10 * _nl  # throughput causes more fragmentation
-    _fragmentation = max(5, min(45, _fragmentation))
-
-    # Check if all metrics meet targets
-    _util_ok = _utilization > 90
-    _wait_ok = _avg_wait < 10
-    _fair_ok = _fairness > 0.85
-    _all_green = _util_ok and _wait_ok and _fair_ok
-
-    # Colors
-    _util_color = COLORS["GreenLine"] if _util_ok else (COLORS["OrangeLine"] if _utilization > 75 else COLORS["RedLine"])
-    _wait_color = COLORS["GreenLine"] if _wait_ok else (COLORS["OrangeLine"] if _avg_wait < 30 else COLORS["RedLine"])
-    _fair_color = COLORS["GreenLine"] if _fair_ok else (COLORS["OrangeLine"] if _fairness > 0.7 else COLORS["RedLine"])
-    _frag_color = COLORS["GreenLine"] if _fragmentation < 15 else (COLORS["OrangeLine"] if _fragmentation < 30 else COLORS["RedLine"])
-
-    # ── Radar chart ───────────────────────────────────────────────────────
-    _categories = ["Utilization", "Low Wait", "Fairness", "Low Fragmentation"]
-    _values = [
-        _utilization / 100,                          # normalize to 0-1
-        max(0, 1 - _avg_wait / 60),                  # invert: lower wait = better
-        _fairness,
-        max(0, 1 - _fragmentation / 50),             # invert: lower frag = better
-    ]
-    _values.append(_values[0])  # close the polygon
-    _categories.append(_categories[0])
-
-    _fig = go.Figure()
-    _fig.add_trace(go.Scatterpolar(
-        r=_values, theta=_categories, fill="toself",
-        line=dict(color=COLORS["BlueLine"], width=2),
-        fillcolor="rgba(0,99,149,0.15)",
-        name="Current policy",
-    ))
-    # Target overlay
-    _fig.add_trace(go.Scatterpolar(
-        r=[0.9, 0.83, 0.85, 0.7, 0.9], theta=_categories, fill="none",
-        line=dict(color=COLORS["GreenLine"], width=1.5, dash="dash"),
-        name="Target",
-    ))
-    _fig.update_layout(
-        height=320,
-        polar=dict(radialaxis=dict(range=[0, 1], tickvals=[0.25, 0.5, 0.75, 1.0])),
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
-        margin=dict(t=30, b=60, l=60, r=60),
-    )
-    apply_plotly_theme(_fig)
-
-    # ── Impossibility banner ──────────────────────────────────────────────
-    _impossible_banner = ""
-    if not _all_green:
-        _failing = []
-        if not _util_ok:
-            _failing.append(f"Utilization ({_utilization:.0f}% < 90%)")
-        if not _wait_ok:
-            _failing.append(f"Wait ({_avg_wait:.0f}m > 10m)")
-        if not _fair_ok:
-            _failing.append(f"Fairness ({_fairness:.2f} < 0.85)")
-        _impossible_banner = f"""
+        # ── Impossibility banner ──────────────────────────────────────────
+        if not _all_green:
+            _failing = []
+            if not _util_ok:
+                _failing.append(f"Utilization ({_utilization:.0f}% < 90%)")
+            if not _wait_ok:
+                _failing.append(f"Wait ({_avg_wait:.0f}m > 10m)")
+            if not _fair_ok:
+                _failing.append(f"Fairness ({_fairness:.2f} < 0.85)")
+            _impossible_banner = f"""
         <div style="background:{COLORS['OrangeLL']}; border:1px solid {COLORS['OrangeLine']};
                     border-radius:10px; padding:14px 18px; margin:10px 0;">
             <div style="font-size:0.88rem; font-weight:800; color:{COLORS['OrangeLine']}; margin-bottom:4px;">
@@ -722,9 +642,9 @@ def _(COLORS, apply_plotly_theme, a2_w_throughput, a2_w_fairness, a2_w_latency, 
                 You will find that turning all four metrics green simultaneously is impossible.
             </div>
         </div>
-        """
-    else:
-        _impossible_banner = f"""
+            """
+        else:
+            _impossible_banner = f"""
         <div style="background:{COLORS['GreenLL']}; border:1px solid {COLORS['GreenLine']};
                     border-radius:10px; padding:14px 18px; margin:10px 0;">
             <div style="font-size:0.88rem; font-weight:800; color:{COLORS['GreenLine']};">
@@ -732,10 +652,9 @@ def _(COLORS, apply_plotly_theme, a2_w_throughput, a2_w_fairness, a2_w_latency, 
                 a fragile equilibrium? Try increasing teams or throughput priority.
             </div>
         </div>
-        """
+            """
 
-    mo.vstack([
-        mo.Html(f"""
+        items.append(mo.Html(f"""
         {_impossible_banner}
         <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
                     border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
@@ -747,8 +666,9 @@ def _(COLORS, apply_plotly_theme, a2_w_throughput, a2_w_fairness, a2_w_latency, 
             <div>Weights: Throughput={_wt}% Fairness={_wf}% Latency={_wl}% (normalized: {_nt:.2f}/{_nf:.2f}/{_nl:.2f})</div>
             <div>Teams: {_teams}</div>
         </div>
-        """),
-        mo.Html(f"""
+        """))
+
+        items.append(mo.Html(f"""
         <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
             <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         width:150px; text-align:center; background:white;">
@@ -775,51 +695,43 @@ def _(COLORS, apply_plotly_theme, a2_w_throughput, a2_w_fairness, a2_w_latency, 
                 <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">stranded GPUs</div>
             </div>
         </div>
-        """),
-        mo.ui.plotly(_fig),
-    ])
-    return (_all_green,)
+        """))
 
+        items.append(mo.ui.plotly(_fig))
 
-# ─── ACT2: REVEAL ─────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(partB_prediction, mo):
-    if partB_prediction.value == "B":
-        mo.callout(mo.md(
-            "**Correct.** High utilization requires keeping GPUs busy with large jobs, "
-            "which blocks queues for small jobs (high wait). Low latency requires serving "
-            "small jobs first, which fragments the cluster (low utilization). Fairness "
-            "requires equal access, which may starve the most productive teams. "
-            "Every scheduling policy is a point in this three-dimensional trade-off space."
-        ), kind="success")
-    elif partB_prediction.value == "A":
-        mo.callout(mo.md(
-            "**This is the trap.** Students from OS courses believe scheduling is solved. "
-            "But ML scheduling has unique properties: gang scheduling (all-or-nothing "
-            "allocation), topology sensitivity (NVLink boundaries), and heavy-tailed "
-            "durations. These create conflicts that no single policy resolves."
-        ), kind="warn")
-    elif partB_prediction.value == "C":
-        mo.callout(mo.md(
-            "**Preemption helps but introduces new costs.** Preempting a job that has "
-            "been running for 2 hours since its last checkpoint loses 2 hours of compute. "
-            "Preemption reduces wait for short jobs but increases total waste and hurts "
-            "long-job throughput. It shifts the trade-off, not eliminates it."
-        ), kind="warn")
-    elif partB_prediction.value == "D":
-        mo.callout(mo.md(
-            "**50% utilization eases wait times but fails the utilization target.** "
-            "At $3/GPU-hour, 50% utilization on a 256-GPU cluster wastes "
-            "$3 x 128 x 24 = $9,216/day in idle GPUs. Operations will not accept this."
-        ), kind="warn")
-    return
+        # ── Reveal ───────────────────────────────────────────────────────
+        if partB_prediction.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Correct.** High utilization requires keeping GPUs busy with large jobs, "
+                "which blocks queues for small jobs (high wait). Low latency requires serving "
+                "small jobs first, which fragments the cluster (low utilization). Fairness "
+                "requires equal access, which may starve the most productive teams. "
+                "Every scheduling policy is a point in this three-dimensional trade-off space."
+            ), kind="success"))
+        elif partB_prediction.value == "A":
+            items.append(mo.callout(mo.md(
+                "**This is the trap.** Students from OS courses believe scheduling is solved. "
+                "But ML scheduling has unique properties: gang scheduling (all-or-nothing "
+                "allocation), topology sensitivity (NVLink boundaries), and heavy-tailed "
+                "durations. These create conflicts that no single policy resolves."
+            ), kind="warn"))
+        elif partB_prediction.value == "C":
+            items.append(mo.callout(mo.md(
+                "**Preemption helps but introduces new costs.** Preempting a job that has "
+                "been running for 2 hours since its last checkpoint loses 2 hours of compute. "
+                "Preemption reduces wait for short jobs but increases total waste and hurts "
+                "long-job throughput. It shifts the trade-off, not eliminates it."
+            ), kind="warn"))
+        elif partB_prediction.value == "D":
+            items.append(mo.callout(mo.md(
+                "**50% utilization eases wait times but fails the utilization target.** "
+                "At $3/GPU-hour, 50% utilization on a 256-GPU cluster wastes "
+                "$3 x 128 x 24 = $9,216/day in idle GPUs. Operations will not accept this."
+            ), kind="warn"))
 
-
-# ─── ACT2: MATHPEEK ───────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.accordion({
-        "Governing equations -- fragmentation and the scheduling impossibility": mo.md("""
+        # ── MathPeek ─────────────────────────────────────────────────────
+        items.append(mo.accordion({
+            "Governing equations -- fragmentation and the scheduling impossibility": mo.md("""
         **Fragmentation Ratio**
 
         ```
@@ -849,61 +761,39 @@ def _(mo):
         - J = 1.0: perfectly fair (all teams get equal share)
         - J = 1/N: maximally unfair (one team gets everything)
         - Throughput-optimal policies push J toward 1/N
-        """)
-    })
-    return
+            """)
+        }))
 
+        # ── Reflection ───────────────────────────────────────────────────
+        items.append(partB_reflection)
 
-# ─── ACT2: REFLECTION ─────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    partB_reflection = mo.ui.radio(
-        options={
-            "A) Implement a single 'optimal' scheduling algorithm that maximizes all metrics": "A",
-            "B) Accept the trade-off and provide transparency -- let stakeholders choose which metric to sacrifice": "B",
-            "C) Use AI to predict optimal scheduling decisions": "C",
-            "D) Increase cluster size until all metrics are satisfied": "D",
-        },
-        label="Given the impossibility of simultaneous optimization, what is the best operational approach?",
-    )
-    partB_reflection
-    return (partB_reflection,)
+        if partB_reflection.value is not None:
+            if partB_reflection.value == "B":
+                items.append(mo.callout(mo.md(
+                    "**Correct.** The impossibility is mathematical, not engineering. The best "
+                    "approach is to make the trade-off explicit: provide dashboards showing all "
+                    "three metrics, let stakeholders decide which to sacrifice, and implement "
+                    "policy knobs (preemption thresholds, fairshare weights, backfill aggressiveness) "
+                    "that map to understandable trade-offs."
+                ), kind="success"))
+            else:
+                items.append(mo.callout(mo.md(
+                    "**The impossibility is fundamental.** No algorithm -- AI or otherwise -- can "
+                    "simultaneously maximize utilization, minimize wait, and ensure fairness. "
+                    "The best approach is transparency: make the trade-off visible and let "
+                    "stakeholders choose which metric to sacrifice."
+                ), kind="warn"))
 
+        return mo.vstack(items)
 
-@app.cell(hide_code=True)
-def _(partB_reflection, mo):
-    mo.stop(
-        partB_reflection.value is None,
-        mo.callout(mo.md("Select an answer."), kind="warn"),
-    )
-    if partB_reflection.value == "B":
-        mo.callout(mo.md(
-            "**Correct.** The impossibility is mathematical, not engineering. The best "
-            "approach is to make the trade-off explicit: provide dashboards showing all "
-            "three metrics, let stakeholders decide which to sacrifice, and implement "
-            "policy knobs (preemption thresholds, fairshare weights, backfill aggressiveness) "
-            "that map to understandable trade-offs."
-        ), kind="success")
-    else:
-        mo.callout(mo.md(
-            "**The impossibility is fundamental.** No algorithm -- AI or otherwise -- can "
-            "simultaneously maximize utilization, minimize wait, and ensure fairness. "
-            "The best approach is transparency: make the trade-off visible and let "
-            "stakeholders choose which metric to sacrifice."
-        ), kind="warn")
-    return
+    # ═════════════════════════════════════════════════════════════════════════
+    # SYNTHESIS
+    # ═════════════════════════════════════════════════════════════════════════
 
+    def build_synthesis():
+        items = []
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.vstack([
-        mo.md("---"),
-        mo.Html(f"""
+        items.append(mo.Html(f"""
         <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
                     border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
@@ -930,8 +820,9 @@ def _(mo, COLORS):
                 </div>
             </div>
         </div>
-        """),
-        mo.Html(f"""
+        """))
+
+        items.append(mo.Html(f"""
         <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 280px; background: white;
                         border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
@@ -960,23 +851,36 @@ def _(mo, COLORS):
                 </div>
             </div>
         </div>
-        """),
-        mo.accordion({
+        """))
+
+        items.append(mo.accordion({
             "Self-Assessment": mo.md("""
 1. At 80% utilization, how much worse is ML queue wait (C_s=3) vs web service wait (C_s=1)?
 2. Why can 77 idle GPUs scattered across 12 nodes not schedule a 64-GPU gang-scheduled job?
 3. Why is it impossible to simultaneously maximize utilization AND minimize wait AND ensure fairness?
 
-*If you cannot answer all three from memory, revisit Acts I and II.*
+*If you cannot answer all three from memory, revisit Parts A and B.*
 """)
-        }),
-    ])
+        }))
+
+        return mo.vstack(items)
+
+    # ── Tab composition ──────────────────────────────────────────────────
+    tabs = mo.ui.tabs({
+        "Part A -- The Queuing Wall": build_part_a(),
+        "Part B -- Fragmentation & Utilization Paradox": build_part_b(),
+        "Synthesis": build_synthesis(),
+    })
+    tabs
     return
 
 
-# ─── CELL 21: LEDGER_HUD ─────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: LEDGER_HUD
+# ═══════════════════════════════════════════════════════════════════════════════
+
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, DecisionLog):
     decision_input, decision_ui = DecisionLog()
     return (decision_input, decision_ui)
 
@@ -984,7 +888,6 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partB_reflection,
       ledger, mo, decision_input, decision_ui):
-    _all_green = False
     ledger.save(
         chapter="v2_07",
         design={
@@ -995,7 +898,6 @@ def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partB_reflec
             "partA_reflection": partA_reflection.value or "no_selection",
             "partB_reflection": partB_reflection.value or "no_selection",
             "student_justification": str(decision_input.value),
-            "all_green_achieved": _all_green,
         },
     )
 
@@ -1009,8 +911,8 @@ def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partB_reflec
     <div class="lab-hud">
         <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab 07</span></div>
         <div><span class="hud-label">CHAPTER</span> <span class="hud-value">v2_07 &middot; Fleet Orchestration</span></div>
-        <div><span class="hud-label">ACT I</span> <span class="{'hud-active' if _a1_ok else 'hud-none'}">{"CORRECT" if _a1_ok else "REVIEW"}</span></div>
-        <div><span class="hud-label">ACT II</span> <span class="{'hud-active' if _a2_ok else 'hud-none'}">{"CORRECT" if _a2_ok else "REVIEW"}</span></div>
+        <div><span class="hud-label">PART A</span> <span class="{'hud-active' if _a1_ok else 'hud-none'}">{"CORRECT" if _a1_ok else "REVIEW"}</span></div>
+        <div><span class="hud-label">PART B</span> <span class="{'hud-active' if _a2_ok else 'hud-none'}">{"CORRECT" if _a2_ok else "REVIEW"}</span></div>
         <div><span class="hud-label">TIER</span> <span style="color:{_tier_color}; font-family:var(--font-mono);">{_tier.upper()}</span></div>
     </div>
     """)
