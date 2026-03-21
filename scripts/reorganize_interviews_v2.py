@@ -898,10 +898,15 @@ def write_scope_file(track, scope_info, questions, output_dir):
                     by_section["Additional Topics"].append(q)
 
         # Write sections
+        first_section = True
         for (sec_title, sec_emoji) in scope_info["sections"]:
             qs = by_section.get(sec_title, [])
             if not qs:
                 continue
+
+            if not first_section:
+                lines.append("\n---\n")
+            first_section = False
 
             lines.append(f"\n### {sec_emoji} {sec_title}\n")
 
@@ -921,6 +926,7 @@ def write_scope_file(track, scope_info, questions, output_dir):
         # Additional topics (overflow)
         overflow = by_section.get("Additional Topics", [])
         if overflow:
+            lines.append("\n---\n")
             lines.append("\n### 📎 Additional Topics\n")
             by_level = defaultdict(list)
             for q in overflow:

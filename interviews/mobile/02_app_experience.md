@@ -1165,6 +1165,9 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 
+---
+
+
 ### ⚡ Power & Thermal Management
 
 
@@ -1766,6 +1769,9 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 
+---
+
+
 ### ⚙️ Compilers & Frameworks
 
 
@@ -1969,6 +1975,9 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 
+---
+
+
 ### 🔧 Model Optimization
 
 
@@ -2033,6 +2042,9 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
   📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
   </details>
 </details>
+
+
+---
 
 
 ### 📡 Sensor & Media Pipelines
@@ -2133,6 +2145,9 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
   </details>
 
 </details>
+
+
+---
 
 
 ### 📎 Additional Topics

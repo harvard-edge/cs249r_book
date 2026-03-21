@@ -943,6 +943,9 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
+---
+
+
 ### 🧠 Memory Hierarchy & KV-Cache
 
 
@@ -1879,6 +1882,9 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
+---
+
+
 ### 🔢 Numerical Precision & Quantization
 
 
@@ -2238,6 +2244,9 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
   </details>
 
 </details>
+
+
+---
 
 
 ### 🏗️ Hardware Architecture & Cost
@@ -2837,6 +2846,9 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
+---
+
+
 ### ⚙️ Compilers & Frameworks
 
 
@@ -2927,6 +2939,9 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
+---
+
+
 ### 📊 Data Pipelines
 
 
@@ -2967,6 +2982,9 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
   </details>
 
 </details>
+
+
+---
 
 
 ### 📎 Additional Topics

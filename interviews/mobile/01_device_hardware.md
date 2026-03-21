@@ -1789,6 +1789,9 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 
+---
+
+
 ### 🧠 Memory Systems
 
 
@@ -2913,6 +2916,9 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 
+---
+
+
 ### 🔢 Numerical Precision & Quantization
 
 
@@ -3406,6 +3412,9 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 
+---
+
+
 ### 🏗️ NPU, GPU & Heterogeneous Compute
 
 
@@ -3789,6 +3798,9 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
   </details>
 
 </details>
+
+
+---
 
 
 ### 📎 Additional Topics

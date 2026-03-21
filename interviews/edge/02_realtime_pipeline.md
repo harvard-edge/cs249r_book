@@ -796,6 +796,9 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 
+---
+
+
 ### 📡 Sensor Fusion & Pipelines
 
 
@@ -1400,6 +1403,9 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
   </details>
 
 </details>
+
+
+---
 
 
 ### ⚡ Power & Thermal Management
@@ -2282,6 +2288,9 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 
+---
+
+
 ### 🔧 Model Optimization
 
 
@@ -2388,6 +2397,9 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
   </details>
 
 </details>
+
+
+---
 
 
 ### 📎 Additional Topics

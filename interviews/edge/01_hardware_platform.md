@@ -1305,6 +1305,9 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 
+---
+
+
 ### 🧠 Memory Systems
 
 
@@ -2251,6 +2254,9 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 
+---
+
+
 ### 🔢 Numerical Precision & Quantization
 
 
@@ -2537,6 +2543,9 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
   </details>
 
 </details>
+
+
+---
 
 
 ### 🏗️ Architecture & Heterogeneous Compute
@@ -2879,6 +2888,9 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
   </details>
 
 </details>
+
+
+---
 
 
 ### 📎 Additional Topics

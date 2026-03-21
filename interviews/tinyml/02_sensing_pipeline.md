@@ -1450,6 +1450,9 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 
+---
+
+
 ### ⚡ Power & Energy Management
 
 
@@ -1591,6 +1594,9 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 
+---
+
+
 ### 🔧 Model Optimization
 
 
@@ -1625,6 +1631,9 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
   </details>
 
 </details>
+
+
+---
 
 
 ### 📎 Additional Topics

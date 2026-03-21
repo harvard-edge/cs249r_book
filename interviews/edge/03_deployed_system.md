@@ -1258,6 +1258,9 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
+---
+
+
 ### 🛡️ Monitoring & Reliability
 
 
@@ -1453,6 +1456,9 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
+---
+
+
 ### 🔒 Functional Safety
 
 
@@ -1577,6 +1583,9 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
   </details>
 
 </details>
+
+
+---
 
 
 ### 🔐 Security & Privacy
@@ -1881,6 +1890,9 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
   </details>
 
 </details>
+
+
+---
 
 
 ### 📎 Additional Topics

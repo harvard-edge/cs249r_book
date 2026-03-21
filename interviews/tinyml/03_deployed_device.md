@@ -531,6 +531,9 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 </details>
 
 
+---
+
+
 ### 🌐 Networking & Connectivity
 
 
@@ -624,6 +627,9 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
   </details>
 
 </details>
+
+
+---
 
 
 ### 🔒 Security & Privacy
@@ -722,6 +728,9 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
   </details>
 
 </details>
+
+
+---
 
 
 ### 📎 Additional Topics
