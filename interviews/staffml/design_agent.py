@@ -1,27 +1,14 @@
-import json
-
 def generate_feedback(persona):
-    feedback_profiles = {
-        "Staff Engineer (End User)": [
-            "The Cmd+Enter shortcut is great, but the text area is too small. When I write a full architectural diagnosis, I need more vertical space to see my math.",
-            "The 'Knowledge Check' (L1/L2) feels too disconnected from the 'Terminal' UI. It feels like two different apps. Unify the visual language.",
-            "I want to see the 'Key Equation' explicitly highlighted if I miss it."
-        ],
-        "UX Designer (Product)": [
-            "The layout is a bit boxy. The 3-panel layout (Sidebar | Scenario | Terminal) is good, but the middle panel (Scenario) needs more breathing room (max-width).",
-            "The Star Trap modal is a bit abrupt. It should feel like a 'Level Up' celebration before asking for the star.",
-            "The typography hierarchy in the 'Ground Truth' section is slightly muddy. The 'Anti-Pattern' and 'Ground Truth' headers need to pop more."
-        ],
-        "Open Source Maintainer (Growth)": [
-            "Where is the 'Edit on GitHub' button? If someone finds a typo in the math, they should be able to click one button to open a PR on the specific markdown file.",
-            "The 'StaffML' logo is great, but we need a clear link back to 'MLSysBook' in the header so people know this is part of the textbook ecosystem."
+    if persona == "UX Expert (Logo & Branding)":
+        return [
+            "The current logo `> StaffML _` is strong, but the spacing feels slightly disjointed. The `>` chevron and the `_` cursor need to feel like they belong to the word, not just floating next to it.",
+            "In modern dev tool branding (like Vercel, Linear, or Raycast), the 'mark' (the icon) usually stands alone or is very tightly integrated. Right now, the `>` and the `_` are competing for attention.",
+            "If the goal is to expand to `StaffX` (StaffSys, StaffSec), the word 'Staff' should be the anchor (heaviest weight), and 'ML' should be the variable suffix (lighter weight or different color).",
+            "Try dropping the `_` cursor. The `>` chevron alone is a stronger, cleaner, more scalable favicon for a tab or an app icon."
         ]
-    }
-    return feedback_profiles.get(persona, ["Looking good."])
+    return []
 
 if __name__ == "__main__":
-    print("--- Simulating Cross-Functional Feedback Loop ---")
-    for persona in ["Staff Engineer (End User)", "UX Designer (Product)", "Open Source Maintainer (Growth)"]:
-        print(f"\n[{persona}]")
-        for comment in generate_feedback(persona):
-            print(f" - {comment}")
+    print("--- UX Expert Logo Critique ---")
+    for comment in generate_feedback("UX Expert (Logo & Branding)"):
+        print(f" - {comment}")

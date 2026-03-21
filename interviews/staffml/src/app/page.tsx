@@ -9,6 +9,7 @@ import clsx from "clsx";
 import dynamic from "next/dynamic";
 import { usePyodide } from "@/lib/pyodide";
 import { motion, AnimatePresence } from "framer-motion";
+import HardwareConfigurator from "@/components/HardwareConfigurator";
 
 // Dynamically import Mermaid to avoid SSR/prerendering errors
 const MermaidRenderer = dynamic(() => import("@/components/MermaidRenderer"), { ssr: false });
@@ -401,7 +402,7 @@ export default function Home() {
               onClick={() => setShowStarTrap(false)}
               className="mt-6 text-xs font-mono text-textTertiary hover:text-white transition-colors"
             >
-              > I ALREADY STARRED IT _
+              &gt; I ALREADY STARRED IT _
             </button>
           </motion.div>
         </motion.div>
@@ -414,14 +415,19 @@ export default function Home() {
         <div className="h-24 flex flex-col justify-center px-8 border-b border-border bg-background/50 relative overflow-hidden group">
           <div className="absolute inset-0 bg-gradient-to-r from-accentBlue/0 via-accentBlue/5 to-accentBlue/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
           
-          <div className="flex items-baseline relative z-10 tracking-tight select-none">
-            <span className="text-accentBlue text-[1.6rem] font-mono font-bold mr-2">></span>
-            <span className="text-white text-2xl font-bold font-sans tracking-tight">Staff</span>
-            <span className="text-white text-2xl font-medium font-sans tracking-tight">ML</span>
-            <span className="text-accentBlue text-[1.6rem] font-mono font-bold ml-1 animate-pulse">_</span>
+          <div className="flex items-center relative z-10 tracking-tight select-none">
+            {/* The Chevron - Optically aligned and sized to match the cap-height of 'Staff' */}
+            <span 
+              className="text-accentBlue font-mono font-black mr-2.5 drop-shadow-[0_0_12px_rgba(59,130,246,0.6)]" 
+              style={{ fontSize: '1.6rem', lineHeight: '1', transform: 'translateY(-1px)' }}
+            >
+              &gt;
+            </span>
+            <span className="text-white text-2xl font-extrabold font-sans tracking-tight">Staff</span>
+            <span className="text-white/70 text-2xl font-medium font-sans tracking-tight">ML</span>
           </div>
           
-          <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-[9px] text-textTertiary hover:text-accentBlue transition-colors mt-1.5 uppercase tracking-[0.25em] font-mono relative z-10 pl-1 flex items-center gap-1 group-hover:underline">
+          <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-[9px] text-textTertiary hover:text-accentBlue transition-colors mt-2 uppercase tracking-[0.25em] font-mono relative z-10 pl-[1.8rem] flex items-center gap-1 group-hover:underline">
             <BookOpen className="w-3 h-3 inline-block" /> Powered by MLSysBook
           </a>
         </div>
@@ -611,6 +617,12 @@ export default function Home() {
                 
                 {isSimulationMode ? (
                   <>
+                    <HardwareConfigurator 
+                       onStateChange={(state) => {
+                         // Build diagnosis string automatically based on hardware choices
+                         setDiagnosis(`I am configuring the system with:\n- ${state.compute} Compute\n- ${state.network} Interconnect\n- ${state.memory} Storage\n\n# Provide additional napkin math here...\n`);
+                       }} 
+                    />
                     <div className="relative flex-1 group min-h-[250px]">
                       <div className="absolute -inset-0.5 bg-gradient-to-br from-accentBlue/20 to-transparent rounded-lg blur opacity-0 group-focus-within:opacity-100 transition duration-500"></div>
                       <textarea
