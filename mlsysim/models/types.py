@@ -141,6 +141,17 @@ class TransformerWorkload(Workload):
         
         return (weight_mem + grad_mem + opt_mem + act_mem).to(ureg.GB)
 
+    @property
+    def training_gpu_days(self):
+        """
+        Backward-compatibility alias for older book chapters.
+        """
+        if self.training_ops is not None:
+            return self.training_ops
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute 'training_gpu_days'"
+        )
+
     def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
         ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
         weights = self.size_in_bytes(precision)

@@ -4,13 +4,36 @@
 
 ## Directory structure
 
-| Path | Purpose |
-|------|---------|
-| **`shared/`** | Content used by **both** Volume I and Volume II (e.g. notation, conventions). |
-| **`frontmatter/`** | Site-level front matter (about, acknowledgements, Socratiq, etc.). |
-| **`index.qmd`** | Root book index (under `frontmatter/` in some configs). |
-| **`vol1/`** | Volume I: Introduction to Machine Learning Systems. |
-| **`vol2/`** | Volume II: Machine Learning Systems at Scale. |
+<table>
+  <thead>
+    <tr>
+      <th width="25%">Path</th>
+      <th width="75%">Purpose</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b><code>shared/</code></b></td>
+      <td>Content used by <b>both</b> Volume I and Volume II (e.g. notation, conventions).</td>
+    </tr>
+    <tr>
+      <td><b><code>frontmatter/</code></b></td>
+      <td>Site-level front matter (about, acknowledgements, Socratiq, etc.).</td>
+    </tr>
+    <tr>
+      <td><b><code>index.qmd</code></b></td>
+      <td>Root book index (under <code>frontmatter/</code> in some configs).</td>
+    </tr>
+    <tr>
+      <td><b><code>vol1/</code></b></td>
+      <td>Volume I: Introduction to Machine Learning Systems.</td>
+    </tr>
+    <tr>
+      <td><b><code>vol2/</code></b></td>
+      <td>Volume II: Machine Learning Systems at Scale.</td>
+    </tr>
+  </tbody>
+</table>
 
 ## Required non-volume paths
 

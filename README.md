@@ -10,187 +10,161 @@
 
 <div align="center">
 
+<!-- Build Status -->
 <p align="center">
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&label=Book&logo=githubactions&cacheSeconds=300" alt="Book"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&label=TinyTorch&logo=python&cacheSeconds=300" alt="TinyTorch"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-preview-dev.yml?branch=dev&label=Kits&logo=arduino&cacheSeconds=300" alt="Kits"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/labs-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/labs-preview-dev.yml?branch=dev&label=Labs&logo=jupyter&cacheSeconds=300" alt="Labs"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/mlsysim-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/mlsysim-validate-dev.yml?branch=dev&label=MLSys%C2%B7im&logo=python&cacheSeconds=300" alt="MLSys·im"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/slides-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/slides-validate-dev.yml?branch=dev&label=Slides&logo=googleslides&cacheSeconds=300" alt="Slides"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/instructors-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/instructors-validate-dev.yml?branch=dev&label=Instructors&logo=googleclassroom&cacheSeconds=300" alt="Instructors"></a>
+  <img src="https://img.shields.io/github/last-commit/harvard-edge/cs249r_book/dev?label=Updated&logo=git&cacheSeconds=300" alt="Updated">
+</p>
 
-  [![Book](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&label=Book&logo=githubactions&cacheSeconds=300)](https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml)
-  [![TinyTorch](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&label=TinyTorch&logo=python&cacheSeconds=300)](https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml)
-  ![Updated](https://img.shields.io/github/last-commit/harvard-edge/cs249r_book/dev?label=Updated&logo=git&cacheSeconds=300)
-
-  [![License](https://img.shields.io/badge/License-CC--BY--NC--ND%204.0-blue.svg)](https://github.com/harvard-edge/cs249r_book/blob/dev/LICENSE.md)
-  [![Cite](https://img.shields.io/badge/Cite-IEEE%202024-blue?logo=ieee)](#-citation--license)
-  [![Fund Us](https://img.shields.io/badge/Fund%20Us-Open%20Collective-blue.svg?logo=open-collective)](https://opencollective.com/mlsysbook)
-
+<!-- Meta -->
+<p align="center">
+  <a href="https://github.com/harvard-edge/cs249r_book/blob/dev/LICENSE.md"><img src="https://img.shields.io/badge/License-CC--BY--NC--ND%204.0-blue.svg" alt="License"></a>
+  <a href="#citation--license"><img src="https://img.shields.io/badge/Cite-IEEE%202024-blue?logo=ieee" alt="Cite"></a>
+  <a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Fund%20Us-Open%20Collective-blue.svg?logo=open-collective" alt="Fund Us"></a>
 </p>
 
 <p align="center">
-
-  <!-- Reader Navigation -->
-  **[📘 Volume I](https://mlsysbook.ai/vol1/)** •
-  **[📙 Volume II *(Summer 2026)*](https://mlsysbook.ai/vol2/)** •
-  **[Tiny🔥Torch](https://mlsysbook.ai/tinytorch/)** •
-  **[🌐 Ecosystem](https://mlsysbook.org)**
-
+  <b><a href="https://mlsysbook.ai">📘 Textbook (current edition)</a></b> •
+  <b>📙 Vol I + Vol II <i>(Summer 2026)</i></b> •
+  <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
+  <b><a href="mlsysim/README.md">🔮 MLSys·im <i>(dev)</i></a></b> •
+  <b><a href="interviews/README.md">💼 Interview Playbook <i>(dev)</i></a></b> •
+  <b><a href="https://mlsysbook.org">🌐 Ecosystem</a></b>
 </p>
 
-📚 **Hardcopy edition coming 2026 with MIT Press.**
+<p align="center">📚 <b>Hardcopy edition coming 2026 with MIT Press.</b></p>
 
 </div>
 
 ---
 
-> [!NOTE]
-> **You are on the `dev` branch.** This is the default branch and where active development happens.
-> I am restructuring the textbook from a single volume into two focused, tighter volumes. New content is being added, existing content is being refined, and diagrams are being updated throughout.
-> For the last stable release, see the [`main` branch](https://github.com/harvard-edge/cs249r_book/tree/main).
-
-## Branch Guide
-
-This repository uses `dev` as the default branch. Here is how the branches relate to the book:
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          BRANCH STRUCTURE                               │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│   main (last stable release)                                            │
-│   ├── Single-volume textbook (published and available)                  │
-│   └── Stable PDF, EPUB, and online edition                              │
-│         │                                                               │
-│         │  ┌──────────────────────────────────────────────────────┐     │
-│         └──┤  RESTRUCTURING IN PROGRESS                           │     │
-│            │  Refocusing into two tighter volumes                 │     │
-│            └────────────────────┬─────────────────────────────────┘     │
-│                                 │                                       │
-│   dev (default branch, you are here)                                    │
-│   ├── 📘 Volume I: Introduction to Machine Learning Systems             │
-│   │      Foundations for single-machine ML (1 to 8 GPUs)                │
-│   │      Status: Content complete, undergoing editorial polish          │
-│   │                                                                     │
-│   └── 📙 Volume II: Machine Learning Systems at Scale                   │
-│          Distributed systems and production infrastructure              │
-│          Status: Active development, chapters being written             │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-| Branch | What It Contains | Status |
-|--------|-----------------|--------|
-| [`main`](https://github.com/harvard-edge/cs249r_book/tree/main) | Last stable single-volume release | Stable, available for reading |
-| **`dev`** (you are here) | Two-volume restructured textbook | Under active development |
-
----
-
-## Working in the Open
-
-I develop this textbook in the open. Like an artist who paints in a public studio, I do my work where anyone can watch, learn from the process, and contribute.
-
-What this means for you:
-
-- **Volume I** content is mature and undergoing final editorial polish. It is ready for classroom use.
-- **Volume II** is actively being written. Chapters, diagrams, and sections are in various stages of completion. Expect rough edges, placeholder figures, and sections under construction. This is normal. You are seeing the book being built.
-- **The transition from one volume to two** means some cross-references, navigation, and structure are still being updated.
-
-I believe open development produces better textbooks. Every commit, every revision, every editorial decision is visible. If you want the polished, stable version, use the [`main` branch](https://github.com/harvard-edge/cs249r_book/tree/main). If you want to see where the book is headed, or help shape it, you are in the right place.
-
----
-
 ## Mission
 
-**The world is rushing to build AI systems. It is not engineering them.**
+<div align="center">
+  <blockquote>
+    <b>The world is rushing to build AI systems. It is not engineering them.</b>
+  </blockquote>
+</div>
 
-That gap is what I mean by AI engineering.
+That gap is what we mean by AI engineering.
 
-**AI engineering is the discipline of building efficient, reliable, safe, and robust intelligent systems that operate in the real world, not just models in isolation.**
+**AI engineering is the discipline of building efficient, reliable, safe, and robust intelligent systems that operate in the real world, not just models in isolation.** Our mission is to establish AI engineering as a foundational discipline alongside software engineering and computer engineering, by teaching how to design, build, and evaluate end-to-end intelligent systems.
 
-**The mission of this project:** Establish AI engineering as a foundational discipline, alongside software engineering and computer engineering, by teaching how to design, build, and evaluate end to end intelligent systems. The long term impact of AI will be shaped by engineers who can turn ideas into working, dependable systems.
-
----
-
-## Start Here
-
-This repository is the open learning stack for AI systems engineering: textbook source, TinyTorch, hardware kits, and upcoming co-labs that connect principles to runnable code and real devices. Choose a path based on your goal.
-
-**READ** Start with the [textbook](https://mlsysbook.ai/book/):
-- [📘 Volume I: Introduction to Machine Learning Systems](https://mlsysbook.ai/vol1/) covers ML basics, development, optimization, and operations. Available now.
-- [📙 Volume II: Machine Learning Systems at Scale](https://mlsysbook.ai/vol2/) covers distributed systems, production infrastructure, and responsible AI at scale. Coming Summer 2026.
-
-**BUILD** Start TinyTorch with the [getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Begin with Module 01 and work up from CNNs to transformers and the MLPerf benchmarks.
-
-**DEPLOY** Pick a [hardware kit](https://mlsysbook.ai/kits/) and run the labs on Arduino, Raspberry Pi, and other edge devices.
-
-**SIMULATE** Explore the [mlsysim Developer Guide](mlsysim/docs/_build/index.html) to understand the physics of ML infrastructure through our first-order analytical platform.
-
-**CONNECT** Say hello in [Discussions](https://github.com/harvard-edge/cs249r_book/discussions). We will do our best to reply.
+**Our goal:** Help **100,000 learners** master ML Systems this year, and reach **1 million by 2030**.
 
 ---
 
-## The Learning Stack
+## Why One Repository
 
-The learning stack below shows how the textbook connects to hands on work and deployment. Read the textbook, then pick your path:
+I designed this as a single integrated curriculum, not a collection of independent projects. The textbook teaches the theory. TinyTorch makes you *build* the internals. The hardware kits force you to confront *real* constraints. The simulator lets you reason about infrastructure you can't afford to rent. Each piece exists because I found that students who only read don't internalize, and students who only code don't generalize.
 
-```
-┌───────────────────────────────────────────────────────────────────────────────┐
-│                                                                               │
-│                           MACHINE LEARNING SYSTEMS                            │
-│                              Read the Textbook                                │
-│                                                                               │
-│                    Theory • Concepts • Best Practices                         │
-│                                                                               │
-└───────────────────────────────────────┬───────────────────────────────────────┘
-                                        │
-                          ┌─────────────┼─────────────┐
-                          │             │             │
-                          ▼             ▼             ▼
-┌───────────────────────────────────────────────────────────────────────────────┐
-│                            HANDS-ON ACTIVITIES                                │
-│                           (pick one or all)                                   │
-│                                                                               │
-│     ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐     │
-│     │                 │      │                 │      │                 │     │
-│     │    SOFTWARE     │      │    TINYTORCH    │      │    HARDWARE     │     │
-│     │    CO-LABS      │      │    FRAMEWORK    │      │      LABS       │     │
-│     │                 │      │                 │      │                 │     │
-│     │ EXPLORE         │      │ BUILD           │      │ DEPLOY          │     │
-│     │                 │      │                 │      │                 │     │
-│     │ Run controlled  │      │ Understand      │      │ Engineer under  │     │
-│     │ experiments on  │      │ frameworks by   │      │ real constraints│     │
-│     │ latency, memory,│      │ implementing    │      │ memory, power,  │     │
-│     │ energy, cost    │      │ them            │      │ timing, safety  │     │
-│     │                 │      │                 │      │                 │     │
-│     │ (coming 2026)   │      │                 │      │ Arduino, Pi     │     │
-│     └─────────────────┘      └─────────────────┘      └─────────────────┘     │
-│                                                                               │
-│           EXPLORE                  BUILD                   DEPLOY             │
-│                                                                               │
-└───────────────────────────────────────┬───────────────────────────────────────┘
-                                        │
-                                        ▼
-┌───────────────────────────────────────────────────────────────────────────────┐
-│                                                                               │
-│                                  AI OLYMPICS                                  │
-│                                 Prove Mastery                                 │
-│                                                                               │
-│       Compete across all tracks • University teams • Public leaderboards      │
-│                                                                               │
-│                                (coming 2026)                                  │
-│                                                                               │
-└───────────────────────────────────────────────────────────────────────────────┘
-```
+<div align="center">
+  <blockquote>
+    <b>The repository is the curriculum.</b>
+  </blockquote>
+</div>
 
-| | Component | What You Do | Link |
-|--|-----------|-------------|------|
-| **READ** | [📖 Textbook](https://mlsysbook.ai/book/) | Understand ML systems concepts | [book/](book/README.md) |
-| | [📘 Volume I](https://mlsysbook.ai/vol1/) | Build, Optimize, Deploy | |
-| | [📙 Volume II](https://mlsysbook.ai/vol2/) | Scale, Distribute, Govern | *(Summer 2026)* |
-| **EXPLORE** | 🔮 Software Co-Labs | Run controlled experiments on latency, memory, energy, cost | *Coming 2026* |
-| **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch/) | Understand frameworks by implementing them | [tinytorch/](tinytorch/README.md) |
-| **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits/) | Engineer under real constraints: memory, power, timing, safety | [kits/](kits/README.md) |
-| **PROVE** | 🏆 AI Olympics | Compete and benchmark across all tracks | *Coming 2026* |
+A growing community of contributors helps improve every part of it: fixing errors, sharpening explanations, testing on new hardware. Their work makes this better for everyone, and I'm grateful for every pull request.
 
-**What each path teaches:**
-- **EXPLORE** teaches *why* — Understand tradeoffs. Change batch sizes, precision, model architectures and see how latency, memory, and accuracy shift.
-- **BUILD** teaches *how* — Understand internals. Implement autograd, optimizers, and attention from scratch to see how TensorFlow and PyTorch actually work.
-- **DEPLOY** teaches *where* — Understand constraints. Face real memory limits, power budgets, and latency requirements on actual hardware.
+---
+
+## The Curriculum
+
+Every component connects. The textbook gives you the mental models. The labs let you explore trade-offs interactively, powered by MLSys·im, the modeling engine for infrastructure you can't physically access. TinyTorch makes you build the machinery yourself. The hardware kits put you face-to-face with real constraints. The interview playbook tests whether you actually understand it. And the instructor hub, slides, and newsletter give educators everything they need to bring this into a classroom.
+
+<p align="center">
+  <img src="README/curriculum-map.svg?v=2" alt="Curriculum map showing how the textbook, labs, Tiny Torch, hardware kits, MLSys im, and interview playbook connect" width="760">
+</p>
+
+### For Students
+
+<table>
+  <thead>
+    <tr>
+      <th width="5%"></th>
+      <th width="15%">Component</th>
+      <th width="50%">Role in the Curriculum</th>
+      <th width="30%">Link</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center">📖</td>
+      <td><b>Textbook</b></td>
+      <td>Two-volume MIT Press textbook. The theory, the mental models, and the quantitative reasoning that everything else builds on.</td>
+      <td><a href="https://mlsysbook.ai">Current edition</a> · Vol I + II <i>(Summer 2026)</i></td>
+    </tr>
+    <tr>
+      <td align="center">🔬</td>
+      <td><b>Labs</b></td>
+      <td>Interactive Marimo notebooks where you explore trade-offs from the textbook: change a parameter, see what breaks, build intuition. Powered by MLSys·im under the hood.</td>
+      <td><a href="labs/README.md">Read more</a> <i>(dev)</i></td>
+    </tr>
+    <tr>
+      <td align="center">🔥</td>
+      <td><b>Tiny🔥Torch</b></td>
+      <td>Build your own ML framework from scratch across 20 progressive modules. You don't understand a system until you've built one.</td>
+      <td><a href="https://mlsysbook.ai/tinytorch/">Get started</a></td>
+    </tr>
+    <tr>
+      <td align="center">🛠️</td>
+      <td><b>Hardware Kits</b></td>
+      <td>Deploy ML to Arduino, Raspberry Pi, and Jetson. Real memory limits, real power budgets, real latency.</td>
+      <td><a href="https://mlsysbook.ai/kits">Browse labs</a></td>
+    </tr>
+    <tr>
+      <td align="center">🔮</td>
+      <td><b>MLSys·im</b></td>
+      <td>Calculate memory bottlenecks, network saturation, and scheduling limits at infrastructure scales you can't physically access.</td>
+      <td><a href="mlsysim/README.md">Read more</a> <i>(dev)</i></td>
+    </tr>
+    <tr>
+      <td align="center">💼</td>
+      <td><b>Interview Playbook</b></td>
+      <td>1,000+ systems design questions for AI infrastructure roles. Silicon physics, distributed infra, production serving, and ML operations.</td>
+      <td><a href="interviews/README.md">Start drilling</a> <i>(dev)</i></td>
+    </tr>
+  </tbody>
+</table>
+
+### For Educators
+
+<table>
+  <thead>
+    <tr>
+      <th width="5%"></th>
+      <th width="15%">Component</th>
+      <th width="50%">What It Provides</th>
+      <th width="30%">Link</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center">🎓</td>
+      <td><b>Instructor Hub</b></td>
+      <td>The AI Engineering Blueprint: two 12-week syllabi, pedagogy guide, assessment rubrics, and a TA handbook.</td>
+      <td><a href="instructors/index.qmd">View hub</a></td>
+    </tr>
+    <tr>
+      <td align="center">🎬</td>
+      <td><b>Lecture Slides</b></td>
+      <td>Beamer slide decks for every chapter, with four theme variants. Drop into your course and teach.</td>
+      <td><a href="slides/README.md">Browse decks</a> <i>(dev)</i></td>
+    </tr>
+    <tr>
+      <td align="center">📬</td>
+      <td><b>Newsletter</b></td>
+      <td>Updates on the curriculum, new chapters, and what the community is building.</td>
+      <td><a href="https://buttondown.email/mlsysbook">Subscribe</a></td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 
@@ -198,168 +172,208 @@ The learning stack below shows how the textbook connects to hands on work and de
 
 This textbook teaches you to think at the intersection of machine learning and systems engineering. Each chapter bridges algorithmic concepts with the infrastructure that makes them work in practice.
 
-### The ML ↔ Systems Bridge
-
-| ML Concept | Systems Concept | What You Learn |
-|------------|-----------------|----------------|
-| Model parameters | Memory constraints | How to fit large models on resource-limited devices |
-| Inference latency | Hardware acceleration | How GPUs, TPUs, and accelerators execute neural networks |
-| Training convergence | Compute efficiency | How mixed-precision and optimization techniques reduce cost |
-| Model accuracy | Quantization and pruning | How to compress models while preserving performance |
-| Data requirements | Pipeline infrastructure | How to build efficient data loading and preprocessing |
-| Model deployment | MLOps practices | How to monitor, version, and update models in production |
-| Privacy constraints | On-device learning | How to train and adapt models without sending data to the cloud |
+<table>
+  <thead>
+    <tr>
+      <th width="45%">You know...</th>
+      <th width="10%" align="center"></th>
+      <th width="45%">You will learn...</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>How to train a model</td>
+      <td align="center">→</td>
+      <td><b>How training scales across GPU clusters</b></td>
+    </tr>
+    <tr>
+      <td>That quantization shrinks models</td>
+      <td align="center">→</td>
+      <td><b>How INT8 math maps to silicon</b></td>
+    </tr>
+    <tr>
+      <td>What a transformer is</td>
+      <td align="center">→</td>
+      <td><b>Why KV-cache dominates memory at inference</b></td>
+    </tr>
+    <tr>
+      <td>Models run on GPUs</td>
+      <td align="center">→</td>
+      <td><b>How schedulers balance latency vs throughput</b></td>
+    </tr>
+    <tr>
+      <td>Edge devices have limits</td>
+      <td align="center">→</td>
+      <td><b>How to co-design models and hardware</b></td>
+    </tr>
+  </tbody>
+</table>
 
 ### Book Structure
 
-This textbook started as a single volume. I am restructuring it into two focused, tighter volumes. The restructuring is not simply splitting the original in half. It is an editorial refinement: sharpening each volume's focus, removing overlap, and ensuring each stands on its own. Volume I is complete and available now. Volume II is actively being developed and will be published Summer 2026. The `main` branch still holds the original single-volume edition. This `dev` branch is where the two-volume restructuring is happening.
+The textbook follows the Hennessy & Patterson pedagogical model across two volumes:
 
-| Volume | Title | Focus | Status |
-|--------|-------|-------|--------|
-| **[Volume I](https://mlsysbook.ai/vol1/)** | Introduction to Machine Learning Systems | One machine, one to eight accelerators. Foundations, optimization, and deployment. | Available now |
-| **[Volume II](https://mlsysbook.ai/vol2/)** | Machine Learning Systems at Scale | Many machines, thousands of accelerators. Distributed training, infrastructure, and production at scale. | Coming Summer 2026 |
-
-The [full textbook](https://mlsysbook.ai/book/) combines both volumes for comprehensive coverage.
-
-#### Volume I: Introduction to Machine Learning Systems
-
-| Part | Focus | Chapters |
-|------|-------|----------|
-| **I. Foundations** | Core concepts | Introduction, ML Systems, ML Workflow, Data Engineering |
-| **II. Development** | Building blocks | Neural Computation, Architectures, Frameworks, Training |
-| **III. Optimization** | Making it fast | Data Selection, Model Compression, HW Acceleration, Benchmarking |
-| **IV. Deployment** | Making it work | Model Serving, MLOps, Responsible Engineering |
-
-### Volume II: Machine Learning Systems at Scale *(Coming Summer 2026)*
-
-> [!CAUTION]
-> **Volume II is a work in progress.** All 16 chapters exist and the structure is locked in, but the content within each chapter is still being written and revised. I share it openly because I believe in transparent development.
-
-Volume II picks up where Volume I ends, moving from a single machine to fleets of machines. It covers the mathematical and algorithmic demand for scale, how to build the physical infrastructure that meets it, how to serve models to billions of users, and how to do all of this safely and responsibly.
-
-| Part | Focus | Chapters |
-|------|-------|----------|
-| **I. Foundations of Scale** | The logic of distributed systems | Introduction to Scale, Distributed Training, Collective Communication, Fault Tolerance |
-| **II. Building the Fleet** | Physical infrastructure | Compute Infrastructure, Network Fabrics, Data Storage, Fleet Orchestration |
-| **III. Deployment at Scale** | Serving at global scale | Inference at Scale, Performance Engineering, Edge Intelligence, Ops at Scale |
-| **IV. Production Concerns** | Safety and governance | Security & Privacy, Robust AI, Sustainable AI, Responsible AI |
+<table>
+  <thead>
+    <tr>
+      <th width="5%"></th>
+      <th width="15%">Volume</th>
+      <th width="25%">Theme</th>
+      <th width="55%">Scope</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center">📗</td>
+      <td><b>Volume I</b></td>
+      <td>Build, Optimize, Deploy</td>
+      <td>Single-machine ML systems (1–8 GPUs). Foundations, optimization, and deployment on one node.</td>
+    </tr>
+    <tr>
+      <td align="center">📘</td>
+      <td><b>Volume II</b></td>
+      <td>Scale, Distribute, Govern</td>
+      <td>Distributed systems at production scale. Multi-machine infrastructure, fault tolerance, and governance.</td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 
-## Design Philosophy
+## Quick Start
 
-This is a living textbook. I keep it updated as the field grows, with community input along the way.
+<table>
+  <tbody>
+    <tr>
+      <td width="7%" align="center"><h3>①</h3></td>
+      <td width="93%"><b>Read the textbook.</b> Start with the <a href="https://mlsysbook.ai">current edition</a>. It's the foundation for everything else.</td>
+    </tr>
+    <tr>
+      <td align="center"><h3>②</h3></td>
+      <td><b>Pick a hands-on path.</b> <a href="https://mlsysbook.ai/tinytorch/">Build a framework</a> (TinyTorch), <a href="labs/README.md">explore trade-offs</a> (Labs), or <a href="https://mlsysbook.ai/kits">deploy to real hardware</a> (Kits).</td>
+    </tr>
+    <tr>
+      <td align="center"><h3>③</h3></td>
+      <td><b>Test yourself.</b> Drill the <a href="interviews/README.md">interview playbook</a>: 1,000+ systems design questions across cloud, edge, mobile, and TinyML.</td>
+    </tr>
+    <tr>
+      <td align="center"><h3>④</h3></td>
+      <td><b>Teach it.</b> Adopt the curriculum with the <a href="instructors/index.qmd">AI Engineering Blueprint</a> and <a href="slides/README.md">lecture slides</a>.</td>
+    </tr>
+  </tbody>
+</table>
 
-AI headlines move fast. The engineering principles underneath move much more slowly. Parallelism, memory hierarchies, reliability mathematics, and quantization theory are as relevant today as they were a decade ago and will remain so a decade from now. This textbook is built around those enduring foundations.
+---
 
-Whether you are reading a chapter, running a lab, or sharing feedback, you are helping make these ideas more accessible to the next learner.
+## Branch Guide
 
-### Research to Teaching Loop
+> [!NOTE]
+> **You are on the `dev` branch.** Active development happens here. For the last stable release, see the [`main` branch](https://github.com/harvard-edge/cs249r_book/tree/main).
 
-The same loop drives both research and teaching: define the system problem, build a reference implementation, benchmark it, then turn it into curriculum and tooling so others can reproduce and extend it.
+<table>
+  <thead>
+    <tr>
+      <th width="5%"></th>
+      <th width="15%">Branch</th>
+      <th width="45%">What's on it</th>
+      <th width="35%">Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center">🟢</td>
+      <td><b><code>main</code></b><br><a href="https://mlsysbook.ai">mlsysbook.ai</a></td>
+      <td>Single-volume textbook (current edition)</td>
+      <td>Live — this is what readers see today.</td>
+    </tr>
+    <tr>
+      <td align="center">🟡</td>
+      <td><b><code>dev</code></b><br><i>← you are here</i></td>
+      <td>
+        <b>Volume I</b> — two-volume split (content complete, editorial polish)<br>
+        <b>Volume II</b> — At Scale (active development)<br>
+        <b>Curriculum</b> — TinyTorch, Kits, MLSys·im, Labs, Interview Playbook
+      </td>
+      <td>
+        TinyTorch and Hardware Kits are live.<br>
+        MLSys·im, Labs, and Interview Playbook are in development.
+      </td>
+    </tr>
+  </tbody>
+</table>
 
-| Loop Step | Research Artifacts | Teaching Artifacts |
-|-----------|-------------------|-------------------|
-| **Measure** | Benchmarks, suites, metrics | Benchmarking chapter, assignments |
-| **Build** | Reference systems, compilers, runtimes | TinyTorch modules, co-labs |
-| **Deploy** | Hardware targets, constraints, reliability | Hardware labs, kits |
+<p align="center"><i>The two-volume split replaces the single-volume edition at launch.</i></p>
 
 ---
 
 ## Support This Work
 
-We are working toward **1 million learners by 2030** so that AI engineering becomes a shared, teachable discipline, not a collection of isolated practices. Every star, share, and contribution helps move this effort forward.
-
-### Why GitHub Stars Matter
-
 <div align="center">
 
-*What gets measured gets improved.*
-
-Each star is a learner, educator, or supporter who believes AI systems should be engineered with rigor and real world constraints in mind.
-
-[![Stars](https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold)](https://github.com/harvard-edge/cs249r_book/stargazers)
-
-[![Star History Chart](https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date)](https://star-history.com/#harvard-edge/cs249r_book&Date)
-
-1 learner → 10 learners → 100 learners → 1,000 learners → **10,000 learners** → 100,000 learners → **1M learners**
+<a href="https://github.com/harvard-edge/cs249r_book/stargazers"><img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold" alt="Stars"></a>
+&nbsp;&nbsp;
+<a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Fund-Open%20Collective-blue.svg?style=for-the-badge&logo=open-collective" alt="Open Collective"></a>
 
 </div>
 
-Stars are not the goal. They are a signal.
-
-A visible, growing community makes it easier for universities, foundations, and industry partners to adopt this material, donate hardware, and fund workshops. That momentum lowers the barrier for the next institution, the next classroom, and the next cohort of learners.
-
-Support raised through this signal flows into [Open Collective](https://opencollective.com/mlsysbook) and funds concrete outcomes such as TinyML4D workshops, hardware kits for underserved classrooms, and the infrastructure required to keep this resource free and open.
-
-One click can unlock the next classroom, the next contributor, and the next generation of AI engineers.
-
-### Fund the Mission
-
-<div align="center">
-
-All contributions go to [Open Collective](https://opencollective.com/mlsysbook), a transparent fund that supports educational outreach.
-
-[![Open Collective](https://img.shields.io/badge/💝%20Support%20AI%20Education-Open%20Collective-blue.svg?style=for-the-badge)](https://opencollective.com/mlsysbook)
-
-</div>
-
----
-
-## Community and Resources
-
-| Resource | Description |
-|---|---|
-| [📖 **Full Textbook**](https://mlsysbook.ai/book/) | Complete interactive online textbook (both volumes) |
-| [📘 **Volume I**](https://mlsysbook.ai/vol1/) | Build, Optimize, Deploy |
-| [📙 **Volume II**](https://mlsysbook.ai/vol2/) | Scale, Distribute, Govern *(Summer 2026)* |
-| [🧮 **MLSys·im**](https://mlsysbook.ai/mlsysim/) | First-principles analytical simulator |
-| [🔥 **TinyTorch**](https://mlsysbook.ai/tinytorch/) | Build ML frameworks from scratch |
-| [🔧 **Hardware Kits**](https://mlsysbook.ai/kits/) | Deploy to Arduino, Raspberry Pi, edge devices |
-| [🌐 **Ecosystem**](https://mlsysbook.org) | Resources, workshops, and community |
-| [💬 **Discussions**](https://github.com/harvard-edge/cs249r_book/discussions) | Questions and ideas |
+<table>
+  <tbody>
+    <tr>
+      <td width="50%" align="center">
+        <b>Star the repo</b><br>
+        Stars signal to universities and foundations that this work matters. They directly fund workshops and hardware kits for underserved classrooms.<br><br>
+        <a href="https://star-history.com/#harvard-edge/cs249r_book&Date"><img src="https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date" alt="Star History Chart" width="400"></a><br>
+        100 → 1,000 → <b>10,000</b> → 100,000 → <b>1M learners by 2030</b>
+      </td>
+      <td width="50%" align="center">
+        <b>Fund the mission</b><br>
+        All contributions go to <a href="https://opencollective.com/mlsysbook">Open Collective</a>, a transparent fund for educational outreach. Every dollar goes to reaching more students.<br><br>
+        <a href="https://opencollective.com/mlsysbook"><img src="https://opencollective.com/mlsysbook/tiers/badge.svg" alt="Open Collective"></a>
+      </td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 
 ## Contributing
 
-Contributions to the book, TinyTorch, and hardware kits are welcome!
-
-| I want to... | Go here |
-|--------------|---------|
-| Fix a typo or improve a chapter | [book/docs/CONTRIBUTING.md](book/docs/CONTRIBUTING.md) |
-| Add a TinyTorch module or fix a bug | [tinytorch/CONTRIBUTING.md](tinytorch/CONTRIBUTING.md) |
-| Improve hardware labs | [kits/README.md](kits/README.md) |
-| Report an issue | [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) |
-| Ask a question | [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions) |
-
----
-
-## Citation & License
-
-### Citation
-```bibtex
-@inproceedings{reddi2024mlsysbook,
-  title        = {MLSysBook.AI: Principles and Practices of Machine Learning Systems Engineering},
-  author       = {Reddi, Vijay Janapa},
-  booktitle    = {2024 International Conference on Hardware/Software Codesign and System Synthesis (CODES+ ISSS)},
-  pages        = {41--42},
-  year         = {2024},
-  organization = {IEEE},
-  url          = {https://mlsysbook.org}
-}
-```
-
-### License
-
-This project uses a dual-license structure:
-
-| Component | License | What It Means |
-|-----------|---------|---------------|
-| **Book content** | [CC BY-NC-ND 4.0](LICENSE.md) | Share freely with attribution; no commercial use; no derivatives |
-| **TinyTorch code** | [Apache 2.0](tinytorch/LICENSE) | Use, modify, and distribute freely; includes patent protection |
-
-The textbook content (chapters, figures, explanations) is educational material that should circulate with attribution and without commercial exploitation. The software framework is a tool designed to be easy for anyone to use, modify, or integrate into their own projects.
+<table>
+  <thead>
+    <tr>
+      <th width="5%"></th>
+      <th width="40%">I want to...</th>
+      <th width="55%">Go here</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center">📖</td>
+      <td><b>Fix a typo or improve a chapter</b></td>
+      <td><a href="book/docs/CONTRIBUTING.md">Textbook contributing guide</a></td>
+    </tr>
+    <tr>
+      <td align="center">🔥</td>
+      <td><b>Add a TinyTorch module or fix a bug</b></td>
+      <td><a href="tinytorch/CONTRIBUTING.md">TinyTorch contributing guide</a></td>
+    </tr>
+    <tr>
+      <td align="center">🛠️</td>
+      <td><b>Improve hardware labs</b></td>
+      <td><a href="kits/README.md">Hardware kits guide</a></td>
+    </tr>
+    <tr>
+      <td align="center">🐛</td>
+      <td><b>Report an issue</b></td>
+      <td><a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub Issues</a></td>
+    </tr>
+    <tr>
+      <td align="center">💬</td>
+      <td><b>Ask a question</b></td>
+      <td><a href="https://github.com/harvard-edge/cs249r_book/discussions">GitHub Discussions</a></td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 
@@ -380,9 +394,9 @@ Thanks goes to these wonderful people who have contributed to making this resour
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧠 🔎 🧪 🛠️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Mjrovai"><img src="https://avatars.githubusercontent.com/Mjrovai?v=4?s=50" width="50px;" alt="Marcelo Rovai"/><br /><sub><b>Marcelo Rovai</b></sub></a><br />🧑‍💻 🎨 🧪</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/GabrielAmazonas"><img src="https://avatars.githubusercontent.com/GabrielAmazonas?v=4?s=50" width="50px;" alt="Gabriel Amazonas"/><br /><sub><b>Gabriel Amazonas</b></sub></a><br />🪲 ✍️ 🧠</td>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/hzeljko"><img src="https://avatars.githubusercontent.com/hzeljko?v=4?s=50" width="50px;" alt="Zeljko Hrcek"/><br /><sub><b>Zeljko Hrcek</b></sub></a><br />🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/kai4avaya"><img src="https://avatars.githubusercontent.com/kai4avaya?v=4?s=50" width="50px;" alt="Kai Kleinbard"/><br /><sub><b>Kai Kleinbard</b></sub></a><br />🧑‍💻 🛠️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/didier-durand"><img src="https://avatars.githubusercontent.com/didier-durand?v=4?s=50" width="50px;" alt="Didier Durand"/><br /><sub><b>Didier Durand</b></sub></a><br />✍️ 🪲</td>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/hzeljko"><img src="https://avatars.githubusercontent.com/hzeljko?v=4?s=50" width="50px;" alt="Zeljko Hrcek"/><br /><sub><b>Zeljko Hrcek</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/jasonjabbour"><img src="https://avatars.githubusercontent.com/jasonjabbour?v=4?s=50" width="50px;" alt="Jason Jabbour"/><br /><sub><b>Jason Jabbour</b></sub></a><br />✍️</td>
     </tr>
     <tr>
@@ -451,7 +465,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
     <tr>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/BrunoScaglione"><img src="https://avatars.githubusercontent.com/BrunoScaglione?v=4?s=50" width="50px;" alt="Bruno Scaglione"/><br /><sub><b>Bruno Scaglione</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/Allen-Kuang"><img src="https://avatars.githubusercontent.com/Allen-Kuang?v=4?s=50" width="50px;" alt="Allen-Kuang"/><br /><sub><b>Allen-Kuang</b></sub></a><br />✍️</td>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/4ad8cdf19eb3b666ace97d3eedb19278?d=identicon&s=100?v=4?s=50" width="50px;" alt="Tess314"/><br /><sub><b>Tess314</b></sub></a><br />✍️</td>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/Tess314"><img src="https://www.gravatar.com/avatar/4ad8cdf19eb3b666ace97d3eedb19278?d=identicon&s=100?v=4?s=50" width="50px;" alt="Tess314"/><br /><sub><b>Tess314</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/taunoe"><img src="https://avatars.githubusercontent.com/taunoe?v=4?s=50" width="50px;" alt="Tauno Erik"/><br /><sub><b>Tauno Erik</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/gnodipac886"><img src="https://avatars.githubusercontent.com/gnodipac886?v=4?s=50" width="50px;" alt="gnodipac886"/><br /><sub><b>gnodipac886</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/serco425"><img src="https://avatars.githubusercontent.com/serco425?v=4?s=50" width="50px;" alt="Sercan Aygün"/><br /><sub><b>Sercan Aygün</b></sub></a><br />✍️</td>
@@ -564,6 +578,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/sotoblanco"><img src="https://avatars.githubusercontent.com/u/46135649?v=4?v=4?s=50" width="50px;" alt="Pastor Soto"/><br /><sub><b>Pastor Soto</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/salmanmkc"><img src="https://avatars.githubusercontent.com/u/32169182?v=4?v=4?s=50" width="50px;" alt="Salman Chishti"/><br /><sub><b>Salman Chishti</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/adityamulik"><img src="https://avatars.githubusercontent.com/u/10626835?v=4?v=4?s=50" width="50px;" alt="Aditya Mulik"/><br /><sub><b>Aditya Mulik</b></sub></a><br />✍️</td>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=50" width="50px;" alt="asgalon"/><br /><sub><b>asgalon</b></sub></a><br />✍️</td>
     </tr>
   </tbody>
 </table>
@@ -571,6 +586,25 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
 <!-- TINYTORCH-CONTRIBUTORS-END -->
+
+---
+
+### 💼 Interview Hub Contributors
+
+<!-- INTERVIEWS-CONTRIBUTORS-START -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧠 🎨 ✍️</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+<!-- INTERVIEWS-CONTRIBUTORS-END -->
 
 ---
 
@@ -618,8 +652,8 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 <div align="center">
 
-**[⭐ Star us on GitHub](https://github.com/harvard-edge/cs249r_book#support-this-work) • [✉️ Subscribe](https://buttondown.email/mlsysbook) • [💬 Join discussions](https://github.com/harvard-edge/cs249r_book/discussions) • [🌐 Visit mlsysbook.ai](https://mlsysbook.ai/)**
+<b><a href="https://buttondown.email/mlsysbook">✉️ Subscribe</a> • <a href="https://github.com/harvard-edge/cs249r_book/discussions">💬 Join discussions</a> • <a href="https://mlsysbook.ai/">🌐 Visit mlsysbook.ai</a></b>
 
-**Made with ❤️ for AI engineers**<br>
-*in the making, around the world* 🌎
+<b>Made with ❤️ for AI engineers</b><br>
+<i>in the making, around the world</i> 🌎
 </div>

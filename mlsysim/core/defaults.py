@@ -5,6 +5,7 @@ for your specific scenario. Every value cites its source.
 """
 
 from .units import USD
+from .pedagogy import SystemAssumption
 
 # --- Reliability (Component MTTF) ---
 # Mean Time To Failure for datacenter-grade components.
@@ -81,6 +82,12 @@ MFU_TRAINING_HIGH = 0.50           # Upper bound for excellent training MFU
 MFU_INFERENCE_BATCH1 = 0.05        # Inference at batch size 1 (memory-bound)
 MFU_INFERENCE_BATCHED = 0.40       # Inference at large batch size
 
+# --- Software Tax ---
+# Latency overhead for a single kernel launch on a modern GPU.
+# Source: NVIDIA (2024), "CUDA C++ Programming Guide."
+KERNEL_LAUNCH_LATENCY_US = 15.0    # 15 μs typical launch overhead
+FRAMEWORK_LAYER_TAX_MS = 0.01      # 10 μs typical framework tax per model layer (assumes graph compilation/fused kernels)
+
 # Scaling efficiency η = T_1 / (N × T_N)
 SCALING_EFF_32GPU = 0.90           # Near-linear regime
 SCALING_EFF_256GPU = 0.70          # Communication starts to bite
@@ -95,8 +102,21 @@ OVERHEAD_MAINTENANCE = 0.05        # ~5% for rolling upgrades, maintenance windo
 
 # --- Scaling Laws (Chinchilla Physics) ---
 # Source: Hoffmann et al. (2022), "Training Compute-Optimal Large Language Models"
-CHINCHILLA_TOKENS_PER_PARAM = 20   # Compute-optimal token count (D ≈ 20P)
-CHINCHILLA_COMPUTE_CONSTANT = 6    # C ≈ 6PD (FLOPs per parameter per token)
+CHINCHILLA_TOKENS_PER_PARAM = SystemAssumption(
+    20,
+    name="Compute-Optimal Token Ratio",
+    description="The optimal number of training tokens per model parameter (D ≈ 20P) to minimize loss for a given compute budget.",
+    citation="Hoffmann et al. (2022). Training Compute-Optimal Large Language Models.",
+    url="https://arxiv.org/abs/2203.15556"
+)
+
+CHINCHILLA_COMPUTE_CONSTANT = SystemAssumption(
+    6,
+    name="Training Compute Constant (C ≈ 6PD)",
+    description="The multiplier for calculating total training FLOPs. 2 FLOPs per parameter for the forward pass, and 4 FLOPs for the backward pass.",
+    citation="Hoffmann et al. (2022). Training Compute-Optimal Large Language Models.",
+    url="https://arxiv.org/abs/2203.15556"
+)
 
 # --- Critical Batch Size (McCandlish et al. 2018) ---
 # Source: McCandlish et al. (2018), "An Empirical Model of Large-Batch Training"
@@ -158,3 +178,31 @@ REFERENCE_MFU_SUSTAINED = 0.40
 # NOT derived from Abadi et al. (2016) — calibrated to match reported
 # slowdowns: ~3x at ε=1.0, ~1.2x at ε=10.0.
 DP_SGD_SLOWDOWN_COEFFICIENT = 2.0
+
+# --- Engine Default Overrides ---
+
+# Default scaling efficiency for parallel clusters
+DEFAULT_SCALING_EFFICIENCY = SystemAssumption(
+    0.90,
+    name="Scaling Efficiency (η)",
+    description="The efficiency of parallel scaling. A value of 0.90 means 90% of theoretical linear speedup is achieved.",
+    citation="Common industry rule-of-thumb for highly optimized clusters."
+)
+
+# Default communication overlap efficiency (e.g., Megatron-LM can overlap ~85% of communication)
+DEFAULT_OVERLAP_EFFICIENCY = SystemAssumption(
+    0.85,
+    name="Communication Overlap Efficiency",
+    description="The fraction of network communication time that can be successfully hidden behind compute operations.",
+    citation="Shoeybi et al. (2019). Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism.",
+    url="https://arxiv.org/abs/1909.08053"
+)
+
+# Default compute efficiency (MFU baseline)
+DEFAULT_COMPUTE_EFFICIENCY = SystemAssumption(
+    0.50,
+    name="Baseline Model FLOPs Utilization (MFU)",
+    description="A highly optimized large language model typically achieves around 50% MFU due to communication overhead and memory bandwidth constraints.",
+    citation="Chowdhery et al. (2022). PaLM: Scaling Language Modeling with Pathways.",
+    url="https://arxiv.org/abs/2204.02311"
+)

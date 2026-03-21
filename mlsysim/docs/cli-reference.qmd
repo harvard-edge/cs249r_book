@@ -1,0 +1,291 @@
+---
+title: "CLI Reference"
+subtitle: "Every command, every flag, with real examples."
+---
+
+MLSys·im ships an agent-ready CLI built on [Typer](https://typer.tiangolo.com/) and [Rich](https://rich.readthedocs.io/). It follows the [3-Tier Command Mapping](architecture.qmd): `eval` maps to Models, `optimize` maps to Optimizers, and `zoo` maps to the registries.
+
+::: {.callout-tip}
+## Output Formats
+Every command supports `-o json` for machine-parseable output and `-o markdown` for reports. The default is `text` (human-readable Rich tables). AI agents should always use `-o json`.
+:::
+
+---
+
+## Quick Examples
+
+```bash
+# What's in the Zoo?
+mlsysim zoo hardware
+mlsysim zoo models
+
+# Single-node roofline: is Llama-3 8B memory-bound on H100?
+mlsysim eval Llama3_8B H100
+
+# Same thing, but with batch size 32 and fp8 precision
+mlsysim eval Llama3_8B H100 --batch-size 32 --precision fp8
+
+# Full cluster evaluation from a YAML spec
+mlsysim eval cluster.yaml
+
+# Machine-readable JSON for CI/CD pipelines
+mlsysim eval Llama3_8B H100 -o json
+
+# Export JSON Schema for IDE autocompletion
+mlsysim schema --type hardware > hardware.schema.json
+```
+
+---
+
+## Exit Codes
+
+The CLI uses semantic exit codes so scripts and CI pipelines can react programmatically:
+
+| Code | Meaning | Example |
+|:-----|:--------|:--------|
+| `0` | Success | Analysis completed, all assertions passed |
+| `1` | Bad input | Unknown model name, malformed YAML, missing required flag |
+| `2` | Physics violation | OOM — model does not fit in memory at the given precision |
+| `3` | SLA violation | A `constraints.assert` check in the YAML failed |
+
+```bash
+mlsysim eval Llama3_70B T4 --batch-size 1
+# Exit code 2: OOM — 140 GB model weights exceed 16 GB T4 memory
+echo $?  # → 2
+```
+
+---
+
+## Global Options
+
+```
+mlsysim [OPTIONS] COMMAND [ARGS]...
+```
+
+| Flag | Description | Default |
+|:-----|:-----------|:--------|
+| `-o, --output` | Output format: `text`, `json`, `markdown` | `text` |
+| `--install-completion` | Install shell completion (bash, zsh, fish) | — |
+| `--show-completion` | Print completion script to stdout | — |
+| `--help` | Show help and exit | — |
+
+---
+
+## `mlsysim zoo`
+
+Explore the built-in registries (the MLSys Zoo).
+
+```
+mlsysim zoo [CATEGORY]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|:---------|:-----------|
+| `CATEGORY` | `hardware` or `models` |
+
+**Examples:**
+
+```bash
+# List all hardware in the Zoo with specs
+mlsysim zoo hardware
+
+# List all models with parameter counts and FLOPs
+mlsysim zoo models
+
+# JSON output for scripting
+mlsysim zoo hardware -o json
+```
+
+---
+
+## `mlsysim eval`
+
+Evaluate the analytical physics of an ML system. This is the primary command — it runs the roofline analysis and returns bottleneck, latency, throughput, and memory usage.
+
+```
+mlsysim eval [OPTIONS] TARGET [HARDWARE]
+```
+
+**Arguments:**
+
+| Argument | Description | Required |
+|:---------|:-----------|:---------|
+| `TARGET` | Model name (e.g., `Llama3_8B`) or path to `mlsys.yaml` | Yes |
+| `HARDWARE` | Hardware name (e.g., `H100`) — required when TARGET is a model name | Conditional |
+
+**Options:**
+
+| Flag | Description | Default |
+|:-----|:-----------|:--------|
+| `-b, --batch-size` | Batch size | `1` |
+| `-p, --precision` | Numerical precision: `fp32`, `fp16`, `fp8`, `int8`, `int4` | `fp16` |
+| `-e, --efficiency` | Model FLOPs Utilization (0.0–1.0) | `0.5` |
+
+**Examples:**
+
+```bash
+# Quick check: is ResNet-50 memory-bound on A100?
+mlsysim eval ResNet50 A100
+
+# LLM inference at batch 1 (typical serving scenario)
+mlsysim eval Llama3_8B H100 --batch-size 1 --precision fp16
+
+# Quantized inference
+mlsysim eval Llama3_8B H100 --batch-size 32 --precision int8 --efficiency 0.35
+
+# Full cluster evaluation with SLA assertions
+mlsysim eval cluster.yaml
+
+# JSON for CI/CD — fails with exit code 3 if SLA assertions fail
+mlsysim eval cluster.yaml -o json
+```
+
+### YAML Cluster Evaluation
+
+When `TARGET` is a YAML file, `eval` runs the full 3-lens scorecard (Feasibility, Performance, Macro) including distributed training, economics, and sustainability analysis.
+
+```yaml
+version: "1.0"
+workload:
+  name: "Llama3_70B"
+  batch_size: 4096
+hardware:
+  name: "H100"
+  nodes: 64
+ops:
+  region: "Quebec"
+  duration_days: 14.0
+constraints:
+  assert:
+    - metric: "performance.latency"
+      max: 50.0
+```
+
+---
+
+## `mlsysim schema`
+
+Export JSON Schema for configuration files. Feed these to your IDE for autocompletion or to an LLM agent for structured generation.
+
+```
+mlsysim schema [OPTIONS]
+```
+
+**Options:**
+
+| Flag | Description |
+|:-----|:-----------|
+| `--type` | Schema type: `hardware`, `workload`, or `plan` |
+
+**Examples:**
+
+```bash
+# Get the hardware YAML schema for IDE autocompletion
+mlsysim schema --type hardware > hardware.schema.json
+
+# Get the workload schema
+mlsysim schema --type workload > workload.schema.json
+
+# Get the full cluster plan schema (for mlsys.yaml files)
+mlsysim schema --type plan > plan.schema.json
+```
+
+---
+
+## `mlsysim optimize`
+
+Search the design space for optimal configurations. Each subcommand maps to an Optimizer in the 3-Tier architecture.
+
+```
+mlsysim optimize COMMAND [ARGS]...
+```
+
+### `mlsysim optimize parallelism`
+
+Find the optimal (TP, PP, DP) split to maximize Model FLOPs Utilization.
+
+```
+mlsysim optimize parallelism CONFIG_FILE
+```
+
+| Argument | Description | Required |
+|:---------|:-----------|:---------|
+| `CONFIG_FILE` | Path to `mlsys.yaml` with fleet definition | Yes |
+
+**Example:**
+
+```bash
+# Find the best parallelism strategy for a 70B model on 256 H100s
+mlsysim optimize parallelism cluster.yaml
+```
+
+### `mlsysim optimize batching`
+
+Find the maximum safe batch size that satisfies a P99 latency SLA.
+
+```
+mlsysim optimize batching [OPTIONS] CONFIG_FILE
+```
+
+| Flag | Description | Required |
+|:-----|:-----------|:---------|
+| `--sla-ms` | P99 latency SLA in milliseconds | Yes |
+| `--qps` | Arrival rate in queries per second | Yes |
+
+**Example:**
+
+```bash
+# Max batch size for 50ms P99 at 100 QPS
+mlsysim optimize batching cluster.yaml --sla-ms 50 --qps 100
+```
+
+### `mlsysim optimize placement`
+
+Find the optimal datacenter region to minimize TCO and carbon footprint.
+
+```
+mlsysim optimize placement [OPTIONS] CONFIG_FILE
+```
+
+| Flag | Description | Default |
+|:-----|:-----------|:--------|
+| `--carbon-tax` | Carbon tax penalty in $/ton CO₂ | `100.0` |
+
+**Example:**
+
+```bash
+# Find cheapest region with $150/ton carbon penalty
+mlsysim optimize placement cluster.yaml --carbon-tax 150
+```
+
+---
+
+## `mlsysim audit`
+
+Profile a workload against the Iron Law and report which wall binds.
+
+```
+mlsysim audit [OPTIONS]
+```
+
+| Flag | Description |
+|:-----|:-----------|
+| `--workload` | Workload name to audit |
+
+---
+
+## Bring Your Own YAML
+
+Instead of using registry names, you can pass custom hardware or workload YAML files directly to `eval`:
+
+```bash
+# Custom chip spec against a Zoo model
+mlsysim eval Llama3_8B ./my_custom_chip.yaml --batch-size 32
+
+# Both custom
+mlsysim eval ./my_model.yaml ./my_chip.yaml
+```
+
+See [Getting Started — Bring Your Own YAML](getting-started.qmd#bring-your-own-yaml-byoy) for the YAML format.

@@ -14,10 +14,12 @@ registered in pint's registry, not just a Python variable.
 import sys
 import os
 
-# Add book/quarto to path (works from any working directory)
+# Add repo root to path so mlsysim is importable (works from any working directory)
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-_quarto_dir = os.path.dirname(_script_dir)
-sys.path.insert(0, _quarto_dir)
+_book_dir = os.path.dirname(_script_dir)          # book/
+_repo_root = os.path.dirname(_book_dir)            # repo root (contains mlsysim/)
+sys.path.insert(0, _repo_root)
+sys.path.insert(0, _book_dir)
 
 from mlsysim.core.constants import *
 from mlsysim.core.formulas import *

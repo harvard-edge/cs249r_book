@@ -6,7 +6,11 @@ from mlsysim.cli.exceptions import ExitCode, exit_with_code, error_shield
 from mlsysim.cli.renderers import render_optimization
 from mlsysim.core.solver import ParallelismOptimizer, BatchingOptimizer, PlacementOptimizer
 
-optimize_app = typer.Typer(help="[Tier 3] Search the design space for optimal configurations.", no_args_is_help=True)
+optimize_app = typer.Typer(
+    help="[Tier 3] Search the design space for optimal configurations.", 
+    no_args_is_help=True,
+    rich_markup_mode="markdown"
+)
 
 @optimize_app.command("parallelism")
 def optimize_parallelism(
@@ -37,8 +41,7 @@ def optimize_parallelism(
             efficiency=schema.hardware.efficiency
         )
         
-        is_json = output_format == "json"
-        render_optimization("3D Parallelism", result, is_json)
+        render_optimization("3D Parallelism", result, output_format)
         
     exit_with_code(ExitCode.SUCCESS)
 
@@ -73,8 +76,7 @@ def optimize_batching(
             efficiency=schema.hardware.efficiency
         )
         
-        is_json = output_format == "json"
-        render_optimization("Batching vs. SLA", result, is_json)
+        render_optimization("Batching vs. SLA", result, output_format)
         
     exit_with_code(ExitCode.SUCCESS)
 
@@ -109,7 +111,6 @@ def optimize_placement(
             mfu=schema.hardware.efficiency
         )
         
-        is_json = output_format == "json"
-        render_optimization(f"Global Placement (Tax: ${carbon_tax}/ton)", result, is_json)
+        render_optimization(f"Global Placement (Tax: ${carbon_tax}/ton)", result, output_format)
         
     exit_with_code(ExitCode.SUCCESS)
