@@ -23,13 +23,17 @@ class DifferentialExplainer:
             if not hasattr(b_prof, "latency") or not hasattr(p_prof, "latency"):
                 return "Cannot perform differential analysis: missing latency metrics."
 
-            b_lat = b_prof.latency.m_as("ms")
-            p_lat = p_prof.latency.m_as("ms")
+            # We know it has latency via the hasattr check. Cast to Any to bypass pyright's dict inference.
+            b_prof_any: Any = b_prof
+            p_prof_any: Any = p_prof
+            
+            b_lat = getattr(b_prof_any, "latency").m_as("ms")
+            p_lat = getattr(p_prof_any, "latency").m_as("ms")
             speedup = b_lat / p_lat if p_lat > 0 else 0
 
             # Bottleneck string matching can be tricky depending on how it's formatted in the engine
-            b_neck = b_prof.bottleneck
-            p_neck = p_prof.bottleneck
+            b_neck = getattr(b_prof_any, "bottleneck", "Unknown")
+            p_neck = getattr(p_prof_any, "bottleneck", "Unknown")
             
             # Normalize to simple "Memory" or "Compute"
             b_is_mem = "memory" in str(b_neck).lower()

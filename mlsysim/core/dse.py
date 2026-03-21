@@ -68,8 +68,14 @@ class DSE:
                 return float('inf') if self.objective.direction == 'minimize' else -float('inf')
         
         try:
+            if current is None:
+                return float('inf') if self.objective.direction == 'minimize' else -float('inf')
+                
             # Handle pint Quantities if needed
-            return current.magnitude if hasattr(current, 'magnitude') else float(current)
+            val = getattr(current, 'magnitude', current)
+            if val is None:
+                return float('inf') if self.objective.direction == 'minimize' else -float('inf')
+            return float(val)
         except (ValueError, TypeError):
             return float('inf') if self.objective.direction == 'minimize' else -float('inf')
 
