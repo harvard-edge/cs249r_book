@@ -132,10 +132,22 @@ model = Sequential([
 
 **MLP vs CNN comparison** (fair setup):
 
-| Architecture | Batch Size | Epochs | Updates | Final Accuracy | Loss Decrease |
-|--------------|------------|--------|---------|----------------|---------------|
-| MLP          | 32         | 25     | 775     | 82.0%          | 52.3%         |
-| CNN          | 32         | 25     | 775     | 82.0%          | 68.1%         |
+<table>
+<thead>
+<tr>
+<th width="20%"><b>Architecture</b></th>
+<th width="15%">Batch Size</th>
+<th width="10%">Epochs</th>
+<th width="12%">Updates</th>
+<th width="18%">Final Accuracy</th>
+<th width="15%">Loss Decrease</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>MLP</b></td><td>32</td><td>25</td><td>775</td><td>82.0%</td><td>52.3%</td></tr>
+<tr><td><b>CNN</b></td><td>32</td><td>25</td><td>775</td><td>82.0%</td><td>68.1%</td></tr>
+</tbody>
+</table>
 
 **Key insights**:
 - Same final accuracy on 8×8 images (too small for CNNs to shine)
@@ -279,13 +291,24 @@ pytest tests/milestones/test_learning_verification.py::test_transformer_learning
 
 ## 📊 What Each Test Verifies
 
-| Milestone | Loss ↓ | Accuracy | Gradients | Weights Updated |
-|-----------|--------|----------|-----------|-----------------|
-| Perceptron | >50% | >90% | 2/2 | ✅ |
-| XOR | >50% | >90% | 8/8 | ✅ |
-| MLP Digits | >50% | >80% | 6/6 | ✅ |
-| CNN | >50% | >80% | 6/6 | ✅ |
-| Transformer | >50% | 100% | 19/19 | ✅ |
+<table>
+<thead>
+<tr>
+<th width="20%"><b>Milestone</b></th>
+<th width="15%">Loss ↓</th>
+<th width="15%">Accuracy</th>
+<th width="20%">Gradients</th>
+<th width="20%">Weights Updated</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>Perceptron</b></td><td>>50%</td><td>>90%</td><td>2/2</td><td>✅</td></tr>
+<tr><td><b>XOR</b></td><td>>50%</td><td>>90%</td><td>8/8</td><td>✅</td></tr>
+<tr><td><b>MLP Digits</b></td><td>>50%</td><td>>80%</td><td>6/6</td><td>✅</td></tr>
+<tr><td><b>CNN</b></td><td>>50%</td><td>>80%</td><td>6/6</td><td>✅</td></tr>
+<tr><td><b>Transformer</b></td><td>>50%</td><td>100%</td><td>19/19</td><td>✅</td></tr>
+</tbody>
+</table>
 
 ## 🐛 Common Issues
 

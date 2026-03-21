@@ -3,133 +3,131 @@ import marimo
 __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LAB 02: THE INTERCONNECT WALL
-#
-# Volume II, Chapter 2: Compute Infrastructure
-#
-# Core invariant: The interconnect hierarchy creates bandwidth cliffs.
-# NVLink (900 GB/s) is 18× faster than PCIe Gen4 (50 GB/s per GPU).
-# Crossing the node boundary causes a 4–9× additional bandwidth drop.
-# This "interconnect wall" determines whether distributed training is feasible.
-#
-# Structure:
-#   Act I  — The Interconnect Cliff (12–15 min)
-#     Stakeholder: Infra Architect comparing NVLink DGX vs PCIe servers
-#     Instruments: Bandwidth explorer with model size, batch, interconnect type
-#     Prediction-vs-reality overlay after instruments run
-#     Reflection: Why AllReduce volume = 2× model size
-#
-#   Act II — The Multi-Node Scaling Wall (20–25 min)
-#     Stakeholder: ML Infra Lead scaling from 1 DGX node to 16 nodes
-#     Instruments: Multi-node scaling analyzer with IB link count
-#     Failure state: >100% overhead triggers danger callout
-#     Reflection: Best remedy for inter-node bandwidth bottleneck
-#
-# 2 Contexts: Single-node (NVLink) vs Multi-node (InfiniBand)
-#
-# Design Ledger: saves context, interconnect, nodes, model size,
-#                comm overhead, predictions, decisions.
-# ─────────────────────────────────────────────────────────────────────────────
 
-
-# ─── CELL 0: SETUP (hide_code=False — leave visible) ────────────────────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
+    import math
     from pathlib import Path
-    import plotly.graph_objects as go
     import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
+        await micropip.install(
+            "../../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
+        )
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
+    import plotly.graph_objects as go
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    import mlsysim
+    from mlsysim.core.defaults import (
+        GPU_MTTF_HOURS,
+        INFINIBAND_NDR_BW_GBS,
+        PUE_BEST_AIR,
+        DEFAULT_KWH_PRICE,
+        ANNUAL_MAINTENANCE_RATIO,
+        MFU_INFERENCE_BATCH1,
+    )
+    from mlsysim.core.constants import (
+        ureg,
+        H100_FLOPS_FP16_TENSOR,
+        H100_MEM_BW,
+        H100_MEM_CAPACITY,
+        H100_TDP,
+        A100_FLOPS_FP16_TENSOR,
+        A100_MEM_BW,
+        A100_MEM_CAPACITY,
+        B200_FLOPS_FP16_TENSOR,
+        B200_MEM_BW,
+        B200_MEM_CAPACITY,
+        V100_FLOPS_FP16_TENSOR,
+        V100_MEM_BW,
+        NVLINK_H100_BW,
+        PCIE_GEN5_BW,
+        NVME_SEQUENTIAL_BW,
+    )
 
-    # ── Hardware constants (all from @sec-compute-infrastructure) ───────────
-    # Bandwidth figures
-    NVLINK4_BW_GBS      = 900   # NVLink4 bidirectional per DGX H100 node, NVIDIA spec
-    PCIE_GEN4_BW_GBS    = 50    # PCIe Gen4 ×16 per GPU, NVIDIA P2P effective BW
-    IB_HDR200_BW_GBS    = 400   # InfiniBand HDR200 peak bidirectional (200 Gbps × 2 directions)
-    IB_HDR200_EFF_GBS   = 50    # InfiniBand HDR200 effective per-port AllReduce bandwidth
-                                 # HDR200 = 200 Gbps = 25 GB/s raw; ~50 GB/s effective with
-                                 # bidirectional pipelining (reduce-scatter + allgather overlap)
-                                 # Source: @sec-compute-infrastructure bandwidth hierarchy table
+    # Extract scalar values for chart use
+    H100_TFLOPS = H100_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
+    H100_BW_GBS = H100_MEM_BW.m_as("GB/s")
+    H100_RAM_GB = H100_MEM_CAPACITY.m_as("GB")
+    H100_TDP_W = H100_TDP.m_as("W")
+    H100_RIDGE = H100_TFLOPS * 1000 / H100_BW_GBS  # FLOPs/Byte
 
-    # H100 compute specs
-    H100_TFLOPS_FP16   = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
-    H100_RAM_GB        = 80     # H100 SXM5 HBM3e capacity, NVIDIA spec
+    A100_TFLOPS = A100_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
+    A100_BW_GBS = A100_MEM_BW.m_as("GB/s")
+    B200_TFLOPS = B200_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
+    B200_BW_GBS = B200_MEM_BW.m_as("GB/s")
+    V100_TFLOPS = V100_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
+    V100_BW_GBS = V100_MEM_BW.m_as("GB/s")
 
-    # FP16 bytes per parameter
-    BYTES_PER_PARAM    = 2      # FP16 = 2 bytes/parameter
-
-    # Calibrated compute constant: K_COMP × params_b × batch = compute_time_s
-    # Calibrated so that 70B params × batch 32 = 2.1 s (spec reference point)
-    # Derivation: 2.1 = (6 × 70e9 × seq_90 × 32) / (989e12 × 0.45), seq_90 ≈ 90 tokens
-    # Equivalent to: K_COMP = 2.1 / (70 × 32) = 9.375e-4
-    K_COMP = 2.1 / (70.0 * 32.0)   # s / (B_params × batch)
+    NVLINK_GBS = NVLINK_H100_BW.m_as("GB/s")
+    PCIE_GBS = PCIE_GEN5_BW.m_as("GB/s")
+    IB_NDR_GBS = INFINIBAND_NDR_BW_GBS
+    NVME_GBS = NVME_SEQUENTIAL_BW.m_as("GB/s")
 
     ledger = DesignLedger()
+    if getattr(ledger, "is_wasm", False):
+        await ledger.load_async()
     return (
-        mo, ledger, go, np,
-        COLORS, LAB_CSS, apply_plotly_theme,
-        NVLINK4_BW_GBS, PCIE_GEN4_BW_GBS,
-        IB_HDR200_BW_GBS, IB_HDR200_EFF_GBS,
-        H100_TFLOPS_FP16, H100_RAM_GB, BYTES_PER_PARAM,
-        K_COMP,
+        COLORS, LAB_CSS, apply_plotly_theme, go, math, mo, np, ledger, ureg,
+        H100_TFLOPS, H100_BW_GBS, H100_RAM_GB, H100_TDP_W, H100_RIDGE,
+        A100_TFLOPS, A100_BW_GBS, B200_TFLOPS, B200_BW_GBS,
+        V100_TFLOPS, V100_BW_GBS,
+        NVLINK_GBS, PCIE_GBS, IB_NDR_GBS, NVME_GBS,
+        PUE_BEST_AIR, DEFAULT_KWH_PRICE, ANNUAL_MAINTENANCE_RATIO,
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE A: OPENING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 1: HEADER ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, LAB_CSS, COLORS):
-    _indigo = COLORS["Cloud"]
+def _(LAB_CSS, mo):
     mo.vstack([
         LAB_CSS,
-        mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        mo.Html("""
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.3);">
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
                         color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems · Volume II · Lab 02
+                Machine Learning Systems &middot; Volume II &middot; Lab 02
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
-                The Interconnect Wall
+                The Compute Infrastructure Wall
             </h1>
-            <p style="margin: 0 0 20px 0; font-size: 1.05rem; color: #94a3b8;
-                      max-width: 660px; line-height: 1.65;">
-                NVLink runs at 900 GB/s. PCIe runs at 50 GB/s. InfiniBand runs at 400 GB/s.
-                These are not implementation details — they are the physical cliffs
-                that determine whether distributed training is feasible at all.
+            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
+                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
+                Memory Wall &middot; Roofline &middot; Bandwidth Staircase &middot; TCO
             </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                <span style="background: rgba(99,102,241,0.15); color: #a5b4fc;
+            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
+                      max-width: 680px; line-height: 1.65;">
+                Even the fastest accelerator spends most of its time waiting for data.
+                The roofline reveals why, the bandwidth staircase dictates parallelism
+                strategy placement, and TCO shows the real cost of scale.
+            </p>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
+                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.25);">
-                    Act I: Interconnect Cliff · Act II: Multi-Node Scaling Wall
+                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
+                    5 Parts &middot; ~57 min
                 </span>
-                <span style="background: rgba(16,185,129,0.15); color: #6ee7b7;
+                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(16,185,129,0.25);">
-                    35–40 min
+                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
+                    Vol II Ch 2: Compute Infrastructure
                 </span>
-                <span style="background: rgba(245,158,11,0.15); color: #fcd34d;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(245,158,11,0.25);">
-                    Prereq: @sec-compute-infrastructure
-                </span>
-                <span class="badge badge-fail">
-                    Interconnect Wall Active
-                </span>
+            </div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <span class="badge badge-info">MFU &lt; 1% at batch=1</span>
+                <span class="badge badge-warn">NVLink/IB = 18x cliff</span>
+                <span class="badge badge-fail">TCO: GPU price is only the start</span>
             </div>
         </div>
         """),
@@ -137,40 +135,40 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, COLORS):
+def _(COLORS, mo):
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
                 padding: 20px 28px; margin: 8px 0 16px 0;
                 box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-
-        <!-- LEARNING OBJECTIVES -->
         <div style="margin-bottom: 16px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                 Learning Objectives
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the bandwidth staircase: measure why a 10 GB tensor transfer takes 11 ms on NVLink but 200 ms over InfiniBand, an 18&times; gap that determines all parallelism placement decisions.</strong></div>
-                <div style="margin-bottom: 3px;">2. <strong>Diagnose interconnect violations: identify the communication fraction when Tensor Parallelism is placed across the InfiniBand boundary, and predict why it collapses GPU utilization to near zero.</strong></div>
-                <div style="margin-bottom: 3px;">3. <strong>Design a hierarchical parallelism mapping: configure TP intra-node and DP inter-node to achieve &gt;80% efficiency for a 70B model on 16 GPUs across 2 DGX nodes.</strong></div>
+                <div style="margin-bottom: 3px;">1. <strong>Diagnose the memory wall</strong> &mdash; show that at batch=1
+                    an H100 is ~99% idle during LLM token generation because HBM bandwidth,
+                    not compute, is the binding constraint.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Map the bandwidth staircase</strong> &mdash; quantify the 18x
+                    NVLink-to-InfiniBand cliff and explain why tensor parallelism cannot cross
+                    the node boundary.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Calculate Total Cost of Ownership</strong> &mdash; show that
+                    electricity reaches ~30% of 3-year TCO for a 1,000-GPU cluster and that
+                    utilization rate matters more than hardware generation.</div>
             </div>
         </div>
-
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <!-- PREREQUISITES + DURATION (side by side) -->
-        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 220px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Transfer time formula T = Data / Bandwidth from @sec-compute-infrastructure &middot;
-                    Tensor vs. Data Parallelism definitions from @sec-distributed-training-systems
+                    V2-01 (Scale Illusion) &middot; Iron Law equation &middot;
+                    Roofline model from Vol I
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -179,23 +177,22 @@ def _(mo, COLORS):
                     Duration
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>35-40 min</strong><br/>
-                    Act I: ~12 min &middot; Act II: ~25 min
+                    <strong>~57 min</strong><br/>
+                    Parts A&ndash;E: ~9&ndash;12 min each
                 </div>
             </div>
         </div>
-
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <!-- CORE QUESTION -->
-        <div style="margin-top: 16px;">
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
+                    padding: 16px 28px 0 28px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                 Core Question
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                "NVLink and InfiniBand are both &lsquo;fast&rsquo; interconnects &mdash; so why does placing Tensor Parallelism across the node boundary turn a 15% communication overhead into an 85% overhead that renders your GPU investment worthless?"
+                &ldquo;If the H100 delivers 989 TFLOPS, why does single-token LLM generation
+                use less than 1% of that compute &mdash; and what does it actually cost to
+                run a 1,000-GPU cluster for three years?&rdquo;
             </div>
         </div>
     </div>
@@ -203,1425 +200,741 @@ def _(mo, COLORS):
     return
 
 
-# ─── CELL 3: RECOMMENDED READING ─────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
-    **Recommended Reading** — Complete the following before this lab:
+    **Recommended Reading** -- Complete the following before this lab:
 
-    - **Bandwidth Hierarchy** (@sec-compute-infrastructure) — HBM, NVLink, InfiniBand, PCIe: what each tier is, where it sits in the stack, and the order-of-magnitude gaps between them.
-    - **AllReduce and Ring Topology** (@sec-compute-infrastructure) — How gradient synchronization works: why the data volume is 2× model size, not 1×, and why ring topology is bandwidth-optimal.
-    - **Node vs. Pod Boundaries** (@sec-compute-infrastructure) — Why crossing the server boundary causes a bandwidth cliff, and how hierarchical AllReduce attempts to bridge it.
+    - **Vol II Ch 2: The Memory Wall** -- why token generation is bandwidth-bound.
+    - **Vol II Ch 2: The Roofline at Fleet Scale** -- ridge point and arithmetic intensity.
+    - **Vol II Ch 2: The Bandwidth Hierarchy** -- NVLink, PCIe, InfiniBand staircase.
+    - **Vol II Ch 2: Total Cost of Ownership** -- CapEx vs OpEx breakdown.
     """), kind="info")
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE ──────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    context_toggle = mo.ui.radio(
-        options={
-            "Single-node (NVLink DGX)": "single_node",
-            "Multi-node (InfiniBand Cluster)": "multi_node",
-        },
-        value="Single-node (NVLink DGX)",
-        label="Deployment context:",
-        inline=True,
-    )
-
-    _c = COLORS["BlueLine"]
-    mo.vstack([
-        mo.Html(f"""
-        <div style="border-bottom: 2px solid {COLORS['Border']}; padding-bottom: 16px; margin-bottom: 8px;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                Infrastructure Context
-            </div>
-        </div>
-        """),
-        context_toggle,
-    ])
-    return (context_toggle,)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: ACT I — CALIBRATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 5: ACT1_BANNER (hide_code=True) ─────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _act_num      = "I"
-    _act_color    = COLORS["BlueLine"]
-    _act_title    = "The Interconnect Cliff"
-    _act_duration = "12&ndash;15 min"
-    _act_why      = (
-        "You expect all GPU connections to be fast &mdash; after all, both NVLink and InfiniBand are "
-        "high-speed fabrics. The bandwidth staircase will show an 18&times; gap between them: "
-        "transferring 10 GB takes 11 ms intra-node but 200 ms inter-node, and this physical cliff "
-        "is the reason Tensor Parallelism cannot cross the node boundary."
-    )
-    mo.Html(f"""
-    <div style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {_act_color}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;
-                        flex-shrink: 0;">{_act_num}</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act {_act_num} &middot; {_act_duration}</div>
-        </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">
-            {_act_title}
-        </div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            {_act_why}
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT I: STAKEHOLDER MESSAGE ──────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    _color = COLORS["BlueLine"]
-    _bg    = COLORS["BlueL"]
-    mo.Html(f"""
-    <div style="border-left: 4px solid {_color}; background: {_bg};
-                border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; color: {_color};
-                    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-            Incoming Message · Infrastructure Architect
-        </div>
-        <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-            "We need to gradient-sync a 70B model (140 GB FP16) across 8 GPUs.
-            We have two options: a single NVLink DGX H100 node, or 8 separate PCIe servers.
-            The PCIe option is 40% cheaper. My manager is asking whether the bandwidth difference
-            actually matters in practice. Can you model this out before we sign the purchase order?"
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT I: SCENARIO SETUP ───────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.vstack([
-        mo.md("""
-        ## The Physics of Gradient Synchronization
-
-        Training a large model across multiple GPUs requires synchronizing gradients after every
-        backward pass. The dominant algorithm — **Ring AllReduce** — sends each gradient tensor
-        in two phases across the interconnect:
-
-        1. **Reduce-Scatter**: Each GPU sends its gradients around the ring once (1× model volume)
-        2. **AllGather**: The reduced result is broadcast back to all GPUs (1× model volume)
-
-        Total data transferred per synchronization step: **2 × model size in bytes**.
-
-        For a 70B parameter model in FP16 (2 bytes/parameter):
-
-        ```
-        AllReduce volume = 2 × (70 × 10⁹ parameters × 2 bytes) = 2 × 140 GB = 280 GB per step
-        ```
-
-        The interconnect bandwidth determines how long this synchronization takes — and whether
-        that time is negligible or catastrophic relative to compute time.
-        """),
-    ])
-    return
-
-
-# ─── ACT I: PREDICTION LOCK ──────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("---")
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    act1_pred = mo.ui.radio(
-        options={
-            "A) Barely any difference — gradient compression will fix the bandwidth gap": "A",
-            "B) ~2× throughput difference — PCIe is slower but still practical for production": "B",
-            "C) ~3–5× throughput difference — PCIe communication overhead dominates training": "C",
-            "D) PCIe makes training impossible — infinite overhead, cannot converge": "D",
-        },
-        label="""**Commit to your prediction before running the instruments.**
-
-When training a 70B parameter model across 8 GPUs, how much worse is the training throughput
-on 8 PCIe-connected servers compared to one NVLink DGX node (assuming the same H100 GPUs)?""",
-    )
-    act1_pred
-    return (act1_pred,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act1_pred):
-    mo.stop(
-        act1_pred.value is None,
-        mo.vstack([
-            act1_pred,
-            mo.callout(
-                mo.md("Select your prediction to continue. Commit before the instruments run."),
-                kind="warn",
-            ),
-        ])
-    )
-    mo.callout(
-        mo.md(f"**Prediction locked:** {act1_pred.value[:2]}. Now run the simulator below to test your hypothesis."),
-        kind="info",
-    )
-    return
-
-
-# ─── ACT I: INSTRUMENTS ──────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("## Bandwidth Comparison Explorer")
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    model_params_b = mo.ui.slider(
-        start=1, stop=175, value=70, step=1,
-        label="Model parameters (billions)",
-    )
-    batch_size = mo.ui.slider(
-        start=1, stop=128, value=32, step=1,
-        label="Batch size per GPU",
-    )
-    interconnect_type = mo.ui.dropdown(
-        options={
-            "NVLink4 (DGX H100) — 900 GB/s": "nvlink",
-            "PCIe Gen4 — 50 GB/s": "pcie",
-            "InfiniBand HDR200 — 400 GB/s": "infiniband",
-        },
-        value="NVLink4 (DGX H100) — 900 GB/s",
-        label="Interconnect type",
-    )
-    mo.vstack([
-        mo.hstack([model_params_b, batch_size], justify="start", gap=2),
-        interconnect_type,
-    ])
-    return (model_params_b, batch_size, interconnect_type)
-
-
 @app.cell(hide_code=True)
 def _(
-    mo, go, np,
-    model_params_b, batch_size, interconnect_type,
-    COLORS, apply_plotly_theme,
-    NVLINK4_BW_GBS, PCIE_GEN4_BW_GBS, IB_HDR200_EFF_GBS,
-    BYTES_PER_PARAM, K_COMP,
+    COLORS, apply_plotly_theme, go, math, mo, np,
+    H100_TFLOPS, H100_BW_GBS, H100_RAM_GB, H100_TDP_W, H100_RIDGE,
+    A100_TFLOPS, A100_BW_GBS, B200_TFLOPS, B200_BW_GBS,
+    V100_TFLOPS, V100_BW_GBS,
+    NVLINK_GBS, PCIE_GBS, IB_NDR_GBS, NVME_GBS,
+    PUE_BEST_AIR, DEFAULT_KWH_PRICE, ANNUAL_MAINTENANCE_RATIO,
 ):
-    # ── Physics engine ────────────────────────────────────────────────────────
-    # Model memory in GB (FP16)
-    model_gb    = model_params_b.value * BYTES_PER_PARAM  # GB
-
-    # AllReduce volume: 2 × model size
-    # Ring AllReduce: reduce-scatter (1× model) + allgather (1× model)
-    allreduce_gb = 2.0 * model_gb
-
-    # Select interconnect bandwidth
-    # For Act I comparison: NVLink vs PCIe vs IB as single-link options
-    _bw_map = {
-        "nvlink":      NVLINK4_BW_GBS,
-        "pcie":        PCIE_GEN4_BW_GBS,
-        "infiniband":  IB_HDR200_EFF_GBS,   # effective single-port IB BW
-    }
-    _bw_name_map = {
-        "nvlink":      "NVLink4 900 GB/s",
-        "pcie":        "PCIe Gen4 50 GB/s",
-        "infiniband":  "InfiniBand HDR200 ~50 GB/s effective",
-    }
-    bw_gbs      = _bw_map[interconnect_type.value]
-    bw_name     = _bw_name_map[interconnect_type.value]
-
-    # Communication time (seconds)
-    comm_time_s = allreduce_gb / bw_gbs
-
-    # Compute time per step (calibrated to spec reference point)
-    # Formula: K_COMP × params_b × batch_size
-    # Calibrated: 70B × batch 32 = 2.1 s (matching @sec-compute-infrastructure numbers)
-    # K_COMP = 2.1 / (70 × 32); equivalent to 6N FLOPs at seq_len=139, MFU=0.45 on H100
-    comp_time_s  = K_COMP * model_params_b.value * batch_size.value
-
-    # Overhead ratio and efficiency
-    overhead_pct = (comm_time_s / comp_time_s) * 100.0
-    efficiency   = comp_time_s / (comp_time_s + comm_time_s) * 100.0
-
-    # Step time
-    total_time_s = comp_time_s + comm_time_s
-    eff_mfu_pct  = (comp_time_s / total_time_s) * 0.45 * 100.0
-
-    # Color coding
-    if overhead_pct <= 20:
-        ovhd_color = COLORS["GreenLine"]
-        ovhd_label = "Acceptable"
-    elif overhead_pct <= 100:
-        ovhd_color = COLORS["OrangeLine"]
-        ovhd_label = "High"
-    else:
-        ovhd_color = COLORS["RedLine"]
-        ovhd_label = "Bottleneck"
-
-    eff_color = COLORS["GreenLine"] if efficiency >= 80 else (
-        COLORS["OrangeLine"] if efficiency >= 40 else COLORS["RedLine"]
+    # ═════════════════════════════════════════════════════════════════════════
+    # WIDGETS
+    # ═════════════════════════════════════════════════════════════════════════
+    pA_pred = mo.ui.radio(
+        options={
+            "A) ~10% idle -- GPUs are mostly computing": "10",
+            "B) ~50% idle -- memory and compute are balanced": "50",
+            "C) ~80% idle -- memory is a drag": "80",
+            "D) ~99% idle -- almost entirely waiting for data": "99",
+        },
+        label="During single-token generation of a 70B model on H100, "
+              "what fraction of the time are the arithmetic units idle?",
     )
+    return (pA_pred,)
 
-    # ── Bar chart: time breakdown ─────────────────────────────────────────────
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        name="Compute",
-        x=["Step Time Breakdown"],
-        y=[comp_time_s],
-        marker_color=COLORS["BlueLine"],
-        width=0.4,
-        text=[f"{comp_time_s:.2f}s"],
-        textposition="inside",
-        textfont=dict(color="white", size=13, family="SF Mono, Fira Code, monospace"),
-    ))
-    fig.add_trace(go.Bar(
-        name="AllReduce (Communication)",
-        x=["Step Time Breakdown"],
-        y=[comm_time_s],
-        marker_color=ovhd_color,
-        width=0.4,
-        text=[f"{comm_time_s:.2f}s"],
-        textposition="inside",
-        textfont=dict(color="white", size=13, family="SF Mono, Fira Code, monospace"),
-    ))
-    fig.update_layout(
-        barmode="stack",
-        height=260,
-        legend=dict(orientation="h", y=-0.25),
-        yaxis=dict(title="Seconds per step"),
-        showlegend=True,
-        margin=dict(l=40, r=20, t=16, b=60),
-    )
-    apply_plotly_theme(fig)
-
-    # ── Display ───────────────────────────────────────────────────────────────
-    mo.vstack([
-        mo.Html(f"""
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0;
-                    border-radius: 12px; padding: 18px 22px; margin: 8px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: #94a3b8;
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                Physics
-            </div>
-            <div style="font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.85rem;
-                        color: #1e293b; line-height: 2.0;">
-                AllReduce volume = 2 × model_size = 2 × {model_gb:.0f} GB = <strong>{allreduce_gb:.0f} GB</strong><br>
-                Communication time = {allreduce_gb:.0f} GB ÷ {bw_gbs} GB/s = <strong style="color:{ovhd_color}">{comm_time_s:.3f} s</strong><br>
-                Compute time = K × {model_params_b.value}B params × batch {batch_size.value} = <strong>{comp_time_s:.3f} s</strong><br>
-                Communication overhead = {comm_time_s:.3f} ÷ {comp_time_s:.3f} = <strong style="color:{ovhd_color}">{overhead_pct:.1f}%</strong>
-            </div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div style="display: flex; gap: 16px; flex-wrap: wrap; margin: 4px 0 12px 0;">
-            <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 10px;
-                        min-width: 160px; text-align: center; background: white;">
-                <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600;
-                            text-transform: uppercase; letter-spacing: 0.08em;">
-                    Comm Overhead
-                </div>
-                <div style="font-size: 2.1rem; font-weight: 800; color: {ovhd_color};
-                            font-family: 'SF Mono', monospace; margin: 4px 0;">
-                    {overhead_pct:.1f}%
-                </div>
-                <div style="font-size: 0.75rem; font-weight: 700; color: {ovhd_color};">
-                    {ovhd_label}
-                </div>
-            </div>
-            <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 10px;
-                        min-width: 160px; text-align: center; background: white;">
-                <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600;
-                            text-transform: uppercase; letter-spacing: 0.08em;">
-                    Training Efficiency
-                </div>
-                <div style="font-size: 2.1rem; font-weight: 800; color: {eff_color};
-                            font-family: 'SF Mono', monospace; margin: 4px 0;">
-                    {efficiency:.1f}%
-                </div>
-                <div style="font-size: 0.75rem; font-weight: 700; color: {eff_color};">
-                    GPU-compute utilization
-                </div>
-            </div>
-            <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 10px;
-                        min-width: 160px; text-align: center; background: white;">
-                <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600;
-                            text-transform: uppercase; letter-spacing: 0.08em;">
-                    Comm Time
-                </div>
-                <div style="font-size: 2.1rem; font-weight: 800; color: {ovhd_color};
-                            font-family: 'SF Mono', monospace; margin: 4px 0;">
-                    {comm_time_s:.2f}s
-                </div>
-                <div style="font-size: 0.75rem; color: #94a3b8; font-weight: 600;">
-                    {bw_name}
-                </div>
-            </div>
-            <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 10px;
-                        min-width: 160px; text-align: center; background: white;">
-                <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600;
-                            text-transform: uppercase; letter-spacing: 0.08em;">
-                    Compute Time
-                </div>
-                <div style="font-size: 2.1rem; font-weight: 800; color: {COLORS['BlueLine']};
-                            font-family: 'SF Mono', monospace; margin: 4px 0;">
-                    {comp_time_s:.2f}s
-                </div>
-                <div style="font-size: 0.75rem; color: #94a3b8; font-weight: 600;">
-                    H100 FP16 @ 45% MFU
-                </div>
-            </div>
-        </div>
-        """),
-        mo.as_html(fig),
-    ])
-    return (
-        comm_time_s, comp_time_s, overhead_pct, efficiency,
-        eff_mfu_pct, allreduce_gb, model_gb,
-    )
-
-
-# ─── ACT I: CONTEXTUAL FEEDBACK ──────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, overhead_pct, comm_time_s, comp_time_s, interconnect_type):
-    _iv = interconnect_type.value
-    if _iv == "nvlink":
-        if overhead_pct <= 20:
-            mo.callout(mo.md(
-                f"**NVLink efficiency.** {overhead_pct:.1f}% communication overhead. "
-                "At 900 GB/s, the AllReduce completes in well under a second — less than a typical "
-                "compute step. This is the design point NVLink was engineered for: keeping the "
-                "interconnect invisible to the training loop."
-            ), kind="success")
+def _(mo, pA_pred):
+    pA_model = mo.ui.dropdown(
+        options={"7B": 7, "70B": 70, "175B": 175},
+        value="70B", label="Model size (B params)",
+    )
+    pA_batch = mo.ui.slider(start=1, stop=128, value=1, step=1, label="Batch size")
+
+    pB_pred = mo.ui.radio(
+        options={
+            "A) All are compute-bound -- H100 is always compute-bound for large models": "all",
+            "B) LLM training and prefill -- they have large batch sizes": "train_prefill",
+            "C) Only prefill and training at large batch -- decode is always below": "prefill_only",
+            "D) None -- all LLM workloads are memory-bound": "none",
+        },
+        label="Which fleet-scale workloads fall above the H100 ridge point?",
+    )
+    return (pB_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, pB_pred):
+    pB_hw = mo.ui.dropdown(
+        options={"V100": "v100", "A100": "a100", "H100": "h100", "B200": "b200"},
+        value="H100", label="Accelerator",
+    )
+
+    pC_pred = mo.ui.radio(
+        options={
+            "A) ~2x slower -- InfiniBand is fast": "2",
+            "B) ~5x slower -- significant but manageable": "5",
+            "C) ~18x slower -- an order of magnitude gap": "18",
+            "D) ~100x slower -- completely different regime": "100",
+        },
+        label="How much slower is a 10 GB AllReduce over IB NDR vs NVLink 4.0?",
+    )
+    return (pC_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, pC_pred):
+    pC_size = mo.ui.slider(start=1, stop=10000, value=10000, step=100, label="Transfer size (MB)")
+
+    pD_pred = mo.ui.radio(
+        options={
+            "A) Yes -- 640 GB is plenty for 175B": "yes",
+            "B) Barely -- fits with ~50 GB headroom": "barely",
+            "C) No -- static memory alone exceeds 640 GB": "no_static",
+            "D) No, but ZeRO-1 fixes it": "zero1",
+        },
+        label="Can a single 8-GPU DGX H100 node (640 GB HBM) train a 175B "
+              "model with Adam in FP16 without ZeRO?",
+    )
+    return (pD_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, pD_pred):
+    pD_model_b = mo.ui.slider(start=1, stop=175, value=175, step=1, label="Model params (B)")
+    pD_gpus = mo.ui.slider(start=1, stop=8, value=8, step=1, label="GPUs per node")
+    pD_zero = mo.ui.dropdown(
+        options={"No ZeRO (Stage 0)": 0, "ZeRO-1": 1, "ZeRO-2": 2, "ZeRO-3": 3},
+        value="No ZeRO (Stage 0)", label="ZeRO Stage",
+    )
+
+    pE_pred = mo.ui.radio(
+        options={
+            "A) GPUs by far -- $30M vs ~$3M electricity": "gpus",
+            "B) GPUs cost more, but electricity is ~30% of TCO": "close",
+            "C) Electricity is more expensive": "elec",
+            "D) Roughly equal": "equal",
+        },
+        label="For a 1,000-GPU H100 cluster over 3 years: GPUs or electricity costs more?",
+    )
+    return (pE_pred,)
+
+@app.cell(hide_code=True)
+def _(mo, pE_pred):
+    pE_n_gpus = mo.ui.slider(start=100, stop=5000, value=1000, step=100, label="GPU count")
+    pE_util = mo.ui.slider(start=30, stop=90, value=70, step=5, label="Utilization (%)")
+    pE_pue = mo.ui.slider(start=1.06, stop=1.60, value=1.12, step=0.02, label="PUE")
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART A: THE MEMORY WALL
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def build_part_a():
+        items = []
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; VP Inference, CloudScale AI
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We bought H100s for LLM serving but our token generation is slow.
+                The H100 has 989 TFLOPS. Surely we are compute-limited?&rdquo;
+            </div>
+        </div>
+        """))
+
+        items.append(mo.md(f"""
+        ## The Memory Wall: Token Generation is Bandwidth-Bound
+
+        At batch=1, every model weight must be loaded from HBM for each token.
+        The H100 delivers {H100_BW_GBS:,.0f} GB/s HBM bandwidth vs {H100_TFLOPS:.0f} TFLOPS.
+        The **ridge point** = {H100_RIDGE:.0f} FLOPs/Byte. LLM decode at batch=1 has
+        arithmetic intensity ~1 FLOP/Byte -- far below the ridge point.
+
+        The GPU is not compute-limited. It is waiting for data.
+        """))
+
+        items.append(pA_pred)
+        if pA_pred.value is None:
+            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([pA_model, pA_batch], justify="start", gap="2rem"))
+
+        _params_b = pA_model.value
+        _batch = pA_batch.value
+        _params = _params_b * 1e9
+        _weight_bytes = _params * 2  # FP16
+        _weight_gb = _weight_bytes / 1e9
+
+        # Memory time: load all weights once per token (decode)
+        _t_mem_ms = (_weight_gb / H100_BW_GBS) * 1000
+        # Compute time: 2 FLOPs per param per token, times batch
+        _flops = 2 * _params * _batch
+        _t_comp_ms = (_flops / (H100_TFLOPS * 1e12)) * 1000
+        _t_total = _t_mem_ms + _t_comp_ms
+        _idle_pct = (_t_mem_ms / _t_total) * 100 if _t_total > 0 else 0
+        _mfu = (_t_comp_ms / _t_total) * 100 if _t_total > 0 else 0
+        _ai = (2 * _batch)  # FLOPs per byte = 2*batch / 2 bytes = batch
+
+        # Waterfall chart
+        _fig = go.Figure()
+        _fig.add_trace(go.Bar(name="Memory (HBM load)", x=["Latency"], y=[_t_mem_ms],
+                              marker_color=COLORS["RedLine"], width=0.4))
+        _fig.add_trace(go.Bar(name="Compute (arithmetic)", x=["Latency"], y=[_t_comp_ms],
+                              marker_color=COLORS["BlueLine"], width=0.4))
+        _fig.update_layout(barmode="stack", height=280,
+                           yaxis=dict(title="Time (ms)", gridcolor="#f1f5f9"),
+                           legend=dict(orientation="h", y=1.12, x=0),
+                           margin=dict(l=50, r=20, t=60, b=40))
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        _mc = COLORS["GreenLine"] if _mfu > 50 else COLORS["OrangeLine"] if _mfu > 10 else COLORS["RedLine"]
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['RedLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Memory Time</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['RedLine']};">{_t_mem_ms:.2f} ms</div>
+            </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Compute Time</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_t_comp_ms:.4f} ms</div>
+            </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:130px; text-align:center; background:white; border-top:3px solid {_mc}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">MFU</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{_mc};">{_mfu:.1f}%</div>
+            </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Arith. Intensity</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_ai:.0f} FLOPs/B</div>
+                <div style="font-size:0.72rem; color:#94a3b8;">Ridge: {H100_RIDGE:.0f}</div>
+            </div>
+        </div>"""))
+
+        items.append(mo.md(f"""
+**Memory Wall -- Live Calculation** (`{_params_b}B, batch={_batch}`)
+
+```
+Weight load  = {_weight_gb:.0f} GB / {H100_BW_GBS:,.0f} GB/s = {_t_mem_ms:.2f} ms
+Compute      = 2 * {_params:.0e} * {_batch} / {H100_TFLOPS:.0f} TFLOPS = {_t_comp_ms:.4f} ms
+GPU idle     = {_t_mem_ms:.2f} / {_t_total:.2f} = {_idle_pct:.1f}%
+AI           = {_ai:.0f} FLOPs/Byte  (ridge = {H100_RIDGE:.0f})
+```
+*Source: Vol II Ch 2 -- The Memory Wall*
+        """))
+
+        _pred = pA_pred.value
+        if _pred == "99":
+            _msg = (f"**Correct.** At batch=1 the GPU is {_idle_pct:.1f}% idle. "
+                    f"The {_params_b}B model loads {_weight_gb:.0f} GB from HBM "
+                    f"in {_t_mem_ms:.2f} ms; compute takes just {_t_comp_ms:.4f} ms.")
+            _kind = "success"
         else:
-            mo.callout(mo.md(
-                f"**NVLink at its limits.** {overhead_pct:.1f}% overhead. "
-                "Even NVLink can be stressed by very large models with small batch sizes — "
-                "the compute-to-communication ratio collapses as batch size shrinks."
-            ), kind="warn")
-    elif _iv == "pcie":
-        mo.callout(mo.md(
-            f"**PCIe bandwidth cliff.** {overhead_pct:.1f}% communication overhead. "
-            f"AllReduce takes {comm_time_s:.2f}s against a compute step of {comp_time_s:.2f}s. "
-            "At 50 GB/s, the interconnect is 18× slower than NVLink. The GPU spends most of its "
-            "time waiting for gradients — not computing. The 40% hardware cost savings is "
-            "immediately offset by training throughput collapse."
-        ), kind="warn")
-    else:
-        mo.callout(mo.md(
-            f"**InfiniBand: the inter-node tier.** {overhead_pct:.1f}% overhead. "
-            "At 400 GB/s, InfiniBand falls between NVLink and PCIe — sufficient for moderate "
-            "workloads but problematic for the largest models. This is the bandwidth available "
-            "when you cross the node boundary in Act II."
-        ), kind="info")
-    return
+            _msg = (f"**The GPU is {_idle_pct:.1f}% idle at batch=1.** "
+                    "LLM decode has arithmetic intensity ~1, far below the "
+                    f"ridge point of {H100_RIDGE:.0f}. The H100 is a $30,000 space heater "
+                    "at batch=1. Increase batch size to improve MFU.")
+            _kind = "warn"
+        items.append(mo.vstack([
+            mo.md(f"**You predicted:** ~{_pred}% idle  |  **Actual:** {_idle_pct:.1f}% idle"),
+            mo.callout(mo.md(_msg), kind=_kind),
+        ]))
+        return mo.vstack(items)
 
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART B: THE ROOFLINE DIAGNOSTIC
+    # ═════════════════════════════════════════════════════════════════════════
 
-# ─── ACT I: PREDICTION-VS-REALITY OVERLAY ────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_pred, COLORS):
-    # Compute the NVLink and PCIe throughput ratio from physics
-    # NVLink: overhead = 280/900 / 2.1 ≈ 15%  → efficiency ≈ 85%
-    # PCIe:   overhead = 280/50  / 2.1 ≈ 267% → efficiency ≈ 27%
-    # Throughput ratio ≈ 85% / 27% ≈ 3.1×
-    # This is Act I physics for 70B default config
+    def build_part_b():
+        items = []
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; Performance Engineer, CloudScale AI
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We have four LLM workloads. The team says they are all compute-bound
+                because the models are huge. Can you verify with the roofline?&rdquo;
+            </div>
+        </div>
+        """))
 
-    _nvlink_eff  = 0.85   # 85% training efficiency on NVLink (15% comm overhead)
-    _pcie_eff    = 0.27   # 27% training efficiency on PCIe (267% comm overhead)
-    _actual_ratio = _nvlink_eff / _pcie_eff   # ≈ 3.1×
+        items.append(mo.md(f"""
+        ## The Roofline Model at Fleet Scale
 
-    _predicted_ratio_map = {
-        "A": 1.1,   # "barely any difference"
-        "B": 2.0,   # "~2× throughput difference"
-        "C": 4.0,   # "~3–5× throughput difference" (mid of range)
-        "D": 999.0, # "impossible / infinite"
-    }
-
-    _letter = act1_pred.value[0] if act1_pred.value else "A"
-    _predicted_ratio = _predicted_ratio_map.get(_letter, 1.0)
-
-    _correct = _letter == "C"
-    _gap_desc = ""
-    if _letter == "A":
-        _gap_desc = (
-            f"You predicted ~{_predicted_ratio:.1f}× throughput difference (gradient compression makes it negligible). "
-            f"The actual ratio is **{_actual_ratio:.1f}×**. Gradient compression reduces volume by 10–100× "
-            "but requires an extra compute pass and introduces approximation error. It does not close "
-            "an 18× bandwidth gap without severe accuracy cost."
-        )
-    elif _letter == "B":
-        _gap_desc = (
-            f"You predicted ~{_predicted_ratio:.0f}× throughput difference. "
-            f"The actual ratio is **{_actual_ratio:.1f}×**. At 267% communication overhead, the PCIe "
-            "configuration spends 72% of its time in AllReduce — not computing. "
-            "A 2× estimate is too optimistic: the math gives 3–4×."
-        )
-    elif _letter == "C":
-        _gap_desc = (
-            f"Correct. You predicted ~3–5× throughput difference. "
-            f"The physics gives **{_actual_ratio:.1f}×**: NVLink at 85% efficiency vs. PCIe at 27% efficiency. "
-            "The 40% hardware savings on PCIe servers translates to 3× slower training — "
-            "a wall-clock cost that erases the hardware savings within weeks."
-        )
-    elif _letter == "D":
-        _gap_desc = (
-            f"You predicted PCIe makes training impossible. "
-            f"The actual ratio is **{_actual_ratio:.1f}×** — substantial, but not infinite. "
-            "Training at 267% overhead is extremely inefficient but technically converges. "
-            "The practical barrier is cost: training takes 3× as long, which means 3× the GPU-hours."
-        )
-
-    _kind = "success" if _correct else "warn"
-    _header = "Correct prediction." if _correct else f"You predicted option {_letter}."
-
-    mo.callout(mo.md(
-        f"**Prediction vs. Reality — Act I**\n\n"
-        f"{_header} {_gap_desc}\n\n"
-        f"**The governing numbers at 70B / batch 32:**\n"
-        f"- NVLink: 280 GB ÷ 900 GB/s = 0.31 s comm | 2.1 s compute → **15% overhead, 85% efficiency**\n"
-        f"- PCIe: 280 GB ÷ 50 GB/s = 5.6 s comm | 2.1 s compute → **267% overhead, 27% efficiency**\n"
-        f"- Throughput ratio: 85% ÷ 27% ≈ **{_actual_ratio:.1f}×** — PCIe trains {_actual_ratio:.1f}× slower."
-    ), kind=_kind)
-    return
-
-
-# ─── ACT I: REFLECTION ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("---")
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    act1_reflect = mo.ui.radio(
-        options={
-            "A) You send weights forward and gradients backward — two passes across the network": "A",
-            "B) Ring AllReduce sends each parameter twice: reduce-scatter (1×) + allgather (1×)": "B",
-            "C) FP16 precision requires 2× more data than FP32 for the same gradient accuracy": "C",
-            "D) Gradient accumulation over multiple micro-batches doubles the sync volume": "D",
-        },
-        label="""**Reflection.** The AllReduce data volume equals 2× the model size (280 GB for a 70B FP16 model).
-Why is the factor exactly 2×, and not 1× or some other number?""",
-    )
-    act1_reflect
-    return (act1_reflect,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act1_reflect):
-    mo.stop(
-        act1_reflect.value is None,
-        mo.vstack([
-            act1_reflect,
-            mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"),
-        ])
-    )
-
-    _feedback = {
-        "A": mo.callout(mo.md(
-            "**Not quite.** Ring AllReduce does not transmit model weights at all — only gradients. "
-            "The forward pass and backward pass are local operations on each GPU. "
-            "The factor-of-2 comes from the two phases of the ring algorithm itself, "
-            "not from the forward/backward decomposition."
-        ), kind="warn"),
-        "B": mo.callout(mo.md(
-            "**Correct.** Ring AllReduce operates in two phases of identical volume. "
-            "In **reduce-scatter**, each of N GPUs sends 1/N of the gradient tensor to its neighbor "
-            "and receives a partial reduction, cycling through the ring. Total data: 1× model size. "
-            "In **allgather**, each GPU then broadcasts its reduced shard back around the ring. "
-            "Total data: another 1× model size. Combined: exactly 2× model size, independent of N. "
-            "This is why ring AllReduce is called bandwidth-optimal: doubling the number of GPUs "
-            "does not increase the per-GPU data volume."
-        ), kind="success"),
-        "C": mo.callout(mo.md(
-            "**Not quite.** The 2× factor is not a precision artifact. FP16 already determines the "
-            "per-parameter byte count (2 bytes). The factor-of-2 comes from the ring AllReduce "
-            "algorithm structure — reduce-scatter plus allgather — which each contribute 1× model "
-            "volume. If you used FP32 gradients, the per-parameter cost would be 4 bytes, "
-            "but the multiplier would still be 2×."
-        ), kind="warn"),
-        "D": mo.callout(mo.md(
-            "**Not quite.** Gradient accumulation reduces the sync frequency (you sync every K steps "
-            "instead of every step), but each sync still involves 2× model size — not 4×. "
-            "Accumulation helps by amortizing the AllReduce cost over K compute steps, "
-            "but it does not change the per-sync data volume."
-        ), kind="warn"),
-    }
-
-    mo.vstack([
-        act1_reflect,
-        _feedback[act1_reflect.value[0]],
-    ])
-    return
-
-
-# ─── ACT I: MATH PEEK ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.accordion({
-        "The Governing Equation — AllReduce Bandwidth Model": mo.md("""
-        **AllReduce Communication Time**
+        The ridge point separates memory-bound (left) from compute-bound (right):
 
         ```
-        T_comm = (2 × N_params × bytes_per_param) / BW_interconnect
+        Ridge Point = Peak FLOPS / Memory Bandwidth
+        H100:  {H100_TFLOPS:.0f} TFLOPS / {H100_BW_GBS:,.0f} GB/s = {H100_RIDGE:.0f} FLOPs/Byte
         ```
 
-        - **N_params** — model parameter count (e.g., 70 × 10⁹)
-        - **bytes_per_param** — 2 for FP16, 4 for FP32
-        - **BW_interconnect** — effective interconnect bandwidth in GB/s
-        - Factor of **2** — ring AllReduce reduce-scatter + allgather
+        LLM decode at batch=1 has AI ~ 1 FLOP/Byte. LLM training at large batch
+        can reach AI > 100. The model size is not what determines the regime --
+        the arithmetic intensity is.
+        """))
 
-        **Communication Overhead**
+        items.append(pB_pred)
+        if pB_pred.value is None:
+            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
+            return mo.vstack(items)
 
-        ```
-        overhead = T_comm / T_compute
-        efficiency = T_compute / (T_compute + T_comm)
-        ```
+        items.append(pB_hw)
 
-        When `overhead > 1.0` (i.e., T_comm > T_compute), communication is the bottleneck.
-        The GPU waits for gradients longer than it spends computing them.
+        _hw_map = {
+            "v100": ("V100", V100_TFLOPS, V100_BW_GBS),
+            "a100": ("A100", A100_TFLOPS, A100_BW_GBS),
+            "h100": ("H100", H100_TFLOPS, H100_BW_GBS),
+            "b200": ("B200", B200_TFLOPS, B200_BW_GBS),
+        }
+        _hw_name, _hw_tflops, _hw_bw = _hw_map[pB_hw.value]
+        _ridge = _hw_tflops * 1000 / _hw_bw
 
-        **The Interconnect Hierarchy (from @sec-compute-infrastructure)**
+        # Roofline curve
+        _ai_range = np.logspace(-1, 4, 200)
+        _perf = np.minimum(_ai_range * _hw_bw / 1000, _hw_tflops)
 
-        | Interconnect | Bandwidth | Relative to NVLink |
-        |---|---|---|
-        | NVLink4 (DGX H100) | 900 GB/s | 1× (baseline) |
-        | InfiniBand HDR200 | 400 GB/s | 0.44× |
-        | PCIe Gen4 ×16 | 50 GB/s | 0.056× (18× slower) |
+        # Workloads: (name, AI FLOPs/Byte, color)
+        _workloads = [
+            ("LLM decode B=1", 1, COLORS["RedLine"]),
+            ("LLM decode B=32", 32, COLORS["OrangeLine"]),
+            ("175B training", 150, COLORS["BlueLine"]),
+            ("175B prefill", 200, COLORS["GreenLine"]),
+            ("DLRM embedding", 0.5, "#6366f1"),
+        ]
 
-        NVLink achieves 900 GB/s because it is a dedicated point-to-point bus
-        etched onto the server backplane, with no contention from I/O traffic.
-        PCIe is a general-purpose bus shared with storage controllers,
-        network cards, and other peripherals — its ML bandwidth is further degraded
-        by protocol overhead and peer-to-peer routing through the CPU.
-        """),
-    })
-    return
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(x=_ai_range, y=_perf, mode="lines",
+                                  name=f"{_hw_name} Roofline",
+                                  line=dict(color=COLORS["BlueLine"], width=2.5)))
+        _fig.add_vline(x=_ridge, line_dash="dash", line_color=COLORS["OrangeLine"],
+                       annotation_text=f"Ridge: {_ridge:.0f}", annotation_position="top right",
+                       annotation_font_size=10)
 
+        for _wname, _wai, _wcolor in _workloads:
+            _wperf = min(_wai * _hw_bw / 1000, _hw_tflops)
+            _fig.add_trace(go.Scatter(
+                x=[_wai], y=[_wperf], mode="markers+text",
+                name=_wname, text=[_wname], textposition="top center",
+                marker=dict(color=_wcolor, size=12, line=dict(color="white", width=2)),
+                textfont=dict(size=9),
+            ))
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: ACT II — DESIGN CHALLENGE
-# ═══════════════════════════════════════════════════════════════════════════════
+        _fig.update_layout(height=400,
+                           xaxis=dict(title="Arithmetic Intensity (FLOPs/Byte)", type="log", gridcolor="#f1f5f9"),
+                           yaxis=dict(title="Throughput (TFLOPS)", type="log", gridcolor="#f1f5f9"),
+                           legend=dict(orientation="h", y=1.15, x=0),
+                           margin=dict(l=50, r=20, t=60, b=40))
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
 
-# ─── CELL 12: ACT2_BANNER (hide_code=True) ────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_reflect, COLORS):
-    mo.stop(act1_reflect.value is None)
-    _act_num      = "II"
-    _act_color    = COLORS["OrangeLine"]
-    _act_title    = "The Multi-Node Scaling Wall"
-    _act_duration = "20&ndash;25 min"
-    _act_why      = (
-        "Act I revealed the 18&times; gap between NVLink and InfiniBand. Now apply it: "
-        "place Tensor Parallelism across the InfiniBand boundary and discover that "
-        "communication consumes 85% of step time &mdash; the bandwidth hierarchy is not "
-        "a recommendation, it is a hard physical constraint on parallelism placement."
-    )
-    mo.Html(f"""
-    <div style="margin: 40px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {_act_color}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;
-                        flex-shrink: 0;">{_act_num}</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act {_act_num} &middot; {_act_duration}</div>
-        </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">
-            {_act_title}
-        </div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            {_act_why}
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT II: STAKEHOLDER MESSAGE ─────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_reflect, COLORS):
-    mo.stop(act1_reflect.value is None)
-    _color = COLORS["RedLine"]
-    _bg    = COLORS["RedL"]
-    mo.Html(f"""
-    <div style="border-left: 4px solid {_color}; background: {_bg};
-                border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; color: {_color};
-                    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-            Incoming Message · ML Infrastructure Lead
-        </div>
-        <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-            "We're scaling from 1 DGX H100 node (8 GPUs, NVLink) to 16 nodes (128 GPUs, InfiniBand).
-            We expected 16× more throughput — we budgeted 6 months to hit this target.
-            First week of benchmarking shows we're only getting 6× throughput on 128 GPUs
-            versus 1 DGX node. The engineering team is pointing at software bugs in
-            distributed PyTorch. But I'm not convinced. What is actually happening?"
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT II: SCENARIO SETUP ──────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_reflect):
-    mo.stop(act1_reflect.value is None)
-    mo.vstack([
-        mo.md("""
-        ## Why Ideal Scaling Does Not Survive the Node Boundary
-
-        Scaling from 1 node to 16 nodes introduces a fundamental topological change:
-        intra-node communication (NVLink) is replaced by inter-node communication
-        (InfiniBand) for the final AllReduce aggregation across nodes.
-
-        A 16-node cluster with 8 GPUs per node must perform a hierarchical AllReduce:
-
-        1. **Intra-node AllReduce** (NVLink, 900 GB/s): Each node reduces its 8 GPUs locally.
-           Data volume per GPU: (N_gpus_per_node - 1) / N_gpus_per_node × model_size
-        2. **Inter-node AllReduce** (InfiniBand, 400 GB/s × IB_links): The 16 node representatives
-           synchronize across the fabric. Data volume per node: model_size / N_gpus_per_node
-
-        The inter-node step is the bottleneck — it runs at InfiniBand bandwidth,
-        which is a 2.25× cliff below NVLink and is shared by all 16 nodes simultaneously.
-        """),
-    ])
-    return
-
-
-# ─── ACT II: PREDICTION LOCK ─────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_reflect):
-    mo.stop(act1_reflect.value is None)
-    mo.md("---")
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo, act1_reflect):
-    mo.stop(act1_reflect.value is None)
-    act2_pred = mo.ui.radio(
-        options={
-            "A) Software bugs — distributed PyTorch has framework overhead that scales badly with node count": "A",
-            "B) InfiniBand latency — each network hop adds 1–2 µs, compounding at 128 GPUs": "B",
-            "C) The node boundary creates a bandwidth cliff — inter-node AllReduce is bottlenecked by InfiniBand": "C",
-            "D) 128 GPUs exceeds the fat-tree topology's bisection bandwidth capacity": "D",
-        },
-        label="""**Commit to your prediction.**
-
-The team observed only 6× throughput scaling on 128 GPUs (16 nodes) versus 8 GPUs (1 node).
-The expectation was 16× scaling. What is the primary cause of this 2.7× shortfall?""",
-    )
-    act2_pred
-    return (act2_pred,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act1_reflect, act2_pred):
-    mo.stop(act1_reflect.value is None)
-    mo.stop(
-        act2_pred.value is None,
-        mo.vstack([
-            act2_pred,
-            mo.callout(mo.md("Select your prediction to continue."), kind="warn"),
-        ])
-    )
-    mo.callout(
-        mo.md(f"**Prediction locked:** {act2_pred.value[:2]}. Run the multi-node analyzer to test your hypothesis."),
-        kind="info",
-    )
-    return
-
-
-# ─── ACT II: INSTRUMENTS ─────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_reflect):
-    mo.stop(act1_reflect.value is None)
-    mo.md("## Multi-Node Scaling Analyzer")
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo, act1_reflect):
-    mo.stop(act1_reflect.value is None)
-    n_nodes = mo.ui.slider(
-        start=1, stop=64, value=16, step=1,
-        label="Number of nodes",
-    )
-    gpus_per_node = mo.ui.slider(
-        start=4, stop=8, value=8, step=4,
-        label="GPUs per node (NVLink)",
-    )
-    act2_model_b = mo.ui.slider(
-        start=7, stop=175, value=70, step=7,
-        label="Model size (billions of parameters)",
-    )
-    ib_links = mo.ui.slider(
-        start=1, stop=8, value=1, step=1,
-        label="InfiniBand links per node",
-    )
-    mo.vstack([
-        mo.hstack([n_nodes, gpus_per_node], justify="start", gap=2),
-        mo.hstack([act2_model_b, ib_links], justify="start", gap=2),
-    ])
-    return (n_nodes, gpus_per_node, act2_model_b, ib_links)
-
-
-@app.cell(hide_code=True)
-def _(
-    mo, go, np,
-    n_nodes, gpus_per_node, act2_model_b, ib_links,
-    act1_reflect,
-    COLORS, apply_plotly_theme,
-    NVLINK4_BW_GBS, IB_HDR200_EFF_GBS, IB_HDR200_BW_GBS,
-    BYTES_PER_PARAM, K_COMP,
-):
-    mo.stop(act1_reflect.value is None)
-
-    # ── Physics engine ────────────────────────────────────────────────────────
-    N_nodes      = n_nodes.value
-    N_gpu_node   = gpus_per_node.value
-    N_gpu_total  = N_nodes * N_gpu_node
-    M_gb         = act2_model_b.value * BYTES_PER_PARAM   # model GB (FP16)
-
-    # Intra-node AllReduce (NVLink)
-    # Ring AllReduce within 1 node: each GPU sends/receives 2 × (N-1)/N × model_size
-    intra_data_gb   = 2.0 * (N_gpu_node - 1.0) / N_gpu_node * M_gb
-    intra_comm_s    = intra_data_gb / NVLINK4_BW_GBS
-
-    # Inter-node AllReduce (InfiniBand)
-    # After intra-node reduce, each node holds the full gradient.
-    # Inter-node ring AllReduce over N_nodes nodes:
-    #   Total data per node: 2 × model_size (bandwidth-optimal ring)
-    #   Effective IB bandwidth per node = IB_HDR200_EFF_GBS × ib_links
-    # Source: ring AllReduce bandwidth analysis, @sec-compute-infrastructure
-    ib_bw_node      = IB_HDR200_EFF_GBS * ib_links.value
-    inter_comm_s    = 2.0 * M_gb / ib_bw_node
-
-    # Total communication time is the sum (hierarchical, sequential phases)
-    total_comm_s    = intra_comm_s + inter_comm_s
-
-    # Compute time per step (calibrated K_COMP formula, batch 32 reference)
-    batch_ref       = 32
-    comp_time2_s    = K_COMP * act2_model_b.value * batch_ref
-
-    # Overhead and efficiency
-    overhead2_pct   = (total_comm_s / comp_time2_s) * 100.0
-    efficiency2     = comp_time2_s / (comp_time2_s + total_comm_s) * 100.0
-
-    # Scaling efficiency vs 1 DGX node (8 GPUs, NVLink only)
-    # Single-node baseline (N_gpu_node = 8 by default):
-    intra_base_s    = (2.0 * 7.0 / 8.0 * M_gb) / NVLINK4_BW_GBS
-    step_base_s     = comp_time2_s + intra_base_s
-
-    # Multi-node step time
-    step_multi_s    = comp_time2_s + total_comm_s
-
-    # Ideal: linear speedup with number of nodes
-    ideal_speedup   = float(N_nodes)    # vs 1 node
-    actual_speedup  = (step_base_s / step_multi_s) * ideal_speedup
-    scaling_eff_pct = (actual_speedup / ideal_speedup) * 100.0
-
-    # ── Failure state ─────────────────────────────────────────────────────────
-    _oom = overhead2_pct > 100.0
-
-    # ── Scaling curve ─────────────────────────────────────────────────────────
-    node_range  = np.arange(1, 65, 1)
-    ideal_curve = node_range * N_gpu_node / N_gpu_node  # normalized to 1 node
-
-    actual_curve = []
-    for _n in node_range:
-        # For _n=1: no inter-node comm (pure NVLink), intra only
-        if _n == 1:
-            _intra_time_n = intra_comm_s
-            _inter_time   = 0.0
+        _pred = pB_pred.value
+        if _pred == "prefill_only":
+            _msg = ("**Correct.** Only prefill and training at large batch sizes exceed "
+                    "the ridge point. LLM decode is always deeply memory-bound regardless "
+                    "of model size -- AI depends on batch, not parameters.")
+            _kind = "success"
         else:
-            _intra_time_n = intra_comm_s
-            # Inter-node: 2 × M_gb / ib_bw_node (same formula regardless of N_nodes)
-            _inter_time   = 2.0 * M_gb / ib_bw_node
-        _total_comm_n = _intra_time_n + _inter_time
-        _step_n = comp_time2_s + _total_comm_n
-        _speedup_n = (step_base_s / _step_n) * _n
-        actual_curve.append(_speedup_n)
+            _msg = (f"**Only prefill and large-batch training exceed the ridge point ({_ridge:.0f}).** "
+                    "LLM decode at batch=1 has AI ~ 1, far below the ridge. "
+                    "'Large model' does not mean 'compute-bound.'")
+            _kind = "warn"
+        items.append(mo.callout(mo.md(_msg), kind=_kind))
+        return mo.vstack(items)
 
-    actual_curve = np.array(actual_curve)
-    ideal_curve  = node_range.astype(float)   # ideal = linear in nodes
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART C: THE BANDWIDTH STAIRCASE
+    # ═════════════════════════════════════════════════════════════════════════
 
-    fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(
-        x=node_range, y=ideal_curve,
-        mode="lines", name="Ideal (linear)",
-        line=dict(color=COLORS["GreenLine"], width=2, dash="dash"),
-    ))
-    fig2.add_trace(go.Scatter(
-        x=node_range, y=actual_curve,
-        mode="lines", name="Actual (bandwidth-limited)",
-        line=dict(color=COLORS["BlueLine"], width=2.5),
-    ))
-    # Mark current configuration
-    fig2.add_trace(go.Scatter(
-        x=[N_nodes], y=[actual_speedup],
-        mode="markers", name=f"Current ({N_nodes} nodes)",
-        marker=dict(
-            color=COLORS["RedLine"] if _oom else COLORS["OrangeLine"],
-            size=14, symbol="circle",
-            line=dict(color="white", width=2),
-        ),
-    ))
-    fig2.update_layout(
-        height=300,
-        xaxis=dict(title="Number of nodes", range=[1, 64]),
-        yaxis=dict(title="Throughput speedup vs 1 node"),
-        legend=dict(orientation="h", y=-0.32),
-        margin=dict(l=40, r=20, t=16, b=80),
-    )
-    apply_plotly_theme(fig2)
-
-    # ── Color coding ──────────────────────────────────────────────────────────
-    eff2_color = (
-        COLORS["GreenLine"] if scaling_eff_pct >= 70 else
-        COLORS["OrangeLine"] if scaling_eff_pct >= 40 else
-        COLORS["RedLine"]
-    )
-    ovhd2_color = COLORS["RedLine"] if _oom else (
-        COLORS["OrangeLine"] if overhead2_pct > 20 else COLORS["GreenLine"]
-    )
-
-    # ── Display ───────────────────────────────────────────────────────────────
-    _bandwidth_cliff_note = ""
-    if N_nodes > 1:
-        _cliff_ratio = NVLINK4_BW_GBS / ib_bw_node
-        _bandwidth_cliff_note = (
-            f"Node boundary: NVLink {NVLINK4_BW_GBS} GB/s → "
-            f"IB {ib_bw_node} GB/s "
-            f"({_cliff_ratio:.1f}× bandwidth cliff)"
-        )
-
-    _failure_banner = mo.Html("")
-    if _oom:
-        _failure_banner = mo.callout(mo.md(
-            f"**Communication Bottleneck — Configuration Impractical.** "
-            f"AllReduce requires {total_comm_s:.1f}s; compute step is {comp_time2_s:.2f}s. "
-            f"**{overhead2_pct:.0f}% overhead** means the cluster spends {overhead2_pct:.0f}% of every "
-            f"compute step waiting for gradient synchronization. "
-            f"At this configuration, adding more nodes makes training *slower* in wall-clock time. "
-            f"Remedies: reduce model size, increase IB links per node, or switch to pipeline parallelism "
-            f"(which does not synchronize full gradients across node boundaries)."
-        ), kind="danger")
-
-    mo.vstack([
-        mo.Html(f"""
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0;
-                    border-radius: 12px; padding: 18px 22px; margin: 8px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: #94a3b8;
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                Physics
+    def build_part_c():
+        items = []
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; Network Architect, CloudScale AI
             </div>
-            <div style="font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.85rem;
-                        color: #1e293b; line-height: 2.0;">
-                Intra-node comm = 2 × {(N_gpu_node-1)}/{N_gpu_node} × {M_gb:.0f} GB ÷ {NVLINK4_BW_GBS} GB/s = <strong>{intra_comm_s:.3f} s</strong> (NVLink)<br>
-                Inter-node comm = 2 × {M_gb:.0f} GB ÷ {ib_bw_node} GB/s = <strong style="color:{ovhd2_color}">{inter_comm_s:.3f} s</strong> (IB {ib_bw_node} GB/s)<br>
-                Total comm = {intra_comm_s:.3f} + {inter_comm_s:.3f} = <strong style="color:{ovhd2_color}">{total_comm_s:.3f} s</strong><br>
-                Compute = <strong>{comp_time2_s:.3f} s</strong> | Overhead = <strong style="color:{ovhd2_color}">{overhead2_pct:.1f}%</strong><br>
-                {"<strong style='color:#CB202D;'>"+_bandwidth_cliff_note+"</strong>" if _bandwidth_cliff_note else ""}
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;The team wants to run tensor parallelism across nodes.
+                NVLink inside a node is fast. How much slower is InfiniBand between nodes?&rdquo;
             </div>
         </div>
-        """),
-        mo.Html(f"""
-        <div style="display: flex; gap: 16px; flex-wrap: wrap; margin: 4px 0 12px 0;">
-            <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 10px;
-                        min-width: 160px; text-align: center; background: white;">
-                <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600;
-                            text-transform: uppercase; letter-spacing: 0.08em;">
-                    Throughput Speedup
-                </div>
-                <div style="font-size: 2.1rem; font-weight: 800; color: {eff2_color};
-                            font-family: 'SF Mono', monospace; margin: 4px 0;">
-                    {actual_speedup:.1f}×
-                </div>
-                <div style="font-size: 0.75rem; color: #94a3b8; font-weight: 600;">
-                    Ideal: {ideal_speedup:.0f}×
-                </div>
+        """))
+
+        items.append(mo.md(f"""
+        ## The Bandwidth Staircase
+
+        Data transfer speed drops by orders of magnitude at each boundary:
+
+        | Interconnect | Bandwidth |
+        |---|---|
+        | HBM3 | {H100_BW_GBS:,.0f} GB/s |
+        | NVLink 4.0 | {NVLINK_GBS:.0f} GB/s |
+        | PCIe Gen5 | {PCIE_GBS:.0f} GB/s |
+        | IB NDR | {IB_NDR_GBS:.0f} GB/s |
+
+        NVLink-to-IB = {NVLINK_GBS/IB_NDR_GBS:.0f}x cliff. This is why tensor parallelism
+        stays within a node and data parallelism crosses nodes.
+        """))
+
+        items.append(pC_pred)
+        if pC_pred.value is None:
+            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(pC_size)
+
+        _size_mb = pC_size.value
+        _size_gb = _size_mb / 1000
+        _tiers = [
+            ("HBM3", H100_BW_GBS, COLORS["BlueLine"]),
+            ("NVLink 4.0", NVLINK_GBS, COLORS["GreenLine"]),
+            ("PCIe Gen5", PCIE_GBS, COLORS["OrangeLine"]),
+            ("IB NDR", IB_NDR_GBS, COLORS["RedLine"]),
+        ]
+        _times_ms = [(_size_gb / bw) * 1000 for _, bw, _ in _tiers]
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Bar(
+            x=[n for n, _, _ in _tiers], y=_times_ms,
+            marker_color=[c for _, _, c in _tiers], width=0.5,
+        ))
+        _fig.update_layout(height=320, yaxis=dict(title="Transfer Time (ms)", type="log", gridcolor="#f1f5f9"),
+                           margin=dict(l=50, r=20, t=30, b=40))
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        _nvlink_ms = (_size_gb / NVLINK_GBS) * 1000
+        _ib_ms = (_size_gb / IB_NDR_GBS) * 1000
+        _ratio = _ib_ms / _nvlink_ms if _nvlink_ms > 0 else 0
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">NVLink Time</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_nvlink_ms:.1f} ms</div>
             </div>
-            <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 10px;
-                        min-width: 160px; text-align: center; background: white;">
-                <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600;
-                            text-transform: uppercase; letter-spacing: 0.08em;">
-                    Scaling Efficiency
-                </div>
-                <div style="font-size: 2.1rem; font-weight: 800; color: {eff2_color};
-                            font-family: 'SF Mono', monospace; margin: 4px 0;">
-                    {scaling_eff_pct:.1f}%
-                </div>
-                <div style="font-size: 0.75rem; color: #94a3b8; font-weight: 600;">
-                    vs ideal linear
-                </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['RedLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">IB NDR Time</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['RedLine']};">{_ib_ms:.1f} ms</div>
             </div>
-            <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 10px;
-                        min-width: 160px; text-align: center; background: white;">
-                <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600;
-                            text-transform: uppercase; letter-spacing: 0.08em;">
-                    Comm Overhead
-                </div>
-                <div style="font-size: 2.1rem; font-weight: 800; color: {ovhd2_color};
-                            font-family: 'SF Mono', monospace; margin: 4px 0;">
-                    {overhead2_pct:.1f}%
-                </div>
-                <div style="font-size: 0.75rem; color: #94a3b8; font-weight: 600;">
-                    {N_gpu_total} total GPUs
-                </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">IB/NVLink Ratio</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_ratio:.0f}x</div>
             </div>
-            <div style="padding: 18px 22px; border: 1px solid #e2e8f0; border-radius: 10px;
-                        min-width: 160px; text-align: center; background: white;">
-                <div style="color: #94a3b8; font-size: 0.82rem; font-weight: 600;
-                            text-transform: uppercase; letter-spacing: 0.08em;">
-                    IB Bandwidth
-                </div>
-                <div style="font-size: 2.1rem; font-weight: 800; color: {COLORS['BlueLine']};
-                            font-family: 'SF Mono', monospace; margin: 4px 0;">
-                    {ib_bw_node} GB/s
-                </div>
-                <div style="font-size: 0.75rem; color: #94a3b8; font-weight: 600;">
-                    {ib_links.value} link(s) × {IB_HDR200_BW_GBS} GB/s
-                </div>
+        </div>"""))
+
+        _pred = pC_pred.value
+        if _pred == "18":
+            _msg = f"**Correct.** NVLink = {NVLINK_GBS:.0f} GB/s, IB NDR = {IB_NDR_GBS:.0f} GB/s. Ratio = {NVLINK_GBS/IB_NDR_GBS:.0f}x."
+            _kind = "success"
+        else:
+            _msg = f"**The ratio is {NVLINK_GBS/IB_NDR_GBS:.0f}x.** This cliff dictates that TP stays within a node."
+            _kind = "warn"
+        items.append(mo.callout(mo.md(_msg), kind=_kind))
+        return mo.vstack(items)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART D: THE NODE MEMORY BUDGET
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def build_part_d():
+        items = []
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; Training Lead, CloudScale AI
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;Our DGX H100 has 640 GB total HBM. Can it train a 175B model?
+                175B x 2 bytes = 350 GB for weights -- should fit, right?&rdquo;
             </div>
         </div>
-        """),
-        _failure_banner,
-        mo.md("### Scaling Curve: Actual vs. Ideal"),
-        mo.as_html(fig2),
-        mo.callout(mo.md(
-            f"**Bandwidth cliff at node boundary.** "
-            f"Intra-node AllReduce runs at {NVLINK4_BW_GBS} GB/s (NVLink). "
-            f"Inter-node AllReduce runs at {ib_bw_node} GB/s (InfiniBand × {ib_links.value}). "
-            f"The cliff ratio is {NVLINK4_BW_GBS / ib_bw_node:.1f}×. "
-            "As you add nodes, each additional node does not add proportional compute — "
-            "it adds proportional gradient volume that must cross the lower-bandwidth inter-node fabric. "
-            "This is the source of the scaling wall."
-        ), kind="info"),
-    ])
-    return (
-        actual_speedup, ideal_speedup, scaling_eff_pct,
-        overhead2_pct, total_comm_s, comp_time2_s,
-        N_nodes, N_gpu_total, act2_model_b,
-    )
+        """))
 
+        items.append(mo.md("""
+        ## Training Memory Budget
 
-# ─── ACT II: PREDICTION-VS-REALITY OVERLAY ───────────────────────────────────
-@app.cell(hide_code=True)
-def _(
-    mo, act2_pred,
-    actual_speedup, ideal_speedup, scaling_eff_pct,
-    overhead2_pct,
-    act1_reflect,
-):
-    mo.stop(act1_reflect.value is None)
-    mo.stop(act2_pred.value is None)
+        Training memory is far more than just weights:
 
-    _letter2 = act2_pred.value[0]
-    _correct2 = _letter2 == "C"
+        ```
+        Total = Weights + Gradients + Optimizer States + Activations
+        ```
 
-    _gap_map = {
-        "A": (
-            "You predicted distributed PyTorch framework overhead. "
-            "Framework overhead is real — it typically costs 5–15% of step time — but it does not "
-            "explain a 2.7× shortfall from ideal. The actual cause is the **18× bandwidth cliff** "
-            "when crossing from NVLink (900 GB/s) to InfiniBand (~50 GB/s effective per port). "
-            "Framework profiling would show the GPU sitting idle waiting for AllReduce — not executing Python."
-        ),
-        "B": (
-            "You predicted InfiniBand latency (per-hop microseconds). "
-            "InfiniBand latency is ~1 µs per hop — at 64 nodes, this is ~6 µs total. "
-            "Against a 2+ second gradient sync, 6 µs is negligible (0.0003% overhead). "
-            "The bottleneck is **bandwidth**, not latency. The 280 GB of gradient data "
-            "must flow through ~50 GB/s of effective InfiniBand bandwidth per port — and that takes seconds, not microseconds."
-        ),
-        "C": (
-            f"Correct. The bandwidth cliff at the node boundary is the root cause. "
-            f"Scaling from 1 node (8 GPUs, NVLink 900 GB/s) to 16 nodes introduces inter-node "
-            "AllReduce at ~50 GB/s effective IB bandwidth — an 18× drop from NVLink for the inter-node phase. "
-            f"At 70B parameters, this dominates the total communication time. "
-            f"The scaling curve shows {scaling_eff_pct:.0f}% efficiency against ideal: "
-            f"approximately {actual_speedup:.1f}× actual vs {ideal_speedup:.0f}× expected."
-        ),
-        "D": (
-            "You predicted the topology's bisection bandwidth is exceeded. "
-            "A properly provisioned fat-tree network does not have a fixed bisection bandwidth cap "
-            "for 128 GPUs — it scales. The bottleneck is the per-node IB link count (1–8 links), "
-            "not the topology itself. The scaling wall would appear even on an ideal non-blocking "
-            "fabric, because the fundamental issue is the NVLink→IB bandwidth drop at the node boundary."
-        ),
-    }
+        Adam optimizer stores FP32 master weights + momentum + variance = 12 bytes/param.
+        With FP16 weights (2B/param) + FP16 grads (2B/param): **16 bytes per parameter**.
+        For 175B params: 175B x 16 = **2,800 GB static memory** (no ZeRO).
+        """))
 
-    _kind2 = "success" if _correct2 else "warn"
-    mo.callout(mo.md(
-        f"**Prediction vs. Reality — Act II**\n\n"
-        f"You predicted option {_letter2}. {_gap_map[_letter2]}\n\n"
-        f"**At 16 nodes / 70B / 1 IB link per node:**\n"
-        f"- Actual speedup: **{actual_speedup:.1f}×** vs ideal **{ideal_speedup:.0f}×**\n"
-        f"- Scaling efficiency: **{scaling_eff_pct:.0f}%**\n"
-        f"- Communication overhead: **{overhead2_pct:.1f}%**\n"
-        f"- The inter-node AllReduce is the bottleneck, not software or topology."
-    ), kind=_kind2)
-    return
+        items.append(pD_pred)
+        if pD_pred.value is None:
+            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
+            return mo.vstack(items)
 
+        items.append(mo.hstack([pD_model_b, pD_gpus], justify="start", gap="2rem"))
+        items.append(pD_zero)
 
-# ─── ACT II: REFLECTION ──────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_reflect):
-    mo.stop(act1_reflect.value is None)
-    mo.md("---")
-    return
+        _P = pD_model_b.value * 1e9
+        _N = pD_gpus.value
+        _zero = pD_zero.value
+        _hbm_per_gpu = H100_RAM_GB
 
+        # Memory components (bytes per parameter)
+        _w_bytes = 2  # FP16 weights
+        _g_bytes = 2  # FP16 gradients
+        _o_bytes = 12  # Adam: 4 (FP32 master) + 4 (momentum) + 4 (variance)
 
-@app.cell(hide_code=True)
-def _(mo, act1_reflect, act2_pred):
-    mo.stop(act1_reflect.value is None)
-    mo.stop(act2_pred.value is None)
+        # ZeRO sharding
+        if _zero == 0:
+            _w_gb = _P * _w_bytes / 1e9
+            _g_gb = _P * _g_bytes / 1e9
+            _o_gb = _P * _o_bytes / 1e9
+        elif _zero == 1:
+            _w_gb = _P * _w_bytes / 1e9
+            _g_gb = _P * _g_bytes / 1e9
+            _o_gb = _P * _o_bytes / 1e9 / _N
+        elif _zero == 2:
+            _w_gb = _P * _w_bytes / 1e9
+            _g_gb = _P * _g_bytes / 1e9 / _N
+            _o_gb = _P * _o_bytes / 1e9 / _N
+        else:  # ZeRO-3
+            _w_gb = _P * _w_bytes / 1e9 / _N
+            _g_gb = _P * _g_bytes / 1e9 / _N
+            _o_gb = _P * _o_bytes / 1e9 / _N
 
-    act2_reflect = mo.ui.radio(
-        options={
-            "A) Use faster InfiniBand HDR400 — double the inter-node bandwidth from 400 to 800 GB/s": "A",
-            "B) Switch to pipeline parallelism — only pipeline-boundary activations cross node boundaries, not full gradients": "B",
-            "C) Reduce model size to fit within a single NVLink node — eliminate inter-node traffic entirely": "C",
-            "D) Increase batch size — fewer sync steps per epoch reduces total gradient communication": "D",
-        },
-        label="""**Reflection.** The inter-node bandwidth bottleneck is structural.
-Given that NVLink within a node is 900 GB/s but InfiniBand across nodes is 400 GB/s
-(a 2.25× cliff at best, 18× for PCIe), what is the most effective architectural remedy?""",
-    )
-    act2_reflect
-    return (act2_reflect,)
+        # Activations (not sharded by ZeRO): approximate
+        _act_gb = min(50, pD_model_b.value * 0.3)  # rough estimate
+        _total_gb = _w_gb + _g_gb + _o_gb + _act_gb
+        _oom = _total_gb > _hbm_per_gpu
 
+        # Stacked bar
+        _fig = go.Figure()
+        _components = [
+            ("Weights", _w_gb, COLORS["BlueLine"]),
+            ("Gradients", _g_gb, COLORS["OrangeLine"]),
+            ("Optimizer", _o_gb, COLORS["RedLine"]),
+            ("Activations", _act_gb, "#6366f1"),
+        ]
+        for _name, _val, _col in _components:
+            _fig.add_trace(go.Bar(name=_name, x=["Per-GPU Memory"], y=[_val],
+                                  marker_color=_col, width=0.4))
+        _fig.add_hline(y=_hbm_per_gpu, line_dash="dash", line_color=COLORS["RedLine"],
+                       annotation_text=f"HBM Capacity: {_hbm_per_gpu:.0f} GB",
+                       annotation_position="top right")
+        _fig.update_layout(barmode="stack", height=300,
+                           yaxis=dict(title="Memory (GB)", gridcolor="#f1f5f9"),
+                           legend=dict(orientation="h", y=1.15, x=0),
+                           margin=dict(l=50, r=20, t=60, b=40))
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
 
-@app.cell(hide_code=True)
-def _(mo, act1_reflect, act2_pred, act2_reflect):
-    mo.stop(act1_reflect.value is None)
-    mo.stop(act2_pred.value is None)
-    mo.stop(
-        act2_reflect.value is None,
-        mo.vstack([
-            act2_reflect,
-            mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"),
+        if _oom:
+            items.append(mo.callout(mo.md(
+                f"**OOM -- Training infeasible.** Required: {_total_gb:.0f} GB | "
+                f"Available: {_hbm_per_gpu:.0f} GB per GPU. "
+                f"Overflow: {_total_gb - _hbm_per_gpu:.0f} GB."
+            ), kind="danger"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**Fits.** Required: {_total_gb:.0f} GB | Available: {_hbm_per_gpu:.0f} GB. "
+                f"Headroom: {_hbm_per_gpu - _total_gb:.0f} GB."
+            ), kind="success"))
+
+        _pred = pD_pred.value
+        if _pred == "no_static":
+            _msg = ("**Correct.** Static memory (weights + gradients + optimizer) = "
+                    "175B x 16 bytes = 2,800 GB. That is 4.4x the total 640 GB HBM "
+                    "of an 8-GPU DGX H100 node. ZeRO-3 is required at minimum.")
+            _kind = "success"
+        else:
+            _msg = ("**Static memory alone is 2,800 GB -- 4.4x more than 640 GB.** "
+                    "Students compute only weight memory (350 GB) and forget gradients "
+                    "(350 GB) and Adam states (2,100 GB at FP32).")
+            _kind = "warn"
+        items.append(mo.callout(mo.md(_msg), kind=_kind))
+        return mo.vstack(items)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART E: TCO -- THE HIDDEN COST OF SCALE
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def build_part_e():
+        items = []
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid #6366f1; background:#f0f4ff;
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:#6366f1;
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incoming Message &middot; CFO, CloudScale AI
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;The GPUs cost $30M. How much will electricity add over three years?
+                I need TCO for the board.&rdquo;
+            </div>
+        </div>
+        """))
+
+        items.append(mo.md("""
+        ## Total Cost of Ownership Goes Far Beyond GPUs
+
+        TCO = CapEx (GPUs + networking + storage) + OpEx (power + cooling + staff).
+        A 1,000-GPU H100 cluster at 700W each = 700 kW. With PUE 1.12, facility
+        power = 784 kW. At $0.12/kWh, annual electricity alone is ~$824K.
+        """))
+
+        items.append(pE_pred)
+        if pE_pred.value is None:
+            items.append(mo.callout(mo.md("Select your prediction to unlock."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([pE_n_gpus, pE_util], justify="start", gap="2rem"))
+        items.append(pE_pue)
+
+        _n = pE_n_gpus.value
+        _util = pE_util.value / 100
+        _pue = pE_pue.value
+        _years = 3
+        _gpu_cost = 30_000
+        _tdp = H100_TDP_W
+
+        # CapEx
+        _capex_gpus = _n * _gpu_cost
+        _capex_network = _n * 2000  # ~$2K networking per GPU
+        _capex_storage = _n * 500
+        _capex_total = _capex_gpus + _capex_network + _capex_storage
+
+        # OpEx (annual)
+        _power_kw = _n * _tdp / 1000 * _util * _pue
+        _annual_elec = _power_kw * 8760 * DEFAULT_KWH_PRICE
+        _annual_maint = _capex_total * ANNUAL_MAINTENANCE_RATIO
+        _annual_staff = _n * 200  # rough staff allocation per GPU
+        _opex_total = (_annual_elec + _annual_maint + _annual_staff) * _years
+
+        _tco = _capex_total + _opex_total
+        _elec_pct = (_annual_elec * _years) / _tco * 100 if _tco > 0 else 0
+
+        # TCO breakdown chart
+        _fig = go.Figure()
+        _labels = ["GPUs", "Networking", "Storage", "Electricity\n(3yr)", "Maintenance\n(3yr)", "Staff\n(3yr)"]
+        _vals = [_capex_gpus, _capex_network, _capex_storage,
+                 _annual_elec * _years, _annual_maint * _years, _annual_staff * _years]
+        _cols = [COLORS["BlueLine"], COLORS["BlueLine"], COLORS["BlueLine"],
+                 COLORS["OrangeLine"], COLORS["OrangeLine"], COLORS["OrangeLine"]]
+        _fig.add_trace(go.Bar(x=_labels, y=[v / 1e6 for v in _vals],
+                              marker_color=_cols, width=0.5))
+        _fig.update_layout(height=320, yaxis=dict(title="Cost ($M)", gridcolor="#f1f5f9"),
+                           margin=dict(l=50, r=20, t=30, b=60))
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">CapEx</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">${_capex_total/1e6:.1f}M</div>
+            </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">OpEx (3yr)</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">${_opex_total/1e6:.1f}M</div>
+            </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['RedLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Total TCO</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['RedLine']};">${_tco/1e6:.1f}M</div>
+            </div>
+            <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
+                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Electricity %</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_elec_pct:.0f}%</div>
+            </div>
+        </div>"""))
+
+        _pred = pE_pred.value
+        if _pred == "close":
+            _msg = (f"**Correct.** Over 3 years, electricity is {_elec_pct:.0f}% of TCO. "
+                    "GPUs cost more in absolute terms, but operational costs are a much "
+                    "larger fraction than most engineers expect.")
+            _kind = "success"
+        else:
+            _msg = (f"**Electricity is {_elec_pct:.0f}% of 3-year TCO.** "
+                    "GPUs dominate CapEx but operational costs compound over years. "
+                    "Utilization rate matters enormously -- a cluster at 30% utilization "
+                    "wastes 70% of its power budget on idle GPUs.")
+            _kind = "warn"
+        items.append(mo.callout(mo.md(_msg), kind=_kind))
+        return mo.vstack(items)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # SYNTHESIS
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def build_synthesis():
+        return mo.vstack([
+            mo.md("## Key Takeaways"),
+            mo.callout(mo.md(
+                f"**1. The Memory Wall dominates LLM inference.** At batch=1, an H100 is ~99% idle. "
+                f"AI ~ 1 FLOPs/Byte vs ridge point {H100_RIDGE:.0f}. The GPU is waiting for HBM, not computing."
+            ), kind="info"),
+            mo.callout(mo.md(
+                f"**2. The Bandwidth Staircase dictates parallelism placement.** "
+                f"NVLink ({NVLINK_GBS:.0f} GB/s) to IB NDR ({IB_NDR_GBS:.0f} GB/s) = "
+                f"{NVLINK_GBS/IB_NDR_GBS:.0f}x cliff. TP stays within a node; DP crosses nodes."
+            ), kind="info"),
+            mo.callout(mo.md(
+                "**3. TCO goes far beyond GPU purchase price.** Electricity reaches ~25-35% "
+                "of 3-year TCO. Utilization rate matters more than hardware generation -- "
+                "a well-utilized A100 cluster outperforms an idle H100 cluster on cost-per-FLOP."
+            ), kind="info"),
+            mo.md("""
+## Connections
+
+**Textbook:** Vol II Ch 2 -- memory wall, roofline at fleet scale, bandwidth hierarchy, TCO.
+
+**Next Lab:** V2-03 explores communication at scale: the alpha-beta model, Ring vs Tree
+AllReduce, hierarchical communication, and gradient compression.
+            """),
         ])
-    )
 
-    _reflect2_feedback = {
-        "A": mo.callout(mo.md(
-            "**Partially correct, but insufficient.** HDR400 doubles bandwidth to 800 GB/s, "
-            "closing the gap from 2.25× to 1.125× vs NVLink. For modest-scale training "
-            "(16–32 nodes, models up to 30B), this can be effective. But it does not eliminate "
-            "the architectural mismatch: you are still synchronizing full gradient tensors across "
-            "a lower-bandwidth inter-node fabric. At 70B+ parameters and 64+ nodes, even HDR400 "
-            "produces unacceptable overhead. It is a bandwidth tax, not an architectural remedy."
-        ), kind="warn"),
-        "B": mo.callout(mo.md(
-            "**Correct.** Pipeline parallelism partitions the model across nodes by **layers**, "
-            "not by data. Each node holds a contiguous slice of the model's layers. "
-            "The data that crosses node boundaries is not gradients (model_size × 2) "
-            "but **pipeline activations**: one micro-batch of activations flowing forward, "
-            "and one of gradients flowing backward. Activation volume is typically "
-            "batch_size × seq_len × hidden_dim × 2 bytes — orders of magnitude smaller than "
-            "full model gradients. The inter-node bandwidth constraint is reduced from "
-            "`2 × model_size / IB_bw` to `2 × activation_volume / IB_bw`. "
-            "This is the architectural insight behind how Megatron-LM and GPT-4-scale systems "
-            "cross node boundaries without a bandwidth wall."
-        ), kind="success"),
-        "C": mo.callout(mo.md(
-            "**Correct premise, wrong conclusion.** Fitting everything on a single NVLink node "
-            "does eliminate inter-node traffic — but it limits you to models that fit in "
-            "8 × 80 GB = 640 GB of HBM. A 70B FP16 model is 140 GB; a 175B model is 350 GB. "
-            "At 70B you fit; at 175B you do not. More importantly, this is not a remedy for "
-            "multi-node scaling — it is a retreat from it. The question is how to scale, "
-            "not how to avoid scaling."
-        ), kind="warn"),
-        "D": mo.callout(mo.md(
-            "**Not the most effective remedy.** Increasing batch size does reduce sync frequency "
-            "per epoch, but it does not reduce the per-sync gradient volume — each AllReduce "
-            "still transfers 2 × model_size bytes. Larger batches also risk statistical efficiency "
-            "degradation (larger batches require more learning rate tuning to avoid accuracy loss). "
-            "The inter-node bandwidth bottleneck is a function of gradient volume, "
-            "not sync frequency."
-        ), kind="warn"),
-    }
+    # ═════════════════════════════════════════════════════════════════════════
+    # COMPOSE TABS
+    # ═════════════════════════════════════════════════════════════════════════
 
-    mo.vstack([
-        act2_reflect,
-        _reflect2_feedback[act2_reflect.value[0]],
-    ])
-    return
-
-
-# ─── ACT II: MATH PEEK ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_reflect):
-    mo.stop(act1_reflect.value is None)
-    mo.accordion({
-        "The Governing Equation — Hierarchical AllReduce at Scale": mo.md("""
-        **Hierarchical AllReduce Time**
-
-        For a cluster of N_nodes nodes, each with N_gpu GPUs connected by NVLink,
-        and inter-node InfiniBand:
-
-        ```
-        T_intra = 2 × (N_gpu - 1)/N_gpu × M_bytes / BW_nvlink
-        T_inter = 2 × M_bytes / (BW_ib × N_ib_links)
-        T_allreduce = T_intra + T_inter
-        ```
-
-        - **T_intra** — intra-node reduce time (NVLink, fast path)
-        - **T_inter** — inter-node reduce time (InfiniBand, bottleneck)
-        - **M_bytes** — model size in bytes (N_params × bytes_per_param)
-        - **BW_nvlink** — NVLink4 bidirectional bandwidth, 900 GB/s
-        - **BW_ib** — InfiniBand per-port bandwidth, 400 GB/s
-        - **N_ib_links** — number of IB ports per node (1–8)
-
-        **Scaling Efficiency**
-
-        ```
-        T_step_1node   = T_compute + T_intra_1node
-        T_step_Nnodes  = T_compute + T_allreduce
-        actual_speedup = (T_step_1node / T_step_Nnodes) × N_nodes
-        scaling_eff    = actual_speedup / N_nodes
-        ```
-
-        **The Bandwidth Cliff**
-
-        | Phase | Bandwidth | Volume (70B FP16) | Time |
-        |---|---|---|---|
-        | Intra-node (NVLink) | 900 GB/s | ~122.5 GB | 0.14 s |
-        | Inter-node (1× IB) | 400 GB/s | ~8.75 GB | 0.35 s |
-        | Inter-node (8× IB) | 3200 GB/s | ~8.75 GB | 0.04 s |
-
-        Adding more IB links per node is the hardware remedy within data-parallel training.
-        Switching to pipeline parallelism is the architectural remedy that eliminates
-        the gradient-crossing requirement altogether.
-
-        **Pipeline Parallelism Volume Comparison**
-
-        ```
-        AllReduce activation volume = 2 × batch × seq_len × hidden_dim × 2 bytes
-        ```
-        For batch=32, seq=2048, hidden=8192 (70B-class):
-        ```
-        2 × 32 × 2048 × 8192 × 2 = ~2.15 GB
-        ```
-        Pipeline boundary traffic (**~2 GB**) vs. data-parallel gradient traffic (**280 GB**) —
-        a 130× reduction in inter-node data movement.
-        """),
+    tabs = mo.ui.tabs({
+        "Part A -- The Memory Wall": build_part_a(),
+        "Part B -- The Roofline Diagnostic": build_part_b(),
+        "Part C -- The Bandwidth Staircase": build_part_c(),
+        "Part D -- Node Memory Budget": build_part_d(),
+        "Part E -- TCO: Hidden Cost of Scale": build_part_e(),
+        "Synthesis": build_synthesis(),
     })
+    tabs
     return
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.vstack([
-        mo.md("---"),
-
-        # ── KEY TAKEAWAYS ──
-        mo.Html(f"""
-        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                Key Takeaways
-            </div>
-            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
-                <div style="margin-bottom: 10px;">
-                    <strong>1. The bandwidth staircase is an 18&times; cliff at the node boundary.</strong>
-                    NVLink delivers 900 GB/s and InfiniBand delivers 50 GB/s: a 10 GB tensor takes 11 ms
-                    within a node but 200 ms between nodes. This cliff is not a configuration choice &mdash;
-                    it is a consequence of signal propagation physics at centimeter vs. meter distances.
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>2. Tensor Parallelism placed across the InfiniBand boundary collapses to ~15% efficiency.</strong>
-                    Each transformer layer requires 192 AllReduce operations. At 50 GB/s, that totals 518 ms
-                    of communication vs. 29 ms on NVLink. GPUs are idle 94% of the time waiting for gradients
-                    that the interconnect cannot deliver fast enough.
-                </div>
-                <div>
-                    <strong>3. The hierarchical TP-intra/DP-inter mapping is universal, not conventional.</strong>
-                    Meta, Google, and OpenAI all use the same assignment because the 18&times; bandwidth gap
-                    physically forces TP to the fastest tier. Hierarchical placement achieves ~85% efficiency;
-                    violating it collapses efficiency to ~15%.
-                </div>
-            </div>
-        </div>
-        """),
-
-        # ── CONNECTIONS ──
-        mo.Html(f"""
-        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-
-            <!-- What's Next -->
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    What's Next
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab V2-03: The Bisection Bandwidth Wall</strong> &mdash; This lab showed
-                    that the node boundary creates an 18&times; bandwidth cliff. The next lab asks:
-                    within the inter-node fabric itself, how does network topology (fat-tree vs.
-                    oversubscribed spine) determine the effective AllReduce bandwidth at cluster scale?
-                </div>
-            </div>
-
-            <!-- Textbook Connection -->
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    Textbook &amp; TinyTorch
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-compute-infrastructure for the full bandwidth hierarchy
-                    derivation and the 18&times; gap calculation.<br/>
-                    <strong>Build:</strong> TinyTorch distributed module &mdash; implement hierarchical
-                    AllReduce with NVLink intra-node and InfiniBand inter-node in
-                    <code>tinytorch/src/distributed/</code>.
-                </div>
-            </div>
-
-        </div>
-        """),
-
-        mo.accordion({
-
-
-            "Self-Assessment": mo.md("""
-**Check your understanding:**
-
-1. NVLink delivers 900 GB/s while InfiniBand delivers 50 GB/s. What is the bandwidth ratio, and why does this 18x cliff at the node boundary force Tensor Parallelism to stay within a single node?
-2. An engineer proposes extending Tensor Parallelism across 2 nodes (16 GPUs). Each transformer layer requires 192 AllReduce operations. Why does this collapse GPU utilization to ~15%, and what parallelism strategy should be used across the InfiniBand boundary instead?
-3. Meta, Google, and OpenAI all use the same TP-intra/DP-inter mapping. Is this a convention or a physical constraint? What happens to efficiency if you violate the hierarchical placement?
-
-**You're ready to move on if you can:**
-- Quantify the bandwidth cliff at each level of the interconnect hierarchy (die, package, node, rack)
-- Explain why the TP-intra/DP-inter mapping is universal across all large-scale training systems
-- Calculate the communication overhead of placing tensor parallelism across an InfiniBand boundary
-""")
-
-
-        }),
-    ])
-    return
-
-
-# ─── CELL 21: LEDGER_HUD ─────────────────────────────────────────────────────
-# ═════════════════════════════════════════════════════════════════════════════
-# LEDGER SAVE + HUD FOOTER
-# ═════════════════════════════════════════════════════════════════════════════
-
-@app.cell(hide_code=True)
-def _(
-    mo, ledger,
-    COLORS,
-    act1_pred, act2_pred, act2_reflect,
-    context_toggle,
-    overhead_pct, efficiency,
-    actual_speedup, ideal_speedup, scaling_eff_pct,
-    overhead2_pct, N_nodes, N_gpu_total,
-    act2_model_b,
-    act1_reflect,
-):
-    # Only save when Act II reflection is answered
-    _act1_done  = act1_pred.value is not None
-    _act1_corr  = (act1_pred.value or "")[0] == "C"
-    _act2_done  = act2_pred.value is not None
-    _act2_corr  = (act2_pred.value or "")[0] == "C"
-    _ref1_done  = act1_reflect.value is not None
-    _ref1_corr  = (act1_reflect.value or "")[0] == "B"
-    _ref2_done  = act2_reflect.value is not None and act1_reflect.value is not None
-
-    _ctx        = context_toggle.value
-    _interconnect = "nvlink" if _ctx == "single_node" else "infiniband"
-    _constraint_hit = overhead_pct > 100.0 or overhead2_pct > 100.0
-
-    if _act2_done and _ref1_done:
-        ledger.save(
-            chapter="v2_02",
-            design={
-                "context":            _ctx,
-                "interconnect":       _interconnect,
-                "nodes":              N_nodes,
-                "model_params_b":     float(act2_model_b.value),
-                "comm_overhead_pct":  float(overhead2_pct),
-                "act1_prediction":    act1_pred.value or "",
-                "act1_correct":       _act1_corr,
-                "act2_result":        float(scaling_eff_pct),
-                "act2_decision":      act2_reflect.value or "",
-                "constraint_hit":     _constraint_hit,
-            }
-        )
-
-    # ── HUD footer ─────────────────────────────────────────────────────────
-    def _hud_badge(label, value, active):
-        _color = COLORS["GreenLine"] if active else COLORS["RedLine"]
-        _bg    = COLORS["GreenLL"] if active else COLORS["RedLL"]
-        return f"""
-        <div style="display:flex; flex-direction:column; gap:2px; min-width:100px;">
-            <div style="font-size:0.68rem; font-weight:700; color:#94a3b8;
-                        text-transform:uppercase; letter-spacing:0.1em;">{label}</div>
-            <div style="font-size:0.88rem; font-weight:700; color:{_color};
-                        font-family:'SF Mono','Fira Code',monospace;">{value}</div>
-        </div>
-        """
-
-    _progress_pct = (
-        (1 if _act1_done else 0) +
-        (1 if _ref1_done else 0) +
-        (1 if _act2_done else 0) +
-        (1 if _ref2_done else 0)
-    ) / 4 * 100
-
-    _hud_items = [
-        _hud_badge("Context",     _ctx.replace("_", "-"), True),
-        _hud_badge("Act I Pred",  (act1_pred.value or "—")[:1], _act1_corr),
-        _hud_badge("Reflect I",   (act1_reflect.value or "—")[:1], _ref1_corr),
-        _hud_badge("Act II Pred", (act2_pred.value or "—")[:1] if _act2_done else "—", _act2_corr),
-        _hud_badge("Scaling Eff", f"{scaling_eff_pct:.0f}%" if _act2_done else "—", scaling_eff_pct >= 50 if _act2_done else False),
-        _hud_badge("Lab Progress", f"{_progress_pct:.0f}%", _progress_pct >= 75),
-    ]
-
+def _(COLORS, ledger, mo):
+    _track = ledger._state.track or "not set"
     mo.Html(f"""
-    <div style="display: flex; gap: 24px; align-items: center; flex-wrap: wrap;
-                padding: 14px 24px; background: #0f172a; border-radius: 12px;
-                margin-top: 32px; border: 1px solid #1e293b;">
-        <div style="font-size: 0.72rem; font-weight: 800; color: #475569;
-                    text-transform: uppercase; letter-spacing: 0.14em; white-space: nowrap;
-                    border-right: 1px solid #1e293b; padding-right: 16px; margin-right: 4px;">
-            Design Ledger · v2_02
-        </div>
-        {"".join(_hud_items)}
+    <div class="lab-hud">
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">V2-02 &middot; The Compute Infrastructure Wall</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">TRACK</span>
+        <span class="{'hud-active' if _track != 'not set' else 'hud-none'}">{_track}</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">VOL&nbsp;II&nbsp;CH&nbsp;2</span>
+        <span class="hud-value">Compute Infrastructure</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">active</span>
     </div>
     """)
     return

@@ -1,10 +1,13 @@
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Optional, Any, List
+import yaml
+from pathlib import Path
 
-# ... (rest of the file logic to remain mostly same, I need to be precise, let's look at it)
 from mlsysim.models.registry import Models
 from mlsysim.hardware.registry import Hardware
 from mlsysim.core.registry import Registry
+from mlsysim.hardware.types import HardwareNode
+from mlsysim.models.types import TransformerWorkload, CNNWorkload, SSMWorkload, DiffusionWorkload, Workload
 
 def _find_flat(reg: Any, name: str) -> Any:
     """Helper to do a deep search for a name in the registry tree."""
@@ -17,12 +20,53 @@ def _find_flat(reg: Any, name: str) -> Any:
                 return res
     return None
 
+def _resolve_hardware(name_or_path: str) -> HardwareNode:
+    """Resolves a hardware node from the Zoo or a local YAML file."""
+    if name_or_path.endswith((".yaml", ".yml")):
+        p = Path(name_or_path)
+        if not p.exists():
+            raise ValueError(f"Hardware YAML not found: {p}")
+        with open(p, "r") as f:
+            data = yaml.safe_load(f)
+        return HardwareNode(**data)
+        
+    h_obj = _find_flat(Hardware, name_or_path)
+    if not h_obj:
+        raise ValueError(f"Hardware '{name_or_path}' not found in the MLSysZoo. (Check case and spelling)")
+    return h_obj
+
+def _resolve_model(name_or_path: str) -> Workload:
+    """Resolves a model from the Zoo or a local YAML file."""
+    if name_or_path.endswith((".yaml", ".yml")):
+        p = Path(name_or_path)
+        if not p.exists():
+            raise ValueError(f"Model YAML not found: {p}")
+        with open(p, "r") as f:
+            data = yaml.safe_load(f)
+            
+        arch = data.get("architecture", "").lower()
+        if "transformer" in arch:
+            return TransformerWorkload(**data)
+        elif "cnn" in arch:
+            return CNNWorkload(**data)
+        elif "ssm" in arch:
+            return SSMWorkload(**data)
+        elif "diffusion" in arch:
+            return DiffusionWorkload(**data)
+        else:
+            return Workload(**data)
+            
+    m_obj = _find_flat(Models, name_or_path)
+    if not m_obj:
+        raise ValueError(f"Model '{name_or_path}' not found in the MLSysZoo. (Check case and spelling)")
+    return m_obj
+
 class EvalNodeSchema(BaseModel):
     """Schema for evaluating a single node (Gate 1: Schema Validation)."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
-    model_name: str = Field(..., description="The name of the workload (e.g. Llama3_8B)")
-    hardware_name: str = Field(..., description="The name of the hardware (e.g. H100)")
+    model_name: str = Field(..., description="The name of the workload (e.g. Llama3_8B) or path to YAML")
+    hardware_name: str = Field(..., description="The name of the hardware (e.g. H100) or path to YAML")
     batch_size: int = Field(default=1, gt=0)
     precision: str = Field(default="fp16")
     efficiency: float = Field(default=0.5, gt=0.0, le=1.0)
@@ -34,20 +78,8 @@ class EvalNodeSchema(BaseModel):
     @model_validator(mode='after')
     def resolve_and_validate(self) -> 'EvalNodeSchema':
         """Gate 2: Registry Resolution."""
-        # 1. Resolve Model
-        m_obj = _find_flat(Models, self.model_name)
-        if not m_obj:
-            raise ValueError(f"Model '{self.model_name}' not found in the MLSysZoo. (Check case and spelling)")
-            
-        # 2. Resolve Hardware
-        h_obj = _find_flat(Hardware, self.hardware_name)
-        if not h_obj:
-            raise ValueError(f"Hardware '{self.hardware_name}' not found in the MLSysZoo. (Check case and spelling)")
-
-        # 3. Store the resolved objects for the solver to use
-        self.model_obj = m_obj
-        self.hardware_obj = h_obj
-            
+        self.model_obj = _resolve_model(self.model_name)
+        self.hardware_obj = _resolve_hardware(self.hardware_name)
         return self
 
 
@@ -88,18 +120,8 @@ class MlsysPlanSchema(BaseModel):
     
     @model_validator(mode='after')
     def resolve_and_validate(self) -> 'MlsysPlanSchema':
-        # 1. Resolve Model
-        m_obj = _find_flat(Models, self.workload.name)
-        if not m_obj:
-            raise ValueError(f"Model '{self.workload.name}' not found in the MLSysZoo. (Check case and spelling)")
-            
-        # 2. Resolve Hardware
-        h_obj = _find_flat(Hardware, self.hardware.name)
-        if not h_obj:
-            raise ValueError(f"Hardware '{self.hardware.name}' not found in the MLSysZoo. (Check case and spelling)")
-
-        self.model_obj = m_obj
-        self.hardware_obj = h_obj
+        self.model_obj = _resolve_model(self.workload.name)
+        self.hardware_obj = _resolve_hardware(self.hardware.name)
         
         # 3. Resolve Fleet if nodes > 1
         if self.hardware.nodes > 1:

@@ -80,6 +80,7 @@ This gives us the per-query TTFT and ITL that everything else builds on.
 
 ```{python}
 from mlsysim import Models, Hardware, ServingModel
+from mlsysim.show import table, info
 
 model = Models.GPT4
 hardware = Hardware.Cloud.H100
@@ -90,12 +91,13 @@ baseline = serving.solve(
     seq_len=2048, batch_size=1, precision="fp16"
 )
 
-print(f"Model:          {model.name} ({model.parameters.to('Gcount'):.0f} params)")
-print(f"Hardware:       {hardware.name}")
-print(f"TTFT:           {baseline.ttft.to('ms'):~.1f}")
-print(f"ITL:            {baseline.itl.to('ms'):~.3f}")
-print(f"Memory Used:    {baseline.memory_utilization:.0%}")
-print(f"Feasible:       {baseline.feasible}")
+info("Baseline Serving",
+     Model=f"{model.name} ({model.parameters.to('Gcount'):.0f} params)",
+     Hardware=hardware.name,
+     TTFT=baseline.ttft.to('ms'),
+     ITL=baseline.itl.to('ms'),
+     Memory_Used=f"{baseline.memory_utilization:.0%}",
+     Feasible=f"{baseline.feasible}")
 ```
 
 The ITL — the per-token decode latency — is the critical number. Every reasoning
@@ -114,11 +116,9 @@ from mlsysim import InferenceScalingModel
 cot_solver = InferenceScalingModel()
 K_values = [1, 4, 8, 16]
 
-print(f"{'K':>3}  {'Total Time':>12}  {'Tokens':>8}  {'Energy (J)':>11}  {'Multiplier':>11}")
-print("-" * 52)
-
 baseline_time = None
 results = {}
+rows = []
 
 for K in K_values:
     result = cot_solver.solve(
@@ -134,13 +134,9 @@ for K in K_values:
     multiplier = total_ms / baseline_time
     results[K] = result
 
-    print(
-        f"{K:>3}  "
-        f"{total_ms:>10.1f}ms  "
-        f"{result.tokens_generated:>8}  "
-        f"{energy_j:>9.1f} J  "
-        f"{multiplier:>9.1f}x"
-    )
+    rows.append([K, f"{total_ms:.1f}ms", result.tokens_generated, f"{energy_j:.1f} J", f"{multiplier:.1f}x"])
+
+table(["K", "Total Time", "Tokens", "Energy (J)", "Multiplier"], rows)
 ```
 
 K=8 does not cost exactly 8x the baseline. The actual multiplier reflects the
@@ -163,11 +159,9 @@ from mlsysim.core.constants import Q_
 econ = EconomicsModel()
 target_qps = 100
 
-print(f"{'K':>3}  {'Query (ms)':>11}  {'QPS/GPU':>8}  {'GPUs':>6}  {'Annual TCO ($)':>16}")
-print("-" * 52)
-
 fleet_results = {}
 fleet_objects = {}
+rows = []
 for K in K_values:
     r = results[K]
     qt_s = r.total_reasoning_time.to("s").magnitude
@@ -196,13 +190,9 @@ for K in K_values:
     fleet_results[K] = tco
     fleet_objects[K] = fleet
 
-    print(
-        f"{K:>3}  "
-        f"{qt_s * 1000:>9.1f}ms  "
-        f"{qps_per_gpu:>8.2f}  "
-        f"{fleet.total_accelerators:>6}  "
-        f"${tco.tco_usd:>14,.0f}"
-    )
+    rows.append([K, f"{qt_s * 1000:.1f}ms", f"{qps_per_gpu:.2f}", fleet.total_accelerators, f"${tco.tco_usd:,.0f}"])
+
+table(["K", "Query (ms)", "QPS/GPU", "GPUs", "Annual TCO ($)"], rows)
 ```
 
 The jump from K=1 to K=8 is not just a latency increase — it propagates through
@@ -268,11 +258,14 @@ tco_all_k8 = fleet_results[8]
 savings = tco_all_k8.tco_usd - tco_routed.tco_usd
 pct_savings = savings / tco_all_k8.tco_usd * 100 if tco_all_k8.tco_usd > 0 else 0
 
-print(f"{'Strategy':<25} {'GPUs':>6}  {'Annual TCO ($)':>16}")
-print("-" * 52)
-print(f"{'All queries -> GPT-4 K=8':<25} {fleet_objects[8].total_accelerators:>6}  ${tco_all_k8.tco_usd:>14,.0f}")
-print(f"{'70/30 routed':<25} {fleet_routed.total_accelerators:>6}  ${tco_routed.tco_usd:>14,.0f}")
-print(f"{'Savings':<25} {'':>6}  ${savings:>14,.0f} ({pct_savings:.0f}%)")
+table(
+    ["Strategy", "GPUs", "Annual TCO ($)"],
+    [
+        ["All queries -> GPT-4 K=8", fleet_objects[8].total_accelerators, f"${tco_all_k8.tco_usd:,.0f}"],
+        ["70/30 routed", fleet_routed.total_accelerators, f"${tco_routed.tco_usd:,.0f}"],
+    ]
+)
+info(Savings=f"${savings:,.0f} ({pct_savings:.0f}%)")
 ```
 
 Routing reduces the fleet but does not eliminate the infrastructure commitment. The 30%

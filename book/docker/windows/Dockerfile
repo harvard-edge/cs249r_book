@@ -142,11 +142,12 @@ RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
     Write-Host '✅ Scoop installation completed!'
 
 # ------------------------------------------------------------
-# PHASE 5: Install Quarto via Scoop (consistent PATH with other tools)
+# PHASE 5: Install Quarto via r-bucket (pins exact version for llms-txt support)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
-    Write-Host 'Installing Quarto via Scoop (extras bucket)...' ; `
-    scoop install extras/quarto ; `
+    Write-Host 'Adding r-bucket for version-pinned Quarto...' ; `
+    scoop bucket add r-bucket https://github.com/cderv/r-bucket ; `
+    scoop install r-bucket/quarto@1.9.27 ; `
     if (-not (Get-Command quarto -ErrorAction SilentlyContinue)) { `
         Write-Host '❌ Quarto install failed: executable not found in PATH' ; `
         exit 1 ; `

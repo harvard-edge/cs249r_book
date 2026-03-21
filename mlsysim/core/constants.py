@@ -51,6 +51,17 @@ B200_MEM_BW = 8 * TB / second             # HBM3e
 B200_MEM_CAPACITY = 192 * GiB
 B200_TDP = 1000 * watt
 
+# NVIDIA GB200 NVL72 (Rack-scale, 2024) — Source: NVIDIA Blackwell Architecture
+# This is a full rack containing 72 Blackwell GPUs and 36 Grace CPUs.
+# We model the aggregate resources of the rack for macro-scale simulation.
+NVL72_GPUs = 72 * count
+NVL72_FLOPS_FP8_TENSOR = 720 * PFLOPs / second  # 72 * 10 PFLOPS (Dense/Sparse vary)
+NVL72_MEM_CAPACITY = 13.8 * TB                  # 72 * 192 GB
+NVL72_MEM_BW = 576 * TB / second                # 72 * 8 TB/s
+NVL72_NVLINK_BW = 130 * TB / second             # Full bisection (bidirectional)
+NVL72_TDP = 120 * kilowatt                      # Max rack power
+NVL72_UNIT_COST = 3000000 * USD                 # Estimated $3M+ per rack
+
 # AMD Instinct MI300X (CDNA 3, 2023) — Source: AMD Instinct MI300X Data Sheet
 MI300X_FLOPS_FP16_TENSOR = 1307 * TFLOPs / second  # Dense. Sparse is 2614.
 MI300X_MEM_BW = 5.3 * TB / second

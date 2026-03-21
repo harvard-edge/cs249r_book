@@ -1,0 +1,1132 @@
+% =============================================================================
+% Chapter 12: ML Operations at Scale — Vol II Lecture Slides
+% =============================================================================
+% IMAGES:
+%   - n-models-complexity.pdf    - platform-roi.pdf
+%   - mlops-maturity.pdf         - model-registry-deps.pdf
+%   - ml-cicd-pipeline.pdf       - staged-rollout.pdf
+%   - monitoring-pyramid.pdf     - feature-freshness.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Volume II},
+  chapter      = {Chapter 12},
+  logo         = {../../assets/img/logo-mlsysbook.png},
+  instlogo     = {../../assets/img/logo-harvard.png},
+  chaptertitle = {ML Operations at Scale},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\TCO}{\text{TCO}_{\text{ML}}}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{%
+        \centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count ---
+\setcounter{mlsystotalsections}{6}
+
+\title{ML Operations at Scale}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{ML Operations at Scale}{From Single-Model to Platform Engineering}{cover_ops_scale.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{
+% -- LINK: Connect to prior chapters
+Students built serving infrastructure in Part III. This chapter asks:
+what happens when you manage not one model, but a hundred?
+
+% -- NARRATE: What to SAY
+Read each objective aloud, pausing on ``platform ROI'' and ``TCO framework.''
+These two anchor the quantitative reasoning for the entire chapter.
+
+% -- ENGAGE: Specific question
+Ask: ``How many of you have deployed more than one model to production?
+At what count did ad hoc practices start breaking?''
+Give 10 seconds for a show of hands.
+
+% -- WARN: Specific misconception
+Students assume operations scale linearly with model count.
+Correct: dependencies grow as O(N^2), alerts as O(N*M).
+
+% -- FLEX: [CORE]
+[CORE] Never skip --- objectives frame the entire lecture.
+IF AHEAD: Ask students to rank which objective they most want to master.
+IF SHORT: Read objectives without elaboration, move on.
+}
+
+\small
+\begin{enumerate}
+  \item Calculate \textbf{platform ROI} to justify shared ML infrastructure
+  \item Design \textbf{dependency-aware model registries} for multi-model portfolios
+  \item Implement \textbf{CI/CD pipelines} tailored to model risk profiles
+  \item Architect \textbf{hierarchical monitoring} that prevents alert fatigue
+  \item Quantify \textbf{ML technical debt} using deployment velocity and toil metrics
+  \item Compare \textbf{centralized}, \textbf{embedded}, and \textbf{hybrid} organizational patterns
+  \item Apply the \textbf{TCO framework} to make infrastructure investment decisions
+\end{enumerate}
+
+\end{frame}
+
+\begin{frame}{Visual Language}
+\note{
+% -- NARRATE: What to SAY
+Point to each card: ``Blue = compute, green = data, orange = routing,
+red = error. These are consistent across every diagram in this course.
+When you see red in a pipeline diagram, something is bottlenecked.''
+
+% -- FLEX: [OPTIONAL]
+[OPTIONAL] Skip if students have seen this in a previous chapter deck.
+IF SHORT: Say ``same color system as last lecture'' and advance.
+}
+
+\small
+Throughout this course, colors carry meaning:
+
+\vspace{0.3cm}
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Blue} --- Compute / Processing\\
+    {\footnotesize GPU ops, forward/backward pass, inference}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Green} --- Data / Memory\\
+    {\footnotesize Data flow, caches, healthy paths}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Orange} --- Routing / Scheduling\\
+    {\footnotesize Load balancers, batch windows}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Red} --- Error / Cost / Bottleneck\\
+    {\footnotesize Loss, decode phase, waste}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\end{frame}
+
+
+
+% =============================================================================
+\section{Platform Operations}
+% =============================================================================
+
+\begin{frame}{The N-Models Problem}
+\note{
+% -- LINK: Connect to prior concept
+Students just saw the learning objectives listing platform ROI and dependency
+management. This slide makes the problem visceral: why platforms exist.
+
+% -- NARRATE: What to SAY
+Point to the diagram: ``At 10 models, a few shared data sources. At 50,
+the dependency graph is a hairball. At 100, a single upstream change
+cascades unpredictably.'' Trace the quadratic growth curve.
+
+% -- ENGAGE: Specific question
+Ask: ``At your organization, how many models share the same data sources?''
+Expected answer: most students underestimate --- typical is 5--10 shared sources.
+
+% -- WARN: Specific misconception
+Students assume managing 100 models is 100x the work of managing one.
+Correct: dependencies grow as O(N^2), so 100 models is closer to 10,000x
+the coordination complexity.
+
+% -- FLEX: [CORE]
+[CORE] This motivates the entire chapter.
+IF AHEAD: Ask ``At what N does your dependency graph become unmanageable?''
+IF SHORT: Show diagram, state O(N^2), move on.
+}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{n-models-complexity.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Key:}{Per-model practices collapse at $\sim$50 models. Dependencies grow as $O(N^2)$.}
+
+\end{frame}
+
+\begin{frame}{Operational Complexity Growth}
+\note{
+% -- LINK: Connect to prior concept
+The N-models diagram showed the complexity curve. This table puts
+concrete operational labels on each step of that curve.
+
+% -- NARRATE: What to SAY
+Walk column by column: ``At 1 model, monitoring is a single dashboard.
+At 100, you have 100 dashboards nobody reads. Debugging shifts from
+local to distributed tracing --- a qualitatively different skill.''
+
+% -- ENGAGE: Specific question
+Ask: ``Which column transitions from manageable to unmanageable first?''
+Expected answer: monitoring (it is the first to break because alert
+volume grows as N times M metrics).
+
+% -- WARN: Specific misconception
+Students focus on deployment coordination but miss that monitoring
+breaks first. Alert fatigue precedes deployment chaos.
+
+% -- FLEX: [OPTIONAL]
+[OPTIONAL] This table reinforces the N-models diagram.
+IF SHORT: Point to the monitoring row, state the key insight, advance.
+IF AHEAD: Ask students to fill in a ``1000 models'' column mentally.
+}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Aspect} & \textbf{1 Model} & \textbf{10 Models} & \textbf{100 Models} \\
+  \midrule
+  \textbf{Deployment}  & None             & Ad hoc            & Critical path \\
+  \textbf{Dependencies}& None             & Some overlap      & Dense graph \\
+  \textbf{Monitoring}  & 1 dashboard      & 10 dashboards     & Unmanageable \\
+  \textbf{On-call}     & Single team      & Multi-team        & Org-wide \\
+  \textbf{Utilization} & Often idle       & Moderate sharing  & Efficiency critical \\
+  \textbf{Debugging}   & Local            & Cross-team        & Distributed tracing \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\mlsysalert{Consequence:}{100 models with independent failure modes create a constant stream of alerts that masks genuine emergencies.}
+
+\end{frame}
+
+\begin{frame}{Quantifying Platform ROI}
+\note{
+% -- LINK: Connect to prior concept
+The complexity table showed operations becoming unmanageable. This slide
+answers: what is the economic case for investing in a platform?
+
+% -- NARRATE: What to SAY
+Point to the equation: ``N is model count, T-saved is hours per model,
+C-eng is engineer cost. The numerator grows linearly with N; the
+denominator is fixed.'' Walk through the worked example: ``50 models,
+40 hours each, \$150/hr = \$3.6M before, \$1.6M after. 56\% savings.''
+
+% -- ENGAGE: Specific question
+Ask: ``At what model count does your organization need a platform team?''
+Give 10 seconds. Expected: most say 50--100; the surprise is 20--50.
+
+% -- WARN: Specific misconception
+Students think platform ROI is linear. Correct: it is superlinear because
+shared infrastructure amortizes over all models simultaneously.
+
+% -- FLEX: [CORE]
+[CORE] The ROI equation is the quantitative anchor for the chapter.
+IF AHEAD: Ask ``What if T-saved is only 10 hours instead of 30?''
+IF SHORT: Show equation, state the 56\% number, skip the worked example detail.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{platform-roi.pdf}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    $$\text{ROI}_{\text{platform}} = \frac{N \times T_{saved} \times C_{eng}}{C_{platform}}$$
+
+    \vspace{0.15cm}
+    {\footnotesize
+    \textbf{Worked example} (50 models):
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Before: 50 $\times$ 40 hrs $\times$ \$150 = \$3.6M/yr
+      \item After: 50 $\times$ 10 hrs $\times$ \$150 + \$667K = \$1.6M/yr
+      \item \textcolor{datastroke}{\textbf{Savings: 56\%}} (\$2M/yr)
+    \end{itemize}
+    }
+
+    \vspace{0.1cm}
+    \mlsysconcept{Threshold:}{Break-even at 20--50 models.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: Micro-Retrieval Cue ---
+\begin{frame}{Quick Check}
+\note{
+% -- NARRATE: What to SAY
+Pause 15 seconds. Then cold-call. Answer: 20--50 models.
+Say: ``Most students guess 100+. The surprise is the threshold is
+much lower because shared infrastructure amortizes across all models.''
+
+% -- FLEX: [OPTIONAL]
+[OPTIONAL] Micro-retrieval cue reinforcing the ROI slide.
+IF SHORT: Skip entirely --- the predict exercise covers this ground.
+}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Quick Check}
+
+\vspace{0.6cm}
+{\large At what model count does platform investment\\typically break even?}
+
+\vspace{0.5cm}
+{\normalsize\textcolor{midgray}{15 seconds --- then I will cold-call.}}
+
+\end{frame}
+
+
+
+\begin{frame}{MLOps Maturity Hierarchy}
+\note{
+% -- LINK: Connect to prior concept
+The ROI equation showed that platforms pay for themselves. This slide
+asks: what does the maturity journey look like?
+
+% -- NARRATE: What to SAY
+Point to each level: ``L0 = scripts on laptops. L1 = per-model CI/CD,
+the most common state. L2 = shared platform, where the superlinear
+returns kick in. L3 = enterprise governance across the org.'' Emphasize
+the L1-to-L2 transition: ``This is where most organizations stall.''
+
+% -- ENGAGE: Specific question
+Ask: ``Where is your organization on this staircase?''
+Show of hands for each level. Most will cluster at L0--L1.
+
+% -- WARN: Specific misconception
+Students think the jump from L0 to L1 is the hard part. Correct:
+L0-to-L1 is just adding CI/CD. The L1-to-L2 jump requires
+organizational change --- shared infrastructure, common APIs, platform team.
+
+% -- FLEX: [OPTIONAL]
+[OPTIONAL] Reinforces the platform investment argument.
+IF SHORT: Show staircase, name the four levels, emphasize L1-to-L2, advance.
+}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{mlops-maturity.pdf}
+
+\vspace{0.1cm}
+\small
+\begin{columns}[T]
+  \begin{column}{0.22\textwidth}
+    \centering
+    \textcolor{errorstroke}{\textbf{L0: Manual}}\\
+    {\scriptsize Ad hoc, 1--2 models}
+  \end{column}
+  \begin{column}{0.22\textwidth}
+    \centering
+    \textcolor{routingstroke}{\textbf{L1: Per-Model}}\\
+    {\scriptsize CI/CD per model}
+  \end{column}
+  \begin{column}{0.22\textwidth}
+    \centering
+    \textcolor{computestroke}{\textbf{L2: Platform}}\\
+    {\scriptsize Shared infra}
+  \end{column}
+  \begin{column}{0.22\textwidth}
+    \centering
+    \textcolor{datastroke}{\textbf{L3: Enterprise}}\\
+    {\scriptsize Org-wide governance}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: When Does Platform Investment Pay Off?}
+\note{[2 min] Prediction exercise. Students write for 60 seconds.
+Do NOT reveal the answer yet. This primes the platform economics discussion.
+Ask 2--3 students to share.}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.6cm}
+{\large Your organization has 30 models, each costing\\
+40 engineer-hours/month in operational toil.\\[0.3cm]
+\alert{At what model count does a \$2M platform pay for itself?}}
+
+\vspace{0.6cm}
+{\normalsize Write your estimate. \textcolor{midgray}{(60 seconds)}}
+
+\end{frame}
+
+% =============================================================================
+\section{Multi-Model Management}
+% =============================================================================
+
+\begin{frame}{Dependency-Aware Model Registry}
+\note{
+% -- LINK: What prior concept connects to this slide
+The N-models problem showed dependencies grow as O(N-squared). This slide
+makes dependency cascades concrete: one silent upstream change poisons
+all downstream consumers.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the dependency graph: ``When the embedding model
+updates silently, every downstream model receives garbage features.
+Without a dependency-aware registry, organizations discover these
+cascades through production failures --- not proactive monitoring.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What happens when the embedding model updates silently?''
+Give 10 seconds. [Expected: garbage predictions for all downstream models.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think pinning model versions prevents cascades.
+Correct framing: pinning delays the problem but creates technical debt ---
+eventually you must propagate updates through the entire graph.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Dependency management is the central multi-model challenge.
+IF AHEAD: Ask ``How would you test a model update against all its consumers?''
+IF SHORT: Show diagram, state the cascade failure mode, move on.
+}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{model-registry-deps.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Without tracking:}{Organizations discover dependencies through production failures.}
+
+\end{frame}
+
+\begin{frame}{Ensemble Management}
+\note{[3 min] Recommendation systems invoke 10--50 models per request.
+Updating any component requires understanding interactions with all others.
+Key patterns: compensation effects, distribution shift propagation, feedback
+loops. If short: focus on the staged deployment table.}
+
+\footnotesize
+\textbf{A single recommendation request invokes 10--50 models:}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}llrl@{}}
+  \toprule
+  \textbf{Deploy Stage} & \textbf{Actions} & \textbf{Duration} & \textbf{Rollback Trigger} \\
+  \midrule
+  \textbf{Shadow}       & Log only, not served        & 24--48 h  & Quality below threshold \\
+  \textbf{Canary}       & 1\% traffic                 & 4--8 h    & Statistical regression \\
+  \textbf{Staged}       & 5\% $\to$ 25\% $\to$ 100\% & 24--72 h  & Business metric drop \\
+  \textbf{Soak}         & Full traffic, extended watch & 7--14 d   & Delayed effects \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{routingstroke}
+{\footnotesize\textbf{Interaction effects:} A component change improving local metrics might degrade system-level performance through subtle interactions.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Model-Type Operations Diversity}
+\note{[2 min] Different model types need fundamentally different operational
+patterns. Fraud detection needs hourly updates; LLMs need monthly staged
+rollouts. The principle: risk profile determines operational cadence.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lllll@{}}
+  \toprule
+  \textbf{Model Type} & \textbf{Update Freq.} & \textbf{Deploy} & \textbf{Primary Risk} & \textbf{Rollback} \\
+  \midrule
+  \textbf{LLM}   & Monthly     & Staged, careful  & Quality, safety     & Hours--days \\
+  \textbf{RecSys} & Daily--weekly & Shadow, A/B     & Engagement drop     & Minutes \\
+  \textbf{Fraud}  & Hourly--daily & Rapid + rollback & False negatives     & Seconds \\
+  \textbf{Vision} & Weekly--monthly & Canary         & Accuracy regression & Minutes \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\mlsysconcept{Principle:}{Risk profile determines operational cadence.}
+
+\vspace{0.1cm}
+{\footnotesize LLMs operate slowly because quality regressions are hard to detect. Fraud detection operates continuously because adversaries do not wait.}
+
+\end{frame}
+
+% =============================================================================
+\section{CI/CD at Scale}
+% =============================================================================
+
+\begin{frame}{ML CI/CD Pipeline}
+\note{[3 min] Walk through the pipeline stages and gates. Key difference
+from software CI/CD: must validate data, model performance, and fairness ---
+not just code correctness. Each stage is idempotent. Ask: ``Which gate
+is most likely to catch a silent regression?''}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ml-cicd-pipeline.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Key difference:}{ML CI/CD validates \textbf{data + model + fairness}, not just code.}
+
+\end{frame}
+
+\begin{frame}{Staged Rollout Strategy}
+\note{[3 min] Walk through the four-phase rollout. Emphasize the 20$\times$
+risk reduction from 5\% canary. The canary duration formula connects sample
+size to traffic percentage. If short: focus on the risk reduction number.}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.0cm,keepaspectratio]{staged-rollout.pdf}
+
+\vspace{0.1cm}
+\small
+\textbf{Canary duration:} $t_{stage} = \frac{n_{samples}}{r_{requests} \times p_{stage}}$
+
+\vspace{0.1cm}
+{\footnotesize At 1M req/hr with 1\% canary: 10K samples needed $\to$ 1 hour minimum.\\
+Total confident rollout: $\sim$4 hours (vs.\ instant blue-green with no safety net).}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Cost of a Delayed Alert}
+\note{[3 min] Give students 90 seconds. Answer: 432M requests $\times$ 0.005
+lost CTR $\times$ \$0.50/click = \$1.08M. The insight: a ``minor'' 0.5\%
+regression at scale is a million-dollar daily disaster.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Calculate the Loss}
+
+    \vspace{0.2cm}
+    A recommendation model has a silent bug reducing CTR by 0.5\% (5.0\% $\to$ 4.5\%).
+    \begin{itemize}
+      \item 5,000 QPS, each click worth \$0.50
+      \item Detection takes 24 hours
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \textbf{How much revenue is lost?}
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    Requests: 5K $\times$ 86,400 = 432M\\
+    Lost clicks: 432M $\times$ 0.005 = 2.16M\\
+    Loss: 2.16M $\times$ \$0.50\\[0.1cm]
+    $=$ \textcolor{errorstroke}{\textbf{\$1,080,000}}\\[0.1cm]
+    Every hour of faster detection saves \textbf{\$45K}.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{CI/CD Patterns by Model Type}
+\note{[2 min] Connect back to model-type diversity. LLMs: quality-gated,
+days to weeks. Fraud: threshold-gated, hours with seconds rollback.
+The key: one-size-fits-all CI/CD fails at platform scale.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lllll@{}}
+  \toprule
+  \textbf{Pattern} & \textbf{Model Type} & \textbf{Validation} & \textbf{Rollout} & \textbf{Rollback} \\
+  \midrule
+  \textbf{Quality-gated}   & LLM   & Human eval + safety  & Days--weeks & Hours \\
+  \textbf{Metric-driven}   & RecSys & Engagement metrics  & Hours--days & Minutes \\
+  \textbf{Threshold-gated} & Fraud  & Precision/recall    & Hours       & Seconds \\
+  \textbf{Accuracy-focused} & Vision & Classification     & Days        & Minutes \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{crimson}
+{\footnotesize \textbf{Rollout risk:} $R = P_{\text{regression}} \times I_{\text{regression}} \times E_{\text{exposure}}$. Reduce any factor to reduce total risk.}
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Monitoring at Scale}
+% =============================================================================
+
+\mlsysfocus{The False Alarm Tax}{%
+$P(\text{false alert}) = 1 - (1-\alpha)^N$\\[0.3cm]
+{\normalsize With $\alpha=0.05$, $N=1000$: $P \approx 1.0$}%
+}
+
+\begin{frame}{Alert Fatigue: The Math}
+\note{[3 min] This is the key quantitative insight. Even at 3-sigma
+specificity, 100 models with 10 metrics generate 864 false alerts/day.
+At 2-sigma: 14,400/day. Operators learn to ignore everything.
+Ask: ``How many alerts per day before your on-call team gives up?''}
+
+\small
+\textbf{100 models $\times$ 10 metrics $\times$ 5-min checks:}
+
+\vspace{0.15cm}
+{\footnotesize
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  \textbf{Threshold} & \textbf{FPR} & \textbf{Daily False Alerts} & \textbf{Status} \\
+  \midrule
+  2-sigma (95\%)   & 5.0\%  & 14,400 & \textcolor{errorstroke}{\textbf{Useless}} \\
+  3-sigma (99.7\%) & 0.3\%  & 864    & \textcolor{routingstroke}{\textbf{Overwhelming}} \\
+  4-sigma (99.99\%) & 0.01\% & 29    & \textcolor{datastroke}{\textbf{Manageable}} \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\mlsysalert{Destructive dynamic:}{Operators ignore alerts $\to$ genuine issues get lost $\to$ monitoring provides \emph{negative} value.}
+
+\end{frame}
+
+\begin{frame}{Hierarchical Monitoring Architecture}
+\note{[3 min] The solution to alert fatigue. Four levels: business,
+portfolio, model, infrastructure. High-level metrics trigger alarms;
+lower-level metrics serve investigation only. Walk through the pyramid.}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{monitoring-pyramid.pdf}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{Four abstraction levels:}
+
+    \vspace{0.15cm}
+    \textcolor{errorstroke}{\textbf{L1 Business:}} Revenue, engagement\\
+    {\scriptsize Few metrics, high signal, exec attention}
+
+    \vspace{0.1cm}
+    \textcolor{routingstroke}{\textbf{L2 Portfolio:}} RecSys lift, fraud rate\\
+    {\scriptsize Domain-level aggregation}
+
+    \vspace{0.1cm}
+    \textcolor{computestroke}{\textbf{L3 Model:}} Accuracy, latency, drift\\
+    {\scriptsize Investigation on anomaly only}
+
+    \vspace{0.1cm}
+    \textcolor{datastroke}{\textbf{L4 Infra:}} GPU util, feature store\\
+    {\scriptsize Platform team routing}
+
+    \vspace{0.1cm}
+    \mlsysconcept{Principle:}{Alert upward, investigate downward.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Drift Detection: PSI}
+\note{[2 min] Two types of drift: covariate (input $P(X)$ changes) and
+concept ($P(Y|X)$ changes). PSI is cheap to compute and serves as a leading
+indicator. Thresholds: $<$0.1 stable, 0.1--0.25 investigate, $\geq$0.25 act.
+Monitoring lag: 2\% accuracy drop needs $\sim$2,500 labeled samples.}
+
+\footnotesize
+\textbf{Population Stability Index} detects feature distribution shift:
+
+\vspace{0.05cm}
+$$PSI = \sum_{i=1}^{n} (A_i - E_i) \times \ln\left(\frac{A_i}{E_i}\right)$$
+
+\vspace{0.05cm}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{PSI Value} & \textbf{Interpretation} & \textbf{Action} \\
+  \midrule
+  $< 0.1$          & No significant shift   & Continue monitoring \\
+  $0.1$ -- $0.25$  & Moderate shift          & Investigate \\
+  $\geq 0.25$      & Significant shift       & \textcolor{errorstroke}{\textbf{Immediate action}} \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\mlsysalert{Monitoring lag:}{Detecting a 2\% accuracy drop needs $\sim$2,500 samples. At 1K labels/hr $\to$ \textbf{2.5 hrs} broken. PSI on inputs is faster.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Which Monitoring Level Fires First?}
+\note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
+The answer depends on the failure mode: infrastructure failures show at L4 first,
+while data drift shows at L3 then propagates to L2/L1.}
+
+\centering
+\vspace{0.8cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.6cm}
+{\large An upstream feature pipeline silently starts\\
+returning null values for 3\% of users.\\[0.3cm]
+\alert{Which monitoring level detects this first?\\
+How long until the business metric dashboard shows a dip?}}
+
+\vspace{0.6cm}
+\begin{columns}[c]
+  \begin{column}{0.22\textwidth}\centering\small L1\\Business\end{column}
+  \begin{column}{0.22\textwidth}\centering\small L2\\Portfolio\end{column}
+  \begin{column}{0.22\textwidth}\centering\small L3\\Model\end{column}
+  \begin{column}{0.22\textwidth}\centering\small L4\\Infra\end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Features \& Organization}
+% =============================================================================
+
+\begin{frame}{Feature Freshness: Batch vs.\ Streaming}
+\note{[3 min] Feature freshness latency determines recommendation quality.
+Batch: 12--24 hours. Streaming: 1--5 seconds. The 10,000$\times$ improvement
+yields 10--20\% engagement lift. Ask: ``For fraud detection, how stale can
+features be before adversaries exploit the window?''}
+
+% --- Full-width diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{feature-freshness.pdf}
+
+\vspace{0.1cm}
+\small
+$L_{\text{freshness}} = T_{\text{available}} - T_{\text{event}}$
+
+\vspace{0.1cm}
+{\footnotesize Streaming: \textbf{10--20\% engagement lift}. For fraud detection, day-old features give adversaries a 24-hour exploitation window.}
+
+\end{frame}
+
+\begin{frame}{Organizational Patterns for ML Platforms}
+\note{[2 min] Three patterns: centralized (consistency but bottleneck),
+embedded (velocity but fragmentation), hybrid (balanced). Most mature
+organizations adopt hybrid. If short: just show the comparison table.}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lp{3.2cm}p{3.2cm}p{3.2cm}@{}}
+  \toprule
+  & \textbf{Centralized} & \textbf{Embedded} & \textbf{Hybrid} \\
+  \midrule
+  \textbf{Structure}  & Single platform team & ML eng in each team & Core + domain leads \\
+  \textbf{Strength}   & Consistency          & Responsiveness       & Balanced \\
+  \textbf{Risk}       & Bottleneck           & Fragmentation        & Coordination cost \\
+  \textbf{Best for}   & 100+ models          & 10--20 models        & 50--100 models \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{computestroke}
+{\footnotesize \textbf{Decision factors:} Model count, model similarity, org size, regulatory requirements, and infrastructure maturity determine the optimal pattern.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{TCO Framework for ML Systems}
+\note{[3 min] The four-component cost structure evolves with scale. Early-stage:
+iteration-dominated (optimize velocity). Production: inference-dominated
+(optimize efficiency). Walk through the equation and the shift.
+Ask: ``Which cost component dominates at your organization?''}
+
+\small
+$$\TCO = C_{\text{train}} + C_{\text{infer}} + C_{\text{data}} + C_{\text{iter}}$$
+
+\vspace{0.15cm}
+{\footnotesize
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Component} & \textbf{Early Stage} & \textbf{Production Scale} \\
+  \midrule
+  $C_{\text{train}}$  & Dominant (experimentation)     & Fixed (scheduled retraining) \\
+  $C_{\text{infer}}$  & Negligible (few users)         & \textcolor{errorstroke}{\textbf{Dominant}} (70--80\% of TCO) \\
+  $C_{\text{data}}$   & Small (curated datasets)       & Growing (storage + pipelines) \\
+  $C_{\text{iter}}$   & \textcolor{routingstroke}{\textbf{Dominant}} (engineer time)  & Reduced by automation \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\mlsysconcept{Strategy:}{Match optimization investment to current cost structure.}
+
+\end{frame}
+
+\begin{frame}{Quantifying ML Technical Debt}
+\note{
+% -- LINK: What prior concept connects to this slide
+The TCO framework showed cost structure. Technical debt is the hidden cost
+that erodes deployment velocity --- Sculley et al.\ called it ``the high-interest
+credit card of ML.''
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the debt categories: ``Configuration debt: 3--5x more config
+code than model code. Data debt: unstable input features that break silently.
+Pipeline debt: glue code connecting systems nobody owns. Monitoring debt:
+\$750K/yr from 15 incidents at \$50K each.'' Point to the audit framework:
+``Measure deployment velocity (deploys/week), toil ratio (manual/total hours),
+and incident rate. Teams with high debt see 70--80\% capacity consumed by
+maintenance.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What fraction of your team's time goes to maintaining existing models
+vs.\ building new ones?'' Give 10 seconds. [Expected: most say 50\%+. The
+surprise is that 70--80\% is common at mature organizations without debt management.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think technical debt is inevitable and should wait.
+Correct framing: debt compounds --- monitoring debt alone costs \$750K/yr.
+Early investment in debt reduction has superlinear ROI.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Technical debt quantification is a key learning objective.
+IF AHEAD: Ask ``Which debt category would you audit first?''
+IF SHORT: Show the table and state the 70--80\% maintenance number.
+}
+
+\footnotesize
+\textbf{ML Technical Debt Categories} (Sculley et al., NeurIPS 2015):
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.1}
+{\scriptsize
+\begin{tabular}{@{}lllr@{}}
+  \toprule
+  \textbf{Debt Category} & \textbf{Symptom} & \textbf{Metric} & \textbf{Annual Cost} \\
+  \midrule
+  \textbf{Configuration} & 3--5$\times$ more config than model code & Config LOC ratio & Eng.\ velocity \\
+  \textbf{Data}          & Unstable input features break silently  & Feature staleness & Data quality \\
+  \textbf{Pipeline}      & Glue code nobody owns                  & Ownership gaps    & Incident rate \\
+  \textbf{Monitoring}    & 15 incidents $\times$ \$50K each        & MTTR, false alerts & \textbf{\$750K/yr} \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{errorstroke}
+{\footnotesize \textbf{Debt audit metrics:} Deployment velocity (deploys/week), toil ratio (manual/total hrs), incident rate. Teams with unmanaged debt: \textbf{70--80\% capacity on maintenance}.}
+\end{mlsyscard}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: Alert System Design Exercise ---
+\begin{frame}{Your Turn: Design an Alert System}
+\note{
+% -- LINK: What prior concept connects to this slide
+Alert fatigue showed 14,400 false alerts/day at 2-sigma. This exercise asks
+students to calculate false alert rates at different thresholds for a real
+portfolio size.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Read the parameters. Give 90 seconds. After pause reveal: ``At 3-sigma,
+FPR = 0.003, checks = 200 x 8 x 288 = 460,800, false alerts = 1,382/day.
+At 4-sigma, FPR = 0.0001, false alerts = 46/day --- manageable.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students must calculate false alert rates at two thresholds. Key insight:
+the jump from 3-sigma to 4-sigma cuts false alerts by 30x.
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students apply the same threshold to all metrics. Correct
+framing: business-critical metrics need 3-sigma; infrastructure metrics
+can use 4-sigma with investigation-only routing.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Quantitative exercise for the monitoring section.
+IF SHORT: Reduce to 60 seconds; show the 3-sigma answer only.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Design the Alert Thresholds}
+
+    \vspace{0.15cm}
+    \textbf{Portfolio}: 200 models, 8 metrics each.\\
+    \textbf{Check interval}: 5 minutes (288/day).
+
+    \vspace{0.1cm}
+    \textbf{Calculate daily false alerts at:}
+    \begin{enumerate}
+      \item 3-sigma (FPR = 0.003)
+      \item 4-sigma (FPR = 0.0001)
+    \end{enumerate}
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{computestroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    Checks/day: $200 \times 8 \times 288$\\
+    = 460,800 checks\\[0.1cm]
+    3-sigma: $460{,}800 \times 0.003$\\
+    = \textcolor{errorstroke}{\textbf{1,382 false alerts/day}}\\[0.1cm]
+    4-sigma: $460{,}800 \times 0.0001$\\
+    = \textcolor{datastroke}{\textbf{46 false alerts/day}}\\[0.1cm]
+    30$\times$ reduction!
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{[2 min] Four common misconceptions with quantitative evidence.}
+
+\footnotesize
+\textbf{Fallacy:} \textit{Operational complexity grows linearly with model count.}\\
+100 models $\times$ 10 metrics at 5\% FPR $\to$ 14,400 false alerts/day. Dependencies grow as $O(N^2)$.
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Platform investment only makes sense after 100+ models.}\\
+A \$2M platform breaks even at $\sim$20 models. By 100, migration cost is 3--5$\times$ the initial build.
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Monitoring training metrics provides sufficient observability.}\\
+20 ms upstream slowdown $\to$ 30\% latency degradation across 10--50 downstream models.
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Technical debt is inevitable and should wait.}\\
+Monitoring debt: \$750K/yr (15 incidents $\times$ \$50K). Teams see 70--80\% capacity on maintenance.
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{[2 min] Three operational pitfalls. If short: cover just the first two.}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Applying independent alerting to every model and metric.}\\
+With $N=1000$ independent tests at $\alpha=0.05$: $P(\text{false alert}) = 1 - 0.95^{1000} \approx 1.0$. Operators ignore the noise; genuine incidents vanish. Use \textbf{hierarchical monitoring}.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Treating all deployments with uniform rollout procedures.}\\
+Fraud detection needs hourly updates with seconds-fast rollback. LLMs need multi-day shadow testing. \textbf{Risk-based policies} must match model type.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Defaulting to batch feature computation for all features.}\\
+Daily batch yields $L_{\text{freshness}} \approx 12$--24 hrs; streaming achieves 1--5 seconds. For recommendations, streaming yields \textbf{10--20\% engagement lift}; for fraud, batch gives adversaries a 24-hour window.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+
+% --- MUDDIEST POINT ---
+\begin{frame}{Muddiest Point}
+\note{[2 min] Quick anonymous poll. Students write on a slip of paper or submit
+digitally. Collect and scan for patterns. Address the top 2--3 confusions in the
+next lecture's opening. This closes the feedback loop.}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries What was the \alert{muddiest point} today?}
+
+\vspace{0.8cm}
+{\normalsize Write down the concept you found \textbf{most confusing}.}
+
+\vspace{0.5cm}
+{\small\textcolor{midgray}{Anonymous. One sentence. Submit before you leave.}}
+
+\end{frame}
+
+\begin{frame}{What Were the Key Ideas?}
+\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
+Do NOT show next slide yet. Walk around the room.}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{[2 min] Reveal. Walk through each bullet. Emphasize quantitative
+anchors: 56\% savings, 14,400 alerts, 20$\times$ risk reduction,
+\$1.08M daily loss.}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{Platform ROI is superlinear}: Break-even at 20--50 models. 50 models saves 56\% (\$2M/yr).
+  \item \textbf{Dependencies grow as $O(N^2)$}: Per-model practices collapse at $\sim$50 models.
+  \item \textbf{Risk profile determines cadence}: LLMs: months. Fraud: hours. One-size CI/CD fails.
+  \item \textbf{Alert fatigue is mathematical}: 100 models $\times$ 10 metrics $\to$ 14,400 false alerts/day. Use hierarchical monitoring.
+  \item \textbf{Staged rollouts reduce risk 20$\times$}: 5\% canary limits blast radius.
+  \item \textbf{TCO shifts with scale}: Early = iteration-dominated; production = inference-dominated (70--80\%).
+  \item \textbf{Feature freshness matters}: Streaming yields 10--20\% engagement lift over batch.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{[1 min] Point students to canonical papers.}
+
+\small
+\mlsysref{Sculley+15}{Sculley et al. ``Hidden Technical Debt in ML Systems.'' NeurIPS 2015.}
+\mlsysref{Covington+16}{Covington et al. ``Deep Neural Networks for YouTube Recommendations.'' RecSys 2016.}
+\mlsysref{Chapelle+12}{Chapelle et al. ``Large-Scale Validation and Analysis of Interleaved Search Evaluation.'' TOIS 2012.}
+\mlsysref{Kohavi+09}{Kohavi et al. ``Controlled Experiments on the Web.'' KDD 2009.}
+\mlsysref{Hardt+16}{Hardt et al. ``Equality of Opportunity in Supervised Learning.'' NeurIPS 2016.}
+\mlsysref{Paleyes+22}{Paleyes et al. ``Challenges in Deploying ML.'' ACM Comp.\ Surveys, 2022.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Security and Privacy}
+\note{[1 min] Forward hook. A globally distributed fleet that autonomously
+adapts presents an expansive attack surface. Data poisoning, model extraction,
+and differential privacy are the next challenges.}
+
+\centering
+\vspace{0.8cm}
+{\large A fleet that is globally distributed\\
+and autonomously adapting presents an\\
+\alert{expansive attack surface.}}
+
+\vspace{0.6cm}
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{errorstroke}
+    {\small\bfseries Data Poisoning}\\[0.1cm]
+    {\scriptsize Corrupt training data}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\small\bfseries Model Extraction}\\[0.1cm]
+    {\scriptsize Steal model via API}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{datastroke}
+    {\small\bfseries Differential Privacy}\\[0.1cm]
+    {\scriptsize Protect training data}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.4cm}
+{\normalsize\textbf{How do we defend the fleet?}}
+
+\end{frame}
+
+
+
+\appendix
+
+\begin{frame}{Backup: Platform ROI Sensitivity Analysis}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Backup. Shows how ROI changes with engineer cost and model count. Use when
+students ask ``what if our engineers cost less?'' or ``we only have 15 models.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Only show if students question the 20--50 model break-even.
+}
+
+\footnotesize
+\textbf{Platform break-even varies with engineer cost and model count:}
+
+\vspace{0.15cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  \textbf{Engineer Cost} & \textbf{10 Models} & \textbf{30 Models} & \textbf{50 Models} \\
+  \midrule
+  \$100/hr & ROI: 0.5$\times$ & ROI: 1.4$\times$ & ROI: 2.3$\times$ \\
+  \$150/hr & ROI: 0.7$\times$ & ROI: \textbf{2.1$\times$} & ROI: \textbf{3.4$\times$} \\
+  \$200/hr & ROI: 1.0$\times$ & ROI: 2.8$\times$ & ROI: 4.5$\times$ \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{crimson}
+{\footnotesize At \$150/hr engineer cost, break-even is $\sim$15 models. The threshold is lower than most teams expect because shared infrastructure amortizes across all models simultaneously.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Backup: Monitoring Tier Design Patterns}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Backup. Detailed monitoring tier configuration for production deployments.
+Use when students ask how to implement hierarchical monitoring.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Implementation detail for students building monitoring systems.
+}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lllr@{}}
+  \toprule
+  \textbf{Tier} & \textbf{Metrics} & \textbf{Alert Target} & \textbf{Threshold} \\
+  \midrule
+  \textbf{L1 Business}    & Revenue, engagement      & Executive + on-call & 4-sigma \\
+  \textbf{L2 Portfolio}   & Domain-level aggregation  & Domain lead         & 3.5-sigma \\
+  \textbf{L3 Model}       & Per-model accuracy, drift & Investigation only  & 3-sigma \\
+  \textbf{L4 Infra}       & GPU util, feature store   & Platform team       & 3-sigma \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\textbf{Key pattern:} L1/L2 alert humans. L3/L4 feed dashboards for investigation \emph{after} higher-tier alerts fire. This prevents the 14,400 false alerts/day problem.
+
+\end{frame}
+
+
+\end{document}

@@ -16,15 +16,24 @@ A demonstration of perceptron limitations and the multi-layer solution:
 
 **Run after Module 08** (Training capability)
 
-| Module | Component | What It Provides |
-|--------|-----------|------------------|
-| Module 01 | Tensor | YOUR data structure |
-| Module 02 | Activations | YOUR sigmoid/ReLU activations |
-| Module 03 | Layers | YOUR Linear layers |
-| Module 04 | Losses | YOUR loss functions |
-| Module 06 | Autograd | YOUR automatic differentiation |
-| Module 07 | Optimizers | YOUR SGD optimizer |
-| Module 08 | Training | YOUR end-to-end training loop |
+<table>
+<thead>
+<tr>
+<th width="25%"><b>Module</b></th>
+<th width="25%">Component</th>
+<th width="50%">What It Provides</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>Module 01</b></td><td>Tensor</td><td>YOUR data structure</td></tr>
+<tr><td><b>Module 02</b></td><td>Activations</td><td>YOUR sigmoid/ReLU activations</td></tr>
+<tr><td><b>Module 03</b></td><td>Layers</td><td>YOUR Linear layers</td></tr>
+<tr><td><b>Module 04</b></td><td>Losses</td><td>YOUR loss functions</td></tr>
+<tr><td><b>Module 06</b></td><td>Autograd</td><td>YOUR automatic differentiation</td></tr>
+<tr><td><b>Module 07</b></td><td>Optimizers</td><td>YOUR SGD optimizer</td></tr>
+<tr><td><b>Module 08</b></td><td>Training</td><td>YOUR end-to-end training loop</td></tr>
+</tbody>
+</table>
 
 ## Milestone Structure
 
@@ -68,10 +77,21 @@ The hidden layer learns to transform the space so XOR becomes linearly separable
 
 ## Expected Results
 
-| Script | Layers | Loss | Accuracy | What It Shows |
-|--------|--------|------|----------|---------------|
-| 01 (Single Layer) | 1 | ~0.69 (stuck!) | ~50% | Cannot learn XOR (Minsky was right) |
-| 02 (Multi-Layer) | 2 | → 0.0 | 100% | Hidden layers solve the problem! |
+<table>
+<thead>
+<tr>
+<th width="25%"><b>Script</b></th>
+<th width="10%">Layers</th>
+<th width="20%">Loss</th>
+<th width="15%">Accuracy</th>
+<th width="30%">What It Shows</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>01 (Single Layer)</b></td><td>1</td><td>~0.69 (stuck!)</td><td>~50%</td><td>Cannot learn XOR (Minsky was right)</td></tr>
+<tr><td><b>02 (Multi-Layer)</b></td><td>2</td><td>→ 0.0</td><td>100%</td><td>Hidden layers solve the problem!</td></tr>
+</tbody>
+</table>
 
 ## Key Learning: The Power of Depth
 

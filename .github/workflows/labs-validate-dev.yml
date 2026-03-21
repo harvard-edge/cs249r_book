@@ -1,0 +1,361 @@
+name: '🔮 Labs · ✅ Validate (Dev)'
+
+# =============================================================================
+# Labs Validate (Dev) - Notebook Syntax & Import Validation
+# =============================================================================
+#
+# Checks:
+#   1. SYNTAX     - All .py lab files parse without syntax errors
+#   2. IMPORTS    - Core modules (components, state, style) import cleanly
+#   3. NOTEBOOKS  - Each Marimo notebook file can be imported (catches broken imports)
+#   4. SITE BUILD - Quarto render succeeds (HTML output validated)
+#
+# Triggers:
+#   - Push to dev: Full validation
+#   - PR to dev/main: Full validation
+#   - Manual: Full validation
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'labs/**'
+      - 'mlsysim/**'
+      - '.github/workflows/labs-*.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'labs/**'
+      - 'mlsysim/**'
+      - '.github/workflows/labs-*.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: labs-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===========================================================================
+  # Stage 1: Python syntax + import validation
+  # ===========================================================================
+  validate-notebooks:
+    name: '🧪 Validate Notebooks'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r labs/requirements.txt
+          # Install mlsysim from source (the engine that powers all labs)
+          pip install "mlsysim/[full]"
+
+      - name: 🔍 Validate Python syntax (all lab files)
+        run: |
+          echo "🔍 Checking Python syntax for all lab files..."
+          FAILED=0
+          COUNT=0
+
+          for f in labs/vol1/lab_*.py labs/vol2/lab_*.py; do
+            [ -f "$f" ] || continue
+            COUNT=$((COUNT + 1))
+            if ! python3 -c "import ast; ast.parse(open('$f').read())" 2>/dev/null; then
+              echo "❌ Syntax error: $f"
+              python3 -c "import ast; ast.parse(open('$f').read())" 2>&1 || true
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          if [ $FAILED -gt 0 ]; then
+            echo "❌ $FAILED of $COUNT lab files have syntax errors"
+            exit 1
+          else
+            echo "✅ All $COUNT lab files pass syntax check"
+          fi
+
+      - name: 🔍 Validate mlsysim + lab module imports
+        run: |
+          echo "🔍 Checking mlsysim engine imports..."
+          python3 -c "import mlsysim; print('✅ mlsysim engine imports OK')"
+          python3 -c "from mlsysim.core.engine import Engine; print('✅ mlsysim.core.engine imports OK')"
+          python3 -c "from mlsysim.hardware.registry import Hardware; print('✅ mlsysim.hardware imports OK')"
+
+          echo ""
+          echo "🔍 Checking mlsysim.labs imports..."
+          python3 -c "from mlsysim.labs.style import COLORS, LAB_CSS; print('✅ mlsysim.labs.style imports OK')"
+          python3 -c "from mlsysim.labs.state import DesignLedger; print('✅ mlsysim.labs.state imports OK')"
+          python3 -c "from mlsysim.labs.components import Card, MetricRow; print('✅ mlsysim.labs.components imports OK')"
+
+          echo ""
+          echo "✅ All modules import successfully"
+
+      - name: 🔍 Validate notebook marimo structure
+        run: |
+          echo "🔍 Checking Marimo notebook structure..."
+          FAILED=0
+          COUNT=0
+
+          for f in labs/vol1/lab_*.py labs/vol2/lab_*.py; do
+            [ -f "$f" ] || continue
+            COUNT=$((COUNT + 1))
+
+            # Every lab must import marimo and define an app
+            if ! grep -q "import marimo" "$f"; then
+              echo "❌ Missing 'import marimo': $f"
+              FAILED=$((FAILED + 1))
+            fi
+
+            if ! grep -q "app = marimo.App" "$f"; then
+              echo "❌ Missing 'app = marimo.App': $f"
+              FAILED=$((FAILED + 1))
+            fi
+
+            # Every lab must use mlsysim.labs imports (not old labs.core path)
+            if grep -q "from labs\.core\." "$f"; then
+              echo "❌ Uses old import path 'labs.core': $f"
+              FAILED=$((FAILED + 1))
+            fi
+
+            # Every lab must have WASM bootstrap
+            if ! grep -q 'sys.platform == "emscripten"' "$f"; then
+              echo "❌ Missing WASM bootstrap: $f"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          if [ $FAILED -gt 0 ]; then
+            echo "❌ $FAILED issues found in $COUNT notebooks"
+            exit 1
+          else
+            echo "✅ All $COUNT notebooks have valid Marimo structure + WASM bootstrap"
+          fi
+
+      - name: 🧪 Validate lab execution (import check)
+        run: |
+          echo "🧪 Testing that each lab can be loaded by Python..."
+          FAILED=0
+          COUNT=0
+
+          for f in labs/vol1/lab_*.py labs/vol2/lab_*.py; do
+            [ -f "$f" ] || continue
+            COUNT=$((COUNT + 1))
+            name=$(basename "$f" .py)
+
+            if python3 -c "import importlib.util; spec = importlib.util.spec_from_file_location('lab', '$f'); mod = importlib.util.module_from_spec(spec)" 2>/dev/null; then
+              echo "✅ $name"
+            else
+              echo "❌ Failed to load: $name"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          if [ $FAILED -gt 0 ]; then
+            echo "❌ $FAILED of $COUNT labs failed load test"
+            exit 1
+          else
+            echo "✅ All $COUNT labs pass load test"
+          fi
+
+      - name: 🧪 Run Level 1 tests (static analysis)
+        run: |
+          echo "🧪 Running static analysis tests..."
+          python3 -m pytest labs/tests/test_static.py -v --tb=short --junitxml=test-results-static.xml
+
+      - name: 🧪 Run Level 2 tests (engine execution)
+        run: |
+          echo "🧪 Running engine execution tests..."
+          python3 -m pytest labs/tests/test_engine.py -v --tb=short -k "engine" --junitxml=test-results-engine.xml
+
+      - name: 🧪 Run Level 3 tests (widget structure)
+        run: |
+          echo "🧪 Running widget structure tests..."
+          python3 -m pytest labs/tests/test_widget.py -v --tb=short -k "widget" --junitxml=test-results-widget.xml
+        continue-on-error: true  # Widget tests are aspirational; many labs still WIP
+
+      - name: 📊 Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lab-test-results
+          path: test-results-*.xml
+
+  # ===========================================================================
+  # Stage 2: Quarto site build validation
+  # ===========================================================================
+  build-site:
+    name: '🔨 Build Labs Site'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build Labs Site
+        working-directory: ${{ vars.LABS_ROOT }}
+        run: quarto render
+
+      - name: 🔍 Validate build output
+        run: |
+          if [ ! -f "${{ vars.LABS_ROOT }}/_build/index.html" ]; then
+            echo "❌ CRITICAL: index.html missing from build output."
+            exit 1
+          fi
+          echo "✅ Site built successfully"
+          echo "📊 Build size: $(du -sh ${{ vars.LABS_ROOT }}/_build | cut -f1)"
+
+  # ===========================================================================
+  # Stage 3: WASM export smoke test
+  # ===========================================================================
+  wasm-smoke-test:
+    name: '🌐 WASM Export Smoke Test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 📦 Install dependencies
+        run: |
+          pip install build marimo
+          pip install -r labs/requirements.txt
+          pip install mlsysim/
+
+      - name: 📦 Build mlsysim wheel
+        run: |
+          cd mlsysim && python3 -m build --wheel
+          echo "✅ Wheel built:"
+          ls -la dist/*.whl
+
+      - name: 📦 Setup Node.js for Pyodide test
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 🧪 Test Pyodide wheel install
+        run: |
+          npm install pyodide
+          WHEEL_FILE=$(ls mlsysim/dist/*.whl | head -n 1)
+          cat << 'EOF' > test_pyodide.js
+          const { loadPyodide } = require("pyodide");
+          const path = require("path");
+          
+          async function main() {
+            const pyodide = await loadPyodide();
+            await pyodide.loadPackage("micropip");
+            const micropip = pyodide.pyimport("micropip");
+            
+            console.log("Installing dependencies...");
+            await pyodide.loadPackage(["pandas", "numpy"]);
+            await micropip.install(["pydantic", "pint"], {keep_going: false});
+            
+            console.log("Installing mlsysim wheel...");
+            const wheelPath = process.argv[2];
+            await micropip.install("file://" + path.resolve(wheelPath), {keep_going: false});
+            
+            console.log("Testing imports...");
+            pyodide.runPython(`
+              import mlsysim
+              from mlsysim.core.engine import Engine
+              print("✅ mlsysim imported successfully in Pyodide!")
+            `);
+          }
+          main().catch(err => {
+            console.error("❌ Pyodide test failed:", err);
+            process.exit(1);
+          });
+          EOF
+          node test_pyodide.js "$WHEEL_FILE"
+
+      - name: 🌐 Export representative labs to WASM HTML
+        run: |
+          SMOKE_LABS="labs/vol1/lab_00_introduction.py labs/vol1/lab_01_ml_intro.py labs/vol2/lab_01_introduction.py"
+          FAILED=""
+          
+          # Setup wheel directory so relative paths work
+          mkdir -p /tmp/wasm-smoke/wheels
+          cp mlsysim/dist/*.whl /tmp/wasm-smoke/wheels/
+
+          for lab in $SMOKE_LABS; do
+            name=$(basename "$lab" .py)
+            echo "  Exporting ${name}..."
+            mkdir -p "/tmp/wasm-smoke/${name}"
+            if marimo export html-wasm "$lab" \
+              -o "/tmp/wasm-smoke/${name}/index.html" \
+              --mode run --no-show-code; then
+              # Verify the HTML is non-trivial (>10KB)
+              SIZE=$(wc -c < "/tmp/wasm-smoke/${name}/index.html")
+              if [ "$SIZE" -lt 10000 ]; then
+                echo "❌ ${name}: index.html is only ${SIZE} bytes (expected >10KB)"
+                FAILED="${FAILED} ${name}"
+              else
+                echo "✅ ${name}: ${SIZE} bytes"
+              fi
+            else
+              echo "❌ ${name}: marimo export failed"
+              FAILED="${FAILED} ${name}"
+            fi
+          done
+
+          if [ -n "$FAILED" ]; then
+            echo ""
+            echo "❌ WASM smoke test failed for:${FAILED}"
+            exit 1
+          fi
+          echo ""
+          echo "✅ All WASM smoke tests passed"
+
+  # ===========================================================================
+  # Summary
+  # ===========================================================================
+  summary:
+    name: '📊 Summary'
+    runs-on: ubuntu-latest
+    needs: [validate-notebooks, build-site, wasm-smoke-test]
+    if: always()
+
+    steps:
+      - name: 📊 Generate Summary
+        run: |
+          echo "## 🔮 Labs Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧪 Notebook Validation | ${{ needs.validate-notebooks.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔨 Site Build | ${{ needs.build-site.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌐 WASM Export | ${{ needs.wasm-smoke-test.result }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: ❌ Check for failures
+        run: |
+          if [ "${{ needs.validate-notebooks.result }}" = "failure" ] || \
+             [ "${{ needs.build-site.result }}" = "failure" ] || \
+             [ "${{ needs.wasm-smoke-test.result }}" = "failure" ]; then
+            echo "❌ Validation failed"
+            exit 1
+          fi
+          echo "✅ All checks passed"

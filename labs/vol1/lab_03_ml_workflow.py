@@ -3,131 +3,95 @@ import marimo
 __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LAB 03: THE SILENT DEGRADATION LOOP
-#
-# Chapter: ml_workflow.qmd  (@sec-ml-workflow)
-# Core Invariant: The Constraint Propagation Principle (2^(N-1) cost escalation)
-#                 + Iteration velocity race (fast cycles outcompete slow ones)
-#
-# Act I  — The Constraint Tax (12-15 min)
-#   Stakeholder message → prediction lock → lifecycle timeline instrument →
-#   prediction-vs-reality reveal → structured reflection → MathPeek
-#
-# Act II — The Iteration Velocity Race (20-25 min)
-#   Context toggle → prediction lock → dual-model accuracy plot →
-#   constraint gate designer → failure state → reflection → MathPeek
-#
-# Design Ledger: saves chapter=3 with model_size, cycle_hours,
-#                crossover_week, constraint_gates, discovery_stage.
-# ─────────────────────────────────────────────────────────────────────────────
 
-
-# ─── CELL 0: SETUP ────────────────────────────────────────────────────────────
 @app.cell
-def _():
+async def _():
     import marimo as mo
     import sys
-    from pathlib import Path
-    import plotly.graph_objects as go
-    import numpy as np
     import math
+    from pathlib import Path
+    import numpy as np
 
-    _root = Path(__file__).resolve().parents[2]
-    if str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
+    if sys.platform == "emscripten":
+        import micropip
+        await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
+        await micropip.install(
+            "../../../wheels/mlsysim-0.1.0-py3-none-any.whl", keep_going=False
+        )
+    elif "mlsysim" not in sys.modules:
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
 
-    from labs.core.state import DesignLedger
-    from labs.core.style import COLORS, LAB_CSS, apply_plotly_theme
-    from labs.core.components import StakeholderMessage, MathPeek
+    import plotly.graph_objects as go
+    from mlsysim.labs.state import DesignLedger
+    from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
+    import mlsysim
+    from mlsysim import Engine, Models, Hardware
+
+    H100_TFLOPS = Hardware.Cloud.H100.compute.peak_flops.m_as("TFLOPs/s")
+    H100_RAM    = Hardware.Cloud.H100.memory.capacity.m_as("GB")
+    ESP32_RAM_KB = Hardware.Tiny.ESP32_S3.memory.capacity.m_as("KiB")
+
+    RESNET50_PARAMS = Models.ResNet50.parameters.m_as("count")
+    RESNET50_SIZE_MB = RESNET50_PARAMS * 2 / (1024 * 1024)
 
     ledger = DesignLedger()
-
-    # ── Chapter-sourced constants (ml_workflow.qmd) ───────────────────────────
-    # 2^(N-1) Constraint Propagation Principle — @sec-ml-workflow line 73
-    # "the Constraint Propagation Principle (2^(N-1) cost escalation)"
-    STAGES = ["Requirements", "Data", "Modeling", "Evaluation", "Deployment", "Monitoring"]
-    STAGE_DAYS = [5, 30, 60, 40, 10, 5]   # Rural Clinic timeline (150 day total)
-    # Rural Clinic: 95% accuracy Day 90, 96% Day 120, failure Day 151
-    # Source: ml_workflow.qmd line 84
-    RURAL_CLINIC_TOTAL_DAYS = 150
-    # Large model: 95% start, +0.15%/iter, 1-week cycle — lines 312-314
-    LARGE_START_ACC  = 95.0
-    LARGE_GAIN_ITER  = 0.15
-    LARGE_CYCLE_HRS  = 168    # 1 week = 168 hours
-    # Small model: 90% start, +0.1%/iter, 1-hour cycle — lines 317-319
-    SMALL_START_ACC  = 90.0
-    SMALL_GAIN_ITER  = 0.10
-    SMALL_CYCLE_HRS  = 1
-    # 26-week project window — line 308
-    WEEKS_TOTAL      = 26
-    # Accuracy ceiling at 99% — lines 325, 329
-    ACC_CEILING      = 99.0
-    # 60-80% time on data activities — line 201
-    DATA_TIME_LOW    = 60
-    DATA_TIME_HIGH   = 80
-    # 10-20% on model development — line 201
-    MODEL_TIME_LOW   = 10
-    MODEL_TIME_HIGH  = 20
-
+    if getattr(ledger, "is_wasm", False):
+        await ledger.load_async()
     return (
-        mo, ledger, COLORS, LAB_CSS, apply_plotly_theme,
-        StakeholderMessage, MathPeek,
-        go, np, math,
-        STAGES, STAGE_DAYS, RURAL_CLINIC_TOTAL_DAYS,
-        LARGE_START_ACC, LARGE_GAIN_ITER, LARGE_CYCLE_HRS,
-        SMALL_START_ACC, SMALL_GAIN_ITER, SMALL_CYCLE_HRS,
-        WEEKS_TOTAL, ACC_CEILING,
-        DATA_TIME_LOW, DATA_TIME_HIGH,
-        MODEL_TIME_LOW, MODEL_TIME_HIGH,
+        COLORS, LAB_CSS, apply_plotly_theme,
+        go, mo, np, math,
+        Engine, Models, Hardware,
+        H100_TFLOPS, H100_RAM,
+        ESP32_RAM_KB,
+        RESNET50_PARAMS, RESNET50_SIZE_MB,
+        ledger,
     )
 
 
-# ─── CELL 1: HEADER ───────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, LAB_CSS, COLORS):
+def _(LAB_CSS, mo):
     mo.vstack([
         LAB_CSS,
-        mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1a2744 60%, #0f172a 100%);
+        mo.Html("""
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.4);">
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
                         color: #475569; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems · Volume I · Lab 03
+                Machine Learning Systems &middot; Volume I &middot; Lab 03
             </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.3rem; font-weight: 900;
+            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
                        color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
                 The Constraint Tax
             </h1>
-            <p style="margin: 0 0 22px 0; font-size: 1.05rem; color: #94a3b8;
-                      max-width: 640px; line-height: 1.65;">
-                A team achieves 96% accuracy on Day 120. On Day 151, they discover the
-                deployment target has 512 MB of memory and the model needs 4 GB.
-                Five months of work is discarded. This lab quantifies why — and how to
-                prevent it.
+            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
+                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
+                Orchestrating the ML Lifecycle
             </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 18px;">
-                <span style="background: rgba(99,102,241,0.15); color: #a5b4fc;
+            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
+                      max-width: 680px; line-height: 1.65;">
+                A DR screening team spends 5 months building a model, then discovers
+                it cannot deploy. Constraints discovered late cost exponentially more
+                than constraints discovered early.
+            </p>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
+                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.25);">
-                    Chapter: ML Workflow
+                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
+                    4 Parts + Synthesis &middot; ~51 min
                 </span>
-                <span style="background: rgba(16,185,129,0.15); color: #6ee7b7;
+                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(16,185,129,0.25);">
-                    35–40 min · 2 Acts
-                </span>
-                <span style="background: rgba(245,158,11,0.15); color: #fcd34d;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(245,158,11,0.25);">
-                    Prerequisite: @sec-ml-workflow
+                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
+                    Chapter 3: ML Workflow
                 </span>
             </div>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                <span class="badge badge-info">Constraint Propagation: 2^(N-1)</span>
-                <span class="badge badge-info">Iteration Tax</span>
-                <span class="badge badge-warn">Cloud vs Mobile Deployment</span>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <span class="badge badge-info">Exponential Cost Curve 2^(N-1)</span>
+                <span class="badge badge-warn">Iteration Velocity &gt; Starting Accuracy</span>
+                <span class="badge badge-fail">200x OOM Discovered at Stage 5</span>
             </div>
         </div>
         """),
@@ -135,44 +99,38 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE A: OPENING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 2: BRIEFING ─────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, COLORS):
+def _(COLORS, mo):
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
                 padding: 20px 28px; margin: 8px 0 16px 0;
                 box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-
-        <!-- LEARNING OBJECTIVES -->
         <div style="margin-bottom: 16px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                 Learning Objectives
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the cost multiplier of late constraint discovery</strong> using the 2<sup>N-1</sup> Constraint Propagation Principle and verify that a deployment-stage discovery (Stage 5) costs 16&times; more than a requirements-stage discovery.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Identify the dominant time category in ML projects</strong> by comparing your intuitive estimate against the chapter&rsquo;s data showing 60&ndash;80% of effort goes to data activities, not modeling.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Predict the crossover week</strong> at which a small model (90% start, 1-hour cycle) overtakes a large model (95% start, 1-week cycle) in a 26-week project window, and explain why iteration velocity dominates starting accuracy.</div>
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the exponential cost</strong> of
+                    discovering deployment constraints late: cost = 2^(N-1) where N is lifecycle stage.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Predict when iteration velocity beats starting
+                    accuracy</strong> using the logarithmic improvement model.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Identify hidden effort allocation</strong> &mdash;
+                    data activities consume 60-80% of ML project effort, not model development.</div>
             </div>
         </div>
-
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <!-- PREREQUISITES + DURATION (side by side) -->
-        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 220px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Six-stage ML lifecycle from @sec-ml-workflow-understanding-ml-lifecycle-ca87 &middot;
-                    Time allocation data from @sec-ml-workflow-quantifying-ml-lifecycle-bd69
+                    Engine.solve() from Lab 01-02 &middot;
+                    Physical walls from Lab 02 &middot;
+                    ML lifecycle stages from @sec-ml-workflow
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -181,23 +139,23 @@ def _(mo, COLORS):
                     Duration
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>35&ndash;40 min</strong><br/>
-                    Act I: ~12 min &middot; Act II: ~25 min
+                    <strong>~51 min</strong><br/>
+                    Part A: ~12 min &middot; Part B: ~12 min<br/>
+                    Part C: ~12 min &middot; Part D: ~9 min
                 </div>
             </div>
         </div>
-
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <!-- CORE QUESTION -->
-        <div style="margin-top: 16px;">
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
+                    padding: 16px 28px 0 28px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                 Core Question
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                &ldquo;A team achieves 96% accuracy after 120 days &mdash; then discovers the deployment target has 512 MB of RAM and the model needs 4 GB. How do you quantify how much those 120 days were worth, and what single decision on Day 1 would have made them count?&rdquo;
+                &ldquo;A team spent 5 months building a model that cannot deploy.
+                Engine.solve() could have told them in 3 milliseconds. When should
+                you check constraints, and what does it cost to check late?&rdquo;
             </div>
         </div>
     </div>
@@ -205,1381 +163,795 @@ def _(mo, COLORS):
     return
 
 
-# ─── CELL 3: READING ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
-    **Recommended Reading** — Complete the following before this lab:
+    **Recommended Reading** -- Complete the following before this lab:
 
-    - **@sec-ml-workflow-understanding-ml-lifecycle-ca87** — The six-stage ML lifecycle
-      and the Rural Clinic case study (Day 90 through Day 153)
-    - **@sec-ml-workflow-quantifying-ml-lifecycle-bd69** — Time allocation data: why
-      60–80% of project time goes to data activities, not modeling
-    - **@sec-ml-workflow-integrating-systems-thinking-principles-24c0** — The Constraint
-      Propagation Principle ($2^{N-1}$ cost escalation) and the Iteration Tax
+    - **@sec-ml-workflow** -- The 6-stage ML lifecycle and the cost of late constraint discovery.
+    - **@sec-ml-workflow-iteration** -- Iteration velocity vs starting accuracy trade-offs.
+    - **@sec-ml-workflow-effort** -- Effort distribution in production ML projects.
     """), kind="info")
     return
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: ACT I -- CALIBRATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, COLORS):
-    _act_num      = "I"
-    _act_color    = COLORS["BlueLine"]
-    _act_title    = "The Constraint Tax"
-    _act_duration = "12&ndash;15 min"
-    _act_why      = ("You expect the cost of fixing a late-stage problem to scale linearly "
-                     "with project progress &mdash; perhaps 5&times; more expensive at deployment "
-                     "than at requirements. The Rural Clinic data will show that the 2<sup>N&minus;1</sup> "
-                     "law makes it 16&times; more expensive, not 5&times;, and that the majority of "
-                     "project time was never spent on the model at all.")
-
-    mo.Html(f"""
-    <div style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {_act_color}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;
-                        flex-shrink: 0;">{_act_num}</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act {_act_num} &middot; {_act_duration}</div>
-        </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">
-            {_act_title}
-        </div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            {_act_why}
-        </div>
-    </div>
-    """)
-    return
-
-
-# ─── ACT I PREDICTION LOCK ────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    act1_prediction = mo.ui.radio(
+def _(
+    COLORS, H100_TFLOPS, H100_RAM, ESP32_RAM_KB,
+    RESNET50_PARAMS, RESNET50_SIZE_MB,
+    Engine, Models, Hardware,
+    apply_plotly_theme, go, math, mo, np,
+):
+    # ── Part A widgets ───────────────────────────────────────────────────
+    partA_prediction = mo.ui.radio(
         options={
-            "A) About 5× more expensive — roughly proportional to project progress": "A",
-            "B) About 10× more expensive — late changes always cost more, but double-digits cap it": "B",
-            "C) About 16× more expensive — each stage compounds the rework required": "C",
-            "D) About 100× more expensive — exponential blowup dominates by deployment": "D",
+            "A) During architecture selection (Stage 2, cost 2x)": "stage2",
+            "B) During training (Stage 3, cost 4x)":               "stage3",
+            "C) During evaluation (Stage 4, cost 8x)":             "stage4",
+            "D) Doesn't matter -- cost is similar at all stages":   "same",
         },
-        label=(
-            "**Before touching any instrument, commit to your prediction.**\n\n"
-            "An ML pipeline has 6 stages: Requirements (1), Data (2), Modeling (3), "
-            "Evaluation (4), Deployment (5), Monitoring (6). The Rural Clinic team "
-            "discovers a memory constraint at Stage 5 (Deployment) — 150 days into the "
-            "project. Compared to discovering it at Stage 1 (Requirements), how much "
-            "more expensive is it to fix?"
-        ),
+        label="A team trained a 95%-accurate model (100 MB FP16) for deployment on "
+              "an ESP32 (512 KB SRAM). When is the constraint cheapest to address?",
     )
-    act1_prediction
-    return (act1_prediction,)
-
+    return (partA_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, act1_prediction):
-    mo.stop(
-        act1_prediction.value is None,
-        mo.callout(
-            mo.md("Select your prediction above to unlock the constraint timeline instrument."),
-            kind="warn",
-        ),
-    )
-    mo.callout(
-        mo.md(
-            "**Prediction recorded.** Now use the instrument below to explore "
-            "how constraint discovery stage affects total rework cost. "
-            "Then compare your prediction to the actual formula."
-        ),
-        kind="info",
-    )
-    return
-
-
-# ─── ACT I INSTRUMENT: CONSTRAINT PROPAGATION TIMELINE ───────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_prediction):
-    mo.stop(act1_prediction.value is None)
-
-    act1_discovery_stage = mo.ui.slider(
+def _(mo, partA_prediction):
+    partA_stage = mo.ui.slider(
         start=1, stop=6, value=5, step=1,
-        label="Constraint Discovery Stage (drag left to discover earlier)",
-        show_value=True,
+        label="Discovery stage (1=Problem Definition, 6=Monitoring)",
     )
-    act1_data_guess = mo.ui.slider(
-        start=5, stop=95, value=40, step=5,
-        label="Your estimate: % of ML project time spent on DATA activities",
-        show_value=True,
-    )
-    mo.vstack([
-        mo.md("### Constraint Propagation Timeline"),
-        mo.md(
-            "The Rural Clinic team discovered their 512 MB memory constraint at Stage 5 "
-            "(Deployment). Drag the slider left to see how the cost changes if they had "
-            "discovered it earlier. Each stage crossed compounds the rework required."
-        ),
-        act1_discovery_stage,
-        mo.md("---"),
-        mo.md("### Time Allocation Reality Check"),
-        mo.md(
-            "Before seeing the data: what percentage of a typical ML project's time "
-            "do you think goes to data activities (collection, cleaning, labeling, validation)?"
-        ),
-        act1_data_guess,
-    ])
-    return (act1_discovery_stage, act1_data_guess)
 
+    # ── Part B widgets ───────────────────────────────────────────────────
+    partB_prediction = mo.ui.radio(
+        options={
+            "A) Team A -- 5% head start is insurmountable": "team_a",
+            "B) Team A -- but barely (within 1%)":           "team_a_barely",
+            "C) Team B -- faster iteration wins":            "team_b",
+            "D) They converge to the same accuracy":         "converge",
+        },
+        label="Team A: 95% start, 1-week cycles. Team B: 90% start, 1-hour cycles. "
+              "After 26 weeks, which team has higher accuracy?",
+    )
+    return (partB_prediction,)
 
 @app.cell(hide_code=True)
-def _(
-    mo, go, np, act1_prediction, act1_discovery_stage, act1_data_guess,
-    COLORS, apply_plotly_theme,
-    STAGES, STAGE_DAYS, RURAL_CLINIC_TOTAL_DAYS,
-    DATA_TIME_LOW, DATA_TIME_HIGH,
-):
-    mo.stop(act1_prediction.value is None)
+def _(mo, partB_prediction):
+    partB_cycle_a = mo.ui.slider(
+        start=1, stop=336, value=168, step=1,
+        label="Team A cycle time (hours)",
+    )
+    partB_cycle_b = mo.ui.slider(
+        start=1, stop=168, value=1, step=1,
+        label="Team B cycle time (hours)",
+    )
 
-    _disc_stage = act1_discovery_stage.value   # 1-indexed
-    _cost_mult = 2 ** (_disc_stage - 1)        # 2^(N-1) formula
-    _wasted_days = sum(STAGE_DAYS[_disc_stage - 1:])
+    # ── Part C widgets ───────────────────────────────────────────────────
+    partC_prediction = mo.ui.radio(
+        options={
+            "A) 50-60% (it is the core task)":    "50",
+            "B) 30-40% (significant but not dominant)": "30",
+            "C) 10-20% (surprisingly small)":     "10",
+            "D) <5% (negligible)":                "5",
+        },
+        label="What fraction of total engineering effort goes to model development "
+              "(architecture, training, hyperparameters)?",
+    )
+    return (partC_prediction,)
 
-    # ── Lifecycle Bar Chart ────────────────────────────────────────────────────
-    _bar_colors = []
-    for _i in range(len(STAGES)):
-        if _i < _disc_stage - 1:
-            _bar_colors.append(COLORS["GreenLine"])    # completed and kept
-        elif _i == _disc_stage - 1:
-            _bar_colors.append(COLORS["OrangeLine"])   # discovery point
+@app.cell(hide_code=True)
+def _(mo, partC_prediction):
+    partC_sliders = {
+        "data_collect": mo.ui.slider(start=0, stop=20, value=3, step=1,
+                                      label="Data Collection (person-months)"),
+        "data_label": mo.ui.slider(start=0, stop=20, value=2, step=1,
+                                    label="Data Labeling/Validation"),
+        "model_dev": mo.ui.slider(start=0, stop=20, value=4, step=1,
+                                   label="Model Development"),
+        "deploy": mo.ui.slider(start=0, stop=20, value=1, step=1,
+                                label="Deployment/Infrastructure"),
+        "monitor": mo.ui.slider(start=0, stop=20, value=0, step=1,
+                                 label="Monitoring/Maintenance"),
+    }
+
+    # ── Part D widgets ───────────────────────────────────────────────────
+    partD_prediction = mo.ui.radio(
+        options={
+            "A) 0 -- it was validated during pilot":    "zero",
+            "B) 1 -- one round of fixes":                "one",
+            "C) 2-3 -- a few adjustments":               "few",
+            "D) 4-8 -- continuous iteration":             "many",
+        },
+        label="After deploying from 5 pilot clinics to 200 clinics, how many "
+              "complete lifecycle iterations before the system stabilizes?",
+    )
+    return (partD_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partD_prediction):
+    partD_months = mo.ui.slider(
+        start=0, stop=24, value=0, step=1,
+        label="Months since production launch",
+    )
+
+    # ═════════════════════════════════════════════════════════════════════
+    # PART A -- Constraint Propagation
+    # ═════════════════════════════════════════════════════════════════════
+
+    def build_part_a():
+        items = []
+
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Incident Report &middot; MedVision Health DR Screening Project
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;After 5 months of development, we achieved 95% accuracy on our DR
+                screening model (ResNet-50 backbone, ~{RESNET50_SIZE_MB:.0f} MB FP16). Today we
+                learned the rural clinic tablets are ESP32-based with {ESP32_RAM_KB:.0f} KB of SRAM.
+                The model does not fit. We need to restart.&rdquo;
+            </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; Post-mortem report, Month 5
+            </div>
+        </div>
+        """))
+
+        items.append(mo.md(f"""
+        ## The Exponential Cost of Late Constraint Discovery
+
+        The cost of discovering a deployment constraint at lifecycle stage N grows as
+        **2^(N-1)**. The DR screening case is concrete: a team spent 150 person-days
+        building a model that Engine.solve() could have rejected in 3 milliseconds.
+
+        ```
+        Engine.solve(ResNet50, ESP32, batch_size=1, precision="fp16")
+        -> INFEASIBLE: {RESNET50_SIZE_MB:.0f} MB model vs {ESP32_RAM_KB:.0f} KB SRAM (~{RESNET50_SIZE_MB*1024/ESP32_RAM_KB:.0f}x over)
+        -> This diagnosis took 0.003 seconds.
+        -> The team spent 150 days before discovering it.
+        ```
+        """))
+
+        items.append(partA_prediction)
+
+        if partA_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction to unlock the cost curve."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
+
+        items.append(partA_stage)
+
+        _stage = partA_stage.value
+        _stages = {
+            1: "Problem Definition",
+            2: "Data Engineering",
+            3: "Model Development",
+            4: "Evaluation",
+            5: "Deployment",
+            6: "Monitoring",
+        }
+        _stage_name = _stages[_stage]
+        _cost_multiplier = 2 ** (_stage - 1)
+        _base_cost_days = 5  # person-days for early discovery
+        _actual_cost = _base_cost_days * _cost_multiplier
+
+        _artifacts_to_rebuild = {
+            1: ["Requirements document"],
+            2: ["Requirements", "Data pipeline"],
+            3: ["Requirements", "Data pipeline", "Model architecture", "Training runs"],
+            4: ["Requirements", "Data pipeline", "Model", "Training", "Evaluation suite"],
+            5: ["Requirements", "Data pipeline", "Model", "Training", "Evaluation", "Deployment config"],
+            6: ["Everything + production rollback"],
+        }
+        _artifacts = _artifacts_to_rebuild[_stage]
+
+        # Cost curve chart
+        _stage_nums = [1, 2, 3, 4, 5, 6]
+        _costs = [2 ** (s - 1) * _base_cost_days for s in _stage_nums]
+        _colors_bar = [COLORS["GreenLine"] if s < _stage else
+                       COLORS["RedLine"] if s == _stage else
+                       COLORS["Grey"] for s in _stage_nums]
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Bar(
+            x=[_stages[s] for s in _stage_nums], y=_costs,
+            marker_color=_colors_bar, opacity=0.85,
+            text=[f"{c:.0f} days" for c in _costs],
+            textposition="outside",
+        ))
+        _fig.update_layout(
+            height=320,
+            yaxis=dict(title="Cost (person-days)", gridcolor="#f1f5f9"),
+            xaxis=dict(gridcolor="#f1f5f9"),
+            margin=dict(l=50, r=20, t=30, b=80),
+        )
+        apply_plotly_theme(_fig)
+        items.append(mo.md("### Exponential Cost Curve: 2^(N-1)"))
+        items.append(mo.as_html(_fig))
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:14px; border:2px solid {COLORS['RedLine']}; border-radius:10px;
+                        text-align:center; background:{COLORS['RedLL']}; flex:1;">
+                <div style="color:{COLORS['RedLine']}; font-size:0.72rem; font-weight:700;">
+                    Discovery Stage</div>
+                <div style="font-size:1.4rem; font-weight:800; color:{COLORS['RedLine']};">
+                    Stage {_stage}: {_stage_name}</div>
+            </div>
+            <div style="padding:14px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        text-align:center; background:white; flex:1;
+                        border-top:3px solid {COLORS['OrangeLine']};">
+                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Cost Multiplier</div>
+                <div style="font-size:1.4rem; font-weight:800; color:{COLORS['OrangeLine']};">
+                    {_cost_multiplier}x</div>
+            </div>
+            <div style="padding:14px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        text-align:center; background:white; flex:1;
+                        border-top:3px solid {COLORS['BlueLine']};">
+                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Person-Days</div>
+                <div style="font-size:1.4rem; font-weight:800; color:{COLORS['BlueLine']};">
+                    {_actual_cost:.0f}</div>
+            </div>
+        </div>
+        """))
+
+        # Artifacts list
+        _artifacts_html = "".join([f"<li style='margin-bottom:4px;'>{a}</li>" for a in _artifacts])
+        items.append(mo.Html(f"""
+        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
+                    border-radius:10px; padding:16px 20px; margin:8px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
+                        text-transform:uppercase; margin-bottom:8px;">
+                Artifacts that must be rebuilt at Stage {_stage}</div>
+            <ul style="margin:0; padding-left:20px; font-size:0.88rem;
+                       color:{COLORS['TextSec']}; line-height:1.65;">
+                {_artifacts_html}
+            </ul>
+        </div>
+        """))
+
+        items.append(mo.Html(f"""
+        <div style="background:{COLORS['BlueLL']}; border-left:4px solid {COLORS['BlueLine']};
+                    border-radius:0 10px 10px 0; padding:14px 20px; margin:12px 0;">
+            <div style="font-size:0.85rem; color:{COLORS['Text']}; line-height:1.6;">
+                <strong>Engine.solve() check:</strong> This diagnosis took <strong>0.003 seconds</strong>.
+                The team spent <strong>{_actual_cost:.0f} person-days</strong> before discovering it
+                at Stage {_stage}. At Stage 1, it would have cost {_base_cost_days} person-days.
+            </div>
+        </div>
+        """))
+
+        _pred = partA_prediction.value
+        if _pred == "stage2":
+            items.append(mo.callout(mo.md(
+                "**Correct.** Early discovery is exponentially cheaper. "
+                "At Stage 2 (cost 2x), you rebuild only the requirements and data pipeline. "
+                f"At Stage 5 (cost {2**4}x), you rebuild everything."
+            ), kind="success"))
         else:
-            _bar_colors.append(COLORS["RedLine"])      # wasted / must redo
+            items.append(mo.callout(mo.md(
+                "**The cost grows exponentially.** At Stage 1-2, fixing a constraint "
+                "costs 5-10 person-days. At Stage 5, it costs 80+ person-days because "
+                "every artifact built on top of the wrong assumption must be rebuilt."
+            ), kind="warn"))
 
-    _fig1 = go.Figure()
-    _fig1.add_trace(go.Bar(
-        x=STAGES,
-        y=STAGE_DAYS,
-        marker_color=_bar_colors,
-        text=[f"{d}d" for d in STAGE_DAYS],
-        textposition="outside",
-        name="Stage Duration (days)",
-        width=0.55,
-    ))
-    _fig1.update_layout(
-        title=dict(
-            text=(
-                f"Rural Clinic Timeline — Constraint discovered at Stage {_disc_stage}: "
-                f"{STAGES[_disc_stage - 1]}"
-            ),
-            font=dict(size=13),
-        ),
-        yaxis=dict(title="Duration (person-days)", range=[0, 75]),
-        xaxis=dict(title="Lifecycle Stage"),
-        height=340,
-        showlegend=False,
-        margin=dict(l=50, r=20, t=55, b=50),
-        annotations=[
-            dict(
-                x=STAGES[_disc_stage - 1],
-                y=STAGE_DAYS[_disc_stage - 1] + 6,
-                text=f"Constraint<br>found here",
-                showarrow=True,
-                arrowhead=2,
-                arrowcolor=COLORS["OrangeLine"],
-                font=dict(size=10, color=COLORS["OrangeLine"]),
-                ax=0, ay=-30,
-            )
-        ] if _disc_stage <= len(STAGES) else [],
-    )
-    apply_plotly_theme(_fig1)
+        items.append(mo.accordion({
+            "Math Peek: Exponential Cost": mo.md("""
+$$
+\\text{Cost}(N) = C_0 \\cdot 2^{N-1}
+$$
 
-    # ── Time Allocation Pie Chart ──────────────────────────────────────────────
-    _student_data_pct  = act1_data_guess.value
-    _student_model_pct = max(0, 100 - _student_data_pct - 10)
-    _student_other_pct = 100 - _student_data_pct - _student_model_pct
+where $C_0$ is the base cost at Stage 1 and $N$ is the discovery stage.
 
-    _actual_data_pct  = 70   # midpoint of 60-80%
-    _actual_model_pct = 15   # midpoint of 10-20%
-    _actual_other_pct = 15
+| Stage | Name | Cost Multiplier | Person-Days |
+|-------|------|-----------------|-------------|
+| 1 | Problem Definition | 1x | 5 |
+| 2 | Data Engineering | 2x | 10 |
+| 3 | Model Development | 4x | 20 |
+| 4 | Evaluation | 8x | 40 |
+| 5 | Deployment | 16x | 80 |
+| 6 | Monitoring | 32x | 160 |
+""")
+        }))
 
-    _fig2 = go.Figure()
-    _fig2.add_trace(go.Pie(
-        labels=["Data activities", "Model development", "Deployment & monitoring"],
-        values=[_actual_data_pct, _actual_model_pct, _actual_other_pct],
-        marker=dict(colors=[COLORS["BlueLine"], COLORS["GreenLine"], COLORS["OrangeLine"]]),
-        hole=0.38,
-        textinfo="label+percent",
-        textfont=dict(size=11),
-        name="Actual",
-        domain={"x": [0.5, 1.0]},
-        title=dict(text="Actual", font=dict(size=11)),
-    ))
-    _fig2.add_trace(go.Pie(
-        labels=["Data activities", "Model development", "Deployment & monitoring"],
-        values=[_student_data_pct, _student_model_pct, _student_other_pct],
-        marker=dict(colors=[COLORS["BlueLine"], COLORS["GreenLine"], COLORS["OrangeLine"]]),
-        hole=0.38,
-        textinfo="label+percent",
-        textfont=dict(size=11),
-        name="Your estimate",
-        domain={"x": [0.0, 0.5]},
-        title=dict(text="Your Estimate", font=dict(size=11)),
-    ))
-    _fig2.update_layout(
-        title=dict(text="Time Allocation: Your Estimate vs. Chapter Data", font=dict(size=13)),
-        height=320,
-        margin=dict(t=50, b=20, l=20, r=20),
-    )
-    apply_plotly_theme(_fig2)
+        return mo.vstack(items)
 
-    # ── Metric cards ──────────────────────────────────────────────────────────
-    _cost_color = (
-        COLORS["GreenLine"] if _cost_mult <= 2 else
-        COLORS["OrangeLine"] if _cost_mult <= 8 else
-        COLORS["RedLine"]
-    )
-    _waste_pct = int(100 * _wasted_days / RURAL_CLINIC_TOTAL_DAYS)
+    # ═════════════════════════════════════════════════════════════════════
+    # PART B -- Iteration Velocity
+    # ═════════════════════════════════════════════════════════════════════
 
-    _cards_html = f"""
-    <div style="display: flex; gap: 16px; justify-content: flex-start;
-                margin: 16px 0; flex-wrap: wrap;">
-        <div style="padding: 18px 22px; border: 1px solid #e2e8f0;
-                    border-radius: 10px; min-width: 170px; background: white;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 600;
-                        text-transform: uppercase; letter-spacing: 0.06em;">
-                Cost Multiplier
+    def build_part_b():
+        items = []
+
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Team Decision &middot; MedVision Health
             </div>
-            <div style="font-size: 2.4rem; font-weight: 800;
-                        color: {_cost_color}; line-height: 1.1; margin-top: 4px;">
-                {_cost_mult}×
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We are choosing between two approaches. Team A proposes a large ensemble
+                (95% starting accuracy, 1-week training cycles). Team B proposes a lightweight
+                edge model (90% start, 1-hour cycles). We have 26 weeks. Which team wins?&rdquo;
             </div>
-            <div style="color: #64748b; font-size: 0.78rem; margin-top: 4px;">
-                2^({_disc_stage}−1) = 2^{_disc_stage - 1}
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; Project Planning Meeting
             </div>
         </div>
-        <div style="padding: 18px 22px; border: 1px solid #e2e8f0;
-                    border-radius: 10px; min-width: 170px; background: white;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 600;
-                        text-transform: uppercase; letter-spacing: 0.06em;">
-                Wasted Days
+        """))
+
+        items.append(mo.md("""
+        ## Iteration Velocity Dominates Starting Accuracy
+
+        ```
+        accuracy(t) = accuracy_0 + alpha * log(1 + experiments(t))
+        ```
+
+        More experiments explore more of the design space. A team that runs 100
+        experiments in 26 weeks finds better configurations than a team running 26.
+        """))
+
+        items.append(partB_prediction)
+
+        if partB_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction to unlock the iteration race."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([partB_cycle_a, partB_cycle_b], justify="start", gap="2rem"))
+
+        _cycle_a = partB_cycle_a.value  # hours
+        _cycle_b = partB_cycle_b.value
+        _weeks = 26
+        _total_hours = _weeks * 168  # hours in 26 weeks
+        _acc_a_start = 95.0
+        _acc_b_start = 90.0
+        _alpha = 2.0
+
+        _exps_a = _total_hours / _cycle_a
+        _exps_b = _total_hours / _cycle_b
+
+        _acc_a_final = min(99.5, _acc_a_start + _alpha * math.log(1 + _exps_a))
+        _acc_b_final = min(99.5, _acc_b_start + _alpha * math.log(1 + _exps_b))
+
+        # Timeline
+        _weeks_range = np.linspace(0, 26, 200)
+        _acc_a_curve = [min(99.5, _acc_a_start + _alpha * math.log(1 + w * 168 / _cycle_a))
+                        for w in _weeks_range]
+        _acc_b_curve = [min(99.5, _acc_b_start + _alpha * math.log(1 + w * 168 / _cycle_b))
+                        for w in _weeks_range]
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(
+            x=_weeks_range.tolist(), y=_acc_a_curve, mode="lines",
+            name=f"Team A ({_cycle_a}h cycle, {_exps_a:.0f} exps)",
+            line=dict(color=COLORS["BlueLine"], width=2.5),
+        ))
+        _fig.add_trace(go.Scatter(
+            x=_weeks_range.tolist(), y=_acc_b_curve, mode="lines",
+            name=f"Team B ({_cycle_b}h cycle, {_exps_b:.0f} exps)",
+            line=dict(color=COLORS["GreenLine"], width=2.5),
+        ))
+        _fig.update_layout(
+            height=320,
+            xaxis=dict(title="Weeks", gridcolor="#f1f5f9"),
+            yaxis=dict(title="Accuracy (%)", range=[88, 100], gridcolor="#f1f5f9"),
+            legend=dict(orientation="h", y=1.12, x=0),
+            margin=dict(l=50, r=20, t=60, b=40),
+        )
+        apply_plotly_theme(_fig)
+        items.append(mo.md("### The Iteration Race"))
+        items.append(mo.as_html(_fig))
+
+        _winner = "Team A" if _acc_a_final > _acc_b_final else "Team B"
+        _winner_color = COLORS["BlueLine"] if _winner == "Team A" else COLORS["GreenLine"]
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:16px 0;">
+            <div style="padding:14px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        text-align:center; background:white; flex:1;
+                        border-top:3px solid {COLORS['BlueLine']};">
+                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Team A Final</div>
+                <div style="font-size:1.4rem; font-weight:800; color:{COLORS['BlueLine']};">
+                    {_acc_a_final:.1f}%</div>
+                <div style="font-size:0.68rem; color:#94a3b8;">{_exps_a:.0f} experiments</div>
             </div>
-            <div style="font-size: 2.4rem; font-weight: 800;
-                        color: {'#CB202D' if _wasted_days > 60 else '#CC5500' if _wasted_days > 20 else '#008F45'};
-                        line-height: 1.1; margin-top: 4px;">
-                {_wasted_days}d
+            <div style="padding:14px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        text-align:center; background:white; flex:1;
+                        border-top:3px solid {COLORS['GreenLine']};">
+                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Team B Final</div>
+                <div style="font-size:1.4rem; font-weight:800; color:{COLORS['GreenLine']};">
+                    {_acc_b_final:.1f}%</div>
+                <div style="font-size:0.68rem; color:#94a3b8;">{_exps_b:.0f} experiments</div>
             </div>
-            <div style="color: #64748b; font-size: 0.78rem; margin-top: 4px;">
-                {_waste_pct}% of {RURAL_CLINIC_TOTAL_DAYS}-day project
+            <div style="padding:14px; border:2px solid {_winner_color}; border-radius:10px;
+                        text-align:center; background:white; flex:1;">
+                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Winner</div>
+                <div style="font-size:1.4rem; font-weight:800; color:{_winner_color};">
+                    {_winner}</div>
             </div>
         </div>
-        <div style="padding: 18px 22px; border: 1px solid #e2e8f0;
-                    border-radius: 10px; min-width: 170px; background: white;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 600;
-                        text-transform: uppercase; letter-spacing: 0.06em;">
-                Stages to Redo
+        """))
+
+        _pred = partB_prediction.value
+        if _pred == "team_b":
+            items.append(mo.callout(mo.md(
+                f"**Correct.** Team B runs {_exps_b:.0f} experiments vs Team A's {_exps_a:.0f}. "
+                "Faster iteration explores more design space and finds better configurations."
+            ), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**{_winner} wins at week 26.** Team A: {_acc_a_final:.1f}% ({_exps_a:.0f} exps). "
+                f"Team B: {_acc_b_final:.1f}% ({_exps_b:.0f} exps). "
+                "Adjust the cycle time sliders to find the crossover point."
+            ), kind="warn"))
+
+        return mo.vstack(items)
+
+    # ═════════════════════════════════════════════════════════════════════
+    # PART C -- Where Does the Time Go?
+    # ═════════════════════════════════════════════════════════════════════
+
+    def build_part_c():
+        items = []
+
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Resource Planning &middot; MedVision Health
             </div>
-            <div style="font-size: 2.4rem; font-weight: 800;
-                        color: {'#CB202D' if _disc_stage >= 4 else '#CC5500' if _disc_stage >= 3 else '#008F45'};
-                        line-height: 1.1; margin-top: 4px;">
-                {max(0, len(STAGES) - _disc_stage + 1)}
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We have a 10-person team and 6 months. How should we allocate
+                effort across the ML lifecycle? Most of us assumed model development
+                would be the biggest block.&rdquo;
             </div>
-            <div style="color: #64748b; font-size: 0.78rem; margin-top: 4px;">
-                Stages {_disc_stage}–{len(STAGES)} must be revisited
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; Project kickoff meeting
             </div>
         </div>
-    </div>
-    """
+        """))
 
-    _physics_text = f"""
-    **Constraint Propagation Physics:**
+        items.append(mo.md("""
+        ## Data Activities Consume 60-80% of ML Project Effort
 
-    ```
-    Stage of discovery (N) = {_disc_stage}  ({STAGES[_disc_stage - 1]})
-    Cost multiplier        = 2^(N-1) = 2^({_disc_stage}-1) = {_cost_mult}×
-    Wasted person-days     = {_wasted_days}  ({_waste_pct}% of total project)
-    ```
+        Model development -- the phase that receives the most research attention --
+        is typically only 10-20% of total effort. Data collection, cleaning, labeling,
+        and validation dominate the budget.
+        """))
 
-    At Stage 1 (Requirements): 2^0 = **1× cost** — the constraint shapes all work before it begins.
-    At Stage {_disc_stage} ({STAGES[_disc_stage - 1]}): 2^{_disc_stage - 1} = **{_cost_mult}× cost** —
-    {_wasted_days} person-days must be redone or discarded.
-    At Stage 6 (Monitoring): 2^5 = **32× cost** — post-deployment remediation.
-    """
+        items.append(partC_prediction)
 
-    mo.vstack([
-        mo.Html(_cards_html),
-        mo.md(_physics_text),
-        mo.as_html(_fig1),
-        mo.md("---"),
-        mo.as_html(_fig2),
-        mo.md(
-            f"The chapter reports that data activities consume **{DATA_TIME_LOW}–{DATA_TIME_HIGH}%** "
-            "of ML project time. Model development is **10–20%**. "
-            f"You estimated **{_student_data_pct}%** for data."
-        ),
-    ])
-    return
+        if partC_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction to unlock the effort allocator."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
 
+        items.append(mo.md("### Allocate Your Team's 10 Person-Months"))
+        for _k, _s in partC_sliders.items():
+            items.append(_s)
 
-# ─── ACT I REVEAL ─────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_prediction, act1_discovery_stage):
-    mo.stop(act1_prediction.value is None)
+        _alloc = {k: s.value for k, s in partC_sliders.items()}
+        _total = sum(_alloc.values())
+        _model_pct = (_alloc["model_dev"] / _total * 100) if _total > 0 else 0
+        _data_pct = ((_alloc["data_collect"] + _alloc["data_label"]) / _total * 100) if _total > 0 else 0
 
-    _predicted_map = {"A": 5, "B": 10, "C": 16, "D": 100}
-    _predicted = _predicted_map[act1_prediction.value]
-    _actual = 16  # Stage 5 discovery → 2^(5-1) = 16
+        # Industry reference (from Hidden Technical Debt, MLCommons)
+        _industry = {"Data Collection": 25, "Data Labeling": 35, "Model Development": 15,
+                     "Deployment": 15, "Monitoring": 10}
+        _student = {
+            "Data Collection": _alloc["data_collect"] / _total * 100 if _total > 0 else 0,
+            "Data Labeling": _alloc["data_label"] / _total * 100 if _total > 0 else 0,
+            "Model Development": _alloc["model_dev"] / _total * 100 if _total > 0 else 0,
+            "Deployment": _alloc["deploy"] / _total * 100 if _total > 0 else 0,
+            "Monitoring": _alloc["monitor"] / _total * 100 if _total > 0 else 0,
+        }
 
-    _ratio = _actual / _predicted
-    _is_correct = act1_prediction.value == "C"
-
-    if _is_correct:
-        _reveal_msg = (
-            f"**You predicted {_predicted}×. The actual value for Stage 5 discovery is "
-            f"16× (2^{{5−1}} = 2^4 = 16). Correct.** "
-            "The formula is 2^(N−1): each stage crossed means its output becomes input to "
-            "the next stage. Discarding at Stage 5 invalidates all modeling, evaluation, "
-            "and deployment work — not just the stage where the failure was found. "
-            "The Rural Clinic team spent 150 person-days before discovering the 512 MB constraint. "
-            "A 1-day requirements checklist at Stage 1 would have cost 1×."
+        _phases = list(_industry.keys())
+        _fig = go.Figure()
+        _fig.add_trace(go.Bar(
+            name="Your Allocation", x=_phases,
+            y=[_student[p] for p in _phases],
+            marker_color=COLORS["BlueLine"], opacity=0.85,
+        ))
+        _fig.add_trace(go.Bar(
+            name="Industry Average", x=_phases,
+            y=[_industry[p] for p in _phases],
+            marker_color=COLORS["OrangeLine"], opacity=0.85,
+        ))
+        _fig.update_layout(
+            barmode="group", height=320,
+            yaxis=dict(title="% of Total Effort", gridcolor="#f1f5f9"),
+            legend=dict(orientation="h", y=1.12, x=0),
+            margin=dict(l=50, r=20, t=60, b=80),
         )
-        _kind = "success"
-    elif act1_prediction.value == "D":
-        _reveal_msg = (
-            f"**You predicted {_predicted}×. The actual Stage 5 value is 16×.** "
-            f"You were off by {_predicted / _actual:.1f}× in the other direction — "
-            "the cost is large but not 100×. The 100× figure is Boehm's original estimate "
-            "for post-deployment bugs in *traditional* software. In ML, Stage 6 (Monitoring/post-deploy) "
-            "discovery reaches ~32× (2^5). The 16× figure applies specifically to Stage 5 (Deployment). "
-            "The principle is right; the stage assignment matters."
+        apply_plotly_theme(_fig)
+        items.append(mo.as_html(_fig))
+
+        # Consequences
+        if _alloc["data_collect"] + _alloc["data_label"] < 3 and _total > 0:
+            items.append(mo.callout(mo.md(
+                "**Data starvation warning.** You allocated less than 30% to data activities. "
+                "The team will run out of clean training data by month 2 -- "
+                "three modelers will sit idle waiting for labeled images."
+            ), kind="danger"))
+        if _alloc["deploy"] == 0 and _total > 0:
+            items.append(mo.callout(mo.md(
+                "**Deployment crisis.** Zero allocation to deployment means the model "
+                "achieves 95% accuracy in development, then fails the ESP32 feasibility "
+                "check (see Part A). This is the DR clinic disaster repeating."
+            ), kind="danger"))
+
+        _pred = partC_prediction.value
+        if _pred == "10":
+            items.append(mo.callout(mo.md(
+                "**Correct.** Model development is typically 10-20% of total effort. "
+                "Data activities dominate at 60-80%."
+            ), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Model development is only 10-20% of total effort.** "
+                "Data collection + labeling + validation consume 60-80%. "
+                "Compare your allocation to the industry average above."
+            ), kind="warn"))
+
+        return mo.vstack(items)
+
+    # ═════════════════════════════════════════════════════════════════════
+    # PART D -- Feedback Loops
+    # ═════════════════════════════════════════════════════════════════════
+
+    def build_part_d():
+        items = []
+
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Production Update &middot; MedVision Health (6 months post-launch)
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We scaled from 5 pilot clinics to 200 clinics. New camera equipment,
+                new demographics, new failure modes. The pilot validation is not holding.
+                How many iteration cycles should we budget?&rdquo;
+            </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; Operations team, Month 6
+            </div>
+        </div>
+        """))
+
+        items.append(mo.md("""
+        ## The Lifecycle Never Ends
+
+        Unlike traditional software, ML systems require continuous feedback loops.
+        Scaling from pilot to production reveals problems invisible at small scale.
+        Each feedback event triggers re-entry into an earlier lifecycle stage.
+        """))
+
+        items.append(partD_prediction)
+
+        if partD_prediction.value is None:
+            items.append(mo.callout(
+                mo.md("Select your prediction to unlock the feedback timeline."),
+                kind="warn",
+            ))
+            return mo.vstack(items)
+
+        items.append(partD_months)
+
+        _month = partD_months.value
+
+        # Feedback events
+        _events = [
+            (3, "Camera model changed at clinic #47", "accuracy drops 8%", "Data Engineering"),
+            (6, "New demographic (elderly with cataracts)", "40% higher error rate", "Data Collection"),
+            (9, "Regulatory audit requires balanced demographics", "model retraining mandated", "Problem Definition"),
+            (12, "Seasonal lighting changes affect image quality", "5% accuracy drop", "Data Validation"),
+            (15, "New clinic network has different image format", "pipeline failure", "Data Engineering"),
+            (18, "Model drift detected across all clinics", "2% gradual degradation", "Model Development"),
+            (21, "Competitor publishes better architecture", "accuracy gap identified", "Model Development"),
+        ]
+
+        _triggered = [e for e in _events if e[0] <= _month]
+        _cycle_count = len(_triggered)
+
+        # Timeline visualization
+        _fig = go.Figure()
+
+        # Base timeline
+        _fig.add_trace(go.Scatter(
+            x=[0, 24], y=[0, 0], mode="lines",
+            line=dict(color=COLORS["Border"], width=2),
+            showlegend=False,
+        ))
+
+        for _i, (_m, _desc, _impact, _stage) in enumerate(_events):
+            _color = COLORS["RedLine"] if _m <= _month else COLORS["Grey"]
+            _fig.add_trace(go.Scatter(
+                x=[_m], y=[0], mode="markers+text",
+                marker=dict(color=_color, size=14, symbol="diamond"),
+                text=[f"M{_m}"], textposition="top center",
+                name=f"M{_m}: {_desc[:30]}...",
+                textfont=dict(size=9),
+            ))
+
+        _fig.add_vline(x=_month, line_dash="dash", line_color=COLORS["BlueLine"], line_width=1.5)
+
+        _fig.update_layout(
+            height=200,
+            xaxis=dict(title="Months Since Launch", range=[-1, 25], gridcolor="#f1f5f9"),
+            yaxis=dict(visible=False, range=[-1, 1]),
+            legend=dict(orientation="v", x=1.05, y=1, font=dict(size=9)),
+            margin=dict(l=30, r=200, t=20, b=40),
         )
-        _kind = "warn"
-    else:
-        _gap = _actual / _predicted
-        _reveal_msg = (
-            f"**You predicted {_predicted}×. The actual value is 16× (2^{{5−1}}).** "
-            f"You were off by {_gap:.1f}×. "
-            "The compounding is what surprises most engineers: it is not that late fixes cost "
-            "more in absolute terms — it is that each stage's output becomes the *input* "
-            "to the next. Invalidating Stage 5 requires revisiting Stages 3, 4, and 5 at minimum. "
-            "At Stage 5, that is 4 compounding factors: 2^4 = 16×."
-        )
-        _kind = "warn"
+        apply_plotly_theme(_fig)
+        items.append(mo.md("### Feedback Event Timeline"))
+        items.append(mo.as_html(_fig))
 
-    mo.callout(mo.md(_reveal_msg), kind=_kind)
-    return
+        # Events table
+        if _triggered:
+            _rows = ""
+            for _m, _desc, _impact, _stage in _triggered:
+                _rows += f"""
+                <tr>
+                    <td style="padding:8px; font-weight:700;">Month {_m}</td>
+                    <td style="padding:8px;">{_desc}</td>
+                    <td style="padding:8px; color:{COLORS['RedLine']};">{_impact}</td>
+                    <td style="padding:8px; color:{COLORS['OrangeLine']}; font-weight:600;">
+                        -> {_stage}</td>
+                </tr>"""
 
+            items.append(mo.Html(f"""
+            <div style="overflow-x:auto; margin:12px 0;">
+                <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+                    <thead>
+                        <tr style="background:{COLORS['Surface2']}; border-bottom:2px solid {COLORS['Border']};">
+                            <th style="padding:8px; text-align:left;">When</th>
+                            <th style="padding:8px; text-align:left;">Event</th>
+                            <th style="padding:8px; text-align:left;">Impact</th>
+                            <th style="padding:8px; text-align:left;">Re-entry Stage</th>
+                        </tr>
+                    </thead>
+                    <tbody>{_rows}</tbody>
+                </table>
+            </div>
+            """))
 
-# ─── ACT I REFLECTION ─────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_prediction):
-    mo.stop(act1_prediction.value is None)
+        items.append(mo.Html(f"""
+        <div style="padding:16px; border:2px solid {COLORS['OrangeLine']}; border-radius:10px;
+                    text-align:center; background:white; margin:16px 0;">
+            <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">
+                Complete Lifecycle Iterations</div>
+            <div style="font-size:2rem; font-weight:800; color:{COLORS['OrangeLine']};">
+                {_cycle_count}</div>
+            <div style="font-size:0.72rem; color:#94a3b8;">by month {_month}</div>
+        </div>
+        """))
 
-    act1_reflection = mo.ui.radio(
-        options={
-            "A) 96% accuracy is insufficient for medical AI — they should have aimed for 99%": "A",
-            "B) The team used the wrong model architecture and needed to retrain from scratch": "B",
-            "C) The memory constraint was never recorded at Stage 1, so modeling aimed at the wrong target": "C",
-            "D) The data labeling was incomplete, causing distribution shift at deployment": "D",
-        },
-        label=(
-            "**Reflection.** The Rural Clinic team achieved 96% accuracy. "
-            "Why was the project a failure?"
-        ),
-    )
-    act1_reflection
-    return (act1_reflection,)
+        _pred = partD_prediction.value
+        if _pred == "many":
+            items.append(mo.callout(mo.md(
+                f"**Correct.** By month 24, there are {len(_events)} feedback events, "
+                "each triggering re-entry into an earlier stage. "
+                "Production ML is a continuous loop, not a one-time pipeline."
+            ), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Scaling reveals problems invisible at pilot scale.** "
+                "Rare subgroups, equipment drift, regulatory changes, and distribution "
+                "shift each trigger a complete lifecycle iteration. Budget 4-8 cycles."
+            ), kind="warn"))
 
+        return mo.vstack(items)
 
-@app.cell(hide_code=True)
-def _(mo, act1_prediction, act1_reflection):
-    mo.stop(act1_prediction.value is None)
-    mo.stop(
-        act1_reflection.value is None,
-        mo.callout(mo.md("Select an answer to continue to Act II."), kind="warn"),
-    )
+    # ═════════════════════════════════════════════════════════════════════
+    # SYNTHESIS
+    # ═════════════════════════════════════════════════════════════════════
 
-    _correct = act1_reflection.value == "C"
-    _feedback_map = {
-        "A": (
-            "**Not quite.** The failure had nothing to do with accuracy. "
-            "The model achieved 96% — well above typical clinical benchmarks. "
-            "The problem was that 150 days of engineering effort optimized a metric "
-            "that was irrelevant to whether the model could actually run on the deployment hardware. "
-            "Accuracy only matters after the physical constraints are satisfied."
-        ),
-        "B": (
-            "**Not quite.** Architecture was not the failure mode. "
-            "The team's modeling decisions were technically competent — they improved accuracy "
-            "from 95% to 96% over the final month. The failure was upstream: "
-            "the deployment target's memory budget was never recorded as a Stage 1 constraint. "
-            "No architecture change can fix a workflow failure."
-        ),
-        "C": (
-            "**Correct.** The memory constraint (512 MB tablet) should have been the first "
-            "entry in the requirements document. Instead it was discovered 150 days later — "
-            "after every downstream decision was already committed to a 4 GB model. "
-            "This is what the Constraint Propagation Principle (2^(N-1)) formalizes: "
-            "late constraint discovery multiplies rework across every preceding stage. "
-            "High accuracy is not a substitute for correct problem definition."
-        ),
-        "D": (
-            "**Not quite.** There is no evidence of data quality issues in this case study. "
-            "The model performed well at 96% — suggesting the data was sufficient. "
-            "Distribution shift is a real failure mode (the focus of Lab 14, @sec-ml-operations), "
-            "but it was not the mechanism here. The failure was an absent hardware constraint "
-            "at Stage 1."
-        ),
-    }
+    def build_synthesis():
+        return mo.vstack([
+            mo.Html(f"""
+            <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                        border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                    Key Takeaways
+                </div>
+                <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                    <div style="margin-bottom: 10px;">
+                        <strong>1. Constraint discovery cost grows as 2^(N-1).</strong>
+                        A deployment constraint found at Stage 5 costs 16x more than at Stage 1.
+                        Engine.solve() can check feasibility in 3 ms -- run it before writing
+                        training code.
+                    </div>
+                    <div style="margin-bottom: 10px;">
+                        <strong>2. Iteration velocity beats starting accuracy.</strong>
+                        1-hour cycles produce ~100 experiments in 26 weeks vs 26 for 1-week cycles.
+                        The team that explores more of the design space wins.
+                    </div>
+                    <div>
+                        <strong>3. Data activities dominate effort at 60-80%.</strong>
+                        Model development is only 10-20%. Under-investing in data causes
+                        team idle time; under-investing in deployment causes the DR disaster.
+                    </div>
+                </div>
+            </div>
+            """),
 
-    mo.vstack([
-        act1_reflection,
-        mo.callout(
-            mo.md(_feedback_map[act1_reflection.value]),
-            kind="success" if _correct else "warn",
-        ),
-    ])
-    return
+            mo.Html(f"""
+            <div style="display: flex; gap: 16px; margin: 8px 0; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        What's Next
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Lab 04: The Data Gravity Trap</strong> -- Data is the heaviest
+                        object in your system. You will discover that GPUs starve when
+                        storage is slow, and that moving 50 TB costs more than the compute.
+                    </div>
+                </div>
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        Textbook Connection
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Read:</strong> @sec-ml-workflow for the full lifecycle model,
+                        iteration velocity analysis, and effort distribution data.
+                    </div>
+                </div>
+            </div>
+            """),
+        ])
 
-
-# ─── ACT I MATHPEEK ───────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_reflection):
-    mo.stop(act1_reflection.value is None)
-
-    mo.accordion({
-        "The Constraint Propagation Principle — governing equation": mo.md("""
-        **Formula:**
-
-        $$\\text{Cost}(N) = 2^{N-1} \\quad N = \\text{stage of constraint discovery (1–6)}$$
-
-        **Stage values:**
-
-        | Stage | Name | Cost Multiplier | Rural Clinic |
-        |-------|------|-----------------|-------------|
-        | 1 | Requirements | 2⁰ = **1×** | 1 day to record the 512 MB constraint |
-        | 2 | Data | 2¹ = **2×** | Data re-collection may be needed |
-        | 3 | Modeling | 2² = **4×** | Architecture + training must restart |
-        | 4 | Evaluation | 2³ = **8×** | Eval + modeling restart |
-        | 5 | Deployment | 2⁴ = **16×** | 150 days wasted (the Rural Clinic case) |
-        | 6 | Monitoring | 2⁵ = **32×** | Post-launch remediation |
-
-        **Note on the formula:** The 2^(N-1) model is a pedagogical approximation, not
-        a precise physical law. Boehm's original empirical data for traditional software
-        showed post-deployment fixes cost up to **100×** what requirements-phase fixes cost.
-        For ML, late-stage constraint violations are often *worse* than traditional software
-        because they invalidate learned model weights — there is no "undo" for 150 days of
-        gradient descent.
-
-        **Stage interface contracts** (from @tbl-stage-interface in the chapter) are the
-        engineering mechanism that enforces this: each stage's output contract must satisfy
-        the next stage's input contract. A violated contract discovered at Stage N costs
-        $2^{N-1}$ times what a Stage 1 violation costs.
-        """),
+    # ── COMPOSE TABS ─────────────────────────────────────────────────────
+    tabs = mo.ui.tabs({
+        "Part A -- Constraint Propagation":     build_part_a(),
+        "Part B -- Iteration Velocity":         build_part_b(),
+        "Part C -- Where Does the Time Go?":    build_part_c(),
+        "Part D -- Feedback Loops":             build_part_d(),
+        "Synthesis":                             build_synthesis(),
     })
+    tabs
     return
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: ACT II -- DESIGN CHALLENGE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, act1_reflection, COLORS):
-    mo.stop(act1_reflection.value is None)
-
-    _act_num      = "II"
-    _act_color    = COLORS["OrangeLine"]
-    _act_title    = "The Iteration Velocity Race"
-    _act_duration = "20&ndash;25 min"
-    _act_why      = ("Act I showed that the Rural Clinic failure was a constraint propagation "
-                     "problem. Now discover the second failure: the team chose the wrong model "
-                     "strategy. You expect that starting with higher accuracy (95% vs 90%) "
-                     "always wins. The data shows a 1-hour cycle accumulates 4,368 iterations "
-                     "while a 1-week cycle completes 26 &mdash; and that velocity, not "
-                     "starting accuracy, determines who wins the 26-week race.")
-
+def _(COLORS, ledger, mo):
+    _track = ledger._state.track or "not set"
     mo.Html(f"""
-    <div style="margin: 32px 0 12px 0;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: {_act_color}; color: white; border-radius: 50%;
-                        width: 32px; height: 32px; display: inline-flex; align-items: center;
-                        justify-content: center; font-size: 0.9rem; font-weight: 800;
-                        flex-shrink: 0;">{_act_num}</div>
-            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act {_act_num} &middot; {_act_duration}</div>
-        </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
-                    margin-top: 8px; line-height: 1.2;">
-            {_act_title}
-        </div>
-        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
-                    line-height: 1.55; max-width: 700px;">
-            {_act_why}
-        </div>
+    <div class="lab-hud">
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">03 &middot; The Constraint Tax</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">TRACK</span>
+        <span class="{'hud-active' if _track != 'not set' else 'hud-none'}">{_track}</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">CHAPTER&nbsp;3</span>
+        <span class="hud-value">ML Workflow</span>
+        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">active</span>
     </div>
     """)
-    return
-
-
-# ─── CONTEXT TOGGLE ───────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_reflection, COLORS):
-    mo.stop(act1_reflection.value is None)
-
-    act2_context = mo.ui.radio(
-        options={
-            "Cloud Training Node (H100, 700W, $3/hr compute)": "cloud",
-            "Mobile On-Device (Smartphone NPU, 5W sustained, 2hr battery)": "mobile",
-        },
-        value="Cloud Training Node (H100, 700W, $3/hr compute)",
-        label="Deployment context:",
-        inline=True,
-    )
-    mo.vstack([
-        mo.Html(f"""
-        <div style="background: white; border: 1px solid {COLORS['Border']};
-                    border-radius: 10px; padding: 16px 20px; margin: 8px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px;">
-                Deployment Context
-            </div>
-        """),
-        act2_context,
-        mo.Html("</div>"),
-    ])
-    return (act2_context,)
-
-
-# ─── ACT II PREDICTION LOCK ───────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act1_reflection):
-    mo.stop(act1_reflection.value is None)
-
-    act2_prediction = mo.ui.radio(
-        options={
-            "A) Always choose the large model — higher starting accuracy means better final accuracy": "A",
-            "B) Always choose the small model — faster cycles always win over any window": "B",
-            "C) It depends on the project window and drift rate — there is a crossover point": "C",
-            "D) Neither — deploy once and never retrain to minimize compute cost": "D",
-        },
-        label=(
-            "**Before using the instruments, commit to your prediction.**\n\n"
-            "A large model starts at 95% accuracy and gains 0.15% per iteration, "
-            "with a 1-week training cycle. A small model starts at 90% accuracy "
-            "and gains 0.1% per iteration, with a 1-hour training cycle. "
-            "In a 26-week project window, which strategy produces the better final model?"
-        ),
-    )
-    act2_prediction
-    return (act2_prediction,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act1_reflection, act2_prediction):
-    mo.stop(act1_reflection.value is None)
-    mo.stop(
-        act2_prediction.value is None,
-        mo.callout(
-            mo.md("Select your prediction above to unlock the iteration velocity instruments."),
-            kind="warn",
-        ),
-    )
-    mo.callout(
-        mo.md(
-            "**Prediction recorded.** Adjust the sliders to explore the velocity race. "
-            "Find the crossover week — and watch what happens when you push the small model "
-            "to hourly cycles in the mobile context."
-        ),
-        kind="info",
-    )
-    return
-
-
-# ─── ACT II INSTRUMENTS ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act2_prediction, act1_reflection):
-    mo.stop(act1_reflection.value is None)
-    mo.stop(act2_prediction.value is None)
-
-    act2_large_cycle = mo.ui.dropdown(
-        options={"1 hour": 1, "24 hours (1 day)": 24, "168 hours (1 week)": 168, "336 hours (2 weeks)": 336},
-        value="168 hours (1 week)",
-        label="Large model cycle time",
-    )
-    act2_small_cycle = mo.ui.dropdown(
-        options={"1 hour": 1, "4 hours": 4, "24 hours (1 day)": 24, "168 hours (1 week)": 168},
-        value="1 hour",
-        label="Small model cycle time",
-    )
-    act2_decay_rate = mo.ui.dropdown(
-        options={"Fast saturation (r=0.90)": 0.90, "Moderate saturation (r=0.95)": 0.95, "Slow saturation (r=0.99)": 0.99},
-        value="Moderate saturation (r=0.95)",
-        label="Gain decay rate per iteration",
-    )
-    act2_project_weeks = mo.ui.slider(
-        start=4, stop=52, value=26, step=2,
-        label="Project window (weeks)",
-        show_value=True,
-    )
-
-    # Constraint gate toggles
-    act2_gate_memory  = mo.ui.checkbox(value=False, label="Stage 1: Hardware memory budget recorded")
-    act2_gate_latency = mo.ui.checkbox(value=False, label="Stage 1: Latency budget recorded")
-    act2_gate_schema  = mo.ui.checkbox(value=False, label="Stage 2: Data schema validation active")
-    act2_gate_profile = mo.ui.checkbox(value=False, label="Stage 3: Memory profiling at batch=1")
-    act2_gate_ondev   = mo.ui.checkbox(value=False, label="Stage 4: On-device test with production hardware")
-    act2_gate_rollout = mo.ui.checkbox(value=False, label="Stage 5: Staged rollout with monitoring")
-
-    mo.vstack([
-        mo.md("### Iteration Velocity Controls"),
-        mo.hstack([
-            mo.vstack([act2_large_cycle, act2_small_cycle]),
-            mo.vstack([act2_decay_rate, act2_project_weeks]),
-        ], justify="start", gap=3),
-        mo.md("---"),
-        mo.md("### Constraint Gate Designer"),
-        mo.md(
-            "Toggle these gates on or off to see how the Rural Clinic failure "
-            "appears (or disappears) on the project timeline. Each gate costs "
-            "~1 person-day to implement at the listed stage."
-        ),
-        mo.vstack([
-            act2_gate_memory,
-            act2_gate_latency,
-            act2_gate_schema,
-            act2_gate_profile,
-            act2_gate_ondev,
-            act2_gate_rollout,
-        ]),
-    ])
-    return (
-        act2_large_cycle, act2_small_cycle, act2_decay_rate, act2_project_weeks,
-        act2_gate_memory, act2_gate_latency, act2_gate_schema,
-        act2_gate_profile, act2_gate_ondev, act2_gate_rollout,
-    )
-
-
-@app.cell(hide_code=True)
-def _(
-    mo, go, np, act2_prediction, act1_reflection, act2_context,
-    act2_large_cycle, act2_small_cycle, act2_decay_rate, act2_project_weeks,
-    act2_gate_memory, act2_gate_latency, act2_gate_schema,
-    act2_gate_profile, act2_gate_ondev, act2_gate_rollout,
-    COLORS, apply_plotly_theme,
-    LARGE_START_ACC, LARGE_GAIN_ITER,
-    SMALL_START_ACC, SMALL_GAIN_ITER,
-    ACC_CEILING,
-):
-    mo.stop(act1_reflection.value is None)
-    mo.stop(act2_prediction.value is None)
-
-    _ctx       = act2_context.value
-    _lc_hrs    = act2_large_cycle.value
-    _sc_hrs    = act2_small_cycle.value
-    _r         = act2_decay_rate.value
-    _weeks     = act2_project_weeks.value
-    _total_hrs = _weeks * 168   # 168 hours per week
-
-    # ── Mobile context: feasibility check ─────────────────────────────────────
-    # Mobile: 5W sustained, 2hr battery = 10 Wh total capacity
-    # On-device retraining: 4.5W average power during training (90% of 5W)
-    # Source: PROTOCOL.md Mobile context definition
-    MOBILE_BATTERY_WH  = 10.0   # 2 hr × 5 W = 10 Wh
-    MOBILE_RETRAIN_W   = 4.5    # 90% of 5W sustained for retraining
-    _retrain_hrs_day   = 24 / _sc_hrs  # retraining sessions per day
-    _power_wh_day      = _retrain_hrs_day * MOBILE_RETRAIN_W * (_sc_hrs / 1.0)
-    # Each session uses (_sc_hrs * MOBILE_RETRAIN_W) Wh, but a full retrain
-    # on mobile takes at least 0.5 hr minimum regardless of cycle time requested
-    _session_wh        = max(0.5, _sc_hrs) * MOBILE_RETRAIN_W
-    _sessions_per_day  = 24 / max(0.5, _sc_hrs)
-    _total_wh_per_day  = _session_wh * _sessions_per_day
-
-    _mobile_infeasible = (_ctx == "mobile" and _sc_hrs == 1)
-
-    # ── Compute iteration counts ───────────────────────────────────────────────
-    _large_iters = int(_total_hrs / _lc_hrs)
-    _small_iters = int(_total_hrs / max(1, _sc_hrs))
-
-    # ── Saturating accuracy curves ─────────────────────────────────────────────
-    # Gain decays: Delta_a_n = Delta_a_0 * r^n
-    # Model accuracy at iteration k: A_k = A_0 + sum_{n=0}^{k-1} gain * r^n
-    # = A_0 + gain * (1 - r^k) / (1 - r)   [geometric series]
-    # Capped at ACC_CEILING = 99.0
-    def _saturating_acc(start, gain_per_iter, r, n_iters):
-        if r >= 1.0 or n_iters == 0:
-            return min(start + gain_per_iter * n_iters, ACC_CEILING)
-        total_gain = gain_per_iter * (1 - r**n_iters) / (1 - r)
-        return min(start + total_gain, ACC_CEILING)
-
-    # Weekly accuracy points for both models
-    _week_arr = np.arange(0, _weeks + 1, dtype=float)
-    _large_acc_arr = np.array([
-        _saturating_acc(
-            LARGE_START_ACC, LARGE_GAIN_ITER, _r,
-            int(w * 168 / _lc_hrs)
-        ) for w in _week_arr
-    ])
-    _small_acc_arr = np.array([
-        _saturating_acc(
-            SMALL_START_ACC, SMALL_GAIN_ITER, _r,
-            int(w * 168 / max(1, _sc_hrs))
-        ) for w in _week_arr
-    ])
-
-    # Final accuracies
-    _large_final = _large_acc_arr[-1]
-    _small_final = _small_acc_arr[-1]
-
-    # Find crossover week (first week where small >= large)
-    _crossover_week = None
-    for _wi in range(len(_week_arr)):
-        if _small_acc_arr[_wi] >= _large_acc_arr[_wi]:
-            _crossover_week = _week_arr[_wi]
-            break
-
-    # ── Dual-line accuracy plot ────────────────────────────────────────────────
-    _fig = go.Figure()
-
-    _fig.add_trace(go.Scatter(
-        x=_week_arr, y=_large_acc_arr,
-        mode="lines", name=f"Large model ({_lc_hrs}h cycle, starts {LARGE_START_ACC}%)",
-        line=dict(color=COLORS["BlueLine"], width=2.5),
-    ))
-    _fig.add_trace(go.Scatter(
-        x=_week_arr, y=_small_acc_arr,
-        mode="lines", name=f"Small model ({_sc_hrs}h cycle, starts {SMALL_START_ACC}%)",
-        line=dict(color=COLORS["GreenLine"], width=2.5, dash="dash"),
-    ))
-
-    # Week 20 deadline reference
-    if _weeks >= 20:
-        _fig.add_vline(
-            x=20,
-            line_color=COLORS["OrangeLine"],
-            line_dash="dot",
-            annotation_text="Week 20 target",
-            annotation_font_color=COLORS["OrangeLine"],
-        )
-
-    # Crossover annotation
-    if _crossover_week is not None:
-        _fig.add_vline(
-            x=_crossover_week,
-            line_color=COLORS["GreenLine"],
-            line_dash="longdash",
-            annotation_text=f"Crossover: Week {_crossover_week:.0f}",
-            annotation_font_color=COLORS["GreenLine"],
-            annotation_position="top left",
-        )
-
-    _fig.update_layout(
-        title=dict(
-            text=(
-                f"Iteration Velocity Race — {_large_iters} large-model iterations "
-                f"vs. {_small_iters:,} small-model iterations over {_weeks} weeks"
-            ),
-            font=dict(size=13),
-        ),
-        xaxis=dict(title="Project Week", range=[0, _weeks]),
-        yaxis=dict(title="Model Accuracy (%)", range=[85, 100]),
-        height=380,
-        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0),
-        margin=dict(l=50, r=20, t=70, b=50),
-    )
-    apply_plotly_theme(_fig)
-
-    # ── Gate status summary ────────────────────────────────────────────────────
-    _gates_active = [
-        act2_gate_memory.value,
-        act2_gate_latency.value,
-        act2_gate_schema.value,
-        act2_gate_profile.value,
-        act2_gate_ondev.value,
-        act2_gate_rollout.value,
-    ]
-    _n_gates = sum(_gates_active)
-    _memory_gate_on = act2_gate_memory.value
-
-    # Rural Clinic failure is prevented only if memory gate is active
-    _failure_prevented = _memory_gate_on
-    _failure_cost_mult = 16 if not _failure_prevented else 1
-    _failure_days_lost = 150 if not _failure_prevented else 0
-
-    _gate_names = [
-        "Memory budget", "Latency budget", "Schema validation",
-        "Memory profiling", "On-device test", "Staged rollout",
-    ]
-    _gate_rows = "".join([
-        f"""<tr>
-            <td style="padding: 5px 10px; font-size:0.85rem; color:#475569;">{_gate_names[i]}</td>
-            <td style="padding: 5px 10px; text-align:center;">
-                {"<span style='color:#008F45; font-weight:700;'>ACTIVE</span>"
-                 if _gates_active[i] else
-                 "<span style='color:#CB202D; font-weight:700;'>OFF</span>"}
-            </td>
-        </tr>"""
-        for i in range(len(_gate_names))
-    ])
-
-    _gate_html = f"""
-    <div style="border: 1px solid {'#008F45' if _failure_prevented else '#CB202D'};
-                border-radius: 10px; padding: 14px 18px; margin: 10px 0;
-                background: {'#ECFDF5' if _failure_prevented else '#FEF2F2'};">
-        <div style="font-weight:800; font-size:0.9rem;
-                    color:{'#008F45' if _failure_prevented else '#CB202D'}; margin-bottom:8px;">
-            {'Rural Clinic failure PREVENTED' if _failure_prevented
-             else 'Rural Clinic failure IN PROGRESS (Day 150 risk)'}
-        </div>
-        <div style="font-size:0.82rem; color:#475569; margin-bottom:10px;">
-            {'Memory budget gate is ACTIVE. The 512 MB constraint propagates to Stage 1. '
-             'No wasted work.'
-             if _failure_prevented else
-             'Memory budget gate is OFF. The 512 MB constraint will not be discovered '
-             'until Stage 5 (Day 150). Cost: 16×.'}
-        </div>
-        <table style="width:100%; border-collapse:collapse;">
-            <tr style="border-bottom:1px solid #e2e8f0;">
-                <th style="text-align:left; padding:5px 10px; font-size:0.78rem;
-                           color:#94a3b8; text-transform:uppercase;">Gate</th>
-                <th style="text-align:center; padding:5px 10px; font-size:0.78rem;
-                           color:#94a3b8; text-transform:uppercase;">Status</th>
-            </tr>
-            {_gate_rows}
-        </table>
-        <div style="margin-top:10px; font-size:0.82rem; font-weight:600;
-                    color:{'#008F45' if _failure_prevented else '#CB202D'};">
-            Gates active: {_n_gates}/6 &nbsp;|&nbsp;
-            {'Cost multiplier: 1× (Stage 1 discovery)' if _failure_prevented
-             else f'Cost multiplier: {_failure_cost_mult}× (Stage 5 discovery)'}
-            &nbsp;|&nbsp;
-            {'Days at risk: 0' if _failure_prevented
-             else f'Days at risk: {_failure_days_lost}'}
-        </div>
-    </div>
-    """
-
-    # ── Metric cards ──────────────────────────────────────────────────────────
-    _crossover_str = f"Week {_crossover_week:.0f}" if _crossover_week is not None else "Never"
-    _card_color_large = COLORS["GreenLine"] if _large_final >= 97 else COLORS["OrangeLine"]
-    _card_color_small = COLORS["GreenLine"] if _small_final >= 97 else COLORS["OrangeLine"]
-
-    _metrics_html = f"""
-    <div style="display: flex; gap: 14px; flex-wrap: wrap; margin: 12px 0;">
-        <div style="padding: 16px 20px; border: 1px solid #e2e8f0; border-radius: 10px;
-                    min-width: 150px; background: white;">
-            <div style="color: #94a3b8; font-size: 0.78rem; font-weight: 600;
-                        text-transform: uppercase;">Large Model Final</div>
-            <div style="font-size: 2.2rem; font-weight: 800; color: {_card_color_large};
-                        line-height: 1.1; margin-top: 4px;">{_large_final:.1f}%</div>
-            <div style="color: #64748b; font-size: 0.75rem;">{_large_iters} iterations</div>
-        </div>
-        <div style="padding: 16px 20px; border: 1px solid #e2e8f0; border-radius: 10px;
-                    min-width: 150px; background: white;">
-            <div style="color: #94a3b8; font-size: 0.78rem; font-weight: 600;
-                        text-transform: uppercase;">Small Model Final</div>
-            <div style="font-size: 2.2rem; font-weight: 800; color: {_card_color_small};
-                        line-height: 1.1; margin-top: 4px;">{_small_final:.1f}%</div>
-            <div style="color: #64748b; font-size: 0.75rem;">{_small_iters:,} iterations</div>
-        </div>
-        <div style="padding: 16px 20px; border: 1px solid #e2e8f0; border-radius: 10px;
-                    min-width: 150px; background: white;">
-            <div style="color: #94a3b8; font-size: 0.78rem; font-weight: 600;
-                        text-transform: uppercase;">Crossover</div>
-            <div style="font-size: 2.2rem; font-weight: 800;
-                        color: {'#008F45' if _crossover_week is not None else '#94a3b8'};
-                        line-height: 1.1; margin-top: 4px;">{_crossover_str}</div>
-            <div style="color: #64748b; font-size: 0.75rem;">
-                {'small model overtakes large' if _crossover_week else 'large model stays ahead'}
-            </div>
-        </div>
-        <div style="padding: 16px 20px; border: 1px solid #e2e8f0; border-radius: 10px;
-                    min-width: 150px; background: white;">
-            <div style="color: #94a3b8; font-size: 0.78rem; font-weight: 600;
-                        text-transform: uppercase;">Cycle Ratio</div>
-            <div style="font-size: 2.2rem; font-weight: 800; color: {COLORS['BlueLine']};
-                        line-height: 1.1; margin-top: 4px;">
-                {int(_lc_hrs / max(1, _sc_hrs))}×
-            </div>
-            <div style="color: #64748b; font-size: 0.75rem;">small cycles faster</div>
-        </div>
-    </div>
-    """
-
-    # ── Physics text ──────────────────────────────────────────────────────────
-    _physics = f"""
-    **Iteration physics (chapter lines 308–329):**
-
-    ```
-    Project window        = {_weeks} weeks × 168 hrs/week = {_weeks * 168:,} hours
-    Large model cycles    = {_weeks * 168:,} ÷ {_lc_hrs} = {_large_iters} iterations
-    Small model cycles    = {_weeks * 168:,} ÷ {max(1, _sc_hrs)} = {_small_iters:,} iterations
-    Cycle ratio           = {_lc_hrs} ÷ {max(1, _sc_hrs)} = {int(_lc_hrs / max(1, _sc_hrs))}×
-    Accuracy (large, end) = {LARGE_START_ACC}% + {LARGE_GAIN_ITER}% × (1−{_r}^{_large_iters})/(1−{_r}) = {_large_final:.1f}%
-    Accuracy (small, end) = {SMALL_START_ACC}% + {SMALL_GAIN_ITER}% × (1−{_r}^{min(_small_iters, 999)})/(1−{_r}) ≈ {_small_final:.1f}%
-    ```
-    """
-
-    _output_parts = [
-        mo.Html(_metrics_html),
-        mo.md(_physics),
-        mo.as_html(_fig),
-        mo.md("---"),
-        mo.md("### Constraint Gate Status"),
-        mo.Html(_gate_html),
-    ]
-
-    mo.vstack(_output_parts)
-    return
-
-
-# ─── ACT II FAILURE STATE ─────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(
-    mo, act2_prediction, act1_reflection, act2_context,
-    act2_small_cycle,
-    COLORS,
-):
-    mo.stop(act1_reflection.value is None)
-    mo.stop(act2_prediction.value is None)
-
-    _ctx    = act2_context.value
-    _sc_hrs = act2_small_cycle.value
-
-    # Mobile failure state: hourly retraining exceeds battery capacity
-    # Mobile: 5W sustained, battery = 2hr × 5W = 10 Wh
-    # Each 1-hour retrain cycle = 5W × 1hr = 5 Wh
-    # 24 retrains/day × 5 Wh = 120 Wh/day >> 10 Wh battery
-    MOBILE_BATTERY_WH = 10.0
-    _session_wh       = max(0.5, _sc_hrs) * 5.0  # 5W per session
-    _sessions_per_day = 24.0 / max(0.5, _sc_hrs)
-    _total_wh_per_day = _session_wh * _sessions_per_day
-
-    _failure = (_ctx == "mobile" and _sc_hrs == 1)
-
-    if _failure:
-        mo.callout(
-            mo.md(
-                f"**OOM — Infeasible on Mobile.**  "
-                f"On-device retraining at {_sc_hrs}-hour cycles requires "
-                f"**{_total_wh_per_day:.0f} Wh/day** of battery capacity.  "
-                f"Mobile sustained budget: **{MOBILE_BATTERY_WH:.0f} Wh** (2 hr × 5 W).  "
-                f"This design exceeds the power budget by "
-                f"**{_total_wh_per_day / MOBILE_BATTERY_WH:.0f}×**.  "
-                f"Reduce retraining frequency or switch to cloud retraining."
-            ),
-            kind="danger",
-        )
-    elif _ctx == "mobile" and _sc_hrs <= 4:
-        mo.callout(
-            mo.md(
-                f"**Power Warning.**  "
-                f"{_sc_hrs}-hour cycles on mobile require {_total_wh_per_day:.1f} Wh/day.  "
-                f"Battery capacity: {MOBILE_BATTERY_WH:.0f} Wh.  "
-                f"Margin: {MOBILE_BATTERY_WH - _total_wh_per_day:.1f} Wh — tight but feasible "
-                "if the device charges between sessions."
-            ),
-            kind="warn",
-        )
-    else:
-        mo.callout(
-            mo.md(
-                f"**Design is feasible** in the {_ctx} context with {_sc_hrs}-hour cycles.  "
-                "No power or compute constraint violation detected. "
-                "Explore what happens when you select Mobile context + 1-hour cycles."
-            ),
-            kind="success",
-        )
-    return
-
-
-# ─── ACT II REFLECTION ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act2_prediction, act1_reflection):
-    mo.stop(act1_reflection.value is None)
-    mo.stop(act2_prediction.value is None)
-
-    act2_reflection = mo.ui.radio(
-        options={
-            "A) Model starting accuracy — a 5% head start is worth more than faster cycles": "A",
-            "B) The deployment context constraint — hardware limits override strategy": "B",
-            "C) The project window — with enough time, the large model always wins": "C",
-            "D) The number of users — more users means longer cycles to gather feedback": "D",
-        },
-        label=(
-            "**Reflection.** In Act II you saw the small model (90% start, 1-hour cycle) "
-            "overtake the large model (95% start, 1-week cycle) within the project window. "
-            "What determines whether that crossover happens early, late, or never?"
-        ),
-    )
-    act2_reflection
-    return (act2_reflection,)
-
-
-@app.cell(hide_code=True)
-def _(mo, act2_prediction, act1_reflection, act2_reflection):
-    mo.stop(act1_reflection.value is None)
-    mo.stop(act2_prediction.value is None)
-    mo.stop(
-        act2_reflection.value is None,
-        mo.callout(mo.md("Select an answer to complete Act II."), kind="warn"),
-    )
-
-    _correct = act2_reflection.value == "B"
-    _feedback = {
-        "A": (
-            "**Not the primary driver.** The starting accuracy gap (90% vs 95%) affects "
-            "when the small model catches up — but not whether it does. With 4,368 iterations "
-            "in 26 weeks versus 26, the small model accumulates learning signal that "
-            "eventually saturates the accuracy ceiling regardless of where it started. "
-            "Starting accuracy sets the initial position; cycle time determines the velocity."
-        ),
-        "B": (
-            "**Correct.** The deployment context is the binding constraint. "
-            "A Cloud H100 can run 168× cycles per week at negligible marginal cost, making "
-            "the fast iteration strategy dominant. A Mobile NPU at 5W sustained cannot "
-            "physically run hourly retraining — the power budget collapses at 1-hour cycles. "
-            "Strategy choice is not separable from hardware constraint. "
-            "This is the chapter's central lesson: the constraint (Stage 1, hardware budget) "
-            "must shape every downstream decision, including iteration strategy."
-        ),
-        "C": (
-            "**Not quite.** With enough time, the large model does not necessarily win — "
-            "it saturates. Both models follow a diminishing-returns curve toward the 99% ceiling. "
-            "The small model, with thousands more iterations, reaches the saturation ceiling "
-            "first. Beyond that point, additional iterations of either model produce negligible gain. "
-            "The crossover timing depends on cycle ratio and gain decay rate, not time alone."
-        ),
-        "D": (
-            "**Not directly.** User count affects dataset size and feedback loop quality, "
-            "but it does not directly determine the crossover between fast and slow iteration "
-            "strategies. The chapter's calculation uses a fixed gain-per-iteration parameter — "
-            "increasing the dataset can change that parameter, but the fundamental trade-off "
-            "between cycle time and starting accuracy is determined by the physics of the "
-            "deployment hardware, not the user base."
-        ),
-    }
-
-    mo.vstack([
-        act2_reflection,
-        mo.callout(
-            mo.md(_feedback[act2_reflection.value]),
-            kind="success" if _correct else "warn",
-        ),
-    ])
-    return
-
-
-# ─── ACT II PREDICTION vs REALITY OVERLAY ─────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act2_prediction, act1_reflection, act2_reflection):
-    mo.stop(act1_reflection.value is None)
-    mo.stop(act2_prediction.value is None)
-    mo.stop(act2_reflection.value is None)
-
-    _is_correct_pred = act2_prediction.value == "C"
-    _pred_labels = {
-        "A": "large model always wins (starting accuracy dominates)",
-        "B": "small model always wins (fast cycles always dominate)",
-        "C": "it depends on the window and constraints — there is a crossover",
-        "D": "never retrain — deploy once",
-    }
-    _pred_txt = _pred_labels[act2_prediction.value]
-
-    if _is_correct_pred:
-        _msg = (
-            f"**You predicted: \"{_pred_txt}\" — Correct.** "
-            "The crossover exists because the small model's velocity advantage compounds "
-            "only when the deployment context permits high-frequency retraining. "
-            "In the cloud context, the small model dominates. In the mobile context with "
-            "hourly cycles, the power budget makes the strategy infeasible — the constraint "
-            "changes the answer. This is the chapter's core claim: strategy is inseparable "
-            "from physical constraints."
-        )
-        _kind = "success"
-    elif act2_prediction.value == "A":
-        _msg = (
-            f"**You predicted: \"{_pred_txt}.\"** "
-            "The instruments showed that the 5% starting accuracy gap is erased by "
-            "the velocity advantage — in the cloud context, the small model accumulates "
-            "thousands of learning cycles while the large model completes 26. "
-            "Starting position matters; cycle time matters more."
-        )
-        _kind = "warn"
-    elif act2_prediction.value == "B":
-        _msg = (
-            f"**You predicted: \"{_pred_txt}.\"** "
-            "Almost — but the mobile failure state shows that fast cycles are not always "
-            "physically achievable. In the mobile context with hourly cycles, the power "
-            "budget collapses: 120 Wh/day required vs. 10 Wh available. Fast cycles only "
-            "win when the hardware can sustain them."
-        )
-        _kind = "warn"
-    else:
-        _msg = (
-            f"**You predicted: \"{_pred_txt}.\"** "
-            "The instruments showed that both models improve substantially over 26 weeks. "
-            "Deploying once without retraining leaves significant accuracy on the table "
-            "as the small model accumulates 4,368 iterations vs. 26 for the large model. "
-            "The chapter's Degradation Equation shows that model accuracy decreases over "
-            "time even without retraining — 'deploy once' is not a stable strategy."
-        )
-        _kind = "warn"
-
-    mo.callout(mo.md(_msg), kind=_kind)
-    return
-
-
-# ─── ACT II MATHPEEK ──────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, act2_reflection):
-    mo.stop(act2_reflection.value is None)
-
-    mo.accordion({
-        "The Iteration Tax — governing equations": mo.md("""
-        **Iteration counts over a project window:**
-
-        $$\\text{Iterations}_{\\text{large}} = \\frac{T_{\\text{project}}}{t_{\\text{cycle,large}}}
-        = \\frac{26 \\times 168\\text{ hrs}}{168\\text{ hrs}} = 26$$
-
-        $$\\text{Iterations}_{\\text{small}} = \\frac{T_{\\text{project}}}{t_{\\text{cycle,small}}}
-        = \\frac{26 \\times 168\\text{ hrs}}{1\\text{ hr}} = 4{,}368$$
-
-        **Saturating accuracy (diminishing-returns model):**
-
-        $$A_k = A_0 + \\Delta a_0 \\cdot \\frac{1 - r^k}{1 - r}$$
-
-        where:
-        - $A_0$ — starting accuracy (95% large, 90% small)
-        - $\\Delta a_0$ — gain per first iteration (0.15% large, 0.10% small)
-        - $r$ — decay rate per iteration (0.90–0.99); controls saturation speed
-        - $k$ — number of iterations completed
-        - Accuracy is capped at $A_{\\text{max}} = 99\\%$
-
-        **Mobile power feasibility:**
-
-        $$\\text{Power}_{\\text{day}} = \\frac{24\\text{ hrs}}{t_{\\text{cycle}}} \\times P_{\\text{train}} \\times t_{\\text{cycle}}
-        = 24 \\times P_{\\text{train}}$$
-
-        For mobile sustained $P_{\\text{train}} = 5\\text{ W}$ and battery capacity $= 10\\text{ Wh}$:
-        - Hourly cycles: $24 \\times 5\\text{ W} \\times 1\\text{ hr} = 120\\text{ Wh/day} >> 10\\text{ Wh}$ — infeasible
-        - 4-hour cycles: $6 \\times 5\\text{ W} \\times 4\\text{ hr} = 120\\text{ Wh/day}$ — still infeasible
-        - Daily cycles: $1 \\times 5\\text{ W} \\times 2\\text{ hr typical} = 10\\text{ Wh/day}$ — marginal
-        """),
-    })
-    return
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.vstack([
-        mo.md("---"),
-
-        # ── KEY TAKEAWAYS ──
-        mo.Html(f"""
-        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                Key Takeaways
-            </div>
-            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
-                <div style="margin-bottom: 10px;">
-                    <strong>1. The Constraint Propagation Principle is geometric, not linear.</strong>
-                    A deployment constraint discovered at Stage 5 costs 2<sup>4</sup> = 16&times; more
-                    to fix than one caught at Stage 1. The Rural Clinic team spent 150 days on work
-                    that a 1-day requirements checklist would have prevented.
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>2. Modeling is not the bottleneck.</strong>
-                    The chapter&rsquo;s data shows 60&ndash;80% of ML project time is spent on data
-                    activities. Students who guess 40&ndash;60% on modeling are off by 3&ndash;8&times;.
-                    The dominant cost center is invisible until measured.
-                </div>
-                <div>
-                    <strong>3. Iteration velocity dominates starting accuracy.</strong>
-                    A small model (90% start, 1-hour cycle) accumulates 4,368 iterations in 26 weeks
-                    versus 26 for the large model. The crossover typically occurs around Week 8&ndash;12.
-                    Cycle time, not model quality, is the binding constraint on final performance.
-                </div>
-            </div>
-        </div>
-        """),
-
-        # ── CONNECTIONS ──
-        mo.Html(f"""
-        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-
-            <!-- What's Next -->
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    What's Next
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab 04: The Data Gravity Trap</strong> &mdash; this lab showed that
-                    data activities dominate project time. Lab 04 asks: what happens when the data
-                    itself becomes immovable? At petabyte scale, the physics of data transfer
-                    determines whether you co-locate compute with data or pay $90,000 to move it.
-                </div>
-            </div>
-
-            <!-- Textbook Connection -->
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                        padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    Textbook &amp; TinyTorch
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-ml-workflow-integrating-systems-thinking-principles-24c0
-                    for the full Constraint Propagation derivation and Iteration Tax formula.<br/>
-                    <strong>Build:</strong> TinyTorch Module 03 &mdash; the training loop scaffold
-                    where iteration cycle time is measured directly.
-                    See <code>tinytorch/src/03_workflow/</code>.
-                </div>
-            </div>
-
-        </div>
-        """),
-
-
-        mo.accordion({
-            "Self-Assessment: Can you answer these?": mo.md("""
-    1. Using the 2^(N-1) Constraint Propagation law, how much more expensive is it to fix a memory constraint discovered at Stage 5 (Deployment) versus Stage 1 (Requirements) in a 6-stage pipeline?
-
-    2. In the iteration velocity race, a large model improves +0.15% accuracy per week-long cycle while a small model improves +0.10% per hour-long cycle. At what approximate week does the small model overtake the large one?
-
-    3. The Rural Clinic team achieved 96% accuracy but the project failed. What single Stage 1 action (cost: ~1 day) would have prevented 150 days of wasted work — and what does this reveal about where leverage lives in the ML pipeline?
-
-    *If you cannot answer all three from memory, revisit Act I and Act II.*
-    """)
-        }),
-    ])
-    return
-
-
-# ─── CELL 21: LEDGER_HUD ──────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(
-    mo, ledger, COLORS,
-    act2_reflection, act1_reflection,
-    act2_context, act2_large_cycle, act2_small_cycle,
-    act2_project_weeks, act1_discovery_stage,
-    act2_gate_memory, act2_gate_latency, act2_gate_schema,
-    act2_gate_profile, act2_gate_ondev, act2_gate_rollout,
-    LARGE_START_ACC, LARGE_GAIN_ITER, SMALL_START_ACC, SMALL_GAIN_ITER,
-    ACC_CEILING,
-    np,
-):
-    mo.stop(act2_reflection.value is None)
-
-    # Compute crossover week for ledger
-    _lc_hrs = act2_large_cycle.value
-    _sc_hrs = act2_small_cycle.value
-    _r_val  = 0.95  # default, not directly accessible from dropdown value name
-    _weeks  = act2_project_weeks.value
-
-    def _sat_acc(start, gain, r, k):
-        if r >= 1.0 or k == 0:
-            return min(start + gain * k, ACC_CEILING)
-        return min(start + gain * (1 - r**k) / (1 - r), ACC_CEILING)
-
-    _crossover = None
-    for _w in range(_weeks + 1):
-        _lg = _sat_acc(LARGE_START_ACC, LARGE_GAIN_ITER, _r_val, int(_w * 168 / _lc_hrs))
-        _sm = _sat_acc(SMALL_START_ACC, SMALL_GAIN_ITER, _r_val, int(_w * 168 / max(1, _sc_hrs)))
-        if _sm >= _lg:
-            _crossover = _w
-            break
-
-    _gates = [
-        act2_gate_memory.value, act2_gate_latency.value, act2_gate_schema.value,
-        act2_gate_profile.value, act2_gate_ondev.value, act2_gate_rollout.value,
-    ]
-    _gate_names_short = ["memory_budget", "latency_budget", "schema_validation",
-                         "memory_profiling", "on_device_test", "staged_rollout"]
-    _active_gate_names = [_gate_names_short[i] for i, g in enumerate(_gates) if g]
-
-    _design = {
-        "context":               act2_context.value,
-        "act1_prediction":       act1_reflection.value,
-        "act1_correct":          act1_reflection.value == "C",
-        "model_size_chosen":     "small" if _sc_hrs <= _lc_hrs else "large",
-        "iteration_cycle_hours": _sc_hrs,
-        "crossover_week":        _crossover if _crossover is not None else -1,
-        "constraint_gates":      _active_gate_names,
-        "constraint_discovery_stage": act1_discovery_stage.value,
-        "cost_multiplier":       2 ** (act1_discovery_stage.value - 1),
-        "constraint_hit":        (act2_context.value == "mobile" and _sc_hrs == 1),
-    }
-
-    ledger.save(chapter=3, design=_design)
-
-    # ── HUD Footer ─────────────────────────────────────────────────────────────
-    _ctx_label   = "Cloud Training Node" if act2_context.value == "cloud" else "Mobile On-Device"
-    _ctx_color   = COLORS["Cloud"] if act2_context.value == "cloud" else COLORS["Mobile"]
-    _gate_count  = sum(_gates)
-    _gates_color = COLORS["GreenLine"] if _gate_count >= 4 else COLORS["OrangeLine"] if _gate_count >= 2 else COLORS["RedLine"]
-
-    mo.Html(f"""
-        <div style="display: flex; gap: 20px; align-items: center; padding: 14px 22px;
-                    background: {COLORS['Surface0']}; border-radius: 12px; margin-top: 8px;
-                    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem;
-                    border: 1px solid {COLORS['Surface1']}; flex-wrap: wrap;">
-            <div>
-                <span style="color:{COLORS['TextMuted']}; font-weight:600; letter-spacing:0.06em;">
-                    LAB ·
-                </span>
-                <span style="color:#e2e8f0;"> 03 — ML Workflow</span>
-            </div>
-            <div>
-                <span style="color:{COLORS['TextMuted']}; font-weight:600;">CONTEXT · </span>
-                <span style="color:{_ctx_color};">{_ctx_label}</span>
-            </div>
-            <div>
-                <span style="color:{COLORS['TextMuted']}; font-weight:600;">CYCLE · </span>
-                <span style="color:#e2e8f0;">{_sc_hrs}h small / {_lc_hrs}h large</span>
-            </div>
-            <div>
-                <span style="color:{COLORS['TextMuted']}; font-weight:600;">CROSSOVER · </span>
-                <span style="color:#e2e8f0;">
-                    {'Week ' + str(_crossover) if _crossover is not None else 'None'}
-                </span>
-            </div>
-            <div>
-                <span style="color:{COLORS['TextMuted']}; font-weight:600;">GATES · </span>
-                <span style="color:{_gates_color};">{_gate_count}/6 active</span>
-            </div>
-            <div>
-                <span style="color:{COLORS['TextMuted']}; font-weight:600;">STAGE · </span>
-                <span style="color:#e2e8f0;">
-                    {act1_discovery_stage.value} ({2 ** (act1_discovery_stage.value - 1)}×)
-                </span>
-            </div>
-        </div>
-        """)
     return
 
 
