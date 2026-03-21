@@ -1,0 +1,147 @@
+name: '📦 Kits · ✅ Validate (Dev)'
+
+# =============================================================================
+# Hardware Kits Validate (Dev) - Content & Build Validation
+# =============================================================================
+#
+# Checks:
+#   1. SITE BUILD   - Quarto HTML render succeeds
+#   2. IMAGE REFS   - All images referenced in QMD files exist on disk
+#   3. PDF BUILD    - Calls kits-build-pdfs.yml to verify PDF compiles
+#
+# Triggers:
+#   - Push to dev: Full validation
+#   - PR to dev/main: Full validation
+#   - Manual: Full validation
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'kits/**'
+      - '.github/workflows/kits-*.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'kits/**'
+      - '.github/workflows/kits-*.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kits-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===========================================================================
+  # Stage 1: Content validation (image refs, cross-refs)
+  # ===========================================================================
+  validate-content:
+    name: '🔍 Validate Content'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔍 Check image references exist
+        working-directory: kits
+        run: |
+          echo "🔍 Checking that all referenced images exist..."
+          python3 - <<'PYEOF'
+          import re, os, sys, glob
+
+          pattern = re.compile(r'!\[.*?\]\(([^)]+)\)')
+          fails = []
+
+          for qmd in glob.glob("contents/**/*.qmd", recursive=True):
+              qmd_dir = os.path.dirname(qmd)
+              with open(qmd) as f:
+                  for lineno, line in enumerate(f, 1):
+                      for m in pattern.finditer(line):
+                          img = m.group(1).split("{")[0].strip()
+                          if img.startswith(("http://", "https://", "#", "@")) or not img:
+                              continue
+                          # Check relative to QMD dir and to kits root
+                          if not os.path.isfile(os.path.join(qmd_dir, img)) and not os.path.isfile(img):
+                              fails.append(f"  {qmd}:{lineno} -> {img}")
+
+          if fails:
+              print(f"❌ {len(fails)} missing image reference(s):")
+              for f in fails:
+                  print(f)
+              sys.exit(1)
+          else:
+              print("✅ All image references are valid")
+          PYEOF
+
+  # ===========================================================================
+  # Stage 2: Quarto HTML site build
+  # ===========================================================================
+  build-site:
+    name: '🔨 Build Kits Site'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build Kits Site (HTML)
+        working-directory: ${{ vars.KITS_ROOT }}
+        run: quarto render
+
+      - name: 🔍 Validate build output
+        run: |
+          if [ ! -f "${{ vars.KITS_ROOT }}/_build/index.html" ]; then
+            echo "❌ CRITICAL: index.html missing from build output."
+            exit 1
+          fi
+          echo "✅ Site built successfully"
+          echo "📊 Build size: $(du -sh ${{ vars.KITS_ROOT }}/_build | cut -f1)"
+
+  # ===========================================================================
+  # Stage 3: PDF build validation (reuse existing workflow)
+  # ===========================================================================
+  build-pdf:
+    name: '📚 Validate PDF Build'
+    uses: ./.github/workflows/kits-build-pdfs.yml
+    with:
+      ref: ${{ github.ref }}
+
+  # ===========================================================================
+  # Summary
+  # ===========================================================================
+  summary:
+    name: '📊 Summary'
+    runs-on: ubuntu-latest
+    needs: [validate-content, build-site, build-pdf]
+    if: always()
+
+    steps:
+      - name: 📊 Generate Summary
+        run: |
+          echo "## 📦 Hardware Kits Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔍 Content Validation | ${{ needs.validate-content.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔨 Site Build (HTML) | ${{ needs.build-site.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📚 PDF Build | ${{ needs.build-pdf.result }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: ❌ Check for failures
+        run: |
+          if [ "${{ needs.validate-content.result }}" = "failure" ] || \
+             [ "${{ needs.build-site.result }}" = "failure" ] || \
+             [ "${{ needs.build-pdf.result }}" = "failure" ]; then
+            echo "❌ Validation failed"
+            exit 1
+          fi
+          echo "✅ All checks passed"

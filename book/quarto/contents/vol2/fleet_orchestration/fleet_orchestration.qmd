@@ -181,6 +181,10 @@ class ClusterEconomicsContext:
     annual_waste_m = (daily_waste * 365) / 1e6
     gpu_gain = cluster_size * (util_high - util_low) / util_low
 
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(annual_waste_m > 0, "Annual waste must be greater than zero")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     cluster_size_str = fmt(cluster_size, precision=0)
     daily_cost_str = fmt(daily_cost, precision=0)
@@ -525,6 +529,14 @@ Solving this requires a choice between prevention and detection. Prevention mech
 
 For large-scale fleets, detection is computationally non-trivial. A cluster with 10,000 GPUs and 500 pending jobs has a state space exceeding $10^{15}$ possible allocations. Constructing and traversing a global "wait-for" graph to detect cycles in real time is often intractable. Production systems therefore rely on heuristics. **Lease-based resources** assign all allocations a time-to-live (TTL); if a job effectively deadlocks, its lease expires, and the scheduler reclaims the GPUs. **Progress monitoring** flags jobs whose GPU utilization drops to zero for a threshold period (e.g., 10 minutes) as "zombies" and terminates them regardless of their reported status. **Holistic preemption** reserves all necessary resources (CPU, network, storage bandwidth) for the victim to exit gracefully when preempting for high-priority jobs, preventing the priority inversion trap. These strategies accept a non-zero rate of false positives (killing healthy but slow jobs) to guarantee cluster liveness.
 
+### Heterogeneous Gang Scheduling {#sec-fleet-orchestration-heterogeneous-gang}
+
+The traditional gang scheduling model assumes a homogeneous Bulk Synchronous Parallel (BSP) workload: $N$ identical workers executing the exact same compute graph. However, advanced training paradigms fundamentally break this assumption. Reinforcement Learning from Human Feedback (RLHF) requires running four models of different sizes simultaneously: an Actor model (training), a Critic model (training), a Reference model (inference), and a Reward model (inference).
+
+::: {.callout-perspective title="Routing Over Synchrony"}
+This necessitates **Heterogeneous Gang Scheduling**. The scheduler must atomically allocate a diverse constellation of resources—high-HBM nodes optimized for memory-bound inference generation, alongside high-compute nodes for compute-bound backpropagation. The orchestration challenge shifts from static topological bin-packing to dynamic data routing. Activations and gradients are no longer just reduced within a homogeneous ring; instead, data must stream continuously between inference nodes generating rollouts and training nodes computing policy updates. If the heterogeneous gang allocation is not perfectly balanced across these distinct workload profiles, the entire cluster falls out of sync, leaving expensive accelerators starved for data.
+:::
+
 The tension between gang scheduling's safety guarantees and backfill's utilization gains defines the core trade-off in training cluster scheduling. Gang scheduling prevents deadlock but wastes resources; backfill improves utilization but requires runtime estimates that users cannot accurately provide. The next section examines how the two dominant orchestration paradigms resolve this tension through fundamentally different architectural philosophies.
 
 ## Orchestration Paradigms {#sec-fleet-orchestration-paradigms}
@@ -801,11 +813,14 @@ for bar, time, bw in zip(bars, times, bandwidths):
             ha='center', va='bottom', fontsize=11, fontweight='bold', color='#333333')
 
 ax.annotate('4.8x Speedup',
-            xy=(3, 25), xycoords='data',
-            xytext=(1.5, 120), textcoords='data',
-            arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=-0.2", color='#2ca02c', lw=2.5),
-            fontsize=13, fontweight='bold', color='#2ca02c',
-            bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="#2ca02c", alpha=0.9))
+            xy=(2.75, 25), xycoords='data',
+            xytext=(2.5, 50), textcoords='data',
+            arrowprops=dict(arrowstyle="->",
+            connectionstyle="arc3,rad=0.2",
+            color='#2ca02c', lw=1.0),
+            fontsize=11, fontweight='normal', color='#2ca02c',
+            bbox=dict(boxstyle="round,pad=0.6",
+            fc="white", ec="#2ca02c", alpha=0.9))
 
 plt.tight_layout()
 fig = plt.gcf()
@@ -1162,26 +1177,69 @@ ax.scatter([philly_cluster], [philly_waste], color=COLORS['OrangeLine'], s=100, 
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.annotate('Microsoft Philly\n(52% median util.)',
-            xy=(philly_cluster, philly_waste), xytext=(12, philly_waste + 50),
-            fontsize=8, fontweight='bold', color=COLORS['OrangeLine'],
-            arrowprops=dict(arrowstyle='->', color=COLORS['OrangeLine'], lw=1.0))
+            xy=(philly_cluster-0.5, philly_waste),
+            xytext=(9, philly_waste + 350),
+            fontsize=8,
+            ha='center',
+            fontweight='normal',
+            color=COLORS['OrangeLine'],
+            arrowprops=dict(
+                arrowstyle='->',
+                shrinkB=7,
+                color=COLORS['OrangeLine'],
+                lw=0.75
+            )
+)
+
+waste_10k_50 = 10000 * (1 - 0.50) * gpu_cost_per_hour * HOURS_PER_YEAR / 1e6
+
+ax.scatter(
+    [10], [waste_10k_50],
+    color='crimson',
+    s=45,
+    zorder=6,
+    edgecolors='white',
+    linewidth=0.8
+)
 
 # Key annotation: waste at 10K GPUs, 50% utilization
-waste_10k_50 = 10000 * (1 - 0.50) * gpu_cost_per_hour * HOURS_PER_YEAR / 1e6
+
 ax.annotate(f'At 10K GPUs, 50% util.\n= ${waste_10k_50:.1f}M wasted/year',
-            xy=(10, waste_10k_50), xytext=(20, waste_10k_50 - 100),
-            fontsize=8, fontweight='bold', color='crimson',
-            bbox=dict(facecolor=COLORS['RedL'], edgecolor='none', alpha=0.8, pad=3),
-            arrowprops=dict(arrowstyle='->', color='crimson', lw=1.2))
+            xy=(10, waste_10k_50),
+            xytext=(15, waste_10k_50 + 500),
+            fontsize=8,
+            fontweight='normal',
+            color='crimson',
+            bbox=dict(
+                facecolor="#f1e3e5",
+                edgecolor='none',
+                alpha=0.8, pad=3),
+            arrowprops=dict(
+                arrowstyle='->',
+                shrinkB=3,
+                color='crimson',
+                lw=0.75
+            )
+)
 
 ax.set_xlabel('Cluster Size (thousands of GPUs)')
 ax.set_ylabel('Annual Wasted Cost ($M)')
-ax.legend(loc='upper left', fontsize=8)
+ax.legend(
+    loc='upper left',
+    fontsize=8,
+    frameon=True,
+    facecolor='white',
+    framealpha=0.95,
+    edgecolor='gray',
+    fancybox=True,
+    borderpad=0.6
+)
 ax.set_xlim(0, 100)
 ax.set_ylim(0, max(waste_30) * 1.05)
 
 plt.tight_layout()
 plt.show()
+plt.close()
 ```
 
 :::
@@ -1816,8 +1874,15 @@ ax.axvspan(80, 100, alpha=0.15, color='red', label='Danger Zone (>80%)')
 
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.text(82, 500, 'Danger Zone:\nWait times explode', color='#8B0000', fontweight='bold')
-ax.text(73, 0.5, 'Target Zone', color='gray', ha='right', va='bottom', rotation=90)
+ax.text(82, 350, 'Danger Zone:\nWait times\nexplode',
+ color='#8B0000',
+ fontweight='bold')
+
+ax.text(73, 0.25, 'Target Zone',
+ color='gray',
+ ha='right',
+ va='bottom',
+ rotation=90)
 
 ax.set_yscale('log')
 ax.set_xlim(0, 100)
@@ -1825,8 +1890,16 @@ ax.set_ylim(0.1, 1000)
 ax.set_xlabel('Cluster Utilization (%)', fontsize=12)
 ax.set_ylabel('Average Job Wait Time (Hours, Log Scale)', fontsize=12)
 ax.set_title('The Utilization Paradox: Efficiency vs. Latency', fontsize=14, pad=15)
-ax.legend(frameon=True, fontsize=10, loc='upper left')
-
+ax.legend(
+    loc='upper left',
+    fontsize=8,
+    frameon=True,
+    facecolor='white',
+    framealpha=0.95,
+    edgecolor='gray',
+    fancybox=True,
+    borderpad=0.6
+)
 ax.grid(True, which="both", ls="-", alpha=0.2)
 ax.minorticks_on()
 
@@ -1834,6 +1907,48 @@ fig = plt.gcf()
 ```
 
 :::
+
+```{python}
+#| label: debug-value-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DEBUGGING EXAMPLE: UTILIZATION RECOVERY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-fleet-orchestration-debugging worked example (callout)
+# │
+# │ Goal: Quantify the annual dollar value recovered by fixing a 1,000-GPU
+# │       cluster from 60% to 84% effective utilization via policy changes.
+# │ Show: ~400 equivalent GPUs recovered; ~$7M/year in recovered value —
+# │       inline in the "Quantified Impact" paragraph after the results table.
+# │ How: recovered_gpus = cluster × (util_after − util_before) / util_before;
+# │      annual_value = recovered_gpus × $2/GPU-hr × 8,760 hr/yr.
+# │
+# │ Imports: (uses ClusterEconomicsContext.gpu_hour_cost_usd from fleet-orchestration-setup)
+# │ Exports: debug_recovered_str, debug_annual_str
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── LEGO ───────────────────────────────────────────────
+class DebugValueCalc:
+    """Annual dollar value recovered by raising a 1,000-GPU cluster from 60% to 84% utilization."""
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    debug_cluster      = 1000
+    debug_util_before  = 0.60
+    debug_util_after   = 0.84
+    _gpu_rate          = ClusterEconomicsContext.gpu_hour_cost_usd
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    debug_improvement  = debug_util_after - debug_util_before
+    debug_recovered    = debug_cluster * debug_improvement / debug_util_before
+    debug_annual       = debug_recovered * _gpu_rate * 8760
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(debug_improvement > 0, "Utilization should improve in this scenario")
+    check(debug_recovered == 400, f"Expected 400 recovered GPUs, got {debug_recovered}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    debug_recovered_str = f"{int(debug_recovered)}"
+    debug_annual_str    = f"{debug_annual / 1e6:.0f}"
+```
 
 ::: {.callout-example title="Debugging Low GPU Utilization"}
 
@@ -1877,48 +1992,6 @@ The scheduler's allocation log shows A100-80 GB GPUs at 95% allocation (380/400)
 3. **Gang scheduling with timeout**: Configure `SchedulerParameters=bf_continue,bf_window=7200` to enable backfill scheduling and prevent indefinite resource holding. Jobs waiting more than 2 hours for gang completion release their partial allocations back to the free pool. This timeout prevents the accumulating deadlock where partially-satisfied jobs hold resources indefinitely.
 4. **V100 workload seeding**: Create a "legacy-gpu" queue with lower cost accounting (reflecting V100's lower capability) to incentivize researchers to submit appropriate workloads to V100 hardware. Small-scale experiments, single-GPU development, and data-parallel training of models under 30B parameters can run effectively on V100s.
 5. **Workload-hardware matching guidance**: Provide researchers with a decision matrix mapping model sizes to minimum GPU memory requirements, reducing over-specification by making the correct resource request the easiest choice.
-
-```{python}
-#| label: debug-value-calc
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DEBUGGING EXAMPLE: UTILIZATION RECOVERY (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-fleet-orchestration-debugging worked example (callout)
-# │
-# │ Goal: Quantify the annual dollar value recovered by fixing a 1,000-GPU
-# │       cluster from 60% to 84% effective utilization via policy changes.
-# │ Show: ~400 equivalent GPUs recovered; ~$7M/year in recovered value —
-# │       inline in the "Quantified Impact" paragraph after the results table.
-# │ How: recovered_gpus = cluster × (util_after − util_before) / util_before;
-# │      annual_value = recovered_gpus × $2/GPU-hr × 8,760 hr/yr.
-# │
-# │ Imports: (uses ClusterEconomicsContext.gpu_hour_cost_usd from fleet-orchestration-setup)
-# │ Exports: debug_recovered_str, debug_annual_str
-# └─────────────────────────────────────────────────────────────────────────────
-
-# ┌── LEGO ───────────────────────────────────────────────
-class DebugValueCalc:
-    """Annual dollar value recovered by raising a 1,000-GPU cluster from 60% to 84% utilization."""
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    debug_cluster      = 1000
-    debug_util_before  = 0.60
-    debug_util_after   = 0.84
-    _gpu_rate          = ClusterEconomicsContext.gpu_hour_cost_usd
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    debug_improvement  = debug_util_after - debug_util_before
-    debug_recovered    = debug_cluster * debug_improvement / debug_util_before
-    debug_annual       = debug_recovered * _gpu_rate * 8760
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(debug_improvement > 0, "Utilization should improve in this scenario")
-    check(debug_recovered == 400, f"Expected 400 recovered GPUs, got {debug_recovered}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    debug_recovered_str = f"{int(debug_recovered)}"
-    debug_annual_str    = f"{debug_annual / 1e6:.0f}"
-```
 
 **Quantified Impact**: After implementing tiered matching and backfill scheduling over a two-week validation period:
 

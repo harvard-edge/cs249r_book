@@ -5,6 +5,10 @@ from mlsysim.systems.registry import Systems
 from mlsysim.core.solver import DistributedModel, ServingModel
 from mlsysim.core.constants import Q_
 
+# Cross-solver integration tests combining multiple features
+pytestmark = pytest.mark.integration
+
+
 def test_distributed_zero_lora_overlap():
     model = TransformerWorkload(
         name="Llama-3-70B",
@@ -24,7 +28,7 @@ def test_distributed_zero_lora_overlap():
     opt_res = solver.solve(model, fleet, batch_size=4096, tp_size=8, pp_size=4, zero_stage=3, is_lora=True, overlap_comm=True)
     
     # Memory should be radically smaller due to LoRA and ZeRO-3
-    assert opt_res.node_performance.memory_footprint < base_res.node_performance.memory_footprint
+    assert opt_res.node_profile.memory_footprint < base_res.node_profile.memory_footprint
     # Step latency should be lower due to comm overlap and smaller gradient comm size
     assert opt_res.step_latency_total < base_res.step_latency_total
 

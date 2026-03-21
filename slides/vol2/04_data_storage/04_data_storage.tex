@@ -1,0 +1,1389 @@
+% =============================================================================
+% Chapter 4: Data Storage — ML Systems Lecture Slides (Volume II)
+% =============================================================================
+% IMAGES NEEDED (SVGs converted to PDF):
+%   - storage-compute-gap.pdf     - workload-inversion.pdf
+%   - storage-hierarchy-pyramid.pdf - pipelined-loading.pdf
+%   - gds-path.pdf                - storage-economics.pdf
+%   - checkpoint-staging.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Volume II},
+  chapter      = {Chapter 4},
+  logo         = {../../assets/img/logo-mlsysbook.png},
+  instlogo     = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Data Storage},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\IOWall}{I/O Wall}
+\newcommand{\Tsave}{$T_{\text{save}}$}
+\newcommand{\BWreq}{$BW_{\text{required}}$}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count ---
+\setcounter{mlsystotalsections}{8}
+
+\title{Data Storage}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Data Storage}{Feed the Accelerators or Waste Them}{cover_storage.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{
+% -- LINK: Ch3 wired the fleet; this chapter feeds it with data
+Students have compute, network, and fabric. Without storage, GPUs starve.
+
+% -- NARRATE: ``This chapter is about the invisible bottleneck: storage.
+Everyone optimizes compute and network, but storage stalls waste just as much.''
+
+% -- ENGAGE: ``Has anyone profiled a training job and found the GPU waiting for data?''
+Most have not --- that is why storage bottlenecks go undetected.
+
+% -- FLEX: [CORE] Sets expectations.
+IF SHORT: Read objectives quickly.
+}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item Analyze how ML workloads \textbf{invert storage assumptions} and identify the \textbf{\IOWall{}}
+  \item Compare the six tiers of the \textbf{ML storage hierarchy} (HBM through Archive)
+  \item Apply the \textbf{data pipeline throughput equation} to size storage bandwidth
+  \item Explain how \textbf{pipelining and prefetching} hide storage latency
+  \item Describe how \textbf{GPU Direct Storage} bypasses the CPU
+  \item Evaluate storage \textbf{economics} including hidden costs (egress, idle GPUs)
+  \item Design \textbf{checkpoint staging} strategies to minimize training pause time
+\end{enumerate}
+
+\end{frame}
+
+\begin{frame}{Visual Language}
+\note{
+% -- NARRATE: Same color system. Point briefly and move on.
+% -- FLEX: [OPTIONAL] Skip if students have seen this three times.
+}
+
+\small
+Throughout this course, colors carry meaning:
+
+\vspace{0.3cm}
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Blue} --- Compute / Processing\\
+    {\footnotesize GPU ops, forward/backward pass, inference}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Green} --- Data / Memory\\
+    {\footnotesize Data flow, caches, healthy paths}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Orange} --- Routing / Scheduling\\
+    {\footnotesize Load balancers, batch windows}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Red} --- Error / Cost / Bottleneck\\
+    {\footnotesize Loss, decode phase, waste}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\end{frame}
+
+
+
+% =============================================================================
+\section{The Fuel Line}
+% =============================================================================
+
+\begin{frame}{The Engine Without Fuel}
+\note{
+% -- LINK: Ch2 built compute, Ch3 wired the network; now the 500x storage-compute gap
+The engine and wires are ready. Without fuel, they are expensive sculpture.
+
+% -- NARRATE: Point to the crimson card: ``H100 HBM: 3.35 TB/s. Single NVMe: 7 GB/s.
+Gap: 500x.'' ANALOGY: ``A Formula 1 engine connected to a garden hose.''
+
+% -- ENGAGE: ``If H100 consumes at 3.35 TB/s and NVMe delivers 7 GB/s, how many
+NVMe drives to match?'' Expected: about 480. That is an entire rack of storage.
+
+% -- WARN: Students assume NVMe is ``fast enough'' because 7 GB/s sounds fast.
+Correct: 7 GB/s is 500x slower than HBM consumption rate.
+
+% -- FLEX: [CORE] The 500x gap is the central number of this chapter.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    The fleet has:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textcolor{computestroke}{\textbf{Compute}}: PetaFLOPS per node (Ch.~2)
+      \item \textcolor{routingstroke}{\textbf{Network}}: TB/s fabric (Ch.~3)
+      \item \textcolor{datastroke}{\textbf{Storage}}: ???
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{crimson}
+    An engine without fuel is expensive sculpture.\\[0.1cm]
+    {\footnotesize H100 HBM: \textbf{3.35 TB/s}\\
+    Single NVMe: \textbf{7 GB/s}\\
+    Gap: \textbf{$\sim$500$\times$}}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{storage-compute-gap.pdf}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Running Example: 175B Model Training}
+\note{
+% -- LINK: 500x gap introduced the problem; running example gives concrete numbers
+These numbers thread through every section of the chapter.
+
+% -- NARRATE: Walk through the table. ``3 TB training data. 1,050 GB per checkpoint.
+But look at total checkpoint volume: 4.5 PB over 30 days. That DWARFS the training
+data by over 1,000x. The surprise: checkpoint I/O, not data loading, is the dominant
+storage workload for frontier models.''
+
+% -- WARN: Students underestimate checkpoint volume. They focus on training data size
+and ignore that checkpoints are written every 10 minutes for 30 days.
+
+% -- FLEX: [CORE] These numbers recur in every subsequent slide.
+IF SHORT: State the 4.5 PB checkpoint number and the 1,000x ratio.
+}
+
+\small
+\textbf{A 175B parameter language model, 30-day training run, 256 nodes:}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+{\footnotesize
+\begin{tabular}{@{}lr@{}}
+  \toprule
+  \textbf{Component} & \textbf{Volume} \\
+  \midrule
+  Training dataset (compressed)         & 3 TB \\
+  Model weights (FP16)                  & 350 GB \\
+  Optimizer state (FP32)                & 1,400 GB \\
+  Single checkpoint (full)              & 1,050 GB \\
+  All checkpoints (30 days, 10 min)     & $\sim$4.5 PB \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.2cm}
+\begin{mlsyscard}{errorstroke}
+{\footnotesize \textbf{Surprise}: Checkpoint I/O ($\sim$4.5 PB) dwarfs training data reads (3 TB) by over 1,000$\times$. Checkpoint storage, not data loading, is the dominant storage workload for frontier models.}
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Workload Inversion}
+% =============================================================================
+
+\begin{frame}{ML Inverts Every Storage Assumption}
+\note{
+% -- LINK: Running example showed volumes; workload inversion shows WHY traditional storage fails
+A database administrator moving to ML infrastructure would get everything wrong.
+
+% -- NARRATE: ``Traditional storage optimizes for IOPS: many small random reads.
+ML needs throughput: few massive sequential streams. Every assumption inverts.''
+Point to the I/O Wall callout: ``When storage throughput cannot keep up, GPUs
+idle regardless of their computational power.''
+
+% -- ENGAGE: ``Why does RAID 5 waste bandwidth for ML?''
+Expected: parity calculation wastes 15--25\% of bandwidth for data that is
+immutable and already backed in object storage.
+
+% -- WARN: Students with database backgrounds assume IOPS matters.
+Correct: ML storage is throughput-limited (GB/s), not IOPS-limited.
+
+% -- FLEX: [CORE] Workload inversion is the conceptual foundation for the chapter.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{workload-inversion.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{The I/O Wall:}{When storage throughput cannot deliver training data as fast as accelerators consume it, GPUs idle regardless of their computational power.}
+
+\end{frame}
+
+\begin{frame}{The Small File Problem}
+\note{
+% -- LINK: Workload inversion showed throughput matters; small files kill metadata first
+Before bandwidth matters, metadata operations serialize and collapse.
+
+% -- NARRATE: ``One file per sample means open(), stat(), close() per image.
+Metadata server: 100K--300K ops/s. 10,000 workers saturate it in under 1 second.''
+Point to the table: ``Aggregating into shards reduces metadata ops by 10,000--100,000x
+and converts random reads to sequential streams.''
+
+% -- ENGAGE: ``Why do WebDataset and TFRecord exist?''
+Expected: to aggregate small files into large sequential shards.
+
+% -- WARN: Students store datasets as individual files (one JPEG per image).
+This works on a laptop but collapses the PFS at scale.
+
+% -- FLEX: [CORE] The small file problem is the first bottleneck teams hit.
+IF SHORT: State the metadata saturation number and the shard solution.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Storing one file per sample is catastrophic at scale:}
+
+    \vspace{0.15cm}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\footnotesize Each file: \texttt{open()}, \texttt{stat()}, \texttt{close()}}
+      \item {\footnotesize Metadata server: 100K--300K ops/s}
+      \item {\footnotesize 10,000 workers $\to$ saturates in $<$1 sec}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution}: Aggregate into large sequential shards (TFRecord, WebDataset, Parquet).\\[0.05cm]
+    {\footnotesize Reduces metadata ops by 10,000--100,000$\times$}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.3cm}
+    \renewcommand{\arraystretch}{1.2}
+    {\scriptsize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      & \textbf{Small Files} & \textbf{Shards} \\
+      \midrule
+      Files         & 14M      & 1,400 \\
+      Metadata ops  & 42M/epoch & 4,200/epoch \\
+      Read pattern  & Random   & Sequential \\
+      Throughput    & 0.5 GB/s & 25 GB/s \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Storage Hierarchy}
+% =============================================================================
+
+\begin{frame}{The Six-Tier ML Storage Hierarchy}
+\note{
+% -- LINK: Small file problem solved metadata; the hierarchy solves bandwidth cliffs
+Students fixed metadata with shards. Now: how to bridge the 300,000x bandwidth gap.
+
+% -- NARRATE: Walk bottom to top: ``HBM: 3.35 TB/s, 80 GB, expensive. DRAM: 200 GB/s.
+NVMe: 7--25 GB/s. PFS: 4 GB/s/node. Object: 1 GB/s/node. Archive: tape.
+Each tier is a prefetch buffer for the tier above.'' Emphasize: 300,000x span.
+
+% -- ENGAGE: ``Which tier does the next batch need to be in BEFORE the current one finishes?''
+Expected: HBM --- it is the only tier where computation happens.
+
+% -- WARN: Students think of the hierarchy as static placement. Correct: data flows
+dynamically through tiers, promoted on demand and demoted when idle.
+
+% -- FLEX: [CORE] The six-tier hierarchy is the organizing framework for storage design.
+}
+
+% --- Layout: FULL-WIDTH pyramid ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{storage-hierarchy-pyramid.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{Design principle:}{Right data, right tier, right time. Each tier is a prefetch buffer for the tier above.}
+
+\end{frame}
+
+\begin{frame}{Bandwidth Cliffs Between Tiers}
+\note{
+% -- LINK: Pyramid showed the tiers; this table shows the cliffs between them
+Students saw the hierarchy. Now: the specific bandwidth drops at each boundary.
+
+% -- NARRATE: ``HBM to DRAM: 17x cliff. DRAM to NVMe: 15x. NVMe to PFS: 3--10x.
+HBM empties in 24 ms but takes 400 ms to refill from DRAM. The next batch must
+ALREADY be in HBM before the current one finishes. Every tier prefetches for the
+tier above.''
+
+% -- WARN: Students assume data can stream through the hierarchy in real time.
+Correct: each cliff means latency hiding via prefetching, not streaming.
+
+% -- FLEX: [CORE] The bandwidth cliffs motivate all pipelining and prefetching.
+IF SHORT: State the 17x HBM-to-DRAM cliff and the prefetching requirement.
+}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.05}
+{\scriptsize
+\begin{tabular}{@{}llrl@{}}
+  \toprule
+  \textbf{Tier} & \textbf{Storage} & \textbf{Bandwidth} & \textbf{Cliff} \\
+  \midrule
+  0 & GPU HBM        & 3.35 TB/s       & \textcolor{errorstroke}{$\downarrow$ 17$\times$} \\
+  1 & Host DRAM      & 200 GB/s        & \textcolor{errorstroke}{$\downarrow$ 15$\times$} \\
+  2 & Local NVMe     & 7--25 GB/s      & \textcolor{errorstroke}{$\downarrow$ 3--10$\times$} \\
+  3 & Parallel FS    & 4 GB/s/node     & \textcolor{errorstroke}{$\downarrow$ 10$\times$} \\
+  4 & Object Storage & $\sim$1 GB/s/node & \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{errorstroke}
+{\scriptsize \textbf{Implication}: HBM empties in 24 ms but takes 400 ms to refill from DRAM. The next batch must \emph{already} be in HBM before the current one finishes. Every tier prefetches for the tier above.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Tier 0: GPU HBM --- The Destination}
+\note{
+% -- LINK: Bandwidth cliffs showed the flow; Tier 0 is the destination where computation happens
+HBM is not just fast memory --- it is the ONLY place computation can occur.
+
+% -- NARRATE: Walk through the table: ``175B model: weights, optimizer, activations,
+gradient buffers, NCCL buffers. Total: 67--79 GB out of 80 GB. Less than 15\%
+free for prefetch. Late batch = GPU stall. Early batch = no room.
+Just-in-time, not just-too-late.''
+
+% -- WARN: Students think 80 GB is plenty. Correct: 85--98\% is occupied by model state.
+The prefetch buffer is razor-thin.
+
+% -- FLEX: [CORE] HBM capacity constraints drive all downstream pipeline design.
+IF SHORT: State the 85--98\% occupancy and the just-in-time requirement.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{HBM is the only tier where weights and activations reside during computation.}
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Component (per GPU)} & \textbf{Size} \\
+      \midrule
+      Weights (FP16, tensor-parallel) & 43.75 GB \\
+      Optimizer (ZeRO-3)              & 5.5 GB \\
+      Activations                     & 10--20 GB \\
+      Gradient buffers                & 5.5 GB \\
+      NCCL buffers                    & 2--4 GB \\
+      \midrule
+      \textbf{Total occupied}         & \textbf{67--79 GB} \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.1cm}
+    \begin{mlsyscard}{crimson}
+    \textbf{H100}: 80 GB HBM\\[0.1cm]
+    {\footnotesize 85--98\% occupied.\\
+    $<$15\% free for prefetch.\\[0.1cm]
+    Late batch = GPU stall.\\
+    Early batch = no room.\\[0.1cm]
+    \textbf{Just-in-time, not just-too-late.}}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: Text vs.\ Image Bandwidth}
+\note{
+% -- LINK: HBM showed tight capacity; now students estimate how much bandwidth different
+modalities need from storage.
+
+% -- NARRATE: ``60 seconds. Estimate the aggregate storage bandwidth for text training
+vs image training. Same cluster, same iteration time.''
+The 2,400x difference surprises most students. Ask 2--3 answers before revealing.
+
+% -- ENGAGE: This IS the active learning moment. Do NOT reveal yet.
+Listen for whether students account for the modality difference.
+
+% -- FLEX: [CORE] This prediction creates the surprise that motivates tiered storage.
+}
+
+\centering
+\vspace{0.8cm}
+{\Large\bfseries Think--Estimate--Share}
+
+\vspace{0.5cm}
+{\large A 2,048-GPU cluster with 200 ms iteration time.\\[0.2cm]
+\textbf{Estimate} the aggregate storage bandwidth needed for:\\
+(a) \textcolor{datastroke}{\textbf{Text}} training (4,096 tokens/GPU, 4 bytes/token)\\
+(b) \textcolor{computestroke}{\textbf{Image}} training (256 images/GPU, 150 KB/image)}
+
+\vspace{0.5cm}
+{\normalsize Write your estimates. \textcolor{midgray}{(60 seconds)}}
+
+\end{frame}
+
+\begin{frame}{Reveal: Text vs.\ Image Bandwidth}
+\note{
+% -- LINK: Students just estimated; now the reveal
+% -- NARRATE: ``Text: 160 MB/s --- a single NAS node handles it. Image: 393 GB/s ---
+you need a high-performance parallel file system. The 2,400x gap between modalities
+drives hierarchy design. Text is volume-heavy but bandwidth-light. Image training
+is the storage stress test.''
+
+% -- WARN: Students assume all training workloads have similar storage needs.
+Correct: LLM text training is trivial for storage; vision training is brutal.
+
+% -- FLEX: [CORE] The modality gap is a key insight for storage planning.
+}
+
+\small
+\renewcommand{\arraystretch}{1.2}
+{\footnotesize
+\begin{tabular}{@{}lrrl@{}}
+  \toprule
+  & \textbf{Text} & \textbf{Image} & \textbf{Ratio} \\
+  \midrule
+  Batch size/GPU    & 4,096 tokens $\times$ 4 B & 256 imgs $\times$ 150 KB & \\
+  Per-GPU data      & 16 KB                      & 38.4 MB                  & 2,400$\times$ \\
+  Aggregate BW      & \textbf{160 MB/s}          & \textbf{393 GB/s}        & 2,400$\times$ \\
+  \midrule
+  Storage needed    & Single NAS node            & High-perf PFS            & \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{datastroke}
+    {\footnotesize \textbf{Text}: bandwidth-light, volume-heavy. Bottleneck = dataset size \& checkpointing.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{computestroke}
+    {\footnotesize \textbf{Image}: bandwidth-heavy. Bottleneck = storage system's ability to feed accelerators.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Pipeline Equation}
+% =============================================================================
+
+\mlsysfocus{The Data Pipeline Equation}{%
+$BW_{\text{req}} = N_{GPUs} \times U_{target} \times \dfrac{S_{batch}}{T_{iteration}}$%
+}
+
+\begin{frame}{Pipeline Equation: Four Levers}
+\note{
+% -- LINK: Modality comparison showed bandwidth needs; the pipeline equation sizes them precisely
+Students saw text vs image bandwidth. This equation generalizes the calculation.
+
+% -- NARRATE: Walk through the worked example: ``256 GPUs, 80\% utilization, 256 images
+at 150 KB per batch, 200 ms iteration. Result: 39.3 GB/s sustained, continuously,
+for days. Miss this target and GPUs idle.''
+Key insight: ``None of the four levers is free. Fewer GPUs costs throughput.
+Lower utilization wastes hardware. Smaller batches hurt convergence.''
+
+% -- WARN: Students tweak one variable without accounting for the others.
+Correct: the equation shows all four are coupled.
+
+% -- FLEX: [CORE] The pipeline equation is the diagnostic tool for storage sizing.
+IF SHORT: Show the worked example result (39.3 GB/s), skip variable walkthrough.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.2}
+    \begin{tabular}{@{}lp{4.5cm}@{}}
+      \toprule
+      \textbf{Variable} & \textbf{Meaning} \\
+      \midrule
+      $N_{GPUs}$ & Number of accelerators \\
+      $U_{target}$ & Target utilization (0.8--0.95) \\
+      $S_{batch}$ & Local batch size (bytes) \\
+      $T_{iteration}$ & Forward-backward time \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.2cm}
+    \mlsysconcept{Key:}{No lever is free. Reducing any input has a cost.}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{Worked example (ImageNet, 256 GPUs):}
+
+    \vspace{0.1cm}
+    {\footnotesize
+    $256 \times 0.80 \times \frac{256 \times 150\text{KB}}{0.2\text{s}}$\\[0.2cm]
+    $= 256 \times 0.80 \times 192\text{ MB/s}$\\[0.2cm]
+    $= \textbf{39.3 GB/s}$
+    }
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize Must sustain \textbf{39.3 GB/s} continuously for days.\\
+    Fall short $\to$ accelerators idle.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The Data Stall Ratio}
+\note{
+% -- LINK: Pipeline equation sized bandwidth; data stall ratio diagnoses if you hit it
+The equation tells you what you NEED. The stall ratio tells you what you GET.
+
+% -- NARRATE: ``Below 2\%: healthy. 2--10\%: marginal, will break at scale. Above 10\%:
+clear storage bottleneck --- redesign the data path. Economic consequence:
+5\% stall on 1,000 GPUs at \$2/GPU-hr for one week = \$16,800 wasted.''
+
+% -- WARN: Students ignore stall ratios below 5\% as ``acceptable.'' Correct: at
+scale, 5\% = thousands of dollars per week. Storage monitoring is economic, not optional.
+
+% -- FLEX: [CORE] The stall ratio is the operational diagnostic for storage health.
+IF SHORT: State the three thresholds and the \$16.8K/week number.
+}
+
+\small
+$$\text{Data Stall \%} = \frac{T_{\text{step}} - T_{\text{compute}}}{T_{\text{step}}} \times 100$$
+
+\vspace{0.15cm}
+\renewcommand{\arraystretch}{1.15}
+{\footnotesize
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Stall Ratio} & \textbf{Diagnosis} & \textbf{Action} \\
+  \midrule
+  $<$ 2\%   & Healthy pipeline            & Monitor, do not over-invest \\
+  2--10\%   & Marginal (will break at scale) & Audit pipeline, add prefetch \\
+  $>$ 10\%  & \textcolor{errorstroke}{Clear storage bottleneck}   & \textcolor{errorstroke}{Redesign data path} \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{errorstroke}
+{\footnotesize \textbf{Economic consequence}: 5\% stall on 1,000 GPUs at \$2/GPU-hr for 1 week = \textbf{\$16,800 wasted}. Storage monitoring is a first-order economic concern.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Pipelining and Prefetching}
+\note{
+% -- LINK: Stall ratio diagnosed the problem; pipelining is the solution
+Students know they have a stall. Pipelining overlaps CPU loading with GPU compute.
+
+% -- NARRATE: Walk through the diagram: ``While the GPU computes batch N, the CPU
+loads batch N+1. The GPU never sees the load latency --- as long as loading finishes
+before compute does.'' Point to the caveat: ``Pipelining hides AVERAGE latency.
+Buffer depth must absorb P99 tail latency to prevent stalls at scale.''
+
+% -- ENGAGE: ``What happens during a P99.9 spike?''
+Expected: the buffer drains and the GPU stalls. Deeper buffers absorb more tail.
+
+% -- WARN: Students size buffers for average latency. Correct: at 10,000 workers,
+P99.9 events happen every few minutes. Size for tail, not average.
+
+% -- FLEX: [CORE] Pipelining is the fundamental technique for hiding storage latency.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{pipelined-loading.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Critical caveat:}{Pipelining hides \emph{average} latency. Buffer depth must absorb \textbf{P99 tail latency} to prevent stalls at scale.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: Micro-Retrieval Cue ---
+\begin{frame}{Quick Check}
+\note{
+% -- NARRATE: ``What is the 500x gap, and what technique hides it?''
+Answer: HBM 3.35 TB/s vs NVMe 7 GB/s. Pipelining and prefetching hide it.
+% -- FLEX: [CORE] Micro-retrieval reinforces the central numbers.
+}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Quick Check}
+
+\vspace{0.6cm}
+{\large What is the 500$\times$ storage-compute gap,}\\
+{\large and what technique hides it?}
+
+\vspace{0.5cm}
+{\normalsize\textcolor{midgray}{15 seconds --- then I will cold-call.}}
+
+\end{frame}
+
+
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Size the Prefetch Buffer}
+\note{
+% -- LINK: Pipelining introduced the technique; this exercise sizes the buffer
+Students know pipelining hides latency. Now they calculate the required buffer depth.
+
+% -- NARRATE: ``90 seconds. Calculate minimum prefetch depth for average and P99.''
+After pause: ``Average: ceil(250/200) = 2 batches. P99: ceil(500/200) = 3 batches.
+The P99 answer is the correct engineering answer. Engineer for tail, not average.''
+
+% -- ENGAGE: This IS the active learning moment.
+After solution: ``What if P99 is 1000 ms?'' Expected: 5 batches --- but that
+may exceed the HBM prefetch budget from the Tier 0 slide.
+
+% -- WARN: Students will compute for average and declare victory. The P99 answer
+is the one that prevents production stalls.
+
+% -- FLEX: [CORE] Buffer sizing exercise builds practical engineering intuition.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Size the Prefetch Buffer}
+
+    \vspace{0.15cm}
+    {\footnotesize A training node has:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\footnotesize $T_{\text{compute}}$ = 200 ms per batch}
+      \item {\footnotesize $T_{I/O,\text{avg}}$ = 250 ms (avg load time)}
+      \item {\footnotesize $T_{I/O,\text{P99}}$ = 500 ms (tail latency)}
+    \end{itemize}
+
+    \vspace{0.05cm}
+    {\footnotesize \textbf{Calculate} min prefetch depth (in batches) for (a) average and (b) P99 latency.}
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.05cm]
+    {\scriptsize
+    Depth = $\lceil T_{I/O} / T_{\text{compute}} \rceil$\\[0.05cm]
+    Average: $\lceil 250/200 \rceil$ = \textbf{2 batches}\\
+    P99: $\lceil 500/200 \rceil$ = \textbf{3 batches}\\[0.05cm]
+    \textcolor{datastroke}{\textbf{Engineer for P99, not average!}}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{GPU Direct Storage}
+% =============================================================================
+
+\begin{frame}{GPU Direct Storage: The CPU Bypass}
+\note{
+% -- LINK: Pipelining hid latency with CPU help; GDS eliminates the CPU from the path
+Students saw CPU-based pipelining. GDS bypasses the CPU entirely.
+
+% -- NARRATE: Point to the diagram: ``Traditional: 3 hops, CPU copies at every step.
+GDS: 1 hop, direct DMA from NVMe to GPU memory via PCIe. The CPU is not involved.''
+Point to the insight callout: ``GDS frees 6 of 8 CPU cores from data copying,
+reallocating them to augmentation that improves model quality.''
+
+% -- WARN: Students think GDS accelerates all storage. Correct: GDS only works
+for local or RDMA-attached NVMe. It does not help object storage or network FS.
+
+% -- FLEX: [CORE] GDS is the state-of-the-art for local data loading.
+IF SHORT: State the 1-hop vs 3-hop comparison and the CPU core savings.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{gds-path.pdf}
+
+\vspace{0.1cm}
+\mlsysinsight{CPU bypass dividend:}{GDS frees 6 of 8 CPU cores from data copying, reallocating them to augmentation that improves model quality.}
+
+\end{frame}
+
+\begin{frame}{GDS: Quantitative Impact}
+\note{
+% -- LINK: GDS diagram showed the path; this table quantifies the CPU savings
+Students saw the data path. Now: specific numbers for a real workload.
+
+% -- NARRATE: ``8 GPUs, 8,000 images/sec each, 150 KB per image. Traditional:
+120 us per image, all 8 CPU cores consumed. GDS: 30 us, only 2 cores.
+6 freed cores can run augmentation, improving both throughput and model quality.''
+
+% -- WARN: Students overlook the limitation: GDS only accelerates local or
+RDMA-attached NVMe. Object storage and network FS still go through the CPU.
+
+% -- FLEX: [OPTIONAL] The quantitative detail reinforces GDS but is not examinable.
+IF SHORT: State the 4x latency reduction and 6 freed cores.
+}
+
+\small
+\textbf{Training node: 8 GPUs, 150 KB images, 8,000 images/s per GPU}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.2}
+{\footnotesize
+\begin{tabular}{@{}lrr@{}}
+  \toprule
+  & \textbf{Traditional} & \textbf{GDS} \\
+  \midrule
+  CPU time per image     & 120 $\mu$s         & 30 $\mu$s \\
+  Total CPU load         & 7.68 core-seconds/s & 1.92 core-seconds/s \\
+  CPU cores for I/O      & $\sim$8 cores       & $\sim$2 cores \\
+  Cores freed for augmentation & 0              & \textbf{6 cores} \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{datastroke}
+    {\footnotesize \textbf{4$\times$ latency reduction} per transfer (120 $\to$ 30 $\mu$s). No kernel buffer copies.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize \textbf{Limitation}: GDS only accelerates \textbf{local or RDMA-attached NVMe}. Does not help object storage.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Economics}
+% =============================================================================
+
+\begin{frame}{The Storage Cost Iceberg}
+\note{
+% -- LINK: GDS optimized the data path; economics shows the cost of getting it wrong
+Students optimized throughput. Now: the dollar cost of storage decisions.
+
+% -- NARRATE: ``The visible cost --- per-GB storage price --- is the tip of the iceberg.
+Below the waterline: egress fees, IOPS charges, and most importantly, idle GPU cost.
+For a 100 TB dataset, storage is only 7\% of total data delivery cost.''
+
+% -- WARN: Students compare storage providers on per-GB price alone. Correct:
+total cost includes egress, IOPS, and idle GPU time from stalls.
+
+% -- FLEX: [CORE] The cost iceberg reframes storage as an economic decision.
+IF SHORT: State the 7\% number and the hidden cost categories.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{storage-economics.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Counterintuitive:}{The cheapest storage tier is not the cheapest choice. Total cost of data delivery includes egress + idle GPUs.}
+
+\end{frame}
+
+\begin{frame}{Worked Example: Stream vs.\ Cache}
+\note{
+% -- LINK: Cost iceberg introduced hidden costs; this worked example quantifies them
+Students saw the iceberg. Now: a concrete stream-vs-cache calculation.
+
+% -- NARRATE: Walk through both options: ``Stream from S3: \$373,800/yr (egress dominates).
+NVMe cache: \$91,800/yr. Savings: \$282,000/yr --- enough for 3 additional H100 GPUs.
+Break-even: 2 epochs. Multi-epoch training always benefits from local caching.''
+
+% -- WARN: Students assume cloud storage is cheap because per-GB rates are low.
+Correct: egress at \$0.09/GB compounds to 4x the storage cost over 20 epochs.
+
+% -- FLEX: [CORE] The \$282K savings number makes storage optimization visceral.
+IF SHORT: Show the bottom line comparison (\$374K vs \$92K).
+}
+
+\footnotesize
+\textbf{50 TB vision dataset, 20 epochs, 4 training runs/year}
+
+\vspace{0.1cm}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Option A: Stream from S3}\\[0.1cm]
+    {\scriptsize
+    Storage: \$13,800/yr\\
+    Egress: 50 TB $\times$ 20 $\times$ \$0.09/GB = \$90K/run\\
+    4 runs/yr: \$360K egress\\[0.05cm]
+    \textbf{Total: \$373,800/yr}
+    }
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{Option B: NVMe cache}\\[0.1cm]
+    {\scriptsize
+    S3 storage: \$13,800/yr\\
+    NVMe capacity: \$60,000/yr\\
+    Egress (stage 1$\times$/run): \$18,000/yr\\[0.05cm]
+    \textbf{Total: \$91,800/yr}
+    }
+  \end{column}
+\end{columns}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{datastroke}
+{\scriptsize \textbf{NVMe caching saves \$282,000/year} --- enough for 3 additional H100 GPUs. Break-even: 2 epochs of reading. Multi-epoch training always benefits from local caching.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Tiering Strategy}
+\note{
+% -- LINK: Worked example showed cache savings; tiering generalizes the strategy
+Students saw one cache decision. This formalizes the four-tier strategy.
+
+% -- NARRATE: Walk through the table: ``Hot (NVMe): active training data. Warm (PFS):
+shared datasets, recent checkpoints. Cold (S3): all organizational data. Archive (Glacier):
+compliance and reproducibility.'' Emphasize: ``Automate with lifecycle policies, not
+engineers. Data promotes when requested, demotes when idle.''
+
+% -- WARN: Students manually place data and forget to demote. Result: hot tier overflows
+while cold tier underutilized. Automate promotion and demotion.
+
+% -- FLEX: [OPTIONAL] Tiering is a practical operations topic.
+IF SHORT: Show the table, state the automation principle, move on.
+}
+
+\small
+\renewcommand{\arraystretch}{1.15}
+{\footnotesize
+\begin{tabular}{@{}lllr@{}}
+  \toprule
+  \textbf{Tier} & \textbf{Storage} & \textbf{What Lives Here} & \textbf{\$/GB/mo} \\
+  \midrule
+  \textbf{Hot}     & Local NVMe + DRAM & Active training data, current batch    & \$0.10 \\
+  \textbf{Warm}    & Parallel FS       & Shared datasets, recent checkpoints    & \$0.03 \\
+  \textbf{Cold}    & Object (S3)       & All organizational data, versioned     & \$0.02 \\
+  \textbf{Archive} & Glacier           & Compliance, reproducibility            & \$0.004 \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\mlsysconcept{Lifecycle:}{Data promotes upward when a job requests it, demotes downward when idle. Automate with policies, not engineers.}
+
+\vspace{0.1cm}
+{\footnotesize \textbf{Staging patterns}: Pre-stage (best steady-state, slow start), On-demand (slow first epoch), Streaming (zero startup, no cache). Choice depends on epoch count and local NVMe capacity.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Where Should Data Live?}
+\note{
+% -- LINK: Tiering introduced the four tiers; now students design a strategy
+Students know the tiers. This forces them to reason about two different workloads.
+
+% -- NARRATE: ``Turn to your neighbor. 70B language model on 2 TB text (single epoch)
+AND a vision model on 50 TB images (20 epochs). Same cluster, same PFS.
+Design the tiering strategy for each. 90 seconds.'' Cold-call 2--3 pairs.
+
+% -- ENGAGE: This IS the active learning moment. No single right answer.
+Key insight: single-epoch text may stream from object storage. Multi-epoch vision
+MUST cache to NVMe. The same cluster needs different strategies simultaneously.
+
+% -- WARN: Students apply one strategy to both workloads. Correct: access frequency
+determines tier placement, and the two workloads have opposite patterns.
+
+% -- FLEX: [CORE] This discussion synthesizes the entire storage chapter.
+IF SHORT: Pose to whole class, take 2 answers, state the access-frequency principle.
+}
+
+\centering
+\vspace{0.5cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.4cm}
+{\normalsize Your team trains a 70B language model on 2 TB of text\\
+(single epoch) and a vision model on 50 TB of images\\
+(20 epochs). Same cluster, same PFS.\\[0.2cm]
+\alert{Design the tiering strategy for each workload.}}
+
+\vspace{0.4cm}
+\begin{columns}[c]
+  \begin{column}{0.22\textwidth}\centering\small Object\\Only\end{column}
+  \begin{column}{0.22\textwidth}\centering\small PFS\\Cache\end{column}
+  \begin{column}{0.22\textwidth}\centering\small NVMe\\Pre-stage\end{column}
+  \begin{column}{0.22\textwidth}\centering\small Hybrid\\Strategy\end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Checkpoints}
+% =============================================================================
+
+\begin{frame}{Checkpoint Storage: The Burst Problem}
+\note{
+% -- LINK: Tiering covered read patterns; checkpoints are the dominant WRITE workload
+Students optimized reading. Checkpoint writes are actually the bigger problem.
+
+% -- NARRATE: ``All 256 nodes write simultaneously --- a checkpoint storm. 1,050 GB
+hits the PFS in seconds. The PFS must be provisioned for PEAK burst, not average.''
+Point to the staging concept: ``Write locally to NVMe (fast, non-blocking),
+then replicate asynchronously to PFS in the background.''
+
+% -- WARN: Students design checkpoint storage for average write bandwidth.
+Correct: the burst is 10x steady-state. Under-provision and checkpointing
+pauses training --- defeating its purpose.
+
+% -- FLEX: [CORE] Checkpoint staging is a key architectural pattern for fault tolerance.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{checkpoint-staging.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Checkpoint storm:}{All nodes write simultaneously. PFS must be provisioned for \textbf{peak burst}, not average. Write locally, replicate asynchronously.}
+
+\end{frame}
+
+\begin{frame}{The Complete Data Path}
+\note{
+% -- LINK: Checkpoint staging showed one write pattern; this traces the complete data lifecycle
+Students saw individual patterns. Now: the full lifecycle during a 30-day training run.
+
+% -- NARRATE: Walk through each phase: ``Setup: stage 3 TB from object to NVMe once.
+Training: NVMe to DRAM to HBM per batch. Checkpoint: HBM to NVMe (fast local write).
+Replicate: NVMe to PFS (async background). Archive: PFS to object to Glacier.''
+Emphasize: ``Checkpoint I/O (4.5 PB) dwarfs training data I/O (3 TB per epoch)
+by 1,000x. For frontier models, checkpoint strategy has more impact on storage
+design than training data pipeline optimization.''
+
+% -- FLEX: [CORE] The complete data path closes the chapter's narrative arc.
+IF SHORT: State the 4.5 PB vs 3 TB contrast and the checkpoint dominance insight.
+}
+
+\footnotesize
+\textbf{Data lifecycle during a 30-day training run:}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.1}
+{\scriptsize
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Phase} & \textbf{Data Path} & \textbf{Volume} \\
+  \midrule
+  \textbf{Setup}     & Object $\to$ NVMe (stage once)            & 3 TB \\
+  \textbf{Training}  & NVMe $\to$ DRAM $\to$ HBM (per batch)     & 3 TB/epoch \\
+  \textbf{Checkpoint} & HBM $\to$ NVMe (local, fast)              & 1,050 GB each \\
+  \textbf{Replicate} & NVMe $\to$ PFS (async, background)         & 1,050 GB each \\
+  \textbf{Archive}   & PFS $\to$ Object $\to$ Glacier (lifecycle) & $\sim$50 TB retained \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{crimson}
+{\scriptsize \textbf{Counterintuitive}: Checkpoint I/O ($\sim$4.5 PB) dwarfs training data I/O (3 TB per epoch). For frontier models, \textbf{checkpoint staging strategy} has more impact on storage design than training data pipeline optimization.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Checkpoint Coordination: Sync vs Async}
+\note{
+% -- LINK: Checkpoint staging showed the write path; this slide addresses WHEN
+to checkpoint --- the coordination dimension.
+
+% -- NARRATE: What to SAY while showing this slide
+``Synchronous checkpointing: all workers pause, write state, resume. Simple but
+expensive. 175B model checkpoint takes 60--120 seconds. At 10-minute intervals,
+that is 10--20\% overhead. Asynchronous: write to local NVMe while training
+continues. Background replication to PFS. Key risk: if a failure occurs during
+async replication, the latest checkpoint may be incomplete. Solution: keep the
+PREVIOUS checkpoint until replication confirms.''
+
+% -- ENGAGE: ``What happens if async replication is slower than the checkpoint interval?''
+Expected: checkpoints queue up and eventually overflow local NVMe. Must size
+local storage for at least 2$\times$ checkpoint size.
+
+% -- WARN: Students implement async without the two-checkpoint safety buffer.
+If only one checkpoint exists and replication has not finished when failure
+strikes, you lose ALL progress since the last completed checkpoint.
+
+% -- FLEX: [CORE] Checkpoint coordination directly impacts training efficiency.
+IF SHORT: State the 10--20\% overhead number and the async solution.
+}
+
+\small
+\renewcommand{\arraystretch}{1.2}
+{\footnotesize
+\begin{tabular}{@{}llrl@{}}
+  \toprule
+  \textbf{Strategy} & \textbf{Impact on Training} & \textbf{Overhead} & \textbf{Recovery Risk} \\
+  \midrule
+  \textbf{Synchronous} & All workers pause & 10--20\% & None (consistent) \\
+  \textbf{Async (local)} & Write NVMe, train continues & 1--3\% & Incomplete if NVMe fails \\
+  \textbf{Async (staged)} & NVMe + background PFS & 2--5\% & \textcolor{datastroke}{\textbf{Safe}} (keep $n-1$) \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Sync overhead}: 175B model, 60--120s per checkpoint, every 10 min = \textbf{10--20\% of training time} lost to I/O.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{Async rule}: Always keep the \emph{previous} completed checkpoint on PFS until the current one is fully replicated.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: Prefetch Buffer Design Exercise ---
+\begin{frame}{Your Turn: Design the Prefetch Buffer}
+\note{
+% -- LINK: Pipeline equation showed bandwidth requirements; this exercise applies it
+to a concrete I/O hiding problem.
+
+% -- NARRATE: ``90 seconds. Your training job reads 10 TB of images. NVMe delivers
+7 GB/s, network delivers 25 Gbps (3.125 GB/s). Design the prefetch buffer to
+hide I/O latency.'' After pause: ``GPU processes one batch in 0.5 s. Batch size:
+200 MB. Required throughput: 200 MB / 0.5 s = 400 MB/s. NVMe delivers 7 GB/s ---
+easily sufficient. Network at 3.125 GB/s --- also sufficient. But the question is
+buffer size: you need enough to absorb P99 latency spikes. If P99 is 500 ms and
+throughput is 400 MB/s, you need 200 MB buffer minimum. In practice: 2--4$\times$
+margin = 400--800 MB buffer. For the full 10 TB dataset: stream from NVMe with
+4 worker threads, prefetch 2$\times$ batch size ahead.''
+
+% -- ENGAGE: This IS the active learning moment.
+After: ``What if NVMe was only 1 GB/s (spinning disk)? Buffer = 400 MB/s $\times$ 3 s
+latency = 1.2 GB. Slower storage demands larger buffers.''
+
+% -- WARN: Students size the buffer for average latency, not P99. Tail latency
+is what causes stalls --- the 500 ms spikes drain the buffer.
+
+% -- FLEX: [CORE] I/O hiding is the most practical skill from this chapter.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Prefetch Buffer Design}
+
+    \vspace{0.15cm}
+    \textbf{Given:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\footnotesize Training data: 10 TB of images}
+      \item {\footnotesize NVMe throughput: 7 GB/s}
+      \item {\footnotesize Network throughput: 25 Gbps (3.125 GB/s)}
+      \item {\footnotesize Batch processing time: 0.5 s}
+      \item {\footnotesize Batch size: 200 MB}
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Design:} Buffer size to hide I/O latency.\\
+    {\footnotesize\textcolor{midgray}{(90 seconds)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{Solution:}\\
+    Required: 200 MB / 0.5 s = 400 MB/s\\
+    NVMe: 7 GB/s $\gg$ 400 MB/s \checkmark\\
+    Network: 3.125 GB/s $\gg$ 400 MB/s \checkmark\\[0.1cm]
+    \textbf{Buffer for P99 spikes:}\\
+    P99 = 500 ms stall\\
+    Buffer = 400 MB/s $\times$ 0.5 s\\
+    = \textbf{200 MB minimum}\\
+    Practice: 2--4$\times$ = \textbf{400--800 MB}\\[0.05cm]
+    \textcolor{datastroke}{\textbf{Size for tail latency!}}}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{
+% -- NARRATE: Four claims proven wrong with numbers. Spend extra time on the NVMe fallacy:
+``7 GB/s sounds fast, but it is 500x slower than HBM. Without pipelining, every
+batch transfer is a stall.'' The compression fallacy surprises: if CPU-bound,
+decompression makes the bottleneck WORSE.
+% -- FLEX: [CORE] IF SHORT: Cover the NVMe and compression fallacies.
+}
+
+\small
+\textbf{Fallacy:} \textit{NVMe is fast enough to feed GPUs without pipelining.}\\
+{\footnotesize NVMe: 7 GB/s. H100 HBM: 3.35 TB/s. Gap: $\sim$500$\times$. Without pipelining, every batch transfer is a stall.}
+
+\vspace{0.1cm}
+\textbf{Fallacy:} \textit{Object storage latency does not matter because we prefetch everything.}\\
+{\footnotesize Prefetching hides \emph{average} latency, not tail. P99 spikes of 500+ ms drain the buffer and stall accelerators.}
+
+\vspace{0.1cm}
+\textbf{Fallacy:} \textit{Compression always helps.}\\
+{\footnotesize Only if I/O-bound. In a CPU-bound pipeline, decompression makes the bottleneck \emph{worse}.}
+
+\vspace{0.1cm}
+\textbf{Fallacy:} \textit{RAID 5/6 is a safe default.}\\
+{\footnotesize For ML, training data is immutable and backed in object storage. RAID 0 maximizes throughput; parity wastes 15--25\% bandwidth.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{
+% -- NARRATE: Four operational mistakes. The egress pitfall is the most expensive:
+``100 TB times 10 reads times \$0.09/GB = \$90,000 in egress, far exceeding
+the \$27,600 annual storage cost. Stage locally.'' The accelerator upgrade pitfall
+connects to Ch2: ``Upgrading A100 to H100 without upgrading storage INCREASES
+the stall ratio.''
+% -- FLEX: [CORE] IF SHORT: Cover the small files and egress pitfalls.
+}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Using millions of small files for training data.}\\
+Metadata operations serialize on the PFS metadata server. At 10,000 workers, metadata saturates in $<$1 sec. Aggregate into shards.
+
+\vspace{0.1cm}
+\textbf{Pitfall:} \textit{Ignoring egress costs.}\\
+100 TB $\times$ 10 reads $\times$ \$0.09/GB = \$90,000 in egress, far exceeding annual storage cost (\$27,600). Stage locally.
+
+\vspace{0.1cm}
+\textbf{Pitfall:} \textit{Designing checkpoint storage for average write performance.}\\
+Checkpoints burst at 10$\times$ steady-state. PFS must be provisioned for peak, not average.
+
+\vspace{0.1cm}
+\textbf{Pitfall:} \textit{Assuming faster accelerators automatically improve throughput.}\\
+Upgrading A100 $\to$ H100 without upgrading storage \emph{increases} the data stall ratio. Every accelerator upgrade requires a storage audit.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+
+% --- MUDDIEST POINT ---
+\begin{frame}{Muddiest Point}
+\note{
+% -- NARRATE: ``Write the one concept you found most confusing. Anonymous. One sentence.''
+% -- FLEX: [CORE] Address top 2--3 confusions in next lecture's opening.
+}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries What was the \alert{muddiest point} today?}
+
+\vspace{0.8cm}
+{\normalsize Write down the concept you found \textbf{most confusing}.}
+
+\vspace{0.5cm}
+{\small\textcolor{midgray}{Anonymous. One sentence. Submit before you leave.}}
+
+\end{frame}
+
+\begin{frame}{What Were the Key Ideas?}
+\note{
+% -- NARRATE: ``Close your notes. Write four key concepts. 90 seconds.''
+Walk around. Do NOT show Key Takeaways yet.
+% -- FLEX: [CORE] Retrieval practice.
+}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{
+% -- LINK: Students wrote their own list; now compare.
+% -- NARRATE: ``Did you capture: 500x gap, 300,000x hierarchy span, 4.5 PB checkpoints,
+\$282K savings from NVMe caching?''
+% -- FLEX: [CORE] Official summary. Read every bullet.
+}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{500$\times$ storage-compute gap}: HBM at 3.35 TB/s vs.\ NVMe at 7 GB/s. The \IOWall{} idles accelerators.
+  \item \textbf{Six-tier hierarchy}: HBM $\to$ DRAM $\to$ NVMe $\to$ PFS $\to$ Object $\to$ Archive. 300,000$\times$ bandwidth span.
+  \item \textbf{Workload inversion}: ML needs throughput (GB/s), not IOPS. Sequential streaming, RAID 0.
+  \item \textbf{Pipeline equation}: \BWreq{} $= N_{GPUs} \times U_{target} \times S_{batch} / T_{iteration}$. Miss it $\to$ GPUs idle.
+  \item \textbf{GPU Direct Storage}: Bypasses CPU, 4$\times$ latency reduction, frees cores for augmentation.
+  \item \textbf{Economics}: Storage is 7\% of total data cost. Egress and idle GPUs dominate. NVMe cache saves \$282K/yr.
+  \item \textbf{Checkpoint staging}: Write NVMe, replicate async. 175B model: $\sim$4.5 PB checkpoints in 30 days.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{
+% -- NARRATE: ``Start with Mohan et al. for data stalls and NVIDIA GDS design guide.''
+% -- FLEX: [OPTIONAL] Skip if running short.
+}
+
+\small
+\mlsysref{Mohan+21}{Mohan et al. ``Analyzing and Mitigating Data Stalls in DNN Training.'' VLDB 2021.}
+\mlsysref{NVIDIA-GDS}{NVIDIA. ``GPU Direct Storage Design Guide.'' Technical Report, 2023.}
+\mlsysref{Rajbhandari+20}{Rajbhandari et al. ``ZeRO: Memory Optimizations Toward Training Trillion Parameter Models.'' SC 2020.}
+\mlsysref{Eisenman+22}{Eisenman et al. ``Check-N-Run: a Checkpointing System for Training Deep Learning.'' NSDI 2022.}
+\mlsysref{Audibert+23}{Audibert et al. ``tf.data: A Machine Learning Data Processing Framework.'' VLDB 2023.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Distributed Training}
+\note{
+% -- LINK: Infrastructure trilogy is complete (compute, network, storage).
+% -- NARRATE: ``The physical infrastructure is built. Compute, network, storage ---
+all three layers of the Fleet Stack's foundation. Next: the algorithmic challenge.
+How do you split a single training job across 1,000+ accelerators? Data parallelism,
+tensor parallelism, pipeline parallelism, and expert parallelism.''
+% -- FLEX: [CORE] Forward hook. IF SHORT: State the central question and dismiss.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \vspace{0.3cm}
+    \begin{mlsyscard}{crimson}
+    {\normalsize\bfseries Infrastructure Complete}\\[0.2cm]
+    {\footnotesize
+    \textcolor{computestroke}{\textbf{Ch.~2}}: Compute (PetaFLOPS)\\
+    \textcolor{routingstroke}{\textbf{Ch.~3}}: Network (TB/s fabric)\\
+    \textcolor{datastroke}{\textbf{Ch.~4}}: Storage (tiered hierarchy)\\[0.15cm]
+    \textbf{Next}: How to \emph{split} a single job across 1,000+ accelerators?}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \vspace{0.3cm}
+    {\normalsize\textbf{Chapter 5: Distributed Training}}
+
+    \vspace{0.15cm}
+    \begin{itemize}\setlength\itemsep{2pt}
+      \item \textcolor{datastroke}{\textbf{Data parallelism}} --- replicate model
+      \item \textcolor{computestroke}{\textbf{Tensor parallelism}} --- split layers
+      \item \textcolor{routingstroke}{\textbf{Pipeline parallelism}} --- split stages
+      \item \textcolor{errorstroke}{\textbf{Expert parallelism}} --- route tokens
+    \end{itemize}
+
+    \vspace{0.1cm}
+    {\footnotesize The algorithmic challenge that completes the fleet.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+
+
+\appendix
+
+\begin{frame}{Backup: Storage Equations Quick Reference}
+\note{
+% -- NARRATE: Backup --- key equations for problem sets.
+% -- FLEX: [OPTIONAL] Only show if requested.
+}
+
+\footnotesize
+\textbf{Key Storage Equations:}
+
+\vspace{0.15cm}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}ll@{}}
+  \toprule
+  \textbf{Metric} & \textbf{Formula} \\
+  \midrule
+  Pipeline BW required & $BW = N_{\text{GPUs}} \times U_{\text{target}} \times S_{\text{batch}} / T_{\text{iter}}$ \\
+  Data stall ratio & $R_{\text{stall}} = \max(0, 1 - BW_{\text{storage}} / BW_{\text{required}})$ \\
+  Checkpoint size & $C = N_{\text{GPUs}} \times (16M_{\text{params}} + A_{\text{activations}})$ \\
+  Total checkpoint I/O & $V = C \times N_{\text{ckpts}} \times (1 + R_{\text{replicas}})$ \\
+  Prefetch buffer & $B \geq \text{throughput} \times P99_{\text{latency}} \times 2$ \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+{\footnotesize \textbf{175B model checkpoint}: 1,050 GB. At 10-min intervals over 30 days: $\sim$4.5 PB total I/O.}
+
+\end{frame}
+
+\begin{frame}{Backup: Emerging Storage Technologies}
+\note{
+% -- NARRATE: Emerging technologies that may change the storage landscape.
+% -- FLEX: [OPTIONAL] Forward-looking reference.
+}
+
+\footnotesize
+\textbf{Technologies reshaping ML storage (2025--2030):}
+
+\vspace{0.15cm}
+\begin{itemize}\setlength\itemsep{2pt}
+  \item \textbf{CXL Memory Pooling}: Disaggregated memory via CXL 3.0. Adds a tier between DRAM and NVMe at $\sim$50 GB/s. Could absorb checkpoint writes without NVMe.
+  \item \textbf{Computational Storage}: NVMe drives with embedded compute for decompression, augmentation. Offloads CPU bottleneck in data pipelines.
+  \item \textbf{GPU Direct Storage 2.0}: Direct NVMe-to-GPU DMA without CPU involvement. 4$\times$ latency reduction, frees CPU cores for augmentation.
+  \item \textbf{Object Storage Tiering}: S3 Express One Zone: 10$\times$ lower latency than standard S3. May eliminate the need for PFS warm tier.
+\end{itemize}
+
+\end{frame}
+
+
+\end{document}

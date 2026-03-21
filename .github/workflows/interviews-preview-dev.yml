@@ -1,0 +1,93 @@
+name: '🧠 Interviews · 👁️ Preview (Dev)'
+
+# Builds and deploys The Blueprint interview playbook to dev preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - 'interviews/**'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: interviews-dev-deploy
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: '🧠 Build & Deploy Interviews (Dev)'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build Interview Playbook
+        working-directory: interviews
+        run: |
+          quarto render
+          touch _build/.nojekyll
+
+      - name: 🔗 Rewrite URLs for dev site
+        run: bash .github/scripts/rewrite-dev-urls.sh interviews interviews/_build
+
+      - name: 🔍 Validate build
+        run: |
+          if [ ! -f "interviews/_build/index.html" ]; then
+            echo "❌ CRITICAL: index.html missing. Aborting deployment."
+            exit 1
+          fi
+          echo "✅ Site built: $(find interviews/_build -name '*.html' | wc -l) pages"
+
+      - name: 🚀 Deploy to Dev Site via SSH
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning dev preview repository..."
+          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+          cd target-repo
+
+          echo "🧹 Cleaning interviews directory..."
+          rm -rf interviews
+          mkdir -p interviews
+
+          echo "🚚 Copying interview playbook content..."
+          cp -r "${{ github.workspace }}/interviews/_build/." interviews/
+
+          if [ ! -f "interviews/index.html" ]; then
+            echo "❌ CRITICAL: interviews/index.html missing. Aborting."
+            exit 1
+          fi
+
+          echo "📦 Committing and pushing..."
+          git add .
+          git commit -m "🧠 Deploy Interviews dev to /interviews/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+
+          # Retry push with rebase to handle concurrent deploys
+          for i in 1 2 3; do
+            if git push origin main 2>/dev/null; then
+              echo "✅ Push succeeded on attempt $i"
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin main || true
+          done
+
+          echo "✅ Interview playbook deployed to dev preview"

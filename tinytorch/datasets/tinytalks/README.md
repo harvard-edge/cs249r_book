@@ -25,16 +25,48 @@
 
 ## 📊 Dataset Statistics
 
-| Property | Value |
-|----------|-------|
-| **Total Q&A Pairs** | 350 |
-| **File Size** | ~40 KB |
-| **Vocabulary Size** | ~1,500 unique tokens (character-level) |
-| **Avg Question Length** | 8 words |
-| **Avg Answer Length** | 10 words |
-| **Training Split** | 245 pairs (70%) |
-| **Validation Split** | 53 pairs (15%) |
-| **Test Split** | 52 pairs (15%) |
+<table>
+  <thead>
+    <tr>
+      <th width="40%">Property</th>
+      <th width="60%">Value</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Total Q&A Pairs</b></td>
+      <td>350</td>
+    </tr>
+    <tr>
+      <td><b>File Size</b></td>
+      <td>~40 KB</td>
+    </tr>
+    <tr>
+      <td><b>Vocabulary Size</b></td>
+      <td>~1,500 unique tokens (character-level)</td>
+    </tr>
+    <tr>
+      <td><b>Avg Question Length</b></td>
+      <td>8 words</td>
+    </tr>
+    <tr>
+      <td><b>Avg Answer Length</b></td>
+      <td>10 words</td>
+    </tr>
+    <tr>
+      <td><b>Training Split</b></td>
+      <td>245 pairs (70%)</td>
+    </tr>
+    <tr>
+      <td><b>Validation Split</b></td>
+      <td>53 pairs (15%)</td>
+    </tr>
+    <tr>
+      <td><b>Test Split</b></td>
+      <td>52 pairs (15%)</td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 

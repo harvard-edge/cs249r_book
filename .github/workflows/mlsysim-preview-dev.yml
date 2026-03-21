@@ -18,9 +18,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Build PDF first (reusable workflow)
+  build-pdf:
+    name: '📄 Build PDF'
+    uses: ./.github/workflows/mlsysim-build-pdfs.yml
+    with:
+      ref: ${{ github.ref }}
+
   build-and-deploy:
     name: '🧮 Build & Deploy MLSYSIM (Dev)'
     runs-on: ubuntu-latest
+    needs: [build-pdf]
 
     steps:
       - name: 📥 Checkout
@@ -29,18 +37,30 @@ jobs:
       - name: 🔧 Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
-      - name: 🐍 Install Python dependencies
-        run: |
-          pip install -e .
-          pip install quartodoc
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-      - name: 📄 Build Research Paper PDF
-        working-directory: mlsysim/paper
+      - name: 🐍 Install Python dependencies
+        working-directory: mlsysim
+        run: pip install ".[docs]"
+
+      - name: 📥 Download Paper PDF
+        uses: actions/download-artifact@v7
+        continue-on-error: true
+        with:
+          name: MLSYSIM-Paper
+          path: ./pdf-artifacts/
+
+      - name: 📁 Inject PDF into docs
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq texlive-latex-extra texlive-fonts-recommended texlive-science poppler-utils > /dev/null
-          bash build.sh
-          cp paper.pdf ../docs/mlsysim-paper.pdf
+          if [ -f ./pdf-artifacts/paper.pdf ]; then
+            cp ./pdf-artifacts/paper.pdf ${{ vars.MLSYSIM_DOCS }}/mlsysim-paper.pdf
+            echo "✅ Injected mlsysim-paper.pdf"
+          else
+            echo "⚠️ Paper PDF not found in artifacts, continuing without it"
+          fi
 
       - name: 🔨 Build MLSYSIM Site
         working-directory: ${{ vars.MLSYSIM_DOCS }}
@@ -100,6 +120,15 @@ jobs:
           echo "🧮 Committing and pushing changes..."
           git add .
           git commit -m "🧮 Deploy MLSYSIM dev to /${{ vars.DEV_MLSYSIM_PATH }}/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
-          git push origin main
+
+          # Retry push with rebase to handle concurrent deploys
+          for i in 1 2 3; do
+            if git push origin main 2>/dev/null; then
+              echo "✅ Push succeeded on attempt $i"
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin main || true
+          done
 
           echo "✅ MLSYSIM deployed to: https://harvard-edge.github.io/${{ vars.DEV_REPO }}/${{ vars.DEV_MLSYSIM_PATH }}/"
