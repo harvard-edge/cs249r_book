@@ -1,0 +1,188 @@
+name: '🌐 Site · 🚀 Publish (Live)'
+
+# =============================================================================
+# Builds and deploys site subsites to mlsysbook.ai (gh-pages).
+# Handles: about, community, landing, newsletter.
+# Instructors has its own workflow (instructors-publish-live.yml).
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      subsite:
+        description: 'Which subsite to deploy (or "all")'
+        type: choice
+        options:
+          - all
+          - about
+          - community
+          - landing
+          - newsletter
+        default: all
+  workflow_call:
+    inputs:
+      subsite:
+        description: 'Which subsite to deploy (or "all")'
+        type: string
+        default: all
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: gh-pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    name: '🌐 Deploy Site Subsites'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔍 Determine subsites to deploy
+        id: subsites
+        run: |
+          CHOICE="${{ inputs.subsite || 'all' }}"
+          if [[ "$CHOICE" == "all" ]]; then
+            echo "list=about community landing newsletter" >> $GITHUB_OUTPUT
+          else
+            echo "list=$CHOICE" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🔨 Build subsites
+        run: |
+          for site in ${{ steps.subsites.outputs.list }}; do
+            echo "🔨 Building $site..."
+            cd site/$site
+            quarto render
+            touch _build/.nojekyll 2>/dev/null || true
+            echo "✅ $site built"
+            cd "${{ github.workspace }}"
+          done
+
+      - name: 🔍 Validate builds
+        run: |
+          for site in ${{ steps.subsites.outputs.list }}; do
+            if [ ! -f "site/$site/_build/index.html" ]; then
+              echo "❌ CRITICAL: site/$site/_build/index.html missing."
+              exit 1
+            fi
+            PAGE_COUNT=$(find site/$site/_build -name '*.html' | wc -l)
+            echo "✅ $site: $PAGE_COUNT pages, $(du -sh site/$site/_build | cut -f1)"
+          done
+
+      # Deploy non-landing subsites (about, community, newsletter)
+      - name: 🚀 Deploy subsites to gh-pages
+        run: |
+          for site in ${{ steps.subsites.outputs.list }}; do
+            [[ "$site" == "landing" ]] && continue
+
+            echo "🚀 Deploying $site to gh-pages..."
+
+            # Clone gh-pages
+            rm -rf gh-pages-repo
+            git clone --depth=1 --branch=gh-pages \
+              https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
+              gh-pages-repo
+
+            cd gh-pages-repo
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            # Deploy to subsite directory
+            rm -rf "$site"
+            mkdir -p "$site"
+            cp -r "${{ github.workspace }}/site/$site/_build/." "$site/"
+
+            if [ ! -f "$site/index.html" ]; then
+              echo "❌ CRITICAL: $site/index.html missing after copy."
+              exit 1
+            fi
+
+            git add .
+            EMOJI="🌐"
+            [[ "$site" == "about" ]] && EMOJI="📋"
+            [[ "$site" == "community" ]] && EMOJI="🌍"
+            [[ "$site" == "newsletter" ]] && EMOJI="📬"
+            git commit -m "$EMOJI Deploy $site live - ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+
+            for i in 1 2 3; do
+              if git push origin gh-pages 2>/dev/null; then
+                echo "✅ $site pushed on attempt $i"
+                break
+              fi
+              echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+              git pull --rebase origin gh-pages || true
+            done
+
+            cd "${{ github.workspace }}"
+            echo "✅ $site deployed"
+          done
+
+      # Deploy landing page to root (special handling)
+      - name: 🏠 Deploy landing to gh-pages root
+        if: contains(steps.subsites.outputs.list, 'landing')
+        run: |
+          echo "🏠 Deploying landing page to gh-pages root..."
+
+          rm -rf gh-pages-repo
+          git clone --depth=1 --branch=gh-pages \
+            https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
+            gh-pages-repo
+
+          cd gh-pages-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          LANDING_BUILD="${{ github.workspace }}/site/landing/_build"
+
+          # Copy landing output to root, preserving subsite directories
+          for item in "$LANDING_BUILD"/*; do
+            basename="$(basename "$item")"
+            if [[ "$basename" == "site_libs" ]]; then continue; fi
+            if [[ -d "$basename" ]] && [[ "$basename" =~ ^(book|kits|tinytorch|labs|mlsysim|slides|instructors|interviews|about|community|newsletter)$ ]]; then
+              continue
+            fi
+            cp -r "$item" .
+          done
+          touch .nojekyll
+
+          if [ ! -f "index.html" ]; then
+            echo "❌ CRITICAL: Landing index.html missing."
+            exit 1
+          fi
+
+          git add .
+          git commit -m "🏠 Deploy landing page live - ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+
+          for i in 1 2 3; do
+            if git push origin gh-pages 2>/dev/null; then
+              echo "✅ Landing pushed on attempt $i"
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin gh-pages || true
+          done
+
+          echo "✅ Landing page deployed to root"
+
+      - name: 📊 Summary
+        run: |
+          echo "## 🌐 Site Publish Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Subsite | URL |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
+          for site in ${{ steps.subsites.outputs.list }}; do
+            if [[ "$site" == "landing" ]]; then
+              echo "| 🏠 Landing | https://mlsysbook.ai/ |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| $site | https://mlsysbook.ai/$site/ |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done

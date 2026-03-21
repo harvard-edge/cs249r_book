@@ -19,7 +19,7 @@ from pathlib import Path
 
 REPO = "harvard-edge/cs249r_book"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-OUTPUT = REPO_ROOT / "about" / "contributors.json"
+OUTPUT = REPO_ROOT / "site" / "about" / "contributors.json"
 ALLCONTRIB = REPO_ROOT / ".all-contributorsrc"
 
 

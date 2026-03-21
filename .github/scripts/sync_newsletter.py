@@ -29,7 +29,7 @@ import requests
 # ── Configuration ──────────────────────────────────────────────────────────────
 API_BASE = "https://api.buttondown.com/v1"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-NEWSLETTER_DIR = REPO_ROOT / "newsletter" / "posts"
+NEWSLETTER_DIR = REPO_ROOT / "site" / "newsletter" / "posts"
 API_KEY = os.environ.get("BUTTONDOWN_API_KEY", "")
 
 
