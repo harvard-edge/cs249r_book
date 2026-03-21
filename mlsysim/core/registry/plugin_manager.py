@@ -57,3 +57,4 @@ class Registry:
 hardware_registry = Registry("mlsysim.hardware")
 model_registry = Registry("mlsysim.models")
 constants_registry = Registry("mlsysim.constants")
+solver_registry = Registry("mlsysim.solvers")

@@ -157,7 +157,71 @@ class CheapestHardwareOptimizer(BaseOptimizer):
 
 ---
 
-## 4. Testing Your Extension
+## 4. Composable Pipelines & Callbacks
+
+MLSys·im doesn't just evaluate models in a vacuum. It uses a **Composable Pipeline** architecture. You can snap your custom solvers into a pipeline and execute them sequentially, with outputs from earlier stages passing automatically to later stages.
+
+```python
+from mlsysim.core.pipeline import Pipeline
+from mlsysim.core.solver import DistributedModel, EconomicsModel
+
+# Build a pipeline with your custom solver in the middle
+my_pipeline = Pipeline([
+    DistributedModel(),
+    PowerEfficiencyModel(), # Your custom model
+    EconomicsModel()
+])
+
+# Run the pipeline
+results = my_pipeline.run(
+    model=mlsysim.Models.Llama3_8B,
+    fleet=mlsysim.Systems.Clusters.Frontier_8K,
+    duration_days=30
+)
+
+# Access individual stage results
+print(results["PowerEfficiencyModel"].flops_per_watt)
+```
+
+### Callbacks (Middleware)
+You can intercept the pipeline execution to log metrics to MLOps platforms like Weights & Biases or Datadog by implementing a callback.
+
+```python
+class WandbLogger:
+    def on_stage_end(self, stage_name: str, result: SolverResult):
+        # Example pseudo-code
+        wandb.log({f"{stage_name}/{k}": v for k, v in result.dict().items()})
+
+my_pipeline.register_callback(WandbLogger())
+```
+
+---
+
+## 5. Registering Your Custom Resolver (Plugins)
+
+You don't need to fork `mlsysim` to use your custom models. You can package your code as a standard Python module and register it via `pyproject.toml` entry points. When a user installs your package, `mlsysim` will automatically discover and load your custom solvers into the engine.
+
+In your plugin's `pyproject.toml`, add:
+
+```toml
+[project.entry-points."mlsysim.solvers"]
+power_efficiency = "my_custom_package.solvers:PowerEfficiencyModel"
+required_bandwidth = "my_custom_package.solvers:RequiredBandwidthSolver"
+cheapest_hardware = "my_custom_package.solvers:CheapestHardwareOptimizer"
+```
+
+Once installed via `pip install .`, you can check that `mlsysim` has discovered your models by running:
+
+```python
+from mlsysim.core.resolver_factory import ResolverFactory
+
+# This will now include 'PowerEfficiencyModel', etc.
+print(ResolverFactory.list_available().keys())
+```
+
+---
+
+## 6. Testing Your Extension
 
 Every custom resolver should have at least one unit test that verifies dimensional correctness and expected output:
 

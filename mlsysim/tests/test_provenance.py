@@ -1,11 +1,11 @@
 import pytest
 import pint
-from mlsysim.core.pedagogy import SystemAssumption
+from mlsysim.core.provenance import TraceableConstant
 from mlsysim.core.constants import ureg
 
 def test_system_assumption_behaves_like_float():
     """Ensure the pedagogical wrapper doesn't break basic math operations."""
-    assump = SystemAssumption(
+    assump = TraceableConstant(
         0.85, 
         name="Test MFU", 
         description="A test assumption.", 
@@ -21,7 +21,7 @@ def test_system_assumption_behaves_like_float():
 
 def test_system_assumption_preserves_metadata():
     """Ensure the metadata is accessible for textbook rendering."""
-    assump = SystemAssumption(
+    assump = TraceableConstant(
         0.50, 
         name="Test MFU", 
         description="A test assumption.", 
@@ -40,7 +40,7 @@ def test_system_assumption_preserves_metadata():
 
 def test_system_assumption_with_pint():
     """Ensure pint unit operations work correctly on the wrapper."""
-    assump = SystemAssumption(
+    assump = TraceableConstant(
         15.0, 
         name="Test Overhead", 
         description="Overhead in ms.", 

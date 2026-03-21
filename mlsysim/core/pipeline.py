@@ -4,7 +4,7 @@ Layer C of the composition architecture: a transparent Pipeline that
 chains resolvers (models and solvers), validates compatibility, and 
 shows students the full Demand → Supply → Consequence data flow.
 
-The Pipeline is NOT a black box — it is a pedagogical tool that makes
+The Pipeline is NOT a black box — it is an analytical tool that makes
 the resolver DAG visible. Students use `explain()` to see what flows
 between each stage and `run()` to execute the chain.
 
@@ -44,12 +44,17 @@ class Pipeline:
             raise ValueError("Pipeline requires at least one resolver.")
         self.resolvers = resolvers
         self.name = name
+        self.callbacks = []
+
+    def register_callback(self, callback: Any):
+        """Register a callback middleware to intercept pipeline execution."""
+        self.callbacks.append(callback)
 
     def explain(self) -> str:
         """Show the resolver DAG: what each stage requires, produces, and where gaps exist.
 
         Returns a human-readable string describing the pipeline flow.
-        This is the pedagogical entry point — students call this to
+        This is the analytical entry point — engineers call this to
         understand how models and solvers compose.
         """
         lines = [f"═══ {self.name} ═══", ""]
@@ -135,7 +140,13 @@ class Pipeline:
             result = resolver.solve(**valid_kwargs)
 
             # Store result under class name
-            stage_results[cls.__name__] = result
+            stage_name = cls.__name__
+            stage_results[stage_name] = result
+
+            # Invoke callbacks
+            for callback in self.callbacks:
+                if hasattr(callback, "on_stage_end"):
+                    callback.on_stage_end(stage_name=stage_name, result=result)
 
             # Make result fields available to subsequent stages
             if hasattr(result, "model_fields"):

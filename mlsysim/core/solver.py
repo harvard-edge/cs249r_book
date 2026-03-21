@@ -59,7 +59,7 @@ class BaseResolver(ABC):
     produces: Optional[Type[SolverResult]] = None
 
     @abstractmethod
-    def solve(self, **kwargs) -> Any:
+    def solve(self, *args, **kwargs) -> Any:
         pass
 
     @classmethod

@@ -1,6 +1,6 @@
 from typing import Optional
 
-class SystemAssumption(float):
+class TraceableConstant(float):
     """
     A numerical float that carries pedagogical context (citation, description)
     for the textbook. Functions exactly as a standard Python float in all

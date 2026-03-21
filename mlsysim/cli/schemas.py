@@ -36,7 +36,12 @@ def _resolve_hardware(name_or_path: str) -> HardwareNode:
     return h_obj
 
 def _resolve_model(name_or_path: str) -> Workload:
-    """Resolves a model from the Zoo or a local YAML file."""
+    """Resolves a model from the Zoo, a local YAML file, or the Hugging Face Hub (hf://)."""
+    if name_or_path.startswith("hf://"):
+        from mlsysim.models.importer import import_hf_model
+        model_id = name_or_path[5:]  # Strip hf://
+        return import_hf_model(model_id)
+
     if name_or_path.endswith((".yaml", ".yml")):
         p = Path(name_or_path)
         if not p.exists():

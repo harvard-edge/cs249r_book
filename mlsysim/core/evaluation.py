@@ -13,7 +13,7 @@ class EvaluationLevel(BaseModel):
 class SystemEvaluation(BaseModel):
     """
     The multi-level 'Scorecard' for a System Simulation.
-    Organizes results into the three pedagogical lenses by composing 
+    Organizes results into the three analytical lenses by composing 
     analytical models and analysis solvers.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -92,47 +92,47 @@ class SystemEvaluator:
         duration_days: Optional[float] = None
     ) -> SystemEvaluation:
         """
-        Evaluates an ML system scenario across three pedagogical lenses: Feasibility, Performance, and Macro/Economics.
-        
-        This method orchestrates the Tier 1 models (SingleNodeModel, DistributedModel) and Tier 2 models 
-        (EconomicsModel, SustainabilityModel) to generate a comprehensive scorecard for the given hardware/software configuration.
-        
-        Args:
-            scenario_name (str): A descriptive name for the evaluation (e.g., "Llama-3 8B on H100").
-            model_obj (Workload): The workload architecture to simulate (e.g., Models.Language.Llama3_8B).
-            hardware_obj (HardwareNode): The target hardware accelerator (e.g., Hardware.Cloud.H100).
-            batch_size (int): The number of samples/tokens processed concurrently.
-            precision (str): The numerical precision used (e.g., 'fp16', 'int8').
-            efficiency (float): The achieved hardware utilization as a fraction of peak (e.g., 0.45 for 45% MFU).
-            fleet_obj (Optional[Fleet]): The cluster topology for distributed runs.
-            nodes (int): The number of accelerators to simulate. Defaults to 1.
-            duration_days (Optional[float]): The expected duration of the run, required for Macro/Economics evaluation.
-            
-        Returns:
-            SystemEvaluation: A multi-level scorecard containing the feasibility, performance, and macro metrics.
+        Evaluates an ML system scenario across three analytical lenses: Feasibility, Performance, and Macro/Economics.
         """
         
         from .solver import SingleNodeModel, DistributedModel, EconomicsModel
+        from .pipeline import Pipeline
 
-        # 1. Evaluate Performance & Feasibility
+        # Compose the pipeline dynamically based on the inputs
+        resolvers = []
         if nodes == 1 or fleet_obj is None:
-            solver = SingleNodeModel()
-            profile = solver.solve(
-                model=model_obj,
-                hardware=hardware_obj,
-                batch_size=batch_size,
-                precision=precision,
-                efficiency=efficiency,
-                raise_errors=False
-            )
-            
+            resolvers.append(SingleNodeModel())
+        else:
+            resolvers.append(DistributedModel())
+
+        if fleet_obj and duration_days:
+            resolvers.append(EconomicsModel())
+
+        pipeline = Pipeline(resolvers, name=f"Eval_{scenario_name}")
+        
+        # Execute the pipeline
+        results = pipeline.run(
+            model=model_obj,
+            hardware=hardware_obj,
+            batch_size=batch_size,
+            precision=precision,
+            efficiency=efficiency,
+            fleet=fleet_obj,
+            tp_size=nodes,
+            pp_size=1,
+            duration_days=duration_days,
+            raise_errors=False
+        )
+
+        # 1. Evaluate Feasibility & Performance
+        if "SingleNodeModel" in results:
+            profile = results["SingleNodeModel"]
             feasibility = EvaluationLevel(
                 level_name="Memory Feasibility",
                 status="PASS" if profile.feasible else "FAIL",
                 summary=f"{profile.memory_footprint.to('GB'):~.1f} / {hardware_obj.memory.capacity.to('GB'):~.1f} used",
                 metrics={"memory_used_gb": profile.memory_footprint.to('GB').magnitude}
             )
-            
             performance = EvaluationLevel(
                 level_name="Single Node Performance",
                 status="PASS",
@@ -143,25 +143,14 @@ class SystemEvaluator:
                     "mfu": profile.mfu
                 }
             )
-        else:
-            dist_model = DistributedModel()
-            dist_res = dist_model.solve(
-                model=model_obj,
-                fleet=fleet_obj,
-                batch_size=batch_size,
-                precision=precision,
-                efficiency=efficiency,
-                tp_size=nodes,
-                pp_size=1
-            )
-            
+        elif "DistributedModel" in results:
+            dist_res = results["DistributedModel"]
             feasibility = EvaluationLevel(
                 level_name="Feasibility",
                 status="PASS",
                 summary="Distributed Model Check Passed",
                 metrics={}
             )
-            
             performance = EvaluationLevel(
                 level_name="Fleet Performance",
                 status="PASS",
@@ -172,15 +161,13 @@ class SystemEvaluator:
                     "fleet_throughput": dist_res.effective_throughput.m_as("1/s")
                 }
             )
+        else:
+            raise RuntimeError("Pipeline failed to produce a valid performance model result.")
 
         # 2. Evaluate Macro / Economics
         macro = EvaluationLevel(level_name="Macro", status="SKIPPED", summary="No Ops config provided", metrics={})
-        if fleet_obj and duration_days:
-            econ_model = EconomicsModel()
-            econ_res = econ_model.solve(
-                fleet=fleet_obj,
-                duration_days=duration_days
-            )
+        if "EconomicsModel" in results:
+            econ_res = results["EconomicsModel"]
             macro = EvaluationLevel(
                 level_name="Economics & Sustainability",
                 status="PASS",

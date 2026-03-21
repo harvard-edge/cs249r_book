@@ -5,7 +5,7 @@ for your specific scenario. Every value cites its source.
 """
 
 from .units import USD
-from .pedagogy import SystemAssumption
+from .provenance import TraceableConstant
 
 # --- Reliability (Component MTTF) ---
 # Mean Time To Failure for datacenter-grade components.
@@ -102,7 +102,7 @@ OVERHEAD_MAINTENANCE = 0.05        # ~5% for rolling upgrades, maintenance windo
 
 # --- Scaling Laws (Chinchilla Physics) ---
 # Source: Hoffmann et al. (2022), "Training Compute-Optimal Large Language Models"
-CHINCHILLA_TOKENS_PER_PARAM = SystemAssumption(
+CHINCHILLA_TOKENS_PER_PARAM = TraceableConstant(
     20,
     name="Compute-Optimal Token Ratio",
     description="The optimal number of training tokens per model parameter (D ≈ 20P) to minimize loss for a given compute budget.",
@@ -110,7 +110,7 @@ CHINCHILLA_TOKENS_PER_PARAM = SystemAssumption(
     url="https://arxiv.org/abs/2203.15556"
 )
 
-CHINCHILLA_COMPUTE_CONSTANT = SystemAssumption(
+CHINCHILLA_COMPUTE_CONSTANT = TraceableConstant(
     6,
     name="Training Compute Constant (C ≈ 6PD)",
     description="The multiplier for calculating total training FLOPs. 2 FLOPs per parameter for the forward pass, and 4 FLOPs for the backward pass.",
@@ -182,7 +182,7 @@ DP_SGD_SLOWDOWN_COEFFICIENT = 2.0
 # --- Engine Default Overrides ---
 
 # Default scaling efficiency for parallel clusters
-DEFAULT_SCALING_EFFICIENCY = SystemAssumption(
+DEFAULT_SCALING_EFFICIENCY = TraceableConstant(
     0.90,
     name="Scaling Efficiency (η)",
     description="The efficiency of parallel scaling. A value of 0.90 means 90% of theoretical linear speedup is achieved.",
@@ -190,7 +190,7 @@ DEFAULT_SCALING_EFFICIENCY = SystemAssumption(
 )
 
 # Default communication overlap efficiency (e.g., Megatron-LM can overlap ~85% of communication)
-DEFAULT_OVERLAP_EFFICIENCY = SystemAssumption(
+DEFAULT_OVERLAP_EFFICIENCY = TraceableConstant(
     0.85,
     name="Communication Overlap Efficiency",
     description="The fraction of network communication time that can be successfully hidden behind compute operations.",
@@ -199,7 +199,7 @@ DEFAULT_OVERLAP_EFFICIENCY = SystemAssumption(
 )
 
 # Default compute efficiency (MFU baseline)
-DEFAULT_COMPUTE_EFFICIENCY = SystemAssumption(
+DEFAULT_COMPUTE_EFFICIENCY = TraceableConstant(
     0.50,
     name="Baseline Model FLOPs Utilization (MFU)",
     description="A highly optimized large language model typically achieves around 50% MFU due to communication overhead and memory bandwidth constraints.",

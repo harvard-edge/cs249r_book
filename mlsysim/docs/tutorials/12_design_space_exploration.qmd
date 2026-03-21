@@ -1,0 +1,116 @@
+---
+title: "Design Space Exploration (DSE)"
+subtitle: "Declaratively navigate trade-offs without writing nested for-loops."
+description: "Learn how to use the DSE Engine to search parameter grids and optimize ML system architectures based on cost and performance SLA constraints."
+categories: ["analysis", "advanced"]
+---
+
+## The Question
+
+Optimizing an ML system often involves navigating complex trade-offs. Should you use Tensor Parallelism (TP) or Pipeline Parallelism (PP)? Should you increase batch size to improve throughput, or does that violate your strict 50ms latency SLA?
+
+When building real systems, you need to search a vast grid of possibilities, evaluate the analytical constraints of each point, and rank the configurations by a target objective. **How do we explore this design space cleanly, without writing messy nested loops?**
+
+::: {.callout-note}
+## What You Will Learn
+
+- **Define** a declarative `SearchSpace` of system parameters.
+- **Formulate** optimization objectives (e.g., `minimize: macro.tco_usd`).
+- **Execute** an exhaustive search using the `DSE` engine.
+- **Filter** configurations based on strict analytical constraints.
+:::
+
+## 1. Setup
+
+Import the necessary classes. The `DSE` (Design Space Explorer) is our Tier 3 engine that wraps around any of our Tier 1 analytical models.
+
+```python
+import mlsysim
+from mlsysim.core.dse import DSE
+from mlsysim.core.solver import DistributedModel, EconomicsModel
+from mlsysim.core.pipeline import Pipeline
+```
+
+## 2. Defining the Evaluation Function
+
+First, we need a function that evaluates a given configuration point. We'll use the `Pipeline` we learned about in the previous tutorial to chain performance and economics.
+
+```python
+# Our fixed baseline constants
+model = mlsysim.Models.Language.Llama3_70B
+fleet = mlsysim.Systems.Clusters.Frontier_8K
+
+# The evaluation function accepts a dictionary of parameters and returns a structured object
+def evaluate_config(params):
+    pipe = Pipeline([DistributedModel(), EconomicsModel()])
+
+    return pipe.run(
+        model=model,
+        fleet=fleet,
+        batch_size=params["batch_size"],
+        tp_size=params["tp"],
+        pp_size=params["pp"],
+        precision="fp16",
+        efficiency=0.45,
+        duration_days=30
+    )
+```
+
+## 3. The Declarative Search
+
+Now, rather than writing three nested `for` loops to test `batch_size`, `tp`, and `pp`, we define the `DSE` engine declaratively.
+
+We want to find the configuration that maximizes throughput (measured in tokens/sec).
+
+```python
+# 1. Define the dimensions of your search grid
+space = {
+    "batch_size": [16, 32, 64, 128],
+    "tp": [1, 2, 4, 8],
+    "pp": [1, 2, 4]
+}
+
+# 2. Initialize the Design Space Explorer
+dse = DSE(
+    space=space,
+    objective="maximize: DistributedModel.effective_throughput"
+)
+
+# 3. Search! (Tests all 4 * 4 * 3 = 48 combinations analytically)
+print("Starting search...")
+result = dse.search(evaluate_config)
+
+# 4. Analyze the best configuration
+best_params = result["best_params"]
+best_throughput = result["best_objective"]
+
+print(f"\\nBest Configuration: TP={best_params['tp']}, PP={best_params['pp']}, Batch={best_params['batch_size']}")
+print(f"Max Throughput: {best_throughput:,.0f} tokens/sec")
+```
+
+## 4. Applying SLA Constraints
+
+Often, the configuration that maximizes throughput is completely unfeasible due to memory limits, or it causes latency to spike beyond acceptable limits.
+
+By analyzing the `result["top_candidates"]`, you can enforce SLAs. (The DSE automatically ignores configurations where the Tier 1 models report `feasible = False` due to Out of Memory errors).
+
+```python
+print(f"\\nTop 3 Configurations:")
+print(f"{'TP':>4} | {'PP':>4} | {'Batch':>6} | {'Throughput':>12} | {'Latency':>10}")
+print("-" * 45)
+
+for candidate in result["top_candidates"][:3]:
+    p = candidate["params"]
+    dist_res = candidate["result"]["DistributedModel"]
+
+    throughput = dist_res.effective_throughput.m_as("1/s")
+    latency = dist_res.step_latency_total.m_as("ms")
+
+    print(f"{p['tp']:>4} | {p['pp']:>4} | {p['batch_size']:>6} | {throughput:>12,.0f} | {latency:>10.1f}ms")
+```
+
+## What You Learned
+
+- **Declarative Navigation:** The `DSE` engine separates the *definition* of the search space from the *execution* of the physics models.
+- **Rapid Sweeps:** Because MLSys·im is analytical, searching 48 complex distributed cluster setups takes milliseconds, not hours of profiling.
+- **Constraints & Objectives:** You can optimize for metrics deep within the result payload (like `DistributedModel.effective_throughput` or `EconomicsModel.tco_usd`).
