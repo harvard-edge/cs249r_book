@@ -138,7 +138,7 @@ EMAIL_TO_GITHUB = {
     "sara.khosravi.ds@gmail.com": "Sara-Khosravi",
     "i.j.shapira@gmail.com": "ishapira1",
     "durand.didier@gmail.com": "didier-durand",
-    "gabriel.amazonas.eng@gmail.com": "GabrielAmazonas",
+    "gabriel.amazonas.eng@gmail.com": "oamazonasgabriel",
     "cbanbury@g.harvard.edu": "colbybanbury",
     "zishenwan@g.harvard.edu": "zishenwan",
     "mark@markmaz.com": "mmaz",
