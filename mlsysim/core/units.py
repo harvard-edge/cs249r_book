@@ -35,7 +35,7 @@ __all__ = [
 ]
 
 ureg = pint.UnitRegistry()
-ureg.default_format = "~P"           # compact Pretty: "312 TFLOPs/s" not "312.0 teraFLOPs / second"
+ureg.formatter.default_format = "~P"           # compact Pretty: "312 TFLOPs/s" not "312.0 teraFLOPs / second"
 pint.set_application_registry(ureg)  # canonical registry for the whole mlsysim package
 Q_ = ureg.Quantity
 

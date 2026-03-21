@@ -1,0 +1,86 @@
+name: '🧮 MLSYSIM · 📑 Update PDFs'
+
+# =============================================================================
+# PDF-Only Update Workflow for MLSYSIM
+# =============================================================================
+# Rebuilds and deploys the research paper PDF without touching the website.
+# Use this when you only need to update the paper PDF on the live site.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-paper:
+    name: '📄 Build Research Paper'
+    uses: ./.github/workflows/mlsysim-build-pdfs.yml
+    with:
+      ref: dev
+
+  deploy-pdf:
+    name: '🚀 Deploy PDF to gh-pages'
+    runs-on: ubuntu-latest
+    needs: [build-paper]
+    if: needs.build-paper.result == 'success'
+
+    steps:
+      - name: 📥 Checkout gh-pages
+        uses: actions/checkout@v6
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: 📥 Download Paper PDF
+        uses: actions/download-artifact@v7
+        with:
+          name: MLSYSIM-Paper
+          path: ./artifacts/paper
+
+      - name: 📁 Update PDF in gh-pages
+        run: |
+          cd gh-pages
+
+          # Place PDF where the docs site expects it
+          DEST="${{ vars.DEV_MLSYSIM_PATH }}"
+          mkdir -p "$DEST"
+
+          if [ -f ../artifacts/paper/paper.pdf ]; then
+            cp ../artifacts/paper/paper.pdf "$DEST/mlsysim-paper.pdf"
+            echo "✅ Updated mlsysim-paper.pdf in $DEST/"
+          else
+            echo "❌ Paper PDF not found in artifacts"
+            exit 1
+          fi
+
+          echo ""
+          echo "📦 Updated files:"
+          ls -la "$DEST/mlsysim-paper.pdf"
+
+      - name: 🚀 Push to gh-pages
+        working-directory: gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add .
+          git commit -m "📄 Update MLSYSIM paper PDF" || echo "No changes to commit"
+          git push origin gh-pages
+
+  summary:
+    name: '📊 Summary'
+    runs-on: ubuntu-latest
+    needs: [build-paper, deploy-pdf]
+    if: always()
+
+    steps:
+      - name: 📊 Generate Summary
+        run: |
+          echo "## 🧮 MLSYSIM PDF Update" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 📄 Build Paper | ${{ needs.build-paper.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🚀 Deploy PDF | ${{ needs.deploy-pdf.result }} |" >> $GITHUB_STEP_SUMMARY

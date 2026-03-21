@@ -18,15 +18,24 @@ A single-layer perceptron for binary classification, demonstrating:
 - **Part 1 (Forward Only):** Run after Module 04 (building blocks)
 - **Part 2 (Trained):** Run after Module 08 (training capability)
 
-| Module | Component | What It Provides |
-|--------|-----------|------------------|
-| Module 01 | Tensor | YOUR data structure |
-| Module 02 | Activations | YOUR sigmoid activation |
-| Module 03 | Layers | YOUR Linear layer |
-| Module 04 | Losses | YOUR loss functions |
-| Module 06 | Autograd | YOUR automatic differentiation (Part 2 only) |
-| Module 07 | Optimizers | YOUR SGD optimizer (Part 2 only) |
-| Module 08 | Training | YOUR end-to-end training loop (Part 2 only) |
+<table>
+<thead>
+<tr>
+<th width="25%"><b>Module</b></th>
+<th width="25%">Component</th>
+<th width="50%">What It Provides</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>Module 01</b></td><td>Tensor</td><td>YOUR data structure</td></tr>
+<tr><td><b>Module 02</b></td><td>Activations</td><td>YOUR sigmoid activation</td></tr>
+<tr><td><b>Module 03</b></td><td>Layers</td><td>YOUR Linear layer</td></tr>
+<tr><td><b>Module 04</b></td><td>Losses</td><td>YOUR loss functions</td></tr>
+<tr><td><b>Module 06</b></td><td>Autograd</td><td>YOUR automatic differentiation (Part 2 only)</td></tr>
+<tr><td><b>Module 07</b></td><td>Optimizers</td><td>YOUR SGD optimizer (Part 2 only)</td></tr>
+<tr><td><b>Module 08</b></td><td>Training</td><td>YOUR end-to-end training loop (Part 2 only)</td></tr>
+</tbody>
+</table>
 
 ## Milestone Structure
 
@@ -54,10 +63,19 @@ This milestone uses **progressive revelation** with 2 scripts:
 
 ## Expected Results
 
-| Script | Accuracy | What It Shows |
-|--------|----------|---------------|
-| 01 (Forward Only) | ~50% | Random weights = random guessing |
-| 02 (Trained) | 95%+ | Training learns the pattern |
+<table>
+<thead>
+<tr>
+<th width="30%"><b>Script</b></th>
+<th width="20%">Accuracy</th>
+<th width="50%">What It Shows</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>01 (Forward Only)</b></td><td>~50%</td><td>Random weights = random guessing</td></tr>
+<tr><td><b>02 (Trained)</b></td><td>95%+</td><td>Training learns the pattern</td></tr>
+</tbody>
+</table>
 
 ## Key Learning: Forward Pass ≠ Intelligence
 

@@ -22,6 +22,52 @@ jobs:
       - name: 📥 Checkout
         uses: actions/checkout@v6
 
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 📦 Install dependencies & build mlsysim wheel
+        run: |
+          pip install build marimo
+          pip install -r labs/requirements.txt
+          pip install mlsysim/
+          cd mlsysim && python3 -m build --wheel
+
+      - name: 🔮 Export labs as WASM HTML
+        run: |
+          mkdir -p labs/_wasm_build/wheels
+          cp mlsysim/dist/mlsysim-*.whl labs/_wasm_build/wheels/
+
+          EXPECTED=0
+          EXPORTED=0
+          FAILED=""
+
+          for vol in vol1 vol2; do
+            mkdir -p "labs/_wasm_build/${vol}"
+            for lab in labs/${vol}/lab_*.py; do
+              name=$(basename "$lab" .py)
+              EXPECTED=$((EXPECTED + 1))
+              echo "  Exporting ${vol}/${name}..."
+              if marimo export html-wasm "$lab" \
+                -o "labs/_wasm_build/${vol}/${name}/index.html" \
+                --mode run \
+                --no-show-code; then
+                EXPORTED=$((EXPORTED + 1))
+              else
+                echo "❌ FAILED to export ${vol}/${name}"
+                FAILED="${FAILED} ${vol}/${name}"
+              fi
+            done
+          done
+
+          echo ""
+          echo "📊 WASM Export Summary: ${EXPORTED}/${EXPECTED} notebooks exported"
+          if [ -n "$FAILED" ]; then
+            echo "❌ Failed exports:${FAILED}"
+            exit 1
+          fi
+
       - name: 🔧 Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
@@ -30,6 +76,19 @@ jobs:
         run: |
           quarto render
           touch _build/.nojekyll
+
+          # Merge WASM exports AFTER Quarto render so they overwrite any fallback
+          cp -r _wasm_build/vol1 _build/vol1
+          cp -r _wasm_build/vol2 _build/vol2
+          cp -r _wasm_build/wheels _build/wheels
+
+          # Verify WASM notebooks are in place
+          WASM_COUNT=$(find _build/vol1 _build/vol2 -name "index.html" | wc -l)
+          echo "📊 WASM notebooks in final build: ${WASM_COUNT}"
+          if [ "$WASM_COUNT" -lt 10 ]; then
+            echo "❌ Too few WASM notebooks in build output (expected 33, got ${WASM_COUNT})"
+            exit 1
+          fi
 
       - name: 🚀 Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4

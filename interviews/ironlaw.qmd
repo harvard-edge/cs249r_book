@@ -1,0 +1,184 @@
+---
+title: "The IronLaw Assessment Engine"
+sidebar: false
+toc: false
+page-layout: custom
+execute:
+  echo: false
+format:
+  html:
+    css: assets/styles/style.css
+    theme:
+      light:
+        - default
+      dark:
+        - default
+        - assets/styles/dark-mode.scss
+---
+
+:::{.column-screen .engine-container}
+
+```{ojs}
+// We load the data directly from the parsed JSON
+questions = FileAttachment("questions.json").json()
+
+// State
+mutable active_track = null
+mutable current_q = null
+mutable chat = []
+mutable user_input = ""
+mutable is_evaluating = false
+```
+
+```{ojs}
+// ---------------------------------------------------------
+// VIEW: LANDING PAGE (Select Track)
+// ---------------------------------------------------------
+viewof landing_page = {
+  if (active_track !== null) return html`<div></div>`;
+
+  return html`
+    <div class="landing-view">
+      <div class="hero">
+        <h1>Welcome to the Assessment Engine</h1>
+        <p>Test your mechanical sympathy against production ML systems scenarios.</p>
+      </div>
+      <div class="track-grid">
+        <div class="track-card" onclick=${() => mutable active_track = "Cloud"}>
+          <h3>☁️ Cloud</h3>
+          <p>Data center scale. Memory bandwidth and network fabrics.</p>
+        </div>
+        <div class="track-card" onclick=${() => mutable active_track = "Edge"}>
+          <h3>🤖 Edge</h3>
+          <p>Thermal limits and hard real-time latency deadlines.</p>
+        </div>
+        <div class="track-card" onclick=${() => mutable active_track = "Mobile"}>
+          <h3>📱 Mobile</h3>
+          <p>Battery drain, shared memory, and SoC architectures.</p>
+        </div>
+        <div class="track-card" onclick=${() => mutable active_track = "TinyML"}>
+          <h3>🔬 TinyML</h3>
+          <p>Microcontrollers. Strict SRAM limits and integer math.</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+```
+
+```{ojs}
+// ---------------------------------------------------------
+// VIEW: ARENA (The Socratic Chat)
+// ---------------------------------------------------------
+
+// Helper to draw a random question from the selected track
+function drawQuestion(track) {
+    const subset = questions.filter(q => q.track === track);
+    if(subset.length === 0) return null;
+    return subset[Math.floor(Math.random() * subset.length)];
+}
+
+// Watch active_track. If it changes from null to something, init.
+{
+  if (active_track !== null && current_q === null) {
+      mutable current_q = drawQuestion(active_track);
+      mutable chat = [
+        {role: 'system', text: `You are entering a ${active_track} engineering assessment.`},
+        {role: 'assistant', text: `Please read the scenario on the left. What is your initial diagnosis?`}
+      ];
+  }
+}
+
+viewof arena = {
+  if (active_track === null || current_q === null) return html`<div></div>`;
+
+  // Determine badge color
+  let lvl_class = "lvl-l3";
+  let lvl_text = current_q.level.toLowerCase();
+  if (lvl_text.includes("l4")) lvl_class = "lvl-l4";
+  if (lvl_text.includes("l5")) lvl_class = "lvl-l5";
+  if (lvl_text.includes("l6")) lvl_class = "lvl-l6";
+
+  const container = html`
+    <div class="arena">
+      <div class="arena-header">
+        <div class="arena-title">${active_track} Track Assessment</div>
+        <button class="btn-quit" onclick=${() => {
+            mutable active_track = null;
+            mutable current_q = null;
+        }}>Return to Hub</button>
+      </div>
+
+      <div class="arena-body">
+
+        <!-- LEFT: Scenario -->
+        <div class="pane-scenario">
+          <span class="badge ${lvl_class}">${current_q.level}</span>
+          <h2>${current_q.title}</h2>
+          <div class="prompt">
+            <b>Interviewer:</b> "${current_q.prompt}"
+          </div>
+        </div>
+
+        <!-- RIGHT: Interactive Chat -->
+        <div class="pane-chat">
+          <div class="chat-log" id="chat-log">
+             ${chat.map(m => `
+                <div class="chat-row ${m.role}">
+                    <div class="bubble">${m.text}</div>
+                </div>
+             `).join('')}
+             ${is_evaluating ? `<div class="chat-row assistant"><div class="bubble typing">Assessing logic...</div></div>` : ''}
+          </div>
+
+          <div class="chat-input-area">
+             <textarea id="answer-input" placeholder="Type your diagnosis or napkin math..."></textarea>
+             <button id="btn-submit">Submit</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  `;
+
+  // Handle Submit
+  setTimeout(() => {
+    const btn = container.querySelector('#btn-submit');
+    const input = container.querySelector('#answer-input');
+    const log = container.querySelector('#chat-log');
+
+    if(log) log.scrollTop = log.scrollHeight;
+
+    if(btn) {
+        btn.onclick = () => {
+            const val = input.value.trim();
+            if(!val) return;
+
+            mutable chat = [...chat, {role: 'user', text: val}];
+            input.value = '';
+            mutable is_evaluating = true;
+
+            // Simulate the LLM delay
+            setTimeout(() => {
+                let expert = current_q.answer
+                  .replace(/\*\*Common Mistake:\*\*/g, "🚨 <b>Common Mistake:</b>")
+                  .replace(/\*\*Realistic Solution:\*\*/g, "✅ <b>Realistic Solution:</b>")
+                  .replace(/> \*\*Napkin Math:\*\*/g, "🧮 <b>Napkin Math:</b>");
+
+                let reply = `<b>Assessment complete.</b> Here is the Architect's benchmark:<br><br><div class="expert-box">${expert}</div>`;
+
+                mutable chat = [...chat, {role: 'assistant', text: reply}];
+                mutable is_evaluating = false;
+
+                if(log) setTimeout(() => log.scrollTop = log.scrollHeight, 50);
+
+            }, 1000);
+        };
+    }
+  }, 50);
+
+  return container;
+}
+```
+
+:::

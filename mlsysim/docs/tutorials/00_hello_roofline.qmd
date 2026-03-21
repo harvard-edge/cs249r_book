@@ -115,19 +115,23 @@ from mlsysim import Engine
 Pull vetted specifications from the **MLSys Zoo** — no need to search datasheets.
 
 ```{python}
+from mlsysim.show import table, info
+
 # ResNet-50: 25M parameters, ~4.1 GFLOP per inference (counting multiply-accumulate as 1 FLOP)
 model = mlsysim.Models.ResNet50
 
 # NVIDIA A100: 312 TFLOP/s (FP16), 2.0 TB/s HBM2e, 80 GB
 hardware = mlsysim.Hardware.Cloud.A100
 
-print(f"Model:      {model.name} ({model.architecture})")
-print(f"Parameters: {model.parameters}")
-print(f"FLOPs/inf:  {model.inference_flops}")
-print()
-print(f"Hardware:   {hardware.name}")
-print(f"Peak FP16:  {hardware.compute.peak_flops.to('TFLOPs/s'):.0f}")
-print(f"HBM BW:     {hardware.memory.bandwidth.to('TB/s'):.1f}")
+info("Model",
+     Name=f"{model.name} ({model.architecture})",
+     Parameters=model.parameters,
+     FLOPs_per_inf=model.inference_flops)
+
+info("Hardware",
+     Name=hardware.name,
+     Peak_FP16=hardware.compute.peak_flops.to('TFLOPs/s'),
+     HBM_BW=hardware.memory.bandwidth.to('TB/s'))
 ```
 
 ---
@@ -146,9 +150,9 @@ profile = Engine.solve(
     precision="fp16"       # Half-precision (16-bit floating point)
 )
 
-print(f"Bottleneck:  {profile.bottleneck}")
-print(f"Latency:     {profile.latency.to('ms'):~.3f}")
-print(f"Throughput:  {profile.throughput:.0f} images/sec")
+info(Bottleneck=profile.bottleneck,
+     Latency=profile.latency.to('ms'),
+     Throughput=f"{profile.throughput:.0f} images/sec")
 ```
 
 At batch size 1, ResNet-50 performs ~4.1 GFLOP but must load ~50 MB of weights (25M params × 2 bytes). That gives an arithmetic intensity of ~82 FLOP/byte — close to the A100's ridge point of ~156 FLOP/byte. At this operating point, the two ceilings are nearly balanced, and the bottleneck label depends on exact assumptions. The important takeaway: **most of the A100's 312 TFLOP/s is idle** — you need larger batches to exploit it.
@@ -178,9 +182,7 @@ Now let's increase the batch size and see when the bottleneck changes. More imag
 batch means more computation per weight load — which increases arithmetic intensity.
 
 ```{python}
-print(f"{'Batch':>6}  {'Bottleneck':<16}  {'Throughput':>12}  {'Latency':>10}")
-print("-" * 52)
-
+rows = []
 for batch in [1, 4, 16, 32, 64, 128, 256]:
     p = Engine.solve(
         model=model,
@@ -188,11 +190,19 @@ for batch in [1, 4, 16, 32, 64, 128, 256]:
         batch_size=batch,
         precision="fp16"
     )
-    print(
-        f"{batch:>6}  {p.bottleneck:<16}  "
-        f"{p.throughput:>10.0f}/s  "
-        f"{p.latency.to('ms').magnitude:>8.2f} ms"
-    )
+    rows.append([batch, p.bottleneck, f"{p.throughput:.0f}/s", p.latency.to('ms')])
+
+table(["Batch", "Bottleneck", "Throughput", "Latency"], rows)
+```
+
+We can visualize this transition on the Roofline model. Notice where the model sits relative to the "ridge point" (the crossover between memory-bound and compute-bound regimes).
+
+```{python}
+from mlsysim.viz.plots import plot_roofline
+
+# The plot_roofline function takes the hardware node and a list of workloads
+fig, ax = plot_roofline(hardware, workloads=[model])
+fig.show()
 ```
 
 ::: {.callout-important}

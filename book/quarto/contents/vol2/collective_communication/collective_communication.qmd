@@ -34,7 +34,7 @@ Computation scales by adding processors; communication scales by moving data bet
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Apply the **$\alpha$-$\beta$ model** to quantify when communication becomes the dominant bottleneck by deriving the bandwidth and latency bounds for distributed training at different cluster scales.
+- Apply the **$\alpha$-$\beta$ model** to quantify *when* communication becomes the dominant bottleneck by deriving the bandwidth and latency bounds for distributed training at different cluster scales.
 - Compare **AllReduce** algorithms (ring, tree, hierarchical) by analyzing their time complexity and identifying the crossover points where each becomes optimal based on message size and cluster scale.
 - Select appropriate **collective primitives** (**AllReduce**, **AlltoAll**, **AllGather**, **ReduceScatter**) for different model architectures by matching communication patterns to workload requirements.
 - Evaluate **gradient compression** techniques by analyzing bandwidth reduction versus convergence impact trade-offs for quantization, sparsification, and error feedback mechanisms.
@@ -49,7 +49,7 @@ When 10,000 GPUs need to agree on a single weight update, they do not simply bro
 
 The parallelism strategies introduced in @sec-distributed-training-systems (data parallelism, model parallelism, and pipeline parallelism) all share a common assumption: workers can exchange data efficiently. That assumption hides what becomes the dominant engineering challenge at scale.
 
-The gap between that assumption and reality reveals a fundamental asymmetry in how computation and communication scale. Computation is inherently local: each GPU operates on its own data independently, so adding GPUs increases aggregate compute capacity proportionally. Communication, however, is inherently global: ensuring all GPUs converge on the same synchronized state requires information to traverse physical distances between them. Adding more independent workers scales local work linearly, but coordinating those workers requires moving data across physical space. The most critical instance of this coordination is *gradient synchronization*.
+The gap between that assumption and reality reveals a fundamental asymmetry in *how* computation and communication scale. Computation is inherently local: each GPU operates on its own data independently, so adding GPUs increases aggregate compute capacity proportionally. Communication, however, is inherently global: ensuring all GPUs converge on the same synchronized state requires information to traverse physical distances between them. Adding more independent workers scales local work linearly, but coordinating those workers requires moving data across physical space. The most critical instance of this coordination is *gradient synchronization*.
 
 ::: {.callout-definition title="Gradient Synchronization"}
 
@@ -106,12 +106,11 @@ These three constraints interact multiplicatively. Latency sets the floor for ev
 # │ How: α-β model: T = 2(N-1)α + 2(N-1)/N × M/β; bare arithmetic (no pint)
 # │      because this is a step-by-step pedagogical trace.
 # │
-# │ Imports: mlsysim.fmt (check); mlsysim.core.constants (INFINIBAND_NDR_BW, GB, second)
+# │ Imports: mlsysim.book (check)
 # │ Exports: gradient_size_gb_str, ring_bw_time_ms_str, ring_lat_time_ms_str,
 # │          ring_total_ms_str, n_gpus_napkin_str, ring_bw_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check
-from mlsysim.core.constants import INFINIBAND_NDR_BW, GB, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AllReduceCost:
@@ -124,7 +123,7 @@ class AllReduceCost:
     llama_params_b = 70
     bytes_per_param = 4 # FP32 gradients
     n_gpus = 64
-    ib_bw_gbs = (INFINIBAND_NDR_BW / 8).m_as(GB/second)  # GB/s NDR 400G per port
+    ib_bw_gbs = 50 # GB/s NDR 400G per port
     alpha_us = 3 # microseconds
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
@@ -266,10 +265,12 @@ ax.set_yticklabels(gpu_counts, fontsize=9)
 ax.set_xlabel('Fraction of Training Step (%)')
 ax.set_xlim(0, 105)
 ax.invert_yaxis()
+ax.set_ylim(len(gpu_counts)-0.5, -0.7) # <-- space above top bar
 ax.legend(loc='upper right', fontsize=8, ncol=3)
 
 plt.tight_layout()
 plt.show()
+plt.close()
 ```
 
 :::
@@ -493,12 +494,12 @@ class LogPOverlap:
 
 **Effective time**: max(`{python} LogPOverlap.compute_str`, `{python} LogPOverlap.L_str` + `{python} LogPOverlap.two_o_str`) = `{python} LogPOverlap.effective_str` $\mu$s (communication hidden!). @fig-comm-compute-overlap shows this overlap visually.
 
-::: {#fig-comm-compute-overlap fig-env="figure" fig-pos="htb" fig-cap="**Communication-Computation Overlap**. By pipelining collective operations with the backward pass, systems can hide network latency behind arithmetic execution. Overlap is successful only when the non-overlappable overhead ($o$) is minimized, allowing the bulk of the transfer ($L$) to proceed while the GPU computes the next layer's gradients." fig-alt="Timeline diagram showing overlapping Compute and Communication bars. Computation for layer N overlaps with Communication for layer N-1."}
-![](images/svg/comm-compute-overlap.svg){width=100%}
-:::
-
 **The Systems Insight**: The α-β model captures the total communication time. The LogP model reveals **how much of it can be hidden**. When designing pipelined training, optimize for low $o$ (kernel bypass, GPUDirect) rather than high $\beta$ alone.
 
+:::
+
+::: {#fig-comm-compute-overlap fig-env="figure" fig-pos="htb" fig-cap="**Communication-Computation Overlap**. By pipelining collective operations with the backward pass, systems can hide network latency behind arithmetic execution. Overlap is successful only when the non-overlappable overhead ($o$) is minimized, allowing the bulk of the transfer ($L$) to proceed while the GPU computes the next layer's gradients." fig-alt="Timeline diagram showing overlapping Compute and Communication bars. Computation for layer N overlaps with Communication for layer N-1."}
+![](images/svg/comm-compute-overlap.svg){width=100%}
 :::
 
 The choice between models depends on the analysis context:
@@ -528,13 +529,12 @@ The alpha-beta model becomes most valuable when applied to real training configu
 # │ How: α-β model applied per tier: NVLink ReduceScatter → IB Ring → NVLink
 # │      AllGather; comm-to-compute ratio computed for both strategies.
 # │
-# │ Imports: mlsysim.core.constants (NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second)
+# │ Imports: (none from mlsys — bare arithmetic for pedagogical clarity)
 # │ Exports: gradient_bf16_gb_str, intra_rs_time_ms_str, inter_payload_gb_str,
 # │          inter_ring_bw_time_ms_str, inter_ring_lat_time_ms_str,
 # │          intra_ag_time_ms_str, hier_total_llama_ms_str, flat_total_ms_str,
 # │          ccr_hier_str, ccr_flat_str, n_gpus_llama_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second
 
 class LlamaBudgetCalc:
     """Hierarchical vs. flat Ring AllReduce timing budget for a 70B model on 128 GPUs."""
@@ -545,9 +545,9 @@ class LlamaBudgetCalc:
     param_count_b       = 70
     gradient_bf16_gb    = param_count_b * 2   # 140 GB in BF16
 
-    nvlink_bw   = NVLINK_H100_BW.m_as(GB/second)        # GB/s
+    nvlink_bw   = 900    # GB/s
     nvlink_alpha = 1.5   # us
-    ib_bw        = (INFINIBAND_NDR_BW / 8).m_as(GB/second)  # GB/s per port
+    ib_bw        = 50    # GB/s per port
     ib_alpha     = 3     # us
     compute_per_step_ms = 200  # approximate for illustration
 
@@ -573,6 +573,10 @@ class LlamaBudgetCalc:
 
     ccr_hier = hier_total_llama_ms / compute_per_step_ms
     ccr_flat = flat_total_ms / compute_per_step_ms
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(flat_total_ms > hier_total_llama_ms, "Flat AllReduce should be much slower than Hierarchical")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gradient_bf16_gb_str       = f"{gradient_bf16_gb}"
@@ -1032,13 +1036,30 @@ ax.loglog(message_sizes, t_ring_ms, label='Ring (Bandwidth Optimal)', color='#e7
 ax.loglog(message_sizes, t_tree_ms, label='Tree (Latency Optimal)', color='#2ecc71', linewidth=2.5, linestyle='--')
 ax.loglog(message_sizes, t_dbt_ms, label='Double Binary Tree (Hybrid)', color='#3498db', linewidth=2.5, linestyle='-.')
 
-ax.text(2e3, 5e-1, 'Latency Dominated\n(Tree wins)', fontsize=10, color='#555555')
-ax.text(1e9, 1e2, 'Bandwidth Dominated\n(Ring wins)', fontsize=10, color='#555555', ha='right')
+ax.text(
+    8e3, 1.6e-1,
+    'Latency Dominated\n(Tree wins)',
+    fontsize=10,
+    color='#555555',
+    ha='center',
+    bbox=dict(facecolor='white', alpha=0.7, edgecolor='none')
+)
+ax.text(3e7, 2e2,
+        'Bandwidth Dominated\n(Ring wins)',
+        fontsize=10,
+        color='#555555',
+        bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'),
+        ha='center')
 
 ax.set_xlabel('Message Size (Bytes)', fontsize=12)
 ax.set_ylabel('AllReduce Time (ms)', fontsize=12)
 ax.set_title('AllReduce Algorithm Performance Crossover (N=256)', fontsize=14, pad=15)
-ax.legend(fontsize=11)
+ax.legend(
+    loc='upper left',
+    fontsize=8,
+    facecolor='white',
+    frameon=True
+)
 ax.grid(True, which="both", ls="-", alpha=0.3)
 
 ax.set_xticks([1e3, 1e6, 1e9])
@@ -1212,6 +1233,10 @@ class CommInfraScenario:
     nvlink_gbs = nvlink_raw.m_as(GB/second)
     ib_gbs = (ib_ndr_raw / 8).m_as(GB/second)
 
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(nvlink_gbs > ib_gbs, "NVLink bandwidth should exceed InfiniBand bandwidth")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvlink_h100_bw_gbs = f"{nvlink_gbs:.0f}"
     ib_ndr_bw_gbs = f"{ib_gbs:.0f}"
@@ -1269,12 +1294,11 @@ The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node)
 # │ How: Flat: T = 2M/β_IB; Hierarchical: T = T_rs + T_inter + T_ag with
 # │      NVLink for intra-node phases and IB for inter-node phase.
 # │
-# │ Imports: mlsysim.core.constants (NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second)
+# │ Imports: (none from mlsys — bare arithmetic for pedagogical clarity)
 # │ Exports: flat_time_ms_str, intra_data_mb_str, intra_rs_ms_str,
 # │          inter_data_mb_str, inter_time_ms_str, intra_ag_ms_str,
 # │          hier_total_ms_str, speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second
 
 class HierarchicalAllreduceCalc:
     """Flat vs. 3-step hierarchical AllReduce timing for a 1 GB gradient on 64 GPUs."""
@@ -1282,8 +1306,8 @@ class HierarchicalAllreduceCalc:
     n_nodes_har    = 8
     gpus_per_node  = 8
     gradient_gb    = 1       # 1 GB gradient buffer
-    ib_bw_gbs      = (INFINIBAND_NDR_BW / 8).m_as(GB/second)  # InfiniBand GB/s
-    nvlink_bw_gbs  = NVLINK_H100_BW.m_as(GB/second)           # NVLink GB/s
+    ib_bw_gbs      = 50      # InfiniBand GB/s
+    nvlink_bw_gbs  = 900     # NVLink GB/s
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     flat_data_gb  = 2 * gradient_gb   # bandwidth-optimal Ring sends ~2×
@@ -1299,6 +1323,10 @@ class HierarchicalAllreduceCalc:
 
     hier_total_ms = intra_rs_ms + inter_time_ms + intra_ag_ms
     speedup       = flat_time_ms / hier_total_ms
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(speedup > 1.0, "Hierarchical should be faster than Flat AllReduce")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     flat_time_ms_str  = f"{flat_time_ms:.0f}"
@@ -1338,9 +1366,7 @@ class HierarchicalAllreduceCalc:
 
 These three phases confine most traffic within each node before crossing the slower inter-node fabric.
 
-::: {.callout-note title="Hierarchical AllReduce Phases"}
-![](images/svg/hierarchical-allreduce.svg){width=100%}
-:::
+<!--
   % Node 0
   \node[nodebox] (n0) at (0,0) {};
   \node[font=\footnotesize\bfseries] at (0, -1.8) {Node 0};
@@ -1391,8 +1417,8 @@ These three phases confine most traffic within each node before crossing the slo
 
 \end{tikzpicture}
 ```
-
 :::
+-->
 
 The hierarchical approach generalizes beyond two levels. Large clusters with multiple racks connected through spine switches introduce a third bandwidth tier (rack-to-rack at reduced bisection bandwidth). The following exercise extends the two-level analysis to quantify the impact of this additional hierarchy.
 
@@ -1411,13 +1437,12 @@ The hierarchical approach generalizes beyond two levels. Large clusters with mul
 # │ How: α-β model per tier; each level reduces payload by GPUs-per-unit before
 # │      crossing the next, slower boundary (oversubscription ratio 2:1).
 # │
-# │ Imports: mlsysim.core.constants (NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second)
+# │ Imports: (none from mlsys — bare arithmetic for pedagogical clarity)
 # │ Exports: total_gpus_3l_str, gradient_3l_gb_str, step1_payload_gb_str,
 # │          step1_time_ms_str, step2_payload_gb_str, step2_ring_bw_ms_str,
 # │          step3_payload_gb_str, step3_ring_bw_ms_str, total_3l_ms_str,
 # │          flat_3l_ms_str, reduction_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second
 
 class ThreeLevelNapkin:
     """3-tier hierarchical AllReduce budget for a 128-GPU rack-scale cluster."""
@@ -1429,8 +1454,8 @@ class ThreeLevelNapkin:
     total_gpus_3l  = n_racks * nodes_per_rack * gpus_per_node_3l
 
     gradient_3l_gb = 2    # 2 GB gradient (BF16 for a ~250B model)
-    nvlink_bw_3l   = NVLINK_H100_BW.m_as(GB/second)           # GB/s
-    ib_bw_3l       = (INFINIBAND_NDR_BW / 8).m_as(GB/second)  # GB/s per port
+    nvlink_bw_3l   = 900  # GB/s
+    ib_bw_3l       = 50   # GB/s per port
     cross_rack_bw  = 25   # GB/s effective (50/2 oversubscription)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -1450,6 +1475,10 @@ class ThreeLevelNapkin:
     total_3l_ms      = 2 * step1_time_ms + 2 * step2_ring_bw_ms + step3_ring_bw_ms
     flat_3l_ms       = 2 * gradient_3l_gb / cross_rack_bw * 1000
     reduction_factor = gradient_3l_gb / step3_payload_gb
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(flat_3l_ms > total_3l_ms, "Flat 3L should be much slower than Total 3L")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     total_gpus_3l_str    = f"{total_gpus_3l}"
@@ -1927,6 +1956,10 @@ class OverlapBudgetCalc:
     )
     overlap_savings_pct = (1 - with_overlap_ms / no_overlap_ms) * 100
 
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsysim.fmt import check
+    check(no_overlap_ms > with_overlap_ms, "No overlap should take longer than with overlap")
+
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     total_backward_ms_str      = f"{total_backward_ms}"
     allreduce_per_layer_ms_str = f"{allreduce_per_layer_ms:.0f}"
@@ -1960,13 +1993,12 @@ The combination of hierarchical AllReduce (reducing the volume of data to commun
 #| label: napkin-overlap-calc
 #| echo: false
 from mlsysim.fmt import check
-from mlsysim.core.constants import NVLINK_H100_BW, GB, second
 
 class NapkinOverlap:
     # ┌── 1. LOAD ──────────────────────────────────────────
     params_b = 70
     bytes_per_param = 2       # FP16
-    nvlink_bw_gbs = NVLINK_H100_BW.m_as(GB/second)
+    nvlink_bw_gbs = 900
     compute_s = 2.1
     # ┌── 2. EXECUTE ───────────────────────────────────────
     gradient_gb = params_b * bytes_per_param

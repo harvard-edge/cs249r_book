@@ -38,7 +38,6 @@ By the end of this module, you will:
 
 Let's add intelligence to your tensors!
 """
-
 # %% [markdown]
 """
 ## 📦 Where This Code Lives in the Final Package
@@ -92,6 +91,7 @@ If you see import errors, ensure you've run `tito export` after completing Modul
 
 import numpy as np
 from typing import Optional
+import warnings
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor
@@ -281,10 +281,15 @@ def test_unit_sigmoid():
     assert np.all(result.data > 0) and np.all(result.data < 1), "All sigmoid outputs should be in (0, 1)"
 
     # Test specific values
+    # Temporarily sppress overflow warning, expected
+    warnings.filterwarnings('ignore', category=RuntimeWarning)
+    print("Suppressed expected warning about exp overflow...")
+
     x = Tensor([-1000, 1000])  # Extreme values
     result = sigmoid.forward(x)
     assert np.allclose(result.data[0], 0, atol=TOLERANCE), "sigmoid(-∞) should approach 0"
     assert np.allclose(result.data[1], 1, atol=TOLERANCE), "sigmoid(+∞) should approach 1"
+    warnings.filterwarnings('default', category=RuntimeWarning)
 
     print("✅ Sigmoid works correctly!")
 

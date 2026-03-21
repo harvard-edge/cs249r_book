@@ -1,0 +1,1867 @@
+% =============================================================================
+% Chapter 1: Introduction — ML Systems Lecture Slides (Gold Standard)
+% =============================================================================
+% This deck is the reference template for all other chapters.
+% Expert-reviewed: Patterson x2, Dean, Education x2, Gemini.
+%
+% IMAGES NEEDED (generate SVGs, convert to PDF):
+%   - dam-taxonomy.pdf        - iron-law-visual.pdf
+%   - sw1-vs-sw2.pdf          - five-percent-problem.pdf
+%   - verification-gap.pdf    - ai-eras-timeline.pdf
+%   - compute-growth.pdf      - silent-failure.pdf
+%   - degradation-curve.pdf   - deployment-spectrum.pdf
+%   - amdahls-pipeline.pdf    - vit-vs-resnet.pdf
+%   - resnet-bottleneck.pdf   - monitoring-dashboard.pdf
+%   - data-center.jpg         - nvidia-a100.png
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume   = {Volume I},
+  chapter  = {Chapter 1},
+  logo = {../../assets/img/logo-mlsysbook.png},
+  instlogo = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Introduction},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\DAM}{D\raisebox{0.08em}{\tiny$\bullet$}A\raisebox{0.08em}{\tiny$\bullet$}M}
+
+% --- Helper: safe image include (compiles even if image missing) ---
+% Note: \IfFileExists does NOT respect \graphicspath, so we check images/ explicitly
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{8}
+
+\title{Introduction}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Introduction}{The Physics of AI Engineering}{cover_introduction.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{
+% -- NARRATE: Read through objectives aloud. ``This chapter establishes the
+% analytical vocabulary for the entire course. By the end, you will have three
+% diagnostic tools---D-A-M, the Iron Law, and the Degradation Equation---that
+% we will use in every single chapter.''
+% Ask: ``How many of you have trained a model but never thought about the
+% hardware it runs on?''
+%
+% -- FLEX: [CORE] Sets the learning contract for the chapter.
+% IF SHORT: Display objectives without reading each one; ask the hand-raise
+% question to establish engagement.
+}
+
+\small
+\begin{enumerate}
+  \item Explain the \textbf{AI Triad} and apply the \textbf{\DAM{} taxonomy}
+  \item Trace AI's evolution and explain the \textbf{Bitter Lesson}
+  \item Distinguish ML systems from traditional software
+  \item Apply the \textbf{Iron Law of ML Systems} to decompose performance
+  \item Identify how \textbf{Lighthouse Models} stress-test bottlenecks
+  \item Apply the \textbf{Degradation Equation} to reason about drift
+  \item Define \textbf{AI Engineering} and the \textbf{efficiency framework}
+  \item Apply the \textbf{five-pillar framework} to organize ML engineering
+\end{enumerate}
+
+\end{frame}
+
+\begin{frame}{Visual Language}
+\note{
+% -- NARRATE: Walk through each card. ``Blue means compute---anytime you see
+% blue in a diagram, think GPU ops, matrix multiplies, forward pass. Green is
+% data flow---memory, caches, healthy paths. Orange is routing---schedulers,
+% load balancers. Red is cost, error, or bottleneck.'' Point to each card as
+% you name it.
+%
+% -- FLEX: [CORE] Show on Day 1 and again briefly on Day 2.
+% IF SHORT: Display the slide but do not narrate---students can read the cards.
+}
+
+\small
+Throughout this course, colors carry meaning:
+
+\vspace{0.3cm}
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Blue} --- Compute / Processing\\
+    {\footnotesize GPU ops, forward/backward pass, inference}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Green} --- Data / Memory\\
+    {\footnotesize Data flow, caches, healthy paths}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Orange} --- Routing / Scheduling\\
+    {\footnotesize Load balancers, batch windows}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Red} --- Error / Cost / Bottleneck\\
+    {\footnotesize Loss, decode phase, waste}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\end{frame}
+
+
+% =============================================================================
+\section{The AI Moment}
+% =============================================================================
+
+\begin{frame}{The AI Moment}
+\note{
+% -- LINK: Learning objectives promised students would understand why ML systems
+% differ from traditional software. This slide grounds that claim in everyday
+% experience.
+%
+% -- NARRATE: ``Every one of these systems runs inference millions of times a
+% day on real hardware. Voice assistants do speech-to-text-to-response in under
+% 200 ms. Social media ranks billions of posts per second. Lending decisions
+% evaluate creditworthiness under uncertainty. Autonomous driving fuses camera,
+% LiDAR, and radar in real time.'' Point to each bullet.
+% Ask: ``Which of these did you interact with today?''
+%
+% -- ENGAGE: ``Pick one of these systems. What physical constraint do you think
+% limits its performance?'' Give 30 seconds, cold-call one student.
+% Expected: latency for voice, compute for ranking, power for autonomous.
+%
+% -- WARN: Students think AI = the model. Correct framing: each example is a
+% full system---data pipeline, hardware, serving infrastructure, monitoring---not
+% just a neural network.
+%
+% -- FLEX: [CORE] Opens the chapter with visceral connection to students' lives.
+% IF SHORT: Skip the cold-call; just ask the ``which did you interact with''
+% question as a show of hands.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    AI is not a future possibility --- it is present reality:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textbf{Voice assistants}: speech $\to$ text $\to$ response
+      \item \textbf{Social media}: ranking billions of posts in ms
+      \item \textbf{Lending}: creditworthiness under uncertainty
+      \item \textbf{Autonomous driving}: fusing sensor modalities
+    \end{itemize}
+    \vspace{0.05cm}
+    \begin{mlsyscard}{crimson}
+      These systems \alert{make decisions under uncertainty}.
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \safeimg{data-center.jpg}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The Dual Mandate}
+\note{
+% -- LINK: The AI Moment showed systems making decisions under uncertainty.
+% This slide names the two simultaneous constraints every such system faces.
+%
+% -- NARRATE: ``Every ML system juggles two things at once: statistical
+% uncertainty---predictions are probabilistic, accuracy degrades silently---and
+% physical constraints---memory, power, latency, speed of light. Traditional
+% software crashes loudly when it fails. ML systems degrade silently. Look at
+% the table: a bug in traditional software is a code error that crashes. A bug
+% in ML is a data error that degrades predictions without any stack trace.''
+%
+% -- ENGAGE: ``Give me one example of a silent failure in an ML system you have
+% used.'' Cold-call one student. Expected: recommendation quality declining,
+% autocomplete getting worse, ad relevance dropping.
+%
+% -- WARN: Students equate ML with ``better software.'' Correct framing: ML
+% introduces a fundamentally new failure mode---silent probabilistic
+% degradation---that traditional testing cannot catch.
+%
+% -- FLEX: [CORE] This is the chapter's thesis statement.
+% IF AHEAD: ``Which column of the table is harder to debug, and why?''
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    Every ML system must simultaneously manage:
+
+    \vspace{0.2cm}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Statistical uncertainty}\\
+    {\footnotesize Predictions are probabilistic. Accuracy degrades silently.}
+    \end{mlsyscard}
+
+    \vspace{0.15cm}
+
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Physical constraints}\\
+    {\footnotesize Memory, power budgets, latency, speed of light.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \vspace{0.3cm}
+    \renewcommand{\arraystretch}{1.25}
+    {\footnotesize
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      & \textbf{Traditional} & \textbf{ML System} \\
+      \midrule
+      \textbf{Bug}   & Code error   & Data error \\
+      \textbf{Failure} & Crash (loud) & Silent degradation \\
+      \textbf{Debug} & Trace code   & Inspect data \\
+      \bottomrule
+    \end{tabular}
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{The Paradigm Shift}
+% =============================================================================
+
+\begin{frame}{Software 1.0 vs.\ Software 2.0}
+\note{
+% -- LINK: The Dual Mandate showed that ML systems face silent degradation.
+% This slide explains the root cause: in Software 2.0, data IS the source code.
+%
+% -- NARRATE: ``Karpathy's framing makes the shift concrete. In SW 1.0, the
+% programmer writes explicit logic. In SW 2.0, the programmer curates the
+% dataset, and SGD is the compiler. Look at the table: source code is now
+% training data. The compiler is SGD. Logic is learned, not written. Failure
+% is metric decay, not a crash. Debugging moves upstream---from code to data.''
+% Point to diagram: ``The arrow from data to model is the key insight.''
+%
+% -- ENGAGE: ``If data is source code, what does version control look like?''
+% Give 20 seconds. Cold-call one student.
+% Expected: dataset versioning tools like DVC. Deepen: ``What happens if
+% someone deletes a row of training data without tracking it?''
+%
+% -- WARN: Students think ``data is important'' but still treat the model as
+% the primary artifact. Correct framing: in SW 2.0, the dataset is the
+% deliverable. The model is derived from it, like a compiled binary.
+%
+% -- FLEX: [CORE] Foundational conceptual shift for the course.
+% IF SHORT: Skip the engage question; narrate the table for 90 seconds.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{sw1-vs-sw2.pdf}
+  \end{column}
+  \begin{column}{0.52\textwidth}
+    \renewcommand{\arraystretch}{1.2}
+    {\footnotesize
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      & \textbf{SW 1.0} & \textbf{SW 2.0} \\
+      \midrule
+      Source & C++, Python & Training data \\
+      Compiler & GCC, LLVM & SGD \\
+      Logic & Explicit & Learned \\
+      Failure & Crash & Metric decay \\
+      Debug & Trace path & Inspect data \\
+      \bottomrule
+    \end{tabular}
+    }
+    \vspace{0.2cm}
+
+    \mlsysconcept{Key insight:}{Data is source code.}
+
+    \vspace{0.15cm}
+    Debugging moves \emph{upstream} --- from code to data.
+  \end{column}
+\end{columns}
+\mlsyscite{Karpathy, ``Software 2.0,'' 2017}
+
+\end{frame}
+
+\begin{frame}{The 5\% Problem}
+\note{
+% -- LINK: SW 2.0 showed that data is source code. This slide reveals the
+% scale of the non-model infrastructure---95\% of a production ML system.
+%
+% -- NARRATE: ``Sculley et al.\ called this `hidden technical debt.' Point to
+% the tiny center box in the diagram: that is the ML model code---about 5
+% percent. Everything around it---data pipelines, feature stores, serving
+% infrastructure, monitoring, configuration---is what this course teaches.
+% The model is the tip of the iceberg.''
+%
+% -- ENGAGE: ``Look at the diagram. What is the biggest surrounding box?''
+% Give 15 seconds. Expected answer: data collection or configuration.
+% Both are valid---the point is that neither is the model.
+%
+% -- WARN: Students equate ``ML'' with ``the model.'' Correct framing: the
+% model is 5\%; the other 95\% is systems engineering that determines whether
+% the model ever reaches a user.
+% IF STUCK: ``Think about what happens after you call model.predict()---who
+% routes the request, monitors latency, detects drift?''
+%
+% -- FLEX: [CORE] Foundational mental model for the course.
+% IF SHORT: Skip the question; just narrate the diagram for 90 seconds.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \safeimg[width=\textwidth,height=5.2cm,keepaspectratio]{five-percent-problem.pdf}
+  \end{column}
+  \begin{column}{0.46\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Hidden Technical Debt}\\[0.05cm]
+    {\footnotesize In production ML, the model is $\approx$5\% of the code. The other 95\%:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\footnotesize Data pipelines \& feature engineering}
+      \item {\footnotesize Serving infrastructure}
+      \item {\footnotesize Monitoring \& configuration}
+    \end{itemize}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \textbf{``ML is easy; ML Systems are hard.''}
+  \end{column}
+\end{columns}
+\mlsyscite{Sculley et al., NeurIPS 2015}
+
+\end{frame}
+
+\begin{frame}{The Verification Gap}
+\note{
+% -- LINK: The 5\% Problem showed the iceberg of systems infrastructure.
+% This slide explains WHY that infrastructure must include monitoring: the
+% input space is too vast to test exhaustively.
+%
+% -- NARRATE: ``A 224-by-224 RGB image has 256 to the power of 150,528
+% possible configurations---a number with 362,000 digits. ImageNet tests only
+% 50,000 of them. The gap between what we test and what exists is effectively
+% infinite. Traditional software can enumerate edge cases. ML systems cannot.
+% The engineering consequence: we trade guaranteed correctness for statistical
+% monitoring.''
+%
+% -- ENGAGE: ``If you cannot test all inputs, how do you know your model is
+% working?'' Give 20 seconds. Cold-call one student.
+% Expected: monitoring production metrics. Deepen: ``What if you do not have
+% ground truth labels in real time?''
+%
+% -- WARN: Students think more test data solves the verification gap. Correct
+% framing: 50,000 vs.\ $256^{150,528}$ is not a sampling problem---it is a
+% fundamental impossibility. No finite test set can cover the space.
+%
+% -- FLEX: [OPTIONAL] Can be summarized in one sentence if short on time.
+% IF SHORT: ``The input space is infinite; we cannot test our way to
+% correctness. Monitoring is non-negotiable.'' Move on.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{verification-gap.pdf}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    A $224\times224$ RGB image has:\\[0.1cm]
+    $256^{150{,}528}$ possible configurations\\
+    {\footnotesize (a number with \textbf{362,000+ digits})}
+
+    \vspace{0.2cm}
+    ImageNet tests only \textbf{50,000} of them.
+
+    \vspace{0.15cm}
+    $$\text{Gap} \approx \text{Total Input Space}$$
+
+    \vspace{0.1cm}
+    \mlsysalert{Consequence:}{Trade \emph{guaranteed correctness} for \emph{statistical monitoring}.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{AI Evolution}
+% =============================================================================
+
+\begin{frame}{Seven Decades of Bottlenecks}
+\note{
+% -- LINK: The Verification Gap showed that ML systems face fundamentally
+% different engineering challenges. This slide traces how we got here---seven
+% decades of systems bottlenecks, not algorithmic dead ends.
+%
+% -- NARRATE: ``Walk through four eras. Symbolic AI hit the knowledge
+% bottleneck---you cannot hand-code enough rules. Expert systems hit the
+% brittleness bottleneck---they broke outside narrow domains. Statistical ML
+% hit the feature engineering bottleneck---humans cannot design features for
+% every domain. Deep learning hit the compute and data bottleneck---but that
+% one we can throw hardware at. The pattern: every AI winter was a systems
+% failure, not an algorithmic dead end.''
+%
+% -- ENGAGE: ``Why did expert systems fail in the 1980s? Was it bad algorithms
+% or bad infrastructure?'' Give 15 seconds. Expected: infrastructure---they
+% could not scale knowledge acquisition.
+%
+% -- WARN: Students think AI winters were caused by ``wrong algorithms.''
+% Correct framing: each era's algorithms were sound; the systems could not
+% deliver the data, compute, or integration required.
+%
+% -- FLEX: [CORE] Historical context is essential for the Bitter Lesson.
+% IF SHORT: Focus on the bottleneck pattern across eras, not individual era
+% details. ``Every winter was a systems failure.'' (60 seconds)
+}
+
+% --- Layout: FULL-WIDTH IMAGE + caption ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ai-eras-timeline.pdf}
+
+\vspace{0.15cm}
+\mlsysinsight{Pattern:}{Every AI winter was a \emph{systems} failure, not an algorithmic dead end.}
+
+\end{frame}
+
+\begin{frame}{The Bitter Lesson}
+\note{
+% -- LINK: The timeline showed that systems bottlenecks---not algorithms---caused
+% every AI winter. Sutton's Bitter Lesson formalizes this pattern.
+%
+% -- NARRATE: ``Sutton wrote this in 2019. The lesson: general methods that
+% leverage computation always win over hand-crafted cleverness. It is `bitter'
+% because our intuition says encode expertise---chess engines with opening
+% books, NLP with grammar rules. Reality says: scale computation. AlphaGo
+% beat hand-tuned heuristics with brute-force search plus learning. GPT beat
+% hand-crafted NLP with massive compute on massive data. The implication for
+% systems engineers: if scale wins, then the systems that deliver scale are
+% the bottleneck.''
+%
+% -- ENGAGE: ``Why is this lesson bitter? What does it say about human
+% intuition?'' Give 20 seconds. Cold-call one student.
+% Expected: our intuition misleads us---we want to build clever solutions,
+% but brute-force scaling wins.
+%
+% -- WARN: Students interpret the Bitter Lesson as ``algorithms do not matter.''
+% Correct framing: algorithms matter, but only those that can exploit scale.
+% The next slide (Efficiency Counter-Narrative) shows algorithmic efficiency
+% also compounds.
+%
+% -- FLEX: [CORE] Philosophical anchor for why systems engineering matters.
+% IF AHEAD: ``If scale always wins, why not just buy more GPUs?'' (Answer:
+% cost, power, memory wall---the physical constraints from the Course Overview.)
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    Richard Sutton (2019):
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{crimson}
+    {\footnotesize ``General methods that leverage computation are
+    ultimately the most effective --- and by a large margin.''}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    The lesson is ``bitter'' because:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Our intuition says \emph{encode expertise}
+      \item Reality says \emph{scale computation}
+    \end{itemize}
+
+    \vspace{0.05cm}
+    {\footnotesize\mlsysconcept{Implication:}{Requires \textbf{systems engineering}.}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{compute-growth.pdf}
+
+    {\footnotesize\textcolor{midgray}{AI compute doubles every 3.4 mo --- 7$\times$ faster than Moore's Law.}}
+  \end{column}
+\end{columns}
+\mlsyscite{Sutton, ``The Bitter Lesson,'' 2019}
+
+\end{frame}
+
+\begin{frame}{The Efficiency Counter-Narrative}
+\note{
+% -- LINK: The Bitter Lesson said scale wins. This slide shows that algorithmic
+% efficiency also compounds---44$\times$ less compute for the same accuracy.
+%
+% -- NARRATE: ``Two forces co-evolve. Brute-force scaling: AI compute grew 7
+% orders of magnitude. Algorithmic efficiency: 44$\times$ compute reduction for
+% equivalent accuracy. Both are real. The systems engineer must exploit both.
+% But here is the catch: ViT achieves 1--2\% higher accuracy than ResNet-50 but
+% requires 4$\times$ the FLOPs and 3$\times$ the memory bandwidth. Better
+% accuracy does not mean better system. A model that violates your latency SLA
+% has zero production utility.''
+%
+% -- ENGAGE: ``Which is growing faster---compute demand or algorithmic
+% efficiency?'' Give 15 seconds. Expected: compute demand (7$\times$ faster
+% than Moore's Law vs.\ 44$\times$ over a decade).
+%
+% -- WARN: Students assume newer architectures are always better systems choices.
+% Correct framing: ViT is a better algorithm but a worse system for latency-
+% constrained deployments. ``Better accuracy $\neq$ better system.''
+%
+% -- FLEX: [OPTIONAL] Safe to compress into one sentence if running short.
+% IF SHORT: ``Algorithmic efficiency compounds too, but better accuracy does
+% not mean better system---ViT needs 4$\times$ the FLOPs of ResNet.''
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{vit-vs-resnet.pdf}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{Two forces co-evolve:}
+
+    \vspace{0.15cm}
+    \textcolor{computestroke}{\textbf{Brute-force scaling}}\\
+    {\footnotesize AI compute: 7 orders of magnitude growth}
+
+    \vspace{0.1cm}
+    \textcolor{datastroke}{\textbf{Algorithmic efficiency}}\\
+    {\footnotesize 44$\times$ compute reduction for equivalent accuracy}
+
+    \vspace{0.2cm}
+    \begin{mlsyscard}{datastroke}
+    {\footnotesize ViT: 1--2\% higher accuracy than ResNet-50, but 4$\times$ FLOPs and 3$\times$ memory bandwidth. \textbf{Better accuracy $\neq$ better system.}}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\mlsyscite{Hernandez \& Brown, ``Measuring Algorithmic Efficiency,'' 2020}
+
+\end{frame}
+
+\begin{frame}{Return on Compute (RoC)}
+\note{
+% -- LINK: The Efficiency Counter-Narrative showed that algorithmic efficiency
+% compounds. RoC formalizes this as an economic invariant.
+%
+% -- NARRATE: ``Return on Compute measures how much useful work you extract per
+% dollar of compute. The formula: RoC = (Accuracy Gain) / (Compute Cost).
+% A model that achieves 1\% accuracy gain for \$100 of compute has an RoC of
+% 0.01\%/\$. A model that achieves the same 1\% for \$10,000 has 100$\times$
+% worse RoC. The Bitter Lesson says scale wins---but RoC asks: at what price?
+% This is the economic discipline that prevents blind scaling.''
+%
+% -- ENGAGE: ``If GPT-4 cost \$100M to train and improved accuracy by 5\%
+% over GPT-3, what is its RoC? Is that good or bad?'' Give 15 seconds.
+% Expected: 0.05/100M = 5$\times 10^{-9}$\%/\$. Compare to fine-tuning
+% a smaller model: 2\% gain for \$1,000 = 0.002\%/\$.
+%
+% -- WARN: Students equate ``more compute = better.'' Correct framing: RoC
+% forces you to ask whether the marginal accuracy gain justifies the cost.
+%
+% -- FLEX: [OPTIONAL] Safe to compress if running short.
+% IF SHORT: State the formula and the GPT-4 example. (60 seconds)
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \textbf{Return on Compute:}
+
+    \vspace{0.15cm}
+    $$\text{RoC} = \frac{\Delta\text{Accuracy}}{\text{Compute Cost}}$$
+
+    \vspace{0.1cm}
+    {\footnotesize The economic invariant that governs scaling decisions.}
+
+    \vspace{0.15cm}
+    \mlsysconcept{Key insight:}{The Bitter Lesson says \emph{scale wins}. RoC asks \emph{at what price?}}
+  \end{column}
+  \begin{column}{0.46\textwidth}
+    \vspace{0.2cm}
+    \renewcommand{\arraystretch}{1.15}
+    {\footnotesize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{Approach} & \textbf{Gain} & \textbf{Cost} \\
+      \midrule
+      GPT-4 pretrain & +5\% & \$100M \\
+      Fine-tune small & +2\% & \$1K \\
+      Distill + quant & +0\% & \$500 \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{routingstroke}
+    {\footnotesize Fine-tuning: 100,000$\times$ better RoC than pretraining from scratch.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: What Defines an ML System?}
+\note{
+% -- NARRATE: ``Before I show you the answer, write down 3 components that
+% define an ML system. Not just `data and model'---think about what makes it
+% a \emph{system}.'' This primes the D-A-M taxonomy reveal on the next slide.
+%
+% -- ENGAGE: Give students 60 seconds to write. Then turn-and-talk for 30
+% seconds. Cold-call 2--3 students to share.
+% Expected answers: data, model, hardware, serving, monitoring.
+% Surprise answer: the interactions between these components.
+%
+% -- FLEX: [CORE] This prediction exercise is essential scaffolding for the
+% D-A-M taxonomy.
+% IF SHORT: Cut turn-and-talk; go straight to cold-call after 60 seconds.
+}
+
+\centering
+\vspace{0.8cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.5cm}
+{\large If ML systems are not ``traditional software + a model,''\\
+what are the essential components?}
+
+\vspace{0.5cm}
+{\normalsize Write down 3 components. \textcolor{midgray}{(60 seconds)}}
+
+\vspace{0.5cm}
+{\small\textcolor{lightgray}{Turn to a neighbor and compare your answers.}}
+
+\end{frame}
+
+% =============================================================================
+\section{The DAM Taxonomy}
+% =============================================================================
+
+\begin{frame}{The D\raisebox{0.04em}{\tiny$\bullet$}A\raisebox{0.04em}{\tiny$\bullet$}M Taxonomy}
+\note{
+% -- LINK: Students just predicted the essential components of an ML system.
+% D-A-M formalizes their intuition into three interdependent axes.
+%
+% -- NARRATE: ``Reveal after prediction exercise. Three axes, color-coded:
+% green = data, blue = algorithm/compute, orange = machine. Point to each in
+% the diagram. Data: how much, how fast can we move it---measured in GB and
+% GB/s. Algorithm: how many operations, what parallelism pattern---measured in
+% FLOPs. Machine: what silicon, what memory hierarchy---measured in FLOP/s.
+% The diagnostic question is always the same: which axis is the bottleneck?''
+%
+% -- ENGAGE: ``Which axis is the bottleneck for training GPT-3?'' Give 15
+% seconds. Expected: compute (massive FLOPs). Correct but incomplete---the
+% Iron Law will show all three terms matter.
+%
+% -- WARN: Students treat the three axes as independent knobs. Correct framing:
+% they are interdependent---doubling data volume requires proportionally more
+% bandwidth or longer training time. Optimizing one shifts pressure to the others.
+% IF STUCK: ``Think of a three-legged stool. Shortening one leg does not help
+% if another leg was already the shortest.''
+%
+% -- FLEX: [CORE] First framework---everything builds on this.
+% IF AHEAD: ``Can you think of a model where all three axes are equally
+% bottlenecked?'' (Answer: rare in practice---one almost always dominates.)
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{dam-taxonomy.pdf}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    Every ML system has three interdependent axes:
+
+    \vspace{0.2cm}
+    \textcolor{datastroke}{\textbf{Data}} ($D_{\text{vol}}$, $BW$)\\
+    {\footnotesize Volume, quality, distribution, bandwidth}
+
+    \vspace{0.15cm}
+    \textcolor{computestroke}{\textbf{Algorithm}} ($O$, architecture)\\
+    {\footnotesize Operation count, model structure}
+
+    \vspace{0.15cm}
+    \textcolor{routingstroke}{\textbf{Machine}} ($R_{\text{peak}}$, memory)\\
+    {\footnotesize Hardware throughput, capacity}
+
+    \vspace{0.2cm}
+    \mlsysalert{Diagnostic:}{``Which axis is the bottleneck?''}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Quick Check}
+\note{
+% -- NARRATE: ``Quick recall---no peeking. What are the three axes of D-A-M?
+% 30 seconds.'' Walk around the room.
+%
+% -- FLEX: [CORE] Micro-retrieval. Distributed practice improves retention
+% (Roediger \& Karpicke, 2006). Never skip retrieval checks.
+}
+
+\centering
+\Large\bfseries Quick check --- no peeking.\\[0.5cm]
+\normalsize What are the three axes of the D$\cdot$A$\cdot$M taxonomy?\\[0.3cm]
+{\small 30 seconds --- then we continue.}
+\end{frame}
+
+
+
+\begin{frame}{D\raisebox{0.04em}{\tiny$\bullet$}A\raisebox{0.04em}{\tiny$\bullet$}M Interdependence}
+\note{
+% -- LINK: The D-A-M taxonomy named three axes. This slide shows they are
+% coupled---optimizing one shifts pressure to the others.
+%
+% -- NARRATE: ``AlexNet 2012 is the canonical example of D-A-M co-design.
+% CNNs existed for decades, but they needed GPU parallelism to become practical.
+% The algorithm change (conv layers) aligned with the machine (GPU SIMD).
+% Result: error dropped from 26.2\% to 15.3\%---a 42\% relative improvement.
+% Not because the algorithm was new, but because the machine could finally
+% execute it efficiently. This is D-A-M interdependence in action.''
+%
+% -- ENGAGE: ``If you switch from ResNet to a Transformer for image
+% classification, which other axis feels the most pressure?'' Give 15 seconds.
+% Expected: Data (Transformers need more training data) or Machine (more
+% memory bandwidth for attention).
+%
+% -- WARN: Students think they can optimize one axis in isolation. Correct
+% framing: changing the algorithm changes the data and hardware requirements.
+% AlexNet succeeded because all three axes aligned simultaneously.
+%
+% -- FLEX: [OPTIONAL] Safe to cover quickly if running short.
+% IF SHORT: ``AlexNet won because CNN parallelism matched GPU hardware.
+% Axes are coupled.'' (30 seconds) Move on.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{The axes are coupled:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item \textcolor{computestroke}{Algorithm} change $\to$ different \textcolor{datastroke}{data} needs
+      \item \textcolor{datastroke}{Data} change $\to$ different \textcolor{routingstroke}{machine} needed
+      \item \textcolor{routingstroke}{Machine} change $\to$ different \textcolor{computestroke}{algorithms} practical
+    \end{itemize}
+
+    \vspace{0.05cm}
+    {\scriptsize\textbf{AlexNet (2012):} CNNs' parallel ops aligned with GPU hardware. Error: 26.2\% $\to$ 15.3\% --- a 42\% relative improvement.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \safeimg[width=\textwidth,height=4.5cm,keepaspectratio]{nvidia-h100.png}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{The Iron Law}
+% =============================================================================
+
+\mlsysfocus{The Iron Law of ML Systems}{%
+$T_{\text{total}} = \underbrace{\dfrac{D_{\text{vol}}}{BW}}_{\text{Data}} +
+\underbrace{\dfrac{O}{R_{\text{peak}} \cdot \eta}}_{\text{Compute}} +
+\underbrace{L_{\text{lat}}}_{\text{Overhead}}$%
+}
+
+\begin{frame}{Iron Law: Three Terms}
+\note{
+% -- LINK: D-A-M tells you where the bottleneck is. The Iron Law quantifies
+% how long each axis takes in seconds.
+%
+% -- NARRATE: ``Point to each term. Data term: bytes divided by bandwidth
+% gives seconds. Compute term: FLOPs divided by peak rate times efficiency
+% gives seconds. Overhead: orchestration tax, also seconds. You add three
+% times and the slowest one dominates. This is dimensional analysis---if
+% your units do not resolve to seconds, the equation is wrong.''
+%
+% -- ENGAGE: ``For a phone camera app classifying a photo, which term
+% dominates?'' Give 20 seconds. Expected: Data term (reading the image from
+% memory) or Overhead (framework launch cost). Accept either with reasoning.
+%
+% -- WARN: Students try to add FLOPs to bytes. Correct framing: every term
+% must resolve to seconds before you can compare or add them. Write the units
+% under each fraction to verify.
+% IF STUCK: ``What are the units of Bytes divided by Bytes-per-second?''
+%
+% -- FLEX: [CORE] Central equation of the course.
+% IF SHORT: State the equation, emphasize ``slowest term dominates,'' move on.
+% IF AHEAD: ``What happens to the equation when you pipeline data loading
+% with compute?'' (Answer: sum becomes max---the Bottleneck Principle from Ch2.)
+}
+
+% --- Layout: FULL-WIDTH diagram + compact legend ---
+\centering
+\safeimg[width=0.88\textwidth,height=3.8cm,keepaspectratio]{iron-law-visual.pdf}
+
+\vspace{0.15cm}
+\small
+\begin{columns}[T]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{datastroke}{\textbf{Data}} $\frac{D_{\text{vol}}}{BW}$\\[0.05cm]
+    {\scriptsize Bytes / (Bytes/s) = \textbf{s}}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{computestroke}{\textbf{Compute}} $\frac{O}{R_p \cdot \eta}$\\[0.05cm]
+    {\scriptsize FLOPs / (FLOPs/s) = \textbf{s}}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \textcolor{errorstroke}{\textbf{Overhead}} $L_{\text{lat}}$\\[0.05cm]
+    {\scriptsize Orchestration tax = \textbf{s}}
+  \end{column}
+\end{columns}
+\vspace{0.1cm}
+{\small The \textbf{slowest term dominates} end-to-end latency.}
+
+\end{frame}
+
+\begin{frame}{Iron Law: Worked Example}
+\note{
+% -- LINK: The previous slide defined the Iron Law abstractly. This slide
+% applies it to GPT-3 training with real hardware numbers.
+%
+% -- NARRATE: ``Walk through GPT-3 step by step. Data term: 350 GB divided
+% by 2,039 GB/s = 0.17 seconds. Compute term: 3.14 times 10-to-the-14
+% FLOPs divided by 989 TFLOPS times 0.5 efficiency = 0.64 seconds. Overhead:
+% synchronization and scheduling adds about 0.05 seconds. Total: 0.86 seconds
+% per batch. The reveal: compute dominates for LLM training. Upgrading memory
+% bandwidth alone---making the data term even faster---yields diminishing
+% returns because compute is already 3.7$\times$ slower.''
+%
+% -- ENGAGE: ``If you upgrade from HBM3 to HBM4 (2$\times$ bandwidth), how
+% much does total time improve?'' Give 20 seconds.
+% Expected: Data term halves from 0.17 to 0.085 s, saving 0.085 s out of
+% 0.86 s = about 10\% improvement. Compute still dominates.
+%
+% -- WARN: Students assume upgrading any component helps proportionally.
+% Correct framing: only upgrading the dominant term yields significant speedup.
+% Upgrading the non-dominant term is wasted investment.
+%
+% -- FLEX: [CORE] First worked example---establishes the analytical pattern.
+% IF SHORT: Just show the final comparison: compute at 0.64 s vs.\ data at
+% 0.17 s. ``Compute dominates. Case closed.''
+}
+
+\small
+\textbf{Training one batch of GPT-3 (175B parameters)}
+
+\vspace{0.15cm}
+\renewcommand{\arraystretch}{1.2}
+{\footnotesize
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Term} & \textbf{Variables} & \textbf{Calculation} & \textbf{Time} \\
+  \midrule
+  \textcolor{datastroke}{Data}    & $D_{\text{vol}}$=350 GB, $BW$=2,039 GB/s & $350/2{,}039$ & \textbf{0.17 s} \\
+  \textcolor{computestroke}{Compute} & $O$=$3.14\!\times\!10^{14}$, $R_p$=989 TF & $3.14\!\times\!10^{14}/(989\!\times\!10^{12}\!\times\!0.5)$ & \textbf{0.64 s} \\
+  \textcolor{errorstroke}{Overhead} & $L_{\text{lat}}$ (sync, sched.) & --- & \textbf{0.05 s} \\
+  \midrule
+  & & $T_{\text{total}} \approx$ & \textbf{0.86 s} \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.2cm}
+\begin{mlsyscard}{computestroke}
+\textbf{Diagnosis:} The \textcolor{computestroke}{compute term} dominates for LLM training.
+Upgrading memory bandwidth alone yields diminishing returns.
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Iron Law: ResNet-50 --- A Different Bottleneck}
+\note{
+% -- LINK: GPT-3 was compute-bound. This slide shows the same equation applied
+% to ResNet-50 inference at batch size 1---a completely different bottleneck.
+%
+% -- NARRATE: ``Same Iron Law, different dominant term. At batch size 1,
+% ResNet-50 has an arithmetic intensity of 79 FLOPs per byte. The accelerator
+% can compute faster than memory can feed it. The data term dominates---the
+% opposite of GPT-3 training. This is why batch size matters: at batch 256,
+% compute reuse increases and the compute term catches up.''
+%
+% -- ENGAGE: ``What happens to the dominant term if you increase batch size
+% from 1 to 256?'' Give 15 seconds.
+% Expected: Compute term grows (more FLOPs), data term grows less (parameter
+% reuse). System shifts from data-bound to compute-bound.
+%
+% -- WARN: Students assume a model is always bound by the same term. Correct
+% framing: the dominant term changes with batch size, hardware, and precision.
+% The same model can be data-bound at batch 1 and compute-bound at batch 256.
+%
+% -- FLEX: [OPTIONAL] Reinforces the Iron Law pattern but can be skipped.
+% IF SHORT: Skip this slide and go to the exercise.
+% IF AHEAD: ``At what batch size does ResNet-50 cross from data-bound to
+% compute-bound on an H100?''
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{resnet-bottleneck.pdf}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{ResNet-50 inference (batch = 1)}
+
+    \vspace{0.15cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Metric} & \textbf{Value} \\
+      \midrule
+      Operations ($O$) & 7.7 GFLOPs \\
+      Parameters       & 97.5 MB \\
+      Arithmetic Intensity & 79 FLOPs/B \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{datastroke}
+    {\footnotesize At batch 1, the accelerator can compute faster than memory can feed it. \textbf{Data term dominates} --- the opposite of GPT-3 training.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Diagnose the Bottleneck}
+\note{
+% -- LINK: Students have seen two worked examples (GPT-3 compute-bound,
+% ResNet-50 data-bound). Now they apply the Iron Law themselves.
+%
+% -- NARRATE: ``You have 90 seconds. Calculate all three terms, add them up,
+% and tell me which term dominates. Show your units---if they do not resolve
+% to seconds, something is wrong.''
+%
+% -- ENGAGE: PEER INSTRUCTION PROTOCOL:
+% 1. Present problem (30s). 2. Individual work (60s).
+% 3. If 30--70\% get the right dominant term: pair discussion (90s), re-vote.
+% 4. Reveal: Data = 40/100 = 400 ms. Compute = 2e9/(20e9*0.6) = 167 ms.
+% Overhead = 5 ms. Total = 572 ms. Data-bound.
+% Key follow-up: ``Adding a faster GPU yields 0\% speedup. Why?''
+%
+% -- WARN: Students will divide FLOPs by peak rate and forget the efficiency
+% factor $\eta$. Correct: $R_{\text{peak}} \times \eta = 20 \times 0.6 = 12$
+% GFLOPS effective. Without $\eta$, they get 100 ms instead of 167 ms and
+% might still identify data as dominant, but the number is wrong.
+% IF STUCK: ``Start with the data term. What are the units of 40 MB divided
+% by 100 MB/s?''
+%
+% -- FLEX: [CORE] First hands-on calculation. Do not skip.
+% IF SHORT: Skip pair discussion; go straight from individual work to reveal.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.58\textwidth}
+    {\normalsize\bfseries Diagnose the Bottleneck}
+
+    \vspace{0.2cm}
+    A mobile inference pipeline has:
+    \begin{itemize}
+      \item $D_{\text{vol}}$ = 40 MB, $BW$ = 100 MB/s
+      \item $O$ = $2\!\times\!10^9$ FLOPs, $R_{\text{peak}}$ = 20 GF, $\eta$ = 0.6
+      \item $L_{\text{lat}}$ = 5 ms
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \textbf{Calculate} $T_{\text{total}}$ and identify the dominant term.
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.38\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    Data: $40/100$ = 400 ms\\
+    Compute: $\frac{2\times10^9}{12\times10^9}$ = 167 ms\\
+    Overhead: 5 ms\\[0.1cm]
+    $T_{\text{total}}$ = \textbf{572 ms}\\[0.1cm]
+    \textcolor{datastroke}{\textbf{Data-bound!}}
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{ML vs.\ Software}
+% =============================================================================
+
+\begin{frame}{Silent Degradation}
+\note{
+% -- LINK: The Iron Law measures performance at a point in time. This slide
+% asks: what happens to that performance over months?
+%
+% -- NARRATE: ``This is the most important conceptual slide in the chapter.
+% Traditional software crashes loudly---you get a stack trace, a log entry,
+% an alert. ML systems degrade silently. Look at the curve: accuracy decays
+% 10--15\% over months without a single code change. No crash. No error log.
+% No alert unless you built monitoring. The world changed---user behavior
+% shifted, data distributions drifted---and the model silently got worse.''
+%
+% -- ENGAGE: ``How would you detect a 10\% accuracy drop if no one filed a
+% bug and no code changed?'' Give 20 seconds. Cold-call one student.
+% Expected: monitoring production metrics, comparing to baseline.
+% Deepen: ``What if you do not have ground truth labels in real time?''
+%
+% -- WARN: Students think ``no crash = working correctly.'' Correct framing:
+% the absence of errors is not evidence of correctness. ML systems require
+% continuous monitoring because their most dangerous failure mode is silence.
+%
+% -- FLEX: [CORE] Motivates the Degradation Equation on the next slide.
+% IF SHORT: Show the diagram, state ``ML fails silently,'' move on (60 seconds).
+}
+
+% --- Layout: FULL-WIDTH comparison diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.2cm,keepaspectratio]{silent-failure.pdf}
+
+\vspace{0.1cm}
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \centering\footnotesize
+    \textbf{Traditional:} Failure is \emph{loud}\\
+    Crashes $\to$ stack traces $\to$ fix
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \centering\footnotesize
+    \textbf{ML:} Failure is \emph{silent}\\
+    10--15\% decay over months
+  \end{column}
+\end{columns}
+\vspace{0.05cm}
+\mlsysalert{Key:}{No code changed. The \emph{world} changed.}
+
+\end{frame}
+
+\begin{frame}{The Degradation Equation}
+\note{
+% -- LINK: Silent Degradation showed the phenomenon. This slide formalizes it
+% into a measurable equation.
+%
+% -- NARRATE: ``Accuracy at time t equals initial accuracy minus alpha times
+% the distribution distance. Alpha is how sensitive the model is to drift---
+% measurable from historical data. Delta measures how far the live data has
+% drifted from training data---measurable with PSI or KL divergence. Look at
+% the example: a recommendation system starts at 85\% and drops to 79.2\% in
+% 6 months. No code changed. No bugs. The engineering response: set a
+% retraining trigger when $A(t)$ crosses a threshold.''
+%
+% -- ENGAGE: ``At what month should this team retrain?'' Give 15 seconds.
+% Expected: when accuracy crosses some threshold like 80\%. Deepen: ``How do
+% you choose the threshold?'' (Answer: SLA requirements + safety margin.)
+%
+% -- WARN: Students think drift is rare or only affects ``bad'' models.
+% Correct framing: ALL deployed models drift. The question is not whether
+% but when. Alpha and Delta are always positive in production.
+% IF STUCK: ``Think about a movie recommendation system. Do your tastes
+% today match your tastes 6 months ago?''
+%
+% -- FLEX: [CORE] Third framework---completes the analytical toolkit.
+% IF SHORT: Show equation, state the rec-system example, move on.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    $$A(t) = A_0 - \alpha \cdot \Delta(P_{\text{train}},\; P_{\text{live}}(t))$$
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \begin{tabular}{@{}ll@{}}
+      $A(t)$    & Accuracy at time $t$ \\
+      $A_0$     & Accuracy at deployment \\
+      $\alpha$  & Sensitivity to drift \\
+      $\Delta$  & Distribution distance \\
+    \end{tabular}
+    }
+
+    \vspace{0.2cm}
+    \mlsysconcept{Engineering use:}{Set retraining triggers when $A(t)$ crosses a threshold.}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{degradation-curve.pdf}
+
+    {\footnotesize\textcolor{midgray}{Rec.\ system: 85\% $\to$ 79.2\% in 6 months without retraining.}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Defining AI Engineering}
+\note{
+% -- LINK: Students now have three frameworks (D-A-M, Iron Law, Degradation
+% Equation). This slide defines the discipline that uses them.
+%
+% -- NARRATE: ``AI Engineering is the discipline of designing, deploying, and
+% maintaining systems whose outputs are inherently probabilistic to meet
+% deterministic reliability targets. Three distinctions from ML Research: (1)
+% stochastic outputs vs.\ deterministic SLAs, (2) all three D-A-M axes
+% simultaneously, (3) production means continuously shifting distributions.
+% In a Kaggle competition, you optimize one metric on a static dataset. In
+% production, you optimize accuracy AND latency AND cost on a moving target.''
+%
+% -- ENGAGE: ``How is this different from what you do in a Kaggle competition?''
+% Give 15 seconds. Cold-call one student.
+% Expected: single metric vs.\ multi-objective, static vs.\ shifting data.
+%
+% -- WARN: Students think AI Engineering = ML Research + deployment scripts.
+% Correct framing: AI Engineering jointly optimizes all three D-A-M axes under
+% continuously shifting distributions---a fundamentally different discipline.
+%
+% -- FLEX: [CORE] Defines the field the course teaches.
+% IF SHORT: Read the definition, show the table, skip the engage question.
+}
+
+\small
+\begin{mlsyscard}{crimson}
+\textbf{AI Engineering:} The discipline of designing, deploying, and maintaining
+systems whose outputs are \emph{inherently probabilistic} to meet
+\emph{deterministic reliability targets} by satisfying constraints on all three
+\DAM{} axes simultaneously in production.
+\end{mlsyscard}
+
+\vspace{0.2cm}
+\renewcommand{\arraystretch}{1.2}
+{\footnotesize
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  & \textbf{ML Research} & \textbf{AI Engineering} \\
+  \midrule
+  Objective     & Single metric (accuracy)      & Multi-objective (accuracy + latency + cost) \\
+  Data          & Static benchmark              & Continuously shifting distribution \\
+  Optimization  & Algorithm axis only           & All three \DAM{} axes jointly \\
+  Success       & State-of-the-art on test set  & Meets SLA in production \\
+  \bottomrule
+\end{tabular}
+}
+
+\end{frame}
+
+\begin{frame}{The ML System Lifecycle}
+\note{
+% -- LINK: AI Engineering was defined as maintaining systems under shifting
+% distributions. This slide shows the operational shape of that maintenance:
+% a continuous loop, not a linear pipeline.
+%
+% -- NARRATE: ``ML systems require continuous iteration---not a linear handoff.
+% Data flows to training, training to deployment, deployment to monitoring,
+% and monitoring feeds back to data and retraining. The monitoring loop is the
+% structural difference from traditional software. A/B tests in ML take 4--6
+% weeks because you need statistical significance on probabilistic outputs.
+% Traditional A/B tests take 2--3 days.''
+%
+% -- ENGAGE: ``Why do ML A/B tests take 4--6 weeks instead of 2--3 days?''
+% Give 15 seconds. Expected: need statistical significance on noisy metrics,
+% or need enough production data to detect small accuracy differences.
+%
+% -- WARN: Students think deployment is the end of the project. Correct
+% framing: deployment is the beginning of the feedback loop. The model starts
+% degrading the moment it goes live.
+%
+% -- FLEX: [OPTIONAL] Reinforces the loop concept but can be compressed.
+% IF SHORT: ``Not a pipeline---a loop. Monitoring feeds back to retraining.''
+% Show diagram for 30 seconds, move on.
+}
+
+% --- Layout: FULL-WIDTH loop diagram + one-liner ---
+\centering
+\safeimg[width=0.80\textwidth,height=4.0cm,keepaspectratio]{monitoring-dashboard.pdf}
+
+\vspace{0.1cm}
+\footnotesize
+\textbf{Not a pipeline --- a loop.} Data $\to$ Train $\to$ Deploy $\to$ Monitor $\to$ \textcolor{errorstroke}{\textbf{Retrain}}.\\
+A/B testing in ML takes \textbf{4--6 weeks} (vs.\ 2--3 days for traditional software).
+
+\end{frame}
+
+% =============================================================================
+\section{Lighthouses \& Pillars}
+% =============================================================================
+
+\begin{frame}{Lighthouse Models: Systems Detectives}
+\note{
+% -- LINK: The Iron Law showed that different workloads have different dominant
+% terms. Lighthouse models are the concrete examples that make this tangible.
+%
+% -- NARRATE: ``Each lighthouse isolates a distinct bottleneck. ResNet-50 is
+% compute-bound---dense matrix ops dominate. GPT-2/Llama is memory-bandwidth-
+% bound---reads the full parameter set for each token. MobileNetV2 is
+% latency-bound---must meet real-time deadlines on a phone. DLRM is data-I/O-
+% bound---massive embedding tables with random access. KWS is power-bound---
+% must run on a coin-cell battery for years. These five models recur in every
+% chapter, testing concepts under different constraint regimes.''
+%
+% -- ENGAGE: ``Why do we need five lighthouse models, not one?'' Give 15
+% seconds. Expected: because different models stress different parts of the
+% system. One model cannot expose all bottleneck types.
+%
+% -- WARN: Students think ``one model to rule them all.'' Correct framing: the
+% deployment spectrum spans $10^6\times$ in compute. No single model or hardware
+% configuration works everywhere. That is why we need five detectives.
+%
+% -- FLEX: [CORE] Cast of characters for the entire course.
+% IF SHORT: Show the table, name each lighthouse and its bottleneck, move on.
+}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lp{2cm}lp{3.5cm}@{}}
+  \toprule
+  \textbf{Lighthouse} & \textbf{Bottleneck} & \textbf{Iron Law} & \textbf{Question} \\
+  \midrule
+  \textbf{ResNet-50}    & \textcolor{computestroke}{Compute}  & $O/R_p$ & Fast arithmetic? \\
+  \textbf{GPT-2/Llama}  & \textcolor{datastroke}{Memory-BW}  & $D/BW$  & Feed the accelerator? \\
+  \textbf{MobileNetV2}  & \textcolor{routingstroke}{Latency}  & $L_{\text{lat}}$ & Meet deadlines? \\
+  \textbf{DLRM}         & \textcolor{datastroke}{Data I/O}   & $D/BW$  & Move embeddings? \\
+  \textbf{KWS}          & \textcolor{errorstroke}{Power}      & $P \times T$ & Coin-cell battery? \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+{\footnotesize Each lighthouse recurs in every chapter, testing concepts under different constraint regimes.}
+
+\end{frame}
+
+\begin{frame}{The Deployment Spectrum}
+\note{
+% -- LINK: Lighthouse models showed five different bottleneck types. The
+% deployment spectrum shows the physical hardware that creates those bottlenecks.
+%
+% -- NARRATE: ``Nine orders of magnitude separate Cloud and TinyML. The H100
+% has 80 GB of HBM3 and 989 TFLOPS. The Arduino Nicla has 384 KB of SRAM and
+% 0.5 GFLOPS. That is a million-fold gap in compute. You cannot `shrink' a
+% cloud model to TinyML---each tier requires fundamentally different engineering.
+% Different algorithms, different precision, different memory management.''
+%
+% -- ENGAGE: ``Can you run GPT-2 (1.5B parameters, ~6 GB) on a mobile device
+% with 8 GB RAM?'' Give 15 seconds.
+% Expected: barely---model fills most of RAM, leaving nothing for the OS or
+% app. Deepen: ``What about KV cache for generation?''
+%
+% -- WARN: Students think ``just quantize it and it runs everywhere.'' Correct
+% framing: quantization helps (4--8$\times$) but the $10^6\times$ gap between
+% Cloud and TinyML requires entirely different model architectures, not just
+% lower precision on the same model.
+%
+% -- FLEX: [CORE] Physical reality that governs deployment decisions.
+% IF SHORT: Show the table, state the $10^6\times$ gap, move on (60 seconds).
+}
+
+% --- Layout: IMAGE TOP + compact table ---
+\centering
+\safeimg[width=0.88\textwidth,height=3.5cm,keepaspectratio]{deployment-spectrum.pdf}
+
+\vspace{0.05cm}
+\scriptsize
+\renewcommand{\arraystretch}{0.95}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Tier} & \textbf{RAM} & \textbf{Compute} & \textbf{Power} \\
+  \midrule
+  Cloud (H100)       & 80 GB  & 989 TF   & 700 W \\
+  Edge (Orin NX)     & 32 GB  & 100 TOP  & 15--40 W \\
+  Mobile             & 8 GB   & 17 TOP   & 3--5 W \\
+  TinyML (Nicla)     & 384 KB & 0.5 GF   & 100 mW \\
+  \bottomrule
+\end{tabular}
+\hfill
+{\scriptsize\textcolor{errorstroke}{\textbf{Gap:}} $10^{5}\!\times$ memory, $10^{6}\!\times$ compute}
+
+\end{frame}
+
+\begin{frame}{Amdahl's Law: A Systems Pitfall}
+\note{
+% -- LINK: The deployment spectrum showed different hardware tiers. Amdahl's
+% Law warns that optimizing one component of a pipeline has bounded returns.
+%
+% -- NARRATE: ``Even a 3$\times$ speedup on inference yields only 23\%
+% end-to-end improvement when preprocessing dominates. Look at the table:
+% inference drops from 45 ms to 15 ms---a dramatic improvement. But
+% preprocessing is still 60 ms and postprocessing is 25 ms. Total goes from
+% 130 ms to 100 ms. That is only 23\% faster, not 3$\times$. This is why
+% you must profile the whole pipeline before optimizing any component.''
+%
+% -- ENGAGE: ``If you could magically make inference take 0 ms, what would
+% the total pipeline time be?'' Give 10 seconds.
+% Expected: 60 + 0 + 25 = 85 ms. Maximum speedup = 130/85 = 1.53$\times$.
+% Amdahl's Law: the non-accelerated fraction (65\%) sets the floor.
+%
+% -- WARN: Students focus on model inference speed and ignore the rest of the
+% pipeline. Correct framing: a 3$\times$ speedup on 35\% of the pipeline
+% yields only 23\% end-to-end. Profile the whole pipeline first.
+%
+% -- FLEX: [OPTIONAL] Important concept but can be abbreviated.
+% IF SHORT: State the punchline: ``3$\times$ on one stage = 23\% end-to-end.
+% Profile first.'' (30 seconds)
+}
+
+% --- Layout: IMAGE TOP + compact table below ---
+\centering
+\safeimg[width=0.85\textwidth,height=2.8cm,keepaspectratio]{amdahls-pipeline.pdf}
+
+\vspace{0.05cm}
+\scriptsize
+\renewcommand{\arraystretch}{0.95}
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  \textbf{Stage} & \textbf{Before} & \textbf{After} & \textbf{Change} \\
+  \midrule
+  Preprocessing  & 60 ms & 60 ms & --- \\
+  Inference      & 45 ms & 15 ms & \textcolor{datastroke}{3$\times$ faster} \\
+  Postprocessing & 25 ms & 25 ms & --- \\
+  \midrule
+  \textbf{Total} & \textbf{130 ms} & \textbf{100 ms} & \textcolor{errorstroke}{\textbf{only 23\%}} \\
+  \bottomrule
+\end{tabular}
+\par\vspace{0.05cm}
+{\footnotesize\textcolor{errorstroke}{\textbf{Amdahl's Law:}} 3$\times$ speedup on 35\% of the pipeline $\to$ only 23\% end-to-end.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Which Pillar Fails First?}
+\note{
+% -- LINK: Students have learned D-A-M, the Iron Law, lighthouse models, and
+% Amdahl's Law. This discussion asks them to synthesize: which engineering
+% discipline fails when a system breaks in production?
+%
+% -- NARRATE: ``A startup deploys a highly accurate model. Within 3 months,
+% customer complaints spike. Which engineering discipline failed?'' Point to
+% the five options. ``There is no single right answer---the point is that all
+% pillars are interdependent. A monitoring gap lets drift go undetected. A
+% data engineering gap means the training data was not representative. A
+% deployment gap means the serving infrastructure could not handle scale.''
+%
+% -- ENGAGE: Turn-and-talk for 90 seconds. Cold-call 2--3 pairs.
+% Accept any well-reasoned answer. Push students to name a specific mechanism:
+% not ``monitoring failed'' but ``monitoring failed to detect distribution
+% drift in the input features.''
+%
+% -- WARN: Students will pick one answer and defend it. Correct framing:
+% multiple pillars can fail simultaneously, and the root cause is often
+% upstream of where the symptom appears.
+%
+% -- FLEX: [CORE] Synthesis exercise for the chapter.
+% IF SHORT: Do a show-of-hands poll instead of turn-and-talk.
+}
+
+\centering
+\vspace{0.8cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.6cm}
+{\large A startup deploys a highly accurate model.\\
+Within 3 months, customer complaints spike.\\[0.3cm]
+\alert{Which engineering discipline failed?}}
+
+\vspace{0.6cm}
+\begin{columns}[c]
+  \begin{column}{0.18\textwidth}\centering\small Data\\ Eng.\end{column}
+  \begin{column}{0.18\textwidth}\centering\small Training\\ Systems\end{column}
+  \begin{column}{0.18\textwidth}\centering\small Deploy\\ Infra\end{column}
+  \begin{column}{0.18\textwidth}\centering\small Ops \&\\ Monitor\end{column}
+  \begin{column}{0.18\textwidth}\centering\small Ethics \&\\ Gov.\end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Case Study: Voice Assistant End-to-End}
+\note{
+% -- LINK: Students have seen the deployment spectrum and lighthouse models
+% in isolation. This slide shows a real system that spans multiple tiers.
+%
+% -- NARRATE: ``A voice assistant is three ML systems stitched together.
+% Wake-word detection runs on TinyML at under 1 mW---always on, listening.
+% Speech-to-text runs on the mobile SoC at 3--5 W---on-device for privacy.
+% Language understanding runs in the cloud at 700 W---because the model is
+% too large for the device. Total latency budget: 200 ms. KWS takes 10 ms.
+% STT takes 80 ms. Cloud round-trip plus LLM: 110 ms. Every millisecond is
+% accounted for. This is AI Engineering: three D-A-M analyses, three Iron
+% Law calculations, one user experience.''
+%
+% -- ENGAGE: ``Which stage is most likely to miss the 200 ms budget?'' Give
+% 15 seconds. Expected: cloud round-trip (network latency is variable).
+%
+% -- WARN: Students think of this as ``one system.'' Correct framing: it is
+% three systems with three different constraint regimes, stitched together.
+%
+% -- FLEX: [CORE] Concrete deployment case study.
+% IF SHORT: Show the pipeline, state the 200 ms budget, move on.
+}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}llllll@{}}
+  \toprule
+  \textbf{Stage} & \textbf{Model} & \textbf{Tier} & \textbf{Power} & \textbf{Latency} & \textbf{Bottleneck} \\
+  \midrule
+  Wake-word   & KWS DS-CNN    & TinyML & $<$1 mW  & 10 ms  & \textcolor{errorstroke}{Power} \\
+  Speech-to-text & Whisper-tiny & Mobile & 3--5 W  & 80 ms  & \textcolor{computestroke}{Compute} \\
+  Language    & LLM (cloud)    & Cloud  & 700 W   & 110 ms & \textcolor{datastroke}{Memory BW} \\
+  \midrule
+  \textbf{Total} & & & & \textbf{200 ms} & \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{crimson}
+    \textbf{Three D-A-M analyses}\\
+    {\footnotesize Three Iron Law calculations\\Three constraint regimes\\One user experience: 200 ms}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Network is the wildcard}\\
+    {\footnotesize Cloud round-trip: 20--100 ms variable. If network spikes, the entire 200 ms budget breaks.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{The Five Pillars of ML Systems}
+\note{
+% -- LINK: The discussion surfaced multiple engineering disciplines that can
+% fail. This slide names the five pillars and maps them to the course.
+%
+% -- NARRATE: ``Five pillars, each essential. Data Engineering is the fuel---
+% garbage in, garbage out. Training Systems is the engine---compute, memory,
+% optimization. Deployment Infrastructure is the factory---serving, scaling,
+% latency. Ops and Monitoring is the cockpit---drift detection, alerting,
+% retraining triggers. Ethics and Governance is the guardrails---fairness,
+% privacy, compliance. Teams lacking expertise in any single pillar face the
+% 60--85\% failure rate we discussed in the Course Overview.''
+%
+% -- ENGAGE: ``Which pillar do you think gets the least attention in
+% industry?'' Give 10 seconds. Show of hands.
+% Expected: Ethics/Governance or Ops/Monitoring. Both are chronically
+% under-invested relative to Training Systems.
+%
+% -- WARN: Students think strong ML expertise compensates for weak systems.
+% Correct framing: teams with strong ML but weak systems achieve only 10--20\%
+% of throughput targets. All five pillars must be staffed.
+%
+% -- FLEX: [CORE] Organizing framework for the rest of the course.
+% IF SHORT: Name the five pillars, state the 60--85\% failure rate, move on.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.42\textwidth}
+    \safeimg{book_pillars.png}
+  \end{column}
+  \begin{column}{0.55\textwidth}
+    \begin{enumerate}\setlength\itemsep{0pt}
+      \item \textcolor{datastroke}{\textbf{Data Engineering}} --- fuel
+      \item \textcolor{computestroke}{\textbf{Training Systems}} --- engine
+      \item \textcolor{routingstroke}{\textbf{Deployment Infra}} --- factory
+      \item \textcolor{crimson}{\textbf{Ops \& Monitoring}} --- cockpit
+      \item \textcolor{errorstroke}{\textbf{Ethics \& Governance}} --- guardrails
+    \end{enumerate}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{60--85\%} of ML projects fail to reach production --- systems gaps, not algorithms.
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\mlsyscite{Paleyes et al., ACM Computing Surveys 2022}
+
+\end{frame}
+
+\begin{frame}{Worked Example: GPT-2 Through Five Pillars}
+\note{
+% -- LINK: The Five Pillars named abstract disciplines. This slide maps GPT-2
+% through all five to show they are concrete, not theoretical.
+%
+% -- NARRATE: ``GPT-2 is 1.5B parameters, about 6 GB at FP16. Walk through
+% each pillar. Data Engineering: 40 GB WebText, 8M documents, cleaned and
+% deduplicated. Training Systems: 256 TPU-v3 cores, 1 week, compute-bound.
+% Deployment: memory-bandwidth-bound at inference---reads full 6 GB per token.
+% Ops: monitor perplexity drift as language evolves. Ethics: training data
+% contains biases from the internet. Every pillar is load-bearing.''
+%
+% -- ENGAGE: ``Which pillar is most likely to cause a production failure for
+% GPT-2?'' Give 15 seconds. Expected: Ops (drift) or Ethics (bias).
+%
+% -- WARN: Students think training is the hard part. Correct framing: training
+% is a one-time cost; deployment, ops, and ethics are ongoing.
+%
+% -- FLEX: [OPTIONAL] Can compress to 60 seconds if running short.
+% IF SHORT: Walk through the table without discussion.
+}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\textbf{GPT-2 (1.5B params, 6 GB FP16) through all five pillars:}
+
+\vspace{0.1cm}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Pillar} & \textbf{GPT-2 Specifics} & \textbf{Key Metric} \\
+  \midrule
+  \textcolor{datastroke}{\textbf{Data Eng.}}      & 40 GB WebText, 8M docs, dedup'd & Tokens/doc quality \\
+  \textcolor{computestroke}{\textbf{Training}}     & 256 TPU-v3, 1 week & 6$\times$N$\times$D FLOPs \\
+  \textcolor{routingstroke}{\textbf{Deployment}}   & Memory-BW-bound: reads 6 GB/token & $D_{\text{vol}}/BW$ dominates \\
+  \textcolor{crimson}{\textbf{Ops}}                & Monitor perplexity as language evolves & Degradation Eq. \\
+  \textcolor{errorstroke}{\textbf{Ethics}}         & Internet biases in training data & Toxicity rate \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\small
+\begin{mlsyscard}{crimson}
+{\footnotesize Training is a one-time cost. Deployment, ops, and ethics are \textbf{ongoing}. The five pillars are not sequential stages---they are concurrent disciplines.}
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{
+% -- LINK: The chapter covered D-A-M, Iron Law, Degradation Equation,
+% lighthouses, and five pillars. These fallacies test whether students
+% internalized the key distinctions.
+%
+% -- NARRATE: ``Four misconceptions, each with quantitative evidence. First:
+% better algorithms do not automatically produce better systems---ViT is 1--2\%
+% more accurate but needs 4$\times$ the FLOPs, violating latency SLAs. Second:
+% high benchmark accuracy does not mean production readiness---94\% on
+% benchmark drops to 78--82\% due to distribution shift. Third: deploy-once
+% does not work---rec systems drop 85\% to 79.2\% in 6 months. Fourth:
+% testing cannot verify ML systems---the input space has $10^{362,000}$
+% configurations.''
+%
+% -- FLEX: [CORE] Fallacies are essential for correcting misconceptions.
+% IF SHORT: Cover just the first two fallacies.
+}
+
+\small
+\textbf{Fallacy:} \textit{Better algorithms automatically produce better systems.}\\
+{\footnotesize ViT: 1--2\% higher accuracy than ResNet but 4$\times$ FLOPs. A model violating latency requirements has zero utility.}
+
+\vspace{0.1cm}
+\textbf{Fallacy:} \textit{High benchmark accuracy means production readiness.}\\
+{\footnotesize Sentiment model: 94\% on benchmark $\to$ 78--82\% in production due to distribution shift.}
+
+\vspace{0.1cm}
+\textbf{Fallacy:} \textit{Deploy once and let it run.}\\
+{\footnotesize Rec.\ system: 85\% $\to$ 79.2\% in 6 months. Fraud detection: 5--10\% decay per quarter.}
+
+\vspace{0.1cm}
+\textbf{Fallacy:} \textit{ML systems can be verified by testing.}\\
+{\footnotesize Input space: $256^{150{,}528}$ configs. Test set: 50{,}000. The gap is effectively infinite.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{
+% -- LINK: Fallacies named misconceptions. Pitfalls name operational mistakes
+% students will make in practice.
+%
+% -- NARRATE: ``Three pitfalls from real systems. First: optimizing components
+% without system context---Amdahl's Law means a 3$\times$ inference speedup
+% yields only 23\% end-to-end when preprocessing dominates. Second: treating ML
+% as traditional software---ML degrades 10--15\% over 3--6 months silently;
+% unit tests are insufficient. Third: assuming ML expertise alone is
+% sufficient---teams with strong ML but weak systems achieve only 10--20\% of
+% throughput targets.''
+%
+% -- FLEX: [CORE] Operational lessons.
+% IF SHORT: Cover just the first two pitfalls.
+}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Optimizing components without considering system interactions.}\\
+A 3$\times$ inference speedup (45$\to$15 ms) yields only \textbf{23\%} end-to-end improvement when preprocessing dominates. \textbf{Amdahl's Law governs the whole pipeline.}
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Treating ML systems as traditional software.}\\
+ML systems degrade 10--15\% over 3--6 months silently. Unit tests are insufficient; \textbf{monitoring infrastructure} is required from day one.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Assuming ML expertise alone is sufficient.}\\
+Teams with strong ML but weak systems achieve only \textbf{10--20\%} of throughput targets. The five disciplines require integrated expertise.
+
+\end{frame}
+
+
+\begin{frame}{Muddiest Point}
+\note{
+% -- NARRATE: ``One-minute paper. Write down the one concept from today that
+% was most confusing or unclear. Hand it in on your way out or submit
+% digitally. I will open the next lecture by addressing the top 2--3 muddiest
+% points.''
+%
+% -- FLEX: [CORE] Diagnostic tool (Angelo \& Cross, 1993). Never skip.
+% Responses shape the opening of the next lecture.
+}
+
+\centering
+\Large\bfseries One-minute paper\\[0.5cm]
+\normalsize Write down the \textbf{muddiest point} from today's lecture.\\[0.2cm]
+{\small What concept was most confusing or unclear?}\\[0.5cm]
+{\footnotesize\textcolor{midgray}{(Hand in on your way out --- or submit digitally)}}
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+\begin{frame}{What Were the Key Ideas?}
+\note{
+% -- NARRATE: ``Close your notes. Write down the 4 most important concepts
+% from today. 90 seconds, no peeking. This is retrieval practice---recalling
+% information strengthens memory more than re-reading it.''
+% Walk around the room. Do NOT show the next slide yet.
+%
+% -- FLEX: [CORE] Retrieval practice (Roediger \& Karpicke, 2006).
+% Never skip. Even 60 seconds of recall is more valuable than 5 minutes
+% of re-reading.
+}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{
+% -- NARRATE: ``Reveal time. Walk through each bullet. D-A-M: three
+% interdependent axes---optimizing one shifts the bottleneck. Silent failure:
+% the Degradation Equation quantifies drift. Iron Law: three terms, slowest
+% dominates. Bitter Lesson: scale wins, but 44$\times$ algorithmic efficiency
+% compounds too. AI Engineering: jointly optimizing all axes under shifting
+% distributions. Five pillars: missing any one leads to the 60--85\% failure
+% rate. Deployment spectrum: $10^6\times$ gap means different engineering per
+% tier. Emphasize the quantitative anchors: 23\% Amdahl's, 362,000-digit
+% verification gap, 44$\times$ efficiency, 60--85\% failure rate.''
+%
+% -- FLEX: [CORE] Summary slide. Walk through all bullets.
+% IF SHORT: Hit just the three frameworks (D-A-M, Iron Law, Degradation).
+}
+
+\footnotesize
+\begin{itemize}\setlength\itemsep{1pt}
+  \item \textbf{\DAM{} taxonomy}: Data, Algorithm, Machine are interdependent. Optimizing one shifts the bottleneck.
+  \item \textbf{Silent failure}: Degradation Equation quantifies accuracy decay. Set retraining triggers from drift.
+  \item \textbf{Iron Law}: $T = D_{\text{vol}}/BW + O/(R_{\text{peak}} \cdot \eta) + L_{\text{lat}}$. Slowest term dominates.
+  \item \textbf{Bitter Lesson}: Scale wins --- but algorithmic efficiency (44$\times$) compounds alongside it.
+  \item \textbf{AI Engineering}: Jointly optimizing all \DAM{} axes under continuously shifting distributions.
+  \item \textbf{Five pillars}: Data, Training, Deployment, Ops, Ethics. Missing any $\to$ 60--85\% failure.
+  \item \textbf{Deployment spectrum}: Cloud to TinyML spans $10^6\!\times$ compute. Each tier needs different \DAM{} balance.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{
+% -- NARRATE: ``Six canonical papers. Sculley for hidden technical debt.
+% Sutton for the Bitter Lesson. Karpathy for Software 2.0. Hernandez and
+% Brown for algorithmic efficiency. Patterson and Hennessy for the quantitative
+% approach. Paleyes for deployment challenges.''
+%
+% -- FLEX: [OPTIONAL] Show briefly. Students can look up papers on their own.
+}
+
+\small
+\mlsysref{Sculley+15}{Sculley et al. ``Hidden Technical Debt in ML Systems.'' NeurIPS 2015.}
+\mlsysref{Sutton19}{R. Sutton. ``The Bitter Lesson.'' 2019.}
+\mlsysref{Karpathy17}{A. Karpathy. ``Software 2.0.'' 2017.}
+\mlsysref{Hernandez+20}{Hernandez \& Brown. ``Measuring Algorithmic Efficiency.'' 2020.}
+\mlsysref{P\&H21}{Patterson \& Hennessy. \textit{Comp.\ Arch.: A Quantitative Approach}. 6th ed.}
+\mlsysref{Paleyes+22}{Paleyes et al. ``Challenges in Deploying ML.'' ACM Comp.\ Surveys, 2022.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: ML Systems in the Wild}
+\note{
+% -- LINK: This chapter established three frameworks. The next chapter asks:
+% where should a model actually run?
+%
+% -- NARRATE: ``Physical laws dictate where a model can run. Speed of light
+% makes distant cloud servers useless for emergency braking---36 ms minimum
+% round trip from CA to VA, before any computation. The Power Wall limits
+% mobile to 3--5 W. The Memory Wall limits TinyML to 384 KB. The question
+% `where should a model run?' is the entire next chapter.''
+%
+% -- FLEX: [CORE] Forward hook. Assign pre-reading if applicable.
+% IF SHORT: ``Next class: where should a model run? Read Chapter 2.''
+}
+
+\footnotesize
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \safeimg[height=2.5cm]{nvidia-h100.png}\\
+    \textcolor{computestroke}{\textbf{Cloud}} --- 700 W
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \safeimg[height=2.5cm]{jetson-orin-nx.jpg}\\
+    \textcolor{routingstroke}{\textbf{Edge}} --- 15--40 W
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \safeimg[height=2.5cm]{arduino-nicla-vision.jpg}\\
+    \textcolor{datastroke}{\textbf{TinyML}} --- 100 mW
+  \end{column}
+\end{columns}
+
+\vspace{0.15cm}
+\centering
+{\normalsize Where should an ML model run?}\\[0.1cm]
+{\small\textbf{The speed of light, thermodynamics, and battery physics decide.}}
+
+\end{frame}
+
+
+% =============================================================================
+% BACKUP SLIDES
+% =============================================================================
+\appendix
+\mlsysbackup
+
+\begin{frame}{ResNet-50 on H100 --- Compute or Memory?}
+\note{
+% -- NARRATE: Use as an additional exercise if students finish the main
+% exercise early. ResNet-50: 8 GFLOPs per image. H100: 989 TFLOPS peak,
+% 40\% utilization. Inference time = 8e9 / (989e12 * 0.4) = 20 microseconds.
+% But actual time is ~1 ms. Why? Memory bandwidth: loading 97.5 MB of
+% parameters at 3,350 GB/s = 29 microseconds. Plus framework overhead.
+% The model is memory-bound at batch=1, not compute-bound.
+%
+% -- FLEX: [OPTIONAL] Additional quantitative exercise.
+}
+\small
+\textbf{ResNet-50 inference on H100 (batch=1):}
+
+\vspace{0.15cm}
+{\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Term} & \textbf{Variables} & \textbf{Calculation} & \textbf{Time} \\
+  \midrule
+  \textcolor{computestroke}{Compute} & 8 GFLOPs, 989 TF, $\eta$=0.4 & $8\text{G}/(396\text{T})$ & \textbf{20 $\mu$s} \\
+  \textcolor{datastroke}{Data}    & 97.5 MB params, 3,350 GB/s & $97.5\text{M}/3{,}350\text{G}$ & \textbf{29 $\mu$s} \\
+  \textcolor{errorstroke}{Overhead} & Framework, kernel launch & --- & \textbf{$\sim$950 $\mu$s} \\
+  \midrule
+  & \textbf{Actual measured} & & \textbf{$\sim$1 ms} \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\textbf{Surprise:} Neither compute nor data dominates---\textcolor{errorstroke}{overhead} does at batch=1. At batch=256, compute catches up and becomes the bottleneck.
+\end{frame}
+
+\begin{frame}{Degradation Equation Worked Example}
+\note{
+% -- NARRATE: Use if students struggle with the Degradation Equation.
+% Walk through month by month: $A(t) = 0.85 - 0.012 \times \Delta(t)$.
+% At month 6, $\Delta = 0.48$, so $A = 0.85 - 0.012 \times 0.48 / 0.012
+% = 79.2\%$. Set retraining trigger at $A(t) < 0.80$ (month $\sim$5).
+%
+% -- FLEX: [OPTIONAL] Backup slide. Use only if students need scaffolding.
+}
+\small
+Use if students struggle with the Degradation Equation.
+
+\small
+\textbf{Scenario:} Recommendation system, $A_0 = 0.85$, $\alpha = 0.012$/month.
+
+\vspace{0.2cm}
+{\footnotesize
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  \textbf{Month} & $\Delta(P)$ & $A(t)$ & \textbf{Status} \\
+  \midrule
+  0 & 0.00 & 85.0\% & Deployed \\
+  3 & 0.15 & 83.2\% & OK \\
+  6 & 0.48 & 79.2\% & Alert threshold \\
+  12 & 1.10 & 71.8\% & SLA violation \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\textbf{Key:} Set retraining trigger at $A(t) < 0.80$ (month $\sim$5).
+\end{frame}
+
+\begin{frame}{Amdahl's Law --- Why System Thinking Matters}
+\note{
+% -- NARRATE: Use if students question the 23\% end-to-end result.
+% Walk through the formula: $\text{Speedup} = 1 / ((1-p) + p/S)$.
+% With $p = 0.35$ and $S = 3$: $1 / (0.65 + 0.117) = 1.30$.
+% Even with infinite speedup on inference: $1 / 0.65 = 1.54$.
+%
+% -- FLEX: [OPTIONAL] Backup slide. Use only if students need the math.
+}
+\small
+Use if students question the 23\% end-to-end result.
+
+\small
+$$\text{Speedup} = \frac{1}{(1-p) + p/S}$$
+
+\vspace{0.1cm}
+If inference is 35\% of the pipeline and you speed it up 3$\times$:
+$$\text{Speedup} = \frac{1}{0.65 + 0.35/3} = \frac{1}{0.767} = 1.30$$
+
+\vspace{0.1cm}
+Only \textbf{30\% improvement} despite 3$\times$ faster inference. The other 65\% (preprocessing + postprocessing) is untouched. \textbf{Profile the whole pipeline first.}
+\end{frame}
+
+\end{document}

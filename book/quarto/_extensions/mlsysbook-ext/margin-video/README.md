@@ -30,11 +30,21 @@ A Quarto extension for embedding YouTube videos as margin notes with automatic n
 
 ## Supported Options
 
-| Option | Description | Default | Example |
-|--------|-------------|---------|---------|
-| `aspect-ratio` | Video aspect ratio | `"16/9"` | `aspect-ratio="4/3"` |
-| `start` | Start time in seconds | none | `start="120"` |
-| `autoplay` | Enable autoplay | `false` | `autoplay="true"` |
+<table>
+<thead>
+<tr>
+<th width="20%"><b>Option</b></th>
+<th width="35%">Description</th>
+<th width="15%">Default</th>
+<th width="30%">Example</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>`aspect-ratio`</b></td><td>Video aspect ratio</td><td>`"16/9"`</td><td>`aspect-ratio="4/3"`</td></tr>
+<tr><td><b>`start`</b></td><td>Start time in seconds</td><td>none</td><td>`start="120"`</td></tr>
+<tr><td><b>`autoplay`</b></td><td>Enable autoplay</td><td>`false`</td><td>`autoplay="true"`</td></tr>
+</tbody>
+</table>
 
 ## Features
 

@@ -6,31 +6,11 @@ engine: jupyter
 
 ## Purpose {.unnumbered}
 
-_How do we reason about failure as a statistical certainty, and what does the math tell us about staying alive at scale?_
+_***How* do we reason about failure as a statistical certainty, and *what* does the math tell us about staying alive at scale?_
 
 Individual accelerators fail rarely---but fleets are large, and probability is relentless. Scale a cluster to tens of thousands of GPUs and the expected time between failures drops from years to hours. Scale further and failures arrive faster than any human operator can respond. The math is straightforward, the implications are profound: at fleet scale, failure is not an exceptional event to be debugged but a continuous physical condition to be engineered around, no different from heat dissipation or power delivery.
 
 This appendix collects the reference calculations that let you reason quantitatively about failure, recovery, and availability at scale. It provides the mathematical tools behind the fault tolerance strategies in @sec-fault-tolerance-reliability, the fleet orchestration policies in @sec-fleet-orchestration, and the operational practices in @sec-ops-scale.
-
-::: {.callout-tip title="Learning Objectives"}
-
-- Calculate component and system **MTTF/MTBF** from FIT rates and explain why aggregate reliability degrades multiplicatively with scale
-- Apply the **exponential failure model** to predict the probability of job-interrupting failures for a given cluster size and job duration
-- Derive **optimal checkpoint intervals** using the **Young-Daly formula** and estimate checkpoint sizes for large models
-- Decompose **recovery time** into its constituent phases and compute its impact on effective training throughput
-- Distinguish between **checkpoint/restart**, **redundancy**, and **elastic training** strategies and evaluate when each applies
-- Compute **stacked availability** from independent replicas and explain why redundancy is essential for serving workloads
-
-:::
-
-## How to Use This Appendix {.unnumbered}
-
-This appendix is designed as a *reference*. Use it when you need to move from intuition ("failures happen more often at scale") to quantitative engineering decisions ("how often should I checkpoint?" or "how many spare nodes do I need?").
-
-- **"How often will something fail?"** --- Start with @sec-reliability-foundations-failure-probability and the MTBF cascade in @sec-reliability-foundations-mtbf-cascade.
-- **"How often should I checkpoint?"** --- Use the Young-Daly model in @sec-reliability-foundations-young-daly and the worked example in @sec-reliability-foundations-worked-example.
-- **"How much time do I lose to recovery?"** --- See the recovery anatomy in @sec-reliability-foundations-recovery-anatomy and the goodput analysis in @sec-reliability-foundations-goodput.
-- **"Should I use redundancy or checkpointing?"** --- Compare strategies in @sec-reliability-foundations-strategies and availability stacking in @sec-reliability-foundations-availability.
 
 ```{python}
 #| label: appendix-reliability-setup
@@ -180,6 +160,26 @@ class ReliabilityStrings:
 RS = ReliabilityStrings
 ```
 
+::: {.callout-tip title="Learning Objectives"}
+
+- Calculate component and system **MTTF/MTBF** from FIT rates and explain why aggregate reliability degrades multiplicatively with scale
+- Apply the **exponential failure model** to predict the probability of job-interrupting failures for a given cluster size and job duration
+- Derive **optimal checkpoint intervals** using the **Young-Daly formula** and estimate checkpoint sizes for large models
+- Decompose **recovery time** into its constituent phases and compute its impact on effective training throughput
+- Distinguish between **checkpoint/restart**, **redundancy**, and **elastic training** strategies and evaluate when each applies
+- Compute **stacked availability** from independent replicas and explain why redundancy is essential for serving workloads
+
+:::
+
+## How to Use This Appendix {.unnumbered}
+
+This appendix is designed as a *reference*. Use it when you need to move from intuition ("failures happen more often at scale") to quantitative engineering decisions ("how often should I checkpoint?" or "how many spare nodes do I need?").
+
+- **"How often will something fail?"** --- Start with @sec-reliability-foundations-failure-probability and the MTBF cascade in @sec-reliability-foundations-mtbf-cascade.
+- **"How often should I checkpoint?"** --- Use the Young-Daly model in @sec-reliability-foundations-young-daly and the worked example in @sec-reliability-foundations-worked-example.
+- **"How much time do I lose to recovery?"** --- See the recovery anatomy in @sec-reliability-foundations-recovery-anatomy and the goodput analysis in @sec-reliability-foundations-goodput.
+- **"Should I use redundancy or checkpointing?"** --- Compare strategies in @sec-reliability-foundations-strategies and availability stacking in @sec-reliability-foundations-availability.
+
 ## Failure Probability at Scale {#sec-reliability-foundations-failure-probability}
 
 ::: {.callout-tip title="Why This Matters"}
@@ -273,10 +273,17 @@ This is the **MTBF cascade**: reliability degrades linearly with component count
 # │ Exports: mtbf_data list of dicts with "gpus", "nodes", "mtbf", "per_day" keys
 # └─────────────────────────────────────────────────────────────────────────────
 
+from mlsysim.fmt import check
+
 mtbf_data = []
 for n_gpus in R.cluster_sizes:
     n_nodes = R.nodes_for_gpus(n_gpus)
     mtbf_h_val = R.cluster_mtbf(n_gpus).m_as(ureg.hour)  # raw float in hours
+
+    if n_gpus == 10000:
+        check(mtbf_h_val < 24.0, f"Narrative Violation: Cluster MTBF is {mtbf_h_val:.1f} hours. Failures are no longer a daily reality!")
+        check(mtbf_h_val < 5.0, f"Narrative Violation: Cluster MTBF is too high for the 'constant failure' narrative.")
+
     if mtbf_h_val >= 1.0:
         mtbf_str = f"{mtbf_h_val:.1f} hours"
     else:

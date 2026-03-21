@@ -19,16 +19,25 @@ Multi-layer perceptrons (MLPs) on real image classification tasks:
 
 **Run after Module 08** (Full training pipeline with data loading)
 
-| Module | Component | What It Provides |
-|--------|-----------|------------------|
-| Module 01 | Tensor | YOUR data structure with autograd |
-| Module 02 | Activations | YOUR ReLU activation |
-| Module 03 | Layers | YOUR Linear layers |
-| Module 04 | Losses | YOUR CrossEntropyLoss |
-| Module 05 | DataLoader | YOUR batching and data pipeline |
-| Module 06 | Autograd | YOUR automatic differentiation |
-| Module 07 | Optimizers | YOUR SGD optimizer |
-| Module 08 | Training | YOUR end-to-end training loop |
+<table>
+<thead>
+<tr>
+<th width="25%"><b>Module</b></th>
+<th width="25%">Component</th>
+<th width="50%">What It Provides</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>Module 01</b></td><td>Tensor</td><td>YOUR data structure with autograd</td></tr>
+<tr><td><b>Module 02</b></td><td>Activations</td><td>YOUR ReLU activation</td></tr>
+<tr><td><b>Module 03</b></td><td>Layers</td><td>YOUR Linear layers</td></tr>
+<tr><td><b>Module 04</b></td><td>Losses</td><td>YOUR CrossEntropyLoss</td></tr>
+<tr><td><b>Module 05</b></td><td>DataLoader</td><td>YOUR batching and data pipeline</td></tr>
+<tr><td><b>Module 06</b></td><td>Autograd</td><td>YOUR automatic differentiation</td></tr>
+<tr><td><b>Module 07</b></td><td>Optimizers</td><td>YOUR SGD optimizer</td></tr>
+<tr><td><b>Module 08</b></td><td>Training</td><td>YOUR end-to-end training loop</td></tr>
+</tbody>
+</table>
 
 ## Milestone Structure
 
@@ -60,10 +69,23 @@ This milestone uses **progressive scaling** with 2 scripts:
 
 ## Expected Results
 
-| Script | Dataset | Image Size | Parameters | Loss | Accuracy | Training Time |
-|--------|---------|------------|------------|------|----------|---------------|
-| 01 (TinyDigits) | 1K train | 8×8 | ~2.4K | < 0.5 | 75-85% | 3-5 min |
-| 02 (MNIST) | 60K train | 28×28 | ~100K | < 0.2 | 94-97% | 10-15 min |
+<table>
+<thead>
+<tr>
+<th width="18%"><b>Script</b></th>
+<th width="12%">Dataset</th>
+<th width="12%">Image Size</th>
+<th width="15%">Parameters</th>
+<th width="12%">Loss</th>
+<th width="15%">Accuracy</th>
+<th width="16%">Training Time</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>01 (TinyDigits)</b></td><td>1K train</td><td>8×8</td><td>~2.4K</td><td>< 0.5</td><td>75-85%</td><td>3-5 min</td></tr>
+<tr><td><b>02 (MNIST)</b></td><td>60K train</td><td>28×28</td><td>~100K</td><td>< 0.2</td><td>94-97%</td><td>10-15 min</td></tr>
+</tbody>
+</table>
 
 ## Key Learning: Hierarchical Feature Learning
 

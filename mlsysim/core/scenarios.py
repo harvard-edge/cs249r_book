@@ -7,6 +7,7 @@ from ..hardware.types import HardwareNode
 from ..systems.types import Fleet, Node
 from .exceptions import OOMError, SLAViolation
 from .evaluation import SystemEvaluation, EvaluationLevel
+from typing import Optional, Union, Dict, Any, List, ClassVar
 
 class Scenario(BaseModel):
     """
@@ -24,7 +25,33 @@ class Scenario(BaseModel):
     sla_latency: Optional[Quantity] = None
     target_accuracy: Optional[float] = None
     power_budget: Optional[Quantity] = None
-    
+
+    _legacy_aliases: ClassVar[dict[str, Any]] = {
+        "mission_goal": lambda self: self.description,
+        "critical_constraint": lambda self:
+            self.sla_latency
+            if self.sla_latency is not None
+            else self.target_accuracy
+            if self.target_accuracy is not None
+            else self.power_budget,
+        "ram": lambda self:
+            self.system.node.accelerator.ram
+            if isinstance(self.system, Fleet)
+            else self.system.ram,
+        "hardware": lambda self:
+            self.system.node.accelerator
+            if isinstance(self.system, Fleet)
+            else self.system,
+    }
+
+    def __getattr__(self, name):
+        aliases = type(self)._legacy_aliases
+        if name in aliases:
+            value = aliases[name](self)
+            if value is not None:
+                return value
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+
     @property
     def is_distributed(self) -> bool:
         return isinstance(self.system, Fleet)
@@ -248,3 +275,18 @@ class Applications:
     AutoDrive = Scenarios.AutonomousVehicle
     Workstation = Scenarios.LocalTraining
     Frontier = Scenarios.FrontierTraining
+
+class Archetypes:
+    """
+    Backward-compatible namespace for older textbook notebooks/qmd files.
+    """
+
+    # Legacy system/application archetype aliases
+    Cloud_V100 = Scenarios.FrontierTraining
+    TinyML_M7 = Scenarios.SmartDoorbell
+
+    # Optional convenience aliases
+    Frontier = Applications.Frontier
+    AutoDrive = Applications.AutoDrive
+    Doorbell = Applications.Doorbell
+    Workstation = Applications.Workstation

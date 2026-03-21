@@ -15,13 +15,22 @@ Before installing or updating any extension, **ALWAYS** check for:
 
 ### 📋 Extension Inventory
 
-| Extension | Status | Safe to Update? |
-|-----------|--------|-----------------|
-| `margin-video` | 🚫 **100% Custom** | Never (MLSysBook only) |
-| `ute/custom-numbered-blocks` | 🚫 **Heavy Customization** | Never |
-| `nmfs-opensci/titlepage` | 🚫 **Customized** | Never |
-| `pandoc-ext/diagram` | ✅ Standard | Yes |
-| `quarto-ext/lightbox` | ✅ Standard | Yes |
+<table>
+<thead>
+<tr>
+<th width="40%"><b>Extension</b></th>
+<th width="35%">Status</th>
+<th width="25%">Safe to Update?</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>`margin-video`</b></td><td>🚫 **100% Custom**</td><td>Never (MLSysBook only)</td></tr>
+<tr><td><b>`ute/custom-numbered-blocks`</b></td><td>🚫 **Heavy Customization**</td><td>Never</td></tr>
+<tr><td><b>`nmfs-opensci/titlepage`</b></td><td>🚫 **Customized**</td><td>Never</td></tr>
+<tr><td><b>`pandoc-ext/diagram`</b></td><td>✅ Standard</td><td>Yes</td></tr>
+<tr><td><b>`quarto-ext/lightbox`</b></td><td>✅ Standard</td><td>Yes</td></tr>
+</tbody>
+</table>
 
 ### 🚨 Emergency Recovery
 

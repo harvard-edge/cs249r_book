@@ -124,23 +124,20 @@ def generate_sectioned_contributors(repo_root: Path) -> str:
     tinytorch_config = load_config(repo_root / "tinytorch" / ".all-contributorsrc")
     kits_config = load_config(repo_root / "kits" / ".all-contributorsrc")
     labs_config = load_config(repo_root / "labs" / ".all-contributorsrc")
+    interviews_config = load_config(repo_root / "interviews" / ".all-contributorsrc")
 
     book_contributors = book_config.get("contributors", [])
     tinytorch_contributors = tinytorch_config.get("contributors", [])
     kits_contributors = kits_config.get("contributors", [])
     labs_contributors = labs_config.get("contributors", [])
+    interviews_contributors = interviews_config.get("contributors", [])
 
-    # Count contributors
-    book_count = len(book_contributors)
-    tinytorch_count = len(tinytorch_contributors)
-    kits_count = len(kits_contributors)
-    labs_count = len(labs_contributors)
-
-    # Generate tables - show ALL contributors
+    # Generate tables
     book_table = generate_contributor_table(book_contributors)
     tinytorch_table = generate_contributor_table(tinytorch_contributors)
     kits_table = generate_contributor_table(kits_contributors)
     labs_table = generate_contributor_table(labs_contributors)
+    interviews_table = generate_contributor_table(interviews_contributors)
 
     # Generate legend
     legend = generate_legend()
@@ -174,6 +171,19 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
 <!-- TINYTORCH-CONTRIBUTORS-END -->
+
+---
+
+### 💼 Interview Hub Contributors
+
+<!-- INTERVIEWS-CONTRIBUTORS-START -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+{interviews_table}
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+<!-- INTERVIEWS-CONTRIBUTORS-END -->
 
 ---
 

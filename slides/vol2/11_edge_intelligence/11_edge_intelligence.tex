@@ -1,0 +1,1596 @@
+% =============================================================================
+% Chapter 11: Edge Intelligence — ML Systems Lecture Slides (Volume II)
+% =============================================================================
+% IMAGES NEEDED (SVGs converted to PDF):
+%   - cloud-vs-edge-learning.pdf    - training-memory-amplifier.pdf
+%   - adaptation-strategies.pdf     - fedavg-protocol.pdf
+%   - edge-device-spectrum.pdf      - federated-systems-challenges.pdf
+%   - sparse-update-strategies.pdf  - centralized-vs-decentralized.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume       = {Volume II},
+  chapter      = {Chapter 11},
+  logo         = {../../assets/img/logo-mlsysbook.png},
+  instlogo     = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Edge Intelligence},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\FedAvg}{\textsc{FedAvg}}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation ---
+\setcounter{mlsystotalsections}{8}
+
+\title{Edge Intelligence}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Edge Intelligence}{On-Device Learning and Federated Coordination}{cover_edge_intelligence.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{
+% -- LINK: What prior concept connects to this slide
+Ch 10 optimized performance within the datacenter. This chapter pushes
+intelligence to devices with 1,000x less memory and 10,000x less compute.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through objectives. Emphasize the shift from datacenter assumptions
+(abundant memory, power, bandwidth) to edge constraints (limited
+everything). Every optimization from Ch 10 becomes a survival skill here.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``How many of you have a phone that predicts your next word? That
+model adapts on your device --- without sending your messages to a server.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students think edge is just ``smaller cloud.'' Edge is a fundamentally
+different engineering discipline: thermal throttling, intermittent
+connectivity, battery budgets, and device heterogeneity spanning 6+
+orders of magnitude.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Sets the constraint mindset for the chapter.
+IF SHORT: Read objectives quickly.
+}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item Contrast \textbf{cloud training}, \textbf{on-device learning}, and \textbf{federated learning} by data flow and privacy
+  \item Quantify edge training overhead: \textbf{memory} (3--5$\times$), compute (2--3$\times$), energy (10--50$\times$)
+  \item Select \textbf{adaptation strategies} (weight freezing, LoRA, sparse) matched to device constraints
+  \item Apply \textbf{data efficiency techniques} (few-shot, replay) for limited local data
+  \item Design \textbf{federated learning} systems with privacy-preserving aggregation across heterogeneous fleets
+  \item Integrate on-device learning into production MLOps with distributed monitoring
+\end{enumerate}
+
+\end{frame}
+
+\begin{frame}{Visual Language}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Brief color review. Students know this from prior chapters.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Skip if familiar.
+}
+
+\small
+Throughout this course, colors carry meaning:
+
+\vspace{0.3cm}
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Blue} --- Compute / Processing\\
+    {\footnotesize GPU ops, forward/backward pass, inference}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Green} --- Data / Memory\\
+    {\footnotesize Data flow, caches, healthy paths}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Orange} --- Routing / Scheduling\\
+    {\footnotesize Load balancers, batch windows}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Red} --- Error / Cost / Bottleneck\\
+    {\footnotesize Loss, decode phase, waste}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\end{frame}
+
+
+
+% =============================================================================
+\section{Why Edge Learning?}
+% =============================================================================
+
+\begin{frame}{The Edge Learning Paradigm}
+\note{
+% -- LINK: What prior concept connects to this slide
+Ch 10 assumed datacenter infrastructure. This slide shows why some
+models must adapt where they operate, not where they were trained.
+
+% -- NARRATE: What to SAY while showing this slide
+``A voice assistant trained on millions of generic audio samples
+struggles with regional accents, household names, and evolving user
+behavior. The core tension: centralized training cannot anticipate
+every deployment context. Four drivers force on-device learning:
+personalization, latency, privacy, and efficiency.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What happens to your keyboard predictions if you switch
+languages mid-conversation?'' Expected: predictions degrade because
+the model was trained on one language distribution.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think edge learning is always necessary. For many applications,
+simpler alternatives suffice: stored preferences, cloud fine-tuning
+with differential privacy, or user-specific lookup tables.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Motivates the entire chapter.
+IF SHORT: State the core tension and the four drivers; skip the voice example.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    A voice assistant trained on generic audio struggles with:
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Regional accents and vocabulary
+      \item Household-specific names and patterns
+      \item Evolving user behavior over time
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{crimson}
+    {\scriptsize\textbf{Core tension:} Centralized training cannot anticipate every deployment context. Models must adapt \emph{where they operate}.}
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    {\scriptsize Four drivers: \textbf{personalization}, \textbf{latency}, \textbf{privacy}, \textbf{efficiency}.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{cloud-vs-edge-learning.pdf}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{When On-Device Learning is Necessary}
+\note{
+% -- LINK: What prior concept connects to this slide
+The paradigm showed why edge learning exists. This slide defines
+when it is actually necessary vs. when simpler alternatives work.
+
+% -- NARRATE: What to SAY while showing this slide
+Left column: ``Feature-based personalization, cloud fine-tuning with
+DP, user lookup tables --- these are simpler and often sufficient.
+On-device learning only when they fail.'' Right column: ``Latency
+makes cloud infeasible: camera processing under 33 ms, AR/VR under
+20 ms, safety-critical under 10 ms. Network round-trip is 50--200 ms.
+Physics decides.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students over-engineer with on-device learning when a stored preference
+table would suffice. The decision rule: on-device learning only when
+simpler alternatives fail the requirements.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Prevents over-engineering.
+IF SHORT: Show only the latency table and the physics-decides insight.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Simpler alternatives often suffice:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Feature-based personalization (stored prefs)
+      \item Cloud fine-tuning with differential privacy
+      \item User-specific lookup tables + global model
+    \end{itemize}
+
+    \vspace{0.15cm}
+    \mlsysalert{Decision rule:}{On-device learning only when simpler alternatives fail the requirements.}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{Latency makes cloud infeasible:}
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.15}
+    {\scriptsize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Application} & \textbf{Budget} \\
+      \midrule
+      Camera processing  & $<$33 ms \\
+      Voice response     & $<$500 ms \\
+      AR/VR motion-to-photon & $<$20 ms \\
+      Safety-critical control & $<$10 ms \\
+      \midrule
+      \textcolor{errorstroke}{Network round-trip} & \textcolor{errorstroke}{50--200 ms} \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \mlsysconcept{Physics decides:}{When the latency budget $<$ round-trip time, the model \emph{must} run locally.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Real-World Applications}
+\note{
+% -- LINK: What prior concept connects to this slide
+The decision rule identified when edge learning is necessary. This
+slide surveys the domains where it is deployed.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the table: ``Gboard: first federated learning at billion-
+device scale, 10--20\% accuracy improvement. Wearables: HIPAA privacy
+constraints. Voice: 1 mW always-on wake-word detection. Industrial
+IoT: offline for days or weeks. Each domain stresses a different
+constraint.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students think edge learning is limited to phones. Industrial IoT
+(pipeline monitoring, agricultural sensors) may be offline for weeks
+--- cloud is physically impossible, not just inconvenient.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Application survey is motivating but secondary to the
+technical content.
+IF SHORT: Mention Gboard (billion devices) and skip the table.
+}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lp{3cm}p{2.5cm}p{3cm}@{}}
+  \toprule
+  \textbf{Domain} & \textbf{Example} & \textbf{Driver} & \textbf{Key Constraint} \\
+  \midrule
+  \textbf{Mobile Input} & Gboard (1B+ devices) & Personalization & 200--300 MB memory \\
+  \textbf{Wearables} & Health monitors & Privacy (HIPAA) & Sub-watt power \\
+  \textbf{Voice} & Wake-word detect & Latency ($<$100 ms) & 1 mW always-on \\
+  \textbf{Industrial IoT} & Pipeline monitoring & Connectivity & Offline days/weeks \\
+  \textbf{Vision} & AR/VR, robotics & Latency ($<$20 ms) & Real-time frames \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{datastroke}
+{\scriptsize\textbf{Common pattern:} Deployment variation that centralized training cannot anticipate. Learning under severe resource constraints.}
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Design Constraints}
+% =============================================================================
+
+\begin{frame}{Training is Not Inference}
+\note{
+% -- LINK: What prior concept connects to this slide
+The applications showed where edge learning is needed. This slide
+reveals why it is hard: training amplifies every constraint.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the table column by column: ``Inference needs weights plus
+one activation map. Training needs weights plus ALL activations (for
+backprop) plus gradients plus optimizer state. Memory amplification:
+3--5x. Compute: 2--3x (forward + backward + update). Bandwidth: 5--10x
+(bidirectional gradient flow). Energy: 10--50x (multiple gradient steps
+vs. one forward pass).''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why is energy amplification (10--50x) so much worse than memory
+amplification (3--5x)?'' Expected: training requires many gradient
+steps per adaptation, each consuming energy. Memory is a one-time
+allocation; energy compounds with iterations.
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume on-device training is just ``inference plus a backward
+pass.'' The optimizer state alone (Adam m and v) doubles the memory
+footprint beyond weights + activations + gradients.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] The amplification table is the central quantitative insight.
+IF SHORT: Focus on the 3--5x memory and 10--50x energy numbers.
+}
+
+% --- Layout: FULL-WIDTH table ---
+\small
+\textbf{On-device training amplifies inference constraints multiplicatively:}
+
+\vspace{0.15cm}
+\renewcommand{\arraystretch}{1.15}
+{\scriptsize
+\begin{tabular}{@{}lp{2.8cm}p{3.5cm}p{2.8cm}@{}}
+  \toprule
+  \textbf{Dimension} & \textbf{Inference} & \textbf{Training} & \textbf{Amplification} \\
+  \midrule
+  \textbf{Memory} & Weights + 1 activation map & Weights + activations + gradients + optimizer & \textcolor{errorstroke}{\textbf{3--5$\times$}} \\
+  \textbf{Compute} & Forward pass only & Forward + backward + update & \textcolor{errorstroke}{\textbf{2--3$\times$}} \\
+  \textbf{Bandwidth} & Sequential weight reads & Bidirectional gradient flow & \textcolor{errorstroke}{\textbf{5--10$\times$}} \\
+  \textbf{Energy} & Single inference & Multiple gradient steps & \textcolor{errorstroke}{\textbf{10--50$\times$}} \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.15cm}
+\mlsysalert{Consequence:}{A smartphone keyboard uses 25\% of available memory for a \emph{single} training step. Compression is not optional --- it is a survival requirement.}
+
+\end{frame}
+
+\begin{frame}{The Training Memory Amplifier}
+\note{
+% -- LINK: What prior concept connects to this slide
+The table showed amplification factors. This figure visualizes the
+stacked memory components and how activations dominate.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the bar chart: ``At 100M parameters: inference uses 400 MB
+(just weights in FP32). Training uses 3.6 GB --- a 9x amplification.
+Activations dominate for larger models because you must store every
+layer's output for backpropagation.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students think model weights dominate training memory. For larger
+models, activations (stored for backprop) exceed weights, gradients,
+and optimizer state combined.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Visual complement to the amplification table.
+IF SHORT: State the 100M example (400 MB vs 3.6 GB) and move on.
+}
+
+% --- Layout: FULL-WIDTH image ---
+\centering
+\safeimg[width=0.88\textwidth,height=5.2cm,keepaspectratio]{training-memory-amplifier.pdf}
+
+\vspace{0.1cm}
+{\small At 100M parameters: inference = 400 MB, training = \textbf{3.6 GB}. Activations dominate.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: Micro-Retrieval Cue ---
+\begin{frame}{Quick Check}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Read question. Wait 15 seconds. Cold-call.
+Expected: activations (for backprop), gradients, and optimizer state
+(Adam m and v) must all be stored during training but not during
+inference.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Reinforces the amplification concept before the prediction exercise.
+}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Quick Check}
+
+\vspace{0.6cm}
+{\large Why is training 3--5$\times$ more memory-intensive\\than inference on edge devices?}
+
+\vspace{0.5cm}
+{\normalsize\textcolor{midgray}{15 seconds --- then I will cold-call.}}
+
+\end{frame}
+
+
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: How Would You Adapt a Model on a Smartwatch?}
+\note{
+% -- LINK: What prior concept connects to this slide
+The amplification table showed why full training is impossible on edge.
+This prediction forces students to design a feasible strategy.
+
+% -- NARRATE: What to SAY while showing this slide
+``A 10M-parameter health model on a smartwatch with 500 MB total
+system memory and 0.5 W power budget. What would you freeze? What
+would you update?'' Give 60 seconds. Do NOT reveal yet --- primes
+the adaptation section.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students write their strategy in 2 sentences. Expected answers:
+freeze all weights except biases (simplest), or freeze backbone and
+update only the classification head. The key insight: you cannot
+update all parameters --- the memory amplifier makes it impossible.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will try to fine-tune the entire model. At 10M params with
+12 bytes/param for training state, that is 120 MB just for optimizer
+state --- 24\% of total system memory. Full fine-tuning is not feasible.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Prediction that motivates the three adaptation strategies.
+IF SHORT: Reduce to 30 seconds.
+}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.5cm}
+{\large A 10M-parameter health model must adapt on a smartwatch\\
+with 500 MB total system memory and 0.5 W power budget.}
+
+\vspace{0.5cm}
+{\normalsize What would you freeze? What would you update?}
+
+\vspace{0.5cm}
+{\small\textcolor{midgray}{Write your strategy in 2 sentences. (60 seconds)}}
+
+\end{frame}
+
+% =============================================================================
+\section{Device Spectrum}
+% =============================================================================
+
+\begin{frame}{The Edge Device Spectrum}
+\note{
+% -- LINK: What prior concept connects to this slide
+The prediction exercise showed that strategy depends on device
+constraints. This slide reveals the full spectrum: 6+ orders of
+magnitude separate the tiers.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the four tiers in the diagram: ``Edge servers with 32 GB
+and 100 TOPS. Smartphones with 8 GB and 17 TOPS. Wearables with
+1--2 GB and 5 TOPS. Microcontrollers with 384 KB and 0.5 GFLOPS.
+Each tier demands a fundamentally different adaptation strategy.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Can you use the same LoRA adapter on a smartwatch and a phone?''
+Expected: no --- the smartwatch cannot even fit LoRA's additional
+matrices in memory. Bias-only adaptation is the maximum for wearables.
+
+% -- WARN: What students will get wrong on THIS topic
+Students design for smartphones and assume it works on all edge
+devices. A strategy that works on a phone (8 GB) fails catastrophically
+on a microcontroller (384 KB) --- a 20,000x difference.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] The spectrum determines strategy selection for the rest of the chapter.
+IF SHORT: Show diagram and state the 6+ orders of magnitude range.
+}
+
+% --- Layout: FULL-WIDTH image ---
+\centering
+\safeimg[width=0.92\textwidth,height=5.5cm,keepaspectratio]{edge-device-spectrum.pdf}
+
+\vspace{0.1cm}
+{\small Each tier demands a different adaptation strategy matched to its resource envelope.}
+
+\end{frame}
+
+\begin{frame}{NPU: The Silicon Dividend}
+\note{
+% -- LINK: What prior concept connects to this slide
+The device spectrum showed the resource constraints. The NPU is what
+makes on-device learning feasible despite those constraints.
+
+% -- NARRATE: What to SAY while showing this slide
+``Mobile NPUs provide 20x speedup and 50x energy savings over CPU
+execution. Without the NPU, on-device training drains the battery in
+minutes. The NPU freed thermal headroom for backpropagation bursts.''
+Point to the right column: ``But the Mobile Memory Wall persists.
+LPDDR5 at 51 GB/s vs. HBM3 at 3,350 GB/s --- a 65x gap. Models are
+bandwidth-bound on mobile just like on datacenter GPUs.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students think NPUs solve all edge constraints. NPUs provide compute
+(TOPS) but the bandwidth wall remains --- quantization is mandatory
+for on-device models, not optional.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] The NPU makes the chapter possible; the bandwidth gap makes
+it hard.
+IF SHORT: State the 20x/50x NPU gains and the 65x bandwidth gap.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{NPU vs.\ CPU for MobileNet inference:}
+
+    \vspace{0.15cm}
+    \renewcommand{\arraystretch}{1.2}
+    {\footnotesize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      & \textbf{CPU} & \textbf{NPU} \\
+      \midrule
+      Latency      & 400 ms & 20 ms \\
+      Energy       & 0.8 J  & 0.016 J \\
+      \midrule
+      \textbf{Speedup}    & ---   & \textbf{20$\times$} \\
+      \textbf{Energy gain} & ---  & \textbf{50$\times$} \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    \mlsysinsight{Insight:}{The NPU does not just make inference faster --- it makes on-device training \emph{feasible}. The 50$\times$ energy gain provides thermal headroom for backpropagation bursts.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{The Mobile Memory Wall}\\[0.1cm]
+    {\footnotesize While NPUs provide raw compute (TOPS), on-device models are \textbf{bandwidth-bound}. The 30--50$\times$ gap between mobile LPDDR5 and datacenter HBM3 makes quantization a mandatory survival strategy.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{@{}lr@{}}
+      Mobile LPDDR5 & 51 GB/s \\
+      H100 HBM3    & 3,350 GB/s \\
+      \textcolor{errorstroke}{\textbf{Gap}} & \textcolor{errorstroke}{\textbf{65$\times$}} \\
+    \end{tabular}
+    }
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Model Adaptation}
+% =============================================================================
+
+\mlsysfocus{The Adaptation Principle}{%
+Freeze what works globally.\\[0.3cm]
+Adapt only what matters locally.%
+}
+
+\begin{frame}{Three Adaptation Strategies}
+\note{
+% -- LINK: What prior concept connects to this slide
+The prediction exercise asked students to design an adaptation strategy.
+This slide reveals the three canonical approaches.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the diagram: ``Weight freezing (bias-only): update only biases,
+100--1000x parameter reduction. Works on microcontrollers. LoRA:
+low-rank adapter matrices, 1--5\% of parameters. Works on smartphones.
+Sparse updates: selective weight modification. Works on edge servers.
+Strategy selection follows device constraints: more resources enable
+more expressive adaptation.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students jump to LoRA for everything. On a microcontroller with 384 KB,
+even LoRA's adapter matrices do not fit. Bias-only is the only option.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] The three strategies structure the rest of the adaptation section.
+IF SHORT: Show diagram and state the device-to-strategy mapping.
+}
+
+% --- Layout: FULL-WIDTH image ---
+\centering
+\safeimg[width=0.92\textwidth,height=5.2cm,keepaspectratio]{adaptation-strategies.pdf}
+
+\vspace{0.1cm}
+{\small Strategy selection follows device constraints: more resources enable more expressive adaptation.}
+
+\end{frame}
+
+\begin{frame}{Weight Freezing: Bias-Only Adaptation}
+\note{
+% -- LINK: What prior concept connects to this slide
+The three strategies overview introduced bias-only as the lightest.
+This slide shows why it works and how simple the implementation is.
+
+% -- NARRATE: What to SAY while showing this slide
+``Standard layer: y = Wx + b. In bias-only adaptation, the gradient
+with respect to W is zero --- we never compute or store it. Only the
+bias gradient is non-zero. This gives 100--1000x parameter reduction.
+Four lines of PyTorch code.'' Point to the code block on the right.
+
+% -- WARN: What students will get wrong on THIS topic
+Students dismiss bias-only as ``too simple to work.'' For tasks like
+domain adaptation (shifting input distribution), biases capture the
+shift surprisingly well because they adjust the decision boundary
+without changing feature extraction.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Implementation detail for the lightest strategy.
+IF SHORT: State the 100--1000x reduction and the equation; skip code.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \textbf{Standard layer:} $y = Wx + b$
+
+    \vspace{0.1cm}
+    In bias-only adaptation:
+    $$\frac{\partial \mathcal{L}}{\partial W} = 0, \quad \frac{\partial \mathcal{L}}{\partial b} \neq 0$$
+
+    \vspace{-0.1cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{100--1000$\times$} parameter reduction. Enables training on devices without FP units.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.47\textwidth}
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize\texttt{%
+    \textcolor{midgray}{\# Freeze all parameters}\\
+    for p in model.parameters():\\
+    \hspace{1em}p.requires\_grad = False\\[0.1cm]
+    \textcolor{midgray}{\# Enable bias gradients only}\\
+    for name, p in model.params():\\
+    \hspace{1em}if "bias" in name:\\
+    \hspace{2em}p.requires\_grad = True%
+    }}
+    \end{mlsyscard}
+    {\scriptsize\textcolor{midgray}{PyTorch: 4 lines for 1000$\times$ param reduction.}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{LoRA: Low-Rank Adaptation}
+\note{
+% -- LINK: What prior concept connects to this slide
+Bias-only is the lightest strategy. LoRA provides more expressive
+adaptation for devices with more resources (smartphones).
+
+% -- NARRATE: What to SAY while showing this slide
+``LoRA decomposes weight updates as a low-rank product: W' = W0 + AB,
+where A is d-by-r and B is r-by-d, with r much less than d. Storage
+per context: 200x smaller than full fine-tuning. Ten user contexts
+fit in 42 MB instead of 400 MB.'' Point to the cards: ``Why LoRA works:
+weight updates have low intrinsic rank. Rank 4 captures most adaptation
+signal. Trade-off: low rank limits expressiveness for complex domain
+shifts.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why does rank 4 capture most of the adaptation signal?''
+Expected: the weight update has low intrinsic dimensionality --- most
+of the change lies in a few principal directions.
+
+% -- WARN: What students will get wrong on THIS topic
+Students set rank too high (r=64 or r=128) ``to be safe.'' Higher
+rank increases memory, compute, and communication cost without
+proportional quality gain. Start with r=4 and increase only if needed.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] LoRA is the default adaptation strategy for smartphones.
+IF SHORT: Show the equation and the 200x per-context saving.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \textbf{Key idea:} Decompose weight updates as low-rank product.
+
+    \vspace{0.05cm}
+    $$W' = W_0 + \Delta W = W_0 + AB$$
+    {\scriptsize where $A \in \mathbb{R}^{d \times r}$, $B \in \mathbb{R}^{r \times d}$, $r \ll d$}
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.05}
+    {\scriptsize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Metric} & \textbf{Value} \\
+      \midrule
+      Rank ($r$)         & 4--64 \\
+      Trainable params   & 1--5\% \\
+      Per-context saving & 200$\times$ \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.05cm}
+    \mlsysconcept{Storage:}{10 contexts = 42 MB (vs.\ 400 MB full).}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize\textbf{Why LoRA works:} Weight updates have low intrinsic rank. Rank-4 captures most adaptation signal with orders-of-magnitude fewer parameters.}
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize\textbf{Trade-off:} Low rank limits expressiveness. Complex domain shifts may need higher rank or sparse updates.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Personalization Storage Budget}
+\note{
+% -- LINK: What prior concept connects to this slide
+LoRA showed the per-context savings. This exercise applies it to
+a concrete multi-user scenario.
+
+% -- NARRATE: What to SAY while showing this slide
+``A 10M parameter vision model (40 MB in FP32). You need 10 user
+contexts on one phone. Calculate total storage for full fine-tuning
+vs. LoRA.'' Give 90 seconds.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Solution: Full = 10 x 40 = 400 MB. LoRA = 40 (backbone) + 10 x 0.2
+(adapters) = 42 MB. Total savings: 9.5x. Per-context: 200x.
+
+% -- WARN: What students will get wrong on THIS topic
+Students forget that LoRA stores one shared backbone plus separate
+adapters. Full fine-tuning stores 10 complete copies with no sharing.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Quantitative exercise applying LoRA storage analysis.
+IF SHORT: Give 45 seconds and reveal quickly.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries Storage Budget for 10 User Contexts}
+
+    \vspace{0.2cm}
+    A 10M parameter vision model (40 MB in FP32).\\
+    You need 10 user contexts on one phone.
+
+    \vspace{0.15cm}
+    \begin{itemize}
+      \item Full fine-tuning: 10 copies $\times$ 40 MB = ?
+      \item LoRA (rank 64, 50K adapter params): backbone + 10 adapters = ?
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \textbf{Calculate} total storage and per-context savings.
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- compare with a neighbor)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    Full: 10 $\times$ 40 = \textbf{400 MB}\\
+    LoRA: 40 + 10 $\times$ 0.2 = \textbf{42 MB}\\[0.1cm]
+    Total savings: \textbf{9.5$\times$}\\
+    Per-context: \textbf{200$\times$}\\[0.1cm]
+    \textcolor{datastroke}{\textbf{Modularity is the only way}} to scale personalization on edge devices.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Sparse Update Strategies}
+\note{
+% -- LINK: What prior concept connects to this slide
+LoRA adapts all targeted layers uniformly. Sparse updates take a more selective approach: only update the layers that matter most for the new task.
+
+% -- NARRATE: What to SAY while showing this slide
+``Three sparse update strategies. Layer Selection: freeze all but the last N layers. Works because early layers learn general features that transfer well. Selective neurons: use Fisher Information to identify the most task-relevant neurons and update only those. Structured pruning during adaptation: remove unimportant connections during fine-tuning, simultaneously adapting and compressing.'' Walk through the comparison table: ``Layer selection is simplest but least expressive. Fisher-based is most precise but requires a calibration pass. The memory savings compound with LoRA: use LoRA on the selected layers only.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If early layers are general, why not always freeze the first 50\%?'' Expected: the optimal freeze point depends on the task. A domain shift (medical imaging) may need to update early layers. A style transfer may need only the last layer.
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume sparse updates and LoRA are alternatives. They are complementary: apply LoRA only to the layers selected by Fisher Information for maximum memory savings.
+
+% -- FLEX: [OPTIONAL] Extends the adaptation strategy toolkit.
+IF SHORT: State the three strategies and their memory savings; skip the comparison table.
+}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrrp{3.5cm}@{}}
+  \toprule
+  \textbf{Strategy} & \textbf{Params Updated} & \textbf{Memory} & \textbf{Best For} \\
+  \midrule
+  \textbf{Last-N layers} & 10--30\%  & 1.5--2$\times$ & Similar domains \\
+  \textbf{Fisher selection} & 5--15\% & 1.2--1.5$\times$ & Task-specific adaptation \\
+  \textbf{Sparse + LoRA}  & 1--3\%   & 1.05--1.1$\times$ & Extreme memory constraints \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.15cm}
+\begin{mlsyscard}{datastroke}
+{\footnotesize\textbf{Combining strategies:} Fisher-selected layers + LoRA rank-4 achieves 97\% of full fine-tuning quality with $<$2\% of the memory overhead. Critical for edge servers with 4--8 GB RAM.}
+\end{mlsyscard}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: LoRA on Smartwatch Exercise ---
+\begin{frame}{Your Turn: Can LoRA Fit on a Smartwatch?}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students learned LoRA storage math for phones. This exercise pushes to the extreme: can we adapt a model on a 512 MB smartwatch?
+
+% -- NARRATE: What to SAY while showing this slide
+Read the problem. Give 90 seconds. Solution: ``Model weights in INT4: 7B * 0.5 bytes = 3.5 GB. Does not fit in 512 MB --- need a smaller model. Try 1B model: 500 MB in INT4. Leaves 12 MB for LoRA. LoRA rank-4 on a 1B model: 2 * d * r * (layers targeted) * 2 bytes. For d=2048, r=4, targeting 25\% of 24 layers = 6 layers: 2 * 2048 * 4 * 6 * 2 = 196 KB. Fits easily. Minimum rank for 7B: impossible --- the base model itself exceeds RAM. Quantization to INT2 gives 1.75 GB, still too large.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+After revealing, ask: ``What is the largest model that fits on a smartwatch in INT4?'' Expected: 512 MB / 0.5 bytes/param = 1B parameters, with almost no memory left for LoRA or activations.
+
+% -- WARN: What students will get wrong on THIS topic
+Students will forget that LoRA requires both the frozen model AND the adapter matrices AND activation memory for the forward pass. The frozen model is the dominant cost.
+
+% -- FLEX: [CORE] Quantitative exercise that tests the limits of on-device learning.
+IF SHORT: Show the solution immediately and state the impossibility result for 7B.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    {\normalsize\bfseries LoRA on a Smartwatch?}
+
+    \vspace{0.15cm}
+    \textbf{Setup:} Smartwatch with 512 MB RAM.\\
+    Target model: 7B parameters.
+
+    \vspace{0.1cm}
+    \begin{enumerate}
+      \item 7B model in INT4: how much memory?
+      \item Does it fit in 512 MB?
+      \item What is the largest model that fits?
+      \item How much memory for LoRA rank-4?
+    \end{enumerate}
+
+    {\footnotesize\textcolor{midgray}{(90 seconds --- show your work)}}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \pause
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\footnotesize
+    7B in INT4: \textbf{3.5 GB} --- does not fit.\\[0.05cm]
+    Max model: $512\text{M} / 0.5 = $ \textbf{1B params}\\[0.05cm]
+    LoRA r=4 on 1B model:\\
+    $\sim$196 KB adapter --- fits easily.\\[0.1cm]
+    \textcolor{errorstroke}{\textbf{7B is impossible.}}\\
+    On-device = smaller models only.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Data Efficiency}
+% =============================================================================
+
+\begin{frame}{Learning from Limited Local Data}
+\note{
+% -- LINK: What prior concept connects to this slide
+Adaptation strategies addressed parameter efficiency. Data efficiency
+addresses the other constraint: edge devices have tiny, noisy datasets.
+
+% -- NARRATE: What to SAY while showing this slide
+Left column: ``Edge data is small (dozens of samples), non-IID (one
+user's patterns), noisy (real sensors), and streaming (arrives
+continuously).'' The key risk: catastrophic forgetting --- new data
+erases old knowledge. Right column: four strategies --- few-shot via
+meta-learning, experience replay (mix old and new), contrastive
+learning (representations without labels), and data compression.
+
+% -- WARN: What students will get wrong on THIS topic
+Students apply standard training (shuffle, multiple epochs) to edge
+data. With only 50 samples, standard SGD overfits in one epoch.
+Few-shot and replay are necessary, not optional.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Data efficiency is the second pillar (after model adaptation).
+IF SHORT: State catastrophic forgetting risk and the replay solution.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Edge data is unlike cloud data:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Small: dozens to hundreds of samples
+      \item Non-IID: reflects one user's patterns
+      \item Noisy: real-world sensor data
+      \item Streaming: arrives continuously
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \mlsysalert{Risk:}{\textbf{Catastrophic forgetting} --- new data erases old knowledge.}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \renewcommand{\arraystretch}{1.05}
+    {\scriptsize
+    \begin{tabular}{@{}lp{3.2cm}@{}}
+      \toprule
+      \textbf{Strategy} & \textbf{How It Helps} \\
+      \midrule
+      \textbf{Few-shot} & 5--20 examples via meta-learning \\
+      \textbf{Replay} & Mix old + new examples in training \\
+      \textbf{Contrastive} & Representations without labels \\
+      \textbf{Compression} & Maximize information per bit \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.05cm}
+    \mlsysinsight{Key:}{Combine replay with freezing to preserve global knowledge.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Federated Learning}
+% =============================================================================
+
+\begin{frame}{The Federated Learning Idea}
+\note{
+% -- LINK: What prior concept connects to this slide
+On-device learning adapts one device. Federated learning coordinates
+learning across millions of devices without sharing raw data.
+
+% -- NARRATE: What to SAY while showing this slide
+``10M devices, each with unique data. Raw data cannot leave the device.
+Federated learning moves COMPUTE to the data: devices train locally
+and share only model updates. Bandwidth savings: raw data is 195 MB/week
+per device, model update is 2.5 MB --- a 78x reduction. Gboard: 1B+
+devices, 10--20\% accuracy gain over static models.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why not just upload the data with encryption?'' Expected:
+bandwidth (195 MB x 1B devices = infeasible), battery (upload drains
+battery), and privacy (encryption protects in transit but not at rest
+on the server).
+
+% -- WARN: What students will get wrong on THIS topic
+Students think federated learning is just ``distributed training with
+bad networking.'' It is fundamentally different: non-IID data,
+intermittent participation, device heterogeneity, and privacy
+constraints have no analog in datacenter training.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Federated learning is the coordination paradigm for edge.
+IF SHORT: State the idea and the 78x bandwidth saving; skip Gboard details.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Problem:} 10M devices each with unique data.\\
+    \textbf{Constraint:} Raw data cannot leave the device.
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{crimson}
+    {\scriptsize\textbf{Federated Learning:} Move \emph{compute} to the data. Devices train locally, share only model updates.}
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    {\scriptsize\textbf{Bandwidth savings:}\\
+    Raw data: 195 MB/week | Update: 2.5 MB\\
+    \textcolor{datastroke}{\textbf{78$\times$ reduction}}\\[0.05cm]
+    Gboard: 1B+ devices, 10--20\% accuracy gain.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \safeimg[width=\textwidth,height=4.8cm,keepaspectratio]{fedavg-protocol.pdf}
+  \end{column}
+\end{columns}
+\mlsyscite{McMahan et al., ``Communication-Efficient Learning,'' AISTATS 2017}
+
+\end{frame}
+
+\begin{frame}{FedAvg: The Core Protocol}
+\note{
+% -- LINK: What prior concept connects to this slide
+The federated learning idea showed the motivation. FedAvg is the
+algorithm that implements it.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the four phases: ``1. Server broadcasts global model to
+selected devices. 2. Each device runs E epochs of SGD on local data.
+3. Devices upload model updates (not raw data). 4. Server computes
+weighted average by local sample count.'' Point to the equation:
+``Weighted by n\_k so devices with more data have more influence.''
+Emphasize: raw data never leaves the device.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think averaging weights is trivial. With non-IID data (each
+device has different label distributions), naive averaging can diverge.
+The non-IID problem is the central research challenge of federated learning.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] FedAvg is the foundational federated algorithm.
+IF SHORT: Show the four phases and the aggregation equation.
+}
+
+\footnotesize
+\textbf{Four phases per round:}
+
+\vspace{0.05cm}
+\renewcommand{\arraystretch}{1.05}
+{\scriptsize
+\begin{tabular}{@{}clp{6cm}@{}}
+  \toprule
+  & \textbf{Step} & \textbf{Action} \\
+  \midrule
+  1 & \textcolor{computestroke}{\textbf{Broadcast}} & Server sends global model $\theta^t$ to selected devices \\
+  2 & \textcolor{datastroke}{\textbf{Local Train}} & Each device runs $E$ epochs of SGD on local data \\
+  3 & \textcolor{routingstroke}{\textbf{Upload}} & Devices send updates $\theta_k^t$ (not raw data) \\
+  4 & \textcolor{crimson}{\textbf{Aggregate}} & Server computes weighted average \\
+  \bottomrule
+\end{tabular}
+}
+
+\vspace{0.1cm}
+\centering
+$$\theta^{t+1} = \sum_{k \in \mathcal{K}_t} \frac{n_k}{n_{\mathcal{K}_t}} \theta_k^t$$
+
+\vspace{0.05cm}
+{\footnotesize Weighted by local sample count $n_k$. Privacy: \textbf{raw data never leaves the device.}}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Is FedAvg Really Private?}
+\note{
+% -- LINK: What prior concept connects to this slide
+FedAvg keeps raw data on devices. But is sharing model updates enough
+for privacy?
+
+% -- NARRATE: What to SAY while showing this slide
+``Federated learning keeps raw data on the device. Does this
+automatically guarantee privacy? Consider: what can an adversary learn
+from the model updates alone?'' Turn-and-talk 90 seconds.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Cold-call 2--3 pairs. Key insight: NO --- gradient inversion attacks
+can reconstruct training images from model updates. True privacy
+requires differential privacy (epsilon 1--8) and secure aggregation.
+The 1--5\% accuracy cost is the ``privacy tax.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume ``data stays on device = private.'' Model updates leak
+information about training data. Gradient inversion attacks can
+reconstruct images and text from gradients with surprising fidelity.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Privacy is the most common misconception about federated learning.
+IF SHORT: State the gradient inversion attack and the DP solution;
+skip turn-and-talk.
+}
+
+\centering
+\vspace{0.8cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.5cm}
+{\large Federated learning keeps raw data on the device.\\[0.2cm]
+\alert{Does this automatically guarantee privacy?}}
+
+\vspace{0.5cm}
+{\normalsize Consider: What can an adversary learn from\\
+the model \emph{updates} alone?}
+
+\vspace{0.5cm}
+{\small\textcolor{lightgray}{Hint: gradient inversion attacks can reconstruct training images.}}
+
+\end{frame}
+
+\begin{frame}{Federated Systems Challenges at Scale}
+\note{
+% -- LINK: What prior concept connects to this slide
+The discussion revealed that privacy requires more than FedAvg alone.
+This slide shows the full set of systems challenges at scale.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the four challenges in the diagram: ``Stragglers: 20--40\%
+of devices are offline at any time. Non-IID data: each device has a
+different label distribution, causing 10--50\% accuracy drop vs. IID.
+Communication: wireless upload asymmetry (5--10 Mbps up vs. 50+ down).
+Privacy: gradient inversion attacks require DP and secure aggregation.
+Each challenge has protocol-level mitigations.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students treat federated learning as a pure algorithm problem. At
+billion-device scale, the systems challenges (stragglers, connectivity,
+versioning, participation bias) dominate over the algorithm design.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Systems perspective on federated learning.
+IF SHORT: Show diagram and name the four challenges without detail.
+}
+
+% --- Layout: FULL-WIDTH image ---
+\centering
+\safeimg[width=0.92\textwidth,height=5.5cm,keepaspectratio]{federated-systems-challenges.pdf}
+
+\vspace{0.1cm}
+{\small Federated learning at scale is a \textbf{systems engineering problem}, not just an algorithm.}
+
+\end{frame}
+
+\begin{frame}{Communication-Efficient Updates}
+\note{
+% -- LINK: What prior concept connects to this slide
+Systems challenges showed communication as a bottleneck. This slide
+provides the compression techniques to address it.
+
+% -- NARRATE: What to SAY while showing this slide
+``Wireless upload is asymmetric: 5--10 Mbps up vs. 50+ down. A 50 MB
+update over LTE takes 40--80 seconds and 2--3\% of battery.'' Walk
+through the table: ``INT8 quantization: 8--16x compression, under 1\%
+accuracy loss. SignSGD (1-bit): 32x compression, 1--3\% loss. Top-k
+sparse: 10--100x, under 2\% loss.'' Point to the LoRaWAN card:
+``At 50 kbps with 1\% duty cycle, uncompressed updates are physically
+impossible.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students think compression is optional for WiFi-connected phones.
+Even on WiFi, a billion devices uploading simultaneously creates
+server-side bandwidth bottlenecks. Compression helps at every scale.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Communication details supplement the systems challenges slide.
+IF SHORT: State the upload asymmetry and the 32x SignSGD compression.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Wireless upload asymmetry:}\\
+    {\scriptsize LTE: 5--10 Mbps up vs.\ 50+ Mbps down}
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.05}
+    {\scriptsize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{Technique} & \textbf{Compress} & \textbf{Acc.\ loss} \\
+      \midrule
+      Quantize (INT8)  & 8--16$\times$ & $<$1\% \\
+      SignSGD (1-bit)   & 32$\times$    & 1--3\% \\
+      Top-$k$ sparse    & 10--100$\times$ & $<$2\% \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.05cm}
+    {\scriptsize 50 MB update over LTE: 40--80s, 2--3\% battery.}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize\textbf{Split architecture:} Shared global backbone + private local head. Sync only the shared part.}
+    \end{mlsyscard}
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize\textbf{LoRaWAN:} 50 kbps, 1\% duty cycle. Uncompressed updates are \emph{physically impossible}. Compression is mandatory.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Centralized vs.\ Decentralized Training}
+\note{
+% -- LINK: What prior concept connects to this slide
+FedAvg is the centralized federated approach: a server coordinates all clients. But what if there is no central server? This slide compares the two architectures quantitatively.
+
+% -- NARRATE: What to SAY while showing this slide
+``Centralized federated learning has a parameter server that orchestrates rounds. Advantages: simple aggregation, easy to add differential privacy, well-understood convergence. Disadvantage: single point of failure, communication bottleneck at the server. Decentralized (peer-to-peer) gossip protocols eliminate the server. Each device communicates with K neighbors. Advantages: no SPOF, scales naturally. Disadvantages: slower convergence (O(N) rounds vs O(1) for centralized), harder to guarantee privacy.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``When would you choose decentralized over centralized?'' Expected: when no trusted server exists (competing organizations), when the server is a bottleneck (millions of devices), or when network topology is mesh-like (IoT sensors).
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume decentralized is always better because it removes the SPOF. But centralized converges faster and is easier to secure with DP. The choice depends on trust, topology, and scale.
+
+% -- FLEX: [OPTIONAL] Extends the federated learning framework.
+IF SHORT: Show the comparison table and state the convergence difference.
+}
+
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Dimension} & \textbf{Centralized (FedAvg)} & \textbf{Decentralized (Gossip)} \\
+  \midrule
+  Coordinator       & Parameter server      & None (peer-to-peer) \\
+  Convergence       & $O(1)$ rounds/epoch   & $O(N)$ rounds/epoch \\
+  Communication     & Server bottleneck     & $K$ neighbors each \\
+  Privacy           & DP at server          & Harder to enforce \\
+  Fault tolerance   & Server = SPOF         & No SPOF \\
+  Best for          & $<$10K devices         & $>$100K devices, no trust \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{routingstroke}
+{\scriptsize\textbf{Hybrid:} Hierarchical FedAvg --- devices aggregate within local clusters (decentralized), cluster heads report to central server (centralized). Combines fast convergence with reduced server load.}
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Production Integration}
+% =============================================================================
+
+\begin{frame}{MLOps for On-Device Learning}
+\note{
+% -- LINK: What prior concept connects to this slide
+Algorithms and protocols are designed. This slide addresses production
+deployment: how to operate edge learning at scale.
+
+% -- NARRATE: What to SAY while showing this slide
+``Production integration transforms three things: artifacts (static
+model becomes policy + weights + configs), versioning (linear becomes
+hierarchical --- base model plus per-device adapters), and monitoring
+(centralized becomes federated analytics).'' Walk through the left
+column for pipeline transforms and the right column for orchestration:
+``20--40\% of devices offline per round. Train only when idle,
+charging, and on WiFi. Suspend if device overheats. Budget under 5\%
+battery per day for training.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students deploy the algorithm and assume production works. 20--40\% of
+devices are offline at any time. Version skew across thousands of
+model variants creates a combinatorial testing challenge.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Production integration is where most edge projects fail.
+IF SHORT: Focus on the orchestration constraints (offline rate, thermal,
+battery); skip the pipeline transforms.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Pipeline transforms:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\scriptsize Artifact: static model $\to$ policy + weights + configs}
+      \item {\scriptsize Versioning: linear $\to$ hierarchical (base + adapters)}
+      \item {\scriptsize Monitoring: centralized $\to$ federated analytics}
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Tiered strategy:}\\
+    {\scriptsize
+    MCU $\to$ bias-only | Phone $\to$ LoRA | Edge $\to$ sparse}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{Orchestration:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item {\scriptsize 20--40\% devices offline per round}
+      \item {\scriptsize Train only when idle + charging + WiFi}
+      \item {\scriptsize Thermal: suspend if device overheats}
+      \item {\scriptsize Battery: $<$5\% per day for training}
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize\textbf{Validation:} Shadow model (frozen baseline vs.\ adapted) detects degradation.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{
+% -- LINK: What prior concept connects to this slide
+The chapter covered edge constraints, adaptation, data efficiency,
+federated learning, and production. These fallacies challenge remaining
+misconceptions.
+
+% -- NARRATE: What to SAY while showing this slide
+Read each fallacy: ``A smartphone cannot replicate datacenter training
+--- 3--10x amplification on 1000x less hardware. Federated learning
+does not automatically preserve privacy --- gradient inversion attacks
+exist. Local adaptation with bad data can DEGRADE performance ---
+fallback to baseline is essential.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Quantitative rebuttals address the three biggest misconceptions.
+IF SHORT: Cover only the privacy fallacy.
+}
+
+\small
+\textbf{Fallacy:} \textit{On-device learning matches cloud-based training capabilities.}\\
+{\footnotesize A smartphone with 8 GB RAM and 5 W cannot replicate datacenter systems with TB of memory and kW of power. Training amplifies resource needs 3--10$\times$ over inference.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Federated learning automatically preserves privacy.}\\
+{\footnotesize Gradient inversion attacks can reconstruct training images from model updates. True privacy requires differential privacy ($\varepsilon = 1$--$8$, 1--5\% accuracy cost) and secure aggregation.}
+
+\vspace{0.15cm}
+\textbf{Fallacy:} \textit{Local adaptation always improves over generic models.}\\
+{\footnotesize Adaptation with insufficient or noisy data can \emph{degrade} performance. Systems need fallback to known-good baselines when local data is inadequate.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{
+% -- LINK: What prior concept connects to this slide
+Fallacies addressed beliefs. Pitfalls address operational mistakes.
+
+% -- NARRATE: What to SAY while showing this slide
+``First: assuming uniform hardware across the fleet. Edge spans 6+
+orders of magnitude --- 32 KB to 16 GB RAM, 48 MHz to 3 GHz. An
+algorithm that works on flagship phones fails on IoT devices. Second:
+underestimating orchestration complexity. Intermittent connectivity,
+version skew across thousands of variants, participation bias (top
+10\% of devices contribute 50\% of rounds), and devices reconnecting
+after weeks offline.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] The two most underestimated challenges in edge ML.
+IF SHORT: Cover only the heterogeneity pitfall.
+}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Assuming uniform hardware across the deployment fleet.}\\
+Edge capabilities span 6+ orders of magnitude: 32 KB to 16 GB RAM, 48 MHz to 3 GHz, 10 $\mu$W to 5 W. A learning algorithm that works on flagship phones may fail catastrophically on IoT devices. Federated systems must handle \textbf{10,000$\times$} performance differences within a single deployment.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Underestimating orchestration complexity at scale.}\\
+Federated systems must handle intermittent connectivity, version skew across thousands of model variants, participation bias (top 10\% of devices contribute to 50\% of rounds), and devices reconnecting after weeks offline. This is not a scaled-down cloud --- it is a fundamentally different engineering discipline.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+
+% --- MUDDIEST POINT ---
+\begin{frame}{Muddiest Point}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Write the most confusing concept from today. Anonymous, one sentence.
+I will address top confusions next lecture.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Feedback loop.
+}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries What was the \alert{muddiest point} today?}
+
+\vspace{0.8cm}
+{\normalsize Write down the concept you found \textbf{most confusing}.}
+
+\vspace{0.5cm}
+{\small\textcolor{midgray}{Anonymous. One sentence. Submit before you leave.}}
+
+\end{frame}
+
+\begin{frame}{What Were the Key Ideas?}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Close notes. 90 seconds. Write 4 most important concepts.''
+Walk around the room. Do NOT show next slide yet.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Retrieval practice consolidates learning.
+}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students just attempted retrieval. Reveal for self-correction.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through each bullet: ``Mobile Memory Wall with 65x bandwidth gap.
+Training amplifies 3--10x. Three pillars: adaptation, data efficiency,
+federated coordination. Heterogeneity spans 6+ orders of magnitude.
+Federated learning is a systems problem. Edge is NOT a scaled-down
+cloud.'' Quantitative anchors: 3--10x amplification, 78x bandwidth
+savings, 200x per-context storage, 20--40\% offline rate.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Summary after retrieval practice.
+IF SHORT: Read bullets quickly.
+}
+
+\footnotesize
+\begin{itemize}\setlength\itemsep{1pt}
+  \item \textbf{Mobile Memory Wall}: NPUs provide TOPS, but on-device models are bandwidth-bound. The 30--50$\times$ gap between mobile RAM and HBM makes quantization mandatory.
+  \item \textbf{Training $\neq$ Inference}: On-device learning amplifies resource needs 3--10$\times$ due to activations, gradients, and optimizer state.
+  \item \textbf{Three pillars}: Model Adaptation (bias/LoRA/sparse), Data Efficiency (few-shot/replay), Federated Coordination (privacy-preserving aggregation).
+  \item \textbf{Heterogeneity is the default}: Edge spans 6+ orders of magnitude. Federated systems must handle stragglers, participation bias, and 10,000$\times$ capability differences.
+  \item \textbf{Federated learning is a systems problem}: Stragglers, non-IID data, communication constraints, and privacy attacks require protocol-level mitigations.
+  \item \textbf{Edge $\neq$ scaled-down cloud}: Thermal throttling, intermittent connectivity, and battery budgets make edge a fundamentally distinct discipline.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``Key papers: McMahan for FedAvg, Bonawitz for federated systems at
+scale, Hu for LoRA, Cai for TinyTL (on-device learning with minimal
+memory).''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Reference slide for self-study.
+}
+
+\small
+\mlsysref{McMahan+17}{McMahan et al. ``Communication-Efficient Learning of Deep Networks from Decentralized Data.'' AISTATS 2017.}
+\mlsysref{Li+20}{Li et al. ``Federated Learning: Challenges, Methods, and Future Directions.'' IEEE SP Magazine, 2020.}
+\mlsysref{Bonawitz+19}{Bonawitz et al. ``Towards Federated Learning at Scale: A System Design.'' MLSys 2019.}
+\mlsysref{Hu+22}{Hu et al. ``LoRA: Low-Rank Adaptation of Large Language Models.'' ICLR 2022.}
+\mlsysref{Hard+18}{Hard et al. ``Federated Learning for Mobile Keyboard Prediction.'' 2018.}
+\mlsysref{Cai+20}{Cai et al. ``TinyTL: Reduce Memory, Not Parameters for Efficient On-Device Learning.'' NeurIPS 2020.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: ML Ops at Scale}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+``We pushed intelligence to its physical limits --- from datacenter
+to edge to microcontroller. Now: how do we sustain these deployments
+reliably? Platform engineering, monitoring at scale, and lifecycle
+management for the entire fleet.''
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Forward hook plants the sustainability question.
+}
+
+\footnotesize
+\begin{columns}[c]
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{computestroke}
+    {\large\bfseries Platform\\Engineering}\\[0.1cm]
+    {\small CI/CD for ML fleets}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{routingstroke}
+    {\large\bfseries Monitoring\\at Scale}\\[0.1cm]
+    {\small Observability across tiers}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.30\textwidth}
+    \centering
+    \begin{mlsyscard}{datastroke}
+    {\large\bfseries Lifecycle\\Management}\\[0.1cm]
+    {\small From deploy to retire}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.3cm}
+\centering
+{\normalsize Deploying models is the beginning.\\
+\textbf{Sustaining them at production scale is the real engineering.}}
+
+\end{frame}
+
+
+
+\appendix
+
+\begin{frame}{Backup: Adaptation Strategy Decision Tree}
+\note{
+% -- NARRATE: Which adaptation strategy to use based on device constraints.
+% -- FLEX: [OPTIONAL] Use during labs or problem sets.
+}
+
+\footnotesize
+\textbf{Choose adaptation strategy based on device resources:}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lllr@{}}
+  \toprule
+  \textbf{Device Class} & \textbf{RAM} & \textbf{Strategy} & \textbf{Params Updated} \\
+  \midrule
+  MCU (Arduino Nicla)    & 384 KB  & Bias-only / lookup table & $<$0.01\% \\
+  Wearable (smartwatch)  & 512 MB  & Quantized 1B + LoRA r=4  & 0.1\% \\
+  Phone (flagship)       & 8 GB    & INT4 7B + LoRA r=16       & 1--2\% \\
+  Edge server (Jetson)   & 32 GB   & FP16 7B + Sparse updates  & 5--15\% \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{datastroke}
+{\scriptsize\textbf{Rule of thumb:} Device RAM determines the largest model that fits. Adaptation strategy fills whatever memory remains. If $<$1 MB remains, use bias-only.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Backup: Federated Learning at Google Scale}
+\note{
+% -- NARRATE: Google's production federated learning system numbers.
+% -- FLEX: [OPTIONAL] Use when students ask about real-world federated deployments.
+}
+
+\footnotesize
+\textbf{Google Gboard: Federated Learning in Production (2019--present)}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lr@{}}
+  \toprule
+  \textbf{Metric} & \textbf{Value} \\
+  \midrule
+  Devices participating per round      & 100--500 \\
+  Total eligible devices               & $>$1 billion \\
+  Rounds per model update              & 500--2,000 \\
+  Communication per round (compressed) & 1--10 MB/device \\
+  Training time per model              & 3--7 days \\
+  Privacy guarantee                    & $(\epsilon=6, \delta=10^{-6})$-DP \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+{\footnotesize Key insight: only 0.00005\% of eligible devices participate per round. Selection criteria: charging, Wi-Fi, idle. This extreme subsampling provides natural privacy amplification.}
+
+\end{frame}
+
+
+\end{document}

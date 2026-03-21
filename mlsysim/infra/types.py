@@ -10,6 +10,9 @@ class GridProfile(BaseModel):
     pue: float
     wue: float
     primary_source: str
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    renewable_pct: Optional[float] = None
     metadata: Metadata = Field(default_factory=Metadata)
 
     @property

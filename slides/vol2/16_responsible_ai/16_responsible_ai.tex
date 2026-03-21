@@ -1,0 +1,1382 @@
+% =============================================================================
+% Chapter 16: Responsible AI — ML Systems Lecture Slides (Volume II)
+% =============================================================================
+% This deck covers responsible AI as engineering infrastructure:
+% fairness metrics, impossibility theorems, explainability methods,
+% privacy preservation, sociotechnical dynamics, and governance.
+%
+% IMAGES (SVG → PDF):
+%   - responsible-ai-stack.pdf     - fairness-metrics-comparison.pdf
+%   - responsible-ai-overhead.pdf  - feedback-loop-bias.pdf
+%   - explainability-methods.pdf   - lifecycle-principles.pdf
+%   - fairness-tax-visual.pdf
+% =============================================================================
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+
+\mlsyssetup{
+  volume   = {Volume II},
+  chapter  = {Chapter 16},
+  logo = {../../assets/img/logo-mlsysbook.png},
+  instlogo = {../../assets/img/logo-harvard.png},
+  chaptertitle = {Responsible AI},
+}
+
+% --- Fonts ---
+\usepackage{fontspec}
+\setsansfont{Helvetica Neue}[
+  BoldFont={Helvetica Neue Bold},
+  ItalicFont={Helvetica Neue Italic},
+  BoldItalicFont={Helvetica Neue Bold Italic},
+]
+\setmonofont{JetBrains Mono}[Scale=0.85]
+
+% --- Packages ---
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+% --- Image paths ---
+\graphicspath{
+  {images/}
+}
+
+% --- Chapter-specific macros ---
+\newcommand{\DP}{\text{Demographic Parity}}
+\newcommand{\EO}{\text{Equalized Odds}}
+\newcommand{\EOpp}{\text{Equality of Opportunity}}
+
+% --- Helper: safe image include ---
+\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
+  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
+    }%
+  }%
+}
+
+% --- Section count for navigation (must match actual \section{} count) ---
+\setcounter{mlsystotalsections}{8}
+
+\title{Responsible AI}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+\begin{document}
+
+% =============================================================================
+% TITLE SLIDE
+% =============================================================================
+\mlsystitle{Responsible AI}{Ethics as Engineering Infrastructure}{cover_responsible_ai.png}
+
+% =============================================================================
+% LEARNING OBJECTIVES
+% =============================================================================
+\begin{frame}{Learning Objectives}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Walk through each objective. ``This chapter transforms ethics from
+aspiration into measurable engineering constraints --- fairness has the same
+force as memory limits or latency budgets.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``How many of you have deployed a model without checking for demographic
+bias?'' [Expected: most hands. This motivates the chapter.]
+
+% -- FLEX: [CORE] + contingency
+[CORE] Sets the chapter scope. IF SHORT: Read objectives 1, 3, and 7 aloud.
+}
+
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0pt}
+  \item Define \textbf{fairness}, \textbf{transparency}, \textbf{accountability}, and \textbf{privacy} as engineering constraints
+  \item Calculate \textbf{fairness metrics} (demographic parity, equalized odds, equality of opportunity)
+  \item Explain why \textbf{impossibility theorems} prove these metrics are mathematically incompatible
+  \item Evaluate \textbf{explainability methods} (SHAP, LIME, gradient-based) and cost-fidelity trade-offs
+  \item Analyze \textbf{feedback loops} that amplify bias in production systems
+  \item Design \textbf{monitoring infrastructure} for detecting fairness degradation across groups
+  \item Assess the \textbf{infrastructure cost} of responsible AI and why it must be budgeted at architecture time
+\end{enumerate}
+
+\end{frame}
+
+\begin{frame}{Visual Language}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[1 min] Point to each card. ``In this chapter, red marks unfairness and bias ---
+the errors that harm people. Green marks equitable outcomes.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Skip if students have seen this in a previous lecture.
+}
+
+\small
+Throughout this course, colors carry meaning:
+
+\vspace{0.3cm}
+\begin{columns}[T]
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Blue} --- Compute / Processing\\
+    {\footnotesize GPU ops, forward/backward pass, inference}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Green} --- Data / Memory\\
+    {\footnotesize Data flow, caches, healthy paths}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Orange} --- Routing / Scheduling\\
+    {\footnotesize Load balancers, batch windows}
+    \end{mlsyscard}
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Red} --- Error / Cost / Bottleneck\\
+    {\footnotesize Loss, decode phase, waste}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\end{frame}
+
+
+
+% =============================================================================
+\section{The Governance Layer}
+% =============================================================================
+
+\begin{frame}{Responsible AI in the Fleet Stack}
+\note{
+% -- LINK: What prior concept connects to this slide
+Ch 15 ensured the fleet is physically viable. This chapter asks the final
+question: whom does the system serve, and does it serve them fairly?
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Point to the stack diagram: ``We built the fleet (Part I), distribution
+logic (Part II), serving infrastructure (Part III), and security armor (Part IV).
+Now we give the system a conscience --- responsibility as the top layer.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What happens when a technically excellent system exhibits bias?'' Give
+10 seconds. [Expected: deployment failure, regulatory shutdown, reputational harm.]
+
+% -- FLEX: [CORE] + contingency
+[CORE] Positions responsibility as infrastructure, not aspiration.
+IF SHORT: State the thesis from the green callout and move on.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{responsible-ai-stack.pdf}
+
+\vspace{0.15cm}
+\mlsysinsight{Core Thesis:}{Responsibility is infrastructure, not aspiration. Systems that fail responsibility requirements fail to deploy.}
+
+\end{frame}
+
+\begin{frame}{The Amazon Hiring Algorithm}
+\note{
+% -- LINK: What prior concept connects to this slide
+The stack showed responsibility as the top layer. This case study shows what
+happens when that layer is missing.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the left column: ``Amazon built a hiring tool trained on
+historical resume data. It learned male-dominated patterns and penalized resumes
+containing the word `women's.\,'\,'' Point to the table on the right: ``It
+passed every technical metric --- accuracy, latency, security, robustness ---
+yet failed on fairness.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``How would you detect this bias before deployment?'' Give 10 seconds.
+[Expected: audit approval rates by demographic group. Correct: that requires
+defining fairness metrics --- which is what the next section teaches.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think more data fixes bias. Correct framing: the data
+accurately reflected historical hiring patterns --- the problem is that
+historical patterns encode structural discrimination.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Amazon is the anchor case study for the chapter.
+IF SHORT: State ``passed all technical gates, failed fairness'' and move on.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Amazon (2019):} Hiring algorithm scrapped after
+    discovering systematic gender bias.
+
+    \vspace{0.15cm}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Trained on historical resume data
+      \item Learned male-dominated hiring patterns
+      \item Penalized resumes containing ``women's''
+      \item Met every \emph{technical} requirement
+    \end{itemize}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Statistically optimal, ethically disastrous.}\\
+    {\footnotesize Technical excellence can coexist with social harm.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \vspace{0.3cm}
+    \renewcommand{\arraystretch}{1.25}
+    {\footnotesize
+    \begin{tabular}{@{}ll@{}}
+      \toprule
+      \textbf{Metric} & \textbf{Status} \\
+      \midrule
+      Accuracy     & \textcolor{datastroke}{\textbf{Pass}} \\
+      Latency      & \textcolor{datastroke}{\textbf{Pass}} \\
+      Security     & \textcolor{datastroke}{\textbf{Pass}} \\
+      Robustness   & \textcolor{datastroke}{\textbf{Pass}} \\
+      \midrule
+      Fairness     & \textcolor{errorstroke}{\textbf{FAIL}} \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.15cm}
+    {\footnotesize\textcolor{midgray}{Passing all technical gates\\is necessary but not sufficient.}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{From Ethics to Engineering}
+\note{
+% -- LINK: What prior concept connects to this slide
+Amazon showed a system that was technically sound but ethically failed. This
+slide reframes ethics from aspiration to hard engineering constraint.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Read the definition card. Walk through the table: ``Traditional view:
+ethical aspiration, post-hoc, nice-to-have. Engineering view: hard deployment
+gate, designed-in, 10--20 ms latency cost, regulatory shutdown on failure.''
+Key punchline: ``Fairness constraints have the same force as memory limits
+or latency budgets.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students treat responsible AI as a checkbox. Correct framing: an
+unsafe system is fundamentally unstable --- toxic outputs erode trust, bias
+degrades training data, privacy leaks invite regulatory shutdown.
+
+% -- FLEX: [CORE] + contingency
+[CORE] The reframing from aspiration to engineering is the chapter thesis.
+}
+
+\footnotesize
+\begin{mlsyscard}{crimson}
+\textbf{Responsible AI:} Designing, auditing, and operating ML
+systems to measurable fairness, safety, privacy, and accountability standards ---
+translating ethical principles into verifiable system properties.
+\end{mlsyscard}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  & \textbf{Traditional View} & \textbf{Engineering View} \\
+  \midrule
+  Nature   & Ethical aspiration    & Hard deployment gate \\
+  Timing   & Post-hoc review       & Designed-in from data collection \\
+  Cost     & ``Nice to have''      & 10--20 ms latency + 15--30\% training \\
+  Failure  & Reputational risk     & Regulatory shutdown \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\mlsysconcept{Key shift:}{Fairness constraints have the same force as memory limits or latency budgets.}
+
+\end{frame}
+
+% =============================================================================
+\section{Core Principles}
+% =============================================================================
+
+\begin{frame}{Principles Across the ML Lifecycle}
+\note{
+% -- LINK: What prior concept connects to this slide
+The reframing established ethics as engineering. This slide maps responsible AI
+principles across the ML lifecycle --- showing it must be designed in, not bolted on.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the diagram: ``Fairness starts at data collection.
+Transparency is designed into architecture. Accountability is built into
+deployment gates.'' Key insight: ``A model trained on biased labels cannot be
+fixed by post-hoc threshold adjustment --- the bias is baked in.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think post-deployment auditing is sufficient. Correct
+framing: constraints not designed in from data collection require fundamental
+retraining to fix.
+
+% -- FLEX: [CORE] + contingency
+[CORE] The lifecycle mapping structures the rest of the chapter.
+IF SHORT: State the ``designed-in, not bolted on'' insight.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{lifecycle-principles.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{Constraints not designed in from data collection require fundamental retraining to fix.}
+
+\end{frame}
+
+\begin{frame}{The Infrastructure Cost of Responsibility}
+\note{
+% -- LINK: What prior concept connects to this slide
+The lifecycle showed WHEN to apply principles. This slide shows the
+infrastructure COST of each principle.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the diagram: ``SHAP: 50--1000x inference compute. Fairness
+monitoring: 10--20 ms per request. At 10 billion inferences/day, responsible AI
+overhead can exceed raw model serving cost.'' Key point: ``This is not optional
+--- it is essential infrastructure budgeted like security and redundancy.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think responsible AI is free. Correct framing: SHAP
+alone costs 50--1000x inference compute --- this must be budgeted at
+architecture time, not discovered at deployment.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Cost awareness prevents retrofitting surprises.
+IF SHORT: State the SHAP overhead number and the ``budget at architecture time'' insight.
+}
+
+% --- Layout: FULL-WIDTH table diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{responsible-ai-overhead.pdf}
+
+\vspace{0.1cm}
+{\small Responsible AI is \textbf{provisioned}, not optional --- budgeted like security and fault tolerance.}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 1: Predict ---
+\begin{frame}{Predict: What Should ``Fair'' Mean?}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students saw that fairness has infrastructure costs. But what does ``fair''
+even mean? This prediction surfaces conflicting definitions.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Read the scenario: ``Group A approved at 70\%, Group B at 40\%. Is
+this unfair?'' Read the hint: ``What if Group B has a genuinely higher default
+rate?'' Give 60 seconds. Ask 3--4 students to share their definitions.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students must write their own definition of ``fair'' in one sentence. The
+point: different students will write different definitions, and they will
+conflict. This primes the impossibility theorem.
+
+% -- FLEX: [CORE] + contingency
+[CORE] First active learning moment. Primes the fairness metrics section.
+IF SHORT: Reduce to 30 seconds; still cold-call 2 students.
+}
+
+\centering
+\vspace{0.8cm}
+{\Large\bfseries Think--Write--Share}
+
+\vspace{0.4cm}
+{\large A loan approval model approves Group A at 70\%\\
+and Group B at 40\%. Is this unfair?}
+
+\vspace{0.3cm}
+{\normalsize Write your definition of ``fair'' in one sentence.}
+
+\vspace{0.3cm}
+{\small\textcolor{midgray}{(60 seconds --- then compare with a neighbor.)}}
+
+\vspace{0.2cm}
+{\footnotesize\textcolor{lightgray}{Hint: What if Group B has a genuinely higher default rate?}}
+
+\end{frame}
+
+% =============================================================================
+\section{Fairness Metrics}
+% =============================================================================
+
+\begin{frame}{Three Definitions of Fairness}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students wrote conflicting definitions. This slide reveals that three formal
+metrics exist --- and they capture different intuitions about fairness.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the diagram: ``Demographic Parity: equal approval rates
+regardless of ground truth. Equalized Odds: equal error rates conditioned on
+the true label. Equality of Opportunity: equal TPR among qualified applicants.''
+Use the loan example to make distinctions concrete.
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think one metric implies the others. Correct framing:
+these metrics conflict mathematically --- satisfying one can violate another.
+
+% -- FLEX: [CORE] + contingency
+[CORE] The three metrics are the foundation for the impossibility theorem.
+}
+
+% --- Layout: FULL-WIDTH comparison ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{fairness-metrics-comparison.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{Each metric captures a \emph{different} aspect of fairness --- and they conflict mathematically.}
+
+\end{frame}
+
+\begin{frame}{Fairness Metrics: The Math}
+\note{
+% -- LINK: What prior concept connects to this slide
+The diagram showed the intuitions. This slide provides the formal math ---
+precise definitions students can implement.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through each equation: ``h(x) predicts, S is sensitive attribute,
+Y is true label. Demographic Parity ignores Y entirely. Equalized Odds
+conditions on Y for both classes. Equality of Opportunity conditions on Y=1
+only.'' Read the impossibility card: ``When base rates differ, no classifier
+satisfies all three simultaneously.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think calibration + equalized odds is achievable.
+Correct framing: Kleinberg et al.\ proved this is mathematically impossible
+when base rates differ between groups.
+
+% -- FLEX: [CORE] + contingency
+[CORE] The formal definitions enable the worked exercise on the next active
+learning slide. IF SHORT: Show equations 1 and 2 and the impossibility card.
+}
+
+\footnotesize
+\textbf{Let} $h(x)$ predict outcome, $S$ = sensitive attribute, $Y$ = true label.
+
+\vspace{0.05cm}
+\textbf{1. Demographic Parity} (equal approval rates):
+\vspace{-0.1cm}
+$$P\big(h(x)=1 \mid S=a\big) = P\big(h(x)=1 \mid S=b\big)$$
+
+\vspace{-0.15cm}
+\textbf{2. Equalized Odds} (equal TPR \emph{and} FPR):
+\vspace{-0.1cm}
+$$P\big(h(x)=1 \mid S=a, Y=y\big) = P\big(h(x)=1 \mid S=b, Y=y\big), \;\; y \in \{0,1\}$$
+
+\vspace{-0.15cm}
+\textbf{3. Equality of Opportunity} (equal TPR only):
+\vspace{-0.1cm}
+$$P\big(h(x)=1 \mid S=a, Y=1\big) = P\big(h(x)=1 \mid S=b, Y=1\big)$$
+
+\vspace{-0.1cm}
+\begin{mlsyscard}{errorstroke}
+{\scriptsize \textbf{Impossibility} (Kleinberg et al., 2016): When base rates differ, no classifier satisfies all three simultaneously.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{The Fairness Tax}
+\note{
+% -- LINK: What prior concept connects to this slide
+The impossibility theorem says you cannot have all metrics. The fairness tax
+quantifies the cost of choosing one.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the diagram: ``Unconstrained: 85\% accuracy, Group A 80\%
+approval, Group B 60\%. Enforce demographic parity: approve Group B at 80\%
+too. This forces approving risky applicants. New accuracy: 81\%. The 4\% drop
+is the Fairness Tax.'' Read the crimson card: ``Engineers must budget this
+trade-off, not pretend it does not exist.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think 4\% accuracy loss is negligible. Correct framing:
+in credit scoring, 4\% accuracy drop means millions of dollars in additional
+defaults --- this is a real business cost that must be explicitly accepted.
+
+% -- FLEX: [CORE] + contingency
+[CORE] The 4\% Fairness Tax is the key quantitative anchor.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.88\textwidth,height=4.0cm,keepaspectratio]{fairness-tax-visual.pdf}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{crimson}
+{\footnotesize Enforcing demographic parity cost \textbf{4\% accuracy} --- a huge drop in credit scoring.
+This is the \textbf{Fairness Tax}: the explicit cost of correcting for historical bias.
+Engineers must budget this trade-off, not pretend it does not exist.}
+\end{mlsyscard}
+
+\end{frame}
+
+% --- ACTIVE LEARNING: Micro-Retrieval Cue ---
+\begin{frame}{Quick Check}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[1 min] Read the question. Give 15 seconds. Cold-call. Answer: No --- the
+impossibility theorem (Kleinberg et al.) proves this is mathematically
+impossible when base rates differ between groups.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Micro-retrieval reinforcing the impossibility theorem.
+}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries Quick Check}
+
+\vspace{0.6cm}
+{\large Can a classifier satisfy Demographic Parity\\AND Equalized Odds when base rates differ?}
+
+\vspace{0.5cm}
+{\normalsize\textcolor{midgray}{15 seconds --- then I will cold-call.}}
+
+\end{frame}
+
+
+
+\mlsysfocus{The Impossibility Theorem}{%
+When base rates differ between groups,\\[0.3cm]
+\textbf{no classifier} can simultaneously satisfy\\[0.2cm]
+Calibration $+$ Equalized Odds $+$ Demographic Parity.\\[0.5cm]
+{\normalsize Fairness is a \emph{value-laden engineering decision},\\
+not a technical optimization with a single correct answer.}%
+}
+
+% --- ACTIVE LEARNING 2: Exercise ---
+\begin{frame}{Your Turn: Calculate Fairness Metrics}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students learned the three metrics formally. This exercise forces them to
+compute all three from raw confusion matrix data.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Read the data. Give 90 seconds. After pause reveal: ``DP gap = 30pp.
+TPR: 40/45 - 30/50 = 0.89 - 0.60 = 29pp. FPR: 30/55 - 10/50 = 0.55 - 0.20
+= 35pp. Violates all three criteria --- fixing one does not fix the others.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students must calculate three specific numbers from data. Falsifiable: they
+can be wrong on the arithmetic. The reveal shows all three are violated.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Second active learning moment. IF SHORT: Reduce to 60 seconds.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    {\normalsize\bfseries Calculate Fairness Metrics}
+
+    \vspace{0.15cm}
+    \textbf{Group A} (100 applicants):\\
+    Approved: 70 (40 repaid, 30 defaulted)\\
+    Rejected: 30 (5 would repay, 25 default)
+
+    \vspace{0.1cm}
+    \textbf{Group B} (100 applicants):\\
+    Approved: 40 (30 repaid, 10 defaulted)\\
+    Rejected: 60 (20 would repay, 40 default)
+
+    \vspace{0.1cm}
+    Calculate: \textbf{DP gap}, \textbf{TPR gap}, \textbf{FPR gap}.\\
+    {\scriptsize\textcolor{midgray}{(90 seconds --- compare with neighbor)}}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \pause
+    \begin{mlsyscard}{datastroke}
+    \textbf{Solution:}\\[0.1cm]
+    {\scriptsize
+    DP: $70/100 - 40/100$ = \textbf{30 pp}\\[0.05cm]
+    TPR: $40/45 - 30/50$ = $0.89 - 0.60$ = \textbf{29 pp}\\[0.05cm]
+    FPR: $30/55 - 10/50$ = $0.55 - 0.20$ = \textbf{35 pp}\\[0.1cm]
+    \textcolor{errorstroke}{\textbf{Violates all three criteria!}}\\
+    Fixing one does not fix the others.
+    }
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Explainability}
+% =============================================================================
+
+\begin{frame}{Explainability Methods: Cost vs.\ Fidelity}
+\note{
+% -- LINK: What prior concept connects to this slide
+Fairness metrics showed WHAT to measure. Explainability shows HOW to explain
+decisions --- required by GDPR Article 22 for automated decisions with legal effects.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the diagram: ``SHAP: theoretically grounded, Shapley values,
+but 50--1000x compute. LIME: model-agnostic local explanations, 100--1000 forward
+passes. Gradient-based: cheapest at 1--10x but lowest fidelity.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students default to SHAP for everything. Correct framing: at 100ms
+SLA with 10K QPS, SHAP adds 50--200ms per request --- SLA violated. Match method
+to deployment constraint.
+
+% -- FLEX: [CORE] + contingency
+[CORE] The cost-fidelity spectrum is essential for deployment decisions.
+IF SHORT: State the SHAP cost and the selection rule from the callout.
+}
+
+% --- Layout: FULL-WIDTH diagram ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{explainability-methods.pdf}
+
+\vspace{0.1cm}
+\mlsysconcept{Selection rule:}{Match method to deployment constraint --- GDPR requires SHAP; real-time needs gradients.}
+
+\end{frame}
+
+\begin{frame}{The Explainability Budget}
+\note{
+% -- LINK: What prior concept connects to this slide
+The methods slide showed costs abstractly. This worked example makes the SLA
+violation concrete.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Walk through: ``100ms SLA, 10K QPS. SHAP adds 50--200ms. Total:
+150--300ms --- SLA violated.'' Point to the options list: ``Pre-compute offline,
+use gradient methods, accept 5x infra cost, or choose an inherently
+interpretable model.'' Point to the GDPR note: ``Fines of 4.5B euros cumulative
+make this a hard requirement, not optional.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Concrete application of the cost spectrum.
+IF SHORT: State the SLA violation and the ``budget at architecture time'' point.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Scenario:} Rec.\ system, SLA: 100 ms, 10{,}000 QPS
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize
+    \textbf{SHAP adds}: 50--200 ms/request\\
+    \textbf{Total latency}: 150--300 ms --- \textcolor{errorstroke}{\textbf{SLA VIOLATED}}}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \textbf{Options:}
+    \begin{itemize}\setlength\itemsep{0pt}
+      \item Pre-compute explanations (offline)
+      \item Use gradient-based methods (+1--10$\times$)
+      \item Accept 5$\times$ infrastructure cost
+      \item Choose inherently interpretable model
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.1}
+    {\scriptsize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Method} & \textbf{Overhead} \\
+      \midrule
+      SHAP            & 50--1000$\times$ \\
+      LIME            & 100--1000 passes \\
+      Gradient        & 1--10$\times$ \\
+      Inherent        & 0$\times$ (arch. cost) \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    {\scriptsize\textcolor{midgray}{GDPR Article 22: Automated decisions\\
+    with legal effects \emph{must} be explained.\\
+    Fines: \textbf{\texteuro 4.5B+} cumulative.}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Feedback Loops}
+% =============================================================================
+
+\begin{frame}{Feedback Loops Amplify Bias}
+\note{
+% -- LINK: What prior concept connects to this slide
+Fairness metrics measure a snapshot. Feedback loops show how bias compounds
+over time --- the system destabilizes its own data distribution.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the diagram: ``Historical data over-represents certain
+neighborhoods. Model predicts high crime there. More patrols sent. More arrests
+made. Training data reinforced. The cycle amplifies the original bias.''
+Key insight: ``Bias is a distributional instability --- the system corrupts
+its own training data.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think retraining on fresh data fixes the loop. Correct
+framing: if the fresh data is generated by the biased system, retraining
+reinforces the bias. You must break the loop with external monitoring.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Feedback loops are the most dangerous dynamic in deployed ML.
+IF SHORT: Walk through the cycle once and state the instability insight.
+}
+
+% --- Layout: FULL-WIDTH comparison ---
+\centering
+\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{feedback-loop-bias.pdf}
+
+\vspace{0.1cm}
+\mlsysalert{Unstable:}{An unfair system degrades its own training data --- bias is a distributional instability.}
+
+\end{frame}
+
+\begin{frame}{Sociotechnical Dynamics}
+\note{
+% -- LINK: What prior concept connects to this slide
+Feedback loops showed technical dynamics. Sociotechnical dynamics add the human
+element --- how organizations and individuals interact with the system.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Point to each card: ``Automation bias: radiologists shown AI predictions
+exhibit confirmation bias, accepting errors they would catch independently.
+Value conflicts: accuracy vs.\ fairness vs.\ privacy are competing constraints.
+Contestability: affected individuals must have mechanisms to challenge decisions.
+Institutional embedding: governance must outlast individual champions.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Extends the technical discussion to organizational context.
+IF SHORT: Read the automation bias and contestability cards only.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Automation Bias}\\
+    {\footnotesize Humans over-trust model outputs. Radiologists shown AI predictions exhibit \textbf{confirmation bias}, accepting errors they would catch independently.}
+    \end{mlsyscard}
+
+    \vspace{0.15cm}
+
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Value Conflicts}\\
+    {\footnotesize Accuracy vs.\ fairness vs.\ privacy are competing constraints. No single optimization satisfies all stakeholders.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Contestability}\\
+    {\footnotesize Affected individuals must have mechanisms to challenge automated decisions. Requires explanation infrastructure.}
+    \end{mlsyscard}
+
+    \vspace{0.15cm}
+
+    \begin{mlsyscard}{errorstroke}
+    \textbf{Institutional Embedding}\\
+    {\footnotesize Governance structures must outlast individual champions. Responsible AI fails when tied to a single team.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% --- ACTIVE LEARNING 3: Discussion ---
+\begin{frame}{Discussion: Which Fairness Metric?}
+\note{
+% -- LINK: What prior concept connects to this slide
+Students learned three metrics and the impossibility theorem. This discussion
+forces them to choose a metric for a specific domain.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Read the three domains. Give 90 seconds for pair discussion. Cold-call
+2--3 pairs. Guide the debrief toward domain-specific reasoning.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Students must match metrics to domains. No single right answer --- the point
+is that the choice is domain-specific. [Expected: criminal justice favors
+equalized odds (equal error rates). Hiring favors demographic parity
+(four-fifths rule). Healthcare favors equality of opportunity (equal treatment
+for equally sick).]
+
+% -- FLEX: [CORE] + contingency
+[CORE] Third active learning moment.
+IF SHORT: Reduce to 60 seconds; cold-call 2 pairs.
+}
+
+\centering
+\vspace{0.6cm}
+{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
+
+\vspace{0.4cm}
+{\large You are deploying a model in \textbf{three} domains:\\[0.15cm]
+\textbf{1.} Criminal justice risk scoring\\
+\textbf{2.} Employee hiring screening\\
+\textbf{3.} Healthcare triage\\[0.2cm]
+\alert{Which fairness metric would you prioritize for each?}}
+
+\vspace{0.3cm}
+{\small\textcolor{midgray}{Consider: What type of error causes the most harm?}}
+
+\end{frame}
+
+% =============================================================================
+\section{Privacy \& Governance}
+% =============================================================================
+
+\begin{frame}{Privacy Preservation at Scale}
+\note{
+% -- LINK: What prior concept connects to this slide
+Fairness addressed group-level equity. Privacy addresses individual-level
+protection --- connecting to the DP foundations from Ch 13.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Point to the left card: ``Differential privacy: bounded influence per
+individual. DP-SGD clips gradients and adds noise. Cost: 2--5\% accuracy,
+15--30\% training overhead. Benefit: enables use of legally restricted data.''
+Point to the right card: ``Machine unlearning: remove a specific user's
+influence without full retraining. Required by GDPR right to be forgotten.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think deleting a user's data from the dataset removes
+their influence from the model. Correct framing: the model has already learned
+from that data --- you need unlearning to remove the influence from weights.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Privacy preservation is a legal requirement, not optional.
+IF SHORT: Cover DP card only; mention unlearning as GDPR requirement.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Differential Privacy}\\[0.05cm]
+    {\scriptsize
+    Mathematical guarantee: individual's data has \textbf{bounded influence} on model output.\\[0.05cm]
+    \textbf{DP-SGD}: Clip gradients + add noise.\\[0.05cm]
+    \textbf{Cost}: 2--5\% accuracy, +15--30\% training.\\[0.05cm]
+    \textbf{Benefit}: Enables legally restricted data.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{Machine Unlearning}\\[0.05cm]
+    {\scriptsize
+    Remove specific user's influence from a trained model.\\[0.05cm]
+    \textbf{Exact}: Retrain from scratch (expensive).\\[0.05cm]
+    \textbf{Approximate}: Influence functions.\\[0.05cm]
+    \textbf{Legal}: GDPR ``right to be forgotten,'' CCPA.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.05cm}
+\mlsysconcept{Key:}{Privacy is a temporal dimension --- unlearning enables compliance without full retraining.}
+
+\end{frame}
+
+\begin{frame}{Machine Unlearning: The Right to Be Forgotten}
+\note{
+% -- LINK: What prior concept connects to this slide
+The Privacy Preservation slide introduced machine unlearning briefly. This
+dedicated slide covers the systems engineering challenge in depth --- GDPR
+Article 17 makes this a legal requirement, not an optional feature.
+
+% -- NARRATE: What to SAY while showing this slide
+[3 min] Walk through the three approaches: ``Exact unlearning: retrain from
+scratch without the user's data. Gold standard but costs 100\% of original
+training compute. Approximate: use influence functions to estimate and remove
+a user's contribution. 1,000--10,000x cheaper but provides only statistical
+guarantees. SISA training: partition data into shards so unlearning only
+requires retraining the affected shard --- 10--100x cheaper than full retrain.''
+Key punchline: ``A 175B model costs \$4M to train. Exact unlearning for each
+GDPR request at \$4M is not viable --- approximate methods are essential.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If you get 100 GDPR deletion requests per month, what is the annual cost
+of exact unlearning for a \$4M model?'' Give 10 seconds.
+[Expected: 100 x 12 x \$4M = \$4.8B --- obviously absurd. This motivates
+approximate methods.]
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think deleting the user's data from the dataset is
+sufficient. Correct framing: the model has already learned from that data ---
+deletion from the dataset does not remove the influence from the weights.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Machine unlearning is a legal requirement under GDPR/CCPA.
+IF SHORT: State the cost impossibility and introduce SISA as the practical approach.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Three approaches to unlearning:}
+
+    \vspace{0.1cm}
+    \renewcommand{\arraystretch}{1.15}
+    {\scriptsize
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{Method} & \textbf{Cost} & \textbf{Guarantee} \\
+      \midrule
+      \textbf{Exact} (retrain) & 100\% train cost & Perfect \\
+      \textbf{Influence fn.}   & 0.01--0.1\%      & Statistical \\
+      \textbf{SISA} (sharded)  & 1--10\%           & Exact (per shard) \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Cost reality}: 175B model at \$4M to train. 100 GDPR requests/month $\times$ exact unlearning = \textbf{\$4.8B/year}. Approximate methods are not optional.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{SISA Training}\\[0.05cm]
+    {\scriptsize
+    \textbf{S}harded, \textbf{I}solated, \textbf{S}liced, \textbf{A}ggregated:\\[0.05cm]
+    1. Partition data into $K$ shards\\
+    2. Train sub-models per shard\\
+    3. Aggregate predictions\\
+    4. Unlearn $\to$ retrain 1 shard\\[0.1cm]
+    \textbf{Cost}: $1/K$ of full retrain\\
+    With $K=100$: \textbf{100$\times$ cheaper}}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Governance Infrastructure}
+\note{
+% -- LINK: What prior concept connects to this slide
+Privacy protected individuals. Governance provides the organizational
+infrastructure to enforce all responsible AI principles continuously.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Walk through the table: ``Model cards document intended use, limitations,
+and group performance. Audit trails add 2--5 ms per inference for TB-scale logs.
+System prompts govern LLM behavior across millions of users. Red teaming probes
+for bias and jailbreaks.'' Read the crimson card: ``System prompts require the
+same version control and CI/CD rigor as model weights.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Governance infrastructure detail.
+IF SHORT: Read the crimson card insight only.
+}
+
+\scriptsize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}p{2.2cm}p{3.8cm}p{4cm}@{}}
+  \toprule
+  \textbf{Mechanism} & \textbf{Purpose} & \textbf{Systems Requirement} \\
+  \midrule
+  \textbf{Model Cards}     & Document use, limits, group perf. & Version-controlled docs in CI/CD \\
+  \textbf{Audit Trails}    & Decision and data lineage tracing & +2--5 ms/inference, TB-scale logs \\
+  \textbf{System Prompts}  & First line of LLM behavior defense & Version control across M users \\
+  \textbf{Red Teaming}     & Probe for bias, toxicity, jailbreaks & Specialized adversarial teams \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{crimson}
+{\scriptsize Managing system prompts across a fleet requires the same \textbf{version control and CI/CD rigor} as model weights. Governance is infrastructure.}
+\end{mlsyscard}
+
+\end{frame}
+
+% =============================================================================
+\section{Implementation}
+% =============================================================================
+
+\begin{frame}{Implementation Challenges}
+\note{
+% -- LINK: What prior concept connects to this slide
+Governance described the ideal. This slide catalogues the real-world barriers
+that prevent implementation.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Walk through the four quadrants: ``Organizational: ethics teams lack
+deployment authority. Data: protected attributes often missing, ground truth
+reflects historical bias. Competing objectives: accuracy vs.\ fairness costs
+4\%. Scale: monitoring overhead compounds, no agreed benchmarks.''
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Implementation context. IF SHORT: Name the four barrier categories.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Organizational Barriers:}
+    \begin{itemize}\setlength\itemsep{-1pt}
+      \item Ethics teams lack deployment authority
+      \item Responsibility tied to individual champions
+      \item Incentive structures misaligned
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Data Constraints:}
+    \begin{itemize}\setlength\itemsep{-1pt}
+      \item Protected attributes often missing
+      \item Ground truth labels reflect historical bias
+      \item Proxy variables encode structural inequity
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \textbf{Competing Objectives:}
+    \begin{itemize}\setlength\itemsep{-1pt}
+      \item Accuracy vs.\ fairness (4\% tax)
+      \item Privacy vs.\ transparency
+      \item Speed-to-market vs.\ governance
+    \end{itemize}
+
+    \vspace{0.05cm}
+    \textbf{Scale \& Standards:}
+    \begin{itemize}\setlength\itemsep{-1pt}
+      \item Monitoring overhead compounds at fleet scale
+      \item No agreed fairness benchmarks
+      \item Regulatory fragmentation (GDPR vs.\ CCPA)
+    \end{itemize}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{AI Safety and Value Alignment}
+\note{
+% -- LINK: What prior concept connects to this slide
+Implementation barriers are organizational. Value alignment is the deeper
+technical challenge: ensuring AI optimizes for human values, not proxy objectives.
+
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Point to the red card: ``YouTube pre-2017 optimized for click-through
+rate. Result: promoted conspiracy content that maximized clicks while degrading
+user welfare. Required full reward pipeline redesign.'' Point to the table:
+``RLHF at training time, system prompts at serving time, red teaming pre-deploy,
+monitoring continuously.''
+
+% -- WARN: What students will get wrong on THIS topic
+Common error: students think RLHF solves alignment. Correct framing: RLHF is
+limited by the representativeness of the rating population --- it encodes the
+values of whoever provides the preference labels.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Forward-looking content on generative AI alignment.
+IF SHORT: State the YouTube example and the RLHF limitation.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \textbf{Value Alignment Problem:}\\
+    {\scriptsize AI systems may optimize proxy objectives diverging from human intent.}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{YouTube (pre-2017):} Optimized for CTR $\to$ promoted conspiracy content that maximized clicks while degrading user welfare. Required full reward pipeline redesign.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \textbf{Generative Alignment:}\\
+    {\scriptsize RLHF bridges human preferences to model weights. System prompts govern fleet behavior.}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \renewcommand{\arraystretch}{1.1}
+    {\scriptsize
+    \begin{tabular}{@{}lr@{}}
+      \toprule
+      \textbf{Mechanism} & \textbf{Scope} \\
+      \midrule
+      RLHF          & Training time \\
+      System prompts & Serving time \\
+      Red teaming    & Pre-deploy \\
+      Monitoring     & Continuous \\
+      \bottomrule
+    \end{tabular}
+    }
+
+    \vspace{0.1cm}
+    {\scriptsize\textcolor{midgray}{RLHF is limited by the representativeness of the rating population.}}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+% =============================================================================
+\section{Wrap-Up}
+% =============================================================================
+
+\begin{frame}{Fallacies}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Read each fallacy. The healthcare algorithm fallacy is most impactful:
+it affected 200M Americans --- the issue was proxy selection, not data quantity.
+The single-metric fallacy: demographic parity forces calibration violations.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Fallacies correct dangerous misconceptions.
+IF SHORT: Read fallacies 1 (more data) and 2 (single metric) only.
+}
+
+\footnotesize
+\textbf{Fallacy:} \textit{Bias can be eliminated through better algorithms and more data.}\\
+{\scriptsize The healthcare algorithm affected 200M Americans; the issue was proxy selection, not data quantity. Impossibility theorems prove no algorithm satisfies all fairness criteria simultaneously.}
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Achieving one fairness metric guarantees overall fairness.}\\
+{\scriptsize Demographic parity forces calibration violations. Single-metric optimization exposes organizations to litigation on other legally relevant criteria.}
+
+\vspace{0.08cm}
+\textbf{Fallacy:} \textit{Responsible AI practices impose only costs without business value.}\\
+{\scriptsize Differential privacy enables use of legally restricted data. Bias monitoring detected the healthcare algorithm's 50\% enrollment reduction before regulatory intervention.}
+
+\end{frame}
+
+\begin{frame}{Pitfalls}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Read each pitfall. The first: SHAP adds 50--200 ms, violating 100 ms
+SLA --- explainability must be budgeted at architecture time. The second:
+group-specific thresholds destroy calibration. The third: governance tied to
+individual champions fails when they leave.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Pitfalls are operational guidance.
+IF SHORT: Cover the first pitfall (explainability as architecture decision).
+}
+
+\footnotesize
+\textbf{Pitfall:} \textit{Treating explainability as an optional post-deployment feature.}\\
+SHAP adds 50--200 ms per request. A 100 ms SLA system cannot retrofit SHAP without 5$\times$ infrastructure cost. Explainability must be budgeted at architecture time.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Implementing fairness via post-hoc threshold adjustment.}\\
+Group-specific thresholds destroy calibration: ``80\% confidence'' means different things for different groups. Proper approach: jointly optimize during training, accepting accuracy-fairness trade-offs.
+
+\vspace{0.15cm}
+\textbf{Pitfall:} \textit{Assuming governance structures survive without institutional embedding.}\\
+Responsible AI tied to individual champions fails when they leave. Governance must be embedded in CI/CD pipelines, deployment gates, and organizational incentive structures.
+
+\end{frame}
+
+% --- RETRIEVAL PRACTICE ---
+
+% --- MUDDIEST POINT ---
+\begin{frame}{Muddiest Point}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[2 min] ``Write the single concept from today you found most confusing.
+Anonymous, one sentence.'' Collect responses. Likely confusions: impossibility
+theorem mechanics, fairness tax justification, or feedback loop dynamics.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Closes the feedback loop. Do not skip.
+}
+
+\centering
+\vspace{1.0cm}
+{\Large\bfseries What was the \alert{muddiest point} today?}
+
+\vspace{0.8cm}
+{\normalsize Write down the concept you found \textbf{most confusing}.}
+
+\vspace{0.5cm}
+{\small\textcolor{midgray}{Anonymous. One sentence. Submit before you leave.}}
+
+\end{frame}
+
+\begin{frame}{What Were the Key Ideas?}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[2 min] ``Close your notes. Write down the 4 most important concepts from today.
+90 seconds, no peeking.'' Walk around the room.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Retrieval practice is the highest-impact learning intervention.
+}
+
+\centering
+\vspace{1.5cm}
+{\Large\bfseries Close your notes.}
+
+\vspace{0.8cm}
+{\large Write down the \textbf{4 most important concepts} from today.}
+
+\vspace{0.8cm}
+{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
+
+\end{frame}
+
+\begin{frame}{Key Takeaways}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[2 min] Reveal after retrieval. Walk through each bullet, anchoring on numbers:
+impossibility theorem, 4\% fairness tax, 50--1000x SHAP overhead, feedback loop
+instability, 2--5\% DP accuracy cost, governance as CI/CD.
+
+% -- FLEX: [CORE] + contingency
+[CORE] Synthesis slide. IF SHORT: Read bullets 2, 3, and 4.
+}
+
+\scriptsize
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textbf{Responsibility is infrastructure}: Fairness monitoring adds 10--20 ms; SHAP costs 50--1000$\times$ inference compute. Budget at architecture time.
+  \item \textbf{Impossibility theorem}: No classifier satisfies Calibration + Equalized Odds + Demographic Parity when base rates differ.
+  \item \textbf{The Fairness Tax}: Enforcing demographic parity costs $\sim$4\% accuracy --- the explicit price of correcting historical bias.
+  \item \textbf{Feedback loops}: Biased systems destabilize their own training data. Monitoring closes the governance loop.
+  \item \textbf{Explainability spectrum}: SHAP (high fidelity, 50--1000$\times$) to gradient-based (low cost, lower fidelity).
+  \item \textbf{Privacy preservation}: Differential privacy (2--5\% accuracy, +15--30\% training) enables legally restricted data use.
+  \item \textbf{Governance as CI/CD}: Model cards, audit trails, system prompts need the same version control rigor as model weights.
+\end{itemize}
+
+\end{frame}
+
+\begin{frame}{References}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[1 min] Highlight Kleinberg+16 (impossibility theorem) and Obermeyer+19
+(healthcare racial bias) as the two must-read papers. Students can photograph.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Do not read every entry aloud.
+}
+
+\small
+\mlsysref{Kleinberg+16}{Kleinberg et al. ``Inherent Trade-Offs in the Fair Determination of Risk Scores.'' 2016.}
+\mlsysref{Chouldechova17}{A. Chouldechova. ``Fair Prediction with Disparate Impact.'' 2017.}
+\mlsysref{Obermeyer+19}{Obermeyer et al. ``Dissecting Racial Bias in Healthcare.'' \textit{Science}, 2019.}
+\mlsysref{Hardt+16}{Hardt, Price, Srebro. ``Equality of Opportunity in Supervised Learning.'' NeurIPS, 2016.}
+\mlsysref{Ribeiro+16}{Ribeiro, Singh, Guestrin. ```Why Should I Trust You?' LIME.'' KDD, 2016.}
+\mlsysref{Lundberg+17}{Lundberg \& Lee. ``A Unified Approach to Interpreting Model Predictions.'' NeurIPS, 2017.}
+
+\end{frame}
+
+\begin{frame}{Next Lecture: Conclusion}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+[1 min] Point to the four columns: performance, security, sustainability,
+responsibility. ``We have addressed every dimension. In the conclusion, we
+synthesize these into a unified engineering framework --- the six principles
+of distributed ML systems.''
+
+% -- FLEX: [CORE] + contingency
+[CORE] Forward hook to the final lecture.
+}
+
+\centering
+\vspace{0.5cm}
+
+{\large We have addressed every dimension of production ML systems:}
+
+\vspace{0.4cm}
+\begin{columns}[c]
+  \begin{column}{0.22\textwidth}\centering\small
+    \textcolor{computestroke}{\textbf{Performance}}\\[0.1cm]
+    {\footnotesize Parts I--III}
+  \end{column}
+  \begin{column}{0.22\textwidth}\centering\small
+    \textcolor{routingstroke}{\textbf{Security}}\\[0.1cm]
+    {\footnotesize Ch 13}
+  \end{column}
+  \begin{column}{0.22\textwidth}\centering\small
+    \textcolor{datastroke}{\textbf{Sustainability}}\\[0.1cm]
+    {\footnotesize Ch 15}
+  \end{column}
+  \begin{column}{0.22\textwidth}\centering\small
+    \textcolor{errorstroke}{\textbf{Responsibility}}\\[0.1cm]
+    {\footnotesize Ch 16 (today)}
+  \end{column}
+\end{columns}
+
+\vspace{0.5cm}
+{\normalsize In \textbf{Ch 17: Conclusion}, we synthesize the principles\\
+from across this volume into a \textbf{unified perspective}\\
+on distributed ML systems engineering.}
+
+\vspace{0.3cm}
+{\small\textbf{The enduring lessons that guide practice regardless of technology.}}
+
+\end{frame}
+
+
+
+\appendix
+
+\begin{frame}{Backup: Intersectional Fairness}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Backup. Shows how single-axis fairness metrics miss compound disadvantage
+at the intersection of multiple protected attributes.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Show when students ask why single-axis metrics are insufficient.
+}
+
+\footnotesize
+\textbf{Single-axis metrics miss intersectional bias:}
+
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  \textbf{Group} & \textbf{Approval Rate} & \textbf{DP Gap (Gender)} & \textbf{DP Gap (Race)} \\
+  \midrule
+  White Male     & 75\% & --- & --- \\
+  White Female   & 68\% & 7 pp & --- \\
+  Black Male     & 62\% & --- & 13 pp \\
+  Black Female   & \textcolor{errorstroke}{\textbf{41\%}} & 7 pp & 13 pp \\
+  \bottomrule
+\end{tabular}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{errorstroke}
+{\footnotesize \textbf{Intersectional gap}: 34 pp (75\% -- 41\%) far exceeds the sum of single-axis gaps (7 + 13 = 20 pp). Single-axis auditing systematically underestimates harm to intersectional subgroups.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Backup: Real-Time Fairness Monitoring Architecture}
+\note{
+% -- NARRATE: What to SAY while showing this slide
+Backup. System design for continuous fairness monitoring at fleet scale.
+Use when students ask about production implementation.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Show for students interested in fairness monitoring systems.
+}
+
+\footnotesize
+\textbf{Production fairness monitoring pipeline:}
+
+\vspace{0.1cm}
+\begin{enumerate}\setlength\itemsep{1pt}
+  \item \textbf{Inference logging}: Capture predictions + protected attributes (encrypted, access-controlled)
+  \item \textbf{Windowed aggregation}: Compute DP, EO, EOpp gaps over 1-hour sliding windows
+  \item \textbf{Statistical testing}: Alert when gap exceeds historical baseline + 3$\sigma$
+  \item \textbf{Root cause analysis}: Attribute drift vs.\ model drift vs.\ population shift
+  \item \textbf{Automated response}: Fallback to last-known-fair model if gap exceeds regulatory threshold
+\end{enumerate}
+
+\vspace{0.1cm}
+\begin{mlsyscard}{routingstroke}
+{\footnotesize \textbf{Overhead}: +10--20 ms latency for logging, +5\% compute for aggregation. At 10K QPS, the fairness monitoring pipeline processes 36M decisions/hour.}
+\end{mlsyscard}
+
+\end{frame}
+
+
+\end{document}

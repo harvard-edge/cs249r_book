@@ -1,0 +1,133 @@
+name: '📬 Newsletter · Sync & Deploy'
+
+# Pulls new published emails from Buttondown API, commits them
+# as markdown files, then renders and deploys the newsletter site.
+#
+# The sync script is idempotent: it skips posts that already exist,
+# so it only pulls genuinely new content each run.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6am UTC (1am ET) — syncs before morning traffic
+  workflow_dispatch:       # Manual trigger from Actions UI
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: newsletter-sync
+  cancel-in-progress: true
+
+jobs:
+  sync-and-deploy:
+    name: '📬 Sync, Build & Deploy Newsletter'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: 📦 Install dependencies
+        run: pip install requests
+
+      - name: 📬 Sync newsletter from Buttondown
+        env:
+          BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
+        run: python3 scripts/sync_newsletter.py
+
+      - name: 📦 Commit if new posts
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add newsletter/posts/ newsletter/_stats.yml
+          if git diff --staged --quiet; then
+            echo "ℹ️ No new newsletter posts"
+            echo "has_new_posts=false" >> "$GITHUB_OUTPUT"
+          else
+            COUNT=$(git diff --staged --name-only | wc -l | tr -d ' ')
+            git commit -m "chore: sync $COUNT newsletter post(s) from Buttondown [automated]"
+            git push
+            echo "✅ Committed $COUNT new post(s)"
+            echo "has_new_posts=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 🔧 Setup Quarto
+        if: steps.commit.outputs.has_new_posts == 'true'
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build Newsletter Site
+        if: steps.commit.outputs.has_new_posts == 'true'
+        working-directory: newsletter
+        run: |
+          quarto render
+          touch _build/.nojekyll
+
+      - name: 🔗 Rewrite URLs for dev site
+        if: steps.commit.outputs.has_new_posts == 'true'
+        run: bash .github/scripts/rewrite-dev-urls.sh newsletter newsletter/_build
+
+      - name: 🔍 Validate build
+        if: steps.commit.outputs.has_new_posts == 'true'
+        run: |
+          if [ ! -f "newsletter/_build/index.html" ]; then
+            echo "❌ CRITICAL: index.html missing. Aborting deployment."
+            exit 1
+          fi
+          echo "✅ Site built: $(find newsletter/_build -name '*.html' | wc -l) pages"
+
+      - name: 🚀 Deploy to Dev Site via SSH
+        if: steps.commit.outputs.has_new_posts == 'true'
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning dev preview repository..."
+          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+          cd target-repo
+
+          echo "🧹 Cleaning newsletter directory..."
+          rm -rf newsletter
+          mkdir -p newsletter
+
+          echo "🚚 Copying newsletter site content..."
+          cp -r "${{ github.workspace }}/newsletter/_build/." newsletter/
+
+          if [ ! -f "newsletter/index.html" ]; then
+            echo "❌ CRITICAL: newsletter/index.html missing. Aborting."
+            exit 1
+          fi
+
+          echo "📦 Committing and pushing..."
+          git add .
+          git commit -m "📬 Deploy Newsletter dev to /newsletter/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+
+          # Retry push with rebase to handle concurrent deploys
+          for i in 1 2 3; do
+            if git push origin main 2>/dev/null; then
+              echo "✅ Push succeeded on attempt $i"
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin main || true
+          done
+
+          echo "✅ Newsletter site deployed to dev preview"
