@@ -59,6 +59,10 @@ async def _():
         NVME_SEQUENTIAL_BW,
     )
 
+    # ── Hardware registry ─────────────────────────────────────────────────────
+    _H100_REG = mlsysim.Hardware.Cloud.H100
+    _EDGE_REG = mlsysim.Hardware.Edge.JetsonOrinNX
+
     # Extract scalar values for chart use
     H100_TFLOPS = H100_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
     H100_BW_GBS = H100_MEM_BW.m_as("GB/s")
@@ -73,10 +77,19 @@ async def _():
     V100_TFLOPS = V100_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
     V100_BW_GBS = V100_MEM_BW.m_as("GB/s")
 
+    EDGE_TFLOPS = _EDGE_REG.compute.peak_flops.m_as("TFLOPs/s")
+    EDGE_BW_GBS = _EDGE_REG.memory.bandwidth.m_as("GB/s")
+    EDGE_RAM_GB = _EDGE_REG.memory.capacity.m_as("GB")
+    EDGE_TDP_W = _EDGE_REG.tdp.m_as("W")
+
     NVLINK_GBS = NVLINK_H100_BW.m_as("GB/s")
     PCIE_GBS = PCIE_GEN5_BW.m_as("GB/s")
     IB_NDR_GBS = INFINIBAND_NDR_BW_GBS
     NVME_GBS = NVME_SEQUENTIAL_BW.m_as("GB/s")
+
+    # ── Model registry ────────────────────────────────────────────────────────
+    GPT2 = mlsysim.Models.GPT2
+    GPT2_PARAMS_B = GPT2.parameters.m_as("dimensionless") / 1e9  # billions
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
@@ -86,6 +99,8 @@ async def _():
         H100_TFLOPS, H100_BW_GBS, H100_RAM_GB, H100_TDP_W, H100_RIDGE,
         A100_TFLOPS, A100_BW_GBS, B200_TFLOPS, B200_BW_GBS,
         V100_TFLOPS, V100_BW_GBS,
+        EDGE_TFLOPS, EDGE_BW_GBS, EDGE_RAM_GB, EDGE_TDP_W,
+        GPT2_PARAMS_B,
         NVLINK_GBS, PCIE_GBS, IB_NDR_GBS, NVME_GBS,
         PUE_BEST_AIR, DEFAULT_KWH_PRICE, ANNUAL_MAINTENANCE_RATIO,
     )

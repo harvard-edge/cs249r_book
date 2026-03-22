@@ -53,10 +53,16 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim.labs.components import DecisionLog
+    from mlsysim.hardware.registry import Hardware
+    from mlsysim.models.registry import Models
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         await ledger.load_async()
+
+    # ── Hardware from registry (Cloud + Edge tiers) ─────────────────────────
+    _cloud = Hardware.Cloud.H100
+    _edge  = Hardware.Edge.JetsonOrinNX
 
     # ── Sustainability constants ────────────────────────────────────────────
     # Grid carbon intensities (gCO2/kWh) — Source: IEA (2023), chapter data
@@ -75,9 +81,10 @@ async def _():
     PUE_AIR      = 1.12   # Best air-cooled
     PUE_LEGACY   = 1.58   # Legacy facility
 
-    # Hardware embodied carbon — Source: chapter lifecycle section
+    # Hardware power from registry — Source: chapter lifecycle section
     H100_EMBODIED_KG = 175.0   # kg CO2eq per H100 (midpoint 150-200)
-    H100_TDP_W       = 700     # Watts TDP
+    H100_TDP_W       = _cloud.tdp.m_as("W")   # 700 W from registry
+    EDGE_TDP_W       = _edge.tdp.m_as("W")    # 25 W — edge power for comparison
 
     # Growth rates — Source: chapter energy wall section
     DEMAND_DOUBLING_MONTHS = 3.4    # AI compute demand doubling time
@@ -95,7 +102,7 @@ async def _():
         CI_QUEBEC, CI_ICELAND, CI_FRANCE, CI_US_AVG, CI_TEXAS,
         CI_GERMANY, CI_CHINA_AVG, CI_POLAND, CI_INDIA,
         PUE_LIQUID, PUE_AIR, PUE_LEGACY,
-        H100_EMBODIED_KG, H100_TDP_W,
+        H100_EMBODIED_KG, H100_TDP_W, EDGE_TDP_W,
         DEMAND_DOUBLING_MONTHS, EFFICIENCY_DOUBLING_MONTHS,
         JEVONS_ELASTICITY_INELASTIC, JEVONS_ELASTICITY_UNIT, JEVONS_ELASTICITY_ELASTIC,
         DecisionLog,

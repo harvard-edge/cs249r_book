@@ -35,11 +35,14 @@ async def _():
 
     H100_TDP_W = mlsysim.Hardware.Cloud.H100.tdp.m_as("W")
 
+    # Edge tier — carbon comparison: much lower TDP changes the sustainability calculus
+    JETSON_TDP_W = mlsysim.Hardware.Edge.JetsonOrinNX.tdp.m_as("W")
+
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         await ledger.load_async()
     return (
-        COLORS, H100_TDP_W, LAB_CSS,
+        COLORS, H100_TDP_W, JETSON_TDP_W, LAB_CSS,
         apply_plotly_theme, go, ledger, math, mo, np,
     )
 
@@ -167,7 +170,7 @@ def _(mo):
 # MAIN LAB CELL
 # ═════════════════════════════════════════════════════════════════════════════
 @app.cell(hide_code=True)
-def _(COLORS, H100_TDP_W, apply_plotly_theme, go, math, mo, np):
+def _(COLORS, H100_TDP_W, JETSON_TDP_W, apply_plotly_theme, go, math, mo, np):
 
     # ── Part A widgets ────────────────────────────────────────────────────────
     partA_pred = mo.ui.radio(
@@ -765,6 +768,18 @@ Responsible AI:
                 f"**The carbon multiplier is ~{_ratio:.0f}x.** "
                 "Responsible AI has a real environmental cost. The question is not whether "
                 "to pay it, but how to budget it against the harms of an unfair system."), kind="warn"))
+
+        # Edge deployment carbon comparison
+        _edge_serve_kwh = _predictions_yr * 0.002 / 3600 * JETSON_TDP_W / 1000
+        _edge_explain_kwh = _predictions_yr * _explain_frac * 50 * 0.002 / 3600 * JETSON_TDP_W / 1000
+        _edge_total_serve = (_edge_serve_kwh + _edge_explain_kwh) * _carbon_intensity / 1000
+        _power_ratio = H100_TDP_W / JETSON_TDP_W if JETSON_TDP_W > 0 else 1
+        items.append(mo.callout(mo.md(
+            f"**Edge deployment contrast (Jetson Orin NX, {JETSON_TDP_W:.0f} W):** "
+            f"Serving carbon drops to {_edge_total_serve:.1f} kg CO2/year "
+            f"({_power_ratio:.0f}x lower TDP), but edge retraining is impractical — "
+            f"you must retrain in the cloud and deploy to the edge, adding OTA update costs."
+        ), kind="info"))
 
         return mo.vstack(items)
 

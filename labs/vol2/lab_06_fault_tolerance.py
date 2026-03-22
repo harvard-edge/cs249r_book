@@ -60,13 +60,20 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim.labs.components import DecisionLog
+    from mlsysim import Hardware
     from mlsysim.core.defaults import GPU_MTTF_HOURS
 
-    GPU_COST_HR = 3.0    # $/GPU-hour cloud pricing
+    # ── Hardware registry ─────────────────────────────────────────────────
+    H100 = Hardware.Cloud.H100
+    A100 = Hardware.Cloud.A100
+    EDGE = Hardware.Edge.JetsonOrinNX
+    H100_RAM_GB = 80.0    # GB HBM3e
+    EDGE_RAM_GB = EDGE.memory.capacity.m_as("GB")
+    GPU_COST_HR = 3.0     # $/GPU-hour cloud pricing
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         await ledger.load_async()
-    return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, GPU_MTTF_HOURS, GPU_COST_HR, DecisionLog
+    return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, GPU_MTTF_HOURS, GPU_COST_HR, DecisionLog, Hardware, H100, A100, EDGE, H100_RAM_GB, EDGE_RAM_GB
 
 
 # ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
@@ -256,9 +263,68 @@ def _(mo, partB_prediction):
     return (a2_model_b, a2_cluster_gpus, a2_storage, partB_reflection)
 
 
+# ─── CELL 6b: PART C WIDGETS ─────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, partB_reflection):
+    mo.stop(partB_reflection.value is None, mo.md("**Complete Part B reflection to unlock Part C.**"))
+
+    partC_prediction = mo.ui.radio(
+        options={
+            "A) 10 seconds -- NVMe is fast": "A",
+            "B) ~24 seconds -- local NVMe first, then drain": "B",
+            "C) ~1 second -- async hides all write time": "C",
+            "D) Same as NFS -- 41 minutes": "D",
+        },
+        label="With async checkpointing (write to local NVMe RAID at 100 GB/s, then drain), how long does the training loop pause for a 175B checkpoint?",
+    )
+    c1_nvme_bw = mo.ui.slider(start=10, stop=200, value=100, step=10, label="Local NVMe BW (GB/s)")
+    c1_drain_bw = mo.ui.slider(start=1, stop=50, value=10, step=1, label="Background drain BW to durable storage (GB/s)")
+    c1_cluster_gpus = mo.ui.slider(start=1000, stop=25000, value=10000, step=1000, label="Cluster GPUs")
+    partC_reflection = mo.ui.radio(
+        options={
+            "A) Async checkpointing eliminates all checkpoint overhead": "A",
+            "B) Async reduces training-loop pause to NVMe write time but requires enough local NVMe capacity for at least 2 checkpoints": "B",
+            "C) Async is free -- no additional hardware cost": "C",
+            "D) Async is unnecessary if you use a fast parallel file system": "D",
+        },
+        label="What is the key requirement for async checkpointing to work?",
+    )
+    return (partC_prediction, c1_nvme_bw, c1_drain_bw, c1_cluster_gpus, partC_reflection)
+
+
+# ─── CELL 6c: PART D WIDGETS ─────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, partC_reflection):
+    mo.stop(partC_reflection.value is None, mo.md("**Complete Part C reflection to unlock Part D.**"))
+
+    partD_prediction = mo.ui.radio(
+        options={
+            "A) 1 replica -- just restart the failed one": "A",
+            "B) N+1 replicas -- one cold spare per service": "B",
+            "C) It depends: replica count = ceil(QPS * recovery_time / max_queue_depth)": "C",
+            "D) 2x replicas -- always double for safety": "D",
+        },
+        label="Your inference service runs 10 replicas at 1000 QPS total. One replica fails (MTBF ~30 days). Recovery takes 90 seconds (model reload). How many spare replicas do you need to maintain the SLO?",
+    )
+    d1_replicas = mo.ui.slider(start=4, stop=32, value=10, step=1, label="Active replicas")
+    d1_qps = mo.ui.slider(start=100, stop=5000, value=1000, step=100, label="Total QPS")
+    d1_recovery_s = mo.ui.slider(start=10, stop=300, value=90, step=10, label="Recovery time (seconds)")
+    d1_slo_p99_ms = mo.ui.slider(start=100, stop=2000, value=500, step=50, label="P99 latency SLO (ms)")
+    partD_reflection = mo.ui.radio(
+        options={
+            "A) Serving fault tolerance is simpler than training -- just add replicas": "A",
+            "B) Serving fault tolerance is harder because KV cache state is lost on failure and must be rebuilt per-request": "B",
+            "C) Serving fault tolerance is the same problem as training fault tolerance": "C",
+            "D) Serving does not need fault tolerance -- requests are stateless": "D",
+        },
+        label="How does serving fault tolerance differ from training fault tolerance?",
+    )
+    return (partD_prediction, d1_replicas, d1_qps, d1_recovery_s, d1_slo_p99_ms, partD_reflection)
+
+
 # ─── CELL 7: DECISION LOG WIDGET ────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(DecisionLog, mo, partB_reflection):
+def _(DecisionLog, mo, partD_reflection):
     synth_decision_input, synth_decision_ui = DecisionLog(
         placeholder="Based on what I learned in this lab, the most important insight about "
                     "fault tolerance at scale is..."
@@ -275,11 +341,15 @@ def _(DecisionLog, mo, partB_reflection):
 @app.cell(hide_code=True)
 def _(
     COLORS, apply_plotly_theme, go, math, mo, np,
-    GPU_MTTF_HOURS, GPU_COST_HR,
+    GPU_MTTF_HOURS, GPU_COST_HR, H100_RAM_GB,
     partA_prediction, a1_cluster_gpus, a1_write_time_s, a1_interval_s,
     partA_reflection,
     partB_prediction, a2_model_b, a2_cluster_gpus, a2_storage,
     partB_reflection,
+    partC_prediction, c1_nvme_bw, c1_drain_bw, c1_cluster_gpus,
+    partC_reflection,
+    partD_prediction, d1_replicas, d1_qps, d1_recovery_s, d1_slo_p99_ms,
+    partD_reflection,
     synth_decision_input, synth_decision_ui,
     ledger,
 ):
@@ -782,6 +852,487 @@ def _(
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
+    # PART C BUILDER -- Async Checkpointing
+    # ─────────────────────────────────────────────────────────────────────
+
+    def build_part_c():
+        items = []
+
+        # Stakeholder message
+        items.append(mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['OrangeLine']}; background: {COLORS['OrangeLL']};
+                border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
+        <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['OrangeLine']};
+                    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
+            Incoming Message &middot; Systems Architect
+        </div>
+        <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
+            "The checkpoint storm from Part B is blocking our 175B training run.
+            Someone suggested async checkpointing -- write to local NVMe first, then drain
+            to durable storage in the background. How much does this actually help?"
+        </div>
+    </div>
+    """))
+
+        # Concept framing
+        items.append(mo.md("""
+    Asynchronous checkpointing splits the write into two phases:
+
+    1. **Snapshot to local NVMe**: Each GPU writes its shard to local NVMe RAID.
+       At 100 GB/s per node, 8 GPUs write their shards in parallel.
+
+    2. **Background drain**: A background thread copies the snapshot from NVMe
+       to durable storage (parallel FS or object store) while training resumes.
+
+    The training loop pauses only for Phase 1. For a 175B model:
+    - Checkpoint per node = 2.45 TB / (N_nodes) -- sharded across nodes
+    - At 100 GB/s local NVMe: pause = shard_size / 100 GB/s
+
+    For 256 GPUs (32 nodes): per-node shard = 2.45 TB / 32 = ~77 GB.
+    NVMe pause = 77 GB / 100 GB/s = **~0.8 seconds** (vs 41 min on NFS).
+
+    The catch: local NVMe must hold at least 2 checkpoints (current + previous)
+    for rollback safety. At 77 GB per checkpoint, that requires ~154 GB local NVMe per node.
+        """))
+
+        # Prediction lock
+        items.append(mo.md("### Your Prediction"))
+        items.append(partC_prediction)
+
+        if partC_prediction.value is None:
+            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part C instruments."), kind="warn"))
+            return mo.vstack(items)
+
+        # Controls
+        items.append(mo.md("### Async Checkpoint Analyzer"))
+        items.append(mo.hstack([c1_nvme_bw, c1_drain_bw, c1_cluster_gpus], justify="center", gap=2))
+
+        # Physics
+        _params_b = 175
+        _ckpt_gb = _params_b * 1e9 * 14 / 1e9  # 2450 GB
+        _n_gpus = c1_cluster_gpus.value
+        _n_nodes = max(_n_gpus // 8, 1)
+        _nvme_bw = c1_nvme_bw.value
+        _drain_bw = c1_drain_bw.value
+
+        _shard_gb = _ckpt_gb / _n_nodes
+        _nvme_pause_s = _shard_gb / _nvme_bw
+        _drain_time_s = _ckpt_gb / _drain_bw  # total drain time
+        _nfs_time_s = _ckpt_gb / 1.0  # NFS baseline
+        _nfs_time_min = _nfs_time_s / 60
+
+        _mtbf_s = GPU_MTTF_HOURS * 3600 / _n_gpus
+        _tau_opt = math.sqrt(2 * _nvme_pause_s * _mtbf_s)
+        _tau_opt_min = _tau_opt / 60
+
+        _waste_async = _nvme_pause_s / _tau_opt + _tau_opt / (2 * _mtbf_s) if _tau_opt > 0 else 1.0
+        _waste_nfs = _nfs_time_s / math.sqrt(2 * _nfs_time_s * _mtbf_s) + math.sqrt(2 * _nfs_time_s * _mtbf_s) / (2 * _mtbf_s) if _mtbf_s > 0 else 1.0
+
+        _speedup = _nfs_time_s / max(_nvme_pause_s, 0.001)
+        _nvme_storage_needed_gb = _shard_gb * 2  # 2 checkpoints
+
+        # Comparison chart
+        _methods = ["NFS (1 GB/s)", "Parallel FS (10 GB/s)", f"Async NVMe ({_nvme_bw} GB/s)"]
+        _pause_times = [_nfs_time_s, _ckpt_gb / 10.0, _nvme_pause_s]
+        _bar_colors = [COLORS["RedLine"], COLORS["OrangeLine"], COLORS["GreenLine"]]
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Bar(
+            x=_methods, y=_pause_times,
+            marker_color=_bar_colors,
+            text=[f"{t:.1f}s" if t < 60 else f"{t/60:.1f}m" for t in _pause_times],
+            textposition="auto",
+        ))
+        _fig.update_layout(
+            height=300,
+            xaxis=dict(title="Checkpoint Method"),
+            yaxis=dict(title="Training Loop Pause (seconds)", type="log"),
+            margin=dict(t=30, b=50, l=50, r=20),
+            showlegend=False,
+        )
+        apply_plotly_theme(_fig)
+
+        _pause_color = COLORS["GreenLine"] if _nvme_pause_s < 5 else (COLORS["OrangeLine"] if _nvme_pause_s < 60 else COLORS["RedLine"])
+
+        items.append(mo.Html(f"""
+        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
+                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
+                    font-size:0.83rem; line-height:1.8;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
+                Physics &mdash; Async Checkpoint Analysis
+            </div>
+            <div>Checkpoint: 175B &times; 14 bytes = <strong>{_ckpt_gb:.0f} GB</strong></div>
+            <div>Nodes: {_n_nodes} &mdash; shard per node: <strong>{_shard_gb:.1f} GB</strong></div>
+            <div>NVMe pause = {_shard_gb:.1f} / {_nvme_bw} = <strong style="color:{_pause_color};">{_nvme_pause_s:.2f}s</strong></div>
+            <div>NFS baseline: <strong style="color:{COLORS['RedLine']};">{_nfs_time_min:.1f} min</strong></div>
+            <div>Speedup: <strong style="color:{COLORS['GreenLine']};">{_speedup:.0f}x</strong></div>
+            <div>Local NVMe required: <strong>{_nvme_storage_needed_gb:.0f} GB</strong> per node (2 checkpoints)</div>
+        </div>
+        """))
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:160px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">NVMe Pause</div>
+                <div style="font-size:2rem; font-weight:800; color:{_pause_color}; font-family:monospace;">{_nvme_pause_s:.1f}s</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">vs {_nfs_time_min:.0f}m NFS</div>
+            </div>
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:160px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Speedup</div>
+                <div style="font-size:2rem; font-weight:800; color:{COLORS['GreenLine']}; font-family:monospace;">{_speedup:.0f}x</div>
+            </div>
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:160px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Waste (async)</div>
+                <div style="font-size:2rem; font-weight:800; color:{COLORS['GreenLine']}; font-family:monospace;">{_waste_async*100:.1f}%</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">vs {_waste_nfs*100:.1f}% NFS</div>
+            </div>
+        </div>
+        """))
+
+        items.append(mo.ui.plotly(_fig))
+
+        # Prediction reveal
+        if partC_prediction.value == "C":
+            items.append(mo.callout(mo.md(
+                "**Correct.** With 256 GPUs across 32 nodes, each node writes ~77 GB to local NVMe "
+                "at 100 GB/s = 0.8 seconds. The training loop pauses for less than 1 second. "
+                "Background drain to durable storage takes minutes, but training has already resumed. "
+                "This reduces Young-Daly waste from ~25% (NFS) to under 2%."
+            ), kind="success"))
+        elif partC_prediction.value == "A":
+            items.append(mo.callout(mo.md(
+                "**Close but wrong phase.** 10 seconds would be the time to drain to NVMe if the "
+                "entire checkpoint were written to one node. With sharding across 32 nodes, "
+                "each writes only 77 GB -- pause is under 1 second."
+            ), kind="warn"))
+        elif partC_prediction.value == "B":
+            items.append(mo.callout(mo.md(
+                "**That is the full checkpoint size / NVMe BW.** 2450 GB / 100 GB/s = 24.5 seconds. "
+                "But with 32 nodes writing in parallel, each writes only 77 GB / 100 = 0.8 seconds. "
+                "The parallelism across nodes is the key insight."
+            ), kind="warn"))
+        elif partC_prediction.value == "D":
+            items.append(mo.callout(mo.md(
+                "**Async does not use NFS for the training pause.** The whole point is to write to "
+                "fast local NVMe first (sub-second), then drain to NFS/parallel FS in the background."
+            ), kind="warn"))
+
+        # MathPeek
+        items.append(mo.accordion({
+            "Governing equations -- async checkpointing": mo.md("""
+        **Async Checkpoint Pause**
+
+        ```
+        T_pause = (C / N_nodes) / BW_nvme
+        ```
+
+        - C = total checkpoint size (bytes)
+        - N_nodes = cluster nodes (each writes its shard in parallel)
+        - BW_nvme = per-node NVMe write bandwidth
+
+        **Background Drain Time**
+
+        ```
+        T_drain = C / BW_durable_storage
+        ```
+
+        T_drain > T_pause is expected and acceptable -- training continues during drain.
+
+        **Requirement**: Local NVMe must hold >= 2 checkpoints:
+        - Current checkpoint being written
+        - Previous checkpoint for rollback safety
+        - NVMe_capacity >= 2 * C / N_nodes
+            """)
+        }))
+
+        # Reflection
+        items.append(mo.md("### Reflection"))
+        items.append(partC_reflection)
+
+        if partC_reflection.value is None:
+            items.append(mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"))
+        elif partC_reflection.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Correct.** Async checkpointing reduces the training pause to NVMe write time, "
+                "but requires: (1) enough local NVMe capacity for 2 checkpoints per node, "
+                "(2) background drain bandwidth sufficient to drain before the next checkpoint. "
+                "For 175B at 32 nodes: 154 GB NVMe per node. Most DGX nodes ship with 2-4 TB NVMe."
+            ), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Not quite.** Async checkpointing is not free -- it requires local NVMe storage "
+                "capacity for at least 2 checkpoints per node. The training pause is reduced to "
+                "NVMe write time, but if drain bandwidth is too slow, checkpoints can pile up "
+                "and exhaust local storage."
+            ), kind="warn"))
+
+        return mo.vstack(items)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PART D BUILDER -- Serving Fault Tolerance
+    # ─────────────────────────────────────────────────────────────────────
+
+    def build_part_d():
+        items = []
+
+        # Stakeholder message
+        items.append(mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['RedLine']}; background: {COLORS['RedLL']};
+                border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
+        <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['RedLine']};
+                    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
+            Incoming Message &middot; SRE Team Lead
+        </div>
+        <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
+            "Our inference service runs 10 replicas serving 1,000 QPS total with a 500ms P99 SLO.
+            When a replica fails, it takes 90 seconds to reload the 70B model. During recovery,
+            the remaining 9 replicas must absorb the extra traffic. Are we SLO-safe, or do we
+            need spare replicas?"
+        </div>
+    </div>
+    """))
+
+        # Concept framing
+        items.append(mo.md("""
+    Training fault tolerance is about **protecting state** (checkpoint/restore).
+    Serving fault tolerance is about **maintaining throughput** during failures.
+
+    Key differences:
+    - **Training**: lose GPU -> lose progress since last checkpoint. Restart from checkpoint.
+    - **Serving**: lose replica -> lose KV cache state for all in-flight requests. Those
+      requests must be re-issued to other replicas. The remaining replicas must absorb
+      the extra QPS without violating the latency SLO.
+
+    The critical question: can N-1 replicas handle the full QPS within the SLO
+    during the recovery window?
+
+    Per-replica capacity = QPS_total / N. After one failure, load per survivor =
+    QPS_total / (N - 1). If this exceeds per-replica max throughput, requests queue
+    and P99 latency spikes above the SLO.
+        """))
+
+        # Prediction lock
+        items.append(mo.md("### Your Prediction"))
+        items.append(partD_prediction)
+
+        if partD_prediction.value is None:
+            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part D instruments."), kind="warn"))
+            return mo.vstack(items)
+
+        # Controls
+        items.append(mo.md("### Serving Fault Tolerance Analyzer"))
+        items.append(mo.hstack([
+            mo.vstack([d1_replicas, d1_qps]),
+            mo.vstack([d1_recovery_s, d1_slo_p99_ms]),
+        ], justify="center", gap=2))
+
+        # Physics
+        _replicas = d1_replicas.value
+        _qps = d1_qps.value
+        _recovery_s = d1_recovery_s.value
+        _slo_ms = d1_slo_p99_ms.value
+
+        _qps_per_replica = _qps / _replicas
+        _qps_after_failure = _qps / max(_replicas - 1, 1)
+
+        # Simple capacity model: max throughput per replica before SLO violation
+        # Assume each replica can handle ~1.3x its normal load before SLO breach
+        _max_qps_per_replica = _qps_per_replica * 1.3
+        _overloaded = _qps_after_failure > _max_qps_per_replica
+        _overflow_qps = max(0, _qps_after_failure - _max_qps_per_replica)
+
+        # Requests dropped during recovery
+        _requests_at_risk = _overflow_qps * _recovery_s if _overloaded else 0
+        _slo_violation = _overloaded
+
+        # Spare replicas needed
+        _spare_needed = 0
+        for _s in range(0, 5):
+            _test_survivors = _replicas + _s - 1
+            if _test_survivors > 0 and _qps / _test_survivors <= _max_qps_per_replica:
+                _spare_needed = _s
+                break
+        else:
+            _spare_needed = 5
+
+        # Cost of spares
+        _spare_cost_day = _spare_needed * 8 * GPU_COST_HR * 24  # 8 GPUs per replica
+
+        # Chart: latency vs replica count during failure
+        _replica_range = list(range(max(_replicas - 3, 2), _replicas + 5))
+        _latency_factor = []
+        for _r in _replica_range:
+            _survivors = _r - 1
+            if _survivors <= 0:
+                _latency_factor.append(999)
+                continue
+            _load_ratio = _qps / _survivors / _qps_per_replica
+            # Approximate: latency scales as 1/(1 - load_ratio/capacity) for queueing
+            _lat = _slo_ms * min(max(_load_ratio, 1.0), 5.0) if _load_ratio < 1.3 else _slo_ms * 5
+            _latency_factor.append(_lat)
+
+        _fig = go.Figure()
+        _colors_bar = [COLORS["GreenLine"] if lat <= _slo_ms else COLORS["RedLine"] for lat in _latency_factor]
+        _fig.add_trace(go.Bar(
+            x=[str(r) for r in _replica_range], y=_latency_factor,
+            marker_color=_colors_bar,
+            text=[f"{l:.0f}ms" for l in _latency_factor],
+            textposition="auto",
+        ))
+        _fig.add_hline(y=_slo_ms, line=dict(color=COLORS["OrangeLine"], width=2, dash="dash"),
+                       annotation_text=f"P99 SLO: {_slo_ms}ms", annotation_position="top right")
+        _fig.update_layout(
+            height=300,
+            xaxis=dict(title="Total Replicas (one fails)"),
+            yaxis=dict(title="Estimated P99 Latency (ms)", range=[0, max(max(_latency_factor) * 1.2, _slo_ms * 2)]),
+            margin=dict(t=30, b=50, l=50, r=20),
+            showlegend=False,
+        )
+        apply_plotly_theme(_fig)
+
+        _status_color = COLORS["RedLine"] if _slo_violation else COLORS["GreenLine"]
+        _status_text = "SLO VIOLATED" if _slo_violation else "SLO MAINTAINED"
+
+        items.append(mo.Html(f"""
+        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
+                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
+                    font-size:0.83rem; line-height:1.8;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
+                Physics &mdash; Serving Fault Tolerance
+            </div>
+            <div>Replicas: {_replicas} &mdash; QPS/replica: {_qps_per_replica:.0f} &mdash; Total QPS: {_qps}</div>
+            <div>After 1 failure: QPS/survivor = {_qps_after_failure:.0f} (max safe: {_max_qps_per_replica:.0f})</div>
+            <div>Recovery time: {_recovery_s}s &mdash; Requests at risk: <strong>{_requests_at_risk:.0f}</strong></div>
+            <div>Status: <strong style="color:{_status_color};">{_status_text}</strong></div>
+            <div>Spare replicas needed: <strong>{_spare_needed}</strong> (cost: ${_spare_cost_day:,.0f}/day)</div>
+        </div>
+        """))
+
+        # SLO violation banner
+        if _slo_violation:
+            items.append(mo.Html(f"""
+        <div style="background:{COLORS['RedLL']}; border:2px solid {COLORS['RedLine']};
+                    border-radius:10px; padding:14px 18px; margin:10px 0;">
+            <div style="font-size:0.88rem; font-weight:800; color:{COLORS['RedLine']}; margin-bottom:4px;">
+                SLO VIOLATION &mdash; Insufficient Replicas
+            </div>
+            <div style="font-size:0.85rem; color:#7f1d1d; line-height:1.6;">
+                After 1 replica failure, remaining {_replicas - 1} replicas receive {_qps_after_failure:.0f} QPS each
+                (max safe: {_max_qps_per_replica:.0f}). ~{_requests_at_risk:.0f} requests will breach the {_slo_ms}ms SLO
+                during the {_recovery_s}s recovery window. <strong>Add {_spare_needed} spare replica(s).</strong>
+            </div>
+        </div>
+        """))
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:160px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Status</div>
+                <div style="font-size:1.4rem; font-weight:800; color:{_status_color}; font-family:monospace;">{_status_text.split()[0]}</div>
+            </div>
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:160px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Spares Needed</div>
+                <div style="font-size:2rem; font-weight:800; color:{COLORS['OrangeLine']}; font-family:monospace;">{_spare_needed}</div>
+            </div>
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:160px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Recovery</div>
+                <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']}; font-family:monospace;">{_recovery_s}s</div>
+            </div>
+        </div>
+        """))
+
+        items.append(mo.ui.plotly(_fig))
+
+        # Prediction reveal
+        if partD_prediction.value == "C":
+            items.append(mo.callout(mo.md(
+                "**Correct.** The required spare count depends on the specific numbers. With 10 "
+                "replicas at 100 QPS each, losing 1 pushes survivors to 111 QPS each. If max "
+                "safe capacity is ~130 QPS/replica, 9 survivors can absorb the load. But with "
+                "fewer replicas or higher QPS, you need N+1 or N+2 provisioning."
+            ), kind="success"))
+        elif partD_prediction.value == "A":
+            items.append(mo.callout(mo.md(
+                "**Dangerous assumption.** During the 90-second recovery, the remaining 9 replicas "
+                "must handle 111% of their normal load. If they were already at 80% capacity, "
+                "the extra 11% pushes them past the SLO threshold. 'Just restart' works only "
+                "if you have headroom."
+            ), kind="warn"))
+        elif partD_prediction.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Conservative but not always necessary.** N+1 guarantees one failure tolerance "
+                "but costs 8 extra GPUs ($576/day). If the existing replicas have >30% headroom, "
+                "they can absorb the load without a spare."
+            ), kind="warn"))
+        elif partD_prediction.value == "D":
+            items.append(mo.callout(mo.md(
+                "**Wasteful.** 2x replicas provides excellent fault tolerance but doubles GPU cost. "
+                "The right answer depends on the specific QPS, SLO, and recovery time. "
+                "Most production systems use N+1 or N+2, not N*2."
+            ), kind="warn"))
+
+        # MathPeek
+        items.append(mo.accordion({
+            "Governing equations -- serving fault tolerance": mo.md("""
+        **Load After Failure**
+
+        ```
+        QPS_per_survivor = QPS_total / (N - k)
+        ```
+
+        - N = total replicas, k = failed replicas
+        - Each survivor must handle more traffic
+
+        **SLO Violation Condition**
+
+        ```
+        QPS_per_survivor > max_capacity_per_replica  =>  SLO violated
+        requests_at_risk = (QPS_per_survivor - max_capacity) * recovery_time
+        ```
+
+        **Serving vs Training Fault Tolerance**
+
+        | Property | Training | Serving |
+        |----------|----------|---------|
+        | State | Checkpoint (GB-TB) | KV cache (GB, per-request) |
+        | Recovery | Restore from storage | Reload model weights |
+        | Cost of failure | Lost compute since checkpoint | Dropped/delayed requests |
+        | Mitigation | Checkpoint frequency | Spare replicas |
+            """)
+        }))
+
+        # Reflection
+        items.append(mo.md("### Reflection"))
+        items.append(partD_reflection)
+
+        if partD_reflection.value is None:
+            items.append(mo.callout(mo.md("Select an answer to see the explanation."), kind="warn"))
+        elif partD_reflection.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Correct.** Training fault tolerance preserves long-lived state (checkpoint/restore). "
+                "Serving fault tolerance maintains throughput. When a serving replica fails, its KV cache "
+                "(active request state) is lost entirely. Those requests must restart from scratch on "
+                "another replica, and the replica must reload ~140 GB of model weights before serving again."
+            ), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Not quite.** Serving fault tolerance differs fundamentally because KV cache state "
+                "is per-request and ephemeral. When a replica fails, all in-flight request state is "
+                "lost. Recovery requires reloading model weights (90+ seconds for 70B), during which "
+                "remaining replicas must absorb the extra traffic."
+            ), kind="warn"))
+
+        return mo.vstack(items)
+
+    # ─────────────────────────────────────────────────────────────────────
     # SYNTHESIS BUILDER
     # ─────────────────────────────────────────────────────────────────────
 
@@ -871,17 +1422,21 @@ def _(
     # ─────────────────────────────────────────────────────────────────────
 
     # Save ledger
-    _a1_ok = partA_prediction.value == "C"
-    _a2_ok = partB_prediction.value == "C"
     ledger.save(
         chapter="v2_06",
         design={
             "partA_prediction": partA_prediction.value or "no_selection",
-            "partA_correct": _a1_ok,
+            "partA_correct": partA_prediction.value == "C",
             "partA_reflection": partA_reflection.value or "no_selection",
             "partB_prediction": partB_prediction.value or "no_selection",
-            "partB_correct": _a2_ok,
+            "partB_correct": partB_prediction.value == "C",
             "partB_reflection": partB_reflection.value or "no_selection",
+            "partC_prediction": partC_prediction.value or "no_selection",
+            "partC_correct": partC_prediction.value == "C",
+            "partC_reflection": partC_reflection.value or "no_selection",
+            "partD_prediction": partD_prediction.value or "no_selection",
+            "partD_correct": partD_prediction.value == "C",
+            "partD_reflection": partD_reflection.value or "no_selection",
             "student_justification": str(synth_decision_input.value),
         },
     )
@@ -889,6 +1444,8 @@ def _(
     tabs = mo.ui.tabs({
         "Part A -- The Young-Daly Sweet Spot":  build_part_a(),
         "Part B -- The Checkpoint Storm":       build_part_b(),
+        "Part C -- Async Checkpointing":        build_part_c(),
+        "Part D -- Serving Fault Tolerance":    build_part_d(),
         "Synthesis":                            build_synthesis(),
     })
     tabs

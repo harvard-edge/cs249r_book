@@ -45,21 +45,36 @@ async def _():
     )
     from mlsysim.core.constants import ureg
 
-    # ── Hardware constants ────────────────────────────────────────────────────
-    H100_TFLOPS_FP16 = mlsysim.Hardware.Cloud.H100.compute.peak_flops.m_as("TFLOPs/s")
-    H100_BW_GBS = mlsysim.Hardware.Cloud.H100.memory.bandwidth.m_as("GB/s")
-    H100_RAM_GB = mlsysim.Hardware.Cloud.H100.memory.capacity.m_as("GB")
-    H100_TDP_W = mlsysim.Hardware.Cloud.H100.tdp.m_as("W")
+    # ── Hardware registry ─────────────────────────────────────────────────────
+    H100 = mlsysim.Hardware.Cloud.H100
+    EDGE = mlsysim.Hardware.Edge.JetsonOrinNX
+
+    H100_TFLOPS_FP16 = H100.compute.peak_flops.m_as("TFLOPs/s")
+    H100_BW_GBS = H100.memory.bandwidth.m_as("GB/s")
+    H100_RAM_GB = H100.memory.capacity.m_as("GB")
+    H100_TDP_W = H100.tdp.m_as("W")
+
+    EDGE_TFLOPS = EDGE.compute.peak_flops.m_as("TFLOPs/s")
+    EDGE_RAM_GB = EDGE.memory.capacity.m_as("GB")
+    EDGE_TDP_W = EDGE.tdp.m_as("W")
+
+    # ── Model registry ────────────────────────────────────────────────────────
+    GPT2 = mlsysim.Models.GPT2
+    GPT2_PARAMS = GPT2.parameters.m_as("dimensionless")
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         await ledger.load_async()
     return (
         COLORS,
+        EDGE_TFLOPS,
+        EDGE_RAM_GB,
+        EDGE_TDP_W,
         H100_BW_GBS,
         H100_RAM_GB,
         H100_TDP_W,
         H100_TFLOPS_FP16,
+        GPT2_PARAMS,
         LAB_CSS,
         apply_plotly_theme,
         calc_mtbf_cluster,

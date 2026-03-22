@@ -43,6 +43,11 @@ async def _():
         NVME_SEQUENTIAL_BW,
     )
 
+    # ── Hardware registry ─────────────────────────────────────────────────────
+    _H100_REG = mlsysim.Hardware.Cloud.H100
+    _T4_REG = mlsysim.Hardware.Cloud.T4
+    _EDGE_REG = mlsysim.Hardware.Edge.JetsonOrinNX
+
     # Scalar extraction
     H100_TFLOPS = H100_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
     A100_TFLOPS = A100_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
@@ -50,12 +55,23 @@ async def _():
     V100_TFLOPS = V100_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
     NVME_GBS = NVME_SEQUENTIAL_BW.m_as("GB/s")
 
+    H100_RAM_GB = _H100_REG.memory.capacity.m_as("GB")
+    T4_RAM_GB = _T4_REG.memory.capacity.m_as("GB")
+    EDGE_RAM_GB = _EDGE_REG.memory.capacity.m_as("GB")
+    EDGE_TFLOPS = _EDGE_REG.compute.peak_flops.m_as("TFLOPs/s")
+
+    # ── Model registry ────────────────────────────────────────────────────────
+    GPT2 = mlsysim.Models.GPT2
+    GPT2_PARAMS_B = GPT2.parameters.m_as("dimensionless") / 1e9  # billions
+
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         await ledger.load_async()
     return (
         COLORS, LAB_CSS, apply_plotly_theme, go, math, mo, np, ledger, ureg,
         H100_TFLOPS, A100_TFLOPS, B200_TFLOPS, V100_TFLOPS, NVME_GBS,
+        H100_RAM_GB, T4_RAM_GB, EDGE_RAM_GB, EDGE_TFLOPS,
+        GPT2_PARAMS_B,
         GPU_MTTF_HOURS,
         calc_young_daly_interval, calc_mtbf_cluster,
     )

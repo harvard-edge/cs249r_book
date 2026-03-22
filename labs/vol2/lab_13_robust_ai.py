@@ -55,10 +55,19 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim.labs.components import DecisionLog
+    from mlsysim.hardware.registry import Hardware
+    from mlsysim.models.registry import Models
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         await ledger.load_async()
+
+    # ── Hardware from registry (Cloud + Edge tiers) ─────────────────────────
+    _cloud = Hardware.Cloud.H100
+    _edge  = Hardware.Edge.JetsonOrinNX
+
+    CLOUD_TFLOPS = _cloud.compute.peak_flops.m_as("TFLOPs/s")  # 989
+    EDGE_TFLOPS  = _edge.compute.peak_flops.m_as("TFLOPs/s")   # 25
 
     # ── Robustness constants ────────────────────────────────────────────────
     # Source: Robust AI chapter (@sec-robust-ai)
@@ -88,6 +97,7 @@ async def _():
     return (
         mo, ledger, COLORS, LAB_CSS, apply_plotly_theme,
         go, np, math,
+        CLOUD_TFLOPS, EDGE_TFLOPS,
         CLEAN_ACC_BASELINE, ADV_TRAINED_CLEAN_ACC, ADV_TRAINED_ROBUST_ACC,
         ROBUST_TAX_PP, PGD_STEPS, PGD_COMPUTE_MULT, SMOOTHING_INFERENCE_MULT,
         FEATURE_SQUEEZE_CLEAN, FEATURE_SQUEEZE_ROBUST,

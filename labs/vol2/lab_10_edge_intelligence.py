@@ -58,20 +58,30 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim.labs.components import DecisionLog
+    from mlsysim.hardware.registry import Hardware
+    from mlsysim.models.registry import Models
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         await ledger.load_async()
 
+    # ── Hardware from registry ──────────────────────────────────────────────
+    _phone = Hardware.Edge.Generic_Phone   # iPhone 15 Pro (A17 Pro)
+    _cloud = Hardware.Cloud.H100           # Cloud tier for comparison
+
     # ── Mobile hardware constants ────────────────────────────────────────────
     # Source: @sec-edge-intelligence, smartphone compute constraints
-    MOBILE_RAM_GB     = 8.0       # smartphone available RAM
+    MOBILE_RAM_GB     = _phone.memory.capacity.m_as("GB")  # 8 GB
     MOBILE_RAM_AVAIL_MB = 300.0   # available for ML after OS/apps
-    MOBILE_BATTERY_WH = 15.0      # typical smartphone battery
+    MOBILE_BATTERY_WH = _phone.battery_capacity.m_as("Wh")  # 15 Wh
     MOBILE_CPU_POWER_W = 3.0      # sustained CPU power draw
     MOBILE_NPU_POWER_W = 0.5     # NPU power draw for equivalent workload
     NPU_SPEEDUP       = 20.0     # NPU latency speedup over CPU
     NPU_ENERGY_GAIN   = 50.0     # NPU energy efficiency gain over CPU
+
+    # Cloud tier specs — for edge-vs-cloud contrast
+    CLOUD_RAM_GB      = _cloud.memory.capacity.m_as("GiB")  # 80 GiB
+    CLOUD_TDP_W       = _cloud.tdp.m_as("W")                # 700 W
 
     # ── Training memory model constants ──────────────────────────────────────
     # Source: @tbl-training-amplification, @fig-training-memory-amplifier
@@ -96,8 +106,9 @@ async def _():
     return (
         mo, ledger, COLORS, LAB_CSS, apply_plotly_theme,
         go, np, math, DecisionLog,
-        MOBILE_RAM_AVAIL_MB, MOBILE_BATTERY_WH,
+        MOBILE_RAM_GB, MOBILE_RAM_AVAIL_MB, MOBILE_BATTERY_WH,
         MOBILE_CPU_POWER_W, MOBILE_NPU_POWER_W,
+        CLOUD_RAM_GB, CLOUD_TDP_W,
         NPU_SPEEDUP, NPU_ENERGY_GAIN,
         BYTES_FP16, BYTES_FP32, ADAM_MULTIPLIER, ACTIVATION_RATIO,
         LORA_RANK, LORA_FRACTION, BIAS_FRACTION,

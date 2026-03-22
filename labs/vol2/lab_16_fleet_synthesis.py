@@ -57,6 +57,8 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim.labs.components import DecisionLog
+    from mlsysim.hardware.registry import Hardware
+    from mlsysim.models.registry import Models
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
@@ -75,14 +77,23 @@ async def _():
     FAIRNESS_OVERHEAD_MS = _ch15.get("fairness_overhead_ms", 15)    # ms per request
     FAIRNESS_THRESHOLD = _ch15.get("fairness_disparity_threshold", 0.05)
 
+    # ── Hardware from registry ──────────────────────────────────────────────
+    _cloud = Hardware.Cloud.H100
+    _edge  = Hardware.Edge.JetsonOrinNX
+
     # ── Fleet constants ──────────────────────────────────────────────────────
-    H100_TFLOPS_FP16    = 989     # TFLOPS — NVIDIA H100 SXM5 spec
-    H100_RAM_GB         = 80      # GB HBM3e
-    H100_TDP_W          = 700     # Watts TDP
+    H100_TFLOPS_FP16    = _cloud.compute.peak_flops.m_as("TFLOPs/s")  # 989
+    H100_RAM_GB         = _cloud.memory.capacity.m_as("GiB")          # 80 GiB
+    H100_TDP_W          = _cloud.tdp.m_as("W")                        # 700 W
     NVLINK_BW_GBS       = 900     # GB/s NVLink4 bidirectional per GPU
     IB_BW_GBPS          = 400     # Gb/s InfiniBand NDR per port
     MTBF_GPU_HOURS      = 2000    # Mean time between failures per GPU (hours)
     CHECKPOINT_COST_S   = 120     # Seconds per checkpoint
+
+    # Edge tier — for fleet heterogeneity comparison
+    EDGE_TFLOPS_FP16    = _edge.compute.peak_flops.m_as("TFLOPs/s")  # 25
+    EDGE_RAM_GB         = _edge.memory.capacity.m_as("GB")            # 16
+    EDGE_TDP_W          = _edge.tdp.m_as("W")                         # 25 W
 
     # Communication constants
     ALLREDUCE_RING_EFF  = 0.85    # AllReduce ring efficiency
@@ -94,6 +105,7 @@ async def _():
         CARBON_CAP, CARBON_STRATEGY, FAIRNESS_METRIC,
         FAIRNESS_OVERHEAD_MS, FAIRNESS_THRESHOLD,
         H100_TFLOPS_FP16, H100_RAM_GB, H100_TDP_W,
+        EDGE_TFLOPS_FP16, EDGE_RAM_GB, EDGE_TDP_W,
         NVLINK_BW_GBS, IB_BW_GBPS, MTBF_GPU_HOURS, CHECKPOINT_COST_S,
         ALLREDUCE_RING_EFF, GRADIENT_COMPRESS,
         DecisionLog,

@@ -38,6 +38,12 @@ async def _():
     H100_RAM_GB      = mlsysim.Hardware.Cloud.H100.memory.capacity.m_as("GB")
     H100_TDP_W       = mlsysim.Hardware.Cloud.H100.tdp.m_as("W")
 
+    # Edge tier — contrast serving constraints: limited memory, lower bandwidth
+    JETSON_TFLOPS    = mlsysim.Hardware.Edge.JetsonOrinNX.compute.peak_flops.m_as("TFLOPs/s")
+    JETSON_BW_GBS    = mlsysim.Hardware.Edge.JetsonOrinNX.memory.bandwidth.m_as("GB/s")
+    JETSON_RAM_GB    = mlsysim.Hardware.Edge.JetsonOrinNX.memory.capacity.m_as("GB")
+    JETSON_TDP_W     = mlsysim.Hardware.Edge.JetsonOrinNX.tdp.m_as("W")
+
     PCIE_GEN5_GBS = 64.0
     PCIE_GEN4_GBS = 32.0
     NVME_SEQ_GBS  = 7.0
@@ -56,6 +62,7 @@ async def _():
         await ledger.load_async()
     return (
         COLORS, H100_BW_GBS, H100_RAM_GB, H100_TDP_W, H100_TFLOPS_FP16,
+        JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W, JETSON_TFLOPS,
         LAB_CSS, LLAMA2_70B_HEADS, LLAMA2_70B_HIDDEN, LLAMA2_70B_LAYERS,
         LLAMA2_70B_PARAMS, NET_FS_GBS, NVME_SEQ_GBS, PCIE_GEN4_GBS,
         PCIE_GEN5_GBS, RESNET50_FLOPS, RESNET50_PARAMS,
@@ -187,7 +194,8 @@ def _(mo):
 # ═════════════════════════════════════════════════════════════════════════════
 @app.cell(hide_code=True)
 def _(
-    COLORS, H100_BW_GBS, H100_RAM_GB, LLAMA2_70B_HEADS, LLAMA2_70B_HIDDEN,
+    COLORS, H100_BW_GBS, H100_RAM_GB, JETSON_BW_GBS, JETSON_RAM_GB,
+    LLAMA2_70B_HEADS, LLAMA2_70B_HIDDEN,
     LLAMA2_70B_LAYERS, NET_FS_GBS, NVME_SEQ_GBS, PCIE_GEN4_GBS,
     PCIE_GEN5_GBS, apply_plotly_theme, go, math, mo, np,
 ):
@@ -656,6 +664,20 @@ T_token      = ({_w_gb:.0f}+{_kv_gb:.1f}) / {_bw:.0f} GB/s = {_tok_ms:.1f} ms
 ```
 *Source: @sec-model-serving-kv-cache*
         """))
+
+        # Edge comparison: same model on Jetson Orin NX
+        _edge_hbm = JETSON_RAM_GB
+        _edge_fits = _w_gb <= _edge_hbm
+        _edge_max_b = max(0, int((_edge_hbm - _w_gb) / _kv_gb)) if _edge_fits and _kv_gb > 0 else 0
+        _edge_tok_ms = _w_gb / JETSON_BW_GBS * 1000 if JETSON_BW_GBS > 0 else float('inf')
+        items.append(mo.callout(mo.md(
+            f"**Edge comparison (Jetson Orin NX, {_edge_hbm:.0f} GB):** "
+            + (f"OOM — weights alone ({_w_gb:.0f} GB) exceed {_edge_hbm:.0f} GB memory."
+               if not _edge_fits else
+               f"Max batch = {_edge_max_b}, token time = {_edge_tok_ms:.0f} ms "
+               f"({_edge_tok_ms/_tok_ms:.0f}x slower). "
+               "Edge serving requires aggressive quantization and small context windows.")
+        ), kind="warn"))
 
         if partC_pred.value == "1":
             items.append(mo.callout(mo.md(

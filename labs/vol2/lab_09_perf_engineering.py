@@ -72,28 +72,41 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim.labs.components import DecisionLog
+    from mlsysim.hardware.registry import Hardware
+    from mlsysim.models.registry import Models
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         await ledger.load_async()
 
-    # ── Hardware constants (NVIDIA datasheets) ────────────────────────────────
-    H100_TFLOPS_FP16 = 989.0
-    H100_BW_GBS      = 3350.0
-    H100_RAM_GB      = 80.0
+    # ── Hardware from registry ──────────────────────────────────────────────
+    _h100 = Hardware.Cloud.H100
+    _a100 = Hardware.Cloud.A100
+    _v100 = Hardware.Cloud.V100
+    _b200 = Hardware.Cloud.B200
+    _edge = Hardware.Edge.JetsonOrinNX   # Edge tier for comparison
+
+    H100_TFLOPS_FP16 = _h100.compute.peak_flops.m_as("TFLOPs/s")
+    H100_BW_GBS      = _h100.memory.bandwidth.m_as("GB/s")
+    H100_RAM_GB      = _h100.memory.capacity.m_as("GiB")  # 80 GiB
     H100_RIDGE       = H100_TFLOPS_FP16 * 1e12 / (H100_BW_GBS * 1e9)  # ~295
 
-    V100_TFLOPS_FP16 = 125.0
-    V100_BW_GBS      = 900.0
+    V100_TFLOPS_FP16 = _v100.compute.peak_flops.m_as("TFLOPs/s")
+    V100_BW_GBS      = _v100.memory.bandwidth.m_as("GB/s")
     V100_RIDGE       = V100_TFLOPS_FP16 * 1e12 / (V100_BW_GBS * 1e9)  # ~139
 
-    A100_TFLOPS_FP16 = 312.0
-    A100_BW_GBS      = 2039.0
+    A100_TFLOPS_FP16 = _a100.compute.peak_flops.m_as("TFLOPs/s")
+    A100_BW_GBS      = _a100.memory.bandwidth.m_as("GB/s")
     A100_RIDGE       = A100_TFLOPS_FP16 * 1e12 / (A100_BW_GBS * 1e9)  # ~153
 
-    B200_TFLOPS_FP16 = 2250.0
-    B200_BW_GBS      = 8000.0
+    B200_TFLOPS_FP16 = _b200.compute.peak_flops.m_as("TFLOPs/s")
+    B200_BW_GBS      = _b200.memory.bandwidth.m_as("GB/s")
     B200_RIDGE       = B200_TFLOPS_FP16 * 1e12 / (B200_BW_GBS * 1e9)  # ~281
+
+    # Edge tier (Jetson Orin NX) — for cloud-vs-edge roofline contrast
+    EDGE_TFLOPS_FP16 = _edge.compute.peak_flops.m_as("TFLOPs/s")   # 25
+    EDGE_BW_GBS      = _edge.memory.bandwidth.m_as("GB/s")          # 102
+    EDGE_RIDGE       = EDGE_TFLOPS_FP16 * 1e12 / (EDGE_BW_GBS * 1e9)
 
     # ── Transformer workload constants (70B LLM) ─────────────────────────────
     HEAD_DIM     = 128
@@ -126,6 +139,7 @@ async def _():
         V100_TFLOPS_FP16, V100_BW_GBS, V100_RIDGE,
         A100_TFLOPS_FP16, A100_BW_GBS, A100_RIDGE,
         B200_TFLOPS_FP16, B200_BW_GBS, B200_RIDGE,
+        EDGE_TFLOPS_FP16, EDGE_BW_GBS, EDGE_RIDGE,
         HEAD_DIM, NUM_HEADS, NUM_LAYERS, HIDDEN_DIM, BYTES_FP16,
         ELEM_FUSION_SAVE_MB,
         PPL_FP16, PPL_INT8_NAIVE, PPL_INT8_OUTLIER,

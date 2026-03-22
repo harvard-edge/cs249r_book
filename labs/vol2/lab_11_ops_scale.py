@@ -56,10 +56,19 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim.labs.components import DecisionLog
+    from mlsysim.hardware.registry import Hardware
+    from mlsysim.models.registry import Models
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         await ledger.load_async()
+
+    # ── Hardware from registry (Cloud + Edge tiers) ─────────────────────────
+    _cloud = Hardware.Cloud.H100
+    _edge  = Hardware.Edge.JetsonOrinNX
+
+    CLOUD_TDP_W  = _cloud.tdp.m_as("W")       # 700 W — datacenter power per GPU
+    EDGE_TDP_W   = _edge.tdp.m_as("W")         # 25 W  — edge device power budget
 
     # ── Operational constants ────────────────────────────────────────────────
     # Part A — Complexity Model
@@ -93,6 +102,7 @@ async def _():
     return (
         mo, ledger, COLORS, LAB_CSS, apply_plotly_theme,
         go, np, math, DecisionLog,
+        CLOUD_TDP_W, EDGE_TDP_W,
         TEAM_CAPACITY_HOURS, ALERT_COST_PER_MODEL,
         COORD_COST_LOG, DEP_COST_QUAD,
         DEFAULT_QPS, DEFAULT_CTR_DROP, DEFAULT_REV_PER_CLICK,

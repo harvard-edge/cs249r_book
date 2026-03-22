@@ -59,15 +59,22 @@ async def _():
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim.labs.components import DecisionLog
+    from mlsysim import Hardware
 
+    # ── Hardware registry ─────────────────────────────────────────────────
+    H100 = Hardware.Cloud.H100
+    T4 = Hardware.Cloud.T4
+    EDGE = Hardware.Edge.JetsonOrinNX
     H100_RAM_GB = 80.0
     H100_COST_HR = 3.0
+    T4_COST_HR = 0.35
+    EDGE_RAM_GB = EDGE.memory.capacity.m_as("GB")
     TRAINING_COST_2M = 2_000_000  # $2M training cost for 70B model
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         await ledger.load_async()
-    return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, H100_RAM_GB, H100_COST_HR, TRAINING_COST_2M, DecisionLog
+    return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, H100_RAM_GB, H100_COST_HR, T4_COST_HR, TRAINING_COST_2M, DecisionLog, Hardware, H100, T4, EDGE, EDGE_RAM_GB
 
 
 # ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
@@ -267,6 +274,73 @@ def _(mo, partB_prediction):
     return (a2_model_size, a2_precision, a2_context_len, a2_n_gpus, partB_reflection)
 
 
+# ─── CELL 6b: Part C prediction + controls ─────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, partB_reflection):
+    mo.stop(partB_reflection.value is None, mo.md("**Complete Part B reflection to unlock Part C.**"))
+
+    partC_prediction = mo.ui.radio(
+        options={
+            "A) 1.5x -- modest improvement over static batching": "A",
+            "B) 2-4x -- continuous batching fills freed slots immediately": "B",
+            "C) 10x -- batching is the dominant optimization": "C",
+            "D) No improvement -- batching does not affect memory-bound workloads": "D",
+        },
+        label="You switch from static batching (pad all requests to max_len) to continuous batching (iteration-level scheduling). What throughput improvement do you expect for a 70B model at mixed context lengths?",
+    )
+    c1_avg_len = mo.ui.slider(start=256, stop=65536, value=4096, step=256, label="Average output length (tokens)")
+    c1_max_len = mo.ui.slider(start=2048, stop=131072, value=32768, step=2048, label="Max context length (tokens)")
+    c1_batch_size = mo.ui.slider(start=1, stop=32, value=8, step=1, label="Static batch size")
+    partC_reflection = mo.ui.radio(
+        options={
+            "A) Static batching is fine -- just increase batch size": "A",
+            "B) Continuous batching is strictly better because it eliminates padding waste and fills freed slots with new requests": "B",
+            "C) Continuous batching only helps with short requests": "C",
+            "D) The choice between static and continuous batching depends on model size": "D",
+        },
+        label="Why is continuous batching the standard for production LLM serving?",
+    )
+    return (partC_prediction, c1_avg_len, c1_max_len, c1_batch_size, partC_reflection)
+
+
+# ─── CELL 6c: Part D prediction + controls ─────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, partC_reflection):
+    mo.stop(partC_reflection.value is None, mo.md("**Complete Part C reflection to unlock Part D.**"))
+
+    partD_prediction = mo.ui.radio(
+        options={
+            "A) 200 replicas of FP16 with static batching -- brute force": "A",
+            "B) 50 replicas of INT4 with continuous batching -- optimized per-replica throughput": "B",
+            "C) 100 replicas of FP16 with continuous batching -- balanced approach": "C",
+            "D) 25 replicas of INT4 with static batching -- minimize replica count": "D",
+        },
+        label="Design: serve 10K QPS at 200ms P99 for a 70B model at 32K context. Which fleet configuration achieves this at lowest cost?",
+    )
+    d1_target_qps = mo.ui.slider(start=1000, stop=20000, value=10000, step=1000, label="Target QPS")
+    d1_quant = mo.ui.dropdown(
+        options={"FP16 (2 bytes)": 2.0, "INT8 (1 byte)": 1.0, "INT4 (0.5 bytes)": 0.5},
+        value="INT4 (0.5 bytes)",
+        label="Weight quantization",
+    )
+    d1_batching = mo.ui.dropdown(
+        options={"Static": 1.0, "Continuous": 3.0},
+        value="Continuous",
+        label="Batching strategy",
+    )
+    d1_gpus_per_replica = mo.ui.slider(start=1, stop=8, value=4, step=1, label="GPUs per replica")
+    partD_reflection = mo.ui.radio(
+        options={
+            "A) Minimize replica count to reduce management overhead": "A",
+            "B) Minimize cost = replicas * GPUs_per_replica * cost_per_GPU_hr, subject to QPS and latency constraints": "B",
+            "C) Maximize batch size per replica for best GPU utilization": "C",
+            "D) Use the largest GPU count per replica to maximize memory": "D",
+        },
+        label="What is the correct objective function for fleet design?",
+    )
+    return (partD_prediction, d1_target_qps, d1_quant, d1_batching, d1_gpus_per_replica, partD_reflection)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ZONE C: SINGLE TABS CELL
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -275,6 +349,7 @@ def _(mo, partB_prediction):
 def _(
     COLORS,
     H100_RAM_GB,
+    H100_COST_HR,
     TRAINING_COST_2M,
     a1_cost_query,
     a1_optimization,
@@ -293,6 +368,17 @@ def _(
     partA_reflection,
     partB_prediction,
     partB_reflection,
+    partC_prediction,
+    c1_avg_len,
+    c1_max_len,
+    c1_batch_size,
+    partC_reflection,
+    partD_prediction,
+    d1_target_qps,
+    d1_quant,
+    d1_batching,
+    d1_gpus_per_replica,
+    partD_reflection,
 ):
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -749,6 +835,466 @@ def _(
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
+    # PART C: CONTINUOUS BATCHING
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def build_part_c():
+        items = []
+
+        # Stakeholder message
+        items.append(mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['OrangeLine']}; background: {COLORS['OrangeLL']};
+                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['OrangeLine']};
+                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
+                Incoming Message &middot; ML Serving Engineer
+            </div>
+            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
+                "Our static batching system pads all requests to 32K tokens and waits for a
+                full batch of 8. Most requests are only 4K tokens -- 87% of GPU cycles are
+                wasted on padding. Someone mentioned 'continuous batching.' How much does it help?"
+            </div>
+        </div>
+        """))
+
+        # Concept framing
+        items.append(mo.md("""
+    **Static batching** pads all requests to `max_len` and processes them together.
+    When a short request (4K tokens) finishes, the GPU sits idle until all 8 requests
+    in the batch complete. Waste = `1 - avg_len / max_len`.
+
+    **Continuous batching** (iteration-level scheduling) processes one token per iteration.
+    When a request finishes, its slot is immediately filled by a new request.
+
+    The throughput advantage:
+    - Static: effective throughput = batch_size / max_len_time (includes padding waste)
+    - Continuous: effective throughput = batch_size / avg_len_time * fill_factor
+
+    The fill_factor (2-4x) comes from:
+    1. No padding waste: compute only on real tokens
+    2. Immediate slot filling: no idle GPU cycles between requests
+    3. Higher effective batch occupancy over time
+        """))
+
+        # Prediction lock
+        items.append(partC_prediction)
+        if partC_prediction.value is None:
+            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part C instruments."), kind="warn"))
+            return mo.vstack(items)
+
+        # Controls
+        items.append(mo.md("### Continuous vs Static Batching Simulator"))
+        items.append(mo.hstack([c1_avg_len, c1_max_len, c1_batch_size], justify="center", gap=2))
+
+        # Physics
+        _avg = c1_avg_len.value
+        _max = c1_max_len.value
+        _batch = c1_batch_size.value
+
+        _padding_waste = 1 - _avg / _max if _max > 0 else 0
+        _static_throughput = _batch  # requests per batch cycle
+        _continuous_throughput = _batch * (_max / _avg) * 0.85  # fill factor ~85% of theoretical
+        _speedup = _continuous_throughput / _static_throughput if _static_throughput > 0 else 1
+
+        # Chart: throughput vs avg_len ratio
+        _ratios = np.linspace(0.05, 1.0, 50)
+        _static_tp = [_batch for _ in _ratios]
+        _continuous_tp = [_batch * (1 / r) * 0.85 for r in _ratios]
+
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(
+            x=_ratios * 100, y=_static_tp, mode="lines",
+            name="Static batching", line=dict(color=COLORS["RedLine"], width=2.5),
+        ))
+        _fig.add_trace(go.Scatter(
+            x=_ratios * 100, y=_continuous_tp, mode="lines",
+            name="Continuous batching", line=dict(color=COLORS["GreenLine"], width=2.5),
+        ))
+        _fig.add_trace(go.Scatter(
+            x=[_avg / _max * 100], y=[_continuous_throughput],
+            mode="markers", marker=dict(size=14, color=COLORS["OrangeLine"], symbol="diamond"),
+            name="Current config",
+        ))
+        _fig.update_layout(
+            height=300,
+            xaxis=dict(title="Avg Length / Max Length (%)"),
+            yaxis=dict(title="Effective Throughput (requests/cycle)"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(t=40, b=50, l=50, r=20),
+        )
+        apply_plotly_theme(_fig)
+
+        _waste_color = COLORS["RedLine"] if _padding_waste > 0.5 else (COLORS["OrangeLine"] if _padding_waste > 0.2 else COLORS["GreenLine"])
+        _speedup_color = COLORS["GreenLine"] if _speedup > 2 else (COLORS["OrangeLine"] if _speedup > 1.3 else COLORS["RedLine"])
+
+        items.append(mo.Html(f"""
+        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
+                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
+                    font-size:0.83rem; line-height:1.8;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
+                Physics &mdash; Batching Strategy Comparison
+            </div>
+            <div>Avg length: {_avg:,} tokens &mdash; Max length: {_max:,} tokens</div>
+            <div>Padding waste (static): <strong style="color:{_waste_color};">{_padding_waste*100:.1f}%</strong></div>
+            <div>Static throughput: <strong>{_static_throughput:.0f}</strong> req/cycle &mdash;
+                 Continuous: <strong style="color:{COLORS['GreenLine']};">{_continuous_throughput:.1f}</strong> req/cycle</div>
+            <div>Speedup: <strong style="color:{_speedup_color};">{_speedup:.1f}x</strong></div>
+        </div>
+        """))
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:160px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Speedup</div>
+                <div style="font-size:2rem; font-weight:800; color:{_speedup_color}; font-family:monospace;">{_speedup:.1f}x</div>
+            </div>
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:160px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Padding Waste</div>
+                <div style="font-size:2rem; font-weight:800; color:{_waste_color}; font-family:monospace;">{_padding_waste*100:.0f}%</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">static only</div>
+            </div>
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:160px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Continuous TP</div>
+                <div style="font-size:2rem; font-weight:800; color:{COLORS['GreenLine']}; font-family:monospace;">{_continuous_throughput:.0f}</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">req/cycle</div>
+            </div>
+        </div>
+        """))
+
+        items.append(mo.ui.plotly(_fig))
+
+        # Prediction reveal
+        if partC_prediction.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Correct.** Continuous batching achieves 2-4x throughput improvement over static "
+                "batching when avg_len << max_len. At avg=4K, max=32K, padding waste is 87.5%. "
+                "Continuous batching eliminates this waste and immediately fills freed slots, "
+                "achieving ~3x higher effective throughput in this scenario."
+            ), kind="success"))
+        elif partC_prediction.value == "A":
+            items.append(mo.callout(mo.md(
+                "**Too conservative.** 1.5x would be the case if avg_len is close to max_len "
+                "(e.g., 24K/32K). When avg_len is 4K vs max=32K, the 87.5% padding waste "
+                "means continuous batching achieves 3-4x improvement."
+            ), kind="warn"))
+        elif partC_prediction.value == "C":
+            items.append(mo.callout(mo.md(
+                "**Too optimistic.** 10x would require avg_len to be <3% of max_len AND perfect "
+                "slot filling. In practice, continuous batching achieves 2-4x because slot "
+                "filling is not instantaneous and prefill compute is non-trivial."
+            ), kind="warn"))
+        elif partC_prediction.value == "D":
+            items.append(mo.callout(mo.md(
+                "**Wrong.** Memory-bound workloads benefit greatly from batching optimizations. "
+                "Continuous batching increases the effective batch occupancy, which improves "
+                "memory bandwidth utilization (more requests share the same weight reads)."
+            ), kind="warn"))
+
+        # MathPeek
+        items.append(mo.accordion({
+            "Governing equations -- continuous batching": mo.md("""
+        **Static Batching Throughput**
+
+        ```
+        TP_static = batch_size / T_max_request
+        ```
+
+        All requests padded to max_len. Waste = 1 - avg_len/max_len.
+
+        **Continuous Batching Throughput**
+
+        ```
+        TP_continuous = batch_size * (max_len / avg_len) * fill_factor
+        ```
+
+        - fill_factor = 0.7-0.9 (accounts for prefill overhead and scheduling gaps)
+        - Speedup = (max_len / avg_len) * fill_factor
+        - At avg=4K, max=32K: speedup = 8 * 0.85 = 6.8x theoretical, ~3x practical
+
+        **Why Practical < Theoretical**
+
+        - Prefill phase for new requests is compute-intensive
+        - Not all slots fill instantly (scheduling latency)
+        - KV cache management overhead
+            """)
+        }))
+
+        # Reflection
+        items.append(partC_reflection)
+        if partC_reflection.value is None:
+            items.append(mo.callout(mo.md("Select an answer."), kind="warn"))
+        elif partC_reflection.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Correct.** Continuous batching is strictly better because: (1) no padding waste, "
+                "(2) freed slots are filled immediately with new requests, (3) the GPU processes "
+                "real tokens instead of padding tokens. This is why every production LLM serving "
+                "system (vLLM, TensorRT-LLM, TGI) uses continuous batching."
+            ), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Not the full picture.** Continuous batching is the standard because it "
+                "eliminates padding waste AND fills slots immediately. It works for all model "
+                "sizes and request length distributions."
+            ), kind="warn"))
+
+        return mo.vstack(items)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # PART D: FLEET DESIGN CHALLENGE
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def build_part_d():
+        items = []
+
+        # Stakeholder message
+        items.append(mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['RedLine']}; background: {COLORS['RedLL']};
+                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['RedLine']};
+                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
+                Incoming Message &middot; VP of AI Infrastructure
+            </div>
+            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
+                "We need to serve 10,000 QPS at 200ms P99 for our 70B model at 32K context.
+                The naive fleet (FP16, static batching) requires 200 replicas on 8xH100 each
+                = 1,600 H100s at $115K/day. Can we do better?"
+            </div>
+        </div>
+        """))
+
+        # Concept framing
+        items.append(mo.md("""
+    Fleet design jointly optimizes three levers:
+    1. **Quantization**: INT4 reduces weight memory, freeing HBM for larger KV cache batches
+    2. **Continuous batching**: 2-4x throughput per replica
+    3. **Replica count and GPU count per replica**: cost = replicas x GPUs x cost/hr
+
+    The naive fleet (FP16, static, 8 GPUs/replica):
+    - Per-replica throughput: ~50 QPS
+    - Replicas needed: 10,000 / 50 = 200
+    - Cost: 200 x 8 x $3/hr = $4,800/hr = $115,200/day
+
+    The optimized fleet (INT4, continuous batching, 4 GPUs/replica):
+    - INT4 weights: 35 GB (vs 140 GB FP16), freeing 105 GB for KV cache
+    - Continuous batching: ~3x throughput = 150 QPS/replica
+    - Replicas needed: ceil(10,000 / 150) = 67
+    - Cost: 67 x 4 x $3/hr = $804/hr = $19,296/day
+
+    **Savings: ~83%** -- same SLO, dramatically lower cost.
+        """))
+
+        # Prediction lock
+        items.append(partD_prediction)
+        if partD_prediction.value is None:
+            items.append(mo.callout(mo.md("Select your prediction above to unlock the Part D instruments."), kind="warn"))
+            return mo.vstack(items)
+
+        # Controls
+        items.append(mo.md("### Fleet Design Optimizer"))
+        items.append(mo.hstack([
+            mo.vstack([d1_target_qps, d1_quant]),
+            mo.vstack([d1_batching, d1_gpus_per_replica]),
+        ], justify="center", gap=2))
+
+        # Physics
+        _target = d1_target_qps.value
+        _bytes_per_elem = d1_quant.value
+        _batch_mult = d1_batching.value
+        _gpus = d1_gpus_per_replica.value
+
+        # Memory model
+        _total_hbm = _gpus * H100_RAM_GB
+        _weight_gb = 70 * 1e9 * _bytes_per_elem / 1e9
+        _available_gb = max(0, _total_hbm - _weight_gb)
+
+        # KV cache per request at 32K context (70B: 80 layers, 8192 hidden)
+        _kv_per_req_gb = 2 * 80 * 8192 * 32768 * 2 / 1e9
+        _max_batch = math.floor(_available_gb / _kv_per_req_gb) if _kv_per_req_gb > 0 else 0
+
+        # Per-replica throughput
+        _base_qps_per_req = 1.5  # tokens/sec/request baseline
+        _effective_batch = max(1, _max_batch)
+        _per_replica_qps = _effective_batch * _base_qps_per_req * _batch_mult
+
+        # Fleet sizing
+        _replicas_needed = math.ceil(_target / _per_replica_qps) if _per_replica_qps > 0 else 9999
+        _total_gpus = _replicas_needed * _gpus
+        _hourly_cost = _total_gpus * H100_COST_HR
+        _daily_cost = _hourly_cost * 24
+
+        # Naive baseline
+        _naive_replicas = math.ceil(_target / 50)  # 50 QPS/replica naive
+        _naive_gpus = _naive_replicas * 8
+        _naive_daily = _naive_gpus * H100_COST_HR * 24
+        _savings_pct = (1 - _daily_cost / _naive_daily) * 100 if _naive_daily > 0 else 0
+
+        _oom = _max_batch < 1
+
+        # Chart: cost comparison across configurations
+        _configs = ["Naive FP16\nStatic 8GPU", "FP16 Cont.\n8GPU", "INT4 Cont.\n4GPU", "Your Config"]
+        _costs = [
+            _naive_daily,
+            math.ceil(_target / (8 * 1.5 * 3.0)) * 8 * H100_COST_HR * 24,  # FP16 continuous
+            math.ceil(_target / (max(1, math.floor((4 * 80 - 35) / _kv_per_req_gb)) * 1.5 * 3.0)) * 4 * H100_COST_HR * 24 if _kv_per_req_gb > 0 else 0,  # INT4 cont 4GPU
+            _daily_cost,
+        ]
+        _bar_colors_d = [COLORS["RedLine"], COLORS["OrangeLine"], COLORS["GreenLine"], COLORS["BlueLine"]]
+
+        _fig = go.Figure()
+        for _i, (_name, _cost) in enumerate(zip(_configs, _costs)):
+            _fig.add_trace(go.Bar(
+                x=[_name], y=[_cost / 1000],
+                marker_color=_bar_colors_d[_i],
+                text=[f"${_cost/1000:.0f}K"],
+                textposition="auto",
+                showlegend=False,
+            ))
+        _fig.update_layout(
+            height=300,
+            xaxis=dict(title="Configuration"),
+            yaxis=dict(title="Daily Cost ($K)", tickformat="$,.0f"),
+            margin=dict(t=30, b=70, l=70, r=20),
+        )
+        apply_plotly_theme(_fig)
+
+        _cost_color = COLORS["GreenLine"] if _savings_pct > 50 else (COLORS["OrangeLine"] if _savings_pct > 20 else COLORS["RedLine"])
+
+        if _oom:
+            items.append(mo.Html(f"""
+            <div style="background:{COLORS['RedLL']}; border:2px solid {COLORS['RedLine']};
+                        border-radius:10px; padding:14px 18px; margin:10px 0;">
+                <div style="font-size:0.88rem; font-weight:800; color:{COLORS['RedLine']}; margin-bottom:4px;">
+                    OOM &mdash; Cannot Fit Any Request
+                </div>
+                <div style="font-size:0.85rem; color:#7f1d1d;">
+                    Weights ({_weight_gb:.0f} GB) + 1 KV cache ({_kv_per_req_gb:.1f} GB) exceed
+                    {_total_hbm:.0f} GB HBM. Increase GPUs per replica or use stronger quantization.
+                </div>
+            </div>
+            """))
+
+        items.append(mo.Html(f"""
+        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
+                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
+                    font-size:0.83rem; line-height:1.8;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
+                Physics &mdash; Fleet Design
+            </div>
+            <div>Weights: {_weight_gb:.0f} GB &mdash; Available HBM: {_available_gb:.0f} GB &mdash; Max batch: {_max_batch}</div>
+            <div>Per-replica QPS: {_per_replica_qps:.0f} &mdash; Replicas needed: {_replicas_needed}</div>
+            <div>Total GPUs: <strong>{_total_gpus}</strong> &mdash; Daily cost: <strong>${_daily_cost:,.0f}</strong></div>
+            <div>Naive baseline: {_naive_replicas} replicas &times; 8 GPUs = {_naive_gpus} GPUs = ${_naive_daily:,.0f}/day</div>
+            <div>Savings: <strong style="color:{_cost_color};">{_savings_pct:.0f}%</strong></div>
+        </div>
+        """))
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:160px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Daily Cost</div>
+                <div style="font-size:2rem; font-weight:800; color:{_cost_color}; font-family:monospace;">${_daily_cost/1000:.0f}K</div>
+            </div>
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:160px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Replicas</div>
+                <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']}; font-family:monospace;">{_replicas_needed}</div>
+            </div>
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:160px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Savings</div>
+                <div style="font-size:2rem; font-weight:800; color:{_cost_color}; font-family:monospace;">{_savings_pct:.0f}%</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">vs naive</div>
+            </div>
+        </div>
+        """))
+
+        items.append(mo.ui.plotly(_fig))
+
+        # Prediction reveal
+        if partD_prediction.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Correct.** INT4 + continuous batching achieves ~3x throughput per replica "
+                "while using only 4 GPUs instead of 8. The combination reduces fleet cost by "
+                "~80% compared to the naive FP16 static approach. The key insight: quantization "
+                "frees memory for larger batches, and continuous batching maximizes throughput "
+                "per batch slot."
+            ), kind="success"))
+        elif partD_prediction.value == "A":
+            items.append(mo.callout(mo.md(
+                "**The most expensive option.** 200 replicas x 8 GPUs = 1,600 H100s at $115K/day. "
+                "FP16 wastes HBM on weight precision that INT4 can deliver. Static batching "
+                "wastes GPU cycles on padding."
+            ), kind="warn"))
+        elif partD_prediction.value == "C":
+            items.append(mo.callout(mo.md(
+                "**Better than naive but still suboptimal.** FP16 weights (140 GB) leave less "
+                "room for KV cache than INT4 (35 GB). With continuous batching, INT4 achieves "
+                "higher per-replica throughput because it can batch more concurrent requests."
+            ), kind="warn"))
+        elif partD_prediction.value == "D":
+            items.append(mo.callout(mo.md(
+                "**Static batching loses most of the INT4 benefit.** INT4 frees memory for "
+                "larger batches, but static batching wastes those larger batches on padding. "
+                "INT4 + continuous batching is the winning combination."
+            ), kind="warn"))
+
+        # MathPeek
+        items.append(mo.accordion({
+            "Governing equations -- inference fleet design": mo.md("""
+        **Fleet Cost Objective**
+
+        ```
+        minimize: replicas * GPUs_per_replica * cost_per_GPU_hour
+        subject to: replicas * QPS_per_replica >= target_QPS
+                    P99_latency <= SLO
+        ```
+
+        **Per-Replica Throughput**
+
+        ```
+        QPS_per_replica = max_batch * base_qps * batching_multiplier
+        max_batch = floor(available_HBM / KV_per_request)
+        available_HBM = GPUs * RAM_per_GPU - weight_memory
+        ```
+
+        **Quantization Impact**
+
+        INT4 vs FP16 weights: 4x memory reduction -> 4x more KV cache slots
+        -> 4x larger batch -> ~4x higher QPS per replica (if memory-bound)
+
+        Combined with 3x from continuous batching: ~12x total improvement.
+            """)
+        }))
+
+        # Reflection
+        items.append(partD_reflection)
+        if partD_reflection.value is None:
+            items.append(mo.callout(mo.md("Select an answer."), kind="warn"))
+        elif partD_reflection.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Correct.** The objective is minimizing total cost subject to QPS and latency "
+                "constraints. This is a constrained optimization: for each combination of "
+                "(quantization, batching, GPUs_per_replica), compute the minimum replicas needed "
+                "to meet the QPS target, then pick the cheapest configuration that also meets "
+                "the latency SLO."
+            ), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Not the right objective.** The correct objective is minimizing total fleet cost "
+                "(replicas x GPUs x cost/hr) subject to meeting both the QPS target and the "
+                "latency SLO. This requires jointly optimizing quantization, batching, and "
+                "replica count."
+            ), kind="warn"))
+
+        return mo.vstack(items)
+
+    # ═════════════════════════════════════════════════════════════════════════
     # SYNTHESIS
     # ═════════════════════════════════════════════════════════════════════════
 
@@ -832,6 +1378,8 @@ def _(
     tabs = mo.ui.tabs({
         "Part A -- The Serving Cost Inversion": build_part_a(),
         "Part B -- The KV Cache Wall": build_part_b(),
+        "Part C -- Continuous Batching": build_part_c(),
+        "Part D -- Fleet Design Challenge": build_part_d(),
         "Synthesis": build_synthesis(),
     })
     tabs
@@ -849,7 +1397,8 @@ def _(mo, DecisionLog):
 
 
 @app.cell(hide_code=True)
-def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partB_reflection,
+def _(COLORS, partA_prediction, partB_prediction, partC_prediction, partD_prediction,
+      partA_reflection, partB_reflection, partC_reflection, partD_reflection,
       ledger, mo, decision_input, decision_ui):
     ledger.save(
         chapter="v2_08",
@@ -860,6 +1409,12 @@ def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partB_reflec
             "partB_prediction": partB_prediction.value or "no_selection",
             "partB_correct": partB_prediction.value == "D",
             "partB_reflection": partB_reflection.value or "no_selection",
+            "partC_prediction": partC_prediction.value or "no_selection",
+            "partC_correct": partC_prediction.value == "B",
+            "partC_reflection": partC_reflection.value or "no_selection",
+            "partD_prediction": partD_prediction.value or "no_selection",
+            "partD_correct": partD_prediction.value == "B",
+            "partD_reflection": partD_reflection.value or "no_selection",
             "student_justification": str(decision_input.value),
         },
     )

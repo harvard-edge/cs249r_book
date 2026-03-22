@@ -46,7 +46,20 @@ async def _():
     )
     from mlsysim.core.constants import ureg, NVLINK_H100_BW
 
+    # ── Hardware registry ─────────────────────────────────────────────────────
+    _H100_REG = mlsysim.Hardware.Cloud.H100
+    _EDGE_REG = mlsysim.Hardware.Edge.JetsonOrinNX
+
+    H100_TFLOPS = _H100_REG.compute.peak_flops.m_as("TFLOPs/s")
+    H100_BW_GBS = _H100_REG.memory.bandwidth.m_as("GB/s")
+    EDGE_TFLOPS = _EDGE_REG.compute.peak_flops.m_as("TFLOPs/s")
+    EDGE_BW_GBS = _EDGE_REG.memory.bandwidth.m_as("GB/s")
+
     NVLINK_GBS = NVLINK_H100_BW.m_as("GB/s")
+
+    # ── Model registry ────────────────────────────────────────────────────────
+    GPT2 = mlsysim.Models.GPT2
+    GPT2_PARAMS = GPT2.parameters.m_as("dimensionless")
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
@@ -55,6 +68,9 @@ async def _():
         COLORS, LAB_CSS, apply_plotly_theme, go, math, mo, np, ledger, ureg,
         INFINIBAND_NDR_BW_GBS, INFINIBAND_HDR_BW_GBS,
         IB_NDR_LATENCY_US, IB_HDR_LATENCY_US,
+        H100_TFLOPS, H100_BW_GBS,
+        EDGE_TFLOPS, EDGE_BW_GBS,
+        GPT2_PARAMS,
         NVLINK_GBS, DEFAULT_OVERLAP_EFFICIENCY,
         calc_ring_allreduce_time, calc_tree_allreduce_time,
         calc_hierarchical_allreduce_time,

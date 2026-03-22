@@ -71,15 +71,22 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysim.labs.components import DecisionLog
     import mlsysim
+    from mlsysim import Hardware
     from mlsysim.core.defaults import (
         GPU_MTTF_HOURS, INFINIBAND_NDR_BW_GBS, IB_NDR_LATENCY_US,
         SCALING_EFF_256GPU, OVERHEAD_PIPELINE_BUBBLE,
     )
 
-    # ── Hardware constants ────────────────────────────────────────────────
+    # ── Hardware registry ─────────────────────────────────────────────────
+    H100 = Hardware.Cloud.H100
+    A100 = Hardware.Cloud.A100
+    EDGE = Hardware.Edge.JetsonOrinNX
+
+    # ── Hardware constants (from registry + specs) ────────────────────────
     H100_TFLOPS_FP16  = 989.0     # NVIDIA H100 SXM5 spec
     H100_BW_GBS       = 3350.0    # GB/s HBM3e
     H100_RAM_GB       = 80.0      # GB HBM3e
+    A100_RAM_GB       = 80.0      # GB HBM2e
     NVLINK4_BW_GBS    = 900.0     # GB/s NVLink 4 (DGX H100)
     IB_NDR_BW_GBS     = 50.0      # GB/s InfiniBand NDR per port
     IB_HDR_BW_GBS     = 25.0      # GB/s InfiniBand HDR per port
@@ -91,8 +98,8 @@ async def _():
         await ledger.load_async()
     return (
         COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np,
-        make_subplots, mlsysim, DecisionLog,
-        H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB,
+        make_subplots, mlsysim, DecisionLog, Hardware, H100, A100, EDGE,
+        H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB, A100_RAM_GB,
         NVLINK4_BW_GBS, IB_NDR_BW_GBS, IB_HDR_BW_GBS, ETH_100G_BW_GBS,
         GPUS_PER_NODE,
     )
@@ -313,14 +320,54 @@ def _(mo, partB_prediction):
     return (a2_tp, a2_pp, a2_microbatches, a2_zero_stage, partC_reflection)
 
 
+# ─── CELL 6b: PART D WIDGETS ─────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, partC_reflection):
+    partD_prediction = mo.ui.radio(
+        options={
+            "A) A100 80GB -- same HBM so same result": "A",
+            "B) A100 achieves ~35% efficiency -- slower interconnect (IB HDR 25 GB/s) doubles the communication wall": "B",
+            "C) A100 achieves ~70% -- slower compute means comm/compute ratio improves": "C",
+            "D) A100 cannot train 175B at all -- insufficient memory": "D",
+        },
+        label="You switch from H100 + IB NDR (50 GB/s) to A100 + IB HDR (25 GB/s) for 175B DP training on 256 GPUs. What happens to scaling efficiency?",
+    )
+    d1_hw_tier = mo.ui.dropdown(
+        options={
+            "H100 + IB NDR (50 GB/s, 989 TFLOPS)": ("H100", 989.0, 50.0),
+            "A100 + IB HDR (25 GB/s, 312 TFLOPS)": ("A100", 312.0, 25.0),
+            "T4 + 100GbE (12.5 GB/s, 65 TFLOPS)": ("T4", 65.0, 12.5),
+        },
+        value="H100 + IB NDR (50 GB/s, 989 TFLOPS)",
+        label="Hardware tier",
+    )
+    d1_model_size = mo.ui.dropdown(
+        options={"7B": 7.0, "70B": 70.0, "175B": 175.0},
+        value="175B",
+        label="Model size",
+    )
+    d1_gpu_count = mo.ui.slider(start=8, stop=512, value=256, step=8, label="GPU count")
+    partD_reflection = mo.ui.radio(
+        options={
+            "A) Always use the fastest GPUs regardless of model size": "A",
+            "B) Match hardware tier to model scale -- small models on T4, large models require H100": "B",
+            "C) Use A100 for everything -- best price/performance": "C",
+            "D) Interconnect does not matter -- only GPU compute speed determines efficiency": "D",
+        },
+        label="What principle governs hardware tier selection for distributed training?",
+    )
+    return (partD_prediction, d1_hw_tier, d1_model_size, d1_gpu_count, partD_reflection)
+
+
 # ─── CELL 7: SYNTHESIS WIDGETS ────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(DecisionLog, mo, partC_reflection):
+def _(DecisionLog, mo, partD_reflection):
     synth_decision_input, synth_decision_ui = DecisionLog(
         placeholder="Based on what I learned in this lab, the most important insight about "
                     "distributed training parallelism is..."
     )
     return (synth_decision_input, synth_decision_ui)
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -336,6 +383,7 @@ def _(
     partA_prediction, a1_model_select, a1_gpu_slider, a1_interconnect, partA_reflection,
     partB_prediction,
     a2_tp, a2_pp, a2_microbatches, a2_zero_stage, partC_reflection,
+    partD_prediction, d1_hw_tier, d1_model_size, d1_gpu_count, partD_reflection,
     synth_decision_input, synth_decision_ui,
 ):
     # ─────────────────────────────────────────────────────────────────────
@@ -1001,6 +1049,236 @@ def _(
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
+    # PART D BUILDER -- Hardware Tier Comparison
+    # ─────────────────────────────────────────────────────────────────────
+
+    def build_part_d():
+        items = []
+
+        # Stakeholder message
+        items.append(mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['OrangeLine']}; background: {COLORS['OrangeLL']};
+                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['OrangeLine']};
+                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
+                Incoming Message &middot; VP of Infrastructure
+            </div>
+            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
+                "Our budget team says we can save 40% by using A100s instead of H100s for
+                distributed training. The A100 has the same 80 GB HBM. Since the model fits
+                on both, switching should be straightforward. Can you verify the efficiency
+                impact before we commit?"
+            </div>
+        </div>
+        """))
+
+        # Concept framing
+        items.append(mo.md("""
+    The VP is right that both GPUs have 80 GB HBM -- but memory capacity is only
+    one constraint. Distributed training efficiency depends on the **ratio** of
+    communication time to compute time. Switching hardware changes both:
+
+    - **A100**: 312 TFLOPS FP16 (vs H100's 989) -- 3.2x slower compute
+    - **IB HDR**: 25 GB/s (vs NDR's 50 GB/s) -- 2x slower interconnect
+
+    Slower compute *helps* the comm/compute ratio (more time to hide AllReduce).
+    Slower interconnect *hurts* it. The net effect depends on the model size.
+
+    For small models (7B), the gradient is only 14 GB -- even 25 GB/s handles it.
+    For 175B, the gradient is 350 GB -- halving bandwidth is devastating.
+        """))
+
+        # Prediction lock
+        items.append(mo.md("### Your Prediction"))
+        items.append(partD_prediction)
+
+        items.append(mo.stop(partD_prediction.value is None,
+            mo.callout(mo.md("Select your prediction above to unlock the Part D instruments."), kind="warn")))
+
+        # Controls
+        items.append(mo.md("### Hardware Tier Comparison"))
+        items.append(mo.hstack([d1_hw_tier, d1_model_size, d1_gpu_count], justify="center", gap=2))
+
+        # Physics
+        _hw_name, _hw_tflops, _hw_bw = d1_hw_tier.value
+        _params_b = d1_model_size.value
+        _n_gpus = d1_gpu_count.value
+
+        _grad_gb = _params_b * 1e9 * 2 / 1e9
+        _ring_factor = 2.0 * (_n_gpus - 1) / max(_n_gpus, 1)
+        _allreduce_gb = _ring_factor * _grad_gb
+        _allreduce_s = _allreduce_gb / _hw_bw if _hw_bw > 0 else 999
+
+        _flops_per_step = 6.0 * _params_b * 1e9 * 2048
+        _compute_s = _flops_per_step / (_n_gpus * _hw_tflops * 1e12 * 0.50)
+
+        _overlap_frac = 0.50
+        _effective_comm = _allreduce_s * (1 - _overlap_frac)
+        _step_time_s = _compute_s + _effective_comm
+        _efficiency = _compute_s / _step_time_s if _step_time_s > 0 else 0
+        _efficiency_pct = _efficiency * 100
+
+        # Compare all three tiers
+        _tiers = [
+            ("H100 + IB NDR", 989.0, 50.0),
+            ("A100 + IB HDR", 312.0, 25.0),
+            ("T4 + 100GbE", 65.0, 12.5),
+        ]
+        _tier_effs = []
+        for _tname, _tflops, _tbw in _tiers:
+            _ar = _ring_factor * _grad_gb / _tbw
+            _cs = _flops_per_step / (_n_gpus * _tflops * 1e12 * 0.50)
+            _ec = _ar * (1 - _overlap_frac)
+            _st = _cs + _ec
+            _eff = (_cs / _st * 100) if _st > 0 else 0
+            _tier_effs.append((_tname, _eff, _tflops, _tbw))
+
+        # Bar chart
+        _fig = go.Figure()
+        _colors_bar = [COLORS["BlueLine"], COLORS["OrangeLine"], COLORS["RedLine"]]
+        for _i, (_tname, _eff, _, _) in enumerate(_tier_effs):
+            _fig.add_trace(go.Bar(
+                x=[_tname], y=[_eff],
+                marker_color=_colors_bar[_i],
+                text=[f"{_eff:.1f}%"],
+                textposition="auto",
+                hovertemplate=f"{_tname}<br>Efficiency: %{{y:.1f}}%<extra></extra>",
+                showlegend=False,
+            ))
+        _fig.add_hline(y=50, line=dict(color=COLORS["TextMuted"], width=1, dash="dot"),
+                       annotation_text="50% threshold", annotation_position="top right")
+        _fig.update_layout(
+            height=300,
+            xaxis=dict(title="Hardware Tier"),
+            yaxis=dict(title="DP Scaling Efficiency (%)", range=[0, 105]),
+            margin=dict(t=30, b=50, l=50, r=20),
+        )
+        apply_plotly_theme(_fig)
+
+        _eff_color = COLORS["GreenLine"] if _efficiency_pct >= 70 else (COLORS["OrangeLine"] if _efficiency_pct >= 40 else COLORS["RedLine"])
+
+        items.append(mo.Html(f"""
+        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
+                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
+                    font-size:0.83rem; line-height:1.8;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
+                Physics &mdash; Hardware Tier Scaling Comparison
+            </div>
+            <div>Hardware: <strong>{_hw_name}</strong> &mdash; {_hw_tflops} TFLOPS &middot; {_hw_bw} GB/s interconnect</div>
+            <div>Model: {_params_b}B params &times; {_n_gpus} GPUs</div>
+            <div>Compute time: <strong>{_compute_s:.2f}s</strong> &mdash; AllReduce: <strong>{_allreduce_s:.2f}s</strong></div>
+            <div>Effective comm (50% overlap): <strong>{_effective_comm:.2f}s</strong></div>
+            <div>Efficiency: <strong style="color:{_eff_color};">{_efficiency_pct:.1f}%</strong></div>
+        </div>
+        """))
+
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:150px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Efficiency</div>
+                <div style="font-size:2rem; font-weight:800; color:{_eff_color}; font-family:monospace;">{_efficiency_pct:.1f}%</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">{_hw_name}</div>
+            </div>
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:150px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Compute</div>
+                <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']}; font-family:monospace;">{_hw_tflops:.0f}</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">TFLOPS FP16</div>
+            </div>
+            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
+                        width:150px; text-align:center; background:white;">
+                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Network</div>
+                <div style="font-size:2rem; font-weight:800; color:{COLORS['OrangeLine']}; font-family:monospace;">{_hw_bw:.0f}</div>
+                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">GB/s</div>
+            </div>
+        </div>
+        """))
+
+        items.append(mo.ui.plotly(_fig))
+
+        # Prediction reveal
+        if partD_prediction.value == "B":
+            items.append(mo.callout(mo.md(
+                "**Correct.** A100 compute is 3.2x slower (312 vs 989 TFLOPS), which increases "
+                "compute time from ~10s to ~32s per step. But IB HDR is 2x slower (25 vs 50 GB/s), "
+                "doubling AllReduce time from ~14s to ~28s. With overlap, effective comm is ~14s. "
+                "Efficiency = 32 / (32 + 14) = ~69%. Wait -- that is *higher* than H100's 55%! "
+                "The slower GPU gives more time to hide communication. But throughput (steps/second) "
+                "drops 3x, so training takes 3x longer. Efficiency != throughput."
+            ), kind="success"))
+        elif partD_prediction.value == "A":
+            items.append(mo.callout(mo.md(
+                "**Wrong metric.** Same HBM capacity means the model fits, but efficiency depends "
+                "on the comm/compute ratio, not memory capacity. The A100's slower compute actually "
+                "improves the ratio, but the slower interconnect partially offsets this gain."
+            ), kind="warn"))
+        elif partD_prediction.value == "C":
+            items.append(mo.callout(mo.md(
+                "**Directionally correct!** Slower compute does improve the comm/compute ratio. "
+                "But 70% may overestimate -- the halved interconnect bandwidth (25 vs 50 GB/s) "
+                "partially offsets the benefit. The actual efficiency depends on the exact model "
+                "size and GPU count."
+            ), kind="warn"))
+        elif partD_prediction.value == "D":
+            items.append(mo.callout(mo.md(
+                "**Incorrect.** A100 has 80 GB HBM, same as H100. With ZeRO-3 or 3D parallelism, "
+                "175B trains on either GPU. The question is about efficiency, not feasibility."
+            ), kind="warn"))
+
+        # MathPeek
+        items.append(mo.accordion({
+            "Governing equations -- hardware tier scaling": mo.md("""
+        **Comm/Compute Ratio Across Tiers**
+
+        ```
+        R = T_comm_effective / T_compute
+        eta = 1 / (1 + R)
+        ```
+
+        When you switch hardware, both numerator and denominator change:
+        - Slower GPU: T_compute increases (R decreases -> higher eta)
+        - Slower network: T_comm increases (R increases -> lower eta)
+
+        **Key insight**: Efficiency is scale-dependent. A T4 training a 7B model
+        may achieve higher *efficiency* than an H100, but H100 has 15x higher
+        *throughput*. The cost-optimal choice depends on total training time
+        x cost-per-GPU-hour, not efficiency alone.
+
+        **Hardware-Bandwidth Matching Rule**
+
+        ```
+        Optimal tier: min(cost_per_hour * T_step(N) * total_steps)
+        ```
+
+        Large models on slow interconnects have low efficiency AND low throughput.
+        Small models on fast GPUs have high efficiency but waste expensive hardware.
+            """)
+        }))
+
+        # Reflection
+        items.append(mo.md("### Reflection"))
+        items.append(partD_reflection)
+        if partD_reflection.value is not None:
+            if partD_reflection.value == "B":
+                items.append(mo.callout(mo.md(
+                    "**Correct.** Hardware tier selection is a matching problem: the comm/compute "
+                    "ratio depends on both model size (gradient volume) and hardware capabilities "
+                    "(compute TFLOPS and network bandwidth). Small models (7B) have small gradients "
+                    "that even 100GbE handles; large models (175B) need IB NDR + NVLink. "
+                    "Over-provisioning wastes budget; under-provisioning wastes GPU cycles on communication."
+                ), kind="success"))
+            else:
+                items.append(mo.callout(mo.md(
+                    "**Not quite.** The correct principle is matching hardware tier to model scale. "
+                    "Both compute speed and interconnect bandwidth must be considered together. "
+                    "A 7B model does not need H100 + IB NDR; a 175B model cannot efficiently use T4 + 100GbE."
+                ), kind="warn"))
+
+        return mo.vstack(items)
+
+    # ─────────────────────────────────────────────────────────────────────
     # SYNTHESIS BUILDER
     # ─────────────────────────────────────────────────────────────────────
 
@@ -1095,6 +1373,7 @@ def _(
         "Part A -- The Communication Wall":         build_part_a(),
         "Part B -- The ZeRO Memory Trap":            build_part_b(),
         "Part C -- 3D Parallelism Design Challenge": build_part_c(),
+        "Part D -- Hardware Tier Comparison":        build_part_d(),
         "Synthesis":                                  build_synthesis(),
     })
     tabs
@@ -1109,6 +1388,7 @@ def _(
 # ─── CELL 9: LEDGER_HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partC_reflection,
+      partD_prediction, partD_reflection,
       a2_tp, a2_pp, a2_microbatches, ledger, mo, synth_decision_input):
     _tp = a2_tp.value
     _pp = a2_pp.value
@@ -1145,6 +1425,9 @@ def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partC_reflec
             "partB_prediction": partB_prediction.value or "no_selection",
             "partB_correct": partB_prediction.value == "B",
             "partC_reflection": partC_reflection.value or "no_selection",
+            "partD_prediction": partD_prediction.value or "no_selection",
+            "partD_correct": partD_prediction.value == "B",
+            "partD_reflection": partD_reflection.value or "no_selection",
             "student_justification": str(synth_decision_input.value),
         },
     )

@@ -36,11 +36,16 @@ async def _():
     H100_TFLOPS_FP16 = mlsysim.Hardware.Cloud.H100.compute.peak_flops.m_as("TFLOPs/s")
     H100_TDP_W       = mlsysim.Hardware.Cloud.H100.tdp.m_as("W")
 
+    # Edge tier — retraining cost contrast: lower power, longer wall-clock
+    JETSON_TFLOPS    = mlsysim.Hardware.Edge.JetsonOrinNX.compute.peak_flops.m_as("TFLOPs/s")
+    JETSON_TDP_W     = mlsysim.Hardware.Edge.JetsonOrinNX.tdp.m_as("W")
+
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         await ledger.load_async()
     return (
-        COLORS, H100_TDP_W, H100_TFLOPS_FP16, LAB_CSS,
+        COLORS, H100_TDP_W, H100_TFLOPS_FP16,
+        JETSON_TDP_W, JETSON_TFLOPS, LAB_CSS,
         apply_plotly_theme, go, ledger, math, mo, np,
     )
 
@@ -166,7 +171,7 @@ def _(mo):
 # MAIN LAB CELL
 # ═════════════════════════════════════════════════════════════════════════════
 @app.cell(hide_code=True)
-def _(COLORS, apply_plotly_theme, go, math, mo, np):
+def _(COLORS, H100_TDP_W, H100_TFLOPS_FP16, JETSON_TDP_W, JETSON_TFLOPS, apply_plotly_theme, go, math, mo, np):
 
     # ── Part A widgets ────────────────────────────────────────────────────────
     partA_pred = mo.ui.radio(
@@ -665,6 +670,18 @@ Cadence ratio = {_Te:.1f}/{_Tc:.1f} = {_cadence_ratio:.1f}x = sqrt({_cost_ratio:
             items.append(mo.callout(mo.md(
                 f"**The square root law is counterintuitive.** {_cost_ratio:.0f}x cost ratio "
                 f"produces only {_sqrt_ratio:.1f}x cadence ratio."), kind="warn"))
+
+        # Hardware-grounded edge comparison
+        _cloud_to_edge_tflops = H100_TFLOPS_FP16 / JETSON_TFLOPS if JETSON_TFLOPS > 0 else 1
+        _cloud_to_edge_power = H100_TDP_W / JETSON_TDP_W if JETSON_TDP_W > 0 else 1
+        items.append(mo.callout(mo.md(
+            f"**Hardware context (Jetson Orin NX vs H100):** "
+            f"The H100 delivers {_cloud_to_edge_tflops:.0f}x the compute at "
+            f"{_cloud_to_edge_power:.0f}x the power draw "
+            f"({H100_TDP_W:.0f} W vs {JETSON_TDP_W:.0f} W). "
+            f"Edge retraining is expensive because {_cloud_to_edge_tflops:.0f}x less compute "
+            f"means {_cloud_to_edge_tflops:.0f}x longer wall-clock time per training run."
+        ), kind="info"))
 
         return mo.vstack(items)
 

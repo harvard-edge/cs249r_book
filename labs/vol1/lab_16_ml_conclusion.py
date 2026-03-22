@@ -38,6 +38,12 @@ async def _():
     H100_RAM_GB      = mlsysim.Hardware.Cloud.H100.memory.capacity.m_as("GB")
     H100_TDP_W       = mlsysim.Hardware.Cloud.H100.tdp.m_as("W")
 
+    # Edge tier — capstone comparison: same analysis on constrained hardware
+    JETSON_TFLOPS    = mlsysim.Hardware.Edge.JetsonOrinNX.compute.peak_flops.m_as("TFLOPs/s")
+    JETSON_BW_GBS    = mlsysim.Hardware.Edge.JetsonOrinNX.memory.bandwidth.m_as("GB/s")
+    JETSON_RAM_GB    = mlsysim.Hardware.Edge.JetsonOrinNX.memory.capacity.m_as("GB")
+    JETSON_TDP_W     = mlsysim.Hardware.Edge.JetsonOrinNX.tdp.m_as("W")
+
     LLAMA2_70B_PARAMS = mlsysim.Models.Language.Llama2_70B.parameters.m_as("count")
     LLAMA2_70B_LAYERS = mlsysim.Models.Language.Llama2_70B.layers
     LLAMA2_70B_HIDDEN = mlsysim.Models.Language.Llama2_70B.hidden_dim
@@ -48,6 +54,7 @@ async def _():
         await ledger.load_async()
     return (
         COLORS, H100_BW_GBS, H100_RAM_GB, H100_TDP_W, H100_TFLOPS_FP16,
+        JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W, JETSON_TFLOPS,
         LAB_CSS, LLAMA2_70B_HEADS, LLAMA2_70B_HIDDEN, LLAMA2_70B_LAYERS,
         LLAMA2_70B_PARAMS, apply_plotly_theme, go, ledger, math, mo, np,
     )
@@ -175,6 +182,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(
     COLORS, H100_BW_GBS, H100_RAM_GB, H100_TDP_W, H100_TFLOPS_FP16,
+    JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W, JETSON_TFLOPS,
     LLAMA2_70B_HEADS, LLAMA2_70B_HIDDEN, LLAMA2_70B_LAYERS,
     LLAMA2_70B_PARAMS, apply_plotly_theme, go, ledger, math, mo, np,
 ):
@@ -416,6 +424,23 @@ AI           = 2*{_batch} = {_ai} FLOPs/byte  (ridge = {_ridge:.0f})
             items.append(mo.callout(mo.md(
                 f"**Memory fraction = {_mem_frac:.0f}%.** Even after 15 labs, "
                 "students underestimate the severity of the memory wall."), kind="warn"))
+
+        # Edge comparison: same analysis on Jetson Orin NX
+        _edge_t_mem = _w_gb / JETSON_BW_GBS * 1000 if JETSON_BW_GBS > 0 else float('inf')
+        _edge_t_comp = _flops / (JETSON_TFLOPS * 1e12 * 0.5) * 1000 if JETSON_TFLOPS > 0 else float('inf')
+        _edge_mem_frac = _edge_t_mem / (_edge_t_mem + _edge_t_comp) * 100 if (_edge_t_mem + _edge_t_comp) > 0 else 0
+        _edge_ridge = JETSON_TFLOPS * 1000 / JETSON_BW_GBS if JETSON_BW_GBS > 0 else 0
+        _fits_edge = _w_gb <= JETSON_RAM_GB
+        items.append(mo.callout(mo.md(
+            f"**Edge comparison (Jetson Orin NX, {JETSON_RAM_GB:.0f} GB):** "
+            + (f"OOM — {_w_gb:.1f} GB weights exceed {JETSON_RAM_GB:.0f} GB memory. "
+               "Edge deployment requires aggressive quantization."
+               if not _fits_edge else
+               f"T_memory = {_edge_t_mem:.1f} ms, T_compute = {_edge_t_comp:.3f} ms, "
+               f"memory fraction = {_edge_mem_frac:.0f}% (ridge point = {_edge_ridge:.0f}). "
+               f"The memory wall is {_edge_t_mem/_t_mem:.0f}x worse on edge due to lower bandwidth "
+               f"({JETSON_BW_GBS:.0f} vs {H100_BW_GBS:.0f} GB/s).")
+        ), kind="info"))
 
         return mo.vstack(items)
 
