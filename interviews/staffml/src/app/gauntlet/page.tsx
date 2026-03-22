@@ -12,7 +12,7 @@ import {
   getTracks, getLevels, getCompetencyAreas, selectGauntletQuestions,
   getQuestionsByFilter, Question, cleanScenario
 } from "@/lib/corpus";
-import { saveAttempt, saveGauntletResult, AttemptRecord } from "@/lib/progress";
+import { saveAttempt, saveGauntletResult, AttemptRecord, recordActivity } from "@/lib/progress";
 
 type Phase = "setup" | "active" | "review" | "results";
 
@@ -161,6 +161,7 @@ export default function GauntletPage() {
       timestamp: Date.now(),
     };
     saveAttempt(attempt);
+    recordActivity();
 
     const newScores = [...scores, score];
     setScores(newScores);

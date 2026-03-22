@@ -13,7 +13,7 @@ import {
   Question, checkNapkinMath, extractFinalNumber, cleanScenario,
   NapkinResult
 } from "@/lib/corpus";
-import { saveAttempt, getAttempts, updateSRCard, getDueQuestionIds, getDueCount } from "@/lib/progress";
+import { saveAttempt, getAttempts, updateSRCard, getDueQuestionIds, getDueCount, recordActivity } from "@/lib/progress";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { getQuestionById } from "@/lib/corpus";
 
@@ -174,8 +174,9 @@ function DrillPage() {
         selfScore: finalScore,
         timestamp: Date.now(),
       });
-      // Update spaced repetition card
+      // Update spaced repetition card + streak
       updateSRCard(current.id, finalScore);
+      recordActivity();
       setQuestionsAnswered(prev => prev + 1);
       setDueCount(getDueCount());
     }

@@ -213,10 +213,83 @@ export function getCompetencyScore(competencyArea: string): number {
   return Math.round((correct / attempts.length) * 100);
 }
 
+// ─── Streaks ─────────────────────────────────────
+
+const STREAK_KEY = 'staffml_streak';
+
+interface StreakData {
+  currentStreak: number;
+  longestStreak: number;
+  lastActiveDate: string; // YYYY-MM-DD
+  activeDates: string[];  // last 90 days of activity
+}
+
+function getToday(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+function getYesterday(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().split('T')[0];
+}
+
+export function getStreakData(): StreakData {
+  return getStorage<StreakData>(STREAK_KEY, {
+    currentStreak: 0,
+    longestStreak: 0,
+    lastActiveDate: '',
+    activeDates: [],
+  });
+}
+
+export function recordActivity(): StreakData {
+  const data = getStreakData();
+  const today = getToday();
+  const yesterday = getYesterday();
+
+  // Already recorded today
+  if (data.lastActiveDate === today) return data;
+
+  // Extend streak if active yesterday or starting fresh today
+  if (data.lastActiveDate === yesterday) {
+    data.currentStreak++;
+  } else if (data.lastActiveDate !== today) {
+    // Streak broken — reset to 1
+    data.currentStreak = 1;
+  }
+
+  data.longestStreak = Math.max(data.longestStreak, data.currentStreak);
+  data.lastActiveDate = today;
+
+  // Track active dates (cap at 90 days for calendar display)
+  if (!data.activeDates.includes(today)) {
+    data.activeDates.push(today);
+    if (data.activeDates.length > 90) {
+      data.activeDates.shift();
+    }
+  }
+
+  setStorage(STREAK_KEY, data);
+  return data;
+}
+
+export function getStreakMilestone(streak: number): string | null {
+  if (streak >= 100) return 'Centurion';
+  if (streak >= 30) return 'Monthly Master';
+  if (streak >= 14) return 'Two-Week Warrior';
+  if (streak >= 7) return 'Weekly Streak';
+  if (streak >= 3) return 'Getting Started';
+  return null;
+}
+
+// ─── Clear All ───────────────────────────────────
+
 export function clearProgress(): void {
   try {
     window.localStorage.removeItem(STORAGE_KEY);
     window.localStorage.removeItem(GAUNTLET_KEY);
     window.localStorage.removeItem(SR_KEY);
+    window.localStorage.removeItem(STREAK_KEY);
   } catch {}
 }

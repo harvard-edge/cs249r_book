@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Terminal, Crosshair, BarChart3, Target, BookOpen, Github, Menu, X } from "lucide-react";
 import clsx from "clsx";
+import StreakBadge from "@/components/StreakBadge";
 
 const links = [
   { href: "/", label: "Home", icon: Terminal },
@@ -57,6 +58,7 @@ export default function Nav() {
         </div>
 
         <div className="flex items-center gap-4">
+          <StreakBadge />
           <a
             href="https://mlsysbook.ai"
             target="_blank"
