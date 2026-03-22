@@ -101,6 +101,57 @@ export default function HeatMapPage() {
           </div>
         </div>
 
+        {/* Readiness summary per track */}
+        {totalAttempted > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+            {tracks.map(t => {
+              let trackAttempted = 0;
+              let trackCorrect = 0;
+              areas.forEach(area => {
+                const cell = heatData[area]?.[t];
+                if (cell) {
+                  trackAttempted += cell.attempted;
+                  trackCorrect += cell.correct;
+                }
+              });
+              const pct = trackAttempted >= 3
+                ? Math.round((trackCorrect / trackAttempted) * 100)
+                : -1;
+
+              return (
+                <div key={t} className="p-3 rounded-lg border border-border bg-surface/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-textSecondary capitalize">
+                      {t === "tinyml" ? "TinyML" : t}
+                    </span>
+                    {pct >= 0 ? (
+                      <span className={clsx(
+                        "text-sm font-bold font-mono",
+                        pct >= 70 ? "text-accentGreen" : pct >= 40 ? "text-accentAmber" : "text-accentRed"
+                      )}>
+                        {pct}%
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-textTertiary">Not enough data</span>
+                    )}
+                  </div>
+                  {pct >= 0 && (
+                    <div className="h-1.5 bg-border rounded-full overflow-hidden">
+                      <div
+                        className={clsx(
+                          "h-full rounded-full transition-all",
+                          pct >= 70 ? "bg-accentGreen" : pct >= 40 ? "bg-accentAmber" : "bg-accentRed"
+                        )}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {totalAttempted === 0 ? (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
