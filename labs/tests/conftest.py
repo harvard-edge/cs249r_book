@@ -3,17 +3,19 @@ Labs Test Configuration
 =======================
 
 Shared fixtures for testing Marimo lab notebooks.
-Three test levels:
+Four test levels:
 
-  Level 1 (Static):  AST parse, structure checks, import validation
-  Level 2 (Engine):  Run cells headlessly via marimo.App.run(), check computations
-  Level 3 (Widget):  Simulate widget interactions, verify prediction/reveal flow
+  Level 1 (Static):   AST parse, structure checks, import validation
+  Level 2 (Engine):   Run cells headlessly via marimo.App.run(), check computations
+  Level 3 (Widget):   Widget structure, prediction-reveal pattern
+  Level 4 (Protocol): Protocol invariant compliance (pedagogical quality gates)
 
 Usage:
-  python3 -m pytest labs/tests/ -v                    # All levels
-  python3 -m pytest labs/tests/ -v -k "static"        # Level 1 only (fast, CI)
-  python3 -m pytest labs/tests/ -v -k "engine"        # Level 2 (medium, CI)
-  python3 -m pytest labs/tests/ -v -k "widget"        # Level 3 (slow, optional)
+  python3 -m pytest labs/tests/ -v                      # All levels
+  python3 -m pytest labs/tests/ -v -k "static"          # Level 1 only (fast, CI)
+  python3 -m pytest labs/tests/ -v -k "engine"          # Level 2 (medium, CI)
+  python3 -m pytest labs/tests/ -v -k "widget"          # Level 3 (fast, CI)
+  python3 -m pytest labs/tests/ -v -k "protocol"        # Level 4 (fast, CI)
 """
 
 import ast
