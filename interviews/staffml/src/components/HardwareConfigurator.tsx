@@ -37,7 +37,7 @@ export default function HardwareConfigurator({ onStateChange, initialState }: Co
         <h3 className="text-xs font-mono font-semibold text-textPrimary uppercase tracking-widest">Hardware Control Plane</h3>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Compute Dial */}
         <div className="flex flex-col gap-2">
           <label className="text-[10px] font-mono text-textTertiary uppercase flex items-center gap-1.5">
@@ -46,7 +46,7 @@ export default function HardwareConfigurator({ onStateChange, initialState }: Co
           <select 
             value={state.compute}
             onChange={(e) => handleChange('compute', e.target.value)}
-            className="bg-surface border border-border text-textPrimary text-xs font-mono rounded-lg px-3 py-2.5 focus:outline-none focus:border-accentBlue focus:ring-1 focus:ring-accentBlue/50 transition-all appearance-none cursor-pointer hover:bg-surfaceHover"
+            className="w-full bg-surface border border-border text-textPrimary text-[11px] font-mono rounded-lg px-2 py-2.5 focus:outline-none focus:border-accentBlue focus:ring-1 focus:ring-accentBlue/50 transition-all appearance-none cursor-pointer hover:bg-surfaceHover truncate"
           >
             <option value="T4">NVIDIA T4 (16GB)</option>
             <option value="A100">NVIDIA A100 (40GB)</option>
@@ -63,29 +63,29 @@ export default function HardwareConfigurator({ onStateChange, initialState }: Co
           <select 
             value={state.network}
             onChange={(e) => handleChange('network', e.target.value)}
-            className="bg-surface border border-border text-textPrimary text-xs font-mono rounded-lg px-3 py-2.5 focus:outline-none focus:border-accentBlue focus:ring-1 focus:ring-accentBlue/50 transition-all appearance-none cursor-pointer hover:bg-surfaceHover"
+            className="w-full bg-surface border border-border text-textPrimary text-[11px] font-mono rounded-lg px-2 py-2.5 focus:outline-none focus:border-accentBlue focus:ring-1 focus:ring-accentBlue/50 transition-all appearance-none cursor-pointer hover:bg-surfaceHover truncate"
           >
             <option value="1GbE">1 GbE Ethernet</option>
             <option value="10GbE">10 GbE Ethernet</option>
             <option value="PCIe">PCIe Gen5 Switch</option>
-            <option value="InfiniBand">NDR InfiniBand (400G)</option>
+            <option value="InfiniBand">InfiniBand (400G)</option>
           </select>
         </div>
 
         {/* Storage / Precision Dial */}
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 sm:col-span-2 lg:col-span-1">
           <label className="text-[10px] font-mono text-textTertiary uppercase flex items-center gap-1.5">
             <HardDrive className="w-3 h-3" /> Storage Tier
           </label>
           <select 
             value={state.memory}
             onChange={(e) => handleChange('memory', e.target.value)}
-            className="bg-surface border border-border text-textPrimary text-xs font-mono rounded-lg px-3 py-2.5 focus:outline-none focus:border-accentBlue focus:ring-1 focus:ring-accentBlue/50 transition-all appearance-none cursor-pointer hover:bg-surfaceHover"
+            className="w-full bg-surface border border-border text-textPrimary text-[11px] font-mono rounded-lg px-2 py-2.5 focus:outline-none focus:border-accentBlue focus:ring-1 focus:ring-accentBlue/50 transition-all appearance-none cursor-pointer hover:bg-surfaceHover truncate"
           >
-            <option value="HDD">Network HDD (100 MB/s)</option>
-            <option value="SSD">SATA SSD (500 MB/s)</option>
-            <option value="NVMe">Local NVMe (7 GB/s)</option>
-            <option value="Distributed">Distributed Flash (20 GB/s)</option>
+            <option value="HDD">Network HDD (100M/s)</option>
+            <option value="SSD">SATA SSD (500M/s)</option>
+            <option value="NVMe">Local NVMe (7G/s)</option>
+            <option value="Distributed">Distributed Flash (20G/s)</option>
           </select>
         </div>
       </div>
