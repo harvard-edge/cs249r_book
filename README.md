@@ -76,10 +76,10 @@ A growing community of contributors helps improve every part of it: fixing error
 
 ## The Curriculum
 
-Every component connects. The textbook gives you the mental models. The labs let you explore trade-offs interactively, powered by MLSys·im, the modeling engine for infrastructure you can't physically access. TinyTorch makes you build the machinery yourself. The hardware kits put you face-to-face with real constraints. The interview playbook tests whether you actually understand it. And the instructor hub, slides, and newsletter give educators everything they need to bring this into a classroom.
+Every component connects. The textbook gives you the mental models. The labs let you reason through trade-offs interactively, powered by MLSys·im, a modeling engine for infrastructure you can't physically access. TinyTorch makes you build the machinery yourself. The hardware kits put you face-to-face with real deployment constraints. The interview playbook tests whether you actually understand it. And the instructor hub, slides, and newsletter give educators everything they need to bring this into a classroom.
 
 <p align="center">
-  <img src="README/curriculum-map.svg?v=2" alt="Curriculum map showing how the textbook, labs, Tiny Torch, hardware kits, MLSys im, and interview playbook connect" width="760">
+  <img src="README/curriculum-map.svg?v=3" alt="Curriculum map showing how the textbook, labs, Tiny Torch, hardware kits, MLSys im, and interview playbook connect" width="760">
 </p>
 
 ### For Students
