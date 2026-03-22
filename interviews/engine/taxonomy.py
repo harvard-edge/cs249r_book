@@ -112,6 +112,7 @@ TAXONOMY: dict[str, dict] = {
             "speculative-decoding",
             "graph-optimization",     # Replaced tensorrt — principle-based (all 3 experts)
             "operator-scheduling",    # MCU memory planning (per Reddi)
+            "compilation",            # Graph/model compilation for target hardware (moved from deployment)
         ],
     },
     "parallelism": {
@@ -151,7 +152,6 @@ TAXONOMY: dict[str, dict] = {
             "firmware",
             "rag",                    # Retrieval-augmented generation (per Huyen)
             "guardrails",             # LLM safety/filtering (per Huyen)
-            "compilation",            # Graph/model compilation for target hardware
         ],
     },
     "reliability": {
@@ -573,7 +573,7 @@ CELL_TARGETS: dict[str, dict[str, list[int]]] = {
         "networking": _IMPORTANT,   # InfiniBand, NVLink
         "deployment": _IMPORTANT,   # Serving, K8s, rollout
         "reliability": _IMPORTANT,  # Checkpointing, fault tolerance
-        "data": _MINOR,             # Feature stores, pipelines
+        "data": _IMPORTANT,         # Feature stores, pipelines (bumped per Huyen review)
         "cross-cutting": _MINOR,    # Security, economics
     },
     "edge": {

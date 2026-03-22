@@ -54,6 +54,131 @@ For your technical design document, you need to state the storage footprint of t
   </details>
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The OTA Cellular Limit</b> · <code>ota-updates</code></summary>
+
+- **Interviewer:** "You are an engineer on an automotive team, and you need to push a critical update to a driver-assistance model. To avoid waiting for a full app store review, you plan to use an Over-the-Air (OTA) update. To ensure the update reaches the maximum number of vehicles, including those not on Wi-Fi, you must stay within the cellular download limit imposed by the mobile OS. What is the typical size limit you must stay under for a cellular download that doesn't require explicit user opt-in?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the large multi-gigabyte *initial install* size with the much stricter *cellular update* size. They might assume that since the app is 2 GB, a 500 MB update is fine, failing to realize OSes strictly cap non-Wi-Fi downloads to protect users' data plans. This leads to failed rollouts for users who aren't on Wi-Fi.
+
+  **Realistic Solution:** Most mobile operating systems, like iOS and Android, impose a limit of around 200-250 MB for automatic downloads over a cellular network. To be safe, an engineering team should target a budget of ~200 MB for any OTA update that needs to be deployed urgently and widely.
+
+  > **Napkin Math:** If your new uncompressed driver-assistance model is 900 MB, you need to achieve a significant compression ratio to meet the OTA limit.
+
+`Required Ratio = Uncompressed Size / Target Size`
+`Required Ratio = 900 MB / 200 MB = 4.5x`
+
+You would need to apply quantization (e.g., FP16 to INT4 is a 4x reduction), pruning, or other techniques to meet this budget.
+
+  > **Key Equation:** $\text{Update Size} \le \text{Cellular Limit}$
+
+  > **Options:**
+  > [ ] 20 MB
+  > [ ] 2 GB
+  > [x] ~200 MB
+  > [ ] Unlimited, as long as the user has a data plan.
+
+  📖 **Deep Dive:** [Mobile: Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Update Budget</b> · <code>ota-update-cost</code></summary>
+
+- **Interviewer:** "You are an ML systems engineer for an automotive company deploying a new driver-assistance feature. The model has 250 million parameters and is stored in FP16 precision. To update the fleet, the model must be sent over-the-air (OTA) via cellular networks. Calculate the size of the model update package that needs to be transmitted."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to confuse the storage requirements for different numerical precisions. Engineers often default to thinking in terms of INT8 (1 byte/param) or FP32 (4 bytes/param), leading to a 2x error in either direction. Another mistake is to confuse bits and bytes, accidentally multiplying by 16 (for FP16) instead of 2, resulting in an 8x overestimation.
+
+  **Realistic Solution:** Each parameter in an FP16 (half-precision float) model requires 2 bytes of storage. To calculate the total size, you multiply the number of parameters by the size of each parameter.
+
+250,000,000 parameters × 2 bytes/parameter = 500,000,000 bytes.
+
+Converting bytes to megabytes (dividing by 1,000,000), you get 500 MB. This is a significant download size for a cellular network, impacting data costs and update reliability across a large fleet of vehicles.
+
+  > **Napkin Math:** $\text{Model Size} = \text{Number of Parameters} \times \text{Bytes per Parameter}$
+
+$\text{Model Size} = 250,000,000 \times 2 \text{ bytes} = 500,000,000 \text{ bytes}$
+
+$500,000,000 \text{ bytes} / 10^6 \text{ bytes/MB} = 500 \text{ MB}$
+
+  > **Key Equation:** $\text{Model Size (Bytes)} = \text{Parameters} \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] 250 MB
+  > [ ] 1 GB
+  > [x] 500 MB
+  > [ ] 4 GB
+
+  📖 **Deep Dive:** [Mobile: Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The OTA Update Budget</b> · <code>ota-update-size</code></summary>
+
+- **Interviewer:** "Your team is updating a keyword spotting model that runs continuously in a mobile app. The update will be pushed Over-the-Air (OTA) to millions of users, many on cellular data. The model is quantized to INT8. To avoid user complaints and high CDN costs, you must estimate the update size. State the most realistic size for this OTA model update package."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to cloud models (GBs) or even larger mobile vision models (10s of MB) often misjudge the scale required for ubiquitous, low-friction mobile features. They forget that for OTA updates on cellular, especially for a background service, the size budget is extremely strict. A multi-megabyte update would be considered prohibitively expensive and intrusive by the product team.
+
+  **Realistic Solution:** A quantized keyword spotting model is designed for extreme efficiency and must be very small. A realistic size is in the hundreds of kilobytes. This ensures the OTA update is fast, cheap, and goes unnoticed by the user, which is critical for a background feature on a cellular-connected device.
+
+  > **Napkin Math:** From the `NUMBERS.md` guide, the *entire Flash budget* for a TinyML device (where keyword spotting is a canonical task) after accounting for the OS and bootloader is only ~454 KB. While a mobile phone has more memory, the model architecture for this task remains fundamentally small to conserve power and CPU. Therefore, a size in the hundreds of kilobytes is the only plausible answer.
+
+  > **Options:**
+  > [ ] ~50 MB
+  > [ ] ~5 GB
+  > [x] ~500 KB
+  > [ ] ~50 KB
+
+  📖 **Deep Dive:** [Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Data Budget</b> · <code>ota-update-cost</code></summary>
+
+- **Interviewer:** "You're a Staff ML Engineer on the mobile team for a popular social media app. Your team is launching a new generative AI feature for creating image filters. The v1 model is 80 MB. After a month of user feedback and fine-tuning, the data science team has produced a v2 model that is 10% more accurate but now weighs 120 MB. Your product manager is concerned about the data cost for users when rolling out this over-the-air (OTA) update. Explain the data consumption for a single user if you ship the full update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to only consider the difference in size (120 MB - 80 MB = 40 MB), assuming a differential 'diff' update mechanism is in place. While possible, diffing is complex to engineer. The default, and most common, OTA update strategy for mobile ML models is to replace the entire file. Another mistake is to ignore the user cost entirely in favor of the accuracy gain, which is not a user-centric or systems-aware tradeoff.
+
+  **Realistic Solution:** The update will download the entire 120 MB model file to the user's device, consuming 120 MB of their cellular or Wi-Fi data plan. This is a significant data cost, especially for users on limited or prepaid mobile plans in emerging markets. It could lead to unexpected data charges or cause users to disable background updates, harming future feature adoption. A Staff engineer must flag this cost and propose mitigations.
+
+  > **Napkin Math:** The calculation is a direct interpretation of the model's storage size as network transfer size.
+
+1. **Identify model size:** The v2 model is 120 MB (MegaBytes).
+2. **Assume full update:** For a standard OTA rollout where the entire asset is replaced, the data downloaded is equal to the full size of the new asset.
+3. **Calculate data cost:** `Data Transferred = v2 Model Size = 120 MB`.
+
+This is not a trivial amount of a monthly data allocation for many users.
+
+  > **Key Equation:** $\text{Data}_{\text{OTA}} = \text{Size}_{\text{Model}}$
+
+  > **Options:**
+  > [ ] The update will only transfer the 40 MB difference, which is a manageable size.
+  > [ ] The 10% accuracy gain is worth the user data cost; we should ship the 120 MB update immediately.
+  > [x] The update will consume 120 MB of the user's data plan, a significant cost we must address.
+  > [ ] The update is about 960 Megabits (Mb), but this is standard and shouldn't be a concern.
+
+  📖 **Deep Dive:** [Mobile: Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+
+
+
+
 #### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Conversion Cliff</b> · <code>deployment</code></summary>

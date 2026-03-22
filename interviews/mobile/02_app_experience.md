@@ -270,6 +270,36 @@ Result: The ANR condition is met. After 5 seconds of the UI thread being blocked
   </details>
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Mobile Jank Budget</b> · <code>mobile-jank-budget</code></summary>
+
+- **Interviewer:** "You're an engineer on a team building a live AR filter for a flagship smartphone app. The key user experience requirement is to avoid 'jank'—stuttering or freezing in the UI. To maintain a smooth 60 frames per second (FPS), what is the maximum per-frame latency budget your ML inference pipeline can consume?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the strict mobile UI 'jank' budget with other latency targets. For example, they might recall the 100ms P99 latency common for cloud services or the 33ms hard real-time deadline for industrial edge devices. These are far too slow for a fluid 60 FPS mobile interface.
+
+  **Realistic Solution:** The correct answer is approximately 16ms. A 60 FPS refresh rate means the screen updates 60 times every second. Therefore, each frame—including all rendering and ML inference—must complete within 1/60th of a second to avoid dropping frames and causing visible stutter.
+
+  > **Napkin Math:** The calculation is a direct application of the frames-per-second target:
+
+1 second / 60 frames = 0.01667 seconds/frame
+0.01667 seconds * 1000 ms/second ≈ 16.7 ms per frame.
+
+  > **Key Equation:** $\text{Latency Budget (ms)} = \frac{1000 \text{ ms/s}}{\text{Target FPS}}$
+
+  > **Options:**
+  > [ ] 100 ms
+  > [ ] 33 ms
+  > [x] 16 ms
+  > [ ] 1 ms
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+
 
 
 

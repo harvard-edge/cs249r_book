@@ -184,6 +184,68 @@ The required 3.0 GB/s from the cameras exceeds the interconnect's ~2.5 GB/s capa
   </details>
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Automotive I/O Bottleneck</b> · <code>sensor-pipeline-bandwidth</code></summary>
+
+- **Interviewer:** "In a typical autonomous vehicle perception system, a high-resolution camera streams data to the main ECU, often a device like the NVIDIA Jetson AGX Orin. Which component typically offers higher data bandwidth: the AGX Orin's LPDDR5 memory system or the MIPI CSI-2 camera interface that feeds it?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume the sensor interface and the processor's memory are performance-matched (a 1:1 ratio), or they incorrectly believe the input sensor is the highest bandwidth component. This overlooks the fundamental design of SoCs, where memory bandwidth must be significantly higher than I/O bandwidth to service multiple peripherals and complex compute kernels simultaneously.
+
+  **Realistic Solution:** The LPDDR5 memory system has vastly higher bandwidth. The Jetson AGX Orin's memory bandwidth is approximately 205 GB/s, whereas a standard 4-lane MIPI CSI-2 camera interface provides only about 2.5 GB/s. This massive difference (over 80x) is intentional, ensuring that the central processor is not bottlenecked by a single sensor and has ample bandwidth for data processing, fusion from other sensors (like LiDAR or radar), and running the neural network inference itself.
+
+  > **Napkin Math:** We can find the ratio by a simple division:
+
+1.  **Recall Hardware Specs:**
+    *   Jetson AGX Orin (LPDDR5) Memory Bandwidth: ~204.8 GB/s
+    *   MIPI CSI-2 (4-lane) Camera Bandwidth: ~2.5 GB/s
+
+2.  **Calculate Ratio:**
+    *   Ratio = Memory BW / Camera BW
+    *   Ratio = 204.8 GB/s / 2.5 GB/s ≈ 82×
+
+The on-chip memory system is over 80 times faster than the camera input interface.
+
+  > **Key Equation:** $\text{Bandwidth Ratio} = \frac{\text{Memory Bandwidth}}{\text{Sensor Interface Bandwidth}}$
+
+  > **Options:**
+  > [ ] They are roughly equal, as they are designed to be balanced.
+  > [x] The LPDDR5 memory system, by about 80x.
+  > [ ] The MIPI CSI-2 camera interface, by about 10x.
+  > [ ] The LPDDR5 memory system, but only by a small amount (~2-3x).
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Sensor Data Deluge</b> · <code>sensor-bandwidth</code></summary>
+
+- **Interviewer:** "You are designing the data ingestion pipeline for an autonomous vehicle's main perception system. A single, forward-facing 8MP camera is streaming raw, uncompressed video. To make any decisions, the system must first get this data from the sensor into memory for processing. What is the approximate bandwidth you must be prepared to handle from a standard automotive camera interface like a 4-lane MIPI CSI-2?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the sheer volume of raw sensor data, confusing it with consumer-grade interconnects like USB or Ethernet, or thinking in terms of compressed video streams (e.g., H.264). A raw 8MP (4K) camera at 30-60fps generates gigabytes per second, not megabytes.
+
+  **Realistic Solution:** A standard 4-lane MIPI CSI-2 camera interface provides approximately 2.5 GB/s of bandwidth. This is a fundamental constraint that dictates the design of the entire downstream perception pipeline, from bus architecture to memory subsystem bandwidth.
+
+  > **Napkin Math:** The hardware source-of-truth specifies the MIPI CSI-2 (4-lane) interconnect at ~2.5 GB/s. At this rate, a single camera would fill a 32 GB LPDDR5 memory module in approximately 12.8 seconds (32 GB / 2.5 GB/s). This highlights why immediate, on-the-fly processing is essential in edge systems, as buffering large amounts of raw sensor data is often infeasible.
+
+  > **Options:**
+  > [ ] ~125 MB/s
+  > [ ] ~500 MB/s
+  > [x] ~2.5 GB/s
+  > [ ] ~25 GB/s
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+
+
 
 
 

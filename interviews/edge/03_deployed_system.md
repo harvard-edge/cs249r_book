@@ -357,6 +357,96 @@ Convert seconds to hours:
   </details>
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The OTA Flash Budget</b> · <code>ota-updates</code></summary>
+
+- **Interviewer:** "You're an engineer on an automotive team responsible for deploying a new perception model to a fleet of vehicles. The target ECU has 2MB of total flash storage. When planning the over-the-air (OTA) update, which of the following is the most fundamental constraint to identify first?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to cloud or mobile environments often focus on network bandwidth or installation time. They forget that for robust embedded systems, especially in automotive, A/B partitioning for fail-safe updates is standard. This effectively halves the flash space available for a new firmware image, making storage the primary bottleneck before any other consideration.
+
+  **Realistic Solution:** The most fundamental constraint is the available flash storage in the inactive partition. To ensure the vehicle can recover from a failed update, a portion of the flash (often half) is reserved to hold the complete new firmware image while the current one is running. If the new image is larger than this reserved space, the update is physically impossible regardless of network speed or permitted downtime.
+
+  > **Napkin Math:** Total Flash: 2MB. For robust A/B updates, the flash is divided into two 1MB partitions. Partition A runs the current model, while the new model is downloaded to Partition B. This means the *entire* new firmware package (model, application code, dependencies) must fit into that 1MB slot. If the RTOS and bootloader take up 100KB within that partition, the hard limit for your update image is ~900KB, which is less than half the total storage.
+
+  > **Key Equation:** $\text{App}_{\text{max}} \approx \frac{\text{Flash}_{\text{total}}}{2} - \text{OS}_{\text{footprint}}$
+
+  > **Options:**
+  > [ ] The vehicle's 4G/5G network bandwidth for the download.
+  > [ ] The power consumed by the flash write operation.
+  > [x] The available storage space in the inactive firmware partition.
+  > [ ] The compute time required to validate the new model post-installation.
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Fleet Update Data Bill</b> · <code>ota-update-fleet-scale</code></summary>
+
+- **Interviewer:** "You are an ML Systems engineer for a large autonomous vehicle company. Your team needs to roll out a critical 4 GB perception model update to the entire production fleet of 10,000 vehicles. Explain the difference in scale between a single-vehicle update and a full fleet rollout, and calculate the total data volume required for this one-time update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers, especially those new to large-scale deployed systems, often focus on the per-unit payload size (4 GB), which seems manageable. They fail to multiply by the fleet size, thus underestimating the total data volume by several orders of magnitude. This leads to a failure to plan for cloud egress costs, content delivery network (CDN) strategy, and the server infrastructure required to handle 10,000 simultaneous connections.
+
+  **Realistic Solution:** The core task is to interpret the scale of the system. While a 4 GB update for one vehicle is simple, deploying it to a 10,000-unit fleet is a significant data-moving operation. The total data volume is the per-vehicle update size multiplied by the number of vehicles. This means the infrastructure must be prepared to serve 40,000 Gigabytes, or 40 Terabytes, of data. This amount of data incurs non-trivial cloud egress costs and requires a robust delivery architecture.
+
+  > **Napkin Math:** 1. **Identify per-unit size:** The update for one vehicle is 4 GB.
+2. **Identify fleet size:** The fleet consists of 10,000 vehicles.
+3. **Calculate total volume:** `Total Data = Update Size per Unit × Fleet Size`
+4. **Calculation:** `4 GB/vehicle × 10,000 vehicles = 40,000 GB`
+5. **Convert to Terabytes:** `40,000 GB / 1,000 GB/TB = 40 TB`
+
+  > **Key Equation:** $\text{Total Data Volume} = \text{Fleet Size} \times \text{Update Size per Unit}$
+
+  > **Options:**
+  > [ ] 4 GB. The update is 4 GB.
+  > [ ] 400 GB. It's a large update for a large fleet.
+  > [x] 40 TB. The total data is the per-vehicle size multiplied by the entire fleet.
+  > [ ] 5 TB. This comes from dividing the total gigabytes by 8, confusing bytes and bits.
+
+  📖 **Deep Dive:** [Edge: The Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Update Budget</b> · <code>ota-update-cost</code></summary>
+
+- **Interviewer:** "You're an engineer for an automotive company deploying a critical OTA (Over-the-Air) update. The update includes a new perception model with 50 million parameters, which will be deployed in a container. The model requires FP16 precision. Explain how to calculate the storage size of the model weights, and then calculate the total download size if the container's base layer adds another 150 MB."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the required bytes per parameter for different precisions. A common error is assuming 1 byte for FP16 (confusing it with INT8) or 4 bytes (confusing it with FP32). Another typical mistake is to focus only on the model weights and forget the significant overhead from the container base image, leading to a severe underestimation of the total required bandwidth and device storage.
+
+  **Realistic Solution:** The correct approach is to calculate the model size based on its parameter count and precision, then add the size of the container base. Each parameter in FP16 precision requires 2 bytes of storage. Therefore, a 50 million parameter model needs 100 MB for its weights. Adding the 150 MB container base results in a total update size of 250 MB.
+
+  > **Napkin Math:** 1. **Parameters**: 50,000,000
+2. **Bytes per Parameter (FP16)**: 2 bytes
+3. **Model Weights Size**: 50,000,000 params × 2 bytes/param = 100,000,000 bytes
+4. **Convert to MB**: 100,000,000 bytes / (1024 * 1024 bytes/MB) ≈ 95.4 MB. For napkin math, we use 1,000,000 bytes/MB, so 100 MB.
+5. **Container Base Size**: 150 MB
+6. **Total Update Size**: 100 MB (model) + 150 MB (container) = 250 MB
+
+  > **Key Equation:** $\text{Total Size} = (\text{Parameters} \times \text{Bytes per Param}) + \text{Container Size}$
+
+  > **Options:**
+  > [ ] 200 MB
+  > [ ] 100 MB
+  > [x] 250 MB
+  > [ ] 350 MB
+
+  📖 **Deep Dive:** [Edge: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+
+
+
 
 
 
