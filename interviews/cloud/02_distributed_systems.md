@@ -17,13 +17,190 @@ Parallelism strategies, network topology, collective communication, and fault to
 ---
 
 
-### 🔀 Parallelism & Memory Sharding
+### Parallelism & Memory Sharding
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Training Cost Estimate</b> · <code>economics</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The NVLink Speed Limit</b> · <code>allreduce-bandwidth</code></summary>
+
+- **Interviewer:** "You are performing a single gradient synchronization step for a 70B parameter model (140 GB of FP16 gradients) across 8 H100 GPUs in a single server. The GPUs are connected by NVLink 4.0, which provides a total bidirectional bandwidth of 900 GB/s. Assuming a theoretically perfect ring All-Reduce implementation, calculate the minimum time this synchronization step will take."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often forget that a ring All-Reduce algorithm requires each GPU to send and receive a total amount of data roughly equal to the model size, spread over 2*(N-1) steps. They might simply divide the model size by the bandwidth, or use the full bidirectional bandwidth number, underestimating the time.
+
+  **Realistic Solution:** The correct approach is to first calculate the total data volume a single GPU must transfer (both sending and receiving) and then divide it by the effective one-way bandwidth of the interconnect. In a ring All-Reduce with N GPUs, each GPU sends and receives (N-1)/N times the model size. The total data moved per GPU is 2 * (N-1)/N * ModelSize. The NVLink's 900 GB/s is bidirectional, so the effective bandwidth for the transfers is 450 GB/s.
+
+  > **Napkin Math:** 1. **Calculate total data moved per GPU:**
+   - Data = 2 * (N-1)/N * ModelSize
+   - Data = 2 * (8-1)/8 * 140 GB
+   - Data = 2 * (7/8) * 140 GB = 1.75 * 140 GB = 245 GB
+
+2. **Identify effective bandwidth:**
+   - NVLink 4.0 is 900 GB/s bidirectional, meaning 450 GB/s send + 450 GB/s receive. The bottleneck is the one-way speed.
+   - Effective BW = 450 GB/s
+
+3. **Calculate time:**
+   - Time = Total Data / Effective BW
+   - Time = 245 GB / 450 GB/s ≈ 0.544 seconds or 544 ms
+
+  > **Key Equation:** $\text{Time} \approx \frac{2 \times \frac{N-1}{N} \times \text{ModelSize}}{\text{One-Way Bandwidth}}$
+
+  > **Options:**
+  > [ ] ~311 ms
+  > [ ] ~272 ms
+  > [x] ~544 ms
+  > [ ] ~4.9 s
+
+  📖 **Deep Dive:** [Distributed Systems](https://mlsysbook.ai/cloud/02_distributed_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The All-Reduce Bottleneck</b> · <code>data-parallelism-allreduce</code></summary>
+
+- **Interviewer:** "You are training a model using data parallelism on a single server with 8 H100 GPUs. The GPUs are fully connected with NVLink 4.0. After the backward pass, you need to synchronize 80 GB of gradients using a ring AllReduce algorithm. Given the H100's total NVLink bandwidth of 900 GB/s, calculate the theoretical minimum time this AllReduce operation will take."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often oversimplify the AllReduce calculation to just `TotalData / Bandwidth`. This ignores the multi-step nature of the ring algorithm, where data is passed sequentially around the ring. Another common error is to forget the two phases of the algorithm (scatter-reduce and all-gather), leading to an answer that is 2x too fast.
+
+  **Realistic Solution:** A ring AllReduce operation consists of two main phases: a scatter-reduce and an all-gather. In each phase, each of the N GPUs sends and receives data for N-1 steps. The total amount of data each GPU sends and receives over the entire process is approximately `2 * (N-1)/N * ModelSize`. The time is this total data volume divided by the link bandwidth.
+
+With 8 GPUs, the `(N-1)/N` factor is `7/8`. So the calculation is `2 * (7/8) * (80 GB / 900 GB/s)`, which gives the total time.
+
+  > **Napkin Math:** 1. **Identify the formula for ring AllReduce time:**
+   $T \approx 2 \times \frac{N-1}{N} \times \frac{\text{ModelSize}}{\text{Bandwidth}}$
+
+2. **Plug in the values:**
+   - N = 8 GPUs
+   - ModelSize = 80 GB
+   - Bandwidth = 900 GB/s
+
+3. **Calculate the time:**
+   $T \approx 2 \times \frac{8-1}{8} \times \frac{80 \text{ GB}}{900 \text{ GB/s}}$
+   $T \approx 2 \times 0.875 \times 0.0889 \text{ s}$
+   $T \approx 1.75 \times 0.0889 \text{ s}$
+   $T \approx 0.1556 \text{ s} \approx 156 \text{ ms}$
+
+  > **Key Equation:** T_{\text{AllReduce}} \approx 2 \times \frac{N-1}{N} \times \frac{M}{B}
+
+  > **Options:**
+  > [ ] ~89 ms
+  > [ ] ~178 ms
+  > [x] ~156 ms
+  > [ ] ~2800 ms
+
+  📖 **Deep Dive:** [Distributed Systems](https://mlsysbook.ai/vol2/ch02-dist.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Pipeline Bubble Tax</b> · <code>pipeline-parallelism</code></summary>
+
+- **Interviewer:** "You're training a large language model using 4-way pipeline parallelism (`P=4`). A global batch is split into 16 microbatches (`M=16`). The execution time for a single forward or backward pass of one microbatch on one stage is 50 ms (`T_stage`). Explain how to calculate the total time to process the full global batch, and what that time is."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to assume perfect parallelization and calculate the total time as `M * T_stage`. This completely ignores the 'bubble'—the initial latency to fill the pipeline stages and the final latency to drain it. This bubble is a fundamental overhead of pipeline parallelism.
+
+  **Realistic Solution:** The total time is the time it would take if all stages were always busy, plus the overhead of the pipeline bubble. The pipeline is only fully utilized after the first microbatch has propagated through all `P` stages. The bubble consists of `P-1` stages that are idle at the beginning and `P-1` stages that are idle at the end. The total time can be calculated as the time to process all `M` microbatches through one stage, plus the time to fill/drain the other `P-1` stages.
+
+  > **Napkin Math:** 1. **Identify the formula for pipeline execution time:**
+   $T_{\text{total}} = (M + P - 1) \times T_{\text{stage}}$
+
+2. **Plug in the values:**
+   - M (microbatches) = 16
+   - P (pipeline stages) = 4
+   - T_stage (time per stage) = 50 ms
+
+3. **Calculate the total time:**
+   $T_{\text{total}} = (16 + 4 - 1) \times 50 \text{ ms}$
+   $T_{\text{total}} = 19 \times 50 \text{ ms}$
+   $T_{\text{total}} = 950 \text{ ms}$
+
+  > **Key Equation:** T_{\text{total}} = (M + P - 1) \times T_{\text{stage}}
+
+  > **Options:**
+  > [ ] 800 ms
+  > [ ] 3200 ms
+  > [ ] 1000 ms
+  > [x] 950 ms
+
+  📖 **Deep Dive:** [Distributed Systems](https://mlsysbook.ai/vol2/ch02-dist.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The AllReduce Bottleneck</b> · <code>distributed-training</code></summary>
+
+- **Interviewer:** "You are scaling a DDP (Distributed Data Parallel) training job from 8 to 128 H100 GPUs. As you add more workers, you notice that the time per training step is no longer decreasing linearly. Identify the communication primitive that is the most common cause of this scaling bottleneck."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers new to distributed training often focus solely on the compute (FLOPs) performed by each GPU. They mistakenly assume that if each GPU has less data, the process will speed up linearly. They forget that the GPUs must communicate and synchronize their gradients after each backward pass, and this communication overhead becomes the dominant bottleneck at scale, saturating the network.
+
+  **Realistic Solution:** The primary bottleneck is the `AllReduce` operation. In data-parallel training, each GPU computes gradients based on its local batch of data. Before the optimizer can update the weights, all these gradients must be averaged across all GPUs. The `AllReduce` primitive handles this: it sums (Reduces) the gradients from all workers and then distributes the final result back to all of them. The communication volume and synchronization requirements of this step grow with the number of GPUs and typically become the limiting factor for training throughput.
+
+  > **Napkin Math:** Let's compare compute vs. communication. A single H100 GPU can execute about 1 Trillion FP16 operations in roughly 1 microsecond (1 TFLOP / 989 TFLOPS ≈ 1µs). A cross-rack network hop over InfiniBand takes about 5 microseconds—5 times longer. The `AllReduce` operation involves multiple such hops and data transfers for all 128 GPUs, making its latency far greater than the compute time it's synchronizing.
+
+  > **Key Equation:** T_{step} \approx T_{compute} + T_{AllReduce}
+
+  > **Options:**
+  > [ ] The data loading (ETL) pipeline
+  > [ ] The optimizer step (e.g., AdamW)
+  > [x] The AllReduce operation
+  > [ ] The forward pass computation
+
+  📖 **Deep Dive:** [Model Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The FSDP Memory Calculation</b> · <code>distributed-training</code></summary>
+
+- **Interviewer:** "You need to fine-tune a 70-billion parameter LLM on a pod of 16 H100s. Using the Adam optimizer, calculate the approximate memory required per GPU for model parameters, gradients, and optimizer states, assuming you are using a Fully Sharded Data Parallelism (FSDP) strategy like ZeRO-3."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to confuse FSDP with standard Data Parallelism (DP). In DP, each GPU holds a full replica of the model, gradients, and optimizer states, leading to enormous memory requirements that would not fit. FSDP, by contrast, shards these states across the available devices. Another frequent error is to only account for the model parameters (at 2 bytes/param for FP16) and forget the much larger memory footprint of the gradients (2 bytes/param) and Adam optimizer states (12 bytes/param).
+
+  **Realistic Solution:** FSDP shards all the training components (parameters, gradients, and optimizer states) across the GPUs. The rule of thumb for training with the Adam optimizer is a memory requirement of 16 bytes per parameter. For a 70B model, this is 1120 GB in total. When sharded across 16 H100 GPUs, each GPU is responsible for just a fraction of that state, making the training feasible within the 80 GB of HBM available on each accelerator.
+
+  > **Napkin Math:** 1. **Total Parameters:** 70 billion
+2. **Bytes per Parameter (with Adam):** 16 bytes (2 for FP16 params + 2 for FP16 grads + 12 for Adam state)
+3. **Total Memory Required:** 70B params × 16 bytes/param = 1120 GB
+4. **Number of GPUs:** 16
+5. **Memory per GPU (with FSDP):** 1120 GB / 16 GPUs = 70 GB
+This fits comfortably within the 80 GB HBM of a single H100 GPU.
+
+  > **Key Equation:** $\text{Mem}_{\text{per\_gpu}} = \frac{(\text{Total Params} \times 16 \text{ bytes})}{\text{Number of GPUs}}$
+
+  > **Options:**
+  > [ ] 1120 GB
+  > [ ] 8.75 GB
+  > [x] 70 GB
+  > [ ] 140 GB
+
+  📖 **Deep Dive:** [Distributed Systems](https://mlsysbook.ai/cloud/02_distributed_systems.html)
+  </details>
+</details>
+
+
+
+
+
+#### 🟢 L3
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Training Cost Estimate</b> · <code>economics</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "Your startup wants to pre-train a 70B-parameter LLM on 2 trillion tokens. You're budgeting for H100 GPU hours on a cloud provider at \$3.50/GPU-hour. Estimate the total training cost. What's the biggest risk to your budget?"
 
@@ -43,7 +220,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Phantom Performance Drop</b> · <code>data-versioning</code> <code>reproducibility</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Phantom Performance Drop</b> · <code>data-versioning</code> <code>data-versioning</code></summary>
 
 - **Interviewer:** "Your team has a critical recommendation model whose performance suddenly dropped by 15% AUC in production. The model was retrained just last week, and the new model performed excellently in staging. You suspect a data issue, but all data pipelines show 'success'. How do you quickly pinpoint if the input data for the production model is different from the training data, and what's the most common culprit?"
 
@@ -68,10 +245,9 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Pipeline Bubble</b> · <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Pipeline Bubble</b> · <code>data-parallelism</code></summary>
 
 - **Interviewer:** "We implemented Pipeline Parallelism across 8 GPUs. However, our profiler shows the GPUs are only active 50% of the time, sitting idle while waiting for the previous GPU to finish its layer. How do we increase utilization without changing the hardware?"
 
@@ -93,7 +269,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Data Parallelism Scaling Efficiency</b> · <code>parallelism</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Data Parallelism Scaling Efficiency</b> · <code>data-parallelism</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You benchmark a 3B model training on A100 GPUs. Going from 1 to 8 GPUs (single node, NVLink) gives 7.6× speedup — nearly linear. Going from 8 to 64 GPUs (8 nodes, InfiniBand 400 Gbps) gives only 5.2× speedup instead of 8×. What explains the sub-linear scaling, and at what GPU count does adding more GPUs actually hurt throughput?"
 
@@ -113,7 +289,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Tensor Parallelism Degree</b> · <code>parallelism</code> <code>network-fabric</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Tensor Parallelism Degree</b> · <code>data-parallelism</code> <code>interconnect</code></summary>
 
 - **Interviewer:** "You're serving a 70B LLM and must choose the tensor parallelism (TP) degree: TP=2, TP=4, or TP=8 across H100 GPUs connected via NVLink. Higher TP reduces per-GPU memory and per-token latency, but adds communication overhead. Calculate the optimal TP degree for a latency target of 40ms per output token."
 
@@ -133,10 +309,10 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The ZeRO-3 Communication Overhead</b> · <code>parallelism</code> <code>network-fabric</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The ZeRO-3 Communication Overhead</b> · <code>data-parallelism</code> <code>interconnect</code></summary>
 
 - **Interviewer:** "You're training a 175B parameter model using ZeRO Stage 3 (DeepSpeed) across 64 A100-80GB GPUs. ZeRO-3 shards weights, gradients, AND optimizer states across all GPUs, so each GPU only stores 1/64th of the model. But your training throughput is 40% lower than ZeRO Stage 1 (which only shards optimizer states). Where is the time going?"
 
@@ -156,7 +332,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Multi-GPU Scaling Curve</b> · <code>parallelism</code> <code>network-fabric</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Multi-GPU Scaling Curve</b> · <code>data-parallelism</code> <code>interconnect</code></summary>
 
 - **Interviewer:** "You scale a training job from 1 to 2, 4, 8, 16, and 32 H100 GPUs using data parallelism. At 1 GPU, throughput is 1,000 samples/sec. Predict the throughput at each scale, accounting for communication overhead. The interconnect is NVLink within 8-GPU nodes and InfiniBand (400 Gb/s) between nodes."
 
@@ -176,7 +352,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Pipeline Bubble Cost</b> · <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Pipeline Bubble Cost</b> · <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You're training a 65B parameter model using pipeline parallelism with 8 stages on 8 DGX H100 nodes (64 GPUs total, 8 GPUs per node with tensor parallelism). Your team lead says 'use 16 microbatches, that's plenty.' The training run will take 3 weeks. How much GPU-time is wasted in the pipeline bubble, and how many microbatches do you actually need to keep the bubble under 5%?"
 
@@ -198,7 +374,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Heterogeneous GPU Training</b> · <code>parallelism</code> <code>economics</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Heterogeneous GPU Training</b> · <code>data-parallelism</code> <code>economics</code></summary>
 
 - **Interviewer:** "Your cloud budget gets you 32 A100 80GB GPUs and 32 H100 80GB GPUs. An engineer proposes combining them into a single 64-GPU DDP training job for a 7B model. The H100 does a training step in 400 ms; the A100 takes 650 ms. What happens, and how do you actually use both GPU types productively?"
 
@@ -218,7 +394,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Async SGD Staleness Problem</b> · <code>parallelism</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Async SGD Staleness Problem</b> · <code>data-parallelism</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "To avoid synchronization barriers, your team switches from synchronous to asynchronous SGD for a 13B model on 64 A100 GPUs. After 24 hours, the loss curve is 15% higher than the synchronous baseline at the same number of tokens processed. The team blames 'async is just worse.' Is that the full story, and can you quantify the staleness?"
 
@@ -238,7 +414,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Pipeline Stutter (1F1B)</b> · <code>parallelism</code> <code>scheduling</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Pipeline Stutter (1F1B)</b> · <code>data-parallelism</code> <code>real-time</code></summary>
 
 - **Interviewer:** "You implement Pipeline Parallelism with 8 stages. To minimize the 'bubble' (idle time), you use the 1F1B (One Forward, One Backward) scheduling strategy with 32 microbatches. It works perfectly for 100 steps. Then, suddenly, the entire pipeline stalls for 2 seconds. The computation is perfectly load-balanced. What non-compute operation broke the 1F1B rhythm?"
 
@@ -266,7 +442,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Idempotent Training Pipeline</b> · <code>mlops</code> <code>fault-tolerance</code> <code>workflow-orchestration</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Idempotent Training Pipeline</b> · <code>deployment</code> <code>fault-tolerance</code> <code>workflow-orchestration</code></summary>
 
 - **Interviewer:** "Your company's flagship recommendation model is trained by a complex, multi-stage ML pipeline orchestrated by Airflow/Kubeflow. The pipeline often takes 12+ hours to complete. Recently, you've observed frequent intermittent failures in one of the intermediate stages (e.g., a transient network error, or a temporary resource exhaustion). When this happens, the entire pipeline restarts from the very beginning, wasting significant compute resources and delaying model updates. How would you redesign this pipeline to be more fault-tolerant and cost-efficient, specifically focusing on making its stages idempotent?"
 
@@ -304,7 +480,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Straggler Log Rotation</b> · <code>mlops</code> <code>fault-tolerance</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Straggler Log Rotation</b> · <code>deployment</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your 512-GPU training job occasionally stalls for exactly 60 seconds. The hardware is healthy, no preemptions occurred, and the network is uncongested. You eventually trace the stall to a cron job running on the Linux host OS of a single node. What is the cron job doing that halts the entire cluster?"
 
@@ -332,10 +508,10 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The Expert Parallelism Communication</b> · <code>parallelism</code> <code>network-fabric</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The Expert Parallelism Communication</b> · <code>data-parallelism</code> <code>interconnect</code></summary>
 
 - **Interviewer:** "You're training a Mixture-of-Experts model with 64 experts, placing one expert per GPU across 64 H100s connected via 400 Gbps InfiniBand. Each token is routed to 2 experts. During training, you notice the all-to-all communication takes longer than the expert computation itself. At what point does the network become the bottleneck, and how do you fix it?"
 
@@ -355,7 +531,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> Dimensioning the 3D Cube</b> · <code>parallelism</code> <code>network</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> Dimensioning the 3D Cube</b> · <code>data-parallelism</code> <code>interconnect</code></summary>
 
 - **Interviewer:** "We have 1,024 GPUs. How do you allocate the dimensions for Data ($D$), Tensor ($T$), and Pipeline ($P$) parallelism for a 175B model?"
 
@@ -377,7 +553,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The 3D Parallelism Orchestration</b> · <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The 3D Parallelism Orchestration</b> · <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You have 1,024 H100 GPUs across 128 DGX nodes (8 GPUs each, NVSwitch intra-node at 900 GB/s, 400 Gbps InfiniBand inter-node). You need to train a 175B parameter GPT-style model with 96 transformer layers. Walk me through how you assign the three parallelism dimensions — tensor ($T$), pipeline ($P$), and data ($D$) — and justify each choice with a physical constraint."
 
@@ -397,7 +573,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The ZeRO-3 Cross-Node Thrashing</b> · <code>parallelism</code> <code>network</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The ZeRO-3 Cross-Node Thrashing</b> · <code>data-parallelism</code> <code>interconnect</code></summary>
 
 - **Interviewer:** "You are training a 500B model using DeepSpeed ZeRO-3 across 256 GPUs. ZeRO-3 shards all parameters across all GPUs. The training speed is acceptable. However, when you increase the batch size slightly to improve utilization, the training time per step skyrockets by 500%. You haven't run out of memory (OOM). Why did a slight batch size increase destroy the network?"
 
@@ -427,7 +603,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The TCP Congestion Window Collapse</b> · <code>networking</code> <code>throughput</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The TCP Congestion Window Collapse</b> · <code>interconnect</code> <code>throughput</code></summary>
 
 - **Interviewer:** "You are transferring a 2 TB model checkpoint from an AWS datacenter in Virginia to a GCP datacenter in Tokyo. You have a dedicated 10 Gbps direct fiber link. However, your `scp` or `rsync` transfer maxes out at a pathetic 250 Mbps. The link is not shared, and there is 0% packet loss. Why is standard TCP catastrophically failing to use the bandwidth over a long distance?"
 
@@ -461,7 +637,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Heterogeneous Cluster Scheduler</b> · <code>economics</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Heterogeneous Cluster Scheduler</b> · <code>economics</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "Your GPU cluster has grown organically over 3 years and now contains: 256× A100-40GB, 128× A100-80GB, 512× H100-80GB, and 64× H200-141GB. You run a mix of training jobs (10–1000 GPUs) and inference workloads. The current scheduler treats all GPUs as equivalent, leading to 35% average utilization. Design a heterogeneity-aware scheduler that maximizes cluster-wide utilization and cost efficiency."
 
@@ -481,7 +657,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Unreproducible Model</b> · <code>mlops</code> <code>reproducibility</code> <code>artifact-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Unreproducible Model</b> · <code>deployment</code> <code>data-versioning</code> <code>artifact-management</code></summary>
 
 - **Interviewer:** "A critical model deployed six months ago is failing in production, and your team needs to quickly debug it. However, you discover that you cannot reliably reproduce the exact training run: the model's performance on the original test set differs significantly, and you can't trace back the specific data, code, or environment that produced the deployed model. As a Principal Engineer, outline a comprehensive MLOps strategy to ensure full reproducibility for all future models, considering large datasets, complex dependencies, and distributed training environments."
 
@@ -525,13 +701,14 @@ Parallelism strategies, network topology, collective communication, and fault to
 ---
 
 
-### 🌐 Network Topology & Collectives
+### Network Topology & Collectives
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Collective Communication Primitives</b> · <code>network-fabric</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Collective Communication Primitives</b> · <code>interconnect</code></summary>
 
 - **Interviewer:** "You're onboarding onto a distributed training team. Your tech lead mentions AllReduce, AllGather, ReduceScatter, and All-to-All in a meeting. For each of these four collectives, name one distributed training strategy that relies on it, and estimate the communication volume for 8 GPUs synchronizing a 1 GB tensor."
 
@@ -578,10 +755,9 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The AllReduce Tax</b> · <code>network-fabric</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The AllReduce Tax</b> · <code>interconnect</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You're training a 7B model with data parallelism across 8 GPUs connected via NVLink (900 GB/s bidirectional). After each backward pass, you must AllReduce 14 GB of gradients (FP16). How long does the AllReduce take, and what fraction of the training step is spent on communication?"
 
@@ -601,7 +777,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Cross-Rack Stall</b> · <code>network</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Cross-Rack Stall</b> · <code>interconnect</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "We tried to scale our 70B model training by spreading Tensor Parallelism (TP) across two server racks connected by 100 Gbps Ethernet. Training speed immediately dropped to zero. What did we misunderstand about network topology?"
 
@@ -621,7 +797,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The InfiniBand vs RoCE Decision</b> · <code>network-fabric</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The InfiniBand vs RoCE Decision</b> · <code>interconnect</code></summary>
 
 - **Interviewer:** "Your company is building a new 512-GPU training cluster. The vendor offers two options: InfiniBand NDR (400 Gbps per port, credit-based flow control, ~1 μs latency) for $2.8M, or RoCE v2 over standard Ethernet (400 GbE, PFC-based, ~2 μs latency) for $1.2M. Both claim 'lossless RDMA.' Your workload is fine-tuning 70B models with FSDP across all 512 GPUs. Which do you choose, and when does the cheaper option break down?"
 
@@ -719,7 +895,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The AllReduce Incast Congestion</b> · <code>network-fabric</code> <code>collectives</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The AllReduce Incast Congestion</b> · <code>interconnect</code> <code>collectives</code></summary>
 
 - **Interviewer:** "You are scaling Data Parallel training from 128 to 512 GPUs. You use a standard hierarchical AllReduce. While the mathematical volume of data sent per GPU is constant regardless of cluster size, the actual network time triples when moving to 512 GPUs. Packet loss metrics show a huge spike. What physical network phenomenon is causing this?"
 
@@ -749,7 +925,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The NCCL Topology Misconfiguration</b> · <code>network-fabric</code> <code>distributed</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The NCCL Topology Misconfiguration</b> · <code>interconnect</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You have a cluster of 8 DGX nodes. Each node has 8 GPUs connected via NVLink, and 8 dedicated Mellanox InfiniBand NICs. You launch a PyTorch distributed training job. The job runs, but cross-node communication is bizarrely slow. You check `nvidia-smi topo -m` and see all hardware is physically connected correctly. You check the NCCL logs and see `NCCL INFO: Using PCIe for cross-node communication`. Why is NCCL ignoring your expensive InfiniBand network?"
 
@@ -775,7 +951,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The ToR Switch Buffer Microburst</b> · <code>network</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The ToR Switch Buffer Microburst</b> · <code>interconnect</code> <code>latency</code></summary>
 
 - **Interviewer:** "You are using RoCEv2 (RDMA over Ethernet) for a 64-GPU cluster. The network links are 100 Gbps. During the AllToAll phase of a Mixture of Experts (MoE) training step, the network throughput plummets, and PFC (Priority Flow Control) pause frames flood the network. The total data volume sent by any GPU is well under the 100 Gbps limit. Why is the network freezing?"
 
@@ -804,7 +980,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Ring AllReduce Bottleneck</b> · <code>network-fabric</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Ring AllReduce Bottleneck</b> · <code>interconnect</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "We scale our data-parallel training from 32 GPUs to 512 GPUs. On 32 GPUs, AllReduce takes 15% of each training step. On 512 GPUs, it takes 60%. The network hardware is the same 400 Gbps InfiniBand everywhere. Why does ring AllReduce degrade at scale, and what replaces it?"
 
@@ -824,10 +1000,10 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The NVLink Domain Boundary</b> · <code>network-fabric</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The NVLink Domain Boundary</b> · <code>interconnect</code></summary>
 
 - **Interviewer:** "You're running tensor-parallel inference for a 70B model across 8 GPUs in a DGX H100. All-reduce latency is 15μs. Your team wants to scale to 16 GPUs by adding a second DGX node. After connecting them, the all-reduce latency jumps to 150μs — a 10x increase — even though you're using 400 Gbps InfiniBand. What physical boundary did you cross?"
 
@@ -847,7 +1023,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Oversubscription Choke</b> · <code>network</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Oversubscription Choke</b> · <code>interconnect</code></summary>
 
 - **Interviewer:** "We placed half our GPUs in Rack A and half in Rack B. The intra-rack AllReduce is incredibly fast, but the global AllReduce crawls, even though we bought 400 Gbps InfiniBand. Where is the bottleneck?"
 
@@ -887,7 +1063,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Gradient Synchronization Overlap</b> · <code>network-fabric</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Gradient Synchronization Overlap</b> · <code>interconnect</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "Your profiler shows that for a 7B model on 64 A100 GPUs with DDP, the backward pass takes 800 ms and the AllReduce takes 600 ms, giving a step time of 1400 ms. Your colleague claims 'we should be able to overlap them and get close to 800 ms.' Under what conditions is this true, and when does the overlap break down?"
 
@@ -907,7 +1083,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Network Congestion Collapse</b> · <code>network-fabric</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Network Congestion Collapse</b> · <code>interconnect</code></summary>
 
 - **Interviewer:** "You have 256 H100 GPUs across 32 nodes, connected by a 2-tier fat-tree with 400 Gbps InfiniBand. During a 70B model AllReduce, your monitoring shows aggregate switch throughput drops from 90% link utilization to 35% as you scale from 64 to 256 GPUs. The switches aren't dropping packets. What's happening?"
 
@@ -927,7 +1103,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Congested Highway</b> · <code>network-management</code> <code>resource-scheduling</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Congested Highway</b> · <code>interconnect</code> <code>resource-scheduling</code></summary>
 
 - **Interviewer:** "You manage a large, multi-tenant GPU cluster. Users complain about unpredictable training times: sometimes jobs finish quickly, other times they take much longer, even when the cluster appears to have available GPU capacity. You suspect network congestion, but how do you verify this and implement a system-level solution to ensure more predictable network performance for critical ML workloads?"
 
@@ -969,7 +1145,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The InfiniBand Subnet Saturation</b> · <code>network-fabric</code> <code>topology</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The InfiniBand Subnet Saturation</b> · <code>interconnect</code> <code>topology</code></summary>
 
 - **Interviewer:** "You are building a 4,000 GPU cluster. You use a standard Fat-Tree InfiniBand topology. The cluster is divided into 4 pods of 1,000 GPUs each. Jobs running entirely within Pod A achieve 98% network scaling efficiency. However, when you launch a 2,000 GPU job spanning Pod A and Pod B, the network efficiency plummets to 40%. The cables are all 400 Gbps. What architectural constraint in the Fat-Tree is causing the bottleneck?"
 
@@ -997,7 +1173,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Gradient Compression Paradox</b> · <code>network-fabric</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Gradient Compression Paradox</b> · <code>interconnect</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "We're training a 13B model across 128 GPUs connected by 400 Gbps InfiniBand. The network is the bottleneck — AllReduce takes 40% of each step. An engineer proposes gradient compression with a 100× compression ratio. They claim this will reduce communication time by 100×, making the network overhead negligible. Why won't they get anywhere near 100× improvement?"
 
@@ -1017,7 +1193,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The InfiniBand Link Flap</b> · <code>network-fabric</code> <code>incident-response</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The InfiniBand Link Flap</b> · <code>interconnect</code> <code>incident-response</code></summary>
 
 - **Interviewer:** "Your 256-GPU training job stalls for 30–90 seconds every 10–20 minutes, then resumes at full speed. `NCCL_DEBUG` logs show no timeouts — the collectives complete, just slowly. Your IB switch logs show a port on leaf switch 7 toggling UP/DOWN every 12 minutes. The ops team says 'it's just one port — it only affects one GPU.' Why does one flapping link stall 256 GPUs?"
 
@@ -1037,10 +1213,10 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Bisection Bandwidth Requirement</b> · <code>network-fabric</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Bisection Bandwidth Requirement</b> · <code>interconnect</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You're designing the network fabric for a 1,024-GPU training cluster. The workload uses 3D parallelism: TP=8 (within node), PP=4 (across nodes), DP=32 (across nodes). Calculate the minimum bisection bandwidth needed to avoid communication bottlenecks, and explain why a fat-tree topology might not be sufficient."
 
@@ -1060,7 +1236,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Ring vs Tree Dilemma</b> · <code>network</code> <code>collectives</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Ring vs Tree Dilemma</b> · <code>interconnect</code> <code>collectives</code></summary>
 
 - **Interviewer:** "For our 10B parameter model, Ring AllReduce utilizes our network perfectly. However, when we switch to a 100M parameter model, it is terribly slow despite moving far less data. Why does the 'best' algorithm fail here?"
 
@@ -1080,7 +1256,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The Cross-Datacenter Training</b> · <code>network-fabric</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The Cross-Datacenter Training</b> · <code>interconnect</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your company has 512 H100 GPUs in Virginia and 512 in Oregon, connected by a 100 Gbps dedicated WAN link with 60 ms RTT. Management wants to train a single 70B model across all 1,024 GPUs. Is this feasible with synchronous training, and if not, what's your architecture?"
 
@@ -1100,7 +1276,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Network Topology Tax</b> · <code>network-fabric</code> <code>datacenter-ops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Network Topology Tax</b> · <code>interconnect</code> <code>datacenter-ops</code></summary>
 
 - **Interviewer:** "We're building a new 2,048-GPU H100 training cluster. The network team proposes two topologies: a traditional fat-tree (Clos) network and NVIDIA's rail-optimized topology. The fat-tree costs $12M for switches and optics; the rail-optimized design costs $8M. The network team says 'rail-optimized saves 33% and NVIDIA recommends it.' Should we trust this recommendation, or is the fat-tree worth the premium?"
 
@@ -1123,11 +1299,10 @@ Parallelism strategies, network topology, collective communication, and fault to
 ---
 
 
-### 🛡️ Fault Tolerance & Reliability
+### Fault Tolerance & Reliability
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Spot Instance Checkpoint Strategy</b> · <code>fault-tolerance</code> <code>economics</code></summary>
 
@@ -1169,7 +1344,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Elastic Training Scaling</b> · <code>fault-tolerance</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Elastic Training Scaling</b> · <code>fault-tolerance</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You're pretraining a 13B model on a cloud cluster. Spot instances give you between 32 and 128 GPUs at any time — nodes can be preempted with 30 seconds notice. Your training framework uses synchronous data parallelism. How do you handle GPUs appearing and disappearing mid-training without restarting from scratch?"
 
@@ -1189,7 +1364,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Checkpoint Storage Bottleneck</b> · <code>fault-tolerance</code> <code>storage-io</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Checkpoint Storage Bottleneck</b> · <code>fault-tolerance</code> <code>persistent-storage</code></summary>
 
 - **Interviewer:** "You're training a 175B parameter model on 512 H100 GPUs using 3D parallelism. The training lead wants to checkpoint every 20 minutes (matching the cluster's estimated MTBF). Each checkpoint must be written to persistent storage. What's the checkpoint size, how long does the write take, and what's the impact on training throughput?"
 
@@ -1209,7 +1384,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Checkpoint Resurrection</b> · <code>fault-tolerance</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Checkpoint Resurrection</b> · <code>fault-tolerance</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "We're training a 175B model on 10,000 H100 GPUs. At step 50,000, a node fails and the job crashes. We checkpoint every 1,000 steps. The PM asks: 'We only lost 1,000 steps of work, right? So we restart and lose maybe 30 minutes?' Explain why the PM's estimate is dangerously optimistic."
 
@@ -1229,10 +1404,10 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Straggler Mitigation Problem</b> · <code>fault-tolerance</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Straggler Mitigation Problem</b> · <code>fault-tolerance</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You're running synchronous data-parallel training of a 13B model across 1,024 H100 GPUs spanning 128 nodes. Each GPU has a 0.1% chance of being 'slow' on any given step (thermal throttling, ECC correction, noisy neighbor on shared NVSwitch). What fraction of steps will have at least one straggler, and how do you mitigate this without switching to async SGD?"
 
@@ -1276,7 +1451,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Unstable Cluster</b> · <code>fault-tolerance</code> <code>distributed-training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Unstable Cluster</b> · <code>fault-tolerance</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You're leading the infrastructure team for training a 1-Trillion parameter model on a cluster of 2000 GPUs spread across 250 nodes. Node failures (hardware, network, OOMs) occur frequently, averaging several per day across the cluster. Restarting training from scratch after each failure is prohibitively expensive. Design a robust fault-tolerance strategy for this large-scale distributed training job."
 
@@ -1322,7 +1497,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Checkpoint Serialization Freeze</b> · <code>fault-tolerance</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Checkpoint Serialization Freeze</b> · <code>fault-tolerance</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your infrastructure team requires saving a checkpoint every 30 minutes to an AWS S3 bucket. Your 70B model checkpoint is 140 GB. When the checkpoint function is called, GPU utilization drops to 0% for almost 3 minutes. Your team suggests upgrading to a faster S3 tier. Why won't faster S3 fix the 3-minute stall?"
 
@@ -1393,7 +1568,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Optimal Checkpoint Interval</b> · <code>fault-tolerance</code> <code>economics</code></summary>
@@ -1438,7 +1613,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Fault-Tolerant Training Framework</b> · <code>fault-tolerance</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Fault-Tolerant Training Framework</b> · <code>fault-tolerance</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You're training a 175B model on 2,048 H100 GPUs for 90 days. At this scale, the mean time between failures (MTBF) for any single GPU is ~1,000 hours, but with 2,048 GPUs, the cluster MTBF is under 30 minutes. Design a fault-tolerant training framework that achieves >95% effective utilization despite continuous hardware failures."
 
@@ -1521,13 +1696,14 @@ Parallelism strategies, network topology, collective communication, and fault to
 ---
 
 
-### 🏋️ Training at Scale
+### Training at Scale
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Warmup Learning Rate Schedule</b> · <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Warmup Learning Rate Schedule</b> · <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You're training a transformer with batch size 4096 on 32 GPUs. Without learning rate warmup, the loss explodes to NaN within 50 steps. With a 2000-step linear warmup, training is stable. Your colleague says 'warmup is just a training trick.' What is the systems-level reason warmup is physically necessary for large-batch training?"
 
@@ -1547,7 +1723,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The DDP Bucket Straggler</b> · <code>training</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The DDP Bucket Straggler</b> · <code>data-parallelism</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You are using PyTorch DistributedDataParallel (DDP) across 4 GPUs. GPU 3 is slightly slower than the others due to thermal throttling. You notice that GPU 0, 1, and 2 are sitting idle for 200ms at the end of every backward pass. You know DDP overlaps communication with computation. Why isn't the overlap hiding the delay of GPU 3?"
 
@@ -1575,7 +1751,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Bad Batch Spike</b> · <code>training</code> <code>incident-response</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Bad Batch Spike</b> · <code>data-parallelism</code> <code>incident-response</code></summary>
 
 - **Interviewer:** "You're fine-tuning a 7B model on 8 A100 GPUs. At step 12,400 the training loss suddenly spikes from 1.8 to 45.0, then gradually recovers over the next 200 steps. The spike happens at the exact same step every time you restart from the same checkpoint. What's in that batch, and how do you prove it?"
 
@@ -1595,7 +1771,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The DataLoader Deadlock</b> · <code>training</code> <code>incident-response</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The DataLoader Deadlock</b> · <code>data-parallelism</code> <code>incident-response</code></summary>
 
 - **Interviewer:** "Your training job on 8 A100 GPUs hangs at step 1 and never progresses. GPU utilization is 0%. CPU utilization is 100% across all cores. `htop` shows 128 Python processes in `D` (uninterruptible sleep) state. You set `num_workers=16` per GPU in the DataLoader. What happened, and what's the maximum safe value for `num_workers`?"
 
@@ -1615,10 +1791,9 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Data Parallel Straggler</b> · <code>training</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Data Parallel Straggler</b> · <code>data-parallelism</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You're running standard Data Parallel (DDP) training on 256 GPUs. One specific node has a slightly degraded cooling fan, causing its 8 GPUs to thermal throttle and run 15% slower than the rest of the cluster. The network is perfectly healthy. By exactly how much does this single degraded node slow down the entire 256-GPU training job?"
 
@@ -1644,7 +1819,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The NCCL Timeout</b> · <code>distributed</code> <code>incident-response</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The NCCL Timeout</b> · <code>data-parallelism</code> <code>incident-response</code></summary>
 
 - **Interviewer:** "You're training a 30B model across 64 H100 GPUs (8 nodes × 8 GPUs). At random intervals — sometimes after 2 hours, sometimes after 20 — the job hangs and eventually dies with `NCCL WARN Timeout on rank 47`. The hang always resolves to a different rank. Your network monitoring shows no packet loss. What's happening?"
 
@@ -1664,7 +1839,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Gradient Overflow</b> · <code>training</code> <code>incident-response</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Gradient Overflow</b> · <code>data-parallelism</code> <code>incident-response</code></summary>
 
 - **Interviewer:** "You're training a 13B model in mixed-precision (FP16 forward/backward, FP32 optimizer) on 32 H100 GPUs. At step 35,000, you start seeing `Inf` values in the loss, but only on 3 of 32 GPUs. The other 29 GPUs report normal loss values. After the AllReduce, all GPUs have `Inf` loss. What's happening on those 3 GPUs, and why does it infect the entire cluster?"
 
@@ -1684,7 +1859,7 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Optimizer State Explosion</b> · <code>training</code> <code>incident-response</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Optimizer State Explosion</b> · <code>data-parallelism</code> <code>incident-response</code></summary>
 
 - **Interviewer:** "A junior engineer is fine-tuning a 7B model on a single A100 80 GB. They report: 'The model is only 14 GB in FP16, but training OOMs at batch_size=1. How can a 14 GB model not fit on an 80 GB GPU?' Walk them through where the other 66 GB went."
 
@@ -1704,10 +1879,10 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Reproducibility Paradox</b> · <code>reproducibility</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Reproducibility Paradox</b> · <code>data-versioning</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "Your research team trains a model that achieves state-of-the-art results. When the production team retrains with the 'same' code and data, accuracy is 3% lower. They try 5 more times — each run produces a different result, varying by up to 2%. The research team insists their code is deterministic. Where are the hidden sources of non-determinism, and what does it cost to eliminate them on a modern GPU cluster?"
 
@@ -1727,10 +1902,10 @@ Parallelism strategies, network topology, collective communication, and fault to
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Global Model</b> · <code>cross-region</code> <code>wan-optimization</code> <code>distributed-training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Global Model</b> · <code>interconnect</code> <code>wan-optimization</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "Your company operates globally, and due to data residency regulations (e.g., GDPR, CCPA), raw training data cannot be moved outside its originating geographic region (US, EU, APAC). You need to train a single, unified, large-scale foundation model that learns from all this distributed data. Describe the architectural challenges and propose a robust solution for cross-region distributed training."
 
@@ -1786,4 +1961,124 @@ Parallelism strategies, network topology, collective communication, and fault to
 
   </details>
 
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> Multi-modal Candidate Generation at Billion-Scale</b> · <code>serving</code></summary>
+
+- **Interviewer:** "Design the candidate generation layer for Instagram Reels. We have a corpus of 10s of billions of videos, each with distinct video, audio, and text features. The retrieval system needs to fetch the top 1000 relevant candidates for a user in under 50ms at a peak load of 100,000 QPS. How do you design the embedding architecture, index, and serving infrastructure to support multi-modal retrieval at this scale?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Proposing late-fusion of separate text, video, and audio embeddings at inference time and performing multiple nearest-neighbor searches per modality. This causes explosive fan-out, unpredictable tail latencies, and easily violates the 50ms SLA at 100k QPS.
+
+  **Realistic Solution:** Use a Two-Tower architecture with early fusion on the item side to project user history and multi-modal item features into a single, shared embedding space offline. Partition the corpus into tiered Approximate Nearest Neighbor (ANN) indexes (e.g., FAISS IVFPQ or HNSW): a "hot" index for recent/viral content kept in RAM, and a "warm/cold" index on SSDs. Implement a two-phase retrieval where the fast "hot" index handles the bulk of real-time requests. To maintain P99 latency during traffic spikes, implement graceful degradation (e.g., dynamically reducing the beam width/search probes in the ANN index).
+
+  > **Napkin Math:** Corpus = 10B videos. "Hot" corpus = 1B videos. Embedding size = 256 dimensions (float16 = 512 bytes). 1B * 512B = 512GB of raw vectors. With IVFPQ index compression, this drops to ~50GB, easily fitting in the RAM of a single node. However, to handle 100,000 QPS, we are compute-bound. Assuming 1 node can handle 2,000 QPS for ANN search, we need 50 replicas of the hot index (50 nodes total) purely for query throughput.
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> Real-Time Click Prediction with Continual Learning</b> · <code>data-pipeline</code></summary>
+
+- **Interviewer:** "We need to update our ad click-through rate (CTR) prediction models in real-time. We receive over 10 million ad events (impressions, clicks, conversions) per second globally. How do you design the streaming ingestion and distributed training pipeline to update the model weights within 5 minutes of a user interacting with an ad, while rigorously handling delayed feedback (late clicks)?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Using a standard batch data warehouse (like Presto/Spark) to join impressions and clicks on a micro-batch schedule. Alternatively, ignoring delayed feedback entirely, which forces the model to treat all impressions without immediate clicks as negative, catastrophically biasing the real-time distribution.
+
+  **Realistic Solution:** Utilize a streaming framework (e.g., Apache Flink) paired with Kafka for event ingestion. Implement a windowing strategy with watermarks to join impressions with clicks in memory. If no click arrives within a short window (e.g., 5 mins), emit a negative label to the training cluster. If a click arrives hours later, emit a positive label with an importance weight or use negative-sample correction techniques (e.g., Fake Negative Calibration) to correct the prior gradient update. Send joined examples to a distributed Parameter Server or an asynchronous DDP training cluster. Use Follow The Regularized Leader (FTRL) for sparse IDs and SGD for dense layers, periodically pushing updated weights to the inference fleet.
+
+  > **Napkin Math:** 10M events/sec. Average joined event size (dense features + sparse IDs) = 1KB. Network throughput = 10GB/sec. To keep up with ingestion, we need ~100 Flink nodes processing 100MB/s each. For training, a batch size of 8192 across 32 GPUs processes ~100k samples/sec/GPU. This requires a dedicated real-time training cluster of ~100 GPUs constantly consuming the streaming data to prevent backpressure.
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> Scaling Foundation Models on Trillions of Tokens</b> · <code>data-parallelism</code></summary>
+
+- **Interviewer:** "We are training a massive dense Transformer model (100B+ parameters) on a multimodal dataset of 5 trillion tokens. Training is taking too long on our 10,000 GPU cluster. How would you architect the distributed training strategy (3D parallelism) and specifically optimize the DDP communication overhead to maximize Model Flops Utilization (MFU)?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Relying purely on standard DDP, which results in Out-of-Memory (OOM) errors since the optimizer states and gradients cannot fit on a single GPU. Alternatively, using naive Pipeline Parallelism (PP) which introduces massive pipeline bubbles (idle GPU time) and destroys cluster efficiency.
+
+  **Realistic Solution:** Implement aggressive 3D Parallelism. Use Tensor Parallelism (TP) within a single 8-GPU node to maximize the high-bandwidth NVLink and avoid cross-node communication bottlenecks. Use Pipeline Parallelism (PP) with micro-batching (e.g., 1F1B schedule) across nodes within the same rack. Finally, use Fully Sharded Data Parallelism (FSDP / ZeRO-3) across the remaining nodes. To maximize MFU, explicitly overlap computation and communication—such as pre-fetching weights for the forward pass while the previous layer computes, and overlapping the all-reduce communication of gradients with the backward pass. Use selective activation checkpointing to trade minor compute overhead for significant memory savings.
+
+  > **Napkin Math:** 100B params * 2 bytes (FP16/BF16) = 200GB for model weights alone (OOM on an 80GB A100). Optimizer states (Adam: 2 variance params * 4 bytes + 2 bytes FP16 = 10 bytes/param = 1TB). Total memory needed per replica = 1.2TB. We must shard this across at least 16 GPUs (ZeRO-3/FSDP). 10,000 GPUs * 300 TFLOPS (BF16 peak) * 50% MFU = 1.5 ExaFLOPS effective. Training compute required: 5T tokens * 100B params * 6 FLOPs/token = 3e24 FLOPs total. 3e24 FLOPs / 1.5e18 FLOPs/sec = 2e6 seconds = ~23 days of continuous training time.
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> Global Scale Real-Time Two-Tower Recommendation</b> · <code>serving</code></summary>
+
+- **Interviewer:** "We are re-architecting the YouTube short-video recommendation retrieval system to support 50 billion candidates globally, served from 12+ datacenters. We want to use a massive 500B parameter two-tower model to improve relevance. How do you design the embedding table distribution and serving infrastructure on TPU v5e pods to ensure sub-50ms p99 latency while maximizing TPU High-Bandwidth Memory (HBM) utilization across global regions?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Attempting to deploy and serve both the user and item towers dynamically in real-time. Candidates will try to fit the entire 500B parameter model across multiple TPUs using Pipeline Parallelism for serving, which results in catastrophic HBM fragmentation, massive cross-node communication overhead, and missed 50ms latency SLAs.
+
+  **Realistic Solution:** Completely decouple the item and user towers. The item tower's embeddings for the 50B candidates are pre-computed entirely offline during batch jobs and stored in a globally distributed, sharded in-memory vector database (e.g., ScaNN / Vertex AI Vector Search) with aggressive regional caching for trending shorts.
+
+  The TPU v5e pods are exclusively reserved for serving the dynamic user tower. To fit the user tower's parameters and serve at high throughput, employ INT8 weight quantization (W8A16) and Tensor Parallelism (TP) strictly bounded within a single TPU pod's inter-chip interconnect (ICI) domain to avoid optical circuit switch (OCS) latency. Apply Continuous Batching for the user tower to maximize hardware utilization, outputting the user embedding which is then sent as a query to the nearest regional ScaNN cluster.
+
+  > **Napkin Math:**
+  > - **Model Size:** 500B params. Assume the user tower is 100B params.
+  > - **Memory:** 100B params * 1 byte (INT8) = 100GB of weights.
+  > - **Hardware:** A single TPU v5e has 16GB HBM. We need at least `ceil(100/16) = 7` chips just for weights. Using 8-way TP fits the model with ~28GB left across the 8 chips for KV-cache/activation memory.
+  > - **Vector DB:** 50B items * 256 dimensions * 4 bytes (FP32) = 51.2 TB. Sharded across 100 in-memory nodes (512GB RAM each) per region.
+  > - **Latency:** TPU User Embedding (~15ms) + Network Hop (~5ms) + ScaNN Top-K ANN Retrieval (~10ms) = ~30ms, safely within the 50ms p99 SLA.
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> Multi-Turn Gemini LLM Serving with PagedAttention</b> · <code>kv-cache</code></summary>
+
+- **Interviewer:** "We are scaling the backend for Gemini Advanced, specifically focusing on multi-turn, long-context conversations (up to 1M tokens). Our current inference clusters are bottlenecked by HBM capacity, not compute, due to severe KV cache fragmentation. Design an inference serving architecture that optimizes KV cache allocation and request routing across a TPU v5p pod to maximize batch size and throughput without violating our 2-second time-to-first-token (TTFT) SLA."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Relying on static, contiguous memory allocation based on the maximum possible sequence length (1M tokens) per request. Candidates also often miss the routing aspect, sending multi-turn requests to random TPU hosts, causing the system to redundantly recompute the KV cache for the entire chat history on every single turn.
+
+  **Realistic Solution:** Implement a centralized Block Manager utilizing PagedAttention. The KV cache is divided into fixed-size physical blocks (e.g., 16 tokens per block) allocated non-contiguously in HBM, eliminating internal fragmentation.
+
+  To handle the routing, implement a Layer-7 Stateful Gateway utilizing "KV-Cache Aware Routing" (Sticky Sessions). Multi-turn requests are consistently hashed based on conversation ID to the same TPU slice that already holds the conversation's physical KV blocks in HBM. Furthermore, implement "Chunked Prefill" (separating prefill and decode microservices): heavy prompt-processing is done on a dedicated prefill pool, and the generated KV blocks are asynchronously transferred over the high-speed ICI to a memory-heavy decode pool, ensuring the compute-bound prefill doesn't stall the memory-bound decode phase.
+
+  > **Napkin Math:**
+  > - **KV Size per Token:** 128 layers * 16 KV heads * 128 dim * 2 bytes (BF16) * 2 (K+V) = ~1 MB per token!
+  > - **Max Context:** 1M tokens = **1 TB of KV Cache per request**.
+  > - **TPU v5p Limits:** 95GB HBM per chip. A 256-chip pod has ~24 TB HBM.
+  > - **Without PagedAttention:** Reserving 1TB statically means maximum pod concurrency is exactly 24 concurrent users, regardless of actual current turn length.
+  > - **With PagedAttention & Routing:** Average active context might be 100k tokens (100GB). PagedAttention allows dynamic allocation, increasing concurrency to `24TB / 100GB = 240 concurrent users` per pod (a 10x throughput increase). Prefix caching shared system prompts (say 10k tokens) across all 240 users saves another 2.4TB of HBM.
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> Trillion-Parameter MoE Training on TPU Torus Topology</b> · <code>data-parallelism</code></summary>
+
+- **Interviewer:** "We are training a 2-Trillion parameter Mixture-of-Experts (MoE) foundational model from scratch on a massive TPU v5p multi-slice cluster (10,000+ chips). Communication overhead over the Optical Circuit Switches (OCS) between slices is severely bottlenecking our Model Flops Utilization (MFU). Design a 3D + Expert parallelism strategy that maps optimally to the physical TPU 3D torus topology to hit at least 45% MFU."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Applying standard 3D parallelism (Data + Tensor + Pipeline) and Expert Parallelism (EP) agnostically to the network topology. Distributing the All-to-All communication required for routing tokens to Experts across the slower OCS (Data Center Network) instead of the fast Inter-Chip Interconnect (ICI).
+
+  **Realistic Solution:** The parallelism strategy must strictly map to the physical boundaries of the cluster. A TPU v5p pod (slice) contains 8,960 chips connected via ultra-fast 4,800 Gbps 3D Torus ICI. Slices are connected via much slower ~100 Gbps DCN via OCS.
+
+  1. **Tensor Parallelism (TP):** Map to a 2D grid within a single TPU slice to leverage the highest ICI bandwidth for the frequent All-Reduce operations.
+  2. **Expert Parallelism (EP):** Constrain EP *strictly* within a single slice. The All-to-All token routing must never cross the OCS. Use Top-1 or Top-2 routing with capacity factors to drop tokens, minimizing ICI bandwidth saturation.
+  3. **Pipeline Parallelism (PP):** Map to the 3rd dimension of the intra-slice ICI torus.
+  4. **Data Parallelism (DP/FSDP):** Use ZeRO-3 / FSDP mapped *across* the OCS-connected slices. While weights and optimizer states are sharded globally, the weight gathering (All-Gather) can be aggressively prefetched and overlapped with the compute of the previous layer, hiding the 100 Gbps DCN latency.
+
+  > **Napkin Math:**
+  > - **Model State:** 2T params * 2 bytes (BF16) = 4 TB weights. Adam optimizer = 16 TB. Total = 20 TB per replica.
+  > - **TPU v5p:** 95GB HBM/chip. Minimum chips per replica = `20 TB / 95 GB = ~210 chips`.
+  > - **Expert All-to-All:** If batch size is 4M tokens, dim=8192, BF16 -> 65 GB of data to shuffle per layer.
+  > - **Network Cliff:** If EP spans across OCS (100 Gbps = 12.5 GB/s), All-to-All takes `65 GB / 12.5 GB/s = 5.2 seconds` *per layer*. Over 100 layers, that's 520s of pure network stall per step (MFU drops to <5%).
+  > - **Optimized Mapping:** Constraining EP to intra-slice ICI (4800 Gbps = 600 GB/s) reduces All-to-All time to `65 GB / 600 GB/s = 0.1 seconds` per layer. Overlapping FSDP over OCS hides the DCN latency, bringing MFU back above 45%.
+  </details>
 </details>

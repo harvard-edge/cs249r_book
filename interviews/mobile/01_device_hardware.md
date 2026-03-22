@@ -17,13 +17,2297 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 ---
 
 
-### 📐 Compute & SoC Architecture
+### Compute & SoC Architecture
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Squeeze-and-Excitation Question</b> · <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The NPU Energy Advantage</b> · <code>npu-delegation</code></summary>
+
+- **Interviewer:** "You are profiling a new computer vision model on a smartphone and need to decide where to run the core `conv2d` layers to maximize battery life. Which of the following processor types on a standard mobile SoC (System on a Chip) is the most **energy-efficient** choice for these operations?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often fixate on latency and assume the fastest processor (often the GPU) is always the best choice for acceleration. They forget that for mobile, battery life is paramount. Another common mistake is underestimating the massive energy cost of running sustained ML workloads on a general-purpose CPU, which is not designed for the specific arithmetic of neural networks.
+
+  **Realistic Solution:** The NPU (Neural Processing Unit) is the correct choice. NPUs contain specialized silicon (e.g., systolic arrays or MAC engine farms) optimized for the parallel, low-precision integer arithmetic that dominates neural network inference. This hardware specialization allows them to execute operations like INT8 convolutions using significantly less power than a general-purpose CPU or a graphics-focused GPU. This is the foundation of heterogeneous compute on mobile.
+
+  > **Napkin Math:** The physical basis for this is the energy cost per operation. A 32-bit floating-point (FP32) operation on a CPU core consumes about **18 times more energy** than an 8-bit integer (INT8) operation on specialized NPU hardware. For a model performing billions of multiply-accumulate operations per inference, this 18x factor is the difference between a feature that is usable versus one that drains the user's battery in minutes.
+
+  > **Key Equation:** $E_{op, \text{FP32}} \approx 18 \times E_{op, \text{INT8}}$
+
+  > **Options:**
+  > [ ] The GPU, because it has the highest parallel throughput (TOPS).
+  > [ ] The CPU, because it avoids the latency overhead of memory transfers to another processing unit.
+  > [x] The NPU, because its specialized hardware for low-precision integer math is vastly more energy-efficient.
+  > [ ] The NPU, but it's only slightly more efficient (e.g., 1.5-2x) than the CPU.
+
+  📖 **Deep Dive:** [Mobile: Device Hardware and SoCs](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Eviction Threshold</b> · <code>mobile-memory-budget</code></summary>
+
+- **Interviewer:** "You're shipping a new AI feature in a mobile app designed for high-end smartphones with 8 GB of RAM. This is not dedicated VRAM like on a desktop GPU, but unified memory shared with the OS and other apps. What is the approximate memory budget your application process can reliably use before risking termination by the operating system?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers from cloud or desktop backgrounds often assume they can use most of the device's RAM (e.g., 6-7 GB). They fail to account for the unified memory architecture on mobile, where the OS, background services, and other apps all share the same physical RAM. The OS will aggressively terminate any process that threatens system stability, and greedy apps are the first to go.
+
+  **Realistic Solution:** On mobile, the operating system requires a significant memory headroom to function smoothly. A common rule of thumb is that an application should not consume more than 25% of the total device RAM to be considered a 'good citizen' and avoid a high risk of being evicted. For a device with 8 GB of RAM, this translates to a budget of approximately 2 GB.
+
+  > **Napkin Math:** 8 GB Total Device RAM × 0.25 (OS 'Good Citizen' Ratio) = 2 GB Application Budget
+
+  > **Key Equation:** $\text{App Memory Budget} \approx \text{Device RAM} \times 0.25$
+
+  > **Options:**
+  > [ ] 7 GB
+  > [ ] 256 MB
+  > [x] 2 GB
+  > [ ] 4 GB
+
+  📖 **Deep Dive:** [Mobile: The App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The CPU Fallback Energy Tax</b> · <code>numerical-representation</code></summary>
+
+- **Interviewer:** "Your team has a new operator in a mobile CNN that isn't supported by the phone's NPU, forcing it to run on the main CPU. The initial implementation uses standard 32-bit floats (FP32). A teammate proposes rewriting the operator to use 8-bit integers (INT8) to save power. Approximately how much more energy-efficient is the INT8 version compared to the FP32 version for that specific operation?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often mistakenly assume the energy savings are linear with the reduction in bit-width, guessing it might be 4x (32 bits / 8 bits). This ignores that the energy cost of a multiplier, a key component in ML ops, scales quadratically with bit-width, leading to a much larger-than-expected energy saving.
+
+  **Realistic Solution:** An INT8 operation consumes approximately 18 times less energy than an FP32 operation. The energy of arithmetic operations is determined by the number of transistors switching, and the complexity of an N-bit multiplier scales roughly as N², not N. Therefore, reducing the bit-width from 32 to 8 yields a much greater than 4x improvement in energy efficiency.
+
+  > **Napkin Math:** According to the standard hardware invariants, the energy ratio between FP32 and INT8 compute is a physical constant.
+
+- FP32 vs INT8 energy ratio: ~18x
+
+This means for every 1 Joule the INT8 operation consumes, the FP32 operation would consume ~18 Joules. This highlights the critical importance of quantization for energy-sensitive mobile applications, especially for operations that cannot be delegated to a hyper-efficient NPU.
+
+  > **Options:**
+  > [ ] ~4× more efficient
+  > [ ] ~2× more efficient
+  > [x] ~18× more efficient
+  > [ ] ~100× more efficient
+
+  📖 **Deep Dive:** [Numerical Representation](https://mlsysbook.ai/vol1/chapters/compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The On-Device LLM Memory Wall</b> · <code>on-device-llm-feasibility</code></summary>
+
+- **Interviewer:** "Your product manager wants to run a 2 Billion parameter Large Language Model on a new flagship smartphone for a real-time generative AI feature. Using FP16 precision for inference, identify if simply loading the model's weights into memory is feasible within the typical constraints of a mobile application."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often compare the model's weight size directly against the phone's total advertised RAM (e.g., 8-12 GB) and incorrectly conclude it fits. This ignores the crucial fact that the mobile OS reserves most of the RAM for itself and other apps, granting only a small fraction (e.g., 25%) as a hard memory budget to any single application.
+
+  **Realistic Solution:** It is not feasible. A 2 Billion parameter model at FP16 requires 4 GB of RAM just for the weights. A high-end smartphone with 12 GB of total RAM typically allocates only about 3 GB of that to a single application. The model's memory footprint exceeds the application's entire memory budget before even accounting for activations or the app's own runtime memory.
+
+  > **Napkin Math:** 1. **Calculate Model Memory:** 2 Billion parameters × 2 bytes/parameter (FP16) = 4,000,000,000 bytes = 4 GB.
+2. **Identify App Memory Budget:** A flagship phone might have 12 GB of RAM. The typical application memory budget is `12 GB × 0.25 = 3 GB`.
+3. **Compare:** Model Weight Memory (4 GB) > Application Memory Budget (3 GB). The model does not fit.
+
+  > **Key Equation:** \text{Inference Memory (FP16)} = \text{Parameters} \times 2 \text{ bytes/param}
+
+  > **Options:**
+  > [ ] Yes, a 12 GB phone has more than enough RAM for a 4 GB model.
+  > [x] No, the model's 4 GB memory footprint exceeds the typical ~3 GB app budget.
+  > [ ] No, a 2B parameter model requires 32 GB of RAM for inference.
+  > [ ] Feasibility depends on the phone's NPU TOPS, not the RAM.
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The 16ms Jank Budget</b> · <code>latency-throughput</code></summary>
+
+- **Interviewer:** "Your team is debugging a new on-device feature that causes the app's scrolling to feel sluggish. To ensure a smooth 60 frames-per-second user experience, what is the total latency budget you have to render a single frame before the user perceives 'jank'?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the UI frame budget with other system latency targets. They might recall the 33ms budget for a 30 FPS video feed (common on edge devices) or the much larger ~100ms P99 latency common in cloud services. Others simply don't have this fundamental number memorized.
+
+  **Realistic Solution:** The total budget for one frame at 60 FPS is approximately 16 milliseconds. If the combination of OS overhead, app logic, and model inference exceeds this budget, the system will drop a frame, leading to visible stutter or 'jank'.
+
+  > **Napkin Math:** The calculation is a direct conversion from frames-per-second to milliseconds-per-frame.
+
+$1 \text{ second} / 60 \text{ frames} = 0.01667 \text{ seconds/frame}$
+$0.01667 \text{ seconds/frame} \times 1000 \text{ ms/second} \approx 16.67 \text{ ms/frame}$
+
+  > **Key Equation:** $\text{Frame Budget (ms)} = \frac{1000}{\text{Target FPS}}$
+
+  > **Options:**
+  > [ ] 100 ms
+  > [ ] 33 ms
+  > [x] 16 ms
+  > [ ] 5 ms
+
+  📖 **Deep Dive:** [Mobile Systems](mobile/README.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Mobile Thermal Wall</b> · <code>power-thermal</code></summary>
+
+- **Interviewer:** "You're an ML engineer profiling a new on-device generative AI model. You observe that after running continuously for about a minute, the model's performance consistently drops by 40-50%. What is the most likely physical limit the System-on-a-Chip (SoC) is encountering, and what is its approximate power value?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers without mobile experience often assume power budgets are much higher, in the 10-30W range like a laptop, or they immediately blame software bugs. They fail to recognize that passive cooling in a sealed chassis is the dominant constraint, forcing a very low and strict power budget for *sustained* performance.
+
+  **Realistic Solution:** The SoC is thermal throttling. It has exceeded its sustainable thermal design power (TDP) and is reducing its clock speeds to prevent overheating. For a modern flagship smartphone, the total sustained power budget for the entire SoC is only about 3 to 5 Watts.
+
+  > **Napkin Math:** To put the mobile power constraint in perspective, compare it to a datacenter GPU:
+- H100 GPU Power: 700 W
+- Mobile SoC Power: ~5 W
+- Ratio: 700W / 5W = 140x
+A single datacenter GPU consumes as much power as a fleet of 140 high-end smartphones running at full tilt. This is why mobile requires relentless power optimization.
+
+  > **Options:**
+  > [ ] The SoC is hitting a software power limit of around 30 Watts.
+  > [ ] The model is likely hitting a memory bandwidth limit of a few hundred milliwatts.
+  > [x] The SoC is thermal throttling, hitting its sustainable power budget of 3-5 Watts.
+  > [ ] The operating system is de-prioritizing the app due to a memory leak.
+
+  📖 **Deep Dive:** [Mobile: Device Hardware and SoC Architecture](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Fusion Tax</b> · <code>operator-fusion</code></summary>
+
+- **Interviewer:** "You're optimizing a small CNN on a mobile device. You notice that the profiler shows many small, back-to-back operations running on the NPU. When a framework like Core ML or TensorFlow Lite applies operator fusion, what is the primary hardware cost it aims to reduce?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume fusion reduces the computational workload (FLOPs). It doesn't. The number of calculations remains the same. The win comes from eliminating the overhead *between* the calculations, which is dominated by memory traffic and kernel launch latency on mobile SoCs.
+
+  **Realistic Solution:** The primary cost reduced by fusion is memory access overhead. By merging sequential operators (e.g., Conv -> ReLU) into a single kernel, intermediate results (the output of the Conv) can be kept in the NPU/GPU's fast on-chip SRAM or registers and immediately consumed by the next operation (ReLU). This avoids a slow and power-expensive round-trip to the main system DRAM (LPDDR5), which is orders of magnitude slower and more energy-hungry than on-chip memory.
+
+  > **Napkin Math:** The core win is avoiding DRAM traffic. The invariant table states that a DRAM access costs ~580x more energy than a single FP16 compute operation. Let's consider a `Conv -> ReLU` fusion.
+
+**Without Fusion:**
+1. `Conv` runs, writes its output tensor to the device's main DRAM. (High energy cost)
+2. `ReLU` kernel is launched, reads the tensor back from DRAM. (High energy cost)
+
+**With Fusion:**
+1. A single `Conv+ReLU` kernel is launched.
+2. The `Conv` result is stored in a fast NPU register.
+3. The `ReLU` logic immediately reads from the register. (Negligible energy cost compared to DRAM)
+
+By keeping the intermediate data on-chip, fusion directly avoids two trips across the 'memory wall', saving a massive amount of energy and time, which translates directly to better battery life and higher throughput on mobile.
+
+  > **Options:**
+  > [ ] The total number of arithmetic computations (FLOPs).
+  > [ ] The model's storage footprint on the device's flash memory.
+  > [x] The latency and power cost of writing intermediate tensors to main memory (DRAM).
+  > [ ] The time spent delegating unsupported operators to the CPU.
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Privacy Wall</b> · <code>monitoring-reliability</code></summary>
+
+- **Interviewer:** "Your team has shipped a new on-device camera feature to 10 million users. You suspect a silent accuracy degradation is occurring on a specific new phone model, but you cannot get ground truth labels from users. You decide to use federated analytics to monitor the distribution of the model's output logits across the fleet. What is the primary reason you must use a privacy-preserving technique like federated analytics instead of simply logging raw camera images and sending them to your servers for analysis?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on the technical constraints, such as network bandwidth or battery life. While these are valid concerns, they are secondary to the absolute product and legal requirement to protect user privacy. It's not just technically hard; it's fundamentally disallowed.
+
+  **Realistic Solution:** The primary reason is user privacy. Logging and uploading raw, potentially sensitive user data (like photos) without explicit, specific, and ongoing consent is a major privacy violation and can break data protection laws (e.g., GDPR, CCPA) and erode user trust. Federated analytics is a technique specifically designed to gather aggregate insights from a device fleet *without* exposing or centralizing raw user data, thus respecting privacy by design.
+
+  > **Napkin Math:** Let's quantify the sheer scale of the data problem that privacy concerns prevent. Assume 10M users run the feature 5 times a day. Each inference input is a modest 250KB image. The daily data upload would be:
+
+`10,000,000 users * 5 inferences/day * 250 KB/inference = 12,500,000,000 KB/day = 12.5 TB/day`
+
+Handling this volume of raw, sensitive user data is not only a massive technical and financial cost but, more importantly, a catastrophic privacy and legal liability.
+
+  > **Options:**
+  > [ ] The daily cellular data usage would be too expensive for users.
+  > [ ] The constant network requests would drain the device's battery too quickly.
+  > [x] Uploading raw user data is a major privacy violation and breaks user trust.
+  > [ ] The on-device storage is insufficient to buffer the image logs before uploading.
+
+  📖 **Deep Dive:** [ML Operations](https://mlsysbook.ai/vol1/ops.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Privacy Memory Tax</b> · <code>federated-learning-privacy</code></summary>
+
+- **Interviewer:** "Your team is implementing federated learning to train a 20 million parameter keyboard suggestion model on mobile devices. To protect user privacy, you're required to add user-level Differential Privacy (DP) via DP-SGD. From a hardware resource perspective, what is the most significant *new* constraint introduced by adding on-device DP to the training process?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on the CPU overhead from generating random noise or the increased network communication rounds sometimes needed for convergence. While these are factors, the most prohibitive, showstopper cost is typically the massive increase in peak memory usage required to instantiate per-example gradients, which can easily exceed the strict memory budget for a single app on a mobile device.
+
+  **Realistic Solution:** The primary new constraint is a dramatic increase in peak RAM usage. Standard training averages gradients across a batch, requiring memory for only one set of gradients. DP-SGD, however, requires computing and storing gradients for *each individual example* in a batch before clipping their norms, adding noise, and averaging. This multiplies the memory required for gradients by the batch size, which is often infeasible on a memory-constrained mobile device.
+
+  > **Napkin Math:** Let's quantify the memory impact:
+- **Model Parameters:** 20 Million
+- **Gradient Memory (FP32):** 20M params × 4 bytes/param = 80 MB
+- **App Memory Budget (Rule of thumb):** For a device with 8 GB RAM, the budget is ~8 GB × 0.25 = 2 GB max.
+- **Standard Training Memory:** The 80 MB for one set of gradients fits comfortably.
+- **DP-SGD Memory (Batch Size 32):** To hold gradients for each example, the requirement becomes 80 MB/gradient × 32 examples = 2,560 MB or 2.56 GB.
+
+This 2.56 GB requirement for gradients alone exceeds the entire 2 GB app budget, making the naive approach infeasible and highlighting RAM—not CPU or network—as the immediate, primary bottleneck.
+
+  > **Options:**
+  > [ ] Increased CPU usage from the cryptographic noise generation.
+  > [ ] Increased network bandwidth to send the larger, noisy model updates.
+  > [x] A major increase in peak RAM to store per-example gradients.
+  > [ ] Increased flash storage needed to save the privacy-preserving model.
+
+  📖 **Deep Dive:** [Responsible Engineering](https://mlsysbook.ai/vol1/responsible_engr.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Battery Drain Dilemma</b> · <code>mobile-ab-testing</code></summary>
+
+- **Interviewer:** "Your team is A/B testing a new, larger on-device personalization model (Model B) against the current production model (Model A) in your mobile app. Early results from the 1% experiment cohort are positive: Model B shows a 3% lift in user engagement. However, telemetry also shows Model B consumes 50% more power during inference. When analyzing these results, which of the following metrics should you identify as the most critical showstopper, likely forcing an immediate rollback of the experiment?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers, especially those from a cloud background, often fixate purely on model accuracy or user engagement metrics. On mobile, battery life is a core, user-facing feature. A significant regression in battery life can lead to negative app store reviews and uninstalls, making it a first-class metric that can and should veto model improvements.
+
+  **Realistic Solution:** The most critical metric is the significant increase in daily battery consumption. A 50% increase in a feature's power draw is a massive regression in user experience. Even with a 3% engagement lift, the negative impact of a noticeably shorter battery life is almost always a deal-breaker for mobile products. The correct operational judgment is to identify this as a critical issue and recommend a rollback until the model's power usage can be optimized.
+
+  > **Napkin Math:** Let's quantify the impact. Assume the baseline Model A has an inference power draw of 0.4W and the feature is active for a total of 15 minutes (0.25 hours) per day.
+
+*   **Model A Energy:** 0.4W * 0.25h = 0.1 Wh
+*   **Model B Power:** 0.4W * 1.5 = 0.6W
+*   **Model B Energy:** 0.6W * 0.25h = 0.15 Wh
+
+A typical smartphone battery is ~15 Wh. The feature's share of the total battery has increased from ~0.67% (0.1 / 15) to ~1.0% (0.15 / 15). While the absolute percentage seems small, it's a 50% increase in the feature's energy budget, which can be the tipping point for a user noticing poor battery life.
+
+  > **Key Equation:** $\text{Energy} = \text{Power} \times \text{Time}$
+
+  > **Options:**
+  > [ ] A 0.5% drop in a secondary, non-engagement accuracy metric.
+  > [ ] A 20ms increase in average inference latency.
+  > [x] A significant increase in the experiment cohort's daily battery consumption.
+  > [ ] A 10% increase in telemetry logs uploaded to the server for analysis.
+
+  📖 **Deep Dive:** [Mobile: Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Cellular Download Budget</b> · <code>mobile-deployment-constraints</code></summary>
+
+- **Interviewer:** "Your team is deploying a new on-device personalization model. To ensure it can be delivered to users who aren't on Wi-Fi, you need to respect the platform's 'download over cellular' size limit. State the approximate size limit you must design your model delivery system around for major mobile app stores."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers without mobile-specific experience often assume download sizes are only limited by the user's data plan or device storage. They forget that app stores impose a strict budget for cellular downloads to protect users from unexpected data charges. Another common error is confusing this cellular limit with the much larger multi-gigabyte limit for the initial app install over Wi-Fi.
+
+  **Realistic Solution:** Most major app stores, including Apple's, impose a cellular download limit of approximately 200 MB. Any on-demand resource, including an ML model, larger than this will fail to download unless the user is on Wi-Fi. This is a hard constraint that forces mobile ML teams to aggressively quantize models, design for delta updates, and carefully manage their delivery pipeline.
+
+  > **Napkin Math:** A 7-billion parameter language model, stored in FP16, requires 14 GB of storage (`7B params × 2 bytes/param`). This is **70 times larger** than the ~200 MB cellular download limit (`14,000 MB / 200 MB`), quantitatively demonstrating why server-class models cannot be directly deployed to mobile devices over the air.
+
+  > **Options:**
+  > [ ] ~50 MB
+  > [x] ~200 MB
+  > [ ] ~1 GB
+  > [ ] No limit, it depends on the user's data plan
+
+  📖 **Deep Dive:** [Mobile: Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The NPU Fallback Power Tax</b> · <code>npu-delegation-power</code></summary>
+
+- **Interviewer:** "You are optimizing a new background service on a flagship smartphone that analyzes user photos. When the model runs entirely on the phone's NPU, it consumes 100mW per inference. However, a recent OS update deprecated a key operation, forcing 20% of the model's compute workload to fall back to the much less efficient CPU. Assuming the CPU is 10x less power-efficient for this kind of workload than the NPU, calculate the new total power consumption per inference."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the 'power tax' of CPU fallback. A common mistake is to assume the power increase is linear (e.g., a simple 20% increase) or to forget that only the *unsupported portion* of the workload runs on the inefficient CPU. The correct approach requires calculating the power for the delegated (NPU) and non-delegated (CPU) portions separately before summing them.
+
+  **Realistic Solution:** The total power is the sum of the power used by the NPU for the supported operations and the power used by the CPU for the fallback operations. The NPU handles 80% of the work, while the CPU handles the remaining 20% at a 10x power cost relative to the NPU.
+
+  > **Napkin Math:** 1.  **Baseline Power (100% NPU):** 100mW
+2.  **Workload on NPU:** 80%
+3.  **Workload on CPU:** 20%
+4.  **Power for NPU portion:** The NPU does 80% of the work, so its power contribution is `100mW * 0.80 = 80mW`.
+5.  **Power for CPU portion:** The 20% workload would have consumed `100mW * 0.20 = 20mW` on the NPU. On the CPU, it costs 10x more: `20mW * 10 = 200mW`.
+6.  **Total New Power:** `80mW (NPU) + 200mW (CPU) = 280mW`.
+
+  > **Key Equation:** $$ P_{\text{total}} = (P_{\text{base}} \times W_{\text{NPU}}) + (P_{\text{base}} \times W_{\text{CPU}} \times \text{Penalty}_{	ext{CPU}}) $$
+
+  > **Options:**
+  > [ ] 120 mW (Mistake: Assumes a simple linear 20% power increase)
+  > [ ] 200 mW (Mistake: Calculates only the power for the CPU portion)
+  > [x] 280 mW
+  > [ ] 1000 mW (Mistake: Applies the 10x penalty to the entire original power draw)
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The App Eviction Trap</b> · <code>shared-ram-eviction</code></summary>
+
+- **Interviewer:** "Your team is excited to deploy a new 3 billion parameter generative AI model onto a flagship smartphone. The target device has 8 GB of total system RAM. For a smooth user experience, the mobile OS aggressively terminates apps that exceed their allocated memory budget. Explain whether this model, loaded in FP16 precision, is likely to run without being evicted by the OS."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often look at the total device RAM (8 GB) and assume that if the model fits (e.g., a 6 GB model), it's acceptable. They forget that, unlike servers with dedicated VRAM, mobile RAM is a shared, contested resource. The OS, background services, and other applications consume a significant portion, leaving a much smaller budget for any single foreground app.
+
+  **Realistic Solution:** No, the model is far too large and will almost certainly be terminated by the OS. A flagship phone with 8 GB of RAM typically allocates only about 25% of its total memory to a single application to ensure system stability. The rest is reserved for the OS, background tasks, and other apps. The 3 billion parameter model requires 6 GB of memory in FP16, which is three times the available budget.
+
+  > **Napkin Math:** 1. **Calculate the App's Memory Budget:** Mobile operating systems typically reserve about 75% of RAM for themselves and other processes. So, the budget for our app is `8 GB * 0.25 = 2 GB`.
+2. **Calculate the Model's Memory Footprint:** An FP16-quantized model uses 2 bytes per parameter. So, the model's size is `3,000,000,000 params * 2 bytes/param = 6,000,000,000 bytes = 6 GB`.
+3. **Compare:** The model's required memory (6 GB) is much larger than the app's budget (2 GB). The OS will evict the app to reclaim memory.
+
+  > **Key Equation:** $\text{App Memory Budget} \approx \text{Total Device RAM} \times 0.25$
+
+  > **Options:**
+  > [ ] Yes, the 6 GB model fits comfortably within the device's 8 GB of total RAM.
+  > [ ] Yes, the model only requires 0.75 GB (3B params × 2 bits), which is well under the budget.
+  > [x] No, the 6 GB model footprint grossly exceeds the app's ~2 GB memory budget, risking OS eviction.
+  > [ ] No, the model requires 12 GB (3B params × 4 bytes), which is more than the device's total RAM.
+
+  📖 **Deep Dive:** [Device Hardware and SoC Constraints](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The NPU Fallback Memory Cost</b> · <code>numerical-representation</code></summary>
+
+- **Interviewer:** "You are deploying a 5 million parameter image segmentation model on a modern smartphone. The phone's NPU natively supports FP16 precision. However, 10% of the model's parameters belong to custom layers that the NPU does not support, forcing them to fall back to the CPU for execution using INT8 quantization. Calculate the total memory in megabytes (MB) required to store the model's weights."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate the memory for the entire model using only the primary precision (FP16), forgetting that the fallback portion has a different, smaller memory footprint. Another common error is assuming all parameters are quantized, ignoring that the majority run in higher precision on the NPU.
+
+  **Realistic Solution:** The solution requires calculating the memory for the two parts of the model separately and then summing them. 90% of the model's parameters (4.5 million) are stored in FP16 (2 bytes/param), while the remaining 10% (0.5 million) are stored in INT8 (1 byte/param) for the CPU fallback.
+
+  > **Napkin Math:** 1. **NPU Part (FP16):**
+   - Parameters: 5,000,000 * 0.90 = 4,500,000 params
+   - Memory: 4,500,000 params * 2 bytes/param = 9,000,000 bytes = 9.0 MB
+
+2. **CPU Fallback Part (INT8):**
+   - Parameters: 5,000,000 * 0.10 = 500,000 params
+   - Memory: 500,000 params * 1 byte/param = 500,000 bytes = 0.5 MB
+
+3. **Total Memory:**
+   - 9.0 MB (NPU) + 0.5 MB (CPU) = 9.5 MB
+
+  > **Key Equation:** $\text{Total Memory} = (\text{Params}_{\text{NPU}} \times \text{bytes}_{\text{FP16}}) + (\text{Params}_{\text{CPU}} \times \text{bytes}_{\text{INT8}})$
+
+  > **Options:**
+  > [ ] 10.0 MB
+  > [ ] 5.0 MB
+  > [x] 9.5 MB
+  > [ ] 5.5 MB
+
+  📖 **Deep Dive:** [Mobile: Systems & SoC](https://mlsysbook.ai/mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The 16ms Jank Budget</b> · <code>latency-throughput</code></summary>
+
+- **Interviewer:** "You are profiling a new real-time camera filter on a flagship smartphone. The core model has a computational cost of 70 GFLOPs (FP16) per frame. Your target is a smooth 60 FPS user experience. The phone's neural engine is rated at 35 INT8 TOPS. Assuming FP16 workloads run at half the throughput of INT8, calculate the model's inference time and explain if it will cause UI jank."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the UI jank budget (~16ms for 60 FPS) with the much longer ANR (Application Not Responding) timeout (~5 seconds). A model can run in 20ms, causing severe jank by missing every frame deadline, but it would never trigger an ANR. Another common mistake is failing to account for the throughput difference between precisions (e.g., INT8 vs. FP16), leading to an overly optimistic performance estimate.
+
+  **Realistic Solution:** The model will not cause UI jank. The 16.67ms budget per frame is significantly higher than the model's calculated inference time. First, we determine the effective FP16 throughput of the hardware. Then, we divide the model's computational cost by this throughput to find the time.
+
+  > **Napkin Math:** # Key Equations
+Frame Budget (ms) = 1000 / Target FPS
+Inference Time (s) = Total Operations / Operations per Second
+
+# 1. Calculate the per-frame budget for 60 FPS
+Frame Budget = 1000ms / 60 FPS = 16.67 ms
+
+# 2. Calculate the effective hardware throughput in FP16 TFLOPS
+# The ANE is 35 INT8 TOPS. Assume FP16 is half that.
+Effective TFLOPS = (35 TOPS) / 2 = 17.5 TFLOPS
+
+# 3. Calculate the model inference time
+# Model Cost = 70 GFLOPs = 70 * 10^9 FLOPs
+# Hardware Speed = 17.5 TFLOPS = 17.5 * 10^12 FLOPs/sec
+Inference Time = (70 * 10^9 FLOPs) / (17.5 * 10^12 FLOPs/sec)
+Inference Time = 4 * 10^-3 seconds = 4 ms
+
+# 4. Compare to budget
+4 ms < 16.67 ms. The model is fast enough and leaves ~12ms for other UI rendering work.
+
+  > **Key Equation:** $\text{Inference Time} = \frac{\text{Total Operations}}{\text{Operations per Second}}$
+
+  > **Options:**
+  > [ ] No, it will cause jank. The inference time is ~40ms.
+  > [ ] Yes, it meets the budget. The inference time is ~2ms.
+  > [x] Yes, it meets the budget. The inference time is ~4ms.
+  > [ ] It meets the budget because 4ms is less than the 5-second ANR timeout.
+
+  📖 **Deep Dive:** [Mobile App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Mobile Thermal Budget</b> · <code>power-thermal-throttling</code></summary>
+
+- **Interviewer:** "You are profiling a new real-time object detection feature on a modern smartphone. You find that when the model is actively running, the total System-on-Chip (SoC) power consumption is 7W. When the model is idle, the baseline SoC power is 3W. The phone's sustainable thermal budget for the SoC is 5W. If you run the model continuously, the phone will quickly overheat and the OS will thermal throttle the chip, drastically reducing performance. To avoid this, you must run the inference intermittently. Explain the maximum percentage of time (duty cycle) the object detection model can be active to stay within the phone's sustainable thermal budget."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to only compare the model's power draw (4W = 7W - 3W) against the thermal budget, ignoring the total system power consumption. This leads to the incorrect conclusion that the model can run continuously because its individual power draw is less than the 5W budget. The thermal budget applies to the *entire* SoC, not just the neural engine.
+
+  **Realistic Solution:** The average power consumption over time must not exceed the sustainable thermal budget. We can calculate the maximum duty cycle (`d`) by setting the average power equal to the 5W sustainable limit. The average power is the weighted average of the active power (7W) and idle power (3W). This calculation determines the maximum proportion of time the power-intensive task can run without causing the system to overheat.
+
+  > **Napkin Math:** 1. Define the average power equation: `P_avg = (P_active * d) + (P_idle * (1 - d))`
+2. Substitute the known values: `5W = (7W * d) + (3W * (1 - d))`
+3. Solve for the duty cycle `d`: `5 = 7d + 3 - 3d`
+4. Simplify the equation: `2 = 4d`
+5. Calculate the result: `d = 0.5`
+
+The model can be active for a maximum of 50% of the time to stay within the thermal budget.
+
+  > **Key Equation:** P_{\text{avg}} = (P_{\text{active}} \cdot d) + (P_{\text{idle}} \cdot (1 - d)) \le P_{\text{sustainable}}
+
+  > **Options:**
+  > [ ] 71%, calculated by the simple ratio of sustainable to active power (5W / 7W).
+  > [ ] 100%, because the model's individual 4W power draw is less than the 5W budget.
+  > [x] 50%
+  > [ ] 29%, based on the ratio of the power surplus to the active power ((7W-5W)/7W).
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Operator Fusion Tax</b> · <code>operator-fusion-optimization</code></summary>
+
+- **Interviewer:** "You're optimizing a CNN on a mobile phone. You notice a sequence of a 2D Convolution followed by a ReLU activation. Running them as separate, unfused operators incurs overhead for each dispatch and forces the intermediate activation tensor to be written to and read back from main memory (LPDDR5). Fusing them into a single `Conv-ReLU` operator avoids this.
+
+Given these numbers:
+- Kernel Dispatch Overhead: **1,000 ns (1 µs)** per operator
+- Intermediate Tensor Memory Round-trip (Write to DRAM + Read from DRAM): **5,000 ns (5 µs)**
+
+Explain the primary benefit of fusion and calculate the total latency saved by fusing this two-operator sequence into one."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often mistakenly believe fusion provides compute savings, but the number of FLOPs remains the same. The real win is in avoiding overhead. A common calculation error is to only count the saved kernel dispatch (1,000 ns) and forget the much larger penalty of the memory round-trip (5,000 ns) that occurs when an intermediate tensor is evicted from fast on-chip cache to slower DRAM between unfused calls.
+
+  **Realistic Solution:** The primary benefit of operator fusion is the reduction of system overhead, not a reduction in FLOPs. By fusing `Conv` and `ReLU`, the framework can execute them in a single kernel launch, keeping the intermediate data in fast on-chip registers or SRAM instead of writing it out to and reading it back from slower main memory.
+
+The total latency saving is the sum of the avoided costs: one kernel dispatch and one memory round-trip.
+
+  > **Napkin Math:** # Latency saved by eliminating one kernel dispatch
+Saved Dispatch Latency = 1,000 ns
+
+# Latency saved by avoiding one memory round-trip
+Saved Memory Latency = 5,000 ns
+
+# Total latency savings from fusion
+Total Savings = Saved Dispatch Latency + Saved Memory Latency
+Total Savings = 1,000 ns + 5,000 ns
+Total Savings = 6,000 ns (or 6 µs)
+
+  > **Key Equation:** $\text{Latency Saved} = T_{\text{dispatch}} + T_{\text{memory\_roundtrip}}$
+
+  > **Options:**
+  > [ ] 1,000 ns (Ignores memory round-trip cost)
+  > [ ] 5,000 ns (Ignores kernel dispatch overhead)
+  > [x] 6,000 ns (Correctly sums dispatch and memory overhead)
+  > [ ] 0 ns (Assumes no latency benefit since FLOPs are unchanged)
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> Federated Averaging's Blind Spot</b> · <code>monitoring-reliability</code></summary>
+
+- **Interviewer:** "You are the ML engineer for a popular mobile keyboard app with 10 million users. After a recent update, your federated analytics dashboard shows that global next-word-prediction accuracy dropped by just 1%, from 80% to 79%. Digging deeper, you find this drop is entirely caused by a silent bug affecting a specific phone model that represents 20% of your user base. Explain how this seemingly small global drop can hide a significant problem and calculate the actual accuracy degradation experienced by users of that specific phone model."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often trust the aggregate metric implicitly. Seeing a 1% global drop, they might deprioritize it as statistical noise or a minor regression. They fail to recognize that in a federated system, a small global average change can mask a severe, concentrated failure affecting a large sub-population of users.
+
+  **Realistic Solution:** The core issue is that federated averaging smooths out errors across the entire fleet. A large error in a smaller segment gets diluted when averaged with the 80% of the fleet that has no error. The 1% global drop is not noise; it is a signal of a concentrated problem. The 2 million users in the affected segment are experiencing a significant degradation that is 5 times worse than the global metric suggests.
+
+  > **Napkin Math:** The global accuracy drop is the weighted average of the accuracy drops across all user segments.
+- Total Fleet Size: 10,000,000 users
+- Affected Segment Fraction: 20% (or 0.20)
+- Unaffected Segment Fraction: 80% (or 0.80)
+- Global Accuracy Drop (Δ_global): 1% (or 0.01)
+- The accuracy for the unaffected segment did not change, so their drop (Δ_unaffected) is 0.
+- Using the weighted average formula: Δ_global = (Fraction_affected × Δ_local) + (Fraction_unaffected × Δ_unaffected)
+- 0.01 = (0.20 × Δ_local) + (0.80 × 0)
+- 0.01 = 0.20 × Δ_local
+- Δ_local = 0.01 / 0.20
+- Δ_local = 0.05 or 5%
+
+Therefore, the 2 million users with the affected phone model are seeing a 5% absolute drop in prediction accuracy.
+
+  > **Key Equation:** $\Delta_{\text{global}} = \sum_{i} \text{fraction}_i \times \Delta_{\text{local}_i}$
+
+  > **Options:**
+  > [ ] The accuracy for affected users dropped by 1%. The problem is being exaggerated.
+  > [ ] The accuracy for affected users dropped by 20%. The model is completely broken for them.
+  > [x] The accuracy for affected users dropped by 5%. A significant degradation is being masked by the fleet average.
+  > [ ] It's impossible to tell the local drop without knowing the new local accuracy value directly.
+
+  📖 **Deep Dive:** [ML Operations](https://mlsysbook.ai/vol1/ops.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Federated Learning Upload Tax</b> · <code>federated-learning-privacy</code></summary>
+
+- **Interviewer:** "Your team is building a federated learning system to train a personalization model on mobile devices. The model has 5 million parameters. For privacy, you'll be using Federated Averaging, where each device sends its computed gradients (represented in FP16 precision) to the server. Explain the primary communication bottleneck for the user in this scenario and calculate the size of the data payload that needs to be uploaded per training round."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on server-side training costs and neglect the user-facing costs. The primary mistake is underestimating the impact of upload payload size on the user's data plan and battery life, which is a critical constraint in mobile environments. Calculation mistakes typically involve using the wrong precision (e.g., 4 bytes for FP32 instead of 2 bytes for FP16).
+
+  **Realistic Solution:** The primary bottleneck for the user is the **upload bandwidth**. Sending a large data payload from a mobile device can be slow, consume a significant portion of a user's monthly data allowance, and drain the battery. The server sees the aggregate, but each individual user pays the upload cost.
+
+The payload size is the number of parameters multiplied by the size of the data type used for the gradients.
+
+  > **Napkin Math:** 1. **Identify Parameters:** The model has 5,000,000 parameters.
+2. **Identify Precision:** The gradients are sent as FP16 values.
+3. **Bytes per Parameter:** FP16 (16 bits) is equal to 2 bytes.
+4. **Calculate Total Size:** 5,000,000 parameters × 2 bytes/parameter = 10,000,000 bytes.
+5. **Convert to Megabytes:** 10,000,000 bytes / (1000 × 1000) = 10 MB.
+
+  > **Key Equation:** $\text{Payload Size} = \text{Parameters} \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] 5 MB
+  > [ ] 20 MB
+  > [x] 10 MB
+  > [ ] 40 MB
+
+  📖 **Deep Dive:** [Responsible Engineering](https://mlsysbook.ai/vol1/responsible_engr.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Battery Drain A/B Test</b> · <code>mobile-ab-testing</code></summary>
+
+- **Interviewer:** "You are preparing to A/B test a new, more powerful on-device ranking model ('Model B') against the current production version ('Model A'). The primary operational concern is the impact on user battery life.
+
+From your telemetry and benchmarking, you have the following data:
+- **Model Invocations:** The model is run an average of 300 times per user per day.
+- **Run Duration:** Each model invocation lasts for 2 seconds.
+- **Power Consumption:** On a typical mobile SoC, 'Model A' consumes 3W of power during inference, while the new 'Model B' consumes 4W.
+
+To make an informed decision, you need to report the expected operational impact to your team. Calculate the *additional* battery energy, in Watt-hours (Wh), that a user in the 'Model B' cohort will consume per day compared to a user in the 'Model A' cohort."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing power (an instantaneous rate, measured in Watts) with energy (power applied over time, measured in Watt-hours). Engineers will often report the power delta (e.g., 'Model B uses 1W more') without factoring in the duty cycle (how long and how often it's used). This fails to quantify the actual impact on the phone's battery reserve.
+
+  **Realistic Solution:** The correct approach is to first calculate the power *delta* between the two models. Then, calculate the total time the model is active per day. Finally, multiply the power delta by the total active time (in hours) to find the total extra energy consumed. This provides a clear, actionable metric for the 'go/no-go' decision on the A/B test.
+
+  > **Napkin Math:** 1. **Calculate Power Delta:** The additional power consumed by Model B is `P_delta = P_model_B - P_model_A = 4W - 3W = 1W`.
+2. **Calculate Total Active Time per Day:** The model runs 300 times for 2 seconds each time. `T_active_seconds = 300 runs * 2 s/run = 600 seconds`.
+3. **Convert Active Time to Hours:** To calculate Watt-hours, we need time in hours. `T_active_hours = 600 seconds / 3600 seconds/hour = 1/6 hours`.
+4. **Calculate Extra Energy Consumed:** Multiply the power delta by the active time in hours. `E_extra = P_delta * T_active_hours = 1W * (1/6 hours) ≈ 0.167 Wh`.
+
+  > **Key Equation:** $\text{ΔEnergy (Wh)} = (P_{new} - P_{old})_W \times \frac{N_{runs} \times t_{run_s}}{3600}$
+
+  > **Options:**
+  > [ ] 1.0 W
+  > [ ] 600 Wh
+  > [x] ~0.17 Wh
+  > [ ] ~0.67 Wh
+
+  📖 **Deep Dive:** [Mobile App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Delta Update Dilemma</b> · <code>model-deployment-mobile</code></summary>
+
+- **Interviewer:** "Your team has trained a new `220 MB` Computer Vision model for your mobile app. This is too large for the App Store's `200 MB` over-the-air (OTA) download limit, hurting adoption for users on cellular data. The new model is an evolution of a `50 MB` v1 model already included in your app binary. A detailed analysis shows that `45 MB` of the v1 model's data is byte-for-byte identical to a corresponding part of the new `220 MB` model. You propose shipping a 'delta patch' to update from v1 to v2 on the user's device. Calculate the approximate size of this delta patch and determine if this strategy will solve the OTA download problem."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to confuse the delta with the simple difference in total file sizes (`220 MB - 50 MB = 170 MB`). This is incorrect because it doesn't account for the actual shared bytes which don't need to be downloaded. A delta patch needs to contain all the *new* data in the target file that wasn't in the source file. Another mistake is calculating the delta on the wrong base (`50 MB - 45 MB = 5 MB`), which only represents the discarded data from the original model.
+
+  **Realistic Solution:** A delta patch works by only shipping the data that has changed between two versions. The user's device uses the v1 model (the source) and the downloaded patch to reconstruct the full v2 model (the target). The patch must contain all the data present in v2 but *not* in v1. Since 45 MB of data is shared, the new data required is the total size of the new model minus that shared portion. This makes the patch size approximately `220 MB - 45 MB = 175 MB`. This is below the `200 MB` OTA limit, so the strategy is successful. A real-world patch would have a small overhead (a few KB or MB) for metadata and instructions, but it would still be well within the budget.
+
+  > **Napkin Math:** 1. Identify Target Model Size: 220 MB
+2. Identify On-Device (Source) Model Size: 50 MB
+3. Identify Shared Data Size: 45 MB
+4. Calculate required patch data: Target Size - Shared Size
+5. Calculation: 220 MB - 45 MB = 175 MB
+6. Compare to download limit: 175 MB < 200 MB
+7. Conclusion: The delta patch strategy works.
+
+  > **Key Equation:** $\text{Patch Size} \approx \text{Target Size} - \text{Shared Data Size}$
+
+  > **Options:**
+  > [ ] `~170 MB`: Yes, the patch size is the difference between the new and old models and is under the 200 MB limit.
+  > [ ] `~5 MB`: Yes, the patch is only the data that changed from the original 50 MB model.
+  > [x] `~175 MB`: Yes, the patch contains the new model's data minus the shared portion, and is under the 200 MB limit.
+  > [ ] `220 MB`: No, a patch is just a compressed version of the new model and won't be small enough.
+
+  📖 **Deep Dive:** [ML Operations](https://mlsysbook.ai/vol1/ops.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The 85% Delegation Fallacy</b> · <code>npu-delegation-bottleneck</code></summary>
+
+- **Interviewer:** "You are deploying a new on-device generative model to a smartphone with an Apple A17 Pro SoC. The model consists of 100 distinct operations. After running the Core ML profiler, you find that 85 of these operations are supported by the A17's Neural Engine (NPU), but the remaining 15 custom operations must fall back to the CPU for execution.
+
+Compare the time spent executing the supported ops on the NPU versus the unsupported ops on the CPU. Which component creates the performance bottleneck?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume that if 85% of operations are delegated to the fast NPU, the overall performance will be close to the NPU's speed. They apply a linear mental model (e.g., '85% fast, 15% slow') and fail to appreciate how a small fraction of very slow operations can dominate the total latency, a classic application of Amdahl's Law.
+
+  **Realistic Solution:** The CPU is the bottleneck. Although it only runs 15% of the operations, its drastically lower performance compared to the NPU means this small portion of work dominates the total inference time. The NPU finishes its 85 operations very quickly and then must wait for the CPU to finish its 15 operations. The total latency is effectively the latency of the CPU-bound portion.
+
+  > **Napkin Math:** 1. **Establish Processor Speeds:**
+   - NPU Speed: 35 TOPS (35,000 Giga-ops/sec) from the A17 Pro specs.
+   - CPU Speed: ~140 GFLOPS (140 Giga-ops/sec) for a performance core.
+
+2. **Calculate Time for Each Portion (proportional time units):**
+   - Time = Work / Rate
+   - NPU Time ∝ 85 ops / 35,000 Giga-ops/sec ≈ 0.0024 time units.
+   - CPU Time ∝ 15 ops / 140 Giga-ops/sec ≈ 0.107 time units.
+
+3. **Compare the Times:**
+   - Ratio = CPU Time / NPU Time ≈ 0.107 / 0.0024 ≈ 45x.
+
+4. **Conclusion:** The 15 operations on the CPU take approximately 45 times longer to execute than the 85 operations on the NPU. The system performance is completely dictated by the CPU bottleneck.
+
+  > **Key Equation:** $\text{Total Latency} \approx \text{Time}_{\text{NPU}} + \text{Time}_{\text{CPU}} = \frac{\text{Work}_{\text{NPU}}}{\text{Rate}_{\text{NPU}}} + \frac{\text{Work}_{\text{CPU}}}{\text{Rate}_{\text{CPU}}}$
+
+  > **Options:**
+  > [ ] The overall performance will be roughly 85% of the NPU's peak performance.
+  > [x] The CPU is the bottleneck; the 15 unsupported ops take ~45x longer than the 85 NPU ops.
+  > [ ] The NPU is the bottleneck because it executes 85% of the total operations.
+  > [ ] The CPU portion is negligible because the NPU is over 250x faster than the CPU.
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The App Memory Guillotine</b> · <code>mobile-memory-budget</code></summary>
+
+- **Interviewer:** "You're designing a new real-time camera filter for an Android app. The target device is a popular smartphone with 8 GB of total system RAM. State the approximate memory budget your ML model and its activations can safely consume without a high risk of being terminated by the OS."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to cloud or desktop development often assume they can use the majority of the device's RAM. They forget that mobile operating systems aggressively protect a large portion of RAM for the OS itself, background services, and other applications to ensure a smooth user experience. Exceeding the implicit budget leads to the app process being killed ('jank' or eviction).
+
+  **Realistic Solution:** A safe rule of thumb is that a single foreground application can use about 25% of the total system RAM. For a device with 8 GB of RAM, this means your application's total memory footprint, including the model, activations, and UI, should stay below ~2 GB.
+
+  > **Napkin Math:** Device RAM × App Budget Ratio = Safe Memory Usage
+8 GB × 0.25 = 2 GB
+This 2 GB budget must be shared between your model's weights, runtime activations, and the rest of the application's code and state.
+
+  > **Key Equation:** $\text{App Memory Budget} = \text{Device RAM} \times 0.25$
+
+  > **Options:**
+  > [ ] Roughly 6-7 GB, since the OS only needs about 1-2 GB.
+  > [x] Approximately 2 GB.
+  > [ ] Around 4 GB, which is half of the total RAM.
+  > [ ] Unlimited, as long as the user isn't running other apps.
+
+  📖 **Deep Dive:** [Mobile Systems & SoC](mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Unified Memory Trap</b> · <code>mobile-unified-memory</code></summary>
+
+- **Interviewer:** "A 7B parameter LLM, requiring 14 GB of memory in FP16, runs on a cloud GPU. A product manager asks why you can't run the same model on a flagship smartphone that has 12 GB of RAM. Identify the fundamental hardware difference that makes this infeasible."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to confuse total system RAM with dedicated accelerator VRAM. Cloud GPUs have large, private, high-bandwidth memory (HBM) pools (e.g., 80 GB on an H100). Mobile SoCs use a Unified Memory Architecture (UMA) where the CPU, GPU, and NPU all share the same physical DRAM pool with the operating system. There is no large, dedicated 'VRAM' for the NPU.
+
+  **Realistic Solution:** The core issue is that mobile devices use a Unified Memory Architecture. The 12 GB of RAM is not dedicated to the ML accelerator; it's shared by the entire system: the CPU, GPU, NPU, OS kernel, and all other running applications. A single app is typically only allowed to use a fraction of this (e.g., ~3 GB on a 12 GB device) before the OS will terminate it to preserve system stability.
+
+  > **Napkin Math:** Total System RAM: 12 GB
+Realistic App Budget: 12 GB × 0.25 ≈ 3 GB
+Model Size: 14 GB
+Result: 14 GB > 3 GB. The model is over 4.5x larger than the entire memory budget for the app.
+
+  > **Key Equation:** $\text{Memory}_{\text{Available}} \ll \text{Memory}_{\text{Required}}$
+
+  > **Options:**
+  > [ ] The phone's NPU is not powerful enough to run a 7B model.
+  > [x] The 12 GB of RAM is unified and shared with the OS, leaving a much smaller budget for the app.
+  > [ ] The phone's memory bandwidth is too low to handle the model's weights.
+  > [ ] The model needs to be converted to CoreML or TensorFlow Lite first.
+
+  📖 **Deep Dive:** [Mobile Systems & SoC](mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Battery Killer Feature</b> · <code>battery-drain-calculation</code></summary>
+
+- **Interviewer:** "Your team has developed a new real-time camera filter that causes the mobile SoC to draw a constant 4W of power. The phone has a standard 4,500 mAh battery, which operates at a nominal 3.7V. If a user starts with a full battery and uses *only* this feature, how long can the phone run before the battery is completely depleted?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to confuse units, typically by dividing the battery's milliamp-hour (mAh) rating directly by the power draw in watts (W). This is dimensionally incorrect, as it ignores the battery's voltage. Power (W) is a product of current (A) and voltage (V), while energy (Wh) is power over time.
+
+  **Realistic Solution:** The correct approach is to first calculate the total energy stored in the battery in Watt-hours (Wh), and then divide that by the power consumption in Watts (W) to find the total time in hours.
+
+1.  **Convert battery capacity to Watt-hours (Wh):**
+    Energy (Wh) = [Capacity (mAh) / 1000] * Voltage (V)
+    Energy = (4500 / 1000) * 3.7V = 4.5 Ah * 3.7V = 16.65 Wh.
+
+2.  **Calculate runtime:**
+    Time (h) = Total Energy (Wh) / Power Draw (W)
+    Time = 16.65 Wh / 4 W ≈ 4.16 hours.
+
+  > **Napkin Math:** 1. **Energy:** 4,500 mAh is 4.5 Ah. At 3.7V, that's `4.5 Ah * 3.7V = 16.65 Wh`.
+2. **Time:** `16.65 Wh / 4 W ≈ 4.2 hours`.
+
+  > **Key Equation:** $\text{Time (h)} = \frac{\text{Capacity (Ah)} \times \text{Voltage (V)}}{\text{Power (W)}}$
+
+  > **Options:**
+  > [ ] About 3.3 hours
+  > [ ] About 5.6 hours
+  > [x] About 4.2 hours
+  > [ ] About 1,125 hours
+
+  📖 **Deep Dive:** [Mobile: Systems & SoC](https://mlsysbook.ai/mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Jank Instigator</b> · <code>thermal-throttling-impact</code></summary>
+
+- **Interviewer:** "An AR game running on a Snapdragon 8 Gen 3 requires 45 TOPS to maintain a smooth 60 FPS. Under peak load, the SoC needs to draw 6W of power. However, the phone's thermal design can only sustain a 5W power draw before thermal throttling is engaged. Interpret this situation: what happens to the frame rate, and what is the approximate new FPS?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often think of throttling as a catastrophic failure (an app crash) or an arbitrary, fixed reduction (e.g., 'performance is cut in half'). In reality, modern SoCs have sophisticated Power Management ICs (PMICs) that gracefully degrade performance by reducing clock speeds to stay within a specific power (and thus thermal) envelope. The performance reduction is proportional to the power reduction.
+
+  **Realistic Solution:** The system will not crash or overheat. Instead, the PMIC will force the SoC to operate within its 5W thermal budget. Since the chip requires 6W to deliver the full 45 TOPS, its performance will be scaled down proportionally.
+
+1.  **Calculate Power Ratio:** The SoC can only operate at `5W / 6W` of its peak power, which is ~83.3%.
+
+2.  **Calculate Throttled Performance:** Assuming performance scales linearly with power, the new compute performance will be:
+    Throttled TOPS = 45 TOPS * (5W / 6W) = 37.5 TOPS.
+
+3.  **Calculate New Frame Rate:** The application's frame rate, which depends on this compute, will drop by the same ratio:
+    New FPS = 60 FPS * (37.5 TOPS / 45 TOPS) = 60 FPS * (5/6) = 50 FPS.
+
+  > **Napkin Math:** 1. **Power Ratio:** The phone must run at `5W / 6W` of its desired power.
+2. **Performance Scaling:** Assume FPS scales with power. `New FPS = 60 FPS * (5/6)`.
+3. **Result:** `60 * 5 / 6 = 50 FPS`. The game becomes noticeably less smooth, dropping 10 frames.
+
+  > **Key Equation:** $\text{FPS}_{\text{new}} = \text{FPS}_{\text{target}} \times \left( \frac{\text{Power}_{\text{limit}}}{\text{Power}_{\text{peak}}} \right)$
+
+  > **Options:**
+  > [ ] The game will crash because the SoC is drawing too much power.
+  > [ ] The frame rate will drop to 30 FPS as the system cuts performance by half.
+  > [ ] The frame rate will remain at 60 FPS, but the phone will get dangerously hot.
+  > [x] The frame rate will drop to approximately 50 FPS as the SoC scales down performance.
+
+  📖 **Deep Dive:** [Mobile: Systems & SoC](https://mlsysbook.ai/mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The A17 Pro Ridge Point</b> · <code>mobile-roofline-analysis</code></summary>
+
+- **Interviewer:** "You are an ML engineer at Apple explaining the performance of the new A17 Pro Neural Engine to an app developer. The spec sheet says the ANE delivers 35 TOPS (INT8) and the SoC has a memory bandwidth of 51.2 GB/s. Interpret these specifications by calculating the chip's roofline 'ridge point' in Operations per Byte. What does this value signify for model optimization?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to confuse the units, for example, dividing Tera-Operations (10^12) by Giga-Bytes (10^9) but forgetting the resulting factor of 1000. Another is correctly calculating the value but misinterpreting its meaning, assuming a high ridge point makes it easy to be compute-bound, when the opposite is true—it sets a high bar for the model's arithmetic intensity.
+
+  **Realistic Solution:** The ridge point is the ratio of peak compute to memory bandwidth. It indicates the minimum Arithmetic Intensity (AI) a model layer needs to be compute-bound rather than memory-bound. For the A17 Pro, this is approximately 684 Ops/Byte. This high value means that to fully utilize the 35 TOPS of compute, a layer must perform at least 684 arithmetic operations for every single byte of data it reads from memory. Any layer with an AI below this value will be limited by the 51.2 GB/s memory bottleneck, not the ANE's compute units.
+
+  > **Napkin Math:** Peak Compute = 35 TOPS = 35 * 10^12 Operations/sec
+Memory Bandwidth = 51.2 GB/s = 51.2 * 10^9 Bytes/sec
+
+Ridge Point = (35 * 10^12 Ops/sec) / (51.2 * 10^9 Bytes/sec)
+Ridge Point ≈ 683.6 Ops/Byte
+
+  > **Key Equation:** $\text{Ridge Point (Ops/Byte)} = \frac{\text{Peak Compute (Ops/sec)}}{\text{Memory Bandwidth (Bytes/sec)}}$
+
+  > **Options:**
+  > [ ] ~0.68 Ops/Byte. This is a unit-confusion error (forgetting the 1000x difference between Tera and Giga).
+  > [ ] ~1.46 Ops/Byte. This is an inversion error (dividing bandwidth by compute) and misinterprets the result.
+  > [ ] ~684 Ops/Byte. This high value means most neural network layers will be compute-bound on the A17 Pro.
+  > [x] ~684 Ops/Byte. Layers must have an arithmetic intensity greater than this to be compute-bound.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Mobile Memory Wall</b> · <code>memory-hierarchy</code></summary>
+
+- **Interviewer:** "An audio processing model on a smartphone needs to apply a filter in real-time. The filter coefficients are stored in main system memory (LPDDR5). Roughly how much slower is fetching those coefficients from DRAM compared to accessing a value already in the CPU's L1 cache?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the off-chip latency penalty on mobile SoCs, thinking it's a small factor like 5-10x. They fail to internalize that leaving the silicon die is a major time and energy event, which is why mobile NPUs have significant amounts of on-chip SRAM.
+
+  **Realistic Solution:** Accessing main system LPDDR5 DRAM is approximately 100 times slower than accessing the L1 cache. L1 cache latency is around 1 ns, while LPDDR5 latency is about 100 ns. This significant gap is the 'memory wall' and is a primary driver for using on-chip memory (SRAM) and specialized data paths in mobile NPUs.
+
+  > **Napkin Math:** If an L1 cache access took 1 second of human time, waiting for the data from LPDDR5 DRAM would feel like waiting for 1 minute and 40 seconds. This is why you can't afford to go to DRAM for every single operation in a tight latency loop (like a 16ms UI frame).
+
+  > **Key Equation:** $\text{Latency Ratio} = \frac{\text{DRAM Latency}}{\text{L1 Cache Latency}} \approx \frac{100 \text{ ns}}{1 \text{ ns}} = 100\times$
+
+  > **Options:**
+  > [ ] ~10x slower
+  > [x] ~100x slower
+  > [ ] ~1,000x slower
+  > [ ] ~2x slower
+
+  📖 **Deep Dive:** [Mobile Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The App Budget Constraint</b> · <code>vram-accounting</code></summary>
+
+- **Interviewer:** "You're trying to ship a new generative AI feature in your app. The model has 750 million parameters. Using half-precision floating point (FP16), what is the memory footprint of just the model's weights?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to use the wrong multiplier. Some candidates recall the 16-byte-per-parameter rule, but that's for training with the Adam optimizer. Others might misremember the size of an FP16 value and use 4 bytes (for FP32) or 1 byte (for INT8), leading to an answer that is off by a factor of two.
+
+  **Realistic Solution:** For inference, each FP16 parameter requires 2 bytes of storage. Therefore, a 750 million parameter model will consume 750M * 2 bytes = 1.5 billion bytes, or 1.5 GB. This is a critical first calculation for mobile deployment, as this footprint must fit within the app's overall memory budget, which is typically only a fraction of the phone's total RAM.
+
+  > **Napkin Math:** Model Parameters: 750,000,000
+Bytes per Parameter (FP16): 2
+Memory for Weights: 750,000,000 params * 2 bytes/param = 1,500,000,000 bytes = 1.5 GB. On a typical 8 GB phone, the app budget is ~2 GB, so this model already consumes 75% of the budget before even accounting for activations.
+
+  > **Key Equation:** $\text{Memory}_{\text{weights}} = \text{Parameters} \times \text{bytes/param}$
+
+  > **Options:**
+  > [ ] 750 MB
+  > [x] 1.5 GB
+  > [ ] 3.0 GB
+  > [ ] 12 GB
+
+  📖 **Deep Dive:** [Mobile Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Mobile LLM's Memory Hog</b> · <code>kv-cache-vram</code></summary>
+
+- **Interviewer:** "You are deploying a 500M parameter LLM on a mobile device to power a chatbot. The model architecture has 20 layers and a hidden dimension of 512. To maintain conversation history, you need to support a context window of 1024 tokens. Using FP16 precision, explain how you would calculate the memory required just for the KV-cache and provide the final value."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often forget one or both of the '×2' factors: the first '×2' is for storing both Keys and Values, and the second '×2' is for the 2 bytes per element in FP16 precision. Another common error is to calculate the memory for only a single token, underestimating the total memory by a factor of the sequence length.
+
+  **Realistic Solution:** The KV-cache stores a Key and a Value vector for every token in the context window, for every layer of the model. To calculate the total memory, we multiply the sequence length by the memory required per token.
+
+Memory per token = (Number of Layers) × (2 for Key and Value) × (Hidden Dimension) × (Bytes per element for FP16)
+
+The total memory is this value multiplied by the sequence length.
+
+  > **Napkin Math:** Sequence Length (S): 1024 tokens
+Number of Layers (L): 20
+Key/Value Multiplier: 2
+Hidden Dimension (H_d): 512
+Bytes per Element (B_p for FP16): 2
+
+KV Cache = S × L × 2 × H_d × B_p
+KV Cache = 1024 tokens × 20 layers × 2 (K/V) × 512 dim × 2 bytes/value
+KV Cache = 1024 × 20 × 2048
+KV Cache = 1024 × 40,960
+KV Cache = 41,943,040 bytes
+KV Cache ≈ 40 MB
+
+  > **Key Equation:** $\text{KV Cache} = S \times L \times 2 \times H_d \times B_p$
+
+  > **Options:**
+  > [ ] 20 MB
+  > [ ] 40 KB
+  > [x] 40 MB
+  > [ ] 80 MB
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The TinyML Tensor Arena Squeeze</b> · <code>sram-tensor-arena</code></summary>
+
+- **Interviewer:** "You're building a low-power keyword spotting feature for a smart wearable that connects to a mobile phone. The device uses an MCU with limited SRAM and TensorFlow Lite for Micro. Your INT8 model has a simplified structure:
+
+1. Input Tensor: `[32, 32, 1]`
+2. Conv1 Output: `[16, 16, 8]`
+3. Conv2 Output: `[8, 8, 16]`
+
+To minimize RAM, you use a 'Tensor Arena' which re-uses memory. Explain how to calculate the minimum required arena size by identifying the point of peak memory usage during inference."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to sum the sizes of all activation tensors (e.g., Input + Output1 + Output2). This is incorrect because the tensor arena reuses memory; not all tensors need to be alive simultaneously. Another error is to only account for the largest single tensor, forgetting that during an operation, both its input and output tensors must coexist in memory.
+
+  **Realistic Solution:** The Tensor Arena's peak memory usage occurs during the execution of the operation that requires the largest combined size of input and output tensors. We must calculate this for each operation and find the maximum.
+
+1.  **Executing Conv1:** Needs its input (from the model Input) and must allocate space for its output. Memory = `size(Input) + size(Conv1 Output)`.
+2.  **Executing Conv2:** The Input tensor is no longer needed. The arena can reuse that memory. Now it needs the output of Conv1 as its input, and must allocate space for its own output. Memory = `size(Conv1 Output) + size(Conv2 Output)`.
+
+The required arena size is the maximum of these two values.
+
+  > **Napkin Math:** All tensors are INT8 (1 byte per element).
+
+**Sizes:**
+- `size(Input)`: 32 × 32 × 1 = 1024 bytes (1 KB)
+- `size(Conv1 Output)`: 16 × 16 × 8 = 2048 bytes (2 KB)
+- `size(Conv2 Output)`: 8 × 8 × 16 = 1024 bytes (1 KB)
+
+**Peak Calculation:**
+- **During Conv1 op:** `size(Input) + size(Conv1 Output)` = 1 KB + 2 KB = 3 KB
+- **During Conv2 op:** `size(Conv1 Output) + size(Conv2 Output)` = 2 KB + 1 KB = 3 KB
+
+**Conclusion:** The peak memory usage is 3 KB, so the tensor arena must be at least this large.
+
+  > **Key Equation:** $\text{Arena Size} = \max_{i \in \text{ops}}(\text{Size}(\text{Input}_i) + \text{Size}(\text{Output}_i))$
+
+  > **Options:**
+  > [ ] 2 KB (Size of largest single tensor)
+  > [x] 3 KB (Peak input + output size)
+  > [ ] 4 KB (Sum of all listed tensors)
+  > [ ] 1 KB (Size of largest output tensor)
+
+  📖 **Deep Dive:** [TinyML: Microcontroller](https://mlsysbook.ai/tinyml/01_microcontroller.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Quantization Energy Dividend</b> · <code>quantization-energy-mobile</code></summary>
+
+- **Interviewer:** "Your team is optimizing a new visual search feature for your mobile app. To improve battery life, you're considering quantizing the model. State the approximate energy saving for a single compute operation (a MAC) when moving from FP16 to INT8 precision."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often mistakenly assume energy savings scale linearly with bit width (e.g., halving the bits from 16 to 8 should be a 2x saving). They also might confuse the FP16->INT8 saving with the much larger FP32->INT8 saving, or simply underestimate the hardware-level impact, thinking it's negligible. The reality is that the energy cost of a multiplier circuit doesn't scale linearly, and the savings are substantial.
+
+  **Realistic Solution:** An INT8 MAC operation is approximately 5x more energy-efficient than an FP16 MAC operation. This is a fundamental physical invariant. The savings come from simpler digital logic in the multiplier and reduced energy for data movement, both on-chip and to/from RAM. While FP32 vs INT8 is a massive ~18x saving, the FP16 vs INT8 jump is still a critical optimization for mobile battery life.
+
+  > **Napkin Math:** This is a direct ratio derived from hardware physics, not a complex calculation. From the standard invariant numbers:
+
+*   Energy(FP32) / Energy(INT8) ≈ 18×
+*   Energy(FP32) / Energy(FP16) ≈ 3.4×
+*   Therefore, the relative saving is: Energy(FP16) / Energy(INT8) ≈ 18 / 3.4 ≈ **5.3×**
+
+  > **Options:**
+  > [ ] About 2x more efficient
+  > [x] About 5x more efficient
+  > [ ] About 18x more efficient
+  > [ ] The savings are negligible (<10%)
+
+  📖 **Deep Dive:** [Numbers Every ML Systems Engineer Should Know](NUMBERS.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The App Store Memory Diet</b> · <code>quantization-memory-savings</code></summary>
+
+- **Interviewer:** "You're a mobile ML engineer shipping a new on-device feature. Your model, a 150 million parameter language model, is currently in FP16 format, occupying 300 MB of storage. To reduce the app's download size and memory footprint, you plan to quantize the model's weights to INT8. Explain the primary trade-off of this process and calculate the new memory requirement for just the model weights after quantization."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often miscalculate the memory savings by either using the wrong baseline (assuming FP32's 4 bytes) or applying the wrong reduction factor (e.g., applying a 4x reduction to an FP16 model). They may also confuse bits with bytes or incorrectly believe quantization doesn't affect storage size.
+
+  **Realistic Solution:** The primary trade-off is precision for efficiency. By reducing the number of bits per weight, the model becomes smaller and faster (especially on hardware with dedicated INT8 units like the Apple Neural Engine or Snapdragon Hexagon DSP), but there is a risk of accuracy degradation due to the loss of numerical precision. The new memory requirement is 150 MB, a 2x reduction.
+
+FP16 uses 2 bytes per parameter. INT8 uses 1 byte per parameter. Therefore, the total size is halved.
+
+  > **Napkin Math:** Original FP16 Memory = 150M params × 2 bytes/param = 300 MB
+New INT8 Memory = 150M params × 1 byte/param = 150 MB
+Memory Savings = 300 MB - 150 MB = 150 MB (a 2× reduction)
+
+  > **Key Equation:** $\text{Memory (Bytes)} = \text{Parameters} \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] 75 MB. Quantization from 32-bit floats provides a 4x reduction, so the 300 MB model becomes 75 MB.
+  > [ ] 300 MB. Quantization to INT8 doesn't affect the stored weight size, only the precision of calculations during inference.
+  > [x] 150 MB. Each 2-byte FP16 parameter is reduced to a 1-byte INT8 parameter, halving the memory.
+  > [ ] 1.2 GB. The model has 1.2 billion bits for its weights (150M x 8), which is roughly 1.2 GB.
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Depthwise Dividend</b> · <code>depthwise-separable-convolution</code></summary>
+
+- **Interviewer:** "You're a mobile ML engineer optimizing a real-time video filter. The main bottleneck is a standard 3x3 convolutional layer. Your colleague suggests replacing it with a 3x3 depthwise separable convolution. What is the approximate reduction in computational cost (FLOPs) for that single layer?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the reduction in parameters with the reduction in computation. While related, they are not the same. Another common mistake is to only consider the depthwise part of the operation and forget to add the cost of the subsequent 1x1 pointwise convolution, leading to a wild overestimation of the savings.
+
+  **Realistic Solution:** A depthwise separable convolution replaces a single, expensive standard convolution with two cheaper layers: a depthwise convolution (one filter per input channel) and a pointwise convolution (a 1x1 convolution to combine the outputs). The computational savings are typically around 8-9x for a 3x3 kernel.
+
+  > **Napkin Math:** The cost ratio is defined by (Cost_Depthwise + Cost_Pointwise) / Cost_Standard. This simplifies to the elegant formula: (1/Output_Channels) + (1/Kernel_Size^2).
+
+For a typical mobile CNN layer with 128 output channels and a 3x3 kernel:
+- (1/128) + (1/3^2)
+- ≈ 0.0078 + 0.111
+- ≈ 0.12
+
+The total cost is ~12% of the original, which corresponds to a reduction of approximately 1 / 0.12 ≈ 8.33x.
+
+  > **Key Equation:** $\frac{\text{FLOPs}_{\text{DepthwiseSep}}}{\text{FLOPs}_{\text{Standard}}} \approx \frac{1}{C_{out}} + \frac{1}{K^2}$
+
+  > **Options:**
+  > [ ] ~2x reduction
+  > [x] ~8-9x reduction
+  > [ ] ~64x reduction
+  > [ ] ~1x (no significant change)
+
+  📖 **Deep Dive:** [Network Architectures](https://mlsysbook.ai/vol1/dnn_architectures.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Illusion of Symmetric Scaling</b> · <code>scaling-laws</code></summary>
+
+- **Interviewer:** "A mobile vision model, composed mostly of depthwise separable convolutions, currently requires 5 GFLOPs for a single inference. Your team is exploring two scaling strategies to improve accuracy: (A) doubling the width (number of channels) of all layers, or (B) doubling the input image resolution. Assuming other factors remain constant, interpret how each strategy impacts the computational cost and calculate the new estimated FLOPs."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often mistakenly assume scaling is linear, believing that doubling the width or resolution will only double the FLOPs. Another common error is to correctly remember that one factor scales quadratically but assume the other scales linearly, failing to recognize that both width and resolution have a quadratic impact on computation in standard 2D convolutional layers.
+
+  **Realistic Solution:** Both strategies result in a roughly 4x increase in computational cost, bringing the total to ~20 GFLOPs. FLOPs in a convolutional layer are proportional to the spatial dimensions (H, W) and the channel dimensions (Cin, Cout).
+1. Doubling the resolution (H, W → 2H, 2W) increases the number of spatial locations where convolutions are applied by a factor of 4.
+2. In a depthwise separable block, the cost is dominated by the `1x1` pointwise convolution. Doubling the width (Cin, Cout → 2Cin, 2Cout) increases the FLOPs of this dominant layer by a factor of 4.
+Therefore, both scaling strategies have the same, quadratic impact on computational requirements.
+
+  > **Napkin Math:** The general scaling rule for FLOPs is FLOPs ∝ width² × resolution².
+
+Baseline FLOPs = 5 GFLOPs.
+
+1.  **Strategy A (Double Width):** The width multiplier (α) becomes 2.
+    New FLOPs ≈ 5 GFLOPs × (α=2)² = 5 × 4 = 20 GFLOPs.
+
+2.  **Strategy B (Double Resolution):** The resolution multiplier (ρ) becomes 2.
+    New FLOPs ≈ 5 GFLOPs × (ρ=2)² = 5 × 4 = 20 GFLOPs.
+
+  > **Key Equation:** $\text{FLOPs} \propto \alpha^2 \times \rho^2 \text{ (where } \alpha \text{ is width scale and } \rho \text{ is resolution scale)}$
+
+  > **Options:**
+  > [ ] Both strategies result in ~10 GFLOPs.
+  > [ ] Width scaling: ~20 GFLOPs; Resolution scaling: ~10 GFLOPs.
+  > [x] Both strategies result in ~20 GFLOPs.
+  > [ ] Width scaling: ~10 GFLOPs; Resolution scaling: ~20 GFLOPs.
+
+  📖 **Deep Dive:** [DNN Architectures](https://mlsysbook.ai/vol1/dnn_architectures.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Mobile Jank Deadline</b> · <code>real-time-deadline</code></summary>
+
+- **Interviewer:** "You're designing an on-device feature that applies a generative AI filter to a live camera feed for a social media app. To ensure a smooth, 60 FPS user experience, what is the absolute maximum latency your model inference can have before the user perceives 'jank' or stutter?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Confusing mobile UI rendering deadlines with web service latency budgets. Many engineers recall the ~100ms number for web requests, but on mobile, the physics of the display dictate a much stricter budget. Dropping a single frame at 60 FPS is immediately noticeable.
+
+  **Realistic Solution:** Approximately 16ms. A 60Hz display refreshes every 16.67ms (1000ms / 60). If model inference plus all other UI work for a frame exceeds this budget, a frame is dropped, leading to visible stutter or 'jank'.
+
+  > **Napkin Math:** Frame Budget = 1000 ms / Refresh Rate. For a standard 60 FPS display, this is `1000 / 60 ≈ 16.67 ms`. This is the total time the system has to render everything for that frame, including model inference, UI drawing, and OS overhead.
+
+  > **Key Equation:** T_{\text{frame}} = \frac{1000 \text{ms}}{\text{FPS}}
+
+  > **Options:**
+  > [ ] ~100 ms
+  > [ ] ~33 ms
+  > [x] ~16 ms
+  > [ ] ~1 ms
+
+  📖 **Deep Dive:** [Device Hardware](mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Duty Cycle Power Trap</b> · <code>power-consumption</code></summary>
+
+- **Interviewer:** "Your team is optimizing a real-time voice assistant on a smartphone. You have two model options. Model A is larger, running at 5W peak power, but its 'voice activity detection' is excellent, so it only has a 5% duty cycle. Model B is smaller, running at 3W peak, but its VAD is less precise, resulting in a 10% duty cycle. For a 1-hour period, which model drains more battery?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing only on the peak power draw (3W vs 5W) and ignoring the time dimension. Total energy consumption, which is what drains the battery, is the integral of power over time. A lower-power model that is active for longer can easily use more energy.
+
+  **Realistic Solution:** Model B drains more battery. Although its peak power is lower, its higher duty cycle results in greater total energy consumption over the hour.
+
+  > **Napkin Math:** Energy = Power × Duty Cycle × Time.
+- Model A: `5W × 0.05 × 1 hour = 0.25 Wh`.
+- Model B: `3W × 0.10 × 1 hour = 0.30 Wh`.
+Model B consumes 20% more energy, thus draining more battery.
+
+  > **Key Equation:** E = P_{\text{active}} \times t_{\text{active}}
+
+  > **Options:**
+  > [ ] Model A (the 5W model)
+  > [x] Model B (the 3W model)
+  > [ ] They drain the same amount
+  > [ ] It's impossible to tell without knowing the device's battery capacity
+
+  📖 **Deep Dive:** [App Experience](mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Jank Budget</b> · <code>real-time-deadline</code></summary>
+
+- **Interviewer:** "You're designing an on-device generative AI feature for a chat app that suggests replies in real-time. The app's UI must remain perfectly smooth, targeting a 60 FPS refresh rate. You measure a candidate model and find its Time Per Output Token (TPOT) is 25ms on the target mobile device's NPU. Explain if this model is acceptable for the feature."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus only on the average model speed and forget the strict, non-negotiable deadlines of the UI render loop. They might think "25ms is fast!" without comparing it to the frame budget, or they assume inference can happen "in the background" without affecting the main thread that needs the result.
+
+  **Realistic Solution:** The model is not acceptable. A 60 FPS UI has a strict budget of approximately 16.7ms to complete all work for a single frame (drawing, logic, inference, etc.). An ML inference that takes 25ms by itself completely consumes and misses this budget. This will block the UI thread while it waits for the result, causing dropped frames and a visibly stuttering or "janky" user experience. The system cannot sustain real-time interaction.
+
+  > **Napkin Math:** 1. Calculate the frame time budget for the target FPS: `1000 ms / 60 FPS = 16.7 ms/frame`.
+2. Compare the model's inference time to the available budget: `25 ms > 16.7 ms`.
+3. Conclusion: The deadline is missed by `25 ms - 16.7 ms = 8.3 ms` on every single frame where a token is generated, guaranteeing UI stutter.
+
+  > **Key Equation:** T_{\text{frame}} = \frac{1000}{\text{FPS}}
+
+  > **Options:**
+  > [ ] Yes, the NPU runs in parallel, so it won't affect the UI rendering on the GPU/CPU.
+  > [ ] Yes, 25ms is very fast, much faster than the 60 FPS rate, so it will fit.
+  > [x] No, because 25ms exceeds the ~16.7ms frame budget for a 60 FPS UI, causing guaranteed jank.
+  > [ ] No, the model's power consumption will be too high at 25ms per token.
+
+  📖 **Deep Dive:** [Mobile: Systems & SoC](https://mlsysbook.ai/mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Voice Assistant Queue</b> · <code>queueing-theory</code></summary>
+
+- **Interviewer:** "You are building a real-time transcription feature for a voice assistant on a mobile device. The audio system provides a new chunk of audio for processing every 100ms. Your speech-to-text model takes, on average, 90ms to process one of these chunks on the device's NPU. Contrast the arrival rate with the processing rate and explain whether the inference queue will be stable over time."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Confusing high resource utilization with instability. An engineer might see that the NPU is busy 90% of the time and incorrectly conclude that the system is "at its limit" and therefore unstable. Stability is determined only by whether the average arrival rate is less than the average processing rate.
+
+  **Realistic Solution:** The system is stable. The key is to compare the time between arrivals (arrival interval) with the time it takes to process a single arrival (service time). Here, the arrival interval is 100ms and the service time is 90ms. Since the device can process a request faster than they arrive (`90ms < 100ms`), the queue of pending audio chunks will not grow indefinitely. The NPU will have approximately 10ms of idle time between finishing one chunk and receiving the next, so it can always catch up. The NPU utilization will be high (90%), but the system remains stable.
+
+  > **Napkin Math:** 1. Identify Arrival Interval: `100 ms`.
+2. Identify Processing Time (Service Time): `90 ms`.
+3. Stability Check: Is `Processing Time < Arrival Interval`? `90 ms < 100 ms`. Yes.
+4. Conclusion: The system is stable.
+5. Optional - Calculate Utilization (`ρ`): `ρ = Processing Time / Arrival Interval = 90 ms / 100 ms = 0.9` or 90%.
+
+  > **Key Equation:** \text{Stability} \iff \text{Arrival Rate} < \text{Processing Rate}
+
+  > **Options:**
+  > [ ] The system is unstable because at 90% utilization, there is no margin for error and the queue will eventually overflow.
+  > [x] The system is stable because the processing time (90ms) is less than the arrival interval (100ms).
+  > [ ] The system is unstable because the work (90ms) takes much longer than the idle time (10ms).
+  > [ ] The system is stable because mobile NPUs like the Snapdragon 8 Gen 3 (45 TOPS) are powerful enough for simple audio.
+
+  📖 **Deep Dive:** [Mobile: App & Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Cost of a Glance</b> · <code>duty-cycling</code></summary>
+
+- **Interviewer:** "You are designing a 'glanceable AI' feature for a smartphone that wakes up, runs a small model for 1 second, and then sleeps for 9 seconds. The SoC consumes 5W when active and a negligible 10µW when in deep sleep. What is the approximate average power consumption of this feature over its 10-second cycle?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often state the peak power (5W) instead of the average, forgetting that the device spends most of its time in a low-power state. Another common error is to incorrectly average the power states (5W and 10µW) without weighting by time.
+
+  **Realistic Solution:** The average power is the time-weighted average of the power consumed in each state. Since the device is active for 1 out of 10 seconds, the average power is dominated by the active state, but scaled down by the duty cycle. The sleep power is several orders of magnitude smaller and is effectively negligible in this calculation.
+
+  > **Napkin Math:** The duty cycle is 1 second active out of a 10-second period.
+
+`P_avg = (P_active × t_active + P_sleep × t_sleep) / t_period`
+`P_avg = (5 W × 1s + 10 µW × 9s) / 10s`
+`P_avg ≈ (5 W × 1s) / 10s = 0.5 W`
+
+Converting to milliwatts: `0.5 W = 500 mW`.
+
+  > **Key Equation:** $\text{P}_{\text{avg}} = \frac{\text{P}_{\text{active}} \cdot t_{\text{active}} + \text{P}_{\text{sleep}} \cdot t_{\text{sleep}}}{t_{\text{period}}}$
+
+  > **Options:**
+  > [ ] 5 W
+  > [ ] 2.5 W
+  > [x] 500 mW
+  > [ ] 50 mW
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Smart Reply Battery Drain</b> · <code>battery-drain-duty-cycle</code></summary>
+
+- **Interviewer:** "You're building a 'smart reply' feature. The inference runs on the mobile SoC, drawing 4W of power for the 200ms it takes to generate a reply. If a typical user receives 10 messages per hour, calculate the total energy this feature will consume in a full 24-hour day."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse power (Watts) and energy (Watt-hours) or make unit conversion errors, especially between milliseconds, seconds, and hours. A common mistake is to calculate the power for a continuous operation rather than a duty-cycled one, leading to a massive overestimation of battery impact.
+
+  **Realistic Solution:** The correct approach is to calculate the total active time of the feature over the 24-hour period and multiply that by the power draw. First, find the total number of inferences, then the total time the SoC is active, and finally convert that to energy in Watt-hours.
+
+1.  **Total Inferences:** 10 inferences/hour * 24 hours = 240 inferences
+2.  **Total Active Time (in seconds):** 240 inferences * 0.2 seconds/inference = 48 seconds
+3.  **Convert Active Time to Hours:** 48 seconds / 3600 seconds/hour = 0.01333 hours
+4.  **Calculate Total Energy:** 4 Watts * 0.01333 hours ≈ 0.053 Wh
+
+  > **Napkin Math:** E = P_{\text{inference}} \times (N_{\text{inferences}} \times t_{\text{inference}})
+E = 4\text{W} \times ( (10 \frac{\text{inf}}{\text{hr}} \times 24 \text{hr}) \times 0.2 \frac{\text{s}}{\text{inf}} )
+E = 4\text{W} \times ( 240 \text{ inf} \times 0.2 \frac{\text{s}}{\text{inf}} )
+E = 4\text{W} \times 48 \text{ s}
+E = 192 \text{ Watt-seconds}
+\text{Convert to Watt-hours: } \frac{192 \text{ Ws}}{3600 \text{ s/hr}} \approx 0.053 \text{ Wh}
+
+  > **Key Equation:** E = P \times t
+
+  > **Options:**
+  > [ ] 96 Wh
+  > [ ] 53.3 Wh
+  > [x] 0.053 Wh
+  > [ ] 192 Wh
+
+  📖 **Deep Dive:** [Mobile: Battery Drain](https://mlsysbook.ai/mobile/#battery-drain)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Mobile Ridge Point</b> · <code>thermal-throttling-ridge-point</code></summary>
+
+- **Interviewer:** "An engineer profiles a new vision model on a Snapdragon 8 Gen 3 SoC, which has 45 TOPS of peak INT8 compute and 77 GB/s of memory bandwidth. They notice performance drops significantly after a few seconds of continuous inference. The model has an arithmetic intensity of 200 Ops/Byte. Interpret these numbers to explain why the device is likely thermal throttling."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to assume that high compute workloads (high TOPS) are always the cause of heat. Engineers often misidentify a model as 'compute-bound' without calculating the hardware's ridge point. They fail to recognize that being 'memory-bound' is often far more energy-intensive (and thus generates more heat) due to the high cost of data movement from DRAM compared to on-chip computation.
+
+  **Realistic Solution:** The key is to compare the model's arithmetic intensity to the SoC's ridge point. The ridge point is the minimum arithmetic intensity required to be compute-bound.
+
+1.  **Calculate SoC Ridge Point:** Peak Compute / Memory Bandwidth
+    (45 x 10^12 Ops/s) / (77 x 10^9 Bytes/s) ≈ 584 Ops/Byte.
+
+2.  **Compare:** The model's AI (200 Ops/Byte) is significantly lower than the SoC's ridge point (584 Ops/Byte).
+
+3.  **Conclusion:** This means the model is **memory-bound**. The processor is spending most of its time and energy waiting for data to arrive from DRAM, rather than performing calculations. Accessing off-chip DRAM is ~580x more energy-intensive than an FP16 compute operation. This high-energy data movement generates immense heat, quickly exceeding the SoC's passive cooling capacity (3-5W) and forcing the OS to thermal throttle.
+
+  > **Napkin Math:** \text{Ridge Point} = \frac{\text{Peak Compute}}{\text{Memory Bandwidth}}
+\text{Ridge Point} = \frac{45 \times 10^{12} \text{ Ops/s}}{77 \times 10^9 \text{ Bytes/s}} \approx 584 \text{ Ops/Byte}
+
+\text{Model AI} (200) < \text{SoC Ridge Point} (584) \implies \text{Memory-Bound}
+
+  > **Key Equation:** \text{Ridge Point} = \frac{\text{Peak Compute (Ops/s)}}{\text{Memory Bandwidth (Bytes/s)}}
+
+  > **Options:**
+  > [ ] The model is compute-bound; its high arithmetic intensity overwhelms the processor, generating excessive heat.
+  > [ ] The phone's ridge point is ~0.58 Ops/Byte, so the model is severely compute-bound, causing it to overheat.
+  > [x] The model is memory-bound; its arithmetic intensity is below the SoC's ridge point, causing high-energy DRAM access that generates heat.
+  > [ ] The SoC's 45 TOPS is insufficient for a model with an AI of 200, causing a bottleneck that leads to throttling.
+
+  📖 **Deep Dive:** [Hardware Acceleration: Roofline Model](https://mlsysbook.ai/vol1/hw_acceleration.html#the-roofline-model-a-visual-tool-for-bottleneck-analysis)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Fusion Overhead Tax</b> · <code>operator-fusion</code></summary>
+
+- **Interviewer:** "You're optimizing a vision model on a smartphone. A profiler shows two sequential operators, a 2D convolution and a ReLU, are taking up a significant portion of your latency budget. The intermediate activation tensor between them is 1 MB. The Conv compute takes 1.0 ms and the ReLU compute takes 0.1 ms. The phone's SoC has LPDDR5 memory with a bandwidth of 51.2 GB/s.
+
+Compare the total latency of running these as separate, unfused operators versus a single fused operator. What percentage of the unfused execution time is pure memory overhead?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus only on the raw compute time of operators and assume memory access is free, especially for small-looking tensors. They forget that even 1 MB must be written to and then read back from main memory between unfused operators, constituting a 'tax' on latency. Another common error is only accounting for the write or the read, not the full roundtrip.
+
+  **Realistic Solution:** In the unfused case, the 1 MB intermediate tensor must be written to LPDDR5 DRAM and then read back by the next operator. In the fused case, the intermediate result stays in the NPU's much faster local SRAM, making the memory transfer time negligible.
+
+The latency difference is the time it takes for this DRAM roundtrip. The percentage overhead is this roundtrip time divided by the total unfused time.
+
+  > **Napkin Math:** 1. **Calculate Memory Transfer Time:**
+   - Bandwidth: 51.2 GB/s = 51,200 MB/s
+   - Write Time: 1 MB / 51,200 MB/s = 0.0000195s ≈ 0.02 ms
+   - Read Time: 1 MB / 51,200 MB/s = 0.0000195s ≈ 0.02 ms
+   - Total Memory Time: 0.02 ms + 0.02 ms = 0.04 ms
+
+2. **Calculate Total Unfused Latency:**
+   - T_unfused = T_conv + T_mem_write + T_mem_read + T_relu
+   - T_unfused = 1.0 ms + 0.02 ms + 0.02 ms + 0.1 ms = 1.14 ms
+
+3. **Calculate Total Fused Latency:**
+   - T_fused = T_conv + T_relu = 1.0 ms + 0.1 ms = 1.10 ms
+
+4. **Calculate Overhead Percentage:**
+   - Overhead = (Total Memory Time / Total Unfused Latency)
+   - Overhead = (0.04 ms / 1.14 ms) * 100% ≈ 3.5%
+
+  > **Key Equation:** $\text{T}_{\text{unfused}} = \text{T}_{\text{op1}} + \text{T}_{\text{DRAM\_write}} + \text{T}_{\text{DRAM\_read}} + \text{T}_{\text{op2}}$
+
+  > **Options:**
+  > [ ] ~1.7% overhead. Fusion saves writing the intermediate tensor to DRAM.
+  > [ ] 0% overhead. The memory access time is negligible compared to compute.
+  > [x] ~3.5% overhead. Fusion saves a DRAM write/read roundtrip.
+  > [ ] ~22% overhead. The memory bandwidth is the main bottleneck.
+
+  📖 **Deep Dive:** [Mobile Device Hardware](mobile/01_device_hardware.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The 7B Parameter Illusion</b> · <code>mobile-deployment-constraints</code></summary>
+
+- **Interviewer:** "The research team is excited about a new 7B parameter language model for on-device search. They claim its quality is state-of-the-art. As the mobile ML systems engineer, what is the first number you should state to ground the conversation in reality? Specifically, identify the minimum memory footprint required just to load this model's weights in FP16."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to cloud resources often underestimate the strictness of mobile memory budgets. They may believe a large model can be made to fit through clever swapping or quantization, without first realizing that the raw weight size alone makes it a non-starter, exceeding not just the typical app budget but often the total RAM of the entire device.
+
+  **Realistic Solution:** The minimum memory footprint is ~14 GB. This is calculated by taking the number of parameters and multiplying by the size of each parameter in memory. For FP16, each parameter requires 2 bytes. This size alone makes the model infeasible for any current mobile device, which typically has a total RAM of 8-16 GB and a strict per-app memory budget of only 2-4 GB.
+
+  > **Napkin Math:** 7 Billion Parameters × 2 Bytes/Parameter (FP16) = 14 Billion Bytes = 14 GB. This is far greater than a typical 2-4 GB mobile app memory budget, making it an instant non-starter.
+
+  > **Key Equation:** $\text{Inference Memory (FP16)} = \text{Parameters} \times 2 \text{ bytes}$
+
+  > **Options:**
+  > [ ] ~7 GB
+  > [ ] ~28 GB
+  > [x] ~14 GB
+  > [ ] ~2 GB
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Memory Budget</b> · <code>ota-memory-budget</code></summary>
+
+- **Interviewer:** "A junior engineer on your team proposes an OTA update for your mobile app's on-device RAG feature. The update swaps the current 500M parameter INT8 model for a new 1B parameter INT8 model. The target device has 8 GB of RAM, and your app's peak memory budget is 25% of the device's RAM. The current app version, with the old model included, consumes 1.2 GB at peak. Explain to the junior engineer, using napkin math, whether this update is safe to roll out from a memory perspective."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to add the full size of the new model (1.0 GB) to the app's current memory usage (1.2 GB), resulting in an incorrect peak of 2.2 GB. This forgets that the old model's memory (0.5 GB) is being replaced, so only the *delta* should be added. Another mistake is to use the wrong precision, such as calculating the model size using FP16 (2 bytes/param) instead of the specified INT8 (1 byte/param).
+
+  **Realistic Solution:** The update is safe to roll out. The key is to calculate the *increase* in memory, not the absolute size of the new model, and add that to the current peak usage. The new peak memory will be 1.7 GB, which is comfortably within the 2.0 GB budget.
+
+  > **Napkin Math:** 1. **Calculate Memory Budget:** The device has 8 GB of RAM, and the app's budget is 25%.
+   `8 GB RAM * 0.25 = 2.0 GB`
+2. **Calculate Old Model Size:** The old model has 500M parameters and is in INT8 (1 byte/param).
+   `500,000,000 params * 1 byte/param = 500 MB = 0.5 GB`
+3. **Calculate New Model Size:** The new model has 1B parameters and is in INT8 (1 byte/param).
+   `1,000,000,000 params * 1 byte/param = 1,000 MB = 1.0 GB`
+4. **Calculate Memory Increase (Delta):** The increase is the size of the new model minus the size of the old one.
+   `1.0 GB (new) - 0.5 GB (old) = 0.5 GB`
+5. **Calculate New Peak Memory:** Add the delta to the current peak usage.
+   `1.2 GB (current peak) + 0.5 GB (increase) = 1.7 GB`
+6. **Conclusion:** The new peak memory of 1.7 GB is less than the 2.0 GB budget. The update is safe.
+
+  > **Key Equation:** $\text{New Peak Memory} = (\text{Current Peak}) + (\text{New Model Size} - \text{Old Model Size})$
+
+  > **Options:**
+  > [ ] Unsafe. The new 1.0 GB model added to the 1.2 GB base usage is 2.2 GB, which exceeds the 2.0 GB budget.
+  > [ ] Unsafe. A 1B parameter model requires 2.0 GB of memory (using 2 bytes/param), which is the entire budget.
+  > [x] Safe. The memory increase is only 0.5 GB, bringing the new peak to 1.7 GB, which is under the 2.0 GB budget.
+  > [ ] Safe. The OS will use memory mapping, so the model's size on disk doesn't count against the app's RAM budget.
+
+  📖 **Deep Dive:** [Mobile: Ship & Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Frozen UI Watchdog</b> · <code>fault-tolerance</code></summary>
+
+- **Interviewer:** "An on-device visual search model sometimes gets stuck in a hard loop during inference, freezing the application's UI. The operating system eventually terminates the app with an 'Application Not Responding' (ANR) error, but the user experience is terrible. What is a standard, low-level timer mechanism used to proactively detect this kind of 'frozen' state and trigger a faster, more graceful recovery?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often suggest relying on the OS's default ANR timeout (e.g., 5 seconds on Android), which is far too slow for a good user experience. Others might propose complex, application-level solutions like asynchronous task cancellation, which can't break out of a hard CPU-bound loop on the main thread, or network-style heartbeats, which are irrelevant for an intra-process freeze.
+
+  **Realistic Solution:** The correct mechanism is a **watchdog timer**. The main UI thread periodically 'pets' the watchdog. If the inference call blocks the thread and prevents this 'petting' for a configured timeout (e.g., 100-200ms), the watchdog triggers a pre-defined recovery action. This could be logging the error, killing the inference task, and restoring the UI to an interactive state, all before the much slower OS-level ANR is ever triggered.
+
+  > **Napkin Math:** The UI thread must update every **16ms** to avoid jank (the 'jank budget'). The default OS ANR timeout is **~5,000ms**. By setting a software watchdog to a **100ms** timeout, you can detect the freeze and initiate recovery **50 times faster** (5000ms / 100ms) than the OS default, preventing a user-facing crash.
+
+  > **Key Equation:** $\text{T}_{\text{watchdog}} \ll \text{T}_{\text{ANR}}$
+
+  > **Options:**
+  > [x] A software watchdog timer
+  > [ ] Relying on the OS 'Application Not Responding' (ANR) timeout
+  > [ ] A network-based health check to a remote server
+  > [ ] Wrapping the inference call in a try/except block
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Watchdog's Power Tax</b> · <code>mobile-monitoring-power</code></summary>
+
+- **Interviewer:** "Your team has built a 'Personal Safety' app that continuously listens for a wake-word. To ensure this critical process doesn't silently crash, you've implemented a watchdog timer. The timer wakes the CPU for a 50-millisecond health check every 5 minutes. During this brief check, the CPU consumes 50 mW.
+
+Explain how you would calculate the total energy consumed *by the watchdog checks alone* over a 24-hour period. What is the final value in Joules?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the cumulative energy cost of frequent, short wakeups. They might miscalculate the total number of checks or make unit conversion errors between milliwatts/watts and milliseconds/seconds, leading to an answer that is off by orders of magnitude.
+
+  **Realistic Solution:** The correct approach is to first calculate the total number of watchdog checks in a day, then find the total 'active' time, and finally multiply that by the power consumption, ensuring all units are in base form (Seconds, Watts, Joules).
+
+1.  **Calculate total checks:** There are (60 minutes / 5 minutes) = 12 checks per hour. Over a full day, this is 12 checks/hour × 24 hours = 288 checks.
+2.  **Calculate total active time:** The total time the CPU is active due to the watchdog is 288 checks × 50 ms/check = 14,400 ms.
+3.  **Convert time to seconds:** 14,400 ms is equal to 14.4 seconds.
+4.  **Calculate energy:** Using the formula `Energy = Power × Time`, and converting 50 mW to 0.050 Watts, we get: 0.050 W × 14.4 s = 0.72 Joules.
+
+  > **Napkin Math:** Checks per day: (24h * 60m/h) / 5m = 288 checks
+Total active time: 288 checks * 50ms = 14,400ms = 14.4s
+Total energy: 14.4s * 50mW = 14.4s * 0.050W = 0.72 J
+
+  > **Key Equation:** $\text{Energy (Joules)} = \text{Power (Watts)} \times \text{Time (seconds)}$
+
+  > **Options:**
+  > [ ] 720 J
+  > [ ] 0.03 J
+  > [x] 0.72 J
+  > [ ] 14.4 J
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Sensor Bandwidth Skew</b> · <code>training-serving-skew</code></summary>
+
+- **Interviewer:** "A mobile vision model, trained on pristine 4K images, is underperforming on-device. A likely source of training-serving skew is the physical data link between the camera sensor and the SoC, which can force on-the-fly compression or resolution scaling not present in the training data. What is the name of this common camera interface, and what is its typical maximum bandwidth in a modern smartphone?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on compute (NPU TOPS) or system memory bandwidth (LPDDR5) and forget the physical pipe from the sensor itself. They might assume this bandwidth is effectively infinite or mistake it for other interconnects like USB or PCIe, which have different bandwidth characteristics and are not used for this purpose in a tightly integrated SoC.
+
+  **Realistic Solution:** The interface is the MIPI CSI-2 (Camera Serial Interface 2). In a typical high-end smartphone using a 4-lane configuration, its bandwidth is approximately 2.5 GB/s. If a model's desired input resolution and frame rate exceed this physical limit, the camera system is forced to drop frames, reduce resolution, or apply heavy compression, introducing artifacts that cause skew from the clean training data.
+
+  > **Napkin Math:** A single uncompressed 4K (3840x2160) RGB frame (3 bytes/pixel) is ~25 MB. To run at 120 FPS, the required data rate is 25 MB/frame * 120 FPS = 3,000 MB/s or 3 GB/s. This exceeds the typical ~2.5 GB/s MIPI CSI-2 bandwidth, forcing a compromise on data quality (e.g., using compression), thus causing skew.
+
+  > **Key Equation:** $\text{Required Bandwidth} = \text{Width} \times \text{Height} \times \text{BytesPerPixel} \times \text{FPS}$
+
+  > **Options:**
+  > [ ] LPDDR5, ~51.2 GB/s
+  > [x] MIPI CSI-2, ~2.5 GB/s
+  > [ ] UFS 4.0, ~4.2 GB/s
+  > [ ] SPI, ~10 Mbps
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Camera Pre-processing Skew</b> · <code>training-serving-skew</code></summary>
+
+- **Interviewer:** "You're developing a new 'Smart Coach' feature on a mobile app that analyzes a user's workout form using the phone's camera. The initial model was trained in the cloud on a dataset of 4K (3840x2160) raw camera sensor frames, where each pixel is represented by 16 bits (2 bytes). For on-device performance, the live camera feed is pre-processed into a 224x224 RGB image (3 bytes per pixel) before being fed to the model. Explain the primary risk of this pipeline and calculate the approximate data reduction factor between a single training frame and a single serving frame."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus only on the resolution change (e.g., '4K vs 224p') and ignore the change in color representation and processing (e.g., RAW vs. RGB). The root cause of the skew isn't just the size difference, but that the model was trained on pristine, perfectly processed data and now sees 'fast and lossy' data in production, including artifacts from on-the-fly downsampling and color conversion it never saw during training.
+
+  **Realistic Solution:** The primary risk is training-serving skew. The model, trained on high-fidelity RAW data, will likely underperform when running inference on the heavily compressed and differently processed RGB data it sees in the app. The on-device preprocessing pipeline (including downsampling and color space conversion) introduces artifacts that the model has not been trained to handle. The best practice is to ensure the training pipeline exactly mimics the on-device preprocessing to eliminate this skew.
+
+  > **Napkin Math:** 1. **Calculate Training Frame Size:**
+   - Dimensions: 3840 pixels × 2160 pixels
+   - Bytes per pixel: 2 bytes (for 16-bit RAW)
+   - Total: `3840 * 2160 * 2 = 16,588,800 bytes` (~16.6 MB)
+
+2. **Calculate Serving Frame Size:**
+   - Dimensions: 224 pixels × 224 pixels
+   - Bytes per pixel: 3 bytes (for RGB)
+   - Total: `224 * 224 * 3 = 150,528 bytes` (~150 KB)
+
+3. **Calculate Reduction Factor:**
+   - Ratio: `16,588,800 / 150,528 ≈ 110.2`
+   - The data is reduced by a factor of approximately 110x.
+
+  > **Key Equation:** $\text{Data Reduction} = \frac{W_{\text{train}} \times H_{\text{train}} \times Bpp_{\text{train}}}{W_{\text{serve}} \times H_{\text{serve}} \times Bpp_{\text{serve}}}$
+
+  > **Options:**
+  > [ ] A ~14x reduction. This is a typical and acceptable trade-off for mobile performance.
+  > [ ] A ~330x reduction. This skew is caused by forgetting to account for the 3 color channels in the serving image.
+  > [x] A ~110x reduction. This causes training-serving skew because the on-device preprocessing artifacts are not in the training data.
+  > [ ] A ~880x reduction. This level of compression is too high and indicates a miscalculation in bit-to-byte conversion.
+
+  📖 **Deep Dive:** [Mobile: Shipping and Updating](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Two-Billion Dollar Keystroke</b> · <code>federated-learning-economics</code></summary>
+
+- **Interviewer:** "A product manager at a major mobile OS company asks you to evaluate the cost of building a next-generation keyboard prediction model. They project 100 million users. The ML team proposes two paths:
+
+A) **Centralized Training:** Collect all user keystrokes on a central server. Estimated server and network cost is $5M/year.
+B) **Federated Learning (FL):** Train the model on-device without data leaving the user's phone. Estimated engineering and mobile compute cost is $15M/year.
+
+From a Total Cost of Ownership (TCO) perspective, what is the most important factor to state when justifying the higher cost of the Federated Learning approach?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often myopically focus on direct engineering costs (servers, network, salaries) or secondary technical benefits like bandwidth savings. They fail to quantify the overwhelming financial and reputational cost of the *risk* associated with centralizing sensitive user data, which is the primary driver for using technologies like Federated Learning.
+
+  **Realistic Solution:** The single most important factor is the catastrophic financial and legal liability of a data breach. Centralizing keystroke data from 100 million users creates a massive security target. A breach could easily lead to regulatory fines (like GDPR) and class-action lawsuits that dwarf the direct engineering costs, making the higher upfront cost of FL a form of insurance.
+
+  > **Napkin Math:** Let's model the cost of a data breach:
+- **Users affected:** Assume a breach impacts 20% of the 100 million users = 20,000,000 users.
+- **Regulatory Fine:** A conservative fine under GDPR/CCPA might be $50 per user.
+- **Potential Liability:** 20,000,000 users × $50/user = $1,000,000,000.
+This billion-dollar risk makes the $10M difference in annual engineering cost between the two approaches negligible. The primary economic driver is risk mitigation, not direct implementation cost.
+
+  > **Key Equation:** $\text{TCO} = \text{CapEx} + \text{OpEx} + \text{Risk}_{liability}$
+
+  > **Options:**
+  > [ ] The $10M/year cost increase is not justifiable as it triples the project's budget.
+  > [ ] FL saves significant network costs by not having to upload petabytes of user data.
+  > [x] The potential cost of a data breach far exceeds the implementation cost difference.
+  > [ ] FL provides better model accuracy through on-device personalization.
+
+  📖 **Deep Dive:** [Responsible Engineering](https://mlsysbook.ai/vol1/responsible_engr.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Economics of On-Device Learning</b> · <code>federated-learning-economics</code></summary>
+
+- **Interviewer:** "You're A/B testing a new personalization model for a mobile app with 1 million users. The new model requires collecting 50 MB of new sensor data per user for one week.
+
+Your team is debating two approaches:
+
+A) **Centralized:** Upload the 50 MB from all 1M users to your cloud backend for training.
+B) **Federated:** Use federated learning (FL) to train on the device. Assume the on-device training process consumes power equivalent to the SoC being active at 4W for a total of 2 minutes per user over the week.
+
+Compare the direct cost of these two approaches. For centralized, assume a cellular data cost of $10 per GB. For federated, assume the user pays an average of $0.15 per kWh to charge their phone."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate or ignore the cost of cellular data transfer at scale. They may focus only on the compute or energy cost per device, failing to see that transmitting data across the network for a large user base is frequently the dominant expense, far outweighing the cost of the electricity needed for on-device computation.
+
+  **Realistic Solution:** The correct approach is to calculate the total cost for each strategy across the entire user base of 1 million people.
+
+**A) Centralized Cost (Data Upload):**
+- First, calculate the total data to be uploaded: 1,000,000 users × 50 MB/user = 50,000,000 MB.
+- Convert this to GB: 50,000,000 MB / 1,000 MB/GB = 50,000 GB.
+- Calculate the total cost: 50,000 GB × $10/GB = $500,000.
+
+**B) Federated Cost (On-Device Energy):**
+- First, calculate the energy consumed per user. A 4W draw for 2 minutes (1/30th of an hour) is: 4W × (1/30)h = ~0.133 Watt-hours (Wh).
+- Calculate the total energy consumed by all users: 1,000,000 users × 0.133 Wh/user = 133,000 Wh.
+- Convert this to kWh: 133,000 Wh / 1,000 Wh/kWh = 133 kWh.
+- Calculate the total cost: 133 kWh × $0.15/kWh ≈ $20.
+
+The cost of the centralized approach ($500,000) is orders of magnitude higher than the federated approach (~$20), highlighting a major economic (and privacy) incentive for on-device learning.
+
+  > **Napkin Math:** 1. **Centralized Cost:**
+   - Total Data = 1M users * 50 MB = 50,000 GB
+   - Cost = 50,000 GB * $10/GB = $500,000
+
+2. **Federated Cost:**
+   - Energy per user = 4 W * (2 min / 60 min/hr) = 0.133 Wh
+   - Total Energy = 1M users * 0.133 Wh = 133 kWh
+   - Cost = 133 kWh * $0.15/kWh = $19.95
+
+3. **Comparison:**
+   - Centralized ($500,000) vs. Federated (~$20)
+
+  > **Key Equation:** $\text{Total Cost} = \sum_{i=1}^{N_{\text{users}}} (\text{Cost}_i)
+
+  > **Options:**
+  > [ ] Centralized cost is ~$50,000; Federated cost is ~$20. (Off-by-10x error in data conversion)
+  > [ ] Centralized cost is ~$500,000; Federated cost is ~$600. (Confuses power with energy for federated cost)
+  > [x] Centralized cost is ~$500,000; Federated cost is ~$20.
+  > [ ] Centralized cost is ~$500; Federated cost is ~$20,000. (Ignores scaling for centralized and miscalculates federated)
+
+  📖 **Deep Dive:** [Mobile: Ship & Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Mobile Bottleneck</b> · <code>compute-analysis</code></summary>
+
+- **Interviewer:** "You're optimizing a computer vision model for a new mobile app running on an Apple A17 Pro. Profiling shows that one specific convolutional layer is a major bottleneck. This layer performs 50 Giga-ops (INT8) and requires reading 500 MB of data (weights and activations) from the main LPDDR5 memory to the ANE for each inference.
+
+Based on the hardware specs, explain whether this specific layer is compute-bound or memory-bound."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often fixate on the advertised peak TOPS of a mobile NPU (Neural Processing Unit) and assume that if performance is poor, they must not be utilizing the compute units effectively. They forget that data has to physically move from memory to the NPU, and this memory bandwidth is often the true bottleneck, especially for 'thin' layers with low operational density.
+
+  **Realistic Solution:** The layer is severely memory-bound. To determine this, we need to calculate the Arithmetic Intensity (AI) of the layer and compare it to the A17 Pro's hardware ridge point. The ridge point is the AI needed to saturate the compute units.
+
+The A17 Pro has a peak performance of 35 TOPS (35 trillion ops/sec) and a memory bandwidth of 51.2 GB/s. Its ridge point is therefore ~683 Ops/Byte. Our layer's AI is far below this, meaning the ANE is spending most of its time waiting for data to arrive from memory.
+
+  > **Napkin Math:** 1. **Calculate the layer's Arithmetic Intensity (AI):**
+   - AI = Total Operations / Total Data Moved
+   - AI = (50 × 10^9 Ops) / (500 × 10^6 Bytes)
+   - AI = 100 Ops/Byte
+
+2. **Find the hardware's Ridge Point (Ops/Byte to saturate compute):**
+   - Ridge Point = Peak Compute / Memory Bandwidth
+   - Ridge Point = (35 × 10^12 Ops/sec) / (51.2 × 10^9 Bytes/sec)
+   - Ridge Point ≈ 683.6 Ops/Byte
+
+3. **Compare and Conclude:**
+   - Layer AI (100 Ops/Byte) < Hardware Ridge Point (683.6 Ops/Byte)
+   - Since the layer's operational intensity is much lower than what's needed to keep the compute units busy, it is **memory-bound**.
+
+  > **Key Equation:** $\text{Arithmetic Intensity (AI)} = \frac{\text{Total Operations (Ops)}}{\text{Total Data Movement (Bytes)}}$
+
+  > **Options:**
+  > [ ] Compute-bound. The ANE's 35 TOPS is the limiting factor.
+  > [x] Memory-bound. The layer's arithmetic intensity is ~100 Ops/Byte, which is significantly lower than the A17 Pro's ridge point of ~683 Ops/Byte.
+  > [ ] Compute-bound. The layer's arithmetic intensity is ~100 Ops/Byte, which is high enough to saturate the processor.
+  > [ ] Neither. The workload is balanced because the amount of data and compute are both large.
+
+  📖 **Deep Dive:** [Mobile: Systems & SoC](https://mlsysbook.ai/mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Mobile Memory Chasm</b> · <code>memory-hierarchy</code></summary>
+
+- **Interviewer:** "You're debugging a slow-loading feature in your mobile app that uses an on-device ML model. A profiler points to heavy I/O operations. To put the performance cost in perspective, identify the approximate latency gap: how much slower is a random read from the phone's UFS flash storage compared to its main LPDDR5 DRAM?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate this gap, thinking it's a small factor like 10-100x. They may also confuse high-throughput (GB/s) figures for flash with low-latency access. While flash is fast for large sequential reads, its random access latency is orders of magnitude worse than DRAM, which is critical for model weight loading and feature access.
+
+  **Realistic Solution:** A random read from UFS flash is about 1,000x slower than a read from LPDDR5 DRAM. Based on typical hardware specs, LPDDR5 has a latency of roughly 100 ns, whereas UFS flash latency is around 100,000 ns (100 µs). This is why loading model weights from flash is a major bottleneck and why caching data in DRAM is critical for mobile performance.
+
+  > **Napkin Math:** Using the '1ns = 1 second' human-scale analogy from the playbook: If an L1 cache read took 1 second, a DRAM read would take about 1.5-2 minutes (100 ns). A read from flash storage, however, would take over a full day (100,000 ns). This highlights that from the processor's perspective, waiting for flash is an eternity.
+
+  > **Options:**
+  > [x] Flash is ~1,000× slower than DRAM.
+  > [ ] Flash is ~10× slower than DRAM.
+  > [ ] They have similar latency, within 2-3× of each other.
+  > [ ] Flash is actually faster for random reads.
+
+  📖 **Deep Dive:** [Mobile Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Mobile KV-Cache Budget</b> · <code>kv-cache-vram</code></summary>
+
+- **Interviewer:** "You're deploying a small 2-billion-parameter LLM on a flagship mobile phone for an on-device assistant feature. The model has 24 layers, 16 attention heads, and a head dimension of 64. To maintain a responsive user experience, you need to support a context window of 4096 tokens. Your team lead is concerned about memory usage. Using FP16 precision, calculate the memory required *just for the KV-cache*."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is forgetting that the KV-cache stores both a Key and a Value tensor for each token, leading to an answer that is exactly half the correct size. Another frequent error is using the wrong precision (e.g., FP32/4 bytes) or confusing the number of model parameters with the dimensions of the cache.
+
+  **Realistic Solution:** The correct way to calculate the KV-cache size is to account for the Key and Value tensors for every token in the sequence, across all layers and heads. The memory footprint is determined by the sequence length, not the total number of model parameters.
+
+  > **Napkin Math:** 1. **Identify Dimensions**: We need storage for the Key (K) and Value (V) tensors.
+   - Sequence Length (S): 4096 tokens
+   - Layers (L): 24
+   - Heads (H): 16
+   - Head Dimension (D_h): 64
+   - Precision (P): FP16 = 2 bytes
+2. **Apply Formula**: The total size is `2 (for K & V) * S * L * H * D_h * P`.
+   - No, the formula is `2 * S * L * D_h_kv * H_kv`, where `H_kv` is the number of KV heads. Assuming MQA/GQA is not used, `H_kv` = `H` and `D_h_kv` = `D_h`. A more standard representation is `2 * S * L * hidden_dim` where `hidden_dim = H * D_h`.
+   - Let's use the core formula: `Cache Size = 2 × S × L × (H × D_h) × bytes_per_element`
+   - `Hidden Dimension = 16 heads × 64 dim/head = 1024`
+   - `Cache Size = 2 × 4096 tokens × 24 layers × 1024 hidden_dim × 2 bytes/element`
+   - `Cache Size = 2 × 4096 × 24 × 1024 × 2 = 402,653,184 bytes`
+3. **Convert to MB**: `402,653,184 bytes / (1024 * 1024) = 384 MB`.
+   - This is a significant portion of a mobile app's typical memory budget.
+
+  > **Key Equation:** $\text{KV Cache Size} = 2 \times \text{Seq Length} \times \text{Layers} \times \text{Hidden Dim} \times \text{Bytes per Element}$
+
+  > **Options:**
+  > [ ] ~192 MB
+  > [x] ~384 MB
+  > [ ] ~768 MB
+  > [ ] ~24 MB
+
+  📖 **Deep Dive:** [Mobile: Systems & SoC](https://mlsysbook.ai/mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The TinyML vs Mobile Memory Arena</b> · <code>memory-hierarchy</code></summary>
+
+- **Interviewer:** "An engineer successfully deployed a 250KB keyword spotting model on a Cortex-M7 microcontroller with 1MB of SRAM. They are now porting it to a flagship smartphone with 12GB of RAM. They believe that since the model is so small, memory will not be a concern. Contrast the memory architecture and constraints of the TinyML device with the mobile phone. Explain why simply having more RAM doesn't tell the whole story."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers unfamiliar with embedded systems often assume 'RAM is RAM'. They fail to distinguish between the fast, tightly-coupled, statically-allocated SRAM on a microcontroller and the slower, vast, OS-managed DRAM on a phone. They also forget that a mobile OS imposes strict per-app memory budgets, so the full 12GB is never available to a single process.
+
+  **Realistic Solution:** The two environments are fundamentally different. The TinyML device uses a 'Tensor Arena': a single, contiguous, statically-allocated block of fast on-chip SRAM. The entire system state is managed by the developer. In contrast, the mobile phone uses an operating system (like Android or iOS) to manage much larger, but higher-latency, off-chip DRAM. The OS gives each app a limited budget (e.g., a few hundred MB to a couple GB) and constantly juggles memory between processes. The memory is not guaranteed to be contiguous and is accessed through virtual memory abstractions.
+
+  > **Napkin Math:** 1. **Establish Budgets**:
+   - TinyML (SRAM): The entire memory might be available, say 1MB, but the peak tensor arena might be budgeted at `250KB`.
+   - Mobile (DRAM): A device has 12GB total RAM. A typical OS might grant a single foreground app a budget of `~1/4th` of that, so `12 GB * 0.25 = 3 GB`.
+2. **Calculate Ratio**: Compare the *available budgets*.
+   - `3 GB / 250 KB = (3 * 1024 * 1024 KB) / 250 KB = 3,145,728 / 250 ≈ 12,500×`
+3. **Interpret**: The mobile app has over 12,000 times more memory available, but it comes with the overhead of an OS, virtual memory page faults, and competition from other apps. The TinyML device has a tiny fraction of the memory, but it's faster (SRAM vs DRAM) and 100% dedicated to the task with no OS interference.
+
+  > **Key Equation:** $\text{App Memory Budget} \approx \frac{\text{Total Device RAM}}{4}$
+
+  > **Options:**
+  > [ ] The mobile app can use all 12GB of RAM, making it over 48,000x larger than the 250KB TinyML budget.
+  > [x] The mobile app's budget is orders of magnitude larger (~12,000x), but it's higher-latency DRAM managed by an OS, unlike the microcontroller's dedicated high-speed SRAM.
+  > [ ] The memory is the same type (RAM), so the only difference is the amount available to the application.
+  > [ ] The mobile OS overhead consumes most of the RAM, so the actual available memory is similar to the TinyML device.
+
+  📖 **Deep Dive:** [TinyML: Micro-architectures](https://mlsysbook.ai/tinyml/01_micro_architectures.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Quantization Memory Payoff</b> · <code>quantization-memory</code></summary>
+
+- **Interviewer:** "You are tasked with deploying a 7-billion parameter language model on a high-end mobile device. To reduce its memory footprint, you decide to quantize the model weights from FP16 to INT8. What is the final memory requirement for the model's weights after this quantization?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A frequent mistake is to confuse the reduction factor, applying a 4x saving (common for FP32-to-INT8) instead of the correct 2x saving for FP16-to-INT8. Another error is to state the original FP16 size (14 GB) or to be off by an order of magnitude, underestimating the large size of modern LLMs.
+
+  **Realistic Solution:** INT8 representation uses exactly one byte for every parameter. Therefore, a 7-billion parameter model requires 7 GB to store its weights. This is a 50% reduction from the 14 GB required for FP16, but it is still far too large for a typical mobile application memory budget (often <2GB).
+
+  > **Napkin Math:** The calculation is a direct application of the scaling rule:
+
+`7B parameters × 1 byte/parameter = 7 GB`
+
+  > **Key Equation:** $\text{Inference memory (INT8)} = 1 \text{ byte} \times \text{params}$
+
+  > **Options:**
+  > [ ] 14 GB
+  > [ ] 3.5 GB
+  > [x] 7 GB
+  > [ ] 700 MB
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The On-Device Memory Diet</b> · <code>quantization-memory-savings</code></summary>
+
+- **Interviewer:** "A mobile machine learning engineer is tasked with optimizing a 150 million parameter image segmentation model for an iPhone. The model's weights are currently stored in FP16 precision. To reduce the application's memory footprint, they plan to quantize the weights to INT8. Compare the memory required for the weights before and after quantization, and calculate the total memory savings."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the memory footprint of FP32 (4 bytes) with FP16 (2 bytes), leading to an overestimation of the initial memory size and the potential savings. Another common error is to report the final INT8 size instead of the memory *reduction*.
+
+  **Realistic Solution:** The calculation is a straightforward comparison of memory based on the number of parameters and the size of each parameter's data type.
+
+- **FP16 (before):** Each parameter requires 2 bytes.
+- **INT8 (after):** Each parameter requires 1 byte.
+
+The savings is the difference between the initial and final memory footprint.
+
+  > **Napkin Math:** 1. **Calculate initial memory (FP16):**
+   150,000,000 parameters × 2 bytes/parameter = 300,000,000 bytes = **300 MB**
+
+2. **Calculate final memory (INT8):**
+   150,000,000 parameters × 1 byte/parameter = 150,000,000 bytes = **150 MB**
+
+3. **Calculate the savings:**
+   300 MB (FP16) - 150 MB (INT8) = **150 MB savings**
+
+  > **Key Equation:** $\text{Memory Savings} = (\text{Parameters} \times \text{Bytes}_{\text{FP16}}) - (\text{Parameters} \times \text{Bytes}_{\text{INT8}})$
+
+  > **Options:**
+  > [ ] The savings will be 75 MB.
+  > [x] The savings will be 150 MB.
+  > [ ] The savings will be 300 MB.
+  > [ ] The savings will be 450 MB.
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Depthwise Separable Dividend</b> · <code>depthwise-separable-convolution</code></summary>
+
+- **Interviewer:** "You're optimizing a real-time object detection model for a new smartphone. A performance profile shows that a standard 3x3 convolutional layer is a major bottleneck, consuming significant compute on the mobile NPU. To improve frame rate, a colleague suggests replacing it with a 3x3 depthwise separable convolution. What is the approximate reduction in computational cost (in Multiply-Accumulate operations, or MACs) you should recall for this specific change?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often know that depthwise separable convolutions are 'more efficient' but can't recall the order of magnitude of the savings. A common error is to guess a small, linear factor like 2-3x, underestimating the quadratic benefit. Another mistake is to confuse compute reduction with memory (activation size) reduction, which is a different effect.
+
+  **Realistic Solution:** The computational cost reduction is approximately the square of the kernel dimension. For a 3x3 kernel, this results in approximately a 9x reduction in MACs compared to a standard convolution. This is because the operation is split into two stages: a 'depthwise' stage that filters each input channel independently, and a 'pointwise' stage (a 1x1 convolution) that combines the outputs. This factorization dramatically reduces the total number of multiplications needed, especially when the number of output channels is large.
+
+  > **Napkin Math:** Let K be the kernel size (3), C_in be input channels, and C_out be output channels.
+- Standard Conv MACs: `K * K * C_in * C_out = 3 * 3 * C_in * C_out = 9 * C_in * C_out`
+- Depthwise Conv MACs: `(K * K * C_in) + (1 * 1 * C_in * C_out) = (9 * C_in) + (C_in * C_out)`
+- Reduction Ratio: `(9 * C_in * C_out) / (9 * C_in + C_in * C_out)`
+- Assuming `C_out` is much larger than `K*K` (e.g., 256 >> 9), the `9 * C_in` term becomes negligible.
+- Simplified Ratio: `(9 * C_out) / C_out ≈ 9`.
+
+  > **Key Equation:** $\text{Cost Ratio} = \frac{\text{Standard Conv}}{\text{Depthwise Sep Conv}} = \frac{K^2 \cdot C_{in} \cdot C_{out}}{K^2 \cdot C_{in} + C_{in} \cdot C_{out}} \approx K^2$
+
+  > **Options:**
+  > [ ] ~2x
+  > [x] ~9x
+  > [ ] ~32x
+  > [ ] It provides no compute reduction, only memory savings.
+
+  📖 **Deep Dive:** [Network Architectures](https://mlsysbook.ai/vol1/dnn_architectures.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Mobile Jank Budget</b> · <code>real-time-deadlines</code></summary>
+
+- **Interviewer:** "You're tasked with integrating a generative model on a smartphone to provide real-time typing suggestions. To ensure a smooth, 'jank-free' user experience that doesn't miss a screen refresh, what is the maximum latency budget you have for the entire end-to-end operation, from model inference to rendering the suggestion?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often misremember the latency target, confusing it with budgets for other platforms. For example, applying a 100ms cloud budget would feel incredibly laggy on mobile, while a 1ms TinyML budget is unnecessarily strict and likely unachievable for a complex generative task.
+
+  **Realistic Solution:** The standard latency budget to avoid UI 'jank' on a mobile device is approximately 16ms. This number is derived directly from the refresh rate of most standard mobile displays (60 FPS), where one frame is drawn every 1000ms / 60 ≈ 16.67ms. All work, including OS scheduling, inference, and rendering, must fit within this window to avoid a dropped frame, which the user perceives as stutter or lag.
+
+  > **Napkin Math:** Frame Time = 1 second / Refresh Rate
+Frame Time = 1000 milliseconds / 60 frames_per_second ≈ 16.67 ms/frame. This is the hard deadline for all on-screen work.
+
+  > **Options:**
+  > [ ] ~100 ms
+  > [ ] ~33 ms
+  > [x] ~16 ms
+  > [ ] ~1 ms
+
+  📖 **Deep Dive:** [Mobile: Systems and SoC](https://mlsysbook.ai/mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The SoC Power Draw</b> · <code>power-consumption</code></summary>
+
+- **Interviewer:** "Your team is developing a 'hands-free' feature that continuously runs a keyword-spotting model on a flagship smartphone. When the model is actively processing audio, what is a realistic power consumption value for the phone's System-on-a-Chip (SoC)?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common error is to confuse the power domain of a mobile SoC with other platforms. An engineer might recall the ~30W budget of an edge device like a Jetson AGX Orin, which would be unsustainable in a passively cooled phone. Conversely, they might recall the milliwatt-scale consumption of a TinyML microcontroller, which is far too low for a powerful mobile application processor.
+
+  **Realistic Solution:** A flagship mobile SoC under a sustained, active ML load will typically consume between 3 to 5 Watts. This is a significant power draw that can drain a battery quickly, which is why such 'always-on' features rely heavily on duty cycling, hardware offload to low-power DSPs, and efficient models to manage battery life.
+
+  > **Napkin Math:** A typical smartphone battery has a capacity of around 15-20 Wh. At a 4W continuous draw, the battery would be completely drained in just (15 Wh / 4 W) = 3.75 hours. This calculation underscores why continuous full-power processing is not feasible on mobile.
+
+  > **Options:**
+  > [ ] ~30 W
+  > [x] ~5 W
+  > [ ] ~500 mW
+  > [ ] ~50 mW
+
+  📖 **Deep Dive:** [Mobile: Systems and SoC](https://mlsysbook.ai/mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Jank Budget</b> · <code>real-time-deadlines</code></summary>
+
+- **Interviewer:** "You are designing a real-time, on-device generative AI feature for a smartphone. The LLM needs to generate tokens that appear on screen as they are produced, creating a smooth, streaming effect. Your model's Time Per Output Token (TPOT) is 20ms on the phone's NPU. The UI team insists that to avoid user-perceptible stutter, or 'jank', a new frame must be rendered every 16ms.
+
+Explain whether this system will meet its real-time UI requirement. Calculate the per-token latency surplus or deficit against the frame budget."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on the model's overall throughput (e.g., tokens per second) and miss the per-event latency constraint. A model can have high throughput (e.g., 1000ms / 20ms = 50 tokens/sec) but still fail a real-time deadline if the time for a single event (one token) exceeds the budget (16ms). They might also incorrectly suggest batching, which increases latency and is unsuitable for single-stream generation.
+
+  **Realistic Solution:** The system will fail to meet its real-time requirement. The time to generate one token (20ms) is longer than the UI's frame rendering deadline (16ms). This means that for every token the model produces, the UI will miss at least one frame update. This causes the animation to appear stuttered and jerky, creating a poor user experience. The system has a latency deficit of 4ms per token.
+
+  > **Napkin Math:** 1. **Identify the Deadline:** The UI rendering budget is 16ms per frame.
+2. **Identify the Task Time:** The Time Per Output Token (TPOT) is 20ms.
+3. **Compare:** Is the task time less than or equal to the deadline?
+   `20ms (TPOT) > 16ms (Deadline)`
+4. **Calculate Deficit:** The system overruns its budget on every single token.
+   `Latency Deficit = TPOT - Frame Deadline = 20ms - 16ms = 4ms`
+
+For every token generated, the UI is 4ms late for the next frame, guaranteeing jank.
+
+  > **Key Equation:** $\text{Latency Deficit} = \text{Time Per Output Token} - \text{Frame Deadline}$
+
+  > **Options:**
+  > [ ] The system is fine; it generates 50 tokens/sec, which is more than fast enough for a real-time experience.
+  > [x] The system will miss its 16ms deadline by 4ms on every token, causing significant UI jank.
+  > [ ] The performance is acceptable; the 4ms overrun is too small for a user to notice.
+  > [ ] The issue can be fixed by batching the token generation to increase NPU efficiency.
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Background Battery Drainer</b> · <code>battery-drain</code></summary>
+
+- **Interviewer:** "A new 'ambient intelligence' feature on a smartphone runs a small keyword-spotting model. It wakes the SoC, runs inference for 0.5 seconds, and then goes back to sleep. This cycle repeats every 10 seconds. When active, the SoC consumes 3 Watts. The phone has a 19 Watt-hour battery. Assuming negligible power consumption during sleep, explain how you would estimate the total percentage of battery this feature will consume over a 24-hour period and calculate the value."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Confusing power (Watts) with energy (Watt-hours). An engineer might calculate the drain assuming the 3W is drawn continuously, leading to a wildly incorrect and physically impossible result (72Wh consumed from a 19Wh battery). Another common mistake is incorrectly calculating the duty cycle or total active time.
+
+  **Realistic Solution:** The correct approach is to first calculate the feature's duty cycle (the fraction of time it is active). Use this to find the total active hours over a 24-hour period. Then, multiply the active hours by the active power consumption (in Watts) to get the total energy consumed (in Watt-hours). Finally, express this energy as a percentage of the phone's total battery capacity.
+
+  > **Napkin Math:** 1. **Calculate Duty Cycle:** The feature is active for 0.5 seconds out of every 10 seconds. Duty Cycle = 0.5s / 10s = 0.05 or 5%.
+2. **Calculate Total Active Hours in a Day:** There are 24 hours in a day. Total Active Time = 24 hours/day × 0.05 = 1.2 hours.
+3. **Calculate Total Energy Consumed:** Energy = Power × Time. Total Energy = 3 W × 1.2 h = 3.6 Wh.
+4. **Calculate Battery Percentage:** (Energy Consumed / Battery Capacity) × 100 = (3.6 Wh / 19 Wh) × 100 ≈ 18.9%.
+
+  > **Key Equation:** $\text{Energy}_{\text{consumed}} = \text{P}_{\text{active}} \times (\text{Total Time} \times \text{Duty Cycle})$
+
+  > **Options:**
+  > [ ] Over 100%. The feature consumes 72Wh, which isn't possible.
+  > [ ] Around 3.2%. The feature is active for about 0.2 hours per day.
+  > [x] Around 18.9%. The feature is active for 1.2 hours and consumes 3.6Wh.
+  > [ ] Around 6.3%. The duty cycle is 1/60, leading to 1.2Wh of consumption.
+
+  📖 **Deep Dive:** [Mobile Systems and SoC](mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The AR Thermal Budget</b> · <code>thermal-throttling</code></summary>
+
+- **Interviewer:** "You're designing an AR application that overlays a real-time particle effect on the user's face. When this feature is active, the mobile SoC consumes a total of 5 Watts. In an idle state (screen on, but no AR), the SoC consumes 1 Watt. The phone's passive cooling system can continuously dissipate 3 Watts of heat. To prevent the device from overheating, interpret these constraints and calculate the maximum sustainable duty cycle (the percentage of time the AR feature can be active)."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming the sustainable load is a simple ratio of dissipation-to-active power (e.g., 3W / 5W = 60%). This ignores the baseline power consumption when the feature is *not* active, which consumes a portion of the thermal budget, thus leading to an overestimation of the available performance.
+
+  **Realistic Solution:** The core principle is that for the system to be thermally stable, the average power generated must not exceed the power dissipated. We must create an equation where the weighted average of the active and idle power states is equal to the dissipation rate, and then solve for the duty cycle (`d`). This correctly accounts for the power consumed even when the specific feature is idle.
+
+  > **Napkin Math:** 1. **Define Goal:** The average power consumption must be less than or equal to the dissipation rate: P_avg ≤ 3W.
+2. **Set up Equation:** Let `d` be the duty cycle. The equation for average power is: (P_active × d) + (P_idle × (1 - d)) = P_dissipated.
+3. **Plug in Values:** (5W × d) + (1W × (1 - d)) = 3W.
+4. **Solve for d:**
+   5d + 1 - d = 3
+   4d = 2
+   d = 0.5
+5. **Conclusion:** The feature can run for a maximum of 50% of the time to stay within the thermal budget. This could be implemented as running for 1 second and then pausing for 1 second.
+
+  > **Key Equation:** $(\text{P}_{\text{active}} \times d) + (\text{P}_{\text{idle}} \times (1 - d)) \le \text{P}_{\text{dissipated}}$
+
+  > **Options:**
+  > [ ] 60%. The phone can dissipate 3W of the 5W active power.
+  > [ ] 100%. The SoC can handle 5W without issue.
+  > [ ] 40%. The excess heat generated is 2W, which is 40% of the active power.
+  > [x] 50%. The weighted average of active and idle power must equal the 3W dissipation rate.
+
+  📖 **Deep Dive:** [Mobile: Power and Thermal](mobile/06_power_thermal.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The OS Kill Switch: Mobile Memory</b> · <code>mobile-memory-budget</code></summary>
+
+- **Interviewer:** "Your team is planning to deploy a new generative model to your mobile app. The target device is a high-end smartphone with 8 GB of RAM. To ensure your app isn't aggressively terminated by the operating system for using too many resources, what is the maximum memory budget you should generally target for your *entire* application process?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to cloud or desktop environments often assume they can use a large fraction (50-75%) of the device's RAM. They forget that mobile operating systems like iOS and Android reserve significant memory for themselves and other background processes, and will aggressively terminate any single app that exceeds its 'fair share' to preserve system stability and user experience.
+
+  **Realistic Solution:** The correct rule of thumb is to target approximately 25% of the total device RAM for your entire application process. On a device with 8 GB of RAM, this translates to a 2 GB budget. This budget must accommodate not just the ML model's weights, but also runtime activations, the application's UI, and all other process heap. Exceeding this is risky and can lead to the OS terminating your app.
+
+  > **Napkin Math:** Device RAM × App Budget Ratio = Total App Budget
+
+8 GB × 0.25 = 2 GB
+
+This 25% rule acts as a critical design guardrail for mobile ML systems, forcing realistic trade-offs between model size, features, and overall app stability.
+
+  > **Key Equation:** $\text{App Memory Budget} \approx \text{Device RAM} \times 0.25$
+
+  > **Options:**
+  > [ ] 6 GB
+  > [ ] 8 GB
+  > [x] 2 GB
+  > [ ] 500 MB
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The On-Device RAG Budget</b> · <code>compute-analysis</code></summary>
+
+- **Interviewer:** "Your team wants to add an on-device Retrieval-Augmented Generation (RAG) feature to your mobile app, powered by a 1 Billion parameter language model. Your target high-end device has 8 GB of total RAM. Explain if the model's weight memory will fit within a standard application memory budget, and calculate the required space for FP16 inference."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate the model size correctly but then compare it against the total device RAM (8 GB). They forget that the operating system, background services, and the application's own UI and logic consume a significant portion of that memory, typically leaving only about 25% for the app's foreground processes.
+
+  **Realistic Solution:** The model requires 2 GB of memory for its weights. While this technically fits within the typical 2 GB application budget (25% of 8 GB RAM), it is extremely risky. This leaves zero headroom for the model's activations (the KV cache), the application's UI, or any other feature, making it highly likely to be terminated by the OS under memory pressure.
+
+  > **Napkin Math:** 1. **Parameters**: 1,000,000,000
+2. **Precision**: FP16 requires 2 bytes per parameter.
+3. **Model Weight Memory**: 1B params × 2 bytes/param = 2,000,000,000 bytes = 2 GB.
+4. **Device RAM**: 8 GB
+5. **Typical App Budget (from NUMBERS.md)**: 8 GB × 0.25 = 2 GB.
+
+  > **Key Equation:** $\text{Inference Memory (FP16)} = \text{Parameters} \times 2 \text{ bytes}$
+
+  > **Options:**
+  > [ ] It needs 1 GB, so it fits easily. (Assumes INT8 precision)
+  > [ ] It needs 2 GB, which is much less than the 8 GB device RAM, so it fits easily. (Ignores app budget constraint)
+  > [x] It needs 2 GB, which consumes the entire 25% app budget, making it too risky. (Correct)
+  > [ ] It needs 4 GB, so it won't fit. (Assumes FP32 precision)
+
+  📖 **Deep Dive:** [Mobile: Systems & SoC](https://mlsysbook.ai/mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Watchdog's Power Tax</b> · <code>mobile-monitoring</code></summary>
+
+- **Interviewer:** "You're designing an always-on fall detection feature for a health app. To ensure its reliability, you implement a software watchdog. Every second, the watchdog process wakes up for 10ms to check a 'heartbeat' flag from the inference service, consuming 0.5W during this brief check. For the remaining 990ms of the second, the watchdog process is asleep and its power consumption is negligible. Contrast this with the full SoC power of 3W when running a game. Calculate the total energy, in Watt-hours (Wh), consumed *only by the watchdog process* over a 24-hour period."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate power consumption for the 'active' state but forget to apply the duty cycle. They calculate the cost as if the component is active 100% of the time, leading to a massive overestimation of battery drain. Another common mistake is using the wrong power number (e.g., peak SoC power) instead of the specific component's power for its brief active period.
+
+  **Realistic Solution:** The solution requires calculating the average power consumption by applying the duty cycle, and then multiplying by the total time. The watchdog is active for 10ms every 1000ms, so its duty cycle is 1%. The average power is this fraction of the active power. This average power, multiplied by 24 hours, gives the total energy drain in Watt-hours.
+
+  > **Napkin Math:** 1. **Calculate Duty Cycle:** The process is active for 10ms out of every 1000ms.
+   - `Duty Cycle = 10 ms / 1000 ms = 0.01`
+2. **Calculate Average Power:** Multiply the active power by the duty cycle.
+   - `Average Power = 0.5 W * 0.01 = 0.005 W`
+3. **Calculate Total Energy in 24 Hours:** Multiply average power by the number of hours.
+   - `Total Energy = 0.005 W * 24 h = 0.12 Wh`
+
+  > **Key Equation:** $$ E_{\text{Wh}} = \left( P_{\text{active}} \times \frac{t_{\text{active}}}{t_{\text{period}}} \right) \times T_{\text{hours}} $$
+
+  > **Options:**
+  > [ ] 12 Wh
+  > [ ] 0.72 Wh
+  > [x] 0.12 Wh
+  > [ ] 432 Wh
+
+  📖 **Deep Dive:** [Mobile Systems](mobile/README.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Hidden Cost of Privacy</b> · <code>federated-learning-economics</code></summary>
+
+- **Interviewer:** "Your team is designing a new system to improve your mobile app's keyboard suggestions. One option is a classic centralized approach, where user data is uploaded for training. The other is a Federated Learning (FL) approach, where training happens on-device and only model updates are sent to the server. From a Total Cost of Ownership (TCO) perspective, what is the single largest operational cost introduced by choosing the Federated Learning design at scale?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on the on-device compute and battery impact, which is a real user-facing concern. However, they underestimate the system-wide operational expense. At the scale of millions of users, the sheer volume of data from daily gradient uploads creates a massive, continuous networking cost that often dwarfs the on-device or server-side compute costs.
+
+  **Realistic Solution:** The dominant operational cost is network communication. Each participating device must upload model updates (gradients or weights) to the central server. While the update from a single device is small, multiplying it by millions of users results in terabytes of daily data ingress, which is a significant and continuous cloud operational expense.
+
+  > **Napkin Math:** Let's assume a fleet of 10 million active users participating in one training round per day. A typical small model update might be 4 MB.
+
+`Total Daily Upload = 10,000,000 users * 4 MB/user = 40,000,000 MB = 40 TB`
+
+This means the system must handle 40 TB of data ingress every single day. Over a year, that's over 14 Petabytes. This massive data transfer volume is a primary driver of the TCO for the federated system, often far exceeding the cost of server-side aggregation compute.
+
+  > **Key Equation:** $\text{TCO}_{\text{network}} = \text{Users} \times \frac{\text{Update Size}}{\text{User}} \times \frac{\text{Rounds}}{\text{Day}} \times \text{Cloud Ingress Cost}$
+
+  > **Options:**
+  > [ ] Increased on-device compute and battery drain.
+  > [ ] Server compute cost for aggregating model updates.
+  > [x] Network communication overhead from gradient uploads.
+  > [ ] Storage costs for the global model on the server.
+
+  📖 **Deep Dive:** [Mobile: Ship & Update](mobile/03_ship_and_update.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Economics of Privacy: Centralized vs. Federated</b> · <code>federated-learning-economics</code></summary>
+
+- **Interviewer:** "You are a Staff ML Engineer at a photo-sharing app planning an A/B test to improve your 'auto-enhance' filter. You are comparing two training strategies for a cohort of 1 million users:
+
+- **Plan A (Centralized Training):** Each user uploads one 10 MB photo to your cloud storage for a large-scale retraining job.
+- **Plan B (Federated Learning):** Each user's device participates in a federated learning cycle, ultimately contributing to a final, aggregated model update that costs 5 MB of upload bandwidth per user.
+
+Your cloud provider has a blended rate of $1.00 per GB for data ingress and processing. Calculate the total data handling cost for **Plan A**."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus solely on model accuracy improvements and neglect the significant operational costs (TCO) associated with data logistics. A common calculation error is confusing units (MB vs. GB) or miscalculating the total data volume by an order of magnitude, leading to unexpected budget overruns. Another pitfall is ignoring the implicit cost of user privacy and trust erosion inherent in uploading personal data.
+
+  **Realistic Solution:** The correct way to solve this is to first calculate the total data volume for the entire user cohort and then apply the provider's unit cost. This analysis reveals the direct financial trade-offs between a centralized approach and a privacy-preserving one like federated learning.
+
+Plan A is significantly more expensive from a pure data-handling perspective, even before considering the engineering complexity and privacy risks of managing a large dataset of user photos.
+
+  > **Napkin Math:** 1. **Calculate total data volume in MB:**
+   `1,000,000 users × 10 MB/user = 10,000,000 MB`
+
+2. **Convert total volume from MB to GB:**
+   `10,000,000 MB / 1,000 MB/GB = 10,000 GB`
+
+3. **Calculate total cost:**
+   `10,000 GB × $1.00/GB = $10,000`
+
+  > **Key Equation:** $\text{Total Cost} = (\text{Number of Users} \times \text{Data per User}) \times \text{Cost per GB}$
+
+  > **Options:**
+  > [ ] $1,000
+  > [ ] $5,000
+  > [x] $10,000
+  > [ ] $10,000,000
+
+  📖 **Deep Dive:** [Responsible Engineering](https://mlsysbook.ai/vol1/responsible_engr.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 🟢 L3
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Squeeze-and-Excitation Question</b> · <code>model-cost</code></summary>
 
 - **Interviewer:** "MobileNetV3 adds squeeze-and-excitation (SE) blocks that increase FLOPs by 2%. Your colleague says 'that's wasted compute — remove them to speed up inference.' Why is your colleague wrong?"
 
@@ -45,7 +2329,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Cellular Download Wall</b> · <code>deployment</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Cellular Download Wall</b> · <code>deployment</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your app bundles a 250 MB on-device ML model. Users on cellular connections report that the app download fails or stalls. Your analytics show a 40% drop-off rate during installation on cellular vs 5% on WiFi. The app itself is 30 MB without the model. What are the platform-imposed limits you're hitting, and how do you redesign the delivery?"
 
@@ -81,7 +2365,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Trivial Model Paradox</b> · <code>compute-overhead</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Trivial Model Paradox</b> · <code>roofline</code></summary>
 
 - **Interviewer:** "You have a very small, simple ML model – say, a single 100-neuron dense layer. When you deploy it on a modern mobile SoC, you observe that running it on the CPU often yields *lower* latency than trying to offload it to the dedicated NPU. Why would this be the case?"
 
@@ -143,7 +2427,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The NCHW vs NHWC Memory Layout</b> · <code>memory-layout</code> <code>compiler</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The NCHW vs NHWC Memory Layout</b> · <code>memory-hierarchy</code> <code>compilation</code></summary>
 
 - **Interviewer:** "You train a PyTorch model on an NVIDIA GPU using the standard `NCHW` memory layout. You convert it to TFLite and deploy it on an Android phone's CPU. The model accuracy is fine, but it runs 3x slower than a comparable model trained natively in TensorFlow. What architectural difference between GPUs and mobile CPUs causes this?"
 
@@ -170,11 +2454,1106 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Phantom Battery Drain</b> · <code>npu-fallback-energy</code></summary>
 
-#### 🔵 L4 — Apply & Identify
+- **Interviewer:** "You are a mobile ML engineer deploying a new AI-powered photo editing feature. The model is authored in FP32. On new phones with an A17 Pro SoC, it runs on the NPU using FP16 and works perfectly. On last year's models, a single unsupported custom op causes the entire model to fall back and run on the CPU in the original FP32 precision. Users on these older devices report the feature is causing catastrophic battery drain. Apply your knowledge of mobile hardware to diagnose the primary cause of the extreme energy consumption."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the massive energy efficiency gap between a dedicated NPU and a general-purpose CPU. They might blame memory bandwidth or assume the increased power draw is small and unavoidable, failing to recognize it's a multi-level problem: an inefficient processor (CPU vs. NPU) is combined with an inefficient data type (FP32 vs. FP16).
+
+  **Realistic Solution:** The primary cause is the combination of processor inefficiency and data type inefficiency. The NPU is architecturally designed for ML workloads and is orders of magnitude more energy-efficient than a CPU for tensor math. On top of this, the fallback is using FP32. According to the ML Systems constants, running an operation in FP32 requires ~3.4 times more energy than FP16. When you combine the architectural penalty (CPU vs. NPU) with the precision penalty (FP32 vs. FP16), the total energy cost can easily be 30-50x higher, explaining the catastrophic drain.
+
+  > **Napkin Math:** Let's quantify the energy increase. We have two main factors:
+1.  **Precision Penalty**: The constants state FP32 operations cost ~3.4× the energy of FP16 operations.
+2.  **Architectural Penalty**: A general-purpose CPU is not optimized for tensor math. It's reasonable to estimate it's at least 10x less energy-efficient for this workload than a dedicated NPU.
+
+Multiplying these factors gives a lower-bound estimate of the total energy increase:
+Total Energy Multiplier ≈ (Architectural Penalty) × (Precision Penalty)
+Total Energy Multiplier ≈ 10 × 3.4 = 34×
+
+Therefore, running the model on the CPU in FP32 could consume over 30 times more energy than running it on the NPU in FP16, leading to the observed battery drain.
+
+  > **Key Equation:** $E_{\text{fallback}} \approx E_{\text{NPU}} \times \text{Penalty}_{\text{arch}} \times \text{Penalty}_{\text{precision}}$
+
+  > **Options:**
+  > [ ] The FP32 model requires 2x the memory of FP16, causing memory bandwidth saturation on the CPU which leads to high power draw.
+  > [ ] An application-level bug is likely causing an infinite loop when the NPU is unavailable, re-running the model constantly.
+  > [x] The CPU fallback is running inefficient FP32 compute. The combined architectural inefficiency of CPU vs. NPU and the ~3.4x energy cost of FP32 vs. FP16 causes a >30x increase in power consumption.
+  > [ ] The phone's thermal management system is throttling the CPU due to the heavy FP32 load, which paradoxically increases total energy use as the task takes longer.
+
+  📖 **Deep Dive:** [Mobile: SoC Architecture](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The GPU Context Switch Overhead</b> · <code>gpu</code> <code>pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Real-Time Stutter</b> · <code>delegation-overhead-latency</code></summary>
+
+- **Interviewer:** "You are developing a real-time video filter that must run at 30 FPS (33ms per frame). On a new device, all 100 layers of your model delegate to the NPU in FP16, meeting the 33ms budget. On an older device, 95 of the layers run on the NPU, but 5 custom layers in a sequential block fall back to the CPU in FP32. You measure the NPU taking 25ms for the 95 layers, and each CPU layer taking 3ms. The OS vendor documentation states each NPU-CPU context switch incurs a 1ms overhead. Diagnose the performance bottleneck by calculating the total frame latency on the older device."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on just one part of the latency equation. They might blame the context-switch overhead as the 'killer', or see a 95% delegation ratio and assume it's 'good enough' without doing the math. They fail to calculate the actual time spent on the CPU, which is often the dominant factor in a partial fallback scenario.
+
+  **Realistic Solution:** The device is dropping frames because the total latency exceeds the 33ms budget. The total latency is the sum of the NPU compute time, the CPU compute time, and the context-switching overhead. The five layers falling back to the CPU create a significant compute bottleneck, which, when added to the NPU time and overhead, pushes the total latency over the threshold. The fix is to optimize the CPU portion by creating an INT8-quantized implementation for the 5 fallback layers, drastically reducing their 15ms execution time.
+
+  > **Napkin Math:** 1.  **Target Latency**: 1000ms / 30 FPS = 33.3ms per frame.
+2.  **NPU Compute Time**: Given as 25ms for the 95 supported layers.
+3.  **CPU Compute Time**: 5 layers × 3ms/layer = 15ms.
+4.  **Overhead**: The 5 layers are in a sequential block, so there's one switch from NPU→CPU and one switch from CPU→NPU. Total overhead = 2 switches × 1ms/switch = 2ms.
+5.  **Total Latency**: $T_{\text{total}} = T_{\text{NPU}} + T_{\text{CPU}} + T_{\text{overhead}}$
+    $T_{\text{total}} = 25\text{ms} + 15\text{ms} + 2\text{ms} = 42\text{ms}$.
+
+This 42ms latency is greater than the 33.3ms budget, resulting in a frame rate of ~23 FPS (1000/42), causing the stutter.
+
+  > **Key Equation:** $T_{\text{total}} = T_{\text{NPU}} + T_{\text{CPU}} + N_{\text{switches}} \times T_{\text{overhead}}$
+
+  > **Options:**
+  > [ ] The NPU is too slow. 25ms for 95 layers is the main bottleneck; the model needs to be pruned to run faster on the NPU.
+  > [ ] The 2ms context switch overhead is the primary issue, as it adds nearly 10% to the latency budget. The model must be re-architected to remove all unsupported ops.
+  > [x] The total latency is ~42ms (25ms NPU + 15ms CPU + 2ms overhead), exceeding the 33ms budget. The 15ms spent on the CPU is the main bottleneck.
+  > [ ] A 95% delegation ratio is simply not high enough for real-time video; you must achieve at least 99% for the feature to be viable.
+
+  📖 **Deep Dive:** [Mobile: The App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Jank-Inducing Photo Filter</b> · <code>mobilenet-architectures</code></summary>
+
+- **Interviewer:** "You are a mobile ML engineer tasked with speeding up a new photo filter feature that uses a standard ResNet-18 model for style transfer. Users are reporting that the app becomes unresponsive ('janky') and their phones get hot. The model takes 200ms per frame, well over the 16ms budget for a smooth 60fps UI. Your team lead suggests replacing the standard convolutions with depthwise separable convolutions, the core component of MobileNet. **Diagnose** why the ResNet is performing poorly and **calculate** the approximate reduction in FLOPs for a single 3x3 convolutional layer operating on a 112x112x64 feature map and outputting 128 filters."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus only on parameter count, but the real issue on mobile is the massive computational cost (FLOPs) of standard convolutions. They might also incorrectly believe that quantization or pruning can magically fix a fundamentally inefficient architecture, when the root cause is the arithmetic intensity.
+
+  **Realistic Solution:** The ResNet is a server-class architecture. Its standard convolutions are incredibly computationally expensive, leading to high latency and power draw (heat). A depthwise separable convolution factors this into two much cheaper steps: a depthwise step that filters each input channel independently, and a pointwise (1x1) step that combines the outputs. This dramatically reduces FLOPs. The UI becomes 'janky' because the CPU/GPU is pegged at 100% computing the expensive layer and can't render UI updates within the 16ms frame budget.
+
+  > **Napkin Math:** We compare the FLOPs for both layer types.
+
+**1. Standard Convolution (ResNet):**
+FLOPs ≈ 2 × (Input Channels × Kernel H × Kernel W) × (Output Channels × Output H × Output W)
+FLOPs ≈ 2 × (64 × 3 × 3) × (128 × 112 × 112) ≈ **1.86 GFLOPs**
+
+**2. Depthwise Separable Convolution (MobileNet):**
+This is a two-step process:
+*Depthwise FLOPs:* 2 × (Input Channels × Kernel H × Kernel W) × (Output H × Output W)
+DW FLOPs ≈ 2 × (64 × 3 × 3) × (112 × 112) ≈ 14.4 MFLOPs
+*Pointwise FLOPs:* 2 × (Input Channels × 1 × 1) × (Output Channels × Output H × Output W)
+PW FLOPs ≈ 2 × (64 × 1 × 1) × (128 × 112 × 112) ≈ 206 MFLOPs
+*Total:* 14.4 MFLOPs + 206 MFLOPs ≈ **220 MFLOPs**
+
+**3. Reduction:** The MobileNet-style layer offers an **~8.5x reduction** in computation (1.86 GFLOPs / 220 MFLOPs), which is the key to meeting the strict latency budget on mobile.
+
+  > **Key Equation:** $\text{FLOPs}_{\text{Reduction}} = \frac{\text{FLOPs}_{\text{Standard}}}{\text{FLOPs}_{\text{Depthwise}} + \text{FLOPs}_{\text{Pointwise}}}$
+
+  > **Options:**
+  > [x] An ~8-9x reduction. The standard convolution is compute-bound, and replacing it addresses the core FLOPs bottleneck.
+  > [ ] A ~2x reduction. The main issue is the number of parameters, which this change only slightly improves.
+  > [ ] No significant reduction. The bottleneck is the LPDDR5 memory bandwidth, so the operation is memory-bound, not compute-bound.
+  > [ ] A >50x reduction. The ResNet is simply too deep, and a single layer change won't fix the jank.
+
+  📖 **Deep Dive:** [Network Architectures](https://mlsysbook.ai/vol1/dnn_architectures.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The 'Smart Reply' Memory Hog</b> · <code>on-device-llm-feasibility</code></summary>
+
+- **Interviewer:** "A product manager wants to add on-device 'smart replies' to your app using a 2-billion parameter LLM. Your target is a high-end smartphone with 8 GB of RAM. Using the scaling rules, **determine** if this is feasible from a memory perspective. You must account for the app's OS-enforced memory budget, which is typically 25% of the device's RAM, and calculate the model's memory footprint using INT8 quantization."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often guess 'it's too big' without doing the math, or they only calculate the model weight size and forget the strict memory budget imposed by the mobile OS. An app that uses too much RAM will be killed by the OS. Another common mistake is focusing only on compute (TOPS) while ignoring memory capacity, which is usually the primary blocker for large models on device.
+
+  **Realistic Solution:** This is not feasible. The memory budget for the app is the critical constraint. Even with INT8 quantization, the model weights alone consume the entire allotted budget, leaving no room for the app itself, other features, or the activation/KV cache, which is essential for conversations and can also consume hundreds of MBs. The OS would aggressively terminate the app process, leading to constant crashes.
+
+  > **Napkin Math:** **1. Calculate the App's Memory Budget:**
+According to the scaling rules, a mobile app's typical memory budget is 25% of total device RAM.
+*App Memory Budget* = 8 GB RAM × 0.25 = **2 GB**. This is the hard limit for your *entire* app process.
+
+**2. Calculate the Model's Memory Footprint:**
+The model has 2 billion parameters and we are using INT8 quantization (1 byte per parameter).
+*Model Weight Footprint* = 2,000,000,000 parameters × 1 byte/parameter = 2,000,000,000 bytes = **2 GB**.
+
+**3. Conclusion:** The model weights *alone* consume the entire 2 GB memory budget. There is 0 MB left for the application code, UI, other libraries, and the dynamic KV-cache needed for inference. Therefore, the feature is infeasible as specified.
+
+  > **Key Equation:** $\text{Footprint (GB)} = \frac{\text{Params} \times \text{Bytes per Param}}{10^9}$
+
+  > **Options:**
+  > [ ] Yes, it's feasible. An 8GB phone can easily fit a 2GB model.
+  > [x] No, it's not feasible. The 2GB model weights consume the entire 2GB app memory budget, leaving no room for the app or KV cache.
+  > [ ] No, it's not feasible because the model requires 4GB of memory with INT8, which is too large.
+  > [ ] Yes, it's feasible. The Apple A17 Pro's 35 TOPS are more than enough to handle a 2B parameter model.
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Fallback Tax</b> · <code>mobile-operator-delegation</code></summary>
+
+- **Interviewer:** "You are a Mobile ML Engineer optimizing a new camera filter model for an iPhone 15 Pro. The app feels laggy, and profiling shows your model's latency is 25ms, missing the critical 16ms 'jank' budget for a smooth UI. Using CoreML's performance profiler, you diagnose that 10 separate layers using a custom `FancyReLU` activation are not supported by the Apple Neural Engine (ANE) and are falling back to the CPU for execution. The rest of the model delegates perfectly. As a quick test, you replace all `FancyReLU` activations with a standard `ReLU`. This makes the model fully delegatable to the ANE, and latency plummets to 12ms, but it causes an unacceptable 0.5% drop in model accuracy. How would you best solve this latency crisis while minimizing the accuracy loss?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on micro-optimizing the single slow operator (e.g., by quantizing it or writing a custom Metal kernel) without realizing that the true cost is the 'fallback tax' — the repeated, fixed overhead of stopping the NPU, moving data to the CPU/GPU, and moving it back. A faster fallback op is still orders of magnitude more expensive than avoiding the fallback altogether.
+
+  **Realistic Solution:** The correct approach is 'delegation-aware' model design. The high latency isn't from the `FancyReLU`'s complexity, but from the 10 separate CPU fallbacks it forces. The optimal solution is to find a hardware-supported activation function that closely approximates `FancyReLU` (e.g., `SiLU`/Swish, which is supported on modern NPUs) and retrain the model. This allows the compiler to fuse the activation with its surrounding layers into a single, highly-efficient block that never leaves the ANE, eliminating the fallback tax while retraining helps recover most of the lost accuracy.
+
+  > **Napkin Math:** Let's diagnose the cost of a single fallback. The total latency difference between the falling-back model (25ms) and the fully-fused model (12ms) is 13ms. Since there are 10 fallbacks, the 'fallback tax' per operator is `13ms / 10 = 1.3ms`. Even if you quantize `FancyReLU` and make its CPU execution 4x faster, the majority of that 1.3ms tax is fixed data transfer and scheduling overhead. If the CPU op itself only took 0.5ms, a 4x speedup saves only `0.5 * (1 - 1/4) = 0.375ms`. The total time per block would only drop from `1.3ms` to `0.925ms`. The new total latency would be `12ms (base) + 10 * 0.925ms = 21.25ms`, which still misses the 16ms budget. This proves that eliminating the fallback itself is the only effective strategy.
+
+  > **Key Equation:** $\text{T}_{\text{total}} = \text{T}_{\text{delegated}} + N_{\text{fallbacks}} \times (\text{T}_{\text{overhead}} + \text{T}_{\text{fallback_op}})$
+
+  > **Options:**
+  > [ ] Implement a custom Metal GPU kernel for `FancyReLU` to accelerate its execution compared to the CPU.
+  > [ ] Apply INT8 quantization to the whole model to reduce the data size and speed up the CPU execution of `FancyReLU`.
+  > [x] Replace `FancyReLU` with a similar, ANE-supported activation like `SiLU` (Swish) and retrain the model to recover the accuracy.
+  > [ ] Increase the number of CPU threads available to the app to parallelize the execution of the ten `FancyReLU` fallbacks.
+
+  📖 **Deep Dive:** [Mobile Systems and SoC Architecture](mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Silent Engagement Drop</b> · <code>silent-accuracy-loss</code></summary>
+
+- **Interviewer:** "You are the lead ML engineer for a new 'smart compose' feature on a popular messaging app. After a successful launch, you roll out an update that uses an INT8 quantized model instead of the original FP16 model to reduce battery drain. `Firebase Crashlytics` shows no increase in crash rates, but your product manager reports a 50% drop in user engagement with the compose suggestions. You suspect a silent failure. Given the hardware constraints of a modern smartphone, diagnose the most likely cause of the engagement drop."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often fixate on catastrophic failures like crashes or thermal throttling. They forget that for user-facing features, a subtle drop in model quality can make the feature 'feel' useless, leading to user abandonment without any explicit error signal. Another mistake is blaming the UI or network without first analyzing the ML-specific change that was made (quantization).
+
+  **Realistic Solution:** The most likely cause is that the INT8 quantization process, while not causing crashes, has degraded the model's accuracy to the point where its suggestions are no longer helpful. This is a classic 'silent accuracy loss'. For a nuanced task like text generation, small errors can make suggestions grammatically incorrect or contextually irrelevant, causing users to ignore them. The lack of crashes is expected; the model is producing valid, but useless, output. The correct approach is to re-evaluate the quantization strategy, potentially using quantization-aware training (QAT) or backing off to a less aggressive format like FP16 for this specific feature if the quality trade-off is too high.
+
+  > **Napkin Math:** Let's analyze the team's motivation for the INT8 switch on an Apple A17 Pro.
+1.  **Energy Consumption Goal:** The primary driver is battery life. The energy cost of a 32-bit operation is ~18x that of an 8-bit one. For FP16 vs INT8, the ratio is still significant.
+2.  **Energy per Suggestion (Hypothetical):** Assume the ANE/SoC draws 2W while generating a suggestion, and it takes 50ms.
+    -   *FP16 Energy:*  Let's estimate this uses roughly double the energy of INT8. Let's use the FP32 vs INT8 ratio as a guide. Maybe it's a 4x energy difference. So, `2W * 0.05s = 0.1 Joules`
+    -   *INT8 Energy:* `0.1 J / 4 = 0.025 Joules`.
+3.  **Daily Impact:** If a power user generates 200 suggestions a day:
+    -   *FP16 Daily Energy:* `0.1 J/sugg * 200 sugg = 20 Joules`
+    -   *INT8 Daily Energy:* `0.025 J/sugg * 200 sugg = 5 Joules`
+4.  **Diagnosis:** The team saved 15 Joules per day per power user, which seemed like a good trade-off. However, this compute-focused optimization ignored the user-facing utility. The 50% engagement drop proves the accuracy loss was too severe. The analysis must balance compute efficiency with product metrics.
+
+  > **Key Equation:** $\text{Utility} = f(\text{Accuracy}, \text{Latency}, \text{Power})$
+
+  > **Options:**
+  > [ ] The model is too slow after the update and is being terminated by the OS watchdog.
+  > [ ] A bug in the UI layer is preventing the new suggestions from being displayed correctly.
+  > [x] The INT8 quantization degraded model accuracy, making suggestions irrelevant and causing users to ignore them.
+  > [ ] Server-side A/B test configuration is faulty, showing the feature to fewer users.
+
+  📖 **Deep Dive:** [Mobile: Ship & Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Federated Reporting Failure</b> · <code>federated-analytics</code></summary>
+
+- **Interviewer:** "Your team is using federated analytics to tune a new camera filter. Each night, a background task on user devices is scheduled to compute a histogram of filter settings used that day and send the small (~50KB) summary. You notice a problem: reporting rates are below 20%, and virtually all successful reports come from high-end devices (e.g., Snapdragon 8 Gen 3, Apple A17 Pro). Low-end and mid-range devices are consistently failing to report. Network connectivity has been ruled out as the primary issue. Use your knowledge of mobile systems to diagnose the most likely bottleneck."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming the network or the federated learning algorithm itself is a common error. Many engineers unfamiliar with mobile constraints don't realize how ruthlessly the OS manages background tasks. They assume if the code is correct, it will run. The reality is that mobile OSes are dictators that prioritize foreground user experience and battery life above all else.
+
+  **Realistic Solution:** The most likely culprit is the mobile OS terminating the background task for exceeding its resource budget on less powerful hardware. Background tasks are given very strict limits on CPU time, memory, and power draw. A task that completes easily on a high-end phone might be too slow or resource-intensive on a mid-range device.
+
+For example, the task might involve loading and processing several recent images. On a low-end phone with slow eMMC flash storage and a less powerful CPU/NPU, this process can take too long or draw too much power, causing the OS to kill it before it can complete and phone home. The solution involves heavily optimizing the background task: reducing the amount of data processed, using the most efficient APIs (e.g., delegating to the NPU instead of running on the CPU), and ensuring the task can complete within the tight resource window provided by the OS for background operations.
+
+  > **Napkin Math:** Let's compare a high-end vs. a mid-range phone running the analytics task.
+1.  **The Task:** Analyze 50 photos. Each analysis involves 1GB of reads from flash and 20 GFLOPS of compute.
+2.  **High-End Phone (Snapdragon 8 Gen 3):**
+    -   *Flash Read Speed (UFS 4.0):* ~4.2 GB/s. Time to read: `1 GB / 4.2 GB/s ≈ 0.24s`.
+    -   *Compute Speed (Hexagon NPU):* Let's say 10 TFLOPS are available in a background task. Time to compute: `20 GFLOPS / 10,000 GFLOPS/s = 0.002s`.
+    -   *Total Time:* `0.24s + 0.002s ≈ 0.242s`. This is well within a typical 30-second OS background budget.
+3.  **Mid-Range Phone (Older Snapdragon):**
+    -   *Flash Read Speed (UFS 2.1):* ~850 MB/s. Time to read: `1 GB / 0.85 GB/s ≈ 1.18s`.
+    -   *Compute Speed (Older Hexagon):* Let's say only 0.5 TFLOPS are available. Time to compute: `20 GFLOPS / 500 GFLOPS/s = 0.04s`.
+    -   *Total Time:* `1.18s + 0.04s = 1.22s`. Still seems okay.
+4.  **The Real Bottleneck (Power/Throttling):** The OS doesn't just measure time, it measures *power-gated time*. The mid-range phone, while running its CPU/NPU, might draw power close to the OS limit. The OS might only grant it a total of 10 seconds of active CPU time in a 5-minute window. If the I/O is slow and contended, and the CPU is throttled, the *wall clock time* could easily exceed the OS's patience, even if the pure compute time seems low. The analysis proves the task is I/O-bound on both, but the slower I/O on the mid-range device pushes it closer to the OS termination limit.
+
+  > **Key Equation:** $\text{TaskTime}_{\text{wall_clock}} > \text{OS_Budget}_{\text{background}}$
+
+  > **Options:**
+  > [ ] A bug in the federated learning framework causes mathematical divergence on less powerful devices.
+  > [x] The background task is exceeding its CPU, memory, or power budget on lower-end devices and is being terminated by the OS.
+  > [ ] The 50KB payload is too large, causing network timeouts on cellular connections common to lower-end plans.
+  > [ ] Users with older phones are more likely to have disabled background app refresh.
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Drowned Signal</b> · <code>on-device-differential-privacy</code></summary>
+
+- **Interviewer:** "You are a mobile ML engineer improving a keyboard app's prediction model by collecting user typing data. To protect user privacy, your team implements on-device differential privacy, adding Gaussian noise to local gradient updates before sending them to a central server. You set an aggressive privacy budget (low epsilon) to provide the strongest theoretical guarantees. After deployment, you observe that the global model's accuracy is not improving and sometimes even degrades. Diagnose the most likely cause of this failure to learn."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often blame the hardware or the network. For instance, they might suspect the phone's NPU can't handle the noise generation math, or that the noisy gradients are being corrupted in transit. While plausible, these usually aren't the root cause. The core issue is the delicate balance between the signal (gradient) and the noise (privacy).
+
+  **Realistic Solution:** The privacy budget (epsilon) is too aggressive (too low). In differential privacy, the scale of the added noise is inversely proportional to epsilon. With a very low epsilon, the magnitude of the noise vector being added on-device is orders of magnitude larger than the magnitude of the actual gradient vector. The learning signal is completely 'drowned' by the privacy-preserving noise. Consequently, the server is aggregating updates that are almost entirely random noise, and the global model fails to converge to a useful state. The solution is to carefully tune epsilon, relaxing the privacy guarantee just enough to allow the signal to be stronger than the noise.
+
+  > **Napkin Math:** Let's quantify the signal-to-noise ratio. Assume an average gradient update has an L2 norm of 0.5. For Gaussian DP, the noise standard deviation `σ` is proportional to the clipping norm `C` divided by epsilon `ε`. Let's say you clip gradients to `C=1.0`.
+
+- **Scenario 1 (Good Epsilon):** `ε = 1.0`. The noise `σ` is proportional to `1.0/1.0 = 1.0`. The signal (0.5) and noise are on a similar scale, allowing for learning.
+- **Scenario 2 (Bad Epsilon):** `ε = 0.01`. The noise `σ` is proportional to `1.0/0.01 = 100`. The noise is ~200x larger than the signal (`100 / 0.5`). The update sent to the server is `gradient + noise ≈ noise`. The server is just averaging noise.
+
+  > **Key Equation:** $\sigma \propto \frac{C}{\epsilon}$
+
+  > **Options:**
+  > [ ] The mobile NPU lacks native support for the complex sampling operations required for differential privacy, introducing numerical errors that corrupt the gradients.
+  > [ ] The high-entropy noisy gradients are being compressed incorrectly by the mobile network stack, leading to information loss before they reach the server.
+  > [x] The privacy budget (epsilon) is too low, causing the magnitude of the added noise to be significantly larger than the gradient signal, preventing the model from learning.
+  > [ ] The on-device training batch size is too small, resulting in high-variance gradients that the server-side optimizer cannot distinguish from the added privacy noise.
+
+  📖 **Deep Dive:** [Responsible Engineering](https://mlsysbook.ai/vol1/responsible_engr.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Battery Drain Anomaly</b> · <code>federated-learning</code></summary>
+
+- **Interviewer:** "You are on a team using federated learning to train a 50M parameter language model on user smartphones. The training plan is for each device to train for one local epoch and then upload the updated model weights to the server. Soon after launch, you receive widespread user complaints of excessive data consumption and rapid battery drain during the app's background activity. Your `perfetto` traces show that on-device training on the NPU is fast and efficient. What is the most likely cause of the user complaints?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to focus only on the compute aspect of ML. Engineers might assume the problem lies with the NPU's power draw during training or that the model is too large for the device's RAM. While these can be issues, they often pale in comparison to the cost of communication, especially on mobile networks.
+
+  **Realistic Solution:** The root cause is the communication cost of the model update. Sending the entire 50M parameter model over the network is prohibitively expensive for a mobile device. Each parameter is typically 4 bytes (FP32), resulting in a 200MB upload. Transmitting this much data requires keeping the phone's power-hungry 5G/LTE radio active for a prolonged period, which is a major source of battery drain. It also consumes a significant chunk of a user's monthly data plan. The solution is to apply communication-reduction strategies, such as sending only the gradient diff, using quantization (e.g., FP16 or INT8 for the updates), or employing more advanced techniques like structured or sparse updates to drastically reduce the payload size.
+
+  > **Napkin Math:** Let's calculate the size of a single update payload.
+
+- **Parameters:** 50,000,000
+- **Bytes per Parameter:** 4 bytes (for standard FP32 precision)
+
+**Calculation:**
+`Upload Size = Parameters × Bytes per Parameter`
+`Upload Size = 50,000,000 × 4 bytes`
+`Upload Size = 200,000,000 bytes = 200 MB`
+
+Uploading a 200 MB payload for every single training contribution is not scalable for a mobile fleet. This is the source of the high data and energy cost.
+
+  > **Key Equation:** $\text{Upload Size} = \text{Parameters} \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] The model's 2GB memory footprint during training exceeds the app memory budget on most phones, causing heavy use of slow flash storage and increasing power draw.
+  > [x] The 50M parameter model update is approximately 200MB, and transmitting this large payload over a cellular network consumes excessive energy and data.
+  > [ ] The Apple A17 Pro's NPU is inefficient at training, and the power consumed during the single local epoch is draining the battery.
+  > [ ] The federated learning server is experiencing high latency, forcing the mobile device to maintain an open, power-draining network connection while waiting for acknowledgment.
+
+  📖 **Deep Dive:** [ML Operations](https://mlsysbook.ai/vol1/ops.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Mobile Generative AI Lag</b> · <code>mobile-roofline-analysis</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer on a mobile team developing a new 'Magic Editor' feature. It uses a custom generative model for real-time photo in-painting on the latest iPhone, which uses an Apple A17 Pro chip. Your latency budget is 16ms to avoid UI jank. However, profiling a single inference reveals it takes 45ms. The profiler reports the model's core execution performs 70 Giga-INT8-Ops and accesses a total of 500 MB of data from DRAM. Using the provided hardware constants, diagnose the primary performance bottleneck."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on the absolute number of operations (70 G-ops seems high!) and incorrectly conclude the model is compute-bound. They might also guess at thermal throttling without evidence. The key is to analyze the *ratio* of compute to memory access (Arithmetic Intensity) and compare it to the hardware's capabilities.
+
+  **Realistic Solution:** The problem is that the model is memory-bound. The A17 Pro's Neural Engine is being starved by slow data access from DRAM. To diagnose this, you must calculate the model's Arithmetic Intensity (AI) and compare it to the A17 Pro's known Ridge Point. The model's AI is far below the hardware's threshold, meaning the chip spends most of its time waiting for data. The optimization priority should be reducing memory traffic (e.g., operator fusion, re-architecting layers to be less memory-intensive) rather than just reducing operation count.
+
+  > **Napkin Math:** 1. **Calculate the model's Arithmetic Intensity (AI):**
+   - AI = Total Operations / Total Memory Bytes
+   - AI = 70e9 Ops / 500e6 Bytes = 140 Ops/Byte
+
+2. **Identify the Hardware's Ridge Point:**
+   - From the constants, the Apple A17 Pro's Ridge Point is ~683 Ops/Byte for the ANE (Neural Engine).
+
+3. **Diagnose the Bottleneck:**
+   - Compare the model's AI to the hardware's Ridge Point.
+   - 140 Ops/Byte (Model) < 683 Ops/Byte (Hardware)
+   - Since the model's operational intensity is far below the hardware's capability, the system is **memory-bound**. The ANE has the computational power but is forced to wait for data to arrive from DRAM.
+
+  > **Key Equation:** $\text{Arithmetic Intensity (AI)} = \frac{\text{Total Operations (Ops)}}{\text{Total Memory Moved (Bytes)}}$
+
+  > **Options:**
+  > [ ] The model is compute-bound; 70 G-ops is too many for the ANE to handle in 16ms.
+  > [ ] The system is power-bound and thermally throttling, which is increasing latency.
+  > [x] The model is memory-bound; its arithmetic intensity is too low for the A17 Pro's memory bandwidth.
+  > [ ] The bottleneck is the UFS flash storage, which is too slow to load the model weights.
+
+  📖 **Deep Dive:** [Mobile: SoC Architectures](https://mlsysbook.ai/mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Catastrophic Accuracy Drop</b> · <code>quantization-calibration</code></summary>
+
+- **Interviewer:** "You are an ML engineer on a mobile AI team. You've successfully trained a computer vision model in FP32 to recognize retail products with 95% accuracy. To deploy it on an iPhone with an A17 Pro chip, you use post-training static quantization to convert the model to INT8. The model now runs extremely fast on the Neural Engine, but its accuracy has plummeted to 20%. Your profiling shows all ops are running on the NPU as expected. The calibration dataset was a small set of 100 images taken in your well-lit office. Diagnose the most likely cause of this catastrophic accuracy failure."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often blame the hardware or the quantization format itself, saying 'INT8 isn't precise enough.' They fail to realize that the quality of the quantization output is critically dependent on the input data used during the calibration step. A small or unrepresentative calibration set is a common cause of failure.
+
+  **Realistic Solution:** The most likely cause is a **calibration data mismatch**. The quantization scale (S) and zero-point (Z) are calculated based on the dynamic range (min/max activation values) observed in the calibration dataset. Your office dataset was not representative of the varied lighting and product arrangements in a real store. When the model encounters real-world images, activations spike beyond the range observed during calibration, leading to massive clipping (overflow). This clipping discards critical information, destroying the model's accuracy.
+
+  > **Napkin Math:** Let's say a key ReLU activation in your office images has a maximum value of 6.0. The static quantizer sets the scale to map `[-6.0, 6.0]` to the INT8 range `[-128, 127]`. Now, in a real store with bright spotlights, the same activation spikes to 20.0. When quantized, this value is clipped to 127. Any value from 6.0 to 20.0 (and beyond) gets mapped to the same maximum integer value. This loss of dynamic range for important features is catastrophic. The model can no longer distinguish between a 'bright' feature and a 'very bright' one.
+
+  > **Key Equation:** $v_{\text{int8}} = \text{clamp}(\text{round}(v_{\text{fp32}} / S) + Z, Q_{\min}, Q_{\max})$
+
+  > **Options:**
+  > [ ] The model is too complex; INT8 format lacks the precision to represent the weights accurately.
+  > [ ] The Apple Neural Engine does not correctly support a key operator, causing a silent fallback to the CPU with incorrect results.
+  > [x] The calibration dataset was not representative of the production data, causing activation values to overflow the INT8 range during inference.
+  > [ ] The conversion process introduced too much noise, and the model needs to be re-trained with quantization-aware training (QAT).
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Janky AR Filter</b> · <code>mixed-precision</code></summary>
+
+- **Interviewer:** "You're trying to optimize an AR style transfer filter for a mobile app. The goal is a smooth 30 FPS (a 33ms per-frame budget). Currently, the FP16 model runs on the mobile NPU, but inference takes ~40ms, causing noticeable 'jank'. A profiler analysis reveals that one specific layer—a large depth-wise separable convolution—has a very wide and unpredictable activation distribution, making it prone to visual artifacts if quantized. The other 49 layers are standard, well-behaved convolutions. Your task is to solve the performance problem. Which approach should you apply?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often take an all-or-nothing approach. They either try to quantize the entire model to INT8, ignoring the risk of quality degradation, or they give up on quantization entirely and start a complex, time-consuming model re-architecture or pruning project. The optimal solution is often a surgical, hybrid approach.
+
+  **Realistic Solution:** The best solution is to use **mixed precision**. By quantizing the 49 well-behaved layers to INT8, you can capture most of the potential performance gain. You would then selectively keep the one problematic depth-wise convolution layer in its original FP16 precision. This hybrid approach balances the need for speed with the need to preserve visual quality by protecting the most sensitive part of the model from aggressive quantization. Modern mobile inference frameworks (like Core ML or TensorFlow Lite) explicitly support this by allowing you to specify the precision for individual layers.
+
+  > **Napkin Math:** A full INT8 quantization would roughly halve the latency: `40ms / 2 = 20ms`. This meets the 33ms budget but risks visual artifacts. Let's analyze a mixed-precision approach. Assume latency is proportional to layer count (a simplification). The 49 INT8 layers contribute `(49/50) * 20ms = 19.6ms`. The single FP16 layer contributes `(1/50) * 40ms = 0.8ms`. The total estimated latency is `19.6ms + 0.8ms = 20.4ms`. This still comfortably meets the 30 FPS target while safeguarding the quality of the most sensitive layer.
+
+  > **Key Equation:** $T_{\text{total}} = \sum_{i \in \text{INT8 Layers}} T_i + \sum_{j \in \text{FP16 Layers}} T_j$
+
+  > **Options:**
+  > [ ] Quantize the entire model to INT8 to achieve the maximum possible speedup.
+  > [x] Keep the sensitive layer in FP16 but quantize the other 49 layers to INT8.
+  > [ ] The NPU is the bottleneck. Offload the model to run on the mobile GPU instead.
+  > [ ] The model is too large. Prune 25% of the channels from all layers and retrain the model.
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Deceiving FLOPs Reduction</b> · <code>depthwise-separable-convolution</code></summary>
+
+- **Interviewer:** "You are optimizing a real-time object detection model for an Android phone with a Snapdragon 8 Gen 3 SoC. The current standard CNN model is missing the 16ms per-frame deadline, running at 40ms. A teammate suggests replacing all standard convolutions with depthwise separable convolutions. After the change, the model's theoretical FLOPs count drops by nearly 9x. However, a benchmark on the device shows the latency only improved from 40ms to 35ms, still badly missing the 16ms budget. Demonstrate why the massive FLOPs reduction did not translate to a proportional latency improvement."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume FLOPs are a direct proxy for latency. They see a big reduction in FLOPs and expect a similar speedup, ignoring that on-device performance is a complex interplay between compute, memory bandwidth, and cache performance. They blame software (e.g., framework overhead) instead of the hardware physics.
+
+  **Realistic Solution:** The massive FLOPs reduction did not translate to a latency improvement because the operation became severely memory-bandwidth bound. Depthwise separable convolutions have a much lower Arithmetic Intensity (AI) than standard convolutions. While they require fewer calculations, they require more memory access events per calculation. Mobile NPUs, like the Hexagon on the Snapdragon, have powerful compute units that end up sitting idle, waiting for data to be shuffled from the slow LPDDR5X DRAM. The two separate steps (depthwise and pointwise) break data locality and can't be perfectly fused, further increasing memory traffic compared to a single, dense convolution that reads its inputs once.
+
+  > **Napkin Math:** Let's use the Roofline Model. The key is Arithmetic Intensity (AI) = Compute / Memory. On a Snapdragon 8 Gen 3, Memory BW is ~77 GB/s. A standard 3x3 convolution might have an AI of ~700 Ops/Byte, which is compute-bound. In contrast, a depthwise separable convolution has an AI of ~70 Ops/Byte. This massive drop in AI shifts the operation from being compute-bound to being heavily memory-bound. Even though the FLOPs are 9x lower, the NPU spends most of its time stalled, waiting for the 77 GB/s DRAM to feed it. The theoretical 35 TOPS of the A17 Pro (similar class) is irrelevant if you can't feed the beast. The latency becomes a function of memory bandwidth, not compute power: `Latency ≈ Total_Bytes_Moved / BW_DRAM`.
+
+  > **Key Equation:** $\text{Arithmetic Intensity (AI)} = \frac{\text{FLOPs}}{\text{Bytes Accessed}}$
+
+  > **Options:**
+  > [ ] The FLOPs calculation for depthwise separable convolutions is misleading; they actually require more total operations.
+  > [ ] The Snapdragon's Hexagon NPU lacks specialized hardware for depthwise convolutions, forcing it to fall back to the CPU.
+  > [x] The operation's Arithmetic Intensity dropped significantly, making it memory-bandwidth bound instead of compute-bound.
+  > [ ] The TensorFlow Lite framework has high dispatch overhead for the two separate depthwise and pointwise operations.
+
+  📖 **Deep Dive:** [Mobile: SoC Architecture](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Transformer Tax on Mobile</b> · <code>cnn-vs-transformer</code></summary>
+
+- **Interviewer:** "Your team is building a 'visual search from camera' feature on an iPhone with an A17 Pro SoC. The latency budget is 100ms. The V1 model, a MobileNetV3 CNN, runs in 80ms. A new hire proposes switching to a small Vision Transformer (ViT) of similar parameter count, citing its superior accuracy. You benchmark the ViT and find it's 5x slower (~400ms), completely missing the budget. Diagnose the architectural reason for the ViT's poor latency on mobile hardware, despite its comparable size."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming that because ViTs are state-of-the-art for large models, they must also be superior when scaled down. Engineers might incorrectly blame the parameter count, activation size, or specific unsupported ops, without identifying the fundamental mismatch between the self-attention mechanism and mobile memory systems.
+
+  **Realistic Solution:** The ViT is dramatically slower due to the memory access patterns of its core self-attention mechanism. Self-attention calculates a score between every single pair of input patches (tokens). This results in non-local, effectively random memory accesses as it reads from the large Q, K, and V matrices stored in DRAM. CNNs, by contrast, exhibit strong locality—a convolution only looks at a small, nearby window of pixels. Mobile memory subsystems (caches, prefetchers, NoC) are highly optimized for this kind of local, contiguous access. The ViT's access pattern thrashes the cache and is perpetually bottlenecked by the SoC's DRAM bandwidth (~51.2 GB/s on the A17 Pro), leaving the powerful 35 TOPS Apple Neural Engine starved for data. It's a classic case of being memory-bandwidth bound.
+
+  > **Napkin Math:** Let's apply the Roofline model. The A17 Pro's ridge point is ~683 Ops/Byte. The self-attention operation (`Q * K^T`) has a very low Arithmetic Intensity. For 196 tokens (14x14 patches) of dimension 768, the FLOPs are `2 * 196 * 768 * 196 ≈ 59 MFLOPs`. The memory accessed is `(2 * 196 * 768) + (196 * 196) ≈ 340 K-elements`, or `~680 KB` in FP16. This gives an AI of `59e6 / 680e3 ≈ 87 Ops/Byte`. Since 87 is far less than the 683 ridge point, the operation is severely memory-bound. The latency is determined by how fast the 51.2 GB/s memory can deliver the data, not by the 35 TOPS of compute.
+
+  > **Key Equation:** $\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V$
+
+  > **Options:**
+  > [ ] The LayerNorm operations in the ViT are not supported by the ANE, causing slow CPU fallbacks.
+  > [ ] The ViT has a much larger total activation memory footprint, exceeding the ANE's on-chip SRAM.
+  > [x] Self-attention's non-local memory access patterns have low arithmetic intensity, making it bottlenecked by DRAM bandwidth.
+  > [ ] The patch embedding (stem) layer of the ViT uses a large convolution that is inefficient on mobile GPUs.
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Stuttering Generative Keyboard</b> · <code>on-device-latency-queueing</code></summary>
+
+- **Interviewer:** "You are the lead ML systems engineer for a new generative AI keyboard feature on a flagship smartphone (equipped with an Apple A17 Pro). The feature suggests follow-up text as the user types. The UX team reports that while the suggestions are good, the keyboard 'stutters' or 'freezes' for a fraction of a second when the first suggestion appears, especially if the user is typing quickly. Your telemetry shows that the Time-To-First-Token (TTFT) for a 20-token prompt is ~80ms, and subsequent Time-Per-Output-Token (TPOT) is ~39ms. Given the mobile UI's 60Hz refresh rate (16.67ms deadline), diagnose the most likely cause of the stutter."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often misdiagnose this as a pure model speed problem, immediately suggesting aggressive quantization or pruning. While faster inference is good, it doesn't solve the core architectural issue: a long, blocking task (TTFT) is stalling the UI thread. The system isn't designed for real-time, concurrent workloads.
+
+  **Realistic Solution:** The most likely cause is a blocking inference pipeline that violates the real-time UI deadline. The 80ms TTFT freezes the UI for nearly 5 frame deadlines (80ms / 16.67ms). The subsequent 39ms TPOT also misses more than two frame deadlines per token. This serial, blocking execution model cannot handle concurrent user input and model generation. The correct approach is to re-architect the inference pipeline to be non-blocking, likely using a continuous batching or a similar iterative prefill system. This allows the model to process the initial prompt, start generating tokens, and crucially, accept new user inputs (keystrokes) to modify the context without having to finish the entire generation sequence first. It addresses the queuing problem, not just the raw inference speed.
+
+  > **Napkin Math:** The diagnosis is based on comparing the inference latencies to the UI rendering deadline.
+1. **UI Deadline:** A 60Hz display refreshes every 1000ms / 60 = 16.67ms. Any task blocking the main thread for longer than this causes a 'stutter' or 'jank'.
+2. **TTFT Violation:** The initial prompt processing takes 80ms. This blocks the UI for `80ms / 16.67ms ≈ 4.8` frame deadlines. This is a severe, user-visible freeze.
+3. **TPOT Violation:** Each subsequent token takes 39ms, blocking the UI for `39ms / 16.67ms ≈ 2.3` frame deadlines. The suggestions will appear in a jerky, non-smooth manner.
+4. **Queuing Failure:** While the 80ms TTFT is running, any new keystrokes from the user are queued up. When the system unfreezes, it has to process this backlog, leading to a cascade of missed deadlines. Little's Law ($L = \lambda W$) shows that as the Wait time (W) for inference exceeds the arrival interval ($\lambda^{-1}$), the queue length (L) of unprocessed inputs grows, causing system instability.
+
+  > **Key Equation:** $T_{\text{inference}} > T_{\text{deadline}}$
+
+  > **Options:**
+  > [ ] The model is too large; it should be quantized from FP16 to INT8 to reduce TPOT.
+  > [ ] The inference workload is not being fully delegated to the Apple A17's Neural Engine, falling back to the CPU.
+  > [x] The inference pipeline is blocking the UI thread; a non-blocking, continuous batching architecture is needed.
+  > [ ] The NPU is overheating and thermally throttling, causing intermittent slowdowns.
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Lagging AR Bounding Box</b> · <code>real-time-deadlines-batching</code></summary>
+
+- **Interviewer:** "You are developing an object detection feature for AR glasses that overlays bounding boxes on objects. The camera streams at 60 FPS. To feel real-time and avoid a 'swimming' effect, the model must process a frame and return results before the next frame arrives. Your current model takes 22ms for inference on a single frame. A product manager, aiming to improve 'efficiency', suggests batching 4 frames together to increase throughput. Using napkin math, demonstrate why this is a counter-productive strategy for this latency-critical application."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Applying cloud-based intuition (where batching increases throughput and is almost always good) to a latency-critical edge application. Engineers might correctly calculate the improved TOPS of a batched request but fail to account for the added 'assembly' latency waiting for the batch to fill, which is fatal for a real-time system.
+
+  **Realistic Solution:** This is a hard real-time system with a strict latency budget. The PM's suggestion is counter-productive because it dramatically increases the latency for each individual frame, violating the real-time constraint. The core problem is that single-frame inference (22ms) already misses the 16.67ms deadline. Batching makes this worse. By waiting to assemble a batch of 4, you add a delay of over 66ms before inference even begins. The total latency for a frame becomes nearly 100ms, making the AR overlay feel extremely laggy and disconnected from reality. The correct engineering path is to reject batching and focus entirely on optimizing the single-frame inference time to get it under 16.67ms through methods like quantization, pruning, or architectural changes.
+
+  > **Napkin Math:** 1. **Calculate the Deadline:** A 60 FPS camera provides a new frame every `1000ms / 60 FPS = 16.67ms`. This is the hard real-time deadline.
+2. **Analyze Single-Frame Performance:** The current model takes 22ms. Since `22ms > 16.67ms`, the system is already unstable. For every frame it processes, `22 / 16.67 ≈ 1.3` new frames arrive. The input queue of frames to be processed will grow indefinitely.
+3. **Analyze PM's Batching Strategy:**
+   - **Batch Assembly Wait Time:** To create a batch of 4, the system must wait for 4 frames to arrive from the camera. This takes `4 frames * 16.67ms/frame = 66.68ms`.
+   - **Batched Inference Time:** Let's assume some hardware parallelism provides a slight speedup, so batch-4 inference takes `80ms` (instead of `4 * 22 = 88ms`).
+   - **Total Latency for Frame 1:** The latency for the very first frame in the batch is `66.68ms (wait time) + 80ms (inference time) = 146.68ms`.
+4. **Conclusion:** The PM's suggestion increases the perceived latency from an already-bad 22ms to a catastrophic 147ms. This is nearly 9 frame-times old (`147 / 16.67 ≈ 8.8`), guaranteeing a terrible user experience. Batching is the wrong optimization for this problem.
+
+  > **Key Equation:** $T_{\text{total}} = T_{\text{wait_for_batch}} + T_{\text{inference}}$
+
+  > **Options:**
+  > [ ] The model's arithmetic intensity is too low, making it memory-bound and thus unsuitable for batching.
+  > [x] The system must process frames in real-time. The single-frame inference time (22ms) already violates the 16.67ms deadline, and batching will only increase total latency.
+  > [ ] Batching is correct. It will improve NPU utilization and system throughput, eventually clearing the backlog of frames.
+  > [ ] A dynamic batching system that adapts the batch size based on queue length should be implemented.
+
+  📖 **Deep Dive:** [Edge: Real-time Pipeline](https://mlsysbook.ai/edge/02_realtime_pipeline.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Mobile GPU's Memory-Go-Round</b> · <code>operator-fusion</code></summary>
+
+- **Interviewer:** "You are optimizing a custom keyword-spotting model on an iPhone with an Apple A17 Pro chip. The profiler shows that a sequence of three operations (`Conv2D`, `BatchNorm`, `ReLU`) is taking up a significant portion of your 1.5ms latency budget, even though the model is small. The intermediate activation tensor between each operation is 1MB. Using the hardware constants for an A17 Pro, diagnose why this sequence is slow and apply the most effective optimization."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus only on the computational complexity (FLOPs) of operators, assuming that if the FLOPs are low, the operator must be fast. They neglect the massive overhead of memory access, especially for sequences of small, memory-bound operations where data is repeatedly written to and read from main memory.
+
+  **Realistic Solution:** The bottleneck is not compute; it's memory bandwidth. Each separate operator in the sequence writes its 1MB result to the main LPDDR5 memory, and the next operator must read it back. These round-trips are extremely slow compared to on-chip computation. The solution is Operator Fusion. By fusing `Conv2D`, `BatchNorm`, and `ReLU` into a single kernel, the intermediate 1MB tensors never leave the GPU's fast on-chip memory (registers/L1 cache), eliminating the slow round-trips to LPDDR5 and dramatically reducing latency.
+
+  > **Napkin Math:** The A17 Pro's LPDDR5 memory bandwidth is 51.2 GB/s.
+1. **Unfused Operation Memory Cost:** Reading or writing the 1MB intermediate tensor to main memory takes: `1 MB / 51.2 GB/s` ≈ `0.0195 ms`.
+2. **Total Overhead:** The sequence involves at least four such transfers: (Conv_Write, BN_Read, BN_Write, ReLU_Read). This alone accounts for `4 * 0.0195 ms` = `0.078 ms`, plus the overhead of launching three separate compute kernels.
+3. **Fused Operation:** A single fused kernel reads the initial input and writes the final output once. The intermediate data transfers happen on-chip at cache speeds (~1-4 ns), which is orders of magnitude faster than main memory (~100 ns).
+4. **Conclusion:** The latency is dominated by memory access overhead. Fusion removes these redundant memory transfers, solving the bottleneck.
+
+  > **Key Equation:** $\text{Latency}_{\text{unfused}} \approx \sum_{i=1}^{N} (\text{T}_{\text{launch}} + \text{T}_{\text{read}} + \text{T}_{\text{compute}} + \text{T}_{\text{write}})$
+
+  > **Options:**
+  > [ ] The 1MB activation tensor is too large and causing memory swapping, so the model needs to be pruned.
+  > [ ] The A17 Pro's Neural Engine is not powerful enough; the workload should be moved to the CPU.
+  > [x] The latency is dominated by memory bandwidth overhead from multiple kernel launches; fuse the operations into a single kernel.
+  > [ ] The Conv2D operation is too computationally expensive; it should be replaced with a depthwise separable convolution.
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Real-time Rendering Wall</b> · <code>knowledge-distillation</code></summary>
+
+- **Interviewer:** "Your team needs to deploy a 20 GFLOP object detector on a Snapdragon 8 Gen 3 phone, but it currently runs at 200ms per frame, catastrophically missing the 16ms UI 'jank' budget. You propose two solutions:
+
+A) Apply 50% unstructured weight pruning to the existing model.
+B) Use knowledge distillation to train a new, dense 1 GFLOP student model.
+
+Given that mobile NPUs (like the Hexagon NPU) are hardware accelerators optimized for dense matrix math, demonstrate which approach is more likely to meet the latency budget and solve the deployment problem."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume that FLOPs reduction from pruning translates directly to latency reduction on all hardware. They fail to account for the architectural specifics of hardware accelerators like mobile NPUs, which gain their performance from massively parallel, dense computations and are highly inefficient at handling the irregular memory access patterns of unstructured sparse models.
+
+  **Realistic Solution:** Option B is the correct approach. While unstructured pruning (Option A) reduces the theoretical FLOP count, it results in sparse weight matrices that are poorly suited for mobile NPUs. The Hexagon NPU cannot effectively skip the zero-value computations and its memory prefetching mechanisms are disrupted by the irregular data access, leading to little-to-no actual speedup. The latency would remain close to 200ms.
+
+In contrast, Option B creates a small, dense model. Although its accuracy is derived from the larger model via distillation, its architecture is NPU-friendly. The dense 1 GFLOP model will map efficiently to the NPU's parallel compute units. A 20x reduction in FLOPs for a dense model will result in a speedup that is much closer to the theoretical 20x, easily meeting the 16ms budget.
+
+  > **Napkin Math:** 1. **Target Latency:** 16 ms.
+2. **Hardware:** Snapdragon 8 Gen 3 NPU, optimized for dense matrix operations.
+3. **Option A (Pruning):** The model is now 10 GFLOPs. However, due to unstructured sparsity, the architectural efficiency (η_arch) on the NPU is extremely low. `Effective Speedup ≈ FLOPs Reduction × η_arch` ≈ `2x × ~0%` ≈ `No Speedup`. The latency remains ~200ms.
+4. **Option B (Distillation):** The new model is dense and 1 GFLOP (20x smaller). For dense models, NPU efficiency is high. A first-order estimate of latency is `200 ms / 20` = `10 ms`. This is a realistic estimate that falls comfortably within the 16ms budget.
+5. **Conclusion:** Distillation to a smaller, dense architecture is the only viable path to meet the real-time constraint on this hardware.
+
+  > **Key Equation:** $\text{Effective Speedup} = \frac{\text{FLOPs}_{\text{old}}}{\text{FLOPs}_{\text{new}}} \times \eta_{\text{arch}}$
+
+  > **Options:**
+  > [ ] Distillation only improves accuracy, it doesn't solve latency issues.
+  > [ ] Pruning halves the FLOPs, so latency will become 100ms, which is a significant improvement.
+  > [x] A small, dense student model from distillation is NPU-friendly and will likely meet the 16ms budget, whereas the pruned model will see little speedup.
+  > [ ] Neither will work; the only solution is to run the model on the cloud via an API call.
+
+  📖 **Deep Dive:** [Mobile: Application Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Futile Shard</b> · <code>parallelism-on-mobile</code></summary>
+
+- **Interviewer:** "You are the Staff ML Engineer on the mobile team. A junior engineer, with a strong background in cloud LLM training, is tasked with implementing on-device fine-tuning for a 50M parameter personalization model on an Apple A17 Pro. To save memory, they wrap the model in a PyTorch FSDP (Fully Sharded Data Parallelism) variant designed for single-node, multi-accelerator use. During testing, they are shocked to find that training is 10x slower than a baseline implementation and peak memory usage has actually increased. They suspect a bug in the ANE drivers. Given the specs, diagnose the most likely cause of the performance degradation."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to cloud environments often assume that parallelism techniques like FSDP are universal solutions for memory and compute scaling. They misapply multi-GPU architectural patterns to single-accelerator, unified-memory systems, failing to account for the fact that the 'network' is now the device's memory bus, and the communication overhead outweighs any benefits.
+
+  **Realistic Solution:** The root cause is the architectural mismatch. FSDP is designed for multi-accelerator systems where model parameters are distributed across physically separate memory pools (e.g., different GPUs). It relies on high-speed interconnects (like NVLink) to run communication (All-Gather) in parallel with computation. On a mobile SoC, there is only one accelerator and one pool of unified memory. FSDP's 'sharding' provides no memory saving and its 'communication' phase becomes a series of blocking memory copies on the main memory bus. This communication overhead, which is meant to be hidden by overlapping with computation on a different accelerator, now dominates the total execution time and adds latency, making the process much slower than a simple, non-parallel forward/backward pass.
+
+  > **Napkin Math:** Let's analyze the communication overhead.
+
+1.  **Hardware Specs:** The Apple A17 Pro has a memory bandwidth of 51.2 GB/s.
+2.  **Model Size:** A 50M parameter model at FP16 is `50,000,000 * 2 bytes = 100 MB`.
+3.  **Communication Cost:** FSDP performs an All-Gather operation for the parameters of each layer before its forward/backward pass. For a single layer's weights (e.g., 10MB), the time to simply read them from memory is `10 MB / 51.2 GB/s = 0.195 ms`.
+4.  **Total Overhead:** If the model has 20 FSDP-wrapped layers, the total communication time for the All-Gathers in one backward pass is at least `20 * 0.195 ms = 3.9 ms`. This is purely the data movement cost, excluding any synchronization or library overhead.
+5.  **Conclusion:** A forward/backward pass for a model this size might take only 5-10ms on the ANE. Adding ~4ms of blocking communication overhead represents a 40-80% slowdown, perfectly explaining the severe performance degradation. The increased memory comes from the duplicated optimizer states and communication buffers that FSDP requires.
+
+  > **Key Equation:** $T_{\text{total}} = T_{\text{compute}} + T_{\text{communication_overhead}}$
+
+  > **Options:**
+  > [ ] The junior engineer is right; this is likely a bug in the ANE drivers that causes poor performance with sharded tensors.
+  > [ ] The A17 Pro's 35 TOPS is insufficient for training a 50M parameter model, and FSDP is exposing this compute bottleneck.
+  > [ ] The model is too small; FSDP's overhead is only amortized for models with billions of parameters.
+  > [x] FSDP is the wrong architectural pattern; its communication overhead, implemented as blocking memory copies on a single SoC, is dominating the actual compute time.
+
+  📖 **Deep Dive:** [Cloud Computing: Distributed Systems](https://mlsysbook.ai/cloud/02_distributed_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Mobile SoC Traffic Jam</b> · <code>mobile-interconnect-bottleneck</code></summary>
+
+- **Interviewer:** "You are a mobile ML performance engineer debugging a new real-time video filter on a flagship smartphone. The model pipeline, which uses the NPU for a CNN and the GPU for a Transformer-based effect, is failing to meet its 16.67ms (60 FPS) deadline. The NPU is required because some Transformer ops are not supported by the NPU. Profiling shows NPU utilization is only 50% and GPU utilization is 60%, suggesting they are frequently idle and starved for data. Your investigation reveals that for every frame, a 2MB tensor of activations is copied from the NPU's memory, written to main DRAM, and then read by the GPU. Using your knowledge of on-chip interconnects, diagnose the most likely performance bottleneck."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus only on the peak theoretical memory bandwidth (e.g., 77 GB/s on a Snapdragon 8 Gen 3) and assume data transfer is 'free'. They forget that communication between different processors on an SoC (like NPU to GPU) incurs significant latency overhead from bus protocols, cache coherency, and DMA setup. This is the mobile equivalent of choosing the higher-latency PCIe bus over a direct interconnect like NVLink for frequent, performance-critical GPU-to-GPU communication.
+
+  **Realistic Solution:** The primary bottleneck is the latency overhead of the on-chip bus transfer between the NPU and GPU. While the LPDDR5X memory bus has enormous bandwidth, the protocol for initiating a DMA transfer, ensuring data is coherent between the processors' caches, and arbitrating bus access creates a significant latency cost for each transfer. The NPU and GPU spend most of their time waiting for the data to be available in their respective memory spaces, hence the low utilization. The correct solution is to re-architect the model to minimize or eliminate this cross-processor dependency, for example, by quantizing the unsupported Transformer ops so they can run entirely on the NPU, keeping the whole pipeline within a single, highly-optimized processing unit.
+
+  > **Napkin Math:** Let's diagnose the transfer cost versus the frame budget.
+1.  **Frame Budget:** 16.67 ms.
+2.  **Data Size:** 2 MB.
+3.  **SoC Memory Bandwidth (Snapdragon 8 Gen 3):** 77 GB/s.
+4.  **Bandwidth-Only Transfer Time:** `2 MB / 77,000 MB/s ≈ 0.026 ms` (26 µs). This is a tiny fraction (<0.2%) of the frame budget, proving that raw bandwidth is not the limiting factor.
+5.  **Latency-Focused Analysis:** The transfer is a complex DMA operation between two separate IP blocks (NPU, GPU). This path (NPU → System Fabric/NoC → DRAM → GPU) is analogous to a server's PCIe bus in terms of protocol overhead. Let's model the transfer as being broken into 4KB pages.
+    - **Number of Transactions:** `2048 KB / 4 KB = 512` transactions.
+    - Using the 'PCIe Gen5 Transfer' latency of **1 µs** as a proxy for the setup/protocol overhead *per transaction*, the total latency cost is:
+    - **Total Latency Cost:** `512 transactions × 1 µs/transaction = 512 µs` (0.512 ms).
+6.  **Conclusion:** This 0.512ms of pure latency overhead occurs every single frame and is **~20 times larger** than the theoretical data transfer time. This 'protocol tax' explains why the processors are starved and is the true bottleneck.
+
+  > **Key Equation:** $T_{\text{transfer}} = N_{\text{transactions}} \times L_{\text{protocol}} + \frac{\text{Data Size}}{\text{Bandwidth}}$
+
+  > **Options:**
+  > [ ] The 77 GB/s LPDDR5X memory bandwidth is insufficient to move the 2MB tensor within the 16.67ms frame budget.
+  > [ ] The GPU's compute performance is too low to process the 2MB tensor from the NPU.
+  > [x] The transfer is latency-bound due to the high protocol overhead of coordinating a DMA transfer between the NPU and GPU across the SoC fabric.
+  > [ ] The access latency of the LPDDR5X DRAM itself (~100 ns per read) is the primary bottleneck.
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Case of the Disappearing Pixels</b> · <code>training-serving-skew</code></summary>
+
+- **Interviewer:** "You are a mobile ML engineer debugging a real-time object detection model on a new smartphone. The model runs at the target 30 FPS on the NPU, but you observe a 50% accuracy drop for small objects compared to your validation results. The training pipeline used high-quality bicubic resizing to downscale images to the model's 640x480 input. On the device, the camera sensor captures at 12MP (4000x3000) and uses the hardware Image Signal Processor (ISP) for a 'zero-cost' resize before sending the frame to the NPU. Your lead suspects this ISP resize is the culprit. Apply your systems knowledge to diagnose the most likely cause of the accuracy degradation."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus only on compute latency (FPS) and memory, assuming that if the model runs fast, the hardware is working correctly. They forget that on mobile, the data pipeline from the sensor through the ISP is a critical, and often lossy, part of the system that can introduce subtle training-serving skew. A 'free' hardware block often comes with hidden quality tradeoffs.
+
+  **Realistic Solution:** The root cause is training-serving skew introduced by the ISP's low-quality resizing algorithm. Hardware resizers on mobile ISPs often use simple, power-efficient algorithms like nearest-neighbor or bilinear filtering to meet extreme power and latency budgets. This is fundamentally different from the high-fidelity bicubic resizing used during training. This discrepancy causes significant information loss for high-frequency details, which is exactly what defines small objects, leading to the severe accuracy drop.
+
+  > **Napkin Math:** The ISP is downscaling from 12MP (4000x3000) to ~0.3MP (640x480).
+1. **Calculate Downscale Factor:** The image is scaled down by `4000px / 640px ≈ 6.25x` on each axis.
+2. **Calculate Area Reduction:** The total pixel area is reduced by `6.25 * 6.25 ≈ 39x`. The ISP is compressing information from 39 sensor pixels into a single pixel for the model.
+3. **Calculate Impact on Small Object:** A 'small' 32x32 pixel object from the training set would be decimated. After downscaling, its effective size on the model's input tensor becomes `32px / 6.25 ≈ 5x5` pixels.
+4. **Diagnose Information Loss:** A simple nearest-neighbor resizer might pick just one of the 39 original pixels, potentially missing the object entirely if it falls between samples. A bilinear filter would average them, blurring the tiny object into the background. The high-quality bicubic algorithm used in training preserves more of this detail. This massive, systematic information loss for small features is the most direct explanation for the 50% accuracy drop.
+
+  > **Key Equation:** $$\text{Effective Object Size} = \frac{\text{Original Object Size}}{\text{Sensor Resolution} / \text{Model Input Resolution}}$$
+
+  > **Options:**
+  > [x] The ISP's low-quality resizing algorithm (e.g., nearest-neighbor) is deleting or blurring the pixels that define small objects before the data reaches the NPU.
+  > [ ] The NPU is running with low precision (INT8) and is unable to represent the features of small objects accurately.
+  > [ ] The LPDDR5 memory bandwidth is insufficient for the 12MP stream, causing data corruption between the ISP and the NPU.
+  > [ ] The model is overfitting to the high-quality training images and cannot generalize to the 'noisier' images from the real camera sensor.
+
+  📖 **Deep Dive:** [Mobile: Device Hardware and the ML Pipeline](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Privacy Paradox TCO</b> · <code>federated-learning-tco</code></summary>
+
+- **Interviewer:** "You are a mobile ML engineer at a company building a smart keyboard. To improve suggestions, you're A/B testing two approaches on a cohort of 10 million users:
+
+- **Group A (Centralized):** Uploads 100KB of anonymized text data per user daily.
+- **Group B (Federated Learning):** Performs a 5-minute on-device training round daily (while the phone is idle but not necessarily charging) and uploads a 1MB compressed model update.
+
+The A/B test results are in: Group B has a 5% higher monthly user churn rate. Management is shocked, as FL was supposed to be the 'privacy-friendly' option and they assumed users would prefer it. The lost Lifetime Value (LTV) from this extra churn is calculated to be $250,000 per month.
+
+You are asked to apply your knowledge of mobile systems to diagnose the most likely primary cause of this user churn."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing only on the most obvious user-facing cost (cellular data usage) or server-side costs, while ignoring the second-order, but more impactful, cost of battery drain and its effect on user experience and behavior. Engineers often underestimate how sensitive users are to even minor, repeated hits to battery life from background processes.
+
+  **Realistic Solution:** The primary driver of user churn is the non-trivial battery consumption from the daily on-device training sessions. A 5-minute training run on a modern mobile SoC consumes a noticeable percentage of a phone's daily battery budget. While each individual event is small, the cumulative daily impact is perceptible to users, leading them to disable the feature or uninstall the app, thus causing churn. The cost of this churn ($250,000/month) is a direct component of the Federated Learning approach's Total Cost of Ownership (TCO), and in this case, it's the dominant one.
+
+  > **Napkin Math:** 1. **Calculate Energy per Training Run:** A mobile SoC under a heavy ML load consumes about 4W (average of the 3W-5W range).
+   - `Energy (Joules) = Power (Watts) × Time (seconds)`
+   - `4 W × (5 minutes × 60 s/min) = 1200 Joules`
+
+2. **Convert to Watt-hours (Wh) for Battery Context:** Smartphone batteries are measured in Wh.
+   - `Energy (Wh) = Energy (Joules) / 3600`
+   - `1200 J / 3600 = 0.333 Wh`
+
+3. **Calculate Battery Drain Percentage:** A typical smartphone has a ~15 Wh battery.
+   - `Drain % = (Energy Consumed / Battery Capacity) × 100`
+   - `(0.333 Wh / 15 Wh) × 100 ≈ 2.2%`
+
+4. **Connect to Economics:** This daily 2.2% battery hit, for a background keyboard feature, is significant enough to cause a 5% churn rate. The cost is the lost LTV.
+   - `Churn Cost = User Base × Churn Rate × LTV per User`
+   - `10,000,000 × 5% × $0.50/month = $250,000/month`.
+
+This confirms that the battery cost, realized as user churn, is the source of the $250,000/month problem.
+
+  > **Key Equation:** E = P \times t
+
+  > **Options:**
+  > [ ] The 1MB daily cellular data upload for the model update is too expensive for users on limited data plans.
+  > [x] The daily ~2.2% battery drain from the 5-minute on-device training is perceptible to users, causing them to disable the feature.
+  > [ ] The FL model updates are introducing inference latency ('jank') into the keyboard UI, leading to a poor user experience.
+  > [ ] The on-device training process is filling up the phone's storage with temporary files, causing 'storage full' warnings.
+
+  📖 **Deep Dive:** [Mobile: App Experience & Resource Management](mobile/02_app_experience.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Mobile Style Transfer Stall</b> · <code>mobile-roofline-analysis</code></summary>
+
+- **Interviewer:** "You are an ML engineer optimizing a new style transfer filter for a mobile app running on an Apple A17 Pro chip. The app feels sluggish, and profiling reveals that a key AdaIN (Adaptive Instance Normalization) layer is taking 2ms to execute, far exceeding your 1ms per-layer budget. The profiler shows the Apple Neural Engine (ANE) is only achieving 8.4 GOPS, a fraction of its 35 TOPS peak. You analyze the layer: it reads an 8.4MB feature map, applies a style vector, and writes an 8.4MB output, performing ~16.8 Million INT8 operations (element-wise multiply-add). Using the A17 Pro's specs (Peak Memory BW: 51.2 GB/s), diagnose the primary performance bottleneck."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often guess 'thermal throttling' or assume all neural network layers are compute-heavy. They fail to perform a roofline analysis to see if the workload's arithmetic intensity can actually saturate the compute units. For many mobile-optimized layers (element-wise, depthwise convs, normalization), the bottleneck is fetching data, not processing it.
+
+  **Realistic Solution:** The primary bottleneck is memory bandwidth. The layer's Arithmetic Intensity (a measure of ops per byte of data) is extremely low. The ANE's powerful compute units are starved for data because they finish their calculations and then must wait idly for the next set of data to be fetched from the much slower main memory. The operation is severely 'memory-bound', not 'compute-bound'.
+
+  > **Napkin Math:** 1. **Calculate Layer's Arithmetic Intensity (AI):** The AI is the ratio of compute to memory movement.
+   - Total Operations = 16.8 Million Ops (16.8e6)
+   - Total Memory Moved = 8.4 MB (read) + 8.4 MB (write) = 16.8 MB (16.8e6 Bytes)
+   - AI = (16.8e6 Ops) / (16.8e6 Bytes) = **1 Op/Byte**
+
+2. **Calculate Hardware's Ridge Point:** This is the minimum AI a workload needs to be compute-bound. It's the ratio of the chip's peak compute to its peak memory bandwidth.
+   - Peak Compute (A17 Pro) = 35 TOPS (35e12 Ops/sec)
+   - Peak Memory BW = 51.2 GB/s (51.2e9 Bytes/sec)
+   - Ridge Point = (35e12 Ops/sec) / (51.2e9 Bytes/sec) ≈ **683 Ops/Byte**
+
+3. **Diagnose the Bottleneck:** Compare the layer's AI to the hardware's Ridge Point.
+   - `1 Op/Byte` (Layer) <<< `683 Ops/Byte` (Hardware)
+   - Since the layer's operational intensity is far below the hardware's requirement to be compute-bound, it is definitively **memory-bound**.
+
+  > **Key Equation:** $\text{Arithmetic Intensity (Ops/Byte)} = \frac{\text{Total Operations}}{\text{Total Bytes Moved}}$
+
+  > **Options:**
+  > [ ] The device is thermal throttling, forcing the ANE to run at a lower frequency.
+  > [ ] The layer is compute-bound; the 16.8M operations are too complex for the ANE.
+  > [x] The layer is memory-bound; its Arithmetic Intensity (1 Op/Byte) is far below the hardware's Ridge Point (~683 Ops/Byte).
+  > [ ] The ANE is running at low TOPS to improve its TOPS/W power efficiency for this simple layer.
+
+  📖 **Deep Dive:** [Mobile: SoC and System Architecture](mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Corrupted Video Frame</b> · <code>quantization-overflow</code></summary>
+
+- **Interviewer:** "You are a mobile ML engineer optimizing a real-time portrait segmentation model for an iOS app. The original FP16 model works perfectly. To reduce power consumption on the Apple A17 Pro's Neural Engine, you apply post-training INT8 quantization. The model now runs faster, but the output video is full of flickering black and magenta artifacts, especially around bright highlights. You suspect a quantization issue. How would you use your understanding of the mobile hardware pipeline to diagnose the most likely cause?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often attribute all quantization errors to general 'precision loss'. They fail to distinguish between graceful degradation from rounding errors and catastrophic failure from dynamic range overflow. This leads them to blame the hardware or assume INT8 is unsuitable, when the real problem is in the calibration data or algorithm.
+
+  **Realistic Solution:** The most likely cause is activation overflow due to a non-representative calibration dataset. Post-training quantization calculates a scale factor based on the observed range of activation values. If your calibration set of images lacked bright, specular highlights, the calculated dynamic range would be too narrow. At inference time, when the camera sees a bright light, the activation values in some layers spike, exceeding the `[-128, 127]` range of INT8. The Neural Engine hardware clips (or 'saturates') these values to the maximum, introducing a massive, non-linear error that propagates through the network, resulting in the observed visual artifacts. The solution is to re-calibrate with a more diverse dataset or use mixed-precision, keeping the problematic layers in FP16.
+
+  > **Napkin Math:** Let's say your calibration data showed a maximum activation value of 150.0 in a specific layer. The quantization scale factor `S` would be calculated to map this to the INT8 max: `S = 150.0 / 127 ≈ 1.18`. Now, during live inference, a bright highlight causes an activation of 400.0. The quantized value should be `q = r / S = 400.0 / 1.18 ≈ 339`. But this value overflows the INT8 tensor, and the hardware clips it to `127`. When this value is de-quantized later, it becomes `r' = q * S = 127 * 1.18 ≈ 150.0`. The original value of 400.0 has been replaced with 150.0, an error of over 60%, causing a large patch of incorrect output.
+
+  > **Key Equation:** $q = \frac{r}{S} + Z$
+
+  > **Options:**
+  > [ ] The INT8 format has lower precision, causing cumulative rounding errors to build up and corrupt the final output.
+  > [ ] The Apple A17 Neural Engine has a hardware bug in its INT8 matrix multiplication units that is triggered by this model's architecture.
+  > [x] The calibration dataset was not representative, leading to activation values at inference time overflowing the INT8 dynamic range. The hardware clips these values, causing massive quantization error.
+  > [ ] The model's FP16 weights were not properly converted, and their range is too large to fit into INT8, causing them to be clipped before inference even begins.
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Disappointing Depthwise Speedup</b> · <code>depthwise-separable-convolution</code></summary>
+
+- **Interviewer:** "You are trying to optimize an object detection model to meet a 16ms per-frame budget on a mobile CPU. A profiler reveals that 75% of the latency is spent in a single 3x3 standard convolutional layer. You apply a standard optimization: replacing this layer with a 3x3 depthwise separable convolution. The model's FLOPs decrease by 8x, but to your surprise, the end-to-end latency only improves by 15%. What is the most likely explanation for this disappointing result?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume that a large reduction in FLOPs will directly translate to a proportional decrease in latency. They forget that on-device performance is a complex interplay between computation, memory access, and architectural overhead, especially on CPUs which lack the specialized memory hierarchies of NPUs.
+
+  **Realistic Solution:** The most likely cause is that the operation has become memory-bandwidth bound. Depthwise separable convolutions have very low arithmetic intensity (the ratio of compute operations to memory accesses). While they drastically reduce FLOPs, they still require moving a significant amount of data. The mobile CPU, waiting for data to be fetched from DRAM, cannot take advantage of the computational savings. The latency is now dominated by memory access time, not compute time.
+
+  > **Napkin Math:** Let's analyze the arithmetic intensity (AI). Assume a 3x3 kernel on a 128x128 feature map with 64 input channels and 128 output channels, using FP16 (2 bytes).
+
+1.  **Standard Conv FLOPs:** $128 \times 128 \times 3 \times 3 \times 64 \times 128 \times 2 \approx 2.4 \text{ GFLOPs}$.
+2.  **Standard Conv Bytes:** $(128^2 \times 64 + 3^2 \times 64 \times 128) \times 2 \approx 2.2 \text{ MB}$.
+3.  **Standard Conv AI:** $2.4 \text{ GFLOPs} / 2.2 \text{ MB} \approx 1090 \text{ Ops/Byte}$.
+
+4.  **Depthwise Sep Conv FLOPs:** $(128^2 \times 3^2 \times 64 \times 2) + (128^2 \times 1 \times 1 \times 64 \times 128 \times 2) \approx 18.8 \text{ MFLOPs} + 268 \text{ MFLOPs} \approx 0.28 \text{ GFLOPs}$ (an ~8.5x reduction).
+5.  **Depthwise Sep Conv Bytes:** $(128^2 \times 64 + 3^2 \times 64 + 1^2 \times 64 \times 128) \times 2 \approx 2.1 \text{ MB}$.
+6.  **Depthwise Sep Conv AI:** $0.28 \text{ GFLOPs} / 2.1 \text{ MB} \approx 133 \text{ Ops/Byte}$.
+
+The arithmetic intensity dropped by ~8x. This low ratio makes it much more likely for the chip to be stalling while waiting for data from main memory, effectively nullifying the computational savings.
+
+  > **Key Equation:** \text{Arithmetic Intensity} = \frac{\text{Total FLOPs}}{\text{Total Bytes Moved}}
+
+  > **Options:**
+  > [ ] The depthwise and pointwise layers could not be fused by the compiler, adding significant kernel launch overhead.
+  > [x] The operation is now memory-bandwidth bound due to the low arithmetic intensity of depthwise convolutions.
+  > [ ] The increased number of parameters in the new layer is causing more cache misses.
+  > [ ] The 8x FLOPs reduction was not enough; a 10x or greater reduction is needed to see latency improvements.
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The NPU Architecture Dilemma: CNN vs. ViT</b> · <code>cnn-vs-transformer</code></summary>
+
+- **Interviewer:** "You're designing a new camera feature for a flagship smartphone (e.g., using an Apple A17 Pro or Snapdragon 8 Gen 3 SoC). You must choose an architecture for real-time scene understanding. You have two prototypes with similar accuracy: a MobileNetV3-based CNN and a small Vision Transformer (ViT). The ViT has 20% fewer parameters but requires 50% more total FLOPs. Both models are fully delegated to the phone's NPU. Which model is likely to be faster and why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often default to thinking CNNs are always more efficient on mobile because of 'local' operations and fewer FLOPs. They might also incorrectly assume that fewer parameters automatically means faster inference. This thinking fails to account for how well an architecture's computational patterns match the underlying hardware's strengths.
+
+  **Realistic Solution:** The Vision Transformer (ViT) is likely to be faster. Modern mobile NPUs are highly parallel processors with high peak TOPs but relatively limited memory bandwidth (e.g., Apple A17 Pro Ridge Point is ~683 Ops/Byte). They achieve peak performance on operations with high arithmetic intensity. The core operation in a ViT, self-attention, is dominated by large matrix multiplications (Q @ K.T), which are compute-bound and have very high arithmetic intensity. In contrast, the depthwise convolutions that make CNNs like MobileNet efficient in terms of FLOPs have very low arithmetic intensity, making them memory-bandwidth bound on powerful NPUs. The NPU will spend most of its time idle, waiting for data. Therefore, the ViT can better saturate the NPU's compute units, achieving higher utilization and lower latency despite its higher FLOP count.
+
+  > **Napkin Math:** Let's compare the 'bang for the buck' on an NPU like the Apple A17 Pro (35 TOPS, ~51.2 GB/s BW, Ridge Point ~683 Ops/Byte).
+
+1.  **MobileNetV3's core op (Depthwise Conv):** As calculated previously, the arithmetic intensity (AI) is very low, often < 100 Ops/Byte. Let's say it's 50 Ops/Byte.
+    - Utilization Estimate: $50 / 683 \approx 7.3\%$. The NPU is starved for data.
+
+2.  **ViT's core op (Self-Attention MM):** For a patch count of 196 (14x14) and dimension of 256, the main matrix multiplication is $(196 \times 256) \times (256 \times 196)$.
+    - FLOPs: $2 \times 196 \times 256 \times 196 \approx 19.6 \text{ MFLOPs}$.
+    - Bytes (reading Q and K): $(196 \times 256 + 256 \times 196) \times 2 \text{ bytes} \approx 200 \text{ KB}$.
+    - AI: $19.6 \text{ MFLOPs} / 0.2 \text{ MB} \approx 98,000 \text{ Ops/Byte}$.
+    - This AI is far above the NPU's ridge point, meaning the operation is strongly compute-bound.
+
+**Conclusion:** The ViT's core computation can run at or near the NPU's peak 35 TOPS. The CNN's core computation is limited by the 51.2 GB/s memory speed, achieving at best $51.2 \text{ GB/s} \times 50 \text{ Ops/Byte} = 2.56 \text{ TOPS}$. The ViT will be significantly faster despite needing more FLOPs.
+
+  > **Key Equation:** \text{Performance} = \min(\text{Peak FLOPs}, \text{Memory BW} \times \text{Arithmetic Intensity})
+
+  > **Options:**
+  > [ ] The MobileNetV3, because it requires fewer total FLOPs and convolutions are inherently more efficient.
+  > [x] The ViT, because its self-attention mechanism consists of large matrix multiplies that can saturate the NPU's compute units.
+  > [ ] The ViT, because it has fewer parameters, which means a smaller memory footprint and faster memory access.
+  > [ ] They will have identical performance, as the NPU is designed to abstract away architectural differences.
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Jank Frame Catastrophe</b> · <code>real-time-deadline-contention</code></summary>
+
+- **Interviewer:** "You are the ML systems engineer for a live video filter app on a new Snapdragon 8 Gen 3 phone. The app must render at a smooth 30 FPS (33ms per frame). Your core ML model takes 20ms for inference. During testing, you notice that whenever a system notification appears, the app stutters and drops frames. A profiler trace shows that during the notification animation, your model's inference latency spikes to 55ms. Diagnose the most likely cause of this behavior."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often blame the model or the hardware in isolation ('The model is too big,' or 'The phone is too slow'). They forget that a mobile SoC is a shared resource ecosystem. A sudden performance drop correlated with an external event is almost always a resource contention issue, not a flaw in the model itself.
+
+  **Realistic Solution:** The root cause is resource contention on the System-on-a-Chip (SoC). The mobile OS is scheduling another task—rendering the notification animation—which competes for the same GPU execution units and memory bandwidth that your inference task requires. This contention forces your model to wait, causing its latency to spike from 20ms to 55ms, thus missing the 33ms real-time deadline and causing a visible stutter ('jank'). The correct solution involves using OS-level Quality of Service (QoS) APIs to request a higher, real-time priority for your inference thread, signaling to the scheduler that it should preempt other, less critical work.
+
+  > **Napkin Math:** The real-time budget is dictated by the target frame rate.
+1. Frame Budget: 1000ms / 30 FPS = 33.3ms/frame.
+2. Latency Slack (Normal): 33.3ms budget - 20ms inference = 13.3ms.
+3. Latency Slack (Contended): 33.3ms budget - 55ms inference = -21.7ms.
+4. Frame Dropped: Because the work for Frame N finishes 21.7ms into Frame N+1's time budget, the system is already behind. It has no choice but to drop Frame N+1 entirely to try and catch up on Frame N+2. The user perceives this as a stutter.
+
+  > **Key Equation:** $\text{Jank} = \sum_{i=1}^{N} [T_{\text{frame}_i} > T_{\text{budget}}]$
+
+  > **Options:**
+  > [ ] The model is too complex and must be pruned or quantized further to reduce its baseline latency.
+  > [ ] The Snapdragon 8 Gen 3's Hexagon DSP is not powerful enough to guarantee real-time performance.
+  > [x] The OS scheduler is contending for shared GPU resources between your app's inference and the system's UI rendering.
+  > [ ] The app is suffering from thermal throttling, and the heat from inference is forcing the SoC to slow down.
+
+  📖 **Deep Dive:** [Mobile: Systems & SoC](https://mlsysbook.ai/mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Laggy LLM Keyboard</b> · <code>queueing-theory-ttft</code></summary>
+
+- **Interviewer:** "You're building an LLM-powered keyboard suggestion feature on an Apple A17 Pro. The business requires a P99 Time-To-First-Token (TTFT) of under 75ms. Your distilled 2B parameter model has a measured end-to-end prefill latency of 80ms for a typical 20-token prompt. When a user types quickly in bursts (e.g., one character every 60ms), you observe the suggestion latency skyrockets, far exceeding the 75ms budget. Given these numbers, what is the primary reason for the latency spike?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to only analyze the average case. Seeing that the 80ms service time is close to the 75ms budget, many engineers might focus on micro-optimizing the model. They fail to apply basic queueing theory, which shows that if the request arrival rate is faster than the service rate, a queue will form and the wait time for each subsequent request will grow without bound, regardless of how small the latency gap is.
+
+  **Realistic Solution:** This is a classic queueing problem. The system becomes unstable because the request arrival interval (60ms) is shorter than the service time (80ms). An M/M/1 queue forms where the arrival rate (λ = 1/60) is greater than the service rate (μ = 1/80). Consequently, a queue of unprocessed keystrokes builds up. The TTFT for a given request becomes its own 80ms processing time plus the sum of all the wait time for the requests ahead of it in the queue. The correct approach isn't to process every single keystroke, but to implement a cancellation or debouncing strategy. When a new keystroke arrives, the system should cancel any in-flight inference for the now-stale prefix and immediately start a new computation for the most current text.
+
+  > **Napkin Math:** Let's apply queueing theory to a burst of two keystrokes.
+1. Arrival Rate (λ): 1 request / 60ms. Service Rate (μ): 1 request / 80ms. Since λ > μ, the queue is unstable.
+2. Request 1 (arrives at t=0): Enters the system. Wait time is 0. Its TTFT is its service time: 80ms.
+3. Request 2 (arrives at t=60ms): The system is still busy with Request 1, which will finish at t=80ms. Request 2 must wait.
+4. Wait Time for Request 2: (Request 1 Finish Time) - (Request 2 Arrival Time) = 80ms - 60ms = 20ms.
+5. TTFT for Request 2: (Wait Time) + (Service Time) = 20ms + 80ms = 100ms.
+This 100ms latency already violates the 75ms budget, and it will get worse for every subsequent keystroke in the burst.
+
+  > **Key Equation:** $L_q \to \infty \quad \text{if} \quad \lambda > \mu$
+
+  > **Options:**
+  > [ ] The 80ms prefill time is too slow; the model must be quantized from FP16 to INT8 to meet the 75ms budget.
+  > [ ] The system's request queue is too small and should be enlarged to buffer the burst of keystrokes.
+  > [x] The request arrival rate (1/60ms) is faster than the service rate (1/80ms), causing a processing queue to form.
+  > [ ] The Apple A17 Pro's 35 TOPS is insufficient; this feature requires waiting for next-generation hardware.
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Jank-Inducing Mobile Generative Model</b> · <code>operator-fusion</code></summary>
+
+- **Interviewer:** "You are a mobile ML engineer deploying a new generative language model for an in-app sticker feature on a flagship phone with a Snapdragon 8 Gen 3 SoC. The model is INT8 quantized, but you observe significant UI 'jank' (stuttering) during inference, which needs to run in under the 16ms frame budget to feel smooth. The on-device profiler shows that the current 25ms inference time is dominated by ~1,000 sequential kernel calls. Each kernel takes ~15µs to execute, but there's a consistent ~10µs gap between each call where the accelerator appears idle. Apply your systems knowledge to diagnose the primary bottleneck and select the most effective solution."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often misdiagnose this as a raw compute or memory bandwidth problem, suggesting architectural changes like distillation or pruning. While these can reduce latency, they don't address the root cause: the fixed, per-operation overhead of dispatching work to the accelerator (the 'death by a thousand cuts' problem). The profiler's pattern of 'work-gap-work-gap' is the classic signature of kernel launch overhead dominating the tiny compute time of each individual operation.
+
+  **Realistic Solution:** The correct diagnosis is that the model is **dispatch-bound** due to excessive kernel launch overhead. The most effective solution is to **apply operator fusion**. By using a compiler or framework feature to fuse sequential operations (e.g., a `Conv` followed by `BatchNorm` and `ReLU`) into a single, larger kernel, you drastically reduce the number of CPU-to-accelerator dispatches. This eliminates the overhead associated with each call, allowing the accelerator to spend more time on useful computation instead of waiting for its next instruction.
+
+  > **Napkin Math:** We can model the total latency to prove the bottleneck.
+*   **Current State (Unfused):**
+*   Kernel launch overhead: ~10 µs per call
+*   Number of kernels: 1,000
+*   Compute time per kernel: ~15 µs
+*   Total Latency = 1,000 kernels × (10 µs overhead + 15 µs compute) = 1,000 × 25 µs = 25,000 µs = **25ms**.
+*   This misses the 16ms UI frame budget.
+*   **Proposed Solution (Fused):**
+*   Assume we can fuse every 10 operations into one, reducing the kernel count by 10x.
+*   Number of kernels: 100
+*   Total compute time remains the same: 100 fused kernels × (10 * 15 µs compute/op) = 15,000µs = 15ms.
+*   Total Latency = (100 kernels × 10 µs overhead) + 15ms compute = 1,000 µs + 15ms = **16ms**.
+*   This meets the frame budget by almost exclusively targeting overhead.
+
+  > **Key Equation:** $T_{\text{total}} = \sum_{i=1}^{N} (T_{\text{overhead}, i} + T_{\text{compute}, i})$
+
+  > **Options:**
+  > [ ] The model is memory-bound due to repeated access to slow LPDDR5x RAM. Apply 50% unstructured pruning to reduce the model's memory footprint.
+  > [ ] The model is compute-bound, exceeding the 45 TOPS of the NPU. Distill the model to a smaller architecture with half the parameters.
+  > [x] The model is dispatch-bound due to kernel launch overhead from too many small operations. Use operator fusion to combine sequential operations into fewer, larger kernels.
+  > [ ] The SoC is thermally throttling, reducing its clock speed. Add a 100ms cool-down period after every 5 inferences to manage heat.
+
+  📖 **Deep Dive:** [ML Frameworks](https://mlsysbook.ai/vol1/frameworks.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The 'On-Device FSDP' Fallacy</b> · <code>on-device-parallelism</code></summary>
+
+- **Interviewer:** "A junior engineer on your team is tasked with speeding up on-device fine-tuning for a 1B parameter language model on a flagship smartphone (Snapdragon 8 Gen 3). They notice the model's 2GB of FP16 parameters barely fit in the app's memory budget. Inspired by cloud training, they propose a 'Micro-FSDP' to shard the model's parameters across the CPU, GPU, and NPU to 'distribute the memory load' and speed up training. You are skeptical. Using the provided hardware specs, diagnose the primary flaw in this approach."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing on secondary issues like NPU instruction set compatibility for backpropagation, or incorrectly assuming that since all components share unified memory, data movement is 'free'. Engineers often misapply cloud-native architectural patterns without considering the orders-of-magnitude shift in the ratio of compute to communication overhead on a mobile SoC.
+
+  **Realistic Solution:** The proposed 'Micro-FSDP' is fundamentally flawed because the communication overhead of gathering the sharded model parameters for each layer's computation would vastly exceed the actual compute time. Mobile SoCs use a high-bandwidth Network-on-Chip (NoC), but it's not designed for the sustained, all-to-all communication patterns of algorithms like FSDP. The system would become severely communication-bound, leading to a massive increase in latency and power drain, which are the primary constraints in a mobile environment.
+
+  > **Napkin Math:** 1. **Model Size:** A 1B parameter model at FP16 requires 2 GB of memory for weights.
+2. **Compute Time (per token):** A Snapdragon 8 Gen 3 Hexagon NPU provides ~45 TOPS. Let's be generous and assume 10 TFLOPS for FP16 operations. Compute for one token is roughly `2 * 1B params = 2 GFLOPs`. The time to compute is `2e9 FLOPs / 10e12 FLOPs/sec = 0.2 ms`.
+3. **Communication Time (simplified All-Gather):** To compute a layer, each processing unit (e.g., GPU) would need the full parameters for that layer. If the model is sharded across 3 units (CPU, GPU, NPU), each holds ~667 MB. To reconstruct the full model state for a forward pass, a unit needs to gather data from the other two, amounting to ~1.34 GB of data transfer.
+4. **The Bottleneck:** A fast on-chip NoC provides ~100 GB/s bandwidth. The time to move the data is `1.34 GB / 100 GB/s = 13.4 ms`.
+5. **Conclusion:** The communication latency (13.4 ms) is over 65x greater than the compute time (0.2 ms). The system would spend over 98% of its time just shuffling data around, burning power and yielding zero performance gain.
+
+  > **Key Equation:** $\text{Efficiency} (\eta) = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{comm}}}$
+
+  > **Options:**
+  > [ ] The NPU's instruction set likely doesn't support the gradients needed for backpropagation, making it unable to participate.
+  > [ ] The model won't fit because the 2GB of parameters doesn't account for the additional 4x memory required for Adam optimizer states.
+  > [x] The communication overhead of synchronizing sharded parameters across the SoC's processors will be much larger than the compute time, making it slower and more power-hungry.
+  > [ ] FSDP relies on InfiniBand for low-latency communication, and the on-chip NoC doesn't have the same capabilities.
+
+  📖 **Deep Dive:** [Cloud: Distributed Systems](https://mlsysbook.ai/cloud/02_distributed_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Cross-GPU Choke</b> · <code>bus-protocols</code></summary>
+
+- **Interviewer:** "You are a mobile ML engineer diagnosing a slow cloud-dependent 'AI Enhance' feature. End-to-end latency is 1.75 seconds, but on-device work and network RTT are only 150ms total. The backend service latency is therefore ~1.6 seconds. The backend runs on a dual H100 server, with a known total compute time of 1 second. The model is split across the GPUs, requiring a 32 GB activation tensor to be copied from GPU1 to GPU2 during execution. What is the most likely cause for the ~600ms of unaccounted-for latency on the server?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the performance penalty of forcing peer-to-peer GPU communication over the motherboard's general-purpose PCIe bus instead of a direct, dedicated interconnect like NVLink. They might blame the network or memory, failing to realize the bus protocol itself is the bottleneck, especially for large transfers.
+
+  **Realistic Solution:** The most likely cause is that the two GPUs are in a server that lacks an NVLink bridge, forcing them to communicate over the slower PCIe bus. While fast for peripherals, PCIe is much slower than a dedicated GPU interconnect for the massive transfers common in model parallelism. A 32 GB transfer that would be trivial on NVLink becomes a major bottleneck on PCIe, easily accounting for the observed extra latency. This is a common configuration error in budget cloud instances or improperly assembled servers.
+
+  > **Napkin Math:** The core of the diagnosis is a bandwidth calculation.
+1. **Isolate the 'mystery' time:** Total Server Latency (~1600ms) - Known Compute Time (1000ms) = ~600ms.
+2. **Hypothesize the transfer path:** The bottleneck is likely the 32 GB data transfer between GPUs.
+3. **Calculate time for NVLink 4.0 (Ideal):** From the constants, NVLink 4.0 bandwidth is 900 GB/s. Transfer Time = 32 GB / 900 GB/s ≈ 35.5 ms. This is too fast to explain the gap.
+4. **Calculate time for PCIe Gen5 (Problem):** A standard PCIe Gen5 x16 slot has a realistic bandwidth of ~63 GB/s. Transfer Time = 32 GB / 63 GB/s ≈ 508 ms.
+5. **Conclusion:** The ~508ms transfer time over PCIe almost perfectly explains the ~600ms of mystery latency. The server is misconfigured and not using NVLink for peer-to-peer communication.
+
+  > **Key Equation:** $\text{Time} = \frac{\text{Data Size}}{\text{Bandwidth}}$
+
+  > **Options:**
+  > [ ] The InfiniBand network connecting the server to the storage cluster is saturated.
+  > [ ] Reading the 32 GB tensor from the first GPU's HBM3 memory is the bottleneck.
+  > [x] The GPUs are communicating over the PCIe bus instead of a direct NVLink bridge, which is saturated by the 32 GB transfer.
+  > [ ] The server's CPU is overloaded with OS context switching, causing the delay.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Privacy-Aware TCO Dilemma</b> · <code>federated-learning-tco</code></summary>
+
+- **Interviewer:** "You are the ML lead for a mobile keyboard app with 10 million daily active users. The product team wants to improve prediction accuracy by training on user text data. They propose a standard A/B test: log raw keystrokes from a 1% cohort (100,000 users) to the cloud for 30 days. The privacy team has flagged this as a high-risk project. You need to make a quantitative argument for investing in a Federated Learning (FL) approach instead. Your team provides the following estimates:
+
+*   **Cloud Ingress:** $0.02/GB
+*   **Data Upload per User:** 1 MB/day
+*   **One-time FL Engineering Cost:** $250,000
+*   **Projected User Churn from a Data Leak:** 5% of DAU
+*   **Lifetime Value (LTV) per User:** $10
+*   **Estimated Probability of a Data Leak:** 1% during the project
+
+Using these numbers, what is the most compelling economic justification for choosing Federated Learning, even with its high up-front cost?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus narrowly on direct infrastructure costs (storage, compute), which are usually trivial for data logging at this scale. They ignore second-order economic factors like risk-adjusted cost, engineering time for privacy reviews, and the massive financial impact of losing user trust, which dominate the TCO calculation in any scenario involving sensitive user data.
+
+  **Realistic Solution:** The correct approach is to calculate the risk-adjusted Total Cost of Ownership (TCO) for the cloud-based A/B test. While the direct infrastructure costs are low, the potential cost of a privacy breach is enormous. The FL approach, despite its high initial engineering cost, is economically superior because it nearly eliminates this risk.
+
+By logging sensitive data to a central server, the company accepts a financial risk. The expected cost of this risk is the probability of the bad event (a leak) multiplied by its impact (user churn). In this case, that risk is far greater than the infrastructure or engineering costs, making the FL investment a prudent long-term decision.
+
+  > **Napkin Math:** 1.  **Cloud A/B - Infrastructure Cost:**
+    *   Data per month: 100,000 users × 1 MB/day × 30 days = 3,000,000 MB = 3 TB
+    *   Ingress Cost: 3 TB × 1000 GB/TB × $0.02/GB = $60. This is negligible.
+2.  **Cloud A/B - Risk-Adjusted Cost:**
+    *   Users lost in a breach: 5% × 10,000,000 DAU = 500,000 users
+    *   Total LTV lost: 500,000 users × $10/user = $5,000,000
+    *   Expected Cost of Risk: 1% probability × $5,000,000 = $50,000
+3.  **TCO Comparison & Breakeven:**
+    *   **TCO (Cloud A/B per experiment):** ~$60 (infra) + $50,000 (risk) = **~$50,060**
+    *   **TCO (Federated Learning):** **$250,000** (one-time engineering cost)
+    *   **Breakeven Point:** The FL investment pays for itself after 5 experiments ($250,000 / $50,000 ≈ 5). Given that A/B tests are run continuously, this makes FL the clear long-term economic winner.
+
+  > **Key Equation:** $\text{TCO} = \sum(\text{C}_{\text{direct}}) + P(\text{Failure}) \times \text{C}_{\text{Failure}}$
+
+  > **Options:**
+  > [ ] The cloud data ingress costs of $60 are far lower than the $250,000 FL engineering cost, so the cloud A/B test is cheaper.
+  > [ ] The on-device compute for FL will drain user batteries, leading to more churn than any potential data leak.
+  > [x] The expected cost from data leak risk is $50,000 for a single experiment, making the one-time $250,000 FL investment economically rational after just 5 experiments.
+  > [ ] A 5% churn from a data leak is unrealistic; the actual financial risk is likely zero, so the focus should be on the lowest direct cost.
+
+  📖 **Deep Dive:** [Mobile: Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 🔵 L4
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The GPU Context Switch Overhead</b> · <code>roofline</code> <code>data-pipeline</code></summary>
 
 - **Interviewer:** "Your mobile game uses an ML model to generate textures dynamically. The ML model runs on the GPU using a Compute Shader. The game engine renders the 3D graphics on the same GPU using a Render Shader. The ML model takes 10ms. The rendering takes 10ms. But the total frame time is 28ms, dropping you below 60 FPS. Where are the missing 8ms going?"
 
@@ -201,7 +3580,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The On-Device LLM Feasibility Check</b> · <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The On-Device LLM Feasibility Check</b> · <code>model-cost</code></summary>
 
 - **Interviewer:** "Your PM saw Apple's on-device LLM demo and wants you to ship a 3B parameter chatbot in your app by next quarter. Walk through the feasibility analysis — memory, compute, latency, and battery — and tell the PM what's actually possible."
 
@@ -231,7 +3610,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The NPU Delegation Failure Modes</b> · <code>compute</code> <code>optimization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The NPU Delegation Failure Modes</b> · <code>roofline</code> <code>operator-fusion</code></summary>
 
 - **Interviewer:** "You convert your PyTorch model to TFLite and enable the Qualcomm QNN delegate for the Hexagon NPU. The delegate reports '87% of ops delegated.' Your colleague says 'close enough — the remaining 13% will run on CPU, no big deal.' Why is 87% delegation potentially worse than 0% delegation?"
 
@@ -255,7 +3634,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The ANE vs GPU Power Efficiency</b> · <code>architecture</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The ANE vs GPU Power Efficiency</b> · <code>model-cost</code> <code>power</code></summary>
 
 - **Interviewer:** "Apple's A17 Pro has a Neural Engine rated at 35 TOPS (INT8) drawing ~2W, and an Apple GPU at ~2.15 TFLOPS (FP16) drawing ~5W. A colleague says 'always use the ANE — it's 8× more efficient per watt.' Calculate the TOPS/W for each, and describe a realistic scenario where the GPU wins despite lower power efficiency."
 
@@ -285,7 +3664,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Metal Performance Shaders</b> · <code>frameworks</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Metal Performance Shaders</b> · <code>compilation</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your team has a custom sparse attention mechanism that CoreML doesn't support natively — CoreML falls back to CPU for the attention layers, making the model 4× slower than expected. A colleague suggests rewriting the attention in Metal compute shaders to run on the Apple GPU. When is this Metal approach faster than CoreML, and when does it backfire?"
 
@@ -311,7 +3690,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The On-Device Speech Recognition</b> · <code>latency</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The On-Device Speech Recognition</b> · <code>latency</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "You're adding on-device speech recognition to a messaging app on an iPhone 16 Pro. You benchmark Whisper-tiny (39M params, FP16) and find it takes 180ms to transcribe 1 second of audio on the ANE, but 950ms on the CPU. The real-time factor (RTF) must be below 1.0 for streaming. Calculate the RTF for each, and explain why Whisper's architecture fundamentally conflicts with streaming ASR even when the RTF is acceptable."
 
@@ -337,7 +3716,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The NNAPI Fragmentation Problem</b> · <code>frameworks</code> <code>fragmentation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The NNAPI Fragmentation Problem</b> · <code>compilation</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You deploy the same TFLite INT8 model across three Android flagships: Samsung Galaxy S24 (Snapdragon 8 Gen 3), Google Pixel 8 Pro (Tensor G3), and Samsung Galaxy S24 FE (Exynos 2400). Using NNAPI delegation, you measure: Snapdragon — 6ms, Tensor G3 — 9ms, Exynos — 22ms. Same model, same API, 3.7× performance spread. Explain the three layers of fragmentation causing this."
 
@@ -365,7 +3744,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Transformer vs CNN on Mobile</b> · <code>architecture</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Transformer vs CNN on Mobile</b> · <code>model-cost</code> <code>latency</code></summary>
 
 - **Interviewer:** "ViT-Small (22M params, 4.6 GFLOPs) and MobileNetV3-Large (5.4M params, 0.22 GFLOPs) both achieve ~75% top-1 on ImageNet. On a Snapdragon 8 Gen 3, MobileNetV3 runs in 3ms while ViT-Small takes 35ms — despite ViT having only 21× more FLOPs, it's 12× slower. FLOPs don't predict latency. Explain the architectural reason for this disproportionate slowdown."
 
@@ -391,7 +3770,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The ANE Delegation Regression</b> · <code>compute</code> <code>npu-delegation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The ANE Delegation Regression</b> · <code>roofline</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You ship a CoreML object detection model on iPhone. Xcode benchmarks show 3ms on the A17 Pro Neural Engine. After an iOS update, users report the same model now takes 30ms — a 10× regression. You haven't changed the model or the app. Instruments shows the ANE utilization is 0% and CPU utilization spikes to 100% during inference. What happened?"
 
@@ -421,7 +3800,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Pocket Oven LLM</b> · <code>power-thermal</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Pocket Oven LLM</b> · <code>power</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your team ships an on-device LLM chatbot (3B params, INT4, 1.5 GB weights) on a Samsung Galaxy S24 Ultra (Snapdragon 8 Gen 3). Users love it — but after 5 minutes of continuous conversation, the phone hits 45°C skin temperature and Android triggers thermal throttling. The SoC junction temperature is 105°C. The user's phone is in their pocket (no convective cooling). Calculate the thermal budget and design a system that prevents overheating."
 
@@ -455,7 +3834,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Noisy Environment Speech Failure</b> · <code>architecture</code> <code>sensor-pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Noisy Environment Speech Failure</b> · <code>model-cost</code> <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "Your on-device speech recognition model (Conformer-Transducer, 30M params, INT8) on a Google Pixel 8 Pro (Tensor G3) achieves 5% WER in quiet environments. In a noisy coffee shop (~70 dB ambient), WER degrades to 35% — unusable. The cloud version of the same model handles noise fine because it uses a 200M parameter noise-robust encoder. You can't fit 200M params on-device. How do you fix noise robustness within a 50 MB model budget?"
 
@@ -485,7 +3864,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Real-Time Video ML Frame Drop</b> · <code>latency</code> <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Real-Time Video ML Frame Drop</b> · <code>latency</code> <code>roofline</code></summary>
 
 - **Interviewer:** "Your video calling app applies a real-time background replacement model (DeepLabV3, 2.1M params, INT8) on a MediaTek Dimensity 9300 (NPU at 37 TOPS). At 720p 30 FPS, the model runs in 12ms per frame — within the 33ms budget. But users report the video drops to 15 FPS during calls. The model isn't the bottleneck. What's consuming the other 21ms per frame?"
 
@@ -523,7 +3902,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Notification Model Backlash</b> · <code>deployment</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Notification Model Backlash</b> · <code>deployment</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your news app uses an on-device ML model (small transformer, 10M params, INT8) on a Snapdragon 8 Elite to predict which articles a user will click, and sends push notifications for high-confidence predictions. The model has 78% precision — seemingly good. But after launch, the app's rating drops from 4.5 to 2.1 stars, with reviews saying 'too many irrelevant notifications.' The model is working as designed. What went wrong?"
 
@@ -551,7 +3930,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Data Starvation NPU</b> · <code>compute-memory-bandwidth</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Data Starvation NPU</b> · <code>memory-bound</code></summary>
 
 - **Interviewer:** "Your new object detection model is running on a high-end Android phone's NPU. The NPU spec sheet boasts 10 TOPS (INT8), yet your model's actual performance is only 2 TOPS equivalent, with a significant portion of the NPU staying idle. What's the most likely bottleneck, and how would you diagnose it?"
 
@@ -634,7 +4013,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Snapdragon 8 Elite NPU Scheduling</b> · <code>architecture</code> <code>heterogeneous-compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Snapdragon 8 Elite NPU Scheduling</b> · <code>model-cost</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You're running a real-time object detection model on a Snapdragon 8 Elite phone. The Hexagon NPU shares a 6 MB system-level cache (SLC) with the Kryo CPU cores. During inference, the CPU is simultaneously decoding a 4K H.265 video stream for the camera preview. Your NPU inference latency spikes from 5ms to 18ms every few hundred milliseconds. What's happening, and how do you fix it?"
 
@@ -662,7 +4041,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The MediaTek Dimensity APU Architecture</b> · <code>architecture</code> <code>npu-delegation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The MediaTek Dimensity APU Architecture</b> · <code>model-cost</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You've optimized a speech enhancement model for Qualcomm's Hexagon NPU using QNN. Now you need to ship the same model on MediaTek Dimensity 9300 phones. Your engineer says 'just switch the TFLite delegate from QNN to NeuroPilot.' The model runs but is 4× slower than on Hexagon. What went wrong?"
 
@@ -690,7 +4069,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Samsung Exynos NPU Fragmentation</b> · <code>architecture</code> <code>fragmentation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Samsung Exynos NPU Fragmentation</b> · <code>model-cost</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your app ships a face mesh model to Samsung Galaxy phones. You test on the Galaxy S24 (Exynos 2400) and it works great at 8ms. Then bug reports flood in: Galaxy S22 (Exynos 2200) users get garbled outputs, and Galaxy S21 (Exynos 2100) users see 45ms latency. Same model binary, same TFLite version. How do you ship one model that works across three Exynos generations?"
 
@@ -724,7 +4103,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The CoreML vs TFLite Performance Gap</b> · <code>frameworks</code> <code>npu-delegation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The CoreML vs TFLite Performance Gap</b> · <code>compilation</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You benchmark the same MobileNetV3-Large model on an iPhone 15 Pro using Core ML and on a Pixel 8 Pro using TFLite. Core ML reports 1.8ms; TFLite reports 5.2ms. Your manager concludes 'Apple hardware is 3× faster.' Then you run TFLite on the iPhone and Core ML on the Pixel (hypothetically, via ONNX Runtime with each EP). Now TFLite on iPhone gets 4.1ms and the CoreML EP on Pixel gets 6.8ms. What's actually happening?"
 
@@ -750,7 +4129,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The ISP Format Conversion Bottleneck</b> · <code>sensor-pipeline</code> <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The ISP Format Conversion Bottleneck</b> · <code>sensor-pipeline</code> <code>roofline</code></summary>
 
 - **Interviewer:** "Your mobile app captures 4K video. Your neural network requires 224x224 RGB input. You write a script to read frames via OpenCV/CPU, resize them, and pass them to the NPU. The NPU processes the frame in 5ms. But your max framerate is 12 FPS. Where is the bottleneck?"
 
@@ -780,7 +4159,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Double-Precision Mobile Tax</b> · <code>compute</code> <code>precision</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Double-Precision Mobile Tax</b> · <code>roofline</code> <code>mixed-precision</code></summary>
 
 - **Interviewer:** "A data scientist writes a custom post-processing script for bounding boxes in Python, and you port it to C++ for the iOS app. In Python: `area = width * height * 0.5`. In C++: `float area = width * height * 0.5;`. The profiler flags this line as shockingly slow on the ARM CPU. Why?"
 
@@ -807,7 +4186,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The WebView WebGL Throttle</b> · <code>deployment</code> <code>gpu</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The WebView WebGL Throttle</b> · <code>deployment</code> <code>roofline</code></summary>
 
 - **Interviewer:** "You deploy a TensorFlow.js model inside a React Native app wrapped in a mobile WebView. The model uses WebGL to run on the mobile GPU. On a desktop browser, it runs at 60 FPS. On the mobile WebView, it runs at 15 FPS, even though the mobile GPU is powerful enough. What OS-level security mechanism is strangling the WebGL performance?"
 
@@ -833,7 +4212,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CPU-GPU Asynchronous Desync</b> · <code>pipeline</code> <code>gpu</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CPU-GPU Asynchronous Desync</b> · <code>data-pipeline</code> <code>roofline</code></summary>
 
 - **Interviewer:** "Your mobile app applies an ML filter to a live video feed. The camera produces frames at 30 FPS. The GPU runs the ML filter in 20ms. The CPU submits the job to the GPU, waits for it to finish using `glFinish()`, and then renders it to the screen. You notice the framerate is only 22 FPS, even though 20ms is well under the 33ms deadline. What pipeline rule did you break?"
 
@@ -868,7 +4247,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CPU-GPU Asynchronous Desync</b> · <code>pipeline</code> <code>gpu</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CPU-GPU Asynchronous Desync</b> · <code>data-pipeline</code> <code>roofline</code></summary>
 
 - **Interviewer:** "Your mobile app applies an ML filter to a live video feed. The camera produces frames at 30 FPS. The GPU runs the ML filter in 20ms. The CPU submits the job to the GPU, waits for it to finish using `glFinish()`, and then renders it to the screen. You notice the framerate is only 22 FPS, even though 20ms is well under the 33ms deadline. What pipeline rule did you break?"
 
@@ -903,7 +4282,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Native Bridge Array Copy</b> · <code>architecture</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Native Bridge Array Copy</b> · <code>model-cost</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You build a React Native app that runs an image classification model. The ML model takes 10ms. You pass the base64 encoded image string from JavaScript to the native iOS/Android module over the React Native bridge. The total frame processing time spikes to 60ms. Why is the bridge so slow, and how do you bypass it for high-frequency video?"
 
@@ -929,8 +4308,214 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Fusion Illusion</b> · <code>operator-fusion-pruning</code></summary>
 
-#### 🟡 L5 — Analyze & Predict
+- **Interviewer:** "A junior engineer on your team has applied 50% unstructured weight pruning to a MobileNetV2 model, reducing its theoretical FLOPs by half. However, when they deploy it to an iPhone with an A17 Pro chip using CoreML, the end-to-end latency only improves by 10%. They are confused, as they expected a speedup closer to 2x. Analyze the interaction between the CoreML runtime, the A17 Pro's hardware, and the pruned model to explain this disappointing result."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Believing that FLOPs are the primary driver of latency on mobile NPUs. Engineers often ignore the fact that unstructured pruning creates sparse, irregular memory access patterns that are hostile to the hardware's architecture and the compiler's optimizations.
+
+  **Realistic Solution:** The root cause is the trade-off between computation and memory access overhead, a classic roofline problem. Unstructured pruning, while reducing FLOPs, breaks the dense, regular structure of convolutions that CoreML's compiler is heavily optimized to fuse. The original, dense model allowed CoreML to fuse multiple layers (e.g., Conv-BN-ReLU) into a single, highly efficient kernel. This minimizes memory roundtrips to the much slower LPDDR5 RAM. The pruned model, with its sparse weight matrices, forces CoreML to use generic, unfused operators. This results in many more individual kernel launches and significantly more data movement between the ANE's SRAM and the device's main memory, making the model memory-bound. The small latency improvement comes from the reduced compute time, but it's almost entirely negated by the massive increase in memory access overhead.
+
+  > **Napkin Math:** Let's analyze this using the Roofline model. The A17 Pro's ridge point is ~683 Ops/Byte. This is the Arithmetic Intensity (AI) required to be compute-bound.
+1.  **Dense Model:** A fused Conv-BN-ReLU layer reads weights and activations once, performs many MAC operations, and writes the output once. Its AI is high, likely > 700 Ops/Byte, making it compute-bound and able to leverage the ANE's 35 TOPS.
+2.  **Pruned Model:** The unstructured sparsity prevents fusion. Now, a convolution kernel reads sparse weights (plus indices, increasing data size), another kernel reads the output to perform batch norm, and a third reads that output to apply ReLU. The AI of each individual operation plummets because the amount of data moved per FLOP increases dramatically. Let's say the AI drops to 100 Ops/Byte.
+3.  **Performance:** The new performance is limited by memory bandwidth, not compute. Max performance = Memory BW × AI = 51.2 GB/s × 100 Ops/Byte = 5.12 TOPS.
+Even though we halved the FLOPs, our attainable performance dropped from 35 TOPS (compute-bound) to ~5 TOPS (memory-bound). The latency reduction is minimal because the processor is now spending most of its time waiting for data.
+
+  > **Key Equation:** $\text{Attainable Performance} = \min(\text{Peak Compute}, \text{Peak Memory BW} \times \frac{\text{FLOPs}}{\text{Bytes Transferred}})$
+
+  📖 **Deep Dive:** [Mobile: SoC Architectures](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Pruning Paradox</b> · <code>structured-vs-unstructured-pruning</code></summary>
+
+- **Interviewer:** "You are optimizing a small transformer model for on-device text completion on a Snapdragon 8 Gen 3 phone using the TensorFlow Lite Hexagon delegate. You compare two strategies: (A) 50% unstructured magnitude pruning on the FFN layers, and (B) 25% structured pruning by removing entire attention heads. Strategy A reduces total MACs more than B, but profiling shows B is 1.5x faster. Differentiate these two pruning approaches and analyze their interaction with the mobile NPU hardware to explain why the seemingly less aggressive pruning strategy wins."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing solely on the MAC count or parameter reduction. Engineers often assume 'fewer parameters equals faster' without considering the regularity of the computation. They underestimate the severe penalty of irregular memory access and control flow overhead introduced by unstructured sparsity on hardware designed for dense tensor operations.
+
+  **Realistic Solution:** The Hexagon NPU, like most mobile accelerators, is a DSP/VLIW-style architecture optimized for dense, predictable computation. It achieves its high throughput (45 TOPS) by executing large, parallel batches of instructions on dense tensors.
+- **Strategy A (Unstructured):** Creates sparse weight matrices. To compute with these, the NPU either needs native sparse matrix support (which is rare and often limited) or it must use a generic CPU kernel. Even with NPU support, it involves expensive gather operations to fetch weights from scattered memory locations, breaking the efficient pre-fetching and caching mechanisms. The overhead from index calculations and irregular data access negates the FLOPs savings.
+- **Strategy B (Structured):** Removing entire attention heads or FFN columns preserves the dense, rectangular nature of all remaining matrix multiplications. The model is simply smaller, but all its operations remain as dense, regular tensors. This is ideal for the Hexagon delegate, which can fuse operations and use its full vector processing capabilities. The computation remains highly efficient and predictable, leading to a much larger real-world speedup.
+
+  > **Napkin Math:** Let's analyze the overhead. A 1M parameter FFN layer with 50% unstructured sparsity still has 500k non-zero weights.
+1.  **Memory Overhead:** To represent this sparsity, you need to store indices for each non-zero element. If we use 16-bit indices, that's 500,000 * 2 bytes = 1 MB of extra index data that must be read from main memory for every inference, competing with activations for the 77 GB/s of bandwidth.
+2.  **Compute Overhead:** A dense operation is a single instruction stream. A sparse operation involves a loop with pointer chasing: `for i in ...: out += weights[i] * activations[indices[i]]`. This kills instruction-level parallelism and creates data dependencies that stall the pipeline.
+3.  **Structured Model:** Strategy B reduces the problem size. If an attention head is 1/12th of the model, removing 3 heads (25%) reduces parameters and FLOPs by 25%. But since all ops remain dense, they run at near-peak efficiency on the NPU. The latency scales almost linearly with the reduction in work. The unstructured model's overhead makes its 'effective' TOPS far lower than the dense model's.
+
+  > **Key Equation:** $T_{\text{total}} = T_{\text{compute}} + T_{\text{overhead-control-flow}} + T_{\text{overhead-memory}}$
+
+  📖 **Deep Dive:** [Mobile: The App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Delegate Dilemma</b> · <code>tflite-delegate-partitioning</code></summary>
+
+- **Interviewer:** "Your team has implemented a novel 'token-shuffling' operator in TensorFlow to improve a model's robustness. When deployed to a Google Pixel phone using the TFLite NPU delegate, the model is 5x slower than expected. The TFLite profiler shows the execution graph is partitioned into 20 small segments, alternating between 'NPU Execution' and 'CPU Execution'. The custom token-shuffling op is one of the CPU segments. Analyze the system-level costs incurred by this graph partitioning and explain why it leads to such a dramatic slowdown."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming the slowdown is just because the custom op runs on the slower CPU. While the CPU is slower, the dominant cost is not the op's execution itself, but the repeated overhead of transferring data between the CPU's and NPU's memory spaces.
+
+  **Realistic Solution:** The TFLite NPU delegate can only accelerate a specific set of known operators. When it encounters an unsupported custom op ('token-shuffling'), it partitions the graph. The execution flow becomes:
+1. NPU executes a supported subgraph.
+2. The output tensor is transferred from the NPU's internal memory (SRAM) back to the phone's main DRAM.
+3. The CPU reads the tensor from DRAM.
+4. The CPU executes the single unsupported 'token-shuffling' op.
+5. The CPU writes the result back to DRAM.
+6. The NPU delegate initiates a transfer of that tensor from DRAM back into its SRAM to execute the next supported subgraph.
+
+This round-trip (NPU->DRAM->CPU->DRAM->NPU) is incredibly expensive. With 20 partitions, this penalty is paid 20 times per inference. The overhead of synchronization, scheduling, and physically copying data across the memory bus completely dominates the actual computation time.
+
+  > **Napkin Math:** Let's quantify the transfer overhead. Assume the intermediate tensor between partitions is 4MB. The mobile LPDDR5x bandwidth is 77 GB/s.
+1.  **Theoretical Transfer Time:** To move 4MB from DRAM to the NPU's SRAM would theoretically take 4MB / 77 GB/s ≈ 52 µs. A full round trip (write back, then read back) is at least 2x this, so ~104 µs.
+2.  **Realistic Overhead:** This ignores driver overhead, cache synchronization, and scheduling, which can add significant latency. A more realistic estimate for a single partition boundary crossing is 100-200 µs.
+3.  **Total Slowdown:** With 20 partitions, the total overhead from data transfer alone is 20 partitions × ~150 µs/partition = 3000 µs or 3ms. If the model's pure compute time on the NPU was supposed to be 2ms, we've already added 150% overhead. Add in the slower CPU execution for the 20 custom ops, and a 5x slowdown (2ms -> 10ms) is entirely plausible. The solution is to reimplement the custom op using basic, supported TFLite ops to avoid partitioning, or, if that's impossible, to rewrite it as a custom delegated op for the target hardware.
+
+  > **Key Equation:** $T_{\text{model}} = \sum T_{\text{NPU}} + \sum T_{\text{CPU}} + N_{\text{partitions}} \times T_{\text{DRAM_roundtrip}}$
+
+  📖 **Deep Dive:** [Mobile: Shipping and Updating](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Sparse Illusion</b> · <code>pruning-vs-distillation</code></summary>
+
+- **Interviewer:** "Your team is shipping a new 'Smart Reply' feature on your app, powered by a 100M parameter Transformer model. Users are reporting significant battery drain. Profiling confirms the model is the cause. Two solutions are proposed to create a smaller model: A) 50% unstructured weight pruning, or B) Distilling the model into a new, dense 50M parameter student model. Both achieve similar accuracy. Analyze the trade-offs and justify which approach is superior for a mobile deployment on a device like the Apple A17. Differentiate their impact on latency, power, and memory."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming that 50% fewer FLOPs from pruning directly translates to a 50% speedup and power reduction. This ignores the reality of mobile hardware architecture. Engineers often forget that data movement, not just computation, dictates performance and power on mobile SoCs. They think of FLOPs as the primary cost.
+
+  **Realistic Solution:** Distillation is unequivocally superior for mobile deployment. Mobile NPUs (like Apple's ANE) are highly optimized for dense, regular matrix multiplications. Unstructured pruning introduces sparsity, which leads to irregular memory access patterns. This breaks cache locality and defeats the prefetching mechanisms in the memory controller, forcing frequent, high-power accesses to the main LPDDR5 DRAM. While the NPU performs fewer calculations, it spends most of its time idle, waiting for data. The distilled model, being smaller and dense, maps perfectly to the NPU's architecture. It has a smaller memory footprint for weights, smaller activation tensors (reducing memory bandwidth pressure), and allows the NPU to run at high utilization with predictable data access patterns, resulting in significantly lower latency and power consumption.
+
+  > **Napkin Math:** Let's analyze memory traffic on an Apple A17 Pro (51.2 GB/s Memory BW).
+
+**Model A: 50% Pruned 100M Model (FP16)**
+- Weight Memory: ~200MB (storage is identical to dense model unless a special sparse format is used, which mobile OSs don't typically support for loading).
+- Activation Memory (example): 20MB per layer.
+- The key issue: To compute a layer, the NPU must read the 20MB activation tensor. Because the weight matrix is sparse and unstructured, access is irregular. This leads to cache misses, meaning we are bottlenecked by DRAM access, not compute. The theoretical 50% reduction in FLOPs is never realized.
+
+**Model B: Distilled 50M Model (FP16)**
+- Weight Memory: ~100MB (a true 2x reduction).
+- Activation Memory: ~10MB (activations are smaller as hidden dimensions are reduced).
+- Total memory traffic per layer is significantly lower. The model is dense, so the NPU can use its full parallelism.
+
+**Energy Analysis:**
+- An LPDDR5 DRAM access costs orders of magnitude more energy than an on-chip FLOP.
+- Pruned Model: High number of DRAM accesses due to cache thrashing.
+- Distilled Model: Fewer DRAM accesses due to smaller activations and better cache locality.
+- Conclusion: The distilled model's energy savings from reduced data movement will far outweigh any theoretical compute reduction from the pruned model.
+
+  > **Key Equation:** $\text{Performance} = \min(\text{Peak Compute}, \text{Memory Bandwidth} \times \text{Arithmetic Intensity})$
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Generative Keyboard's Hidden Tax</b> · <code>operator-fusion</code></summary>
+
+- **Interviewer:** "You are optimizing an autoregressive model for a generative keyboard. Profiling on a Snapdragon 8 Gen 3 reveals that per-token latency is high, but the actual math time within the NPU kernels is low. A large portion of the time is spent on overhead. A common pattern in the Transformer is `LayerNorm -> GeLU -> Add`, each executed as a separate kernel. Analyze the impact of fusing these three operations into a single NPU kernel. Quantify the potential latency savings."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing only on FLOPs, which do not change with fusion, and therefore concluding the benefit is minimal. Another common mistake is underestimating the severe penalty of kernel launch overhead and DRAM round-trips on mobile SoCs, which are designed for power efficiency and have less aggressive schedulers and caches than datacenter GPUs.
+
+  **Realistic Solution:** Fusing the operations is critical for performance on a mobile device. The primary bottleneck isn't the arithmetic itself, but the cost of data movement and control.
+
+1.  **Reduced Memory Traffic:** Without fusion, the output of `LayerNorm` is written to LPDDR5 DRAM, then read back by `GeLU`, which writes its output to DRAM, which is then read back by `Add`. Fusion eliminates these two intermediate round-trips. The entire sequence `Input -> Norm -> GeLU -> Add -> Output` happens using the NPU's high-speed on-chip SRAM, saving huge amounts of power and time.
+2.  **Amortized Kernel Overhead:** Every kernel invocation has a fixed latency cost for launch, setup, and teardown (e.g., 5-10µs). Executing three separate kernels means paying this tax three times. A single fused kernel pays this tax only once for a larger chunk of work.
+
+By keeping the data hot in local memory and reducing control overhead, fusion directly addresses the two main sources of inefficiency shown in the profiler.
+
+  > **Napkin Math:** Let's analyze the memory and overhead savings for a tensor of size `[1, 128, 768]` in FP16 on a Snapdragon 8 Gen 3 (77 GB/s BW).
+
+- **Tensor Size:** `1 * 128 * 768 * 2 bytes = 196,608` bytes (~192 KB).
+
+**Unfused Operation:**
+- `LayerNorm`: Reads 192KB, Writes 192KB.
+- `GeLU`: Reads 192KB, Writes 192KB.
+- `Add`: Reads 192KB (from GeLU) + 192KB (residual), Writes 192KB.
+- Total DRAM Traffic (approx): `(3 reads + 2 writes) * 192 KB = 960 KB`.
+- Memory Latency: `960 KB / 77 GB/s ≈ 12.5 µs`.
+- Kernel Launch Overhead: `3 kernels * ~10 µs/kernel = 30 µs`.
+- Total Estimated Latency: `12.5 µs + 30 µs = 42.5 µs`.
+
+**Fused Operation:**
+- `FusedKernel`: Reads 192KB (input) + 192KB (residual), Writes 192KB.
+- Total DRAM Traffic: `(2 reads + 1 write) * 192 KB = 576 KB`.
+- Memory Latency: `576 KB / 77 GB/s ≈ 7.5 µs`.
+- Kernel Launch Overhead: `1 kernel * ~10 µs/kernel = 10 µs`.
+- Total Estimated Latency: `7.5 µs + 10 µs = 17.5 µs`.
+
+**Conclusion:** Fusion provides a latency saving of `42.5 µs - 17.5 µs = 25 µs` for *each Transformer block*. For a 12-layer model, this is a `12 * 25 µs = 300 µs` reduction per generated token, a massive improvement for an interactive application.
+
+  > **Key Equation:** $\text{Latency} = \sum_{i=1}^{N} (T_{\text{overhead}_i} + T_{\text{exec}_i} + T_{\text{mem}_i})$
+
+  📖 **Deep Dive:** [ML Frameworks](https://mlsysbook.ai/vol1/frameworks.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Speculative Speedup</b> · <code>speculative-decoding</code></summary>
+
+- **Interviewer:** "You're deploying an INT4-quantized 7B LLM on a high-end mobile device (e.g., Snapdragon 8 Gen 3). The goal is real-time code generation, but the token rate is only ~10 tokens/sec, which feels sluggish. Your colleague proposes implementing speculative decoding, using a small, 200M parameter model as a 'draft' generator. Analyze the feasibility of this approach. Specifically, examine why this might provide a speedup despite adding a second model. Calculate the expected token throughput, assuming the draft model can generate 4 tokens that are accepted by the main model 75% of the time (i.e., an average of 3 tokens are accepted per verification step)."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming the primary bottleneck for LLM inference is arithmetic computation (TOPS). While compute is a factor, for single-token generation (low batch size), the process is almost always entirely limited by memory bandwidth—the time it takes to read the model's weights from DRAM. An analysis that only compares FLOPs will incorrectly conclude that speculative decoding adds overhead and slows things down.
+
+  **Realistic Solution:** This approach is not only feasible but is one of the most effective strategies for accelerating LLMs on memory-bandwidth-constrained devices like phones. The core insight is that token generation is bound by the 'Memory Wall'. Each new token requires a full pass over the large 7B model's weights, which must be streamed from the slow LPDDR5 DRAM. This takes far longer than the actual math.
+
+Speculative decoding amortizes this high cost. The small 200M draft model is fast because its weights (~200MB) can be read very quickly, or may even stay hot in cache. We use it to generate a 'draft' of K tokens cheaply. Then, we perform a single, expensive forward pass of the 7B model to verify all K tokens in parallel. If `N` of these tokens are accepted, we've effectively generated `N` tokens for the cost of one 7B forward pass plus K cheap draft passes. As long as `N > 1`, we win.
+
+  > **Napkin Math:** Let's analyze the latency on a Snapdragon 8 Gen 3 (77 GB/s Memory BW).
+
+**Bottleneck Analysis (Memory Wall):**
+- **Main Model (7B INT4):** Weights are `7 GB`. Reading them from DRAM dominates latency.
+- Time per token (baseline): `T_main = 7 GB / 77 GB/s ≈ 91 ms`. This yields `1 / 0.091s ≈ 11 tokens/sec`, matching the scenario.
+- **Draft Model (200M INT4):** Weights are `200 MB`.
+- Time per draft token: `T_draft = 200 MB / 77 GB/s ≈ 2.6 ms`.
+
+**Speculative Decoding Calculation:**
+- **Step 1: Draft Generation.** Generate `K=4` tokens with the small model. Cost: `4 * T_draft = 4 * 2.6 ms = 10.4 ms`.
+- **Step 2: Verification.** Run one forward pass of the main model to check all 4 draft tokens. Cost: `1 * T_main = 91 ms`.
+- **Total Time per Cycle:** `10.4 ms + 91 ms = 101.4 ms`.
+- **Tokens Produced:** The scenario states an average of 3 accepted tokens per cycle.
+- **New Throughput:** We get 3 tokens every 101.4 ms.
+- **Effective Tokens/sec:** `3 tokens / 0.1014 s ≈ 29.6 tokens/sec`.
+
+**Conclusion:**
+Speculative decoding provides a speedup of `29.6 / 11 ≈ 2.7x`, turning a sluggish experience into a responsive one. This is achieved by shifting the workload from being memory-bound on every single token to being memory-bound only once for a batch of tokens.
+
+  > **Key Equation:** $\text{Tokens}_\text{new} = \frac{\text{AvgAcceptedTokens}}{\text{K} \times T_\text{draft} + T_\text{main}}$
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Accelerator Selection Conundrum</b> · <code>heterogeneous-compute</code></summary>
@@ -963,7 +4548,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The CoreML Neural Engine Black Box</b> · <code>compiler</code> <code>apple-silicon</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The CoreML Neural Engine Black Box</b> · <code>compilation</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You profile your CoreML model on an iPhone 14. Instruments shows that Layer 1 through 10 execute on the Apple Neural Engine (ANE) in 2ms. Layer 11 (a custom Softmax over a non-contiguous dimension) executes on the CPU in 1ms. Layers 12 through 20 execute back on the ANE in 2ms. You expect a total latency of 5ms. Reality shows 18ms. Where did the extra 13ms come from?"
 
@@ -1000,7 +4585,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Budget Phone Mystery</b> · <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Budget Phone Mystery</b> · <code>roofline</code></summary>
 
 - **Interviewer:** "Your image classification model runs in 4ms on a Pixel 8 Pro (Tensor G3). On a budget phone with a MediaTek Dimensity 700 — which claims 'AI accelerator support' on the spec sheet — the same model takes 40ms. Both phones advertise NPU capability. Why is there a 10× performance gap?"
 
@@ -1030,7 +4615,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Streaming ASR Trade-off</b> · <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Streaming ASR Trade-off</b> · <code>model-cost</code></summary>
 
 - **Interviewer:** "You're building live captions for a video calling app. Your team is debating between Whisper-small (244M params, non-streaming) and a custom RNN-T model (30M params, streaming). The PM wants 'the best accuracy.' Why might the smaller model be the right choice?"
 
@@ -1054,7 +4639,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Shared GPU Contention</b> · <code>architecture</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Shared GPU Contention</b> · <code>model-cost</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your app runs a 12ms style transfer model on the Apple GPU while simultaneously rendering a complex UI with animations at 60 FPS. Users report dropped frames and UI jank during inference. The GPU has a 16.67ms budget per frame for 60 FPS. Show why the math doesn't add up, and design a scheduling strategy that eliminates frame drops."
 
@@ -1088,7 +4673,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The NPU Utilization Paradox</b> · <code>compute</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The NPU Utilization Paradox</b> · <code>roofline</code> <code>latency</code></summary>
 
 - **Interviewer:** "You're profiling an on-device LLM (3B params, INT4) on an Apple A18 Pro. Xcode Instruments shows the Neural Engine at 100% utilization during autoregressive decoding, yet you're only getting 15 tokens/second — far below the theoretical maximum. The ANE is rated at 38 TOPS (INT8). At INT4, effective throughput should be even higher. Where are the tokens going?"
 
@@ -1118,7 +4703,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Inference Timing Jitter</b> · <code>latency</code> <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Inference Timing Jitter</b> · <code>latency</code> <code>roofline</code></summary>
 
 - **Interviewer:** "You're building a real-time AR app on an iPhone 15 Pro (A17 Pro) that overlays virtual objects on camera frames. Your CoreML pose estimation model benchmarks at 6ms ± 0.2ms in isolation. In production, the same model shows 6ms median but with a long tail: P95 = 12ms, P99 = 22ms — a 3.7× spread. The P99 spikes cause visible AR object jitter. Identify the sources of timing variance and design a system that guarantees sub-10ms P99."
 
@@ -1199,7 +4784,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The NPU Utilization Paradox</b> · <code>roofline</code> <code>npu-delegation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The NPU Utilization Paradox</b> · <code>roofline</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "Your on-device LLM (1.5B parameters, INT4) runs on the Qualcomm Snapdragon 8 Elite's Hexagon NPU (rated 45 TOPS). Qualcomm's profiler shows 98% NPU utilization during token generation. But you're only getting 12 tokens/sec — your back-of-envelope calculation says 45 TOPS should deliver 40+ tokens/sec for this model. The NPU is 'busy' but underperforming by 3×. What's happening?"
 
@@ -1227,7 +4812,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The CoreML ANE Fallback</b> · <code>compiler</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The CoreML ANE Fallback</b> · <code>compilation</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "You successfully convert your PyTorch model to CoreML format to run on an iPhone's Apple Neural Engine (ANE). The Xcode profiling tool shows that 95% of the model operations are mapped to the ANE. However, the inference latency is worse than running it purely on the CPU. How can using the dedicated AI accelerator make the model slower?"
 
@@ -1260,7 +4845,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Hardware-Aware NAS for Mobile</b> · <code>architecture</code> <code>optimization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Hardware-Aware NAS for Mobile</b> · <code>model-cost</code> <code>operator-fusion</code></summary>
 
 - **Interviewer:** "You need a model that runs in <5ms on the Apple Neural Engine AND <8ms on the Qualcomm Hexagon NPU. Standard NAS finds architectures that minimize FLOPs, but a low-FLOP model isn't necessarily fast on either accelerator. How do you run NAS that optimizes for actual on-device latency?"
 
@@ -1288,7 +4873,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The 60 FPS Camera ML Pipeline</b> · <code>latency</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The 60 FPS Camera ML Pipeline</b> · <code>latency</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Design a camera pipeline that runs portrait segmentation at 60 FPS with ML-powered depth-of-field blur. The segmentation model takes 25ms per frame. The camera outputs at 60 FPS (16.67ms per frame). The math doesn't work — 25ms > 16.67ms. How do you deliver 60 FPS?"
 
@@ -1318,7 +4903,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The Depthwise Memory Bound</b> · <code>compute-intensity</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The Depthwise Memory Bound</b> · <code>arithmetic-intensity</code></summary>
 
 - **Interviewer:** "To optimize your mobile vision model, you replace all standard 3x3 convolutions with Depthwise Separable Convolutions (like in MobileNet). The total FLOPs (compute operations) decrease by 8x. However, the actual latency on the mobile GPU only improves by 1.5x. Why didn't the 8x reduction in math translate to an 8x reduction in time?"
 
@@ -1339,7 +4924,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Google Tensor G4 TPU Trade-off</b> · <code>architecture</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Google Tensor G4 TPU Trade-off</b> · <code>model-cost</code> <code>power</code></summary>
 
 - **Interviewer:** "Google claims the Tensor G4 in the Pixel 9 Pro is purpose-built for AI workloads. Your team is choosing between the Pixel 9 Pro (Tensor G4) and the Galaxy S24 Ultra (Snapdragon 8 Gen 3) as the reference device for your on-device ML product. The Tensor G4 TPU is rated at 27 TOPS; the Hexagon NPU at 48 TOPS. Your PM says 'go with Qualcomm, it has more TOPS.' Is that the right call?"
 
@@ -1397,7 +4982,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The JNI Boundary Crossing</b> · <code>architecture</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The JNI Boundary Crossing</b> · <code>model-cost</code> <code>latency</code></summary>
 
 - **Interviewer:** "You write a highly optimized C++ inference engine using XNNPACK for Android. Your Java app calls `runInference(float[] image)` natively via JNI. The C++ code executes in 5ms. However, the app measures 18ms per frame. What is JNI doing that consumes 13ms of overhead?"
 
@@ -1423,7 +5008,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The JNI Boundary Crossing</b> · <code>architecture</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The JNI Boundary Crossing</b> · <code>model-cost</code> <code>latency</code></summary>
 
 - **Interviewer:** "You write a highly optimized C++ inference engine using XNNPACK for Android. Your Java app calls `runInference(float[] image)` natively via JNI. The C++ code executes in 5ms. However, the app measures 18ms per frame. What is JNI doing that consumes 13ms of overhead?"
 
@@ -1449,7 +5034,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The CoreML Neural Engine Fallback</b> · <code>hardware</code> <code>frameworks</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The CoreML Neural Engine Fallback</b> · <code>model-cost</code> <code>compilation</code></summary>
 
 - **Interviewer:** "You compile a custom Transformer model for iOS using CoreML. You explicitly set `MLComputeUnits.all` to allow the OS to run it on the Apple Neural Engine (ANE). The model runs, but it consumes massive battery and the phone gets hot. You check the profiler and discover it is running entirely on the GPU. Why did CoreML silently reject the Neural Engine?"
 
@@ -1477,7 +5062,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Battery Impedance Collapse</b> · <code>power</code> <code>hardware</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Battery Impedance Collapse</b> · <code>power</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your mobile app runs a massive diffusion model on the NPU to generate an image. When the phone is at 100% battery, it takes 3 seconds. When the phone is at 15% battery, the exact same operation takes 8 seconds. The OS is not officially in 'Low Power Mode'. What analog electrical property of the battery forced the hardware to slow down?"
 
@@ -1506,7 +5091,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Metal Shader Threadgroup Limit</b> · <code>gpu</code> <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Metal Shader Threadgroup Limit</b> · <code>roofline</code> <code>roofline</code></summary>
 
 - **Interviewer:** "You write a custom Metal Compute Shader for iOS to perform a specialized activation function. You configure the threadgroup size to `MTLSizeMake(1024, 1, 1)` because you are processing 1024 pixels at a time. The code works perfectly on your iPhone 15 Pro. You release the app, and it immediately crashes on iPhone 11s with a 'Threadgroup size exceeds limit' error. Why does it crash on older hardware?"
 
@@ -1531,8 +5116,197 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
   </details>
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Quantization Slowdown Paradox</b> · <code>coreml-tflite-optimization</code></summary>
 
-#### 🔴 L6+ — Synthesize & Derive
+- **Interviewer:** "Your team is optimizing a new generative text model for an on-device summarization feature. To reduce memory and accelerate inference, you apply post-training INT8 quantization using CoreML/TFLite. A microbenchmark running only the core model shows a 2x speedup per token. However, when integrated into the app, the total time to generate a 100-token summary is now 50% *slower* than the original FP16 model. The quantization seems to have backfired. Evaluate the potential causes of this system-level slowdown, despite the core operation getting faster."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus solely on the compute speedup of the quantized operations, assuming the whole model benefits equally. They might blame 'Python overhead' or 'the OS scheduler,' which are orders of magnitude too small to explain such a large regression.
+
+  **Realistic Solution:** The most likely cause is a 'Delegation Mismatch' or 'Graph-Splitting Overhead.' The NPU (like Apple's ANE or Qualcomm's Hexagon) can only execute operations it supports. If the model contains even a few unsupported ops (e.g., a specific attention variant, a novel activation function), the execution graph is split. The system runs the supported ops on the NPU, but then must copy the intermediate activation tensors to the CPU or GPU to run the unsupported op, and then copy the result *back* to the NPU to continue. This CPU-NPU round trip, involving driver calls, memory copies, and context switching, is extremely expensive. If the model graph is split multiple times, the cumulative overhead from these round trips can easily overwhelm the 2x speedup gained from the INT8 compute itself, leading to a net slowdown.
+
+  > **Napkin Math:** Let's model a single token generation. The original FP16 model runs entirely on the mobile GPU at 12ms/token.
+The new model has 98% of its ops quantized to INT8 for the NPU, but 2% fall back to the CPU. Let's say this 2% is scattered, causing 5 graph splits.
+- **NPU Compute (98%):** The 2x speedup means this part now takes (12ms * 98%) / 2 = 5.88ms.
+- **CPU Compute (2%):** The CPU is much slower than the GPU for these ops. This might take (12ms * 2%) * 5x_slower_factor = 1.2ms.
+- **Split Overhead:** The killer. A single NPU-CPU-NPU round trip for a typical activation tensor can cost ~1-2ms in driver/memory overhead. Let's use 1.5ms. With 5 splits, this is 5 * 1.5ms = 7.5ms.
+- **New Total Time:** 5.88ms (NPU) + 1.2ms (CPU) + 7.5ms (Overhead) = 14.58ms.
+- **Comparison:** The 'optimized' model's 14.58ms/token is ~21% slower than the original 12ms/token, despite the core math being faster. The problem is the connection cost, not the compute.
+
+  > **Key Equation:** T_{\text{new}} = \sum_{\text{i}}^{\text{splits}} (T_{\text{NPU}_i} + T_{\text{CPU}_i} + T_{\text{overhead}_i}) > T_{\text{original}}
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Performance Cliff</b> · <code>coreml-tflite-optimization</code></summary>
+
+- **Interviewer:** "You are the tech lead for a real-time video effects app on iOS. The core feature, a segmentation model, runs at a stable 55 FPS (18ms latency) on an iPhone 16, with the entire model graph executing on the Apple Neural Engine (ANE). To improve segmentation quality, a data scientist proposes changing the model architecture slightly, which involves replacing a few dozen standard convolution blocks with a new, custom 'Dynamic Kernel' block. After recompiling the model with this change, the app's frame rate catastrophically collapses to 15 FPS. The model's total MACs only increased by 5%. Justify why a minor change in model arithmetic led to a 3.5x drop in system performance."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to assume performance scales linearly with MACs. An engineer might predict a slight slowdown from 55 FPS to ~52 FPS and be shocked by the collapse. They fail to consider that not all ops are equal from the hardware's perspective.
+
+  **Realistic Solution:** This is a classic 'Hardware Delegation Failure'. The ANE, like most NPUs, has a fixed, immutable list of supported layer types it can accelerate. The standard convolution blocks were fully supported and ran efficiently on the ANE. The new 'Dynamic Kernel' block, however, is not on this list. When CoreML encounters this unsupported op, it is forced to break the execution graph. It runs the initial portion of the model on the ANE, then transfers the large, intermediate feature map tensor to the CPU or GPU to execute the custom block. Critically, in many cases, once the execution falls back from the ANE, *the rest of the graph continues on the slower CPU/GPU*. The system doesn't pay the overhead to transfer it back to the ANE. Therefore, instead of just one slow op, a large portion of the model is now running on a less efficient processor, causing the performance to collapse.
+
+  > **Napkin Math:** Let's assume the new custom op appears 30% of the way through the model's layers.
+- **Original Performance (100% ANE):** 18ms latency. The ANE is highly optimized, let's model its sustained throughput as 10 TOPS.
+- **New Performance (Split Execution):**
+  - **ANE Portion (first 30%):** 30% of the original work = 18ms * 0.30 = 5.4ms.
+  - **Split Overhead:** A single copy of a large feature map (e.g., 5MB) from ANE to GPU memory costs not just bandwidth but driver overhead. Let's estimate a realistic 2ms for the single context switch.
+  - **GPU Portion (remaining 70%):** The mobile GPU is a general-purpose processor, far less efficient for ML ops than the ANE. If the ANE delivers 10 sustained TOPS, the GPU might deliver only 2 TFLOPS for the same workload (a 5x performance gap). The remaining 70% of the work now runs on the GPU: (18ms * 0.70) * 5 = 12.6ms * 5 = 63ms.
+  - **Total New Latency:** 5.4ms (ANE) + 2ms (Overhead) + 63ms (GPU) = 70.4ms.
+  - **New FPS:** 1000ms / 70.4ms ≈ 14.2 FPS.
+This calculation correctly predicts the catastrophic drop from 55 FPS to ~15 FPS, caused not by the 5% increase in MACs, but by forcing 70% of the model onto a 5x slower execution unit.
+
+  > **Key Equation:** T_{\text{new}} = T_{\text{ANE_prefix}} + T_{\text{split_overhead}} + \frac{T_{\text{GPU_suffix}}}{\eta_{\text{GPU/ANE}}}
+
+  📖 **Deep Dive:** [Mobile: The App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Thermal Throttling Paradox</b> · <code>coreml-tflite-optimization</code></summary>
+
+- **Interviewer:** "Your team is building an always-on 'smart reply' feature that runs continuous inference on a Snapdragon-powered phone. To minimize latency, a junior engineer enables a high-performance mode that fixes the NPU clock frequency to its maximum setting. During a 10-second test, the average prediction latency is an excellent 50ms. However, when deployed in a 5-minute user trial, the average latency degrades to 90ms. Counter-intuitively, disabling the high-performance mode and letting the OS manage clocks results in a stable, better average latency of 75ms. Assess this paradoxical outcome where asking for maximum performance results in worse sustained performance."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume that 'maximum frequency' equals 'maximum performance' indefinitely. They neglect that mobile devices are not servers; they are thermally-constrained systems where power consumption and heat dissipation are the primary limiting factors, not peak clock speed.
+
+  **Realistic Solution:** This is a direct result of 'Thermal Throttling.' Mobile SoCs have a strict thermal design power (TDP) budget, typically around 5W for the entire chip. Running the NPU at its absolute maximum frequency consumes a disproportionate amount of power, pushing the total SoC power consumption well over the TDP limit. The chip's temperature rises rapidly. To prevent physical damage, the Power Management IC (PMIC) intervenes and aggressively down-clocks the NPU to a very low-power state to allow the chip to cool down. The system then enters a 'sawtooth' pattern: a short burst of peak performance followed by a longer period of throttled, slow performance. The *average* performance over this cycle is often lower than what could have been achieved by running at a slightly lower, but thermally sustainable, clock frequency from the start.
+
+  > **Napkin Math:** Let's model the power and performance.
+- **SoC Thermal Budget:** 5W. **SoC Baseline Power (non-NPU):** 2.5W.
+- **NPU's Max-Q State:** Power = 4W, Performance = 100 predictions/sec (50ms latency / 2 = 100 pred/sec for math). Total SoC power = 4W + 2.5W = 6.5W. This is 1.5W over budget and is not sustainable.
+- **NPU's Sustainable State:** Power = 2W, Performance = 66 predictions/sec (75ms latency / 1.33 = ~66 pred/sec).
+
+Let's analyze the sawtooth pattern in 'Max-Q' mode:
+1.  The NPU runs at 4W for 10 seconds, generating a 'thermal debt.'
+2.  The PMIC detects overheating and throttles the NPU to a 'cool-down' state of 1W to get back under the 5W total budget (1W + 2.5W = 3.5W).
+3.  How long must it cool down? The 'extra' heat was generated by 1.5W for 10s = 15 Joules of thermal debt. The 'cool down' provides a thermal credit of 1.5W (5W limit - 3.5W actual). To pay back the debt, it must run in this low state for 15J / 1.5W = 10 seconds.
+4.  So, the cycle is: 10 seconds of high performance, followed by 10 seconds of low performance.
+5.  **Performance in Cool-down (1W):** Power is 1/4 of Max-Q, so performance is roughly half (square-root relationship for many accelerators): 100 / 2 = 50 predictions/sec.
+6.  **Average Performance:** Over a 20-second cycle, the system generates (10s * 100 pred/s) + (10s * 50 pred/s) = 1500 predictions. This is an average of 1500/20 = 75 predictions/sec.
+7.  The paradox is subtle: the average performance might be similar, but the user experiences high variance (fast, then slow, then fast). The 90ms reported could be P95 latency during the throttled periods. The stable 75ms from the sustainable mode provides a much better UX. The engineer's pursuit of peak performance created instability that ruined the average case.
+
+  > **Key Equation:** P_{avg} = \frac{t_{burst}P_{burst} + t_{throttle}P_{throttle}}{t_{burst} + t_{throttle}} \le P_{TDP}
+
+  📖 **Deep Dive:** [Mobile: Device Hardware](https://mlsysbook.ai/mobile/01_device_hardware.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Operator Fusion Fallacy</b> · <code>operator-fusion</code></summary>
+
+- **Interviewer:** "Your team is deploying a new Transformer-based model to an Android phone using the Snapdragon 8 Gen 3 Hexagon NPU. `systrace` analysis reveals that although individual NPU operations are fast, the end-to-end latency is poor. The trace shows a pattern of many short, high-frequency NPU dispatches with significant idle gaps in between. A junior engineer proposes quantizing the model more aggressively, from INT8 down to INT4, arguing that making each mathematical operation faster will reduce the overall latency. Assess this proposal. Why is this approach likely to fail and potentially even make relative performance worse, and what is the true, underlying system bottleneck?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Believing that faster individual operations directly translate to lower end-to-end latency. The proposal focuses on the `T_compute` part of the latency equation while ignoring the dominant `T_dispatch` component, a classic fallacy when moving from monolithic cloud GPUs to heterogeneous mobile SoCs.
+
+  **Realistic Solution:** The proposal is flawed because the bottleneck is not compute speed; it is dispatch overhead. Each call from the CPU to the NPU incurs a fixed latency cost for context switching, driver interaction, and data marshalling. For a Transformer with many small, sequential operations, this dispatch tax is paid for every single layer or operation that isn't fused. Making the compute faster with INT4 quantization only shortens the time the NPU is busy, which makes the fixed dispatch overhead a *larger percentage* of the total time for each call. The true solution is Operator Fusion. The ML compiler (e.g., via the device delegate) must be capable of analyzing the graph, identifying sequential operations (like MatMul -> Add -> LayerNorm), and compiling them into a single, monolithic kernel. This single kernel is dispatched once, amortizing the dispatch overhead over a much larger chunk of computation and allowing the NPU to stay busy without constant CPU intervention.
+
+  > **Napkin Math:** Assume a simplified sequence of 3 operations in a Transformer block. Let NPU dispatch overhead be ~20µs. Let each op on INT8 take 30µs. Without fusion, total latency = 3 × (T_dispatch + T_compute) = 3 × (20µs + 30µs) = 150µs. With INT4, T_compute might drop to 15µs. The new latency is 3 × (20µs + 15µs) = 105µs. While this is a speedup, the overhead is now 20/35 = 57% of the per-op time, up from 20/50 = 40%. With fusion, the entire 3-op block is dispatched once. The fused INT8 kernel might take 30µs × 3 = 90µs. Total fused latency = 1 × T_dispatch + T_fused_compute = 20µs + 90µs = 110µs. The fused INT4 kernel might take 15µs × 3 = 45µs. Total fused latency = 20µs + 45µs = 65µs. The unfused INT4 approach (105µs) is significantly slower than the fused INT8 approach (110µs) and dramatically slower than the fused INT4 approach (65µs), proving fusion is the critical optimization.
+
+  > **Key Equation:** $\text{Latency}_{unfused} = N_{ops} \times (\text{T}_{dispatch} + \text{T}_{compute}) \gg \text{Latency}_{fused} = \text{T}_{dispatch} + \sum_{i=1}^{N} \text{T}_{compute_i}$
+
+  📖 **Deep Dive:** [ML Frameworks](https://mlsysbook.ai/vol1/frameworks.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Speculative Decoding Memory Trap</b> · <code>speculative-decoding</code></summary>
+
+- **Interviewer:** "To accelerate a 2B parameter LLM on an iPhone with an A17 Pro chip, your team implements speculative decoding. They use a tiny 150M parameter draft model to generate 4 candidate tokens, which the main 2B model then verifies in a single forward pass. This works on a cloud GPU, but on the iPhone, the app's memory usage balloons after a few hundred generated tokens, and the OS terminates it. The team is confused; the verification step is a single, parallel operation that should be compute-efficient. Why does this time-saving algorithm lead to catastrophic memory failure on a mobile device, and what specific hardware constraint is being violated?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming a memory leak in the application code or the size of the draft model itself. These are plausible but miss the core architectural conflict between the algorithm and the hardware. The issue isn't a bug; it's a fundamental misunderstanding of the memory cost of speculation.
+
+  **Realistic Solution:** The failure is caused by the explosive growth of the KV Cache due to rejected speculative tokens. On a mobile device, memory is a scarce, shared resource (e.g., 8-12 GB LPDDR5 for the whole system), not abundant and dedicated like an 80GB HBM3 module on a cloud GPU. With normal decoding, the KV cache grows by one token's worth of data per step. With speculative decoding (k=4), you compute and store keys and values for all 4 tokens *before* verification. If the main model only accepts the first token (a common scenario), the KV cache data for the other 3 rejected tokens becomes wasted space. This data is often in a contiguously allocated buffer and cannot be easily reclaimed. Over hundreds of generation steps, this accumulated, unreclaimed memory from rejected speculations consumes the entire RAM budget allocated by the OS, leading to termination. The algorithm trades potentially wasted memory for a reduction in latency, a trade that is untenable on a memory-constrained mobile platform.
+
+  > **Napkin Math:** Consider a 2B model where the KV cache per token is ~4MB. The app's memory budget on an 8GB iPhone is roughly 2GB. Normal decoding for 200 steps: 200 tokens × 4MB/token = 800MB added to the KV cache, which is within budget. Speculative decoding with k=4 and a 75% token rejection rate (accepting only 1 token per step on average): Each step, you add 4 tokens worth of data to the cache. Total data generated over 200 steps = 200 steps × 4 tokens/step × 4MB/token = 3200MB, or 3.2GB. This exceeds the 2GB budget and causes the OS to kill the app. The memory pressure is 4x higher than with standard decoding.
+
+  > **Key Equation:** $\text{Memory}_{KV\_growth} = \text{Steps} \times k \times (2 \times N_{layers} \times D_{model}) \times \text{bytes}$
+
+  📖 **Deep Dive:** [Model Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Pruning vs. Distillation Dilemma</b> · <code>pruning-distillation</code></summary>
+
+- **Interviewer:** "Your team needs to run a large transformer model for a real-time video AR effect on a new mobile SoC. The model currently takes 80ms per frame, but the budget for 'no jank' is 16ms. An engineer from a cloud background proposes using 50% unstructured weight pruning, stating, 'halving the FLOPs should give us a 2x speedup and get us to 40ms, which is a good start.' Evaluate this proposal. Why is this reasoning flawed for a mobile NPU (like Apple's ANE or Qualcomm's Hexagon), and what alternative compression technique would you champion as a more effective path to meeting the strict 16ms deadline on this hardware?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming that a reduction in theoretical FLOPs translates linearly to a reduction in wall-clock latency. This is true for general-purpose CPUs but completely false for specialized accelerators like mobile NPUs which are optimized for specific compute patterns.
+
+  **Realistic Solution:** The proposal is critically flawed because mobile NPUs are designed as dense math engines. They use hardware like systolic arrays that are physically optimized for dense matrix multiplications. Unstructured pruning creates sparse weight matrices. These NPUs lack the complex indexing logic to dynamically skip zero-value weights. To execute a sparse layer, the NPU must either run the computation on a slower, general-purpose core or, more commonly, treat the sparse matrix as dense, executing a vast number of useless multiply-accumulate operations on zero-valued weights. The memory access patterns also become irregular and scattered, destroying cache locality. Consequently, 50% unstructured pruning yields almost zero speedup. The correct approach is Knowledge Distillation. By distilling the large model's knowledge into a smaller, architecturally-distinct, and *dense* student model (e.g., one based on MobileNet-like principles), you create a model whose computations are dense matrix multiplications. These map perfectly to the NPU's hardware, allowing it to run near its peak theoretical throughput. Distillation changes the problem to one the hardware is actually good at solving.
+
+  > **Napkin Math:** Original model latency: 80ms. The mobile SoC has an NPU with a theoretical peak of, say, 35 TOPS (Apple A17 Pro). The original model requires 80ms * 35 TOPS (assuming it's compute bound, simplified) = 2.8 Tera-ops. With 50% pruning, the required ops are 1.4 Tera-ops. The flawed logic: 1.4 Tera-ops / 35 TOPS = 40ms. The reality: The NPU cannot exploit the sparsity, so it still effectively performs 2.8 Tera-ops, running at ~80ms. Now consider distillation to a new dense model that requires 0.7 Tera-ops (a 4x reduction). Since this model is dense, the NPU can execute it efficiently. Latency_distilled ≈ 0.7 Tera-ops / 35 TOPS = 20ms. This is a real 4x speedup, bringing the model much closer to the 16ms target, whereas pruning yielded no improvement.
+
+  > **Key Equation:** $\text{Speedup}_{pruning} = \frac{\text{Latency}_{dense}}{\text{Latency}_{sparse}} \approx 1 \quad vs \quad \text{Speedup}_{distill} = \frac{\text{FLOPs}_{teacher}}{\text{FLOPs}_{student}} > 1$
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Speculative Pruning Paradox</b> · <code>compute-analysis</code></summary>
+
+- **Interviewer:** "Your team is tasked with deploying a 3-billion parameter generative language model on a flagship mobile phone (like one with a Snapdragon 8 Gen 3 SoC). The goal is interactive, real-time generation. The initial FP16 model is too slow, taking over 50ms per token.
+
+To accelerate inference, the team implements two main optimizations:
+1.  **Speculative Decoding:** They introduce a tiny, 100M parameter 'draft' model to generate speculative tokens (K=4), which the main 3B model then verifies in a single pass.
+2.  **Verifier Pruning:** To make the main 3B model 'faster' at its verification step, they apply 50% unstructured weight pruning.
+
+The result is a disaster. The overall time-per-output-token more than doubles to over 100ms, and the model's output quality becomes incoherent. Critique this optimization strategy. Justify, using quantitative reasoning, why this combination of techniques likely backfired and led to a catastrophic slowdown."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing only on the theoretical benefit of each optimization in isolation. A common answer is, 'Unstructured pruning doesn't provide speedup on mobile NPUs, that's the only problem.' While true, this misses the more critical, systemic failure. Another mistake is to blame the draft model for being 'too dumb,' without explaining *why* that interacts poorly with the pruned main model.
+
+  **Realistic Solution:** The core failure is a negative feedback loop between the two optimizations. Speculative decoding's speedup is entirely dependent on the *acceptance rate* of the draft model's tokens. By applying 50% unstructured pruning to the main 'verifier' model, the team severely damaged its accuracy and changed its internal representations.
+
+Consequently, the pruned 3B model no longer agrees with the outputs of the (unpruned) draft model. The acceptance rate plummets. Instead of accepting 3-4 tokens per verification pass, it might only accept 1 (or even none). The system now pays the cost of running the draft model (K times) *plus* the full cost of a forward pass on the main model, only to generate a single token. This is computationally far more expensive than just running the original model token-by-token. The quality collapse happens because when the verifier rejects the draft tokens, it falls back to its own (now severely pruned and less accurate) generation capability.
+
+  > **Napkin Math:** Let's assume the original 3B model on a Snapdragon 8 Gen 3 takes **50ms** per token.
+
+**1. Cost of the Draft Model:** A 100M model is 30x smaller. Let's estimate its inference time is proportionally faster: 50ms / 30 = **~1.7ms per token**. To generate K=4 speculative tokens, the draft model runs 4 times: 4 * 1.7ms = **~6.8ms**.
+
+**2. Ideal Scenario (High Acceptance):** Assume an 80% acceptance rate (avg. 3.2 accepted tokens). Total time for 3.2 tokens = 6.8ms (draft) + 50ms (verify) = 56.8ms. Time per token = 56.8ms / 3.2 = **~17.8ms**. This would be a huge success (a ~2.8x speedup).
+
+**3. The Failed Scenario (Pruning-Induced Low Acceptance):** Pruning the verifier causes the acceptance rate to collapse to, say, 25% (avg. 1 accepted token). Total time for 1 token = 6.8ms (draft) + 50ms (verify) = 56.8ms. The time per token is now **56.8ms**—slower than the original 50ms, because we're paying the draft model's cost for no gain.
+
+**4. Catastrophic Scenario:** If the acceptance rate is near-zero (e.g., 5%), we might accept on average 0.2 tokens per cycle. Total time for 0.2 tokens = 6.8ms + 50ms = 56.8ms. Effective time per token = 56.8ms / 0.2 = **284ms**. This is the catastrophic slowdown the team observed, where the overhead of failed speculation dramatically outweighs any benefit.
+
+  > **Key Equation:** $\text{Effective Latency} = \frac{\text{Latency}_{\text{draft}} \times K + \text{Latency}_{\text{verify}}}{\text{Avg. Accepted Tokens}}$
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Heterogeneous Orchestrator</b> · <code>heterogeneous-compute</code></summary>
@@ -1576,7 +5350,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Heterogeneous Execution Strategy</b> · <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Heterogeneous Execution Strategy</b> · <code>roofline</code></summary>
 
 - **Interviewer:** "You're deploying a multi-modal model on a Snapdragon 8 Gen 3 that has a Hexagon NPU (45 TOPS), an Adreno GPU (4.6 TFLOPS FP16), and Kryo CPU cores. The model has Conv2D layers, a custom attention mechanism, GELU activations, and dynamic control flow. Design the execution strategy that minimizes total latency."
 
@@ -1604,7 +5378,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Big.LITTLE Synchronization Trap</b> · <code>cpu-architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Big.LITTLE Synchronization Trap</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You are running inference for an NLP model entirely on the CPU of a mobile Snapdragon SoC, which features an octa-core big.LITTLE architecture (1 Prime core, 3 Performance cores, 4 Efficiency cores). You spawn 8 threads to maximize throughput using OpenMP. Strangely, using exactly 4 threads is significantly faster than using all 8 threads. Why?"
 
@@ -1624,7 +5398,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The Federated Learning Device Heterogeneity</b> · <code>compute</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The Federated Learning Device Heterogeneity</b> · <code>roofline</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You're running federated learning across 10,000 Android devices to train a next-word prediction model. Each round, the server selects 100 devices to train locally for 5 epochs and upload gradients. The round consistently fails — only 30-40 devices complete in the 10-minute window. Your fleet includes: Snapdragon 8 Gen 3 flagships (20%), Snapdragon 7 Gen 1 mid-range (35%), MediaTek Dimensity 700 budget (30%), and Samsung Exynos 1380 budget (15%). Why does device heterogeneity break federated learning, and how do you fix the round completion rate?"
 
@@ -1692,7 +5466,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> Building a Hardware-Adaptive Inference Engine</b> · <code>compiler-runtime</code> <code>heterogeneous-compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> Building a Hardware-Adaptive Inference Engine</b> · <code>compilation</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You're building a mobile ML inference engine that must run the same model optimally across: Apple A18 Pro (ANE + GPU + CPU), Qualcomm Snapdragon 8 Elite (Hexagon NPU + Adreno GPU + Kryo CPU), MediaTek Dimensity 9300 (APU + Mali GPU + Cortex CPU), Samsung Exynos 2400 (NPU + Xclipse GPU + CPU), and Google Tensor G4 (TPU + Mali GPU + CPU). Each SoC has different operator support, memory hierarchies, and optimal data layouts. Current approaches (TFLite, Core ML) are platform-specific. Design a cross-platform inference engine that automatically adapts to each SoC's strengths without maintaining 5 separate model variants."
 
@@ -1724,7 +5498,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The On-Device LLM System Design</b> · <code>architecture</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The On-Device LLM System Design</b> · <code>model-cost</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Design the complete system architecture for running a 3B parameter LLM on a phone with 8 GB RAM. Cover memory management, inference pipeline, context handling, and user experience. The model must generate tokens at ≥20 tokens/second with 2048 context length."
 
@@ -1752,7 +5526,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Multi-Modal Sensor Fusion System</b> · <code>architecture</code> <code>sensor-fusion</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Multi-Modal Sensor Fusion System</b> · <code>model-cost</code> <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "Design an on-device system for a fitness app that fuses camera (pose estimation), microphone (rep counting from audio cues), and accelerometer (motion tracking) to provide real-time exercise form feedback. The three sensors run at different rates, produce different data types, and compete for compute resources. How do you architect the fusion?"
 
@@ -1788,17 +5562,113 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Real-time AR Filter Janks</b> · <code>distillation-fusion-attention</code></summary>
+
+- **Interviewer:** "You are the lead ML Systems Engineer at a major social media company. Your team is developing a flagship feature: a real-time 'Art Style' camera filter that redraws the video feed in the style of Van Gogh. It uses a 100M parameter Vision Transformer (ViT). Prototyping on a cloud GPU was successful, but on the target device (an iPhone with an A17 Pro SoC), it runs at only 5 FPS and consumes 8W, making the UI unresponsive and draining the battery in under 30 minutes. The product manager's mandate is non-negotiable: the feature must ship hitting a smooth 30 FPS (33ms per frame) and stay within a 4W power budget.
+
+Propose a three-pronged strategy to get this model from 5 FPS to 30 FPS. Your proposal must combine at least three of the following techniques: pruning, distillation, operator fusion, FlashAttention. Formulate the plan and justify each component with napkin math, explaining its specific role in bridging the performance gap."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often suggest 'just use INT8 quantization' or 'prune it by 50%'. While quantization is a necessary step, it only provides a linear speedup and doesn't solve the core architectural bottleneck. Unstructured pruning often yields zero speedup on mobile NPUs which are optimized for dense, structured computations. These answers fail to identify that the primary bottleneck in transformers is memory I/O from the attention mechanism, not raw arithmetic.
+
+  **Realistic Solution:** The current 200ms latency (5 FPS) is not due to a lack of compute, but a severe memory bandwidth bottleneck on the SoC. The strategy must attack memory I/O from multiple angles.
+
+1.  **Distill First:** The 100M parameter ViT is too large. The first step is to distill it down to a much smaller student model, perhaps ~15M parameters. This is the most effective way to reduce the overall memory footprint and FLOPs by ~7x, making real-time performance theoretically achievable.
+
+2.  **Implement FlashAttention:** Even in the smaller model, the standard attention mechanism, which materializes a full (N, N) matrix in memory, is a latency killer. Replace it with an I/O-aware attention mechanism (like FlashAttention). This avoids writing the large intermediate matrix to the A17's LPDDR5 RAM, keeping the computation within the SoC's faster on-chip SRAM. This directly attacks the primary source of latency.
+
+3.  **Aggressive Operator Fusion:** The remaining transformer blocks (LayerNorm, MLP, activations) involve multiple separate kernel launches. Each launch pays a latency penalty to read data from main memory. Work with the inference engine (CoreML) to aggressively fuse these sequential operations (e.g., `LayerNorm -> Conv1x1 -> GELU -> Conv1x1`) into a single, monolithic kernel. This minimizes DRAM round-trips, further reducing the memory I/O overhead.
+
+  > **Napkin Math:** Target: 33ms/frame, 4W on A17 Pro (35 TOPS, 51.2 GB/s Memory BW).
+
+**Baseline (100M ViT @ 5 FPS / 200ms):**
+- **Compute:** A 100M ViT requires ~200 GFLOPs per frame. The A17's 35 TOPS NPU could theoretically run this in `200e9 / 35e12` = ~5.7ms. The 200ms latency clearly isn't from compute.
+- **Memory Bottleneck:** For an input of 196 tokens (e.g., 224x224 image, 16x16 patches), the attention matrix is 196x196. Accessing this matrix repeatedly from LPDDR5 (51.2 GB/s), which has ~100ns latency vs ~4ns for on-chip cache, dominates the frame time.
+
+**Proposed Strategy:**
+1.  **Distillation (100M -> 15M):**
+    - New compute: ~30 GFLOPs. Theoretical time: `30e9 / 35e12` = ~0.8ms. Total parameter footprint drops from 200MB to 30MB.
+
+2.  **FlashAttention Impact:**
+    - Standard attention writes the `196*196*2_bytes` ≈ 77KB attention matrix to slow LPDDR5 RAM. FlashAttention avoids this write entirely. This saves `77KB / 51.2 GB/s` ≈ 1.5µs per head per layer. Multiplied across dozens of heads/layers, this saves critical milliseconds and, more importantly, keeps data hot in SRAM.
+
+3.  **Fusion Impact:**
+    - The 15M model has a ~30MB memory footprint. Without fusion, each of the ~10 transformer layers might read/write ~10MB of intermediate activations to LPDDR5. At 51.2 GB/s, each read/write costs `10e6 / 51.2e9` = ~0.2ms. Ten such operations add 2ms of pure memory latency *per layer*, totaling ~20ms for the model. Fusion collapses this, saving a huge portion of that time.
+
+**Final State:** The ~30 GFLOPs compute takes <1ms. Memory latency, once hundreds of ms, is slashed by distillation (smaller tensors), FlashAttention (no attention matrix write), and Fusion (fewer kernel launches). The total frame time plausibly drops from 200ms to well under the 33ms target. Power consumption drops proportionally with the reduction in DRAM access and compute time, meeting the 4W budget.
+
+  > **Key Equation:** $\text{Latency} \approx N_{\text{kernels}} \times T_{\text{launch_overhead}} + \frac{\sum \text{Bytes}_{	ext{read/written}}}{\text{Memory Bandwidth}} + \frac{\text{FLOPs}}{\text{TOPS}}$
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The On-Device LLM Keyboard Power Drain</b> · <code>speculative-decoding-power</code></summary>
+
+- **Interviewer:** "You are the architect for a new AI keyboard on Android, targeting devices like the Snapdragon 8 Gen 3. The key feature is sentence completion using an on-device 2B parameter LLM. The Product Manager has two non-negotiable requirements: 1) The time-to-generate a 10-token completion must be under 500ms. 2) The feature cannot consume more than 1W of average power during active use, to prevent noticeable battery drain. Your initial prototype, which uses a standard auto-regressive decoder with the quantized 2B model, is too slow and hot: latency is ~150ms per token (1.5s total), and power consumption spikes to 4W during generation.
+
+Design a system that meets the latency and power targets. Your design must be centered on **Speculative Decoding**. Formulate the specifications for both your *drafter* and *verifier* models (parameter count, quantization). Justify your design with napkin math, showing how it meets the latency and power goals. What is the single most significant architectural risk to your proposal?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common proposal is to simply use a much smaller model (e.g., 500M parameters). This improves latency and power but sacrifices significant quality, failing the implicit requirement of having a powerful model. This approach moves along the existing Pareto curve, whereas the goal is to *break* the curve. The key is to get the latency of a small model with the quality of the large model, which is the purpose of speculative decoding.
+
+  **Realistic Solution:** The architecture will use speculative decoding to get the speed of a tiny 'drafter' model with the accuracy of the large 'verifier' model.
+
+1.  **Verifier Model:** Keep the 2B parameter LLM, quantized to INT8. Its role is not to generate tokens one-by-one, but to validate a whole sequence of draft tokens in a single, parallel forward pass. Its memory footprint is 2GB.
+
+2.  **Drafter Model:** Design a very small transformer, e.g., 100M parameters, also quantized to INT8. Its memory footprint is only 100MB. This model must be trained (likely via distillation from the 2B model) to be a high-quality 'approximator' of the verifier.
+
+3.  **Execution Flow:** For a 10-token prediction:
+    a. The 100M drafter model generates a candidate sequence of `k` (e.g., 8) tokens auto-regressively. This is very fast.
+    b. The 2B verifier model runs **once** on the input prompt plus the 8 draft tokens. It produces a probability distribution for the next token at each position.
+    c. The draft is verified. Where the verifier agrees with the drafter's choice, the token is accepted. This continues until a token is rejected. The number of accepted tokens is `gamma`.
+    d. The process repeats until 10 tokens are generated. With a good drafter, we expect an average `gamma` of 4-5, meaning we only need ~2 verification cycles instead of 10.
+
+**Most Significant Risk:** The **Acceptance Rate (`gamma`)**. If the drafter is a poor approximation of the verifier, `gamma` will be low (e.g., 1-2). This means the system performs many expensive verification steps, and the latency/power savings evaporate. The entire architecture's success hinges on the quality of the drafter model and its alignment with the verifier.
+
+  > **Napkin Math:** Target: 10 tokens in <500ms, <1W average power on Snapdragon 8 Gen 3 (45 TOPS, 77 GB/s BW).
+
+**Baseline (Auto-regressive 2B model):**
+- **Latency:** The bottleneck is memory bandwidth. For each token, we must load the 2GB of INT8 weights. Time per token ≥ `2 GB / 77 GB/s` = **~26ms**. For 10 tokens, this is `10 * 26ms = 260ms` in memory transfers alone. The observed 150ms/token (1.5s total) is realistic with kernel overheads.
+- **Power:** `4W * 1.5s` = **6 Joules** of energy per completion. Way too high.
+
+**Speculative Decoding Design:**
+- **Drafter (100M INT8):** Weight loading time per token = `100 MB / 77 GB/s` ≈ **1.3ms**. Generating 8 draft tokens takes `8 * 1.3ms` ≈ **10.4ms**.
+- **Verifier (2B INT8):** Runs once to validate the 8 draft tokens. This is a single, large pass. Weight loading time = `2 GB / 77 GB/s` ≈ **26ms**. Let's add overhead and compute and call it **40ms**.
+
+- **Total Latency per Cycle:** `10.4ms (drafting) + 40ms (verifying)` ≈ **50.4ms**.
+- **Achieving 10 Tokens:** Assume an average acceptance rate `gamma=5`. We need two cycles to get 10 tokens. Total latency = `2 * 50.4ms` = **~101ms**. This is well under the 500ms budget.
+
+- **Energy per Cycle:** Assume drafter runs at a lower power (1W) and verifier at the peak (4W). Energy = `(1W * 0.0104s) + (4W * 0.040s)` = `0.0104J + 0.16J` ≈ **0.17 Joules**.
+- **Total Energy:** Two cycles cost `2 * 0.17J` = **0.34 Joules**. This is a **17.6x reduction** from the baseline 6 Joules.
+- **Average Power:** If a user triggers this once every 3 seconds, the average power is `0.34J / 3s` = **0.11W**, easily meeting the <1W budget.
+
+  > **Key Equation:** $\text{Speedup} \approx \bar{\gamma} = \mathbb{E}[\text{Accepted Tokens per Cycle}]$
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+
+
 
 ---
 
 
-### 🧠 Memory Systems
+### Memory Systems
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The App Sandbox Memory Trap</b> · <code>memory-pressure</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The App Sandbox Memory Trap</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your Android app loads two ML models: a face detection model (15 MB) and a face mesh model (8 MB). On a Samsung Galaxy A14 (MediaTek Helio G80, 4 GB RAM), the app works fine in isolation. But when the user has WhatsApp, Chrome, and Spotify running, your app crashes with an OOM error. Your models only use 23 MB — how can that cause OOM on a 4 GB device?"
 
@@ -1826,7 +5696,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Mobile LLM KV-Cache Squeeze</b> · <code>memory</code> <code>kv-cache</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Mobile LLM KV-Cache Squeeze</b> · <code>memory-hierarchy</code> <code>kv-cache</code></summary>
 
 - **Interviewer:** "You're running a 3B parameter LLM (Phi-3-mini, INT4) on an iPhone 15 Pro with 8 GB RAM. The model weights take 1.5 GB. Short conversations work fine, but after 10+ back-and-forth turns, the app gets killed by iOS. The model weights haven't changed. What's growing?"
 
@@ -1850,7 +5720,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Unified Memory Architecture Advantage</b> · <code>memory-hierarchy</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Unified Memory Architecture Advantage</b> · <code>memory-hierarchy</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Apple's M4 and A-series chips use a unified memory architecture where CPU, GPU, and Neural Engine share the same physical LPDDR5X. Qualcomm's Snapdragon 8 Gen 3 also has shared LPDDR5X. Your colleague says 'they're the same thing — both share memory.' Explain the critical architectural difference and why Apple's approach eliminates a copy overhead that Qualcomm's doesn't."
 
@@ -1876,7 +5746,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The App Memory Pressure Levels</b> · <code>memory-hierarchy</code> <code>app-lifecycle</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The App Memory Pressure Levels</b> · <code>memory-hierarchy</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You're building an iOS app that runs a 1.2 GB CoreML model on an iPhone 15 with 6 GB RAM. During testing, the app works fine in isolation but gets killed when the user switches to Safari and back. Walk through iOS memory pressure levels and calculate at what model size your app starts getting killed on a 6 GB device."
 
@@ -1909,7 +5779,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Older iPhone Memory Crash</b> · <code>memory</code> <code>app-lifecycle</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Older iPhone Memory Crash</b> · <code>memory-hierarchy</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your photo editing app ships a CoreML style-transfer model that works flawlessly on iPhone 15 Pro (8 GB RAM). After launch, crash reports flood in — exclusively from iPhone 11 and iPhone SE 3rd gen users (4 GB RAM). The crash log shows `EXC_RESOURCE` with type `MEMORY` and a jetsam event. The model file is only 45 MB. Walk through why a 45 MB model crashes a 4 GB device."
 
@@ -1939,7 +5809,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Budget Phone Crash</b> · <code>memory</code> <code>fragmentation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Budget Phone Crash</b> · <code>memory-hierarchy</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your ML-powered camera app works perfectly on the Samsung Galaxy S24 (Snapdragon 8 Gen 3, 8 GB RAM) but crashes on the Samsung Galaxy A15 (MediaTek Helio G99, 4 GB RAM) within 30 seconds of opening the camera. The model is a 15 MB INT8 segmentation model. Logcat shows `java.lang.OutOfMemoryError` followed by a native crash in the TFLite runtime. The model alone is only 15 MB. Why does a 15 MB model crash a 4 GB phone?"
 
@@ -1971,7 +5841,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The "Small Model, Big Latency" Puzzle</b> · <code>cpu-cache-memory-access</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The "Small Model, Big Latency" Puzzle</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You've deployed a tiny image preprocessing model (only 500KB, 10M FLOPs) on a mobile device, running entirely on the CPU. To your surprise, its latency is consistently 15ms, which is much higher than expected for such a small model. What's a common, often overlooked factor that could be causing this high latency on the CPU, and how would you investigate?"
 
@@ -2027,7 +5897,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The OOM Crash on Older iPhones</b> · <code>memory-hierarchy</code> <code>app-lifecycle</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The OOM Crash on Older iPhones</b> · <code>memory-hierarchy</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your photo editing app ships a Core ML style transfer model that works perfectly on iPhone 15 (6 GB RAM). After launch, Crashlytics shows a 12% crash rate — almost entirely on iPhone 11 and SE 3rd gen (4 GB RAM). The crash log shows `EXC_RESOURCE` with `MEMORY` subtype. The model file is only 28 MB. What's causing the crash and how do you fix it?"
 
@@ -2055,7 +5925,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Budget Phone Crash</b> · <code>fragmentation</code> <code>memory-hierarchy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Budget Phone Crash</b> · <code>memory-hierarchy</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your image editing app with an on-device super-resolution model works on the Samsung Galaxy S24 (Snapdragon 8 Gen 3, 8 GB RAM) and iPhone 15 (A16, 6 GB RAM). A wave of 1-star reviews comes from users on the Samsung Galaxy A15 (Helio G99, 4 GB RAM) and Redmi Note 13 (Snapdragon 685, 4 GB RAM). The app crashes immediately when they tap 'Enhance Photo.' The model is 15 MB. What's happening?"
 
@@ -2085,10 +5955,9 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silent Eviction</b> · <code>memory-pressure</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silent Eviction</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your iOS app loads a 400 MB CoreML model into memory. Users report that switching to another app and back causes a 3-second freeze. Instruments shows no crash. What is happening, and how do you fix it?"
 
@@ -2132,7 +6001,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory Bandwidth Throttling</b> · <code>memory-hierarchy</code> <code>soc</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory Bandwidth Throttling</b> · <code>memory-hierarchy</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "Your mobile application runs a 1080p semantic segmentation model on the NPU at 30 FPS. The NPU requires 4 GB/s of memory bandwidth to sustain this. The device has LPDDR5 RAM capable of 25 GB/s. However, when the user starts screen recording the app, the ML model drops to 12 FPS. The screen recording uses the hardware video encoder, not the NPU. Why did the NPU slow down?"
 
@@ -2158,7 +6027,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory Map (mmap) Page Fault Freeze</b> · <code>memory</code> <code>storage</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory Map (mmap) Page Fault Freeze</b> · <code>memory-hierarchy</code> <code>persistent-storage</code></summary>
 
 - **Interviewer:** "To load a 150 MB transformer model quickly on an iPhone without blowing up the app's RAM limit, you use `mmap` (Memory-Mapped Files). The OS reports zero RAM used, which is great. However, during the *first* inference pass, the app completely freezes for 1.2 seconds. Subsequent passes take only 40ms. Why did `mmap` cause a massive freeze?"
 
@@ -2210,7 +6079,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The On-Device Training Storage Bloat</b> · <code>memory</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The On-Device Training Storage Bloat</b> · <code>memory-hierarchy</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your keyboard app does on-device personalization — it fine-tunes a next-word prediction model (50M params, FP16 = 100 MB) on the user's typing patterns using federated learning on a Pixel 8 (Tensor G3, 128 GB storage). After 3 months, users complain the app is using 4.2 GB of storage. The model is still 100 MB. Where did the other 4.1 GB come from?"
 
@@ -2242,7 +6111,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The On-Device Vector Search Gone Wrong</b> · <code>memory</code> <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The On-Device Vector Search Gone Wrong</b> · <code>memory-hierarchy</code> <code>serving</code></summary>
 
 - **Interviewer:** "Your note-taking app has an on-device semantic search feature on a Pixel 9 (Tensor G4, 12 GB RAM). Users index ~10K notes with 384-dim embeddings using an HNSW index. A user reports that searching for 'vacation photos from Italy' returns their tax documents instead. The embedding model is correct — you verified the embeddings are semantically meaningful. What's wrong with the vector search?"
 
@@ -2274,7 +6143,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Invisible OOM Crash</b> · <code>memory-management-oom-android</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Invisible OOM Crash</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your mobile app is experiencing intermittent Out-Of-Memory (OOM) crashes on certain Android devices, specifically when loading a 100MB ML model. However, `adb shell dumpsys meminfo` shows that the device still has 500MB of free physical RAM. Why might the app be crashing with OOM despite seemingly ample free memory?"
 
@@ -2301,7 +6170,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Phantom OOM Crash</b> · <code>memory-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Phantom OOM Crash</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your mobile application intermittently crashes with an Out-Of-Memory (OOM) error specifically when trying to load a 500MB ML model, even though the device reports several gigabytes of free RAM. The crash is not consistent; it happens more frequently on older devices or after the app has been running for a while. What's the most likely root cause, and how would you debug and mitigate it?"
 
@@ -2335,7 +6204,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory-Mapped Page Fault</b> · <code>memory</code> <code>storage</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory-Mapped Page Fault</b> · <code>memory-hierarchy</code> <code>persistent-storage</code></summary>
 
 - **Interviewer:** "You are using TensorFlow Lite with memory mapping (`mmap`) to load a 100 MB model on an Android device. The documentation says `mmap` is great because it has 'zero load time' and 'zero memory overhead.' But during the very first inference, the UI thread completely freezes for 800ms. Subsequent inferences take only 30ms. Why did `mmap` cause a UI freeze?"
 
@@ -2391,10 +6260,10 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Mobile Memory Controller Puzzle</b> · <code>memory-architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Mobile Memory Controller Puzzle</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're optimizing an on-device LLM on a MediaTek Dimensity 9300 (LPDDR5X, 4 × 16-bit channels, 8533 MHz). The theoretical peak bandwidth is 68.3 GB/s. Your 4-bit quantized 7B model (3.5 GB) should generate tokens at 68.3 / 3.5 = 19.5 tokens/sec if fully memory-bandwidth-bound. You measure 11 tokens/sec. Where is the missing 44% of bandwidth?"
 
@@ -2450,7 +6319,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Memory-Mapped Weight Strategy</b> · <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Memory-Mapped Weight Strategy</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your team's mobile ML app has a 3-second cold start because it loads 300 MB of model weights into a malloc'd buffer at launch. The PM wants sub-500ms startup. You can't make the model smaller. How do you eliminate the cold start without changing the model?"
 
@@ -2514,7 +6383,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Multi-Model Memory Sharing</b> · <code>memory-hierarchy</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Multi-Model Memory Sharing</b> · <code>memory-hierarchy</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your camera app runs three models simultaneously: face detection, face landmark estimation, and background segmentation. All three use a MobileNetV3-Small backbone (1.5M params, INT8 = 1.5 MB) with different heads. Currently deployed as three independent models totaling 4.5 MB of backbone weights (3 copies). Design a shared-backbone architecture and calculate the memory savings. What are the runtime complications on the Apple ANE?"
 
@@ -2546,7 +6415,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The On-Device Fine-Tuning Corruption</b> · <code>memory</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The On-Device Fine-Tuning Corruption</b> · <code>memory-hierarchy</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your app performs on-device fine-tuning of a 100M parameter image classifier on a Samsung Galaxy S24 (Snapdragon 8 Gen 3, 12 GB RAM) to personalize for the user's specific objects. After 50 fine-tuning steps, the model's accuracy on the user's objects improves from 60% to 92%. But the model's accuracy on the original 1000 ImageNet classes drops from 85% to 12% — catastrophic forgetting. The base model is effectively destroyed. How do you fine-tune on-device without corrupting the base model?"
 
@@ -2576,7 +6445,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The On-Device Image Generation Memory Wall</b> · <code>memory</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The On-Device Image Generation Memory Wall</b> · <code>memory-hierarchy</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your PM wants on-device image generation (Stable Diffusion-style) on an iPhone 16 Pro (A18 Pro, 8 GB RAM). The model: a 1B parameter U-Net (INT8 = 1 GB weights), CLIP text encoder (340M params, FP16 = 680 MB), and VAE decoder (80M params, FP16 = 160 MB). Total weights: 1.84 GB. It fits in the ~5 GB available memory. But during the 20-step denoising loop, the app gets jetsammed at step 12. The weights haven't changed. What's consuming memory during denoising?"
 
@@ -2610,7 +6479,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> Quantization Strategy for On-Device Updates</b> · <code>quantization-memory-deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> Quantization Strategy for On-Device Updates</b> · <code>quantization</code></summary>
 
 - **Interviewer:** "Your team is deploying a new semantic segmentation model to millions of mobile devices. You need to achieve sub-50ms latency and a model size under 20MB. You're considering dynamic range quantization (DRQ) vs. quantization-aware training (QAT). Describe the trade-offs in terms of model development, deployment, performance, and memory footprint on device, especially considering future over-the-air (OTA) model updates."
 
@@ -2649,7 +6518,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> Unpredictable Latency Spikes</b> · <code>memory-management-latency-spikes-android</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> Unpredictable Latency Spikes</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your real-time ML model on Android generally achieves a 30ms latency, but occasionally you observe unpredictable spikes up to 100-200ms. These spikes don't correlate with thermal throttling, NPU utilization drops, or obvious background app activity. How would you diagnose and mitigate these latency spikes, focusing on memory management within the ML inference pipeline?"
 
@@ -2728,7 +6597,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The JNI Object Pinning Death</b> · <code>memory</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The JNI Object Pinning Death</b> · <code>memory-hierarchy</code> <code>latency</code></summary>
 
 - **Interviewer:** "You are passing camera frames (byte arrays) from Android Java to a C++ inference engine via JNI using `GetByteArrayElements`. The ML model takes 15ms. The system runs perfectly at 30 FPS for a minute. Suddenly, the entire Android UI stutters massively, dropping to 2 FPS for several seconds, before recovering. What is JNI doing to the Android Garbage Collector?"
 
@@ -2757,10 +6626,10 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The SLC Cache Eviction</b> · <code>memory-hierarchy</code> <code>soc</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The SLC Cache Eviction</b> · <code>memory-hierarchy</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You are designing an always-on audio classifier for a mobile SoC. The model is 2 MB and the SoC has a 4 MB System-Level Cache (SLC). You pin the model to the SLC. It runs perfectly at 1 mW. However, the moment the user turns on the screen and scrolls the UI, the audio model's power consumption spikes to 15 mW, even though the CPU/NPU usage hasn't changed. Why does UI scrolling ruin your ML power budget?"
 
@@ -2788,7 +6657,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The On-Device LLM Memory Architecture</b> · <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The On-Device LLM Memory Architecture</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your PM wants to run a 3B parameter LLM on a phone with 8 GB RAM. In FP16, the weights alone are 6 GB. The OS uses 3 GB. You have 5 GB available. Design a memory architecture that makes this work."
 
@@ -2816,7 +6685,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Custom Allocator Architect</b> · <code>memory-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Custom Allocator Architect</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You are developing a high-throughput, low-latency ML inference engine for an always-on mobile service. You've identified that the standard system `malloc`/`free` calls are causing significant performance variability, increased memory fragmentation over long runs, and non-deterministic latency due to OS-level memory management overheads. How would you design and implement a custom memory allocator specifically optimized for the unique characteristics of ML inference workloads on a mobile device?"
 
@@ -2890,7 +6759,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The CoreML Multi-Array Pre-allocation</b> · <code>memory</code> <code>frameworks</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The CoreML Multi-Array Pre-allocation</b> · <code>memory-hierarchy</code> <code>compilation</code></summary>
 
 - **Interviewer:** "You run a CoreML video processing pipeline at 60 FPS on iOS. The model prediction takes 5ms. However, the Instruments profiler shows your app is constantly triggering the OS memory allocator and occasionally dropping frames due to memory spikes. You are creating a new `MLMultiArray` for the output every frame. How do you stop this memory allocation overhead?"
 
@@ -2919,13 +6788,14 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 ---
 
 
-### 🔢 Numerical Precision & Quantization
+### Numerical Precision & Quantization
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Quantization Quirk</b> · <code>quantization-npu</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Quantization Quirk</b> · <code>quantization</code></summary>
 
 - **Interviewer:** "Your team successfully quantizes a large image segmentation model from FP32 to INT8 for deployment on a mobile NPU, expecting significant speedup. However, after deployment, you notice that some operations, particularly custom layers or obscure activations, are still running in FP32 on the CPU. Why would this happen, despite the model being 'quantized'?"
 
@@ -2946,10 +6816,9 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Conversion Precision Loss</b> · <code>precision</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Conversion Precision Loss</b> · <code>mixed-precision</code></summary>
 
 - **Interviewer:** "You convert a PyTorch model from FP32 to Core ML FP16 for the Apple Neural Engine. Overall accuracy drops 0.3% — acceptable. But one specific layer's output diverges by 12% from the FP32 reference. Which layer type is most likely the culprit, and why?"
 
@@ -2975,7 +6844,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Zero-Point Drift</b> · <code>numerical-precision</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Zero-Point Drift</b> · <code>mixed-precision</code></summary>
 
 - **Interviewer:** "You deploy an INT8 quantized image classification model to a mobile phone. During local testing with PyTorch, the model has 95% accuracy. On the phone, using TFLite, it drops to 82%. You discover that a specific intermediate activation tensor is consistently hitting exactly `0` when it shouldn't. What quantization hardware mismatch occurred?"
 
@@ -2995,7 +6864,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Cross-SoC Accuracy Divergence</b> · <code>precision</code> <code>fragmentation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Cross-SoC Accuracy Divergence</b> · <code>mixed-precision</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You deploy the same TFLite INT8 face verification model on a Pixel 8 Pro (Tensor G3) and a Samsung Galaxy S23 (Snapdragon 8 Gen 2). On Pixel, the false acceptance rate (FAR) is 0.1% — within spec. On Galaxy S23, the FAR jumps to 1.2% — 12× worse, making the biometric feature unusable. Same model binary, same test images. What's causing the accuracy divergence?"
 
@@ -3023,7 +6892,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Cross-Platform Confidence Divergence</b> · <code>precision</code> <code>frameworks</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Cross-Platform Confidence Divergence</b> · <code>mixed-precision</code> <code>compilation</code></summary>
 
 - **Interviewer:** "You train a single PyTorch image classification model and deploy it as CoreML on iOS (iPhone 16 Pro, A18 Pro) and TFLite on Android (Galaxy S24, Snapdragon 8 Gen 3). Both use INT8 quantization. For the same test image, the iOS model outputs 92% confidence for 'golden retriever' while the Android model outputs 71% confidence. The predicted class is the same, but the confidence gap causes your app's UX to behave differently (iOS shows 'Definitely a golden retriever!' while Android shows 'Might be a golden retriever'). Explain the three conversion steps where confidence diverges."
 
@@ -3051,7 +6920,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Adaptive Precision Challenge</b> · <code>dynamic-quantization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Adaptive Precision Challenge</b> · <code>quantization</code></summary>
 
 - **Interviewer:** "You're deploying a real-time audio processing model on a mobile device. The input audio amplitude can vary wildly depending on the environment (quiet room vs. loud concert). Static INT8 post-training quantization (PTQ) leads to significant accuracy degradation during high-amplitude spikes or very low-amplitude signals. How would you adapt your quantization strategy to maintain accuracy while still leveraging INT8 performance on mobile hardware?"
 
@@ -3080,7 +6949,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Quantization Fragmentation Trap</b> · <code>quantization</code> <code>fragmentation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Quantization Fragmentation Trap</b> · <code>quantization</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your team ships a TFLite INT8 food recognition model. QA passes on Pixel 8 (Tensor G3) and Samsung Galaxy S24 (Snapdragon 8 Gen 3). A user on a Samsung Galaxy A54 (Exynos 1380) reports the model identifies a banana as 'hot dog' with 94% confidence. You test the same image on Pixel 8 — correctly identifies 'banana' at 97%. The model binary is byte-for-byte identical. How can the same INT8 model produce different results on different SoCs?"
 
@@ -3108,7 +6977,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Neural Engine Quantization Cliff</b> · <code>quantization</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Neural Engine Quantization Cliff</b> · <code>quantization</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "You're deploying a 1B parameter language model on-device. Apple's ANE supports INT8 and FP16 but not INT4. Qualcomm's Hexagon NPU supports INT4 natively. Your model at FP16 is 2 GB, at INT8 is 1 GB, and at INT4 is 500 MB. The phone has 6 GB RAM with 2 GB available. Walk me through the quantization decision for each platform and where the 'cliff' is."
 
@@ -3136,10 +7005,10 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Quantization Conundrum</b> · <code>quantization-hardware</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Quantization Conundrum</b> · <code>quantization</code></summary>
 
 - **Interviewer:** "Your team has quantized a large language model to INT8 for deployment on a mobile SoC. To your surprise, on a specific *older generation* NPU, the INT8 model is *slower* and consumes *more power* than the FP16 version. What architectural reasons within the NPU or its surrounding SoC might explain this counter-intuitive result?"
 
@@ -3166,7 +7035,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Int8 Quantization Activation Clipping</b> · <code>quantization</code> <code>soc</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Int8 Quantization Activation Clipping</b> · <code>quantization</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You quantize an image classification model to INT8 to run on a Qualcomm Hexagon DSP. The FP32 model had 92% accuracy. The INT8 model runs 4x faster but drops to 60% accuracy. The weights quantized perfectly, but debugging shows the activations in Layer 5 are completely saturated (hitting the maximum value of 127 constantly). What property of mobile activation functions causes this?"
 
@@ -3193,7 +7062,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Mixed-Precision Deployment Plan</b> · <code>precision</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Mixed-Precision Deployment Plan</b> · <code>mixed-precision</code></summary>
 
 - **Interviewer:** "You're deploying a 100-layer model on the Apple Neural Engine via Core ML. Running everything in FP16 gives a 2% accuracy drop — unacceptable for your medical imaging app. Running everything in FP32 means the Neural Engine can't be used (it only supports FP16). Design a mixed-precision strategy that gets Neural Engine speed with FP32 accuracy."
 
@@ -3243,7 +7112,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Quantization Divergence Across SoCs</b> · <code>precision</code> <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Quantization Divergence Across SoCs</b> · <code>mixed-precision</code> <code>roofline</code></summary>
 
 - **Interviewer:** "You deploy an INT4 quantized LLM (Gemma-2B) across three flagship phones: iPhone 16 Pro (A18 Pro), Galaxy S24 Ultra (Snapdragon 8 Gen 3), and Pixel 9 Pro (Tensor G4). The same prompt produces noticeably different outputs on each device — not just minor token differences, but semantically different responses. All three use the same INT4 weight file. How can identical weights produce different text on different SoCs?"
 
@@ -3273,7 +7142,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Cross-SoC Quantization Divergence</b> · <code>quantization</code> <code>fragmentation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Cross-SoC Quantization Divergence</b> · <code>quantization</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You ship a single INT8 TFLite object detection model for your autonomous drone control app. The model must identify landing zones with >95% precision — a false positive means the drone lands on an unsafe surface. Testing on Pixel 8 (Tensor G3): 97.2% precision. On Samsung Galaxy S23 (Snapdragon 8 Gen 2): 96.8%. On Samsung Galaxy S23 FE (Exynos 2200): 91.3%. The Exynos result is below your safety threshold. Same model binary, same test images. Why does precision drop 6% on Exynos, and how do you fix it without maintaining three separate models?"
 
@@ -3301,10 +7170,10 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The INT4 Accuracy Cliff</b> · <code>quantization-low-precision-hardware-support</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The INT4 Accuracy Cliff</b> · <code>quantization</code></summary>
 
 - **Interviewer:** "Your team wants to push the envelope on model size and latency, aiming for INT4 quantization for a critical on-device generative AI model. What are the significant technical challenges you anticipate with INT4 quantization compared to INT8, both in terms of hardware support and accuracy preservation, and how would you mitigate them?"
 
@@ -3382,7 +7251,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Cross-Platform Confidence Score Divergence</b> · <code>quantization</code> <code>compiler-runtime</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Cross-Platform Confidence Score Divergence</b> · <code>quantization</code> <code>compilation</code></summary>
 
 - **Interviewer:** "Your medical imaging app runs the same diagnostic model on iOS (Core ML, A17 Pro) and Android (TFLite + NNAPI, Snapdragon 8 Gen 3). Both models are converted from the same PyTorch checkpoint. A dermatologist reports that the same mole photo gets a 'high risk' score (0.87) on their iPhone but 'low risk' (0.42) on their Samsung Galaxy S24. For a medical app, this inconsistency is a liability nightmare. The model architecture and weights are identical pre-conversion. Why do the confidence scores diverge by 0.45, and how do you guarantee cross-platform consistency for safety-critical applications?"
 
@@ -3415,13 +7284,14 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 ---
 
 
-### 🏗️ NPU, GPU & Heterogeneous Compute
+### NPU, GPU & Heterogeneous Compute
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Delegation Lottery</b> · <code>npu-delegation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Delegation Lottery</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "Your team ships an image classification model on Android using TFLite. On a Snapdragon 8 Gen 3 device, inference takes 4ms. A colleague adds a single custom post-processing op written as a TFLite Flex delegate. Inference jumps to 38ms. What happened?"
 
@@ -3441,10 +7311,9 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Heterogeneous Scheduling Trap</b> · <code>npu-delegation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Heterogeneous Scheduling Trap</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You're profiling a real-time object detection pipeline on a Snapdragon 8 Gen 3. The NPU is rated at 45 TOPS (INT8). Your YOLOv8-S model needs ~7 GOPS per frame. At 30 FPS that's 210 GOPS/s — less than 0.5% of NPU peak. Yet you measure 28ms per frame, barely hitting 30 FPS. Where is the time going?"
 
@@ -3466,7 +7335,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Mobile GPU Misconception</b> · <code>mobile-gpu</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Mobile GPU Misconception</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "Your team decides to run ML inference on the mobile GPU instead of the NPU, reasoning that 'GPUs are great for ML.' On a Samsung Galaxy S24 (Snapdragon 8 Gen 3, Adreno 750 GPU), your model runs at 18ms on the GPU via TFLite's GPU delegate. The same model runs at 6ms on the Hexagon NPU. The GPU has 1.5 TFLOPS FP16 — more than enough compute. Why is the GPU 3× slower than the NPU for this workload?"
 
@@ -3496,7 +7365,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The SoC Interconnect Bottleneck</b> · <code>soc-architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The SoC Interconnect Bottleneck</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "On a Google Tensor G3 (Pixel 8 Pro), you pipeline your ML workload: the CPU preprocesses a frame, the GPU runs a segmentation model, and the TPU runs a classification model on the segmented output. Each stage takes ~5ms individually. You expect 5ms total with perfect pipelining, but measure 14ms. The compute units aren't overloaded. What's eating the other 9ms?"
 
@@ -3528,7 +7397,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Qualcomm QNN SDK Delegation</b> · <code>npu-delegation</code> <code>compiler-runtime</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Qualcomm QNN SDK Delegation</b> · <code>heterogeneous-compute</code> <code>compilation</code></summary>
 
 - **Interviewer:** "You're deploying a multi-modal model on a Snapdragon 8 Elite using the Qualcomm AI Engine (QNN SDK). QNN can delegate ops to the Hexagon NPU (50 TOPS INT8), Adreno GPU (4.6 TFLOPS FP16), or Kryo CPU. Your model has: Conv2D layers, LayerNorm, GELU, multi-head attention with dynamic sequence lengths, and a final softmax. Build the delegation decision tree and estimate total latency."
 
@@ -3556,7 +7425,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The ANE Delegation Disaster</b> · <code>npu-delegation</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The ANE Delegation Disaster</b> · <code>heterogeneous-compute</code> <code>latency</code></summary>
 
 - **Interviewer:** "You convert a PyTorch segmentation model to Core ML for your AR app. On your test iPhone 15 Pro (A17 Pro), inference takes 6 ms on the Neural Engine. After deploying to production, users on iPhone 14 (A15 Bionic) report the AR overlay is laggy. Your telemetry shows 62 ms inference on A15 devices — a 10× regression. The model is identical. What happened?"
 
@@ -3584,7 +7453,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Dilated Convolution Penalty</b> · <code>npu-architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Dilated Convolution Penalty</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You port an image segmentation model (DeepLabV3) to an Android phone. It relies heavily on Atrous (Dilated) Convolutions to expand the receptive field without adding parameters. On the CPU, it takes 200ms. On the NPU, it takes 800ms. Why is the dedicated AI hardware 4x slower than the general-purpose CPU?"
 
@@ -3604,10 +7473,10 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The UI Contention Crisis</b> · <code>apple-silicon</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The UI Contention Crisis</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You are deploying a 7B parameter local LLM on an iPhone 15 Pro (A17 Pro). In your sterile testing environment, it reliably generates text at 25 tokens/second. But in production, users complain that whenever they scroll the app's rich 3D animation interface, the LLM generation speed plummets to 5 tokens/second. What is the bottleneck?"
 
@@ -3627,7 +7496,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The NPU Compiler Black Box</b> · <code>npu-compiler</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The NPU Compiler Black Box</b> · <code>compilation</code></summary>
 
 - **Interviewer:** "You export the same ONNX model to three mobile NPU compilers: Apple's CoreML compiler (for ANE), Qualcomm's QNN compiler (for Hexagon), and MediaTek's NeuroPilot compiler (for APU). The model has 45 layers. CoreML maps 44 layers to the ANE, QNN maps 38 layers, and NeuroPilot maps 41 layers. The unmapped layers fall back to CPU. Why do three compilers targeting three NPUs produce different partitioning decisions from the same ONNX graph, and how do you debug this?"
 
@@ -3655,7 +7524,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Mobile AI Chip Roadmap Bet</b> · <code>soc-architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Mobile AI Chip Roadmap Bet</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You're the ML platform lead at a major app company. You need to decide your on-device ML strategy for the next 3 years. Apple is pushing the ANE (fixed-function, proprietary), Qualcomm is pushing Hexagon (programmable DSP + NPU), Google is building custom TPU cores in Tensor chips, Samsung is licensing ARM Ethos NPUs, and MediaTek is integrating custom APUs. How do you build a model deployment pipeline that survives this hardware fragmentation without maintaining 5 separate codepaths?"
 
@@ -3683,7 +7552,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Interconnect Choke Point</b> · <code>soc-interconnect</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Interconnect Choke Point</b> · <code>interconnect</code></summary>
 
 - **Interviewer:** "You are profiling a real-time semantic segmentation model on a mobile SoC. The pipeline consists of two main stages: complex image preprocessing on the CPU (e.g., tone mapping, color space conversion) followed by neural network inference on the NPU. You observe that the end-to-end latency is significantly higher than the sum of CPU preprocessing time and NPU inference time. What SoC-level component is likely causing this discrepancy, and how would you quantify its impact?"
 
@@ -3711,10 +7580,10 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Asymmetric Multiprocessing (Big.LITTLE) Stutter</b> · <code>soc</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Asymmetric Multiprocessing (Big.LITTLE) Stutter</b> · <code>heterogeneous-compute</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your Android app runs an OCR model entirely on the CPU (using XNNPACK). You spawn 4 threads to match the 4 cores of the device. The average latency is 50ms. However, the 99th percentile (P99) latency is a massive 150ms, causing noticeable UI stutter. The device is not thermal throttling. What architectural feature of mobile CPUs causes this massive latency variance?"
 
@@ -3742,7 +7611,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The "Unaccelerated Custom Op" Dilemma</b> · <code>custom-ops-heterogeneous-compute-vendor-sdk</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The "Unaccelerated Custom Op" Dilemma</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You're integrating a novel graph neural network (GNN) model on a specific Android device with a proprietary NPU (e.g., a custom Google Tensor NPU or Qualcomm Hexagon DSP). The GNN has a custom aggregation operator not natively supported by TensorFlow Lite or the vendor's NPU SDK. Running this operator on the CPU causes a 20ms latency spike, making the overall model too slow. How would you approach accelerating this custom operator?"
 
@@ -3772,7 +7641,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The ISP/NPU Hardware Synchronization</b> · <code>pipeline</code> <code>soc</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The ISP/NPU Hardware Synchronization</b> · <code>data-pipeline</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "Your AR headset uses a dedicated Image Signal Processor (ISP) and an NPU. You want zero-copy memory between them. You allocate a hardware buffer. The ISP writes a frame to it, then the NPU reads it. It works, but occasionally the ML model outputs complete garbage. The image visually looks fine if you save it to disk right after the ISP finishes. What hardware synchronization mechanism did you forget?"
 
@@ -3803,13 +7672,12 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 ---
 
 
-### 📎 Additional Topics
+### Additional Topics
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The On-Device Training Storage Explosion</b> · <code>training</code> <code>memory-hierarchy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The On-Device Training Storage Explosion</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your photo app offers personalized style transfer — users can fine-tune the base model on their own photos to learn their preferred aesthetic. On-device training runs on the Apple A17 Pro using Core ML's MLUpdateTask. After 3 months, users complain their phone storage is full. Your app is using 4.2 GB. The base model is only 45 MB. Where did 4.2 GB come from?"
 
@@ -3839,10 +7707,10 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The On-Device Fine-Tuning Corruption</b> · <code>training</code> <code>memory-hierarchy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The On-Device Fine-Tuning Corruption</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your language learning app fine-tunes an on-device pronunciation model to each user's accent. The base model scores 88% accuracy. After 2 weeks of personalization on a Pixel 8 Pro (Tensor G3, 12 GB RAM), most users improve to 93%. But 5% of users report the model 'gets worse over time' — accuracy drops to 60% and the app starts accepting clearly wrong pronunciations. Resetting to the base model fixes it. What's corrupting the fine-tuned model?"
 
@@ -3872,7 +7740,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The On-Device Personalization OOM</b> · <code>training</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The On-Device Personalization OOM</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your app has a 50 MB vision model that runs inference flawlessly on devices with 3 GB of RAM. You decide to add on-device personalization—allowing the model to fine-tune its last layer using the user's photos. As soon as you trigger `model.fit()` with a batch size of 16, the app crashes with an Out-of-Memory (OOM) error. Why did a 50 MB model suddenly exceed the 1 GB app memory limit?"
 
@@ -3898,7 +7766,7 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The On-Device Training Graph Explosion</b> · <code>training</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The On-Device Training Graph Explosion</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your app has a 30 MB vision model that runs inference flawlessly on older iPhones with 2 GB of RAM. You decide to add on-device personalization—allowing the model to fine-tune its weights using the user's photos. As soon as you trigger `model.fit()` with a batch size of 8, the app crashes with an Out-of-Memory (OOM) error from iOS. Why did a 30 MB model suddenly exceed the ~1 GB per-app memory limit?"
 
@@ -3925,10 +7793,10 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Federated Learning Device Heterogeneity Crisis</b> · <code>training</code> <code>fragmentation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Federated Learning Device Heterogeneity Crisis</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're running federated learning across 2 million Android devices to improve your keyboard's next-word prediction. Each round selects 10,000 devices. After 6 months, you discover a systematic bias: the global model performs 8% better for users with flagship phones (Snapdragon 8 Gen 3, Tensor G3) than for users with budget phones (Helio G99, Snapdragon 685). Budget phone users are 60% of your user base. What's causing the bias and how do you fix it at the system level?"
 
@@ -3953,4 +7821,105 @@ SoC architecture, NPU delegation, memory hierarchies, numerical precision, and h
 
   </details>
 
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> Zero-Shot UI Action Grounding</b> · <code>deployment</code></summary>
+
+- **Interviewer:** "We're implementing a Ferret-UI-inspired agentic system where Siri can perform actions based on what the user is currently looking at on their screen. The vision-language model needs to ground user commands (e.g., 'Click the second checkout button') to explicit x,y coordinates. The constraint: this grounding model must reside entirely in-memory with a peak RAM footprint under 50MB, execute in <10ms on the Apple Neural Engine (ANE), and support seamless handoff to Private Cloud Compute for complex reasoning. How do you design the on-device grounding architecture and the handoff protocol?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Suggesting running a multi-billion parameter Vision-Language Model (VLM) on-device using standard 4-bit quantization (which still violates the 50MB RAM constraint by orders of magnitude), or relying on DOM/accessibility trees which are notoriously unreliable and not universally implemented across all iOS apps.
+
+  **Realistic Solution:** Use an asymmetric cascaded architecture. An ultra-small, specialized CoreML model (e.g., a MobileNetV4-based encoder paired with a lightweight transformer decoder, ~15M parameters) continuously runs on the ANE to output bounding boxes and semantic embeddings for UI elements. It relies solely on pixels, bypassing the accessibility tree. For the handoff protocol, instead of sending the raw screenshot to the cloud (which introduces latency and privacy risks), the on-device model generates a highly compressed semantic embedding grid (e.g., 16x16 tokens) of the screen. Only this grid and the user's audio transcript are securely handed off to the Apple Intelligence cloud nodes, drastically reducing bandwidth and preserving user privacy.
+
+  > **Napkin Math:**
+  > - **Memory:** 15M parameters quantized to INT4 = **~7.5MB**.
+  > - **Activations:** Downsampled 512x512 image input → peak activation memory is `256 x 256 x 16 channels x 2 bytes (FP16)` = **~2MB**.
+  > - **Context/OS Buffer:** **~5MB**.
+  > - **Total RAM Footprint:** **~14.5MB** (safely under the 50MB constraint).
+  > - **Latency:** The ANE computes ~11-35 TOPS. A 15M parameter forward pass is ~0.5 GFLOPs. Compute time is bounded by memory bandwidth. At ~50GB/s unified memory bandwidth, transferring 7.5MB takes **0.15ms**. Processing takes **< 1ms**. Total end-to-end UI grounding latency is **< 2ms**, leaving massive headroom for the OS compositor.
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> Local-Local RAG & On-Device Telemetry</b> · <code>privacy</code></summary>
+
+- **Interviewer:** "Siri needs to proactively suggest contextual actions based on a user's local message history, photos, and app usage. We want to update a semantic index dynamically on-device, but we must guarantee strict Local Differential Privacy (LDP) before any aggregated telemetry (to improve the global model) leaves the device. The entire indexing and query pipeline must consume <50MB of RAM and <10ms latency per query. How do you architect the local vector store, the CoreML embedding pipeline, and the LDP mechanism?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Using standard vector databases like FAISS or HNSW locally. HNSW has massive, unpredictable memory overhead for its graph structure and indexing latency spikes that will trigger iOS watchdog terminations. Furthermore, applying standard Laplace noise to raw text embeddings degrades local utility to the point of uselessness.
+
+  **Realistic Solution:** Implement a direct-to-flash Product Quantization (PQ) index. The embedding model is an ultra-lite dual-encoder (~10M parameters, INT8). The vector index uses memory-mapped (mmap) files backed by NVMe flash storage, completely bypassing the RAM limit for storage. The ANE handles the embedding extraction, while the Apple Matrix AMX coprocessor handles the PQ asymmetric distance calculations. For telemetry, we use DP-FTRL (Differential Privacy Follow-The-Regularized-Leader). We never send embeddings or text. We calculate local gradients on-device using a tiny federated learning task, clip the gradients, add Gaussian noise (ensuring strict LDP), and only send the noisy gradients to the server.
+
+  > **Napkin Math:**
+  > - **Memory:** Model: 10M params @ INT8 = **10MB**.
+  > - **Index Storage:** 100,000 local items * 64-dim * 1-byte (PQ) = **6.4MB** on disk (mmap'd, zero RAM footprint).
+  > - **Active RAM:** 10MB (model) + 2MB (activations) + 1MB (PQ centroids in RAM) = **13MB total RAM**.
+  > - **Latency:** Embedding extraction = **~4ms** on ANE. Dot product of query against 100,000 64-dim INT8 vectors = 6.4M MACs. AMX throughput is ~2 TMACs/s. Compute time for the search is **< 0.1ms**. Total latency = **~4.1ms**.
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> The Semantic Router</b> · <code>quantization</code></summary>
+
+- **Interviewer:** "We need an on-device 'Router' model that listens to every user invocation and decides in <10ms whether the query can be handled entirely locally (e.g., toggling a setting) or if it requires handing off to Apple Intelligence in the cloud. The router must maintain semantic context of the last 5 interactions, fit strictly under 50MB RAM, and operate seamlessly with the Neural Engine. How do you design the model architecture, context management, and extreme quantization strategy?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Proposing a "small" LLM (like TinyLlama or MobileLLM) with KV caching. Even a 1-billion parameter model quantized to 2-bit takes ~250MB, completely destroying the 50MB budget and forcing background apps to be evicted from memory.
+
+  **Realistic Solution:** Frame the routing not as generative text, but as an Intent Classification and Entity Extraction (NER) task. Use an extreme-quantized CNN-RNN hybrid or a distilled ALBERT-style architecture (~20M parameters). Context is NOT maintained by a KV cache; instead, we use a fixed-size running state vector (e.g., 512-dim) updated via a lightweight GRU/LSTM cell after each turn. The graph is compiled directly to CoreML, utilizing mixed-precision: INT4 weight-only quantization for the feed-forward layers and INT8 for the recurrent activations, fully hardware-accelerated by the ANE.
+
+  > **Napkin Math:**
+  > - **Model Size:** 20M parameters. Core weights in INT4 = **10MB**.
+  > - **Context State:** 5 interactions * 512 float16 values = **~5KB** (completely negligible).
+  > - **Activations:** For a short sequence (seq_len=32): `32 * 256 (hidden) * 2 bytes` = **~16KB**.
+  > - **Total RAM Footprint:** **~10.1MB**.
+  > - **Latency:** 20M params per token. For 32 tokens = ~1.2 GFLOPs. With ANE memory bandwidth at ~50GB/s, fetching 10MB of weights takes **0.2ms**. Compute overhead is **~0.1ms**. Total end-to-end routing decision takes **< 1ms**, ensuring zero user-perceptible delay before OS execution or cloud handoff begins.
+  </details>
+</details>
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> CoreML vs PyTorch</b> · <code>compilation</code></summary>
+
+- **Interviewer:** "If you train a model in PyTorch, can you deploy the raw `.pt` or `.pth` file directly into a native iOS Swift application?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Thinking iOS natively supports PyTorch or that you just need to install a PyTorch pip package on the iPhone.
+
+  **Realistic Solution:** No. The raw PyTorch model must be converted into Apple's proprietary CoreML format (`.mlpackage` or `.mlmodel`) so that the iOS operating system can automatically route the operations to the Neural Engine, GPU, or CPU.
+
+  > **Options:**
+  > [ ] Yes, iOS natively executes raw PyTorch files using the Swift Torch API.
+  > [ ] Yes, but only if you use an iPhone 14 or newer.
+  > [x] No, the model must be converted to the CoreML format for hardware acceleration on iOS.
+  > [ ] No, iOS only supports models trained in TensorFlow.
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Foundation-brightgreen?style=flat-square" alt="Level 2" align="center"> Background Inference Limits</b> · <code>deployment</code></summary>
+
+- **Interviewer:** "You are designing an iOS app that runs an LLM to summarize incoming audio while the app is in the background (user is looking at the home screen). What is the primary risk of running heavy ML inference in the background?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Worrying about the network connection dropping or the UI freezing.
+
+  **Realistic Solution:** The iOS Watchdog Timer. The operating system aggressively monitors background apps for memory and CPU usage to preserve battery. If your ML model consumes too much RAM or runs too hot, the OS will silently kill the app process entirely.
+
+  > **Options:**
+  > [ ] The model will automatically downgrade to 1-bit quantization.
+  > [x] The OS watchdog will forcefully terminate the app process to save battery and RAM.
+  > [ ] The user's screen will freeze until the background task completes.
+  > [ ] The App Store will reject the app during the review process.
+  </details>
 </details>

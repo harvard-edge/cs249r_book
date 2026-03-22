@@ -17,11 +17,73 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 ---
 
 
-### ⏱️ Real-Time & Latency
+### Real-Time & Latency
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Audio Buffer Memory Footprint</b> · <code>audio-pipeline-memory</code></summary>
+
+- **Interviewer:** "You are designing a keyword spotting system on a microcontroller. The system needs to continuously analyze 1-second audio clips to detect a wake word. If you're sampling at a standard 16 kHz with a 16-bit depth, what is the approximate size of the raw audio buffer you need to allocate in SRAM just to hold one clip for processing?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often miscalculate this by an order of magnitude, either by using the wrong units for the sampling rate (confusing Hz with kHz) or by forgetting the sample bit depth (confusing 16-bit with 1-byte). This can lead them to believe a pipeline is feasible on a chip where the raw audio won't even fit, or to dramatically over-provision on a larger chip.
+
+  **Realistic Solution:** The memory required is the product of the sampling rate, the duration, and the bytes per sample. For a standard 16-bit (2-byte) audio sample, a 1-second buffer at 16 kHz requires 32 KB of RAM. This is a significant, and often dominant, portion of the total available SRAM on a typical microcontroller (e.g., an MCU with 256KB SRAM), making this a critical first calculation.
+
+  > **Napkin Math:** 16,000 samples/second × 1 second × 2 bytes/sample = 32,000 bytes = 32 KB
+
+  > **Key Equation:** S_{buffer} = R_{sample} \times t_{duration} \times d_{bytes}
+
+  > **Options:**
+  > [ ] 3.2 KB
+  > [ ] 320 bytes
+  > [x] 32 KB
+  > [ ] 320 KB
+
+  📖 **Deep Dive:** [The TinyML Sensing Pipeline](https://mlsysbook.ai/tinyml/02_sensing_pipeline.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Sensor Data Ingestion Budget</b> · <code>sensor-pipeline</code></summary>
+
+- **Interviewer:** "You are designing a TinyML device for wake-word detection. Your system uses a single microphone sampling at 16 kHz with a 16-bit resolution. To perform inference, your model requires a buffer containing exactly 1 second of audio data.
+
+Explain how you would calculate the minimum SRAM required for this raw audio buffer and what that size is."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistakes are confusing bits with bytes or miscalculating the data rate. Engineers might use the sample rate (16,000) as the final answer, or forget to multiply by the number of bytes per sample (16-bit resolution = 2 bytes), leading to a buffer that is 2x too small and causes immediate overflows and system crashes.
+
+  **Realistic Solution:** The calculation is a direct conversion of the audio stream's data rate into a memory footprint. You need to multiply the sampling frequency by the size of each sample in bytes.
+
+A 16 kHz sample rate means 16,000 samples are collected per second. Each sample has a 16-bit resolution, which is equal to 2 bytes. Therefore, a one-second buffer requires 16,000 samples/sec * 2 bytes/sample, which equals 32,000 bytes or 32 KB. This is a significant portion of the available SRAM on many microcontrollers (e.g., 256KB-2MB), making this a critical first calculation in system design.
+
+  > **Napkin Math:** 1. **Identify Sample Rate:** 16 kHz = 16,000 samples per second.
+2. **Identify Sample Size:** 16-bit resolution = 2 Bytes per sample.
+3. **Calculate Data Rate:** 16,000 samples/sec × 2 Bytes/sample = 32,000 Bytes/sec.
+4. **Determine Buffer Size:** For 1 second of audio, the buffer must be 32,000 Bytes, or 32 KB.
+
+  > **Key Equation:** $\text{Buffer Size (Bytes)} = f_{\text{sample}} \times \frac{\text{Bit Depth}}{8} \times \text{Duration (s)}$
+
+  > **Options:**
+  > [ ] 16 KB. (Mistake: Assumes 8-bit resolution instead of 16-bit, a common off-by-two error).
+  > [ ] 64 KB. (Mistake: Assumes stereo/dual-channel audio, over-provisioning memory).
+  > [x] 32 KB. (Correct: 16,000 samples/sec * 2 bytes/sample * 1 sec = 32,000 bytes).
+  > [ ] 256 KB. (Mistake: Confuses bits and bytes, calculating 16,000 * 16 bits = 256,000, then misinterpreting as KB).
+
+  📖 **Deep Dive:** [Sensing Pipeline](https://mlsysbook.ai/tinyml/02_sensing_pipeline.html)
+  </details>
+</details>
+
+
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Keyword Spotting Latency Budget</b> · <code>latency</code></summary>
 
@@ -109,7 +171,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> Watchdog Timers and Hard Real-Time Guarantees</b> · <code>reliability</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> Watchdog Timers and Hard Real-Time Guarantees</b> · <code>fault-tolerance</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your Cortex-M4 runs inference for a safety-critical vibration monitor. The system must produce a result every 100ms — no exceptions. Your colleague says 'the model runs in 50ms on average, so we have 50ms of margin.' How does the ML model's worst-case execution time (which varies with input complexity for some architectures like decision trees or early-exit networks) make WCET analysis harder than for fixed-time tasks, and how must the watchdog timeout be set relative to the model's WCET?"
 
@@ -133,7 +195,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> Energy per Inference from Power Profile</b> · <code>power-thermal</code> <code>monitoring</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> Energy per Inference from Power Profile</b> · <code>power</code> <code>monitoring</code></summary>
 
 - **Interviewer:** "You're profiling a keyword spotting model on a Cortex-M4F running at 168 MHz, powered by a CR2032 coin cell (225 mAh, 3.0V nominal). The MCU draws 0.5 µA in deep sleep, 30 mA during active inference, and 15 mA during MFCC feature extraction. Feature extraction takes 5ms and inference takes 18ms. The system wakes every 1 second to check for a keyword. Calculate the energy per wake cycle and estimate the battery life."
 
@@ -161,10 +223,9 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The DMA Ping-Pong Desync</b> · <code>pipeline</code> <code>sensors</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The DMA Ping-Pong Desync</b> · <code>data-pipeline</code> <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "You are capturing audio using I2S and DMA on an STM32. You use a standard Ping-Pong (Double Buffering) scheme. DMA writes to Buffer A, fires a 'Half-Transfer' interrupt, then writes to Buffer B, firing a 'Full-Transfer' interrupt. You process the data in the main loop. After a few hours, the audio sounds garbled, like small chunks of time are missing. What timing failure broke the Ping-Pong buffer?"
 
@@ -192,7 +253,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The FPU Register Thrashing</b> · <code>os</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The FPU Register Thrashing</b> · <code>deployment</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your Cortex-M4F (which has an FPU) runs an RTOS. The ML model runs in a low-priority thread using heavily optimized floating-point math. You have a high-priority timer interrupt (ISR) that fires every 1ms to read an analog sensor. To be 'accurate', you decide to convert the sensor's integer value to a float inside the ISR before saving it. Suddenly, your ML thread's overall latency spikes dramatically. What did you do to the RTOS scheduler?"
 
@@ -280,7 +341,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Clock Speed vs Power Trade-off</b> · <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Clock Speed vs Power Trade-off</b> · <code>power</code></summary>
 
 - **Interviewer:** "Your wearable gesture recognition device uses a Cortex-M4 that supports Dynamic Voltage and Frequency Scaling: 168 MHz at 1.8V (50 mW) and 48 MHz at 1.2V (6 mW). Deep sleep draws 8 µW. The model takes 30ms at 168 MHz. The device runs 1 inference per second. Which operating point minimizes energy per inference cycle, and at what inference rate does the answer flip?"
 
@@ -312,7 +373,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Sensor Duty Cycle Optimization</b> · <code>power-thermal</code> <code>sensor-pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Sensor Duty Cycle Optimization</b> · <code>power</code> <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "Your wearable fall detection system uses a Cortex-M33 (Apollo4 Blue Plus) with a 3-axis accelerometer. The current design samples at 100 Hz continuously. A colleague proposes reducing to 25 Hz to save power. The accelerometer draws 150 µA at 100 Hz and 40 µA at 25 Hz (at 1.8V supply). Analyze the power savings, the Nyquist implications for fall detection, and propose a smarter duty-cycling strategy."
 
@@ -394,7 +455,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Power Supply ADC Jitter</b> · <code>sensor-pipeline</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Power Supply ADC Jitter</b> · <code>sensor-pipeline</code> <code>power</code></summary>
 
 - **Interviewer:** "Your vibration monitoring system on an ESP32-C6 (RISC-V, 160 MHz, 512 KB SRAM) uses the built-in 12-bit SAR ADC to sample a piezoelectric vibration sensor at 10 kHz. The model was trained on data from a benchtop DAQ with 16-bit resolution. In the field, the model's anomaly detection F1-score drops from 0.92 to 0.71. The vibration signal amplitude is correct, but the frequency spectrum shows unexpected broadband noise above 2 kHz. Diagnose the ADC issue."
 
@@ -454,7 +515,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The ESP32 WiFi-ADC Interference</b> · <code>sensor-pipeline</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The ESP32 WiFi-ADC Interference</b> · <code>sensor-pipeline</code> <code>power</code></summary>
 
 - **Interviewer:** "Your smart agriculture system on an ESP32-C6 (RISC-V, 160 MHz, 512 KB SRAM) reads soil moisture via a capacitive sensor on ADC1 channel 3 and runs a crop health classification model. The system also uploads results over WiFi every 5 minutes. You notice that soil moisture readings taken during WiFi transmission are consistently 8-12% higher than readings taken with WiFi off. The model misclassifies 'dry soil' as 'adequate moisture' during WiFi-active periods. Quantify the interference mechanism."
 
@@ -556,7 +617,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> Power Profiling Methodology</b> · <code>power-thermal</code> <code>monitoring</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> Power Profiling Methodology</b> · <code>power</code> <code>monitoring</code></summary>
 
 - **Interviewer:** "Your team claims their keyword spotting model on an Apollo4 Blue Plus (Cortex-M4F, 192 MHz, 2 MB flash, 2 MB SRAM) draws '5 mA average.' You suspect this number is wrong. Design a measurement setup to get the real power profile, and explain what the team likely missed."
 
@@ -593,7 +654,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> Watchdog Timer Integration with Inference</b> · <code>real-time</code> <code>functional-safety</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> Watchdog Timer Integration with Inference</b> · <code>real-time</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your Cortex-M33 (nRF5340, 128 MHz) runs a 12-layer anomaly detection model. Inference takes 85 ms. The system's Independent Watchdog Timer (IWDG) is set to 100 ms because the safety spec requires a response within 100 ms. Your test engineer reports that the watchdog fires randomly during normal inference — about 1 in 50 runs. The model isn't hanging. What's going on, and how do you fix it without relaxing the safety deadline?"
 
@@ -626,7 +687,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Model Calibration Drift</b> · <code>deployment</code> <code>sensor</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Model Calibration Drift</b> · <code>deployment</code> <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "You train an anomaly detection model for industrial motors using a high-end lab accelerometer. You achieve 99% accuracy. You deploy the model to the factory floor using a cheap $2 MEMS accelerometer. The model immediately fires a continuous stream of false positives. Both sensors are 16-bit. What critical MLOps step did you skip during deployment?"
 
@@ -655,7 +716,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The BLE Connection Event Starvation</b> · <code>networking</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The BLE Connection Event Starvation</b> · <code>interconnect</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your wearable device runs a gesture recognition model on a single-core Cortex-M4. It streams the classification results (4 bytes) over Bluetooth Low Energy (BLE) to a phone. The model takes 30ms to run. You configure the BLE connection interval to 15ms to ensure low latency. The system works, but the model's inference time randomly spikes to 45ms or 60ms. What protocol conflict is causing the ML latency spikes?"
 
@@ -687,7 +748,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The BLE Connection Event Starvation</b> · <code>networking</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The BLE Connection Event Starvation</b> · <code>interconnect</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your wearable device runs a gesture recognition model on a single-core Cortex-M4. It streams the classification results (4 bytes) over Bluetooth Low Energy (BLE) to a phone. The model takes 30ms to run. You configure the BLE connection interval to 15ms to ensure low latency. The system works, but the model's inference time randomly spikes to 45ms or 60ms. What protocol conflict is causing the ML latency spikes?"
 
@@ -719,7 +780,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The ADC Multiplexer Race Condition</b> · <code>sensors</code> <code>pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The ADC Multiplexer Race Condition</b> · <code>sensor-pipeline</code> <code>data-pipeline</code></summary>
 
 - **Interviewer:** "Your MCU has one physical ADC but reads from 4 analog sensors sequentially using an internal multiplexer (MUX). You switch the MUX to Channel 1, read, switch to Channel 2, read, etc. However, the data from Channel 1 seems to 'bleed' into Channel 2. If Sensor 1 is at 3.3V, Sensor 2 (which should be 0V) reads as 1.2V. What electrical property did you ignore?"
 
@@ -743,7 +804,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The UART Buffer Overrun</b> · <code>pipeline</code> <code>networking</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The UART Buffer Overrun</b> · <code>data-pipeline</code> <code>interconnect</code></summary>
 
 - **Interviewer:** "Your MCU streams ML predictions (100 bytes of JSON) to an external cellular modem via UART at 115200 baud. It works perfectly in the lab. In the field, the cellular modem sometimes loses its network connection and takes a few seconds to reconnect. During this time, the MCU keeps sending data. When the modem reconnects, the first few JSON strings are completely mangled. Why did the UART connection corrupt the data?"
 
@@ -769,7 +830,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> Vibration-Based Predictive Maintenance</b> · <code>system-design</code> <code>sensor-pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> Vibration-Based Predictive Maintenance</b> · <code>model-cost</code> <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "Design a vibration-based predictive maintenance system for 500 industrial motors using Cortex-M4 sensors. The system must detect bearing degradation 2 weeks before failure, run for 2 years on a battery, and cost less than $30 per sensor in BOM. Walk through the full system design."
 
@@ -805,7 +866,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Custom Operator Trap</b> · <code>micro-npu</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Custom Operator Trap</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "Your embedded team has a Convolutional Neural Network (CNN) running brilliantly on an ARM Cortex-M55 paired with an Ethos-U55 microNPU, taking only 2ms per inference. A data scientist decides to swap out the standard ReLU activations for a custom Swish activation to gain 1% accuracy. Suddenly, inference takes 85ms. Why did a single activation function destroy your real-time budget?"
 
@@ -825,7 +886,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> Sensor Aging Changes the Baseline — Detecting and Adapting On-Device</b> · <code>mlops</code> <code>sensor-pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> Sensor Aging Changes the Baseline — Detecting and Adapting On-Device</b> · <code>deployment</code> <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "Your vibration sensor for predictive maintenance uses an ADXL345 accelerometer feeding a Cortex-M4 running an autoencoder anomaly detector. After 18 months in the field, false alarm rates jump from 2% to 15%. The motors haven't changed — your maintenance team confirms they're healthy. The accelerometer's sensitivity has drifted by 8% due to aging and thermal cycling. How do you detect this is sensor drift (not real anomalies) and adapt on-device without retraining?"
 
@@ -863,7 +924,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Hardware Crypto Engine Latency</b> · <code>security</code> <code>pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Hardware Crypto Engine Latency</b> · <code>security</code> <code>data-pipeline</code></summary>
 
 - **Interviewer:** "Your ML device connects to AWS over Wi-Fi. Every hour, it performs a TLS handshake to securely upload a model update. The MCU has a hardware crypto accelerator (AES/RSA). You use an RTOS. When the hourly TLS handshake occurs, the ML audio inference task (which runs every 20ms) misses its deadline and drops audio frames. If the crypto is hardware-accelerated, why is it freezing the CPU?"
 
@@ -891,10 +952,10 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The Interrupt Jitter Crisis</b> · <code>rtos-scheduling</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The Interrupt Jitter Crisis</b> · <code>real-time</code></summary>
 
 - **Interviewer:** "You have a vibration-analysis model running on an industrial motor's MCU. It must sample an accelerometer via an ADC every 100 microseconds, buffer it, and run an FFT + NN inference. Occasionally, the system misses an ADC sample entirely, causing the FFT frequencies to skew and the model to output false positives. The CPU utilization is only at 60%. Why did you drop a sample?"
 
@@ -972,7 +1033,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Power Supply Noise Impact</b> · <code>power-thermal</code> <code>sensor-pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Power Supply Noise Impact</b> · <code>power</code> <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "Your environmental monitoring device uses a Cortex-M4 with a 12-bit ADC reading a gas sensor (analog output, 0-3.3V). The device runs on a switching regulator with 50 mV peak-to-peak ripple at 1 MHz. During ML inference, the MCU draws current spikes that cause additional 30 mV supply droops. Your model was trained on clean lab data. Quantify the SNR degradation and its impact on model accuracy."
 
@@ -1065,7 +1126,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Sleep Mode Wi-Fi Disconnect</b> · <code>power</code> <code>networking</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Sleep Mode Wi-Fi Disconnect</b> · <code>power</code> <code>interconnect</code></summary>
 
 - **Interviewer:** "Your ESP32 battery-powered camera needs to send an image to the cloud when motion is detected. To save power, you put it into Light Sleep. The Wi-Fi modem stays powered on to maintain the router connection. However, when it wakes up to send an image, the `send()` call fails, and it has to do a full 3-second DHCP reconnection, draining the battery. Why did the router drop the connection if the modem was on?"
 
@@ -1093,7 +1154,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The LoRaWAN Confirmed ACK Spiral</b> · <code>networking</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The LoRaWAN Confirmed ACK Spiral</b> · <code>interconnect</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your smart agriculture sensor uses LoRaWAN to send ML anomaly predictions to a gateway 5 miles away. To ensure data is never lost, you configure the device to send 'Confirmed Messages' (requiring an ACK from the gateway). During a rainstorm, the signal quality drops. The sensor's battery dies in 3 days instead of 3 years. What protocol trap destroyed the battery?"
 
@@ -1122,7 +1183,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Flash Erase Suspend Lockout</b> · <code>real-time</code> <code>storage</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Flash Erase Suspend Lockout</b> · <code>real-time</code> <code>persistent-storage</code></summary>
 
 - **Interviewer:** "You are writing ML telemetry to SPI Flash. A sector erase takes 300ms. Your MCU has a critical real-time motor control interrupt that must run every 5ms. While the SPI Flash is erasing, the MCU's instruction cache is disabled (since code runs from the same flash). The motor control interrupt misses its deadline and the motor crashes. Can you just pause the erase?"
 
@@ -1146,7 +1207,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> Solar + Supercapacitor + MCU System Design</b> · <code>power</code> <code>system-design</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> Solar + Supercapacitor + MCU System Design</b> · <code>power</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Design a battery-free structural health monitoring system powered by a small indoor solar cell (2 cm², ~100 µW average indoors). The system must run vibration anomaly detection on a Cortex-M4 that draws 30 mW active. How do you bridge the 300× gap between harvest rate and compute demand?"
 
@@ -1178,7 +1239,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Designing an Inference Duty Cycle on 0.5 mW Solar</b> · <code>power-thermal</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Designing an Inference Duty Cycle on 0.5 mW Solar</b> · <code>power</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You're deploying a keyword spotting sensor on a building facade powered by a small solar cell that provides 0.5 mW average (accounting for day/night, clouds, and seasons). The sensor uses an Ambiq Apollo4 Lite (Cortex-M4F, 5 µW sleep, 3 mW active at 96 MHz). Inference takes 15ms per keyword detection pass. Design the duty cycle. How many inferences per hour can you sustain year-round?"
 
@@ -1222,7 +1283,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> On-Device Anomaly Detection System</b> · <code>mlops</code> <code>sensor-pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> On-Device Anomaly Detection System</b> · <code>deployment</code> <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "You're deploying 500 vibration sensors on industrial motors for predictive maintenance. Each sensor has a Cortex-M4F (256 KB SRAM, 1 MB flash) with a 3-axis accelerometer sampling at 3.2 kHz. The system must detect bearing faults (inner race, outer race, ball, cage defects) with <1% false positive rate and <5% false negative rate. The models must run entirely on-device — no cloud dependency. Design the anomaly detection pipeline, including feature extraction, model architecture, and the threshold calibration strategy."
 
@@ -1250,7 +1311,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Power-Aware Inference Scheduler</b> · <code>power-thermal</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Power-Aware Inference Scheduler</b> · <code>power</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "Your wearable health monitor on a Cortex-M33 (64 KB SRAM, 64 MHz, 3.3 µA deep sleep) runs three models: (1) heart rate estimation (PPG sensor, 25 Hz, 0.5ms inference, runs continuously), (2) arrhythmia detection (ECG, 250 Hz, 8ms inference, runs every 10 seconds), (3) fall detection (accelerometer, 50 Hz, 3ms inference, runs every 1 second). The device has a 40 mAh battery and must last 7 days. Design a power-aware scheduler that meets all real-time deadlines while maximizing battery life."
 
@@ -1283,7 +1344,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The AMP Mailbox Full</b> · <code>pipeline</code> <code>os</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The AMP Mailbox Full</b> · <code>data-pipeline</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your system uses Asymmetric Multi-Processing (AMP). A Linux Cortex-A processor handles the network, and a bare-metal Cortex-M processor handles the real-time ML sensors. They communicate via an RPMsg (Remote Processor Messaging) mailbox. The ML core detects anomalies at 500 Hz and sends a 10-byte message to Linux for each one. The system runs for 5 seconds and then the ML core crashes with a `Mailbox Full` error. Linux is running fine. Why did the mailbox fill up?"
 
@@ -1309,7 +1370,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Sub-Millisecond Fault Detector</b> · <code>latency</code></summary>
@@ -1380,7 +1441,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Always-On Multi-Modal Sensor Fusion System</b> · <code>sensor-fusion</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Always-On Multi-Modal Sensor Fusion System</b> · <code>sensor-pipeline</code> <code>power</code></summary>
 
 - **Interviewer:** "You're designing an always-on context-aware wearable that fuses data from 5 sensors: microphone (16 kHz), 3-axis accelerometer (50 Hz), PPG heart rate sensor (25 Hz), skin temperature (1 Hz), and ambient light (1 Hz). The device must classify 8 activities (walking, running, sleeping, talking, eating, driving, exercising, idle) with <500ms latency on a Cortex-M33 (256 KB SRAM, 512 KB flash, 64 MHz). The battery is 80 mAh and must last 5 days. Design the full sensor fusion architecture, specifying which sensors are always-on vs triggered, the fusion model, and the power budget."
 
@@ -1418,7 +1479,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Self-Calibrating Sensor Pipeline</b> · <code>sensor-pipeline</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Self-Calibrating Sensor Pipeline</b> · <code>sensor-pipeline</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your fleet of 5,000 air quality sensors (each with a Cortex-M4F, a particulate matter sensor, and a gas sensor) is deployed across a city. After 6 months, the gas sensors have drifted — the electrochemical cells degrade with exposure, causing a systematic 15% under-reading of NO2 concentrations. The PM sensors are still accurate. You can't physically recalibrate 5,000 devices. Design an on-device self-calibration system that corrects the drift using the PM sensor as a reference and periodic ground-truth from 20 government reference stations."
 
@@ -1449,17 +1510,39 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Streaming Audio 'KV-Cache'</b> · <code>kv-cache-transformer-audio-dma</code></summary>
+
+- **Interviewer:** "You're designing an always-on keyword spotting device using a small Transformer-based model on a Cortex-M4. The total SRAM is limited to 256KB. Unlike a simple CNN, this model needs to maintain state across consecutive audio windows to understand context. Your task is to design a 'KV-cache' equivalent for this streaming audio task. The model processes 100ms non-overlapping audio chunks. Your constraints are a total model footprint (weights + arena) under 200KB and an average power consumption below 1mW. Formulate an architecture for managing this state. How do you decide what state to keep versus discard, and what hardware feature is critical for achieving your power budget?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to LLMs might propose caching the full Key/Value state for all layers and all heads, quickly finding this would consume all 256KB of SRAM within a few seconds of audio. Another mistake is to focus only on the CPU, ignoring the energy cost of getting data into the SRAM in the first place.
+
+  **Realistic Solution:** A principal-level answer recognizes that a full KV-cache is infeasible. The solution is to design a *rolling buffer* of activation history, not a complete KV-cache. The candidate must justify *which* layers' activations are most critical for temporal context (likely the earlier layers for feature extraction, or the final layer's output). They would propose a fixed-size ring buffer in the Tensor Arena to hold, for example, the last 5-10 feature vectors (from 500-1000ms of audio). The core architectural component is using the Direct Memory Access (DMA) controller. The optimal design uses DMA to transfer audio samples from the microphone's ADC buffer directly into the model's input tensor while the CPU is in a low-power sleep state. The CPU is only woken by a DMA 'transfer complete' interrupt to run inference. This DMA-centric, interrupt-driven architecture is the only way to meet the sub-mW power budget, as it minimizes CPU active time.
+
+  > **Napkin Math:** Average power is `(P_active * t_active + P_sleep * t_sleep) / t_period`. Let's analyze a 100ms period. `t_period = 100ms`. Assume inference takes 20ms (`t_active`) on a Cortex-M4 drawing 50mW (`P_active`). The remaining 80ms (`t_sleep`) the chip is in deep sleep drawing 10µW (`P_sleep`). Average Power = `(50mW * 20ms + 10µW * 80ms) / 100ms = (1µJ + 0.0008µJ) / 100ms ≈ 10mW`. This fails the power budget. The error is assuming the CPU is active only for inference. What about getting the data? A 100ms chunk of 16kHz 16-bit audio is `0.1s * 16000 Hz * 2 bytes = 3.2KB`. A CPU `memcpy` might take `~0.02ms` but keeps the CPU active. With DMA, the CPU stays asleep. Let's say DMA adds 5mW draw for `~0.01ms`. The real win is keeping the CPU in its 10µW sleep state for as long as possible. The DMA-driven design ensures `t_active` is truly just for inference, and the rest of the time is deep sleep, making the `1mW` target achievable.
+
+  > **Key Equation:** $\bar{P} = \frac{P_{\text{active}} t_{\text{active}} + P_{\text{sleep}} t_{\text{sleep}}}{t_{\text{period}}}$
+
+  📖 **Deep Dive:** [TinyML: Sensing Pipeline](https://mlsysbook.ai/tinyml/02_sensing_pipeline.html)
+  </details>
+</details>
+
+
 
 ---
 
 
-### ⚡ Power & Energy Management
+### Power & Energy Management
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Battery Life Equation</b> · <code>power-energy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Battery Life Equation</b> · <code>power</code></summary>
 
 - **Interviewer:** "You're deploying a gesture recognition system on a Cortex-M4 powered by a 300 mAh coin cell battery. The MCU draws 50 mW active and 10 µW in deep sleep. Inference takes 30 ms and runs once per second. Your product manager asks: how long will the battery last?"
 
@@ -1481,7 +1564,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Sleep Mode Wake-Up Cost</b> · <code>low-power</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Sleep Mode Wake-Up Cost</b> · <code>power</code></summary>
 
 - **Interviewer:** "Your always-on environmental sound classifier runs on an nRF52840 (Cortex-M4F, 64 MHz, 256 KB SRAM). Between inferences (every 2 seconds), you put the MCU in System OFF mode (0.3 µA). But your measured average current is 800 µA — 10× higher than your duty-cycle calculation predicts. The inference itself only takes 25 ms at 3 mA. What's eating the power budget?"
 
@@ -1511,10 +1594,10 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Energy Harvesting Wall</b> · <code>power-energy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Energy Harvesting Wall</b> · <code>power</code></summary>
 
 - **Interviewer:** "You're designing a structural health monitoring sensor powered by a small solar cell that provides an average of 0.5 mW indoors. The Cortex-M4 draws 50 mW active. Your model inference takes 30 ms. What is the maximum inference rate you can sustain indefinitely without a battery?"
 
@@ -1536,7 +1619,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Voltage Scaling Tightrope</b> · <code>voltage-scaling</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Voltage Scaling Tightrope</b> · <code>power</code></summary>
 
 - **Interviewer:** "Your battery-powered wildlife monitoring sensor runs a bird call classifier on an STM32L5 (Cortex-M33, 110 MHz max, 256 KB SRAM). To maximize battery life, you reduce the core voltage from 1.2V (Range 1, 110 MHz max) to 0.9V (Range 2, 26 MHz max). Inference time increases from 15 ms to 63 ms — roughly 4.2× slower, matching the clock ratio. But after deploying 500 units in the field, 3% of devices produce incorrect classifications intermittently. The other 97% work perfectly. What's happening?"
 
@@ -1566,7 +1649,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Duty Cycle Fallacy</b> · <code>energy-harvesting</code></summary>
@@ -1597,13 +1680,12 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 ---
 
 
-### 🔧 Model Optimization
+### Model Optimization
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The SRAM Overflow Options</b> · <code>optimization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The SRAM Overflow Options</b> · <code>operator-fusion</code></summary>
 
 - **Interviewer:** "Your model fits in flash (weights: 180 KB, flash: 1 MB) but the tensor arena needs 240 KB and your SRAM is only 200 KB. Walk through the optimization options in order of engineering effort."
 
@@ -1636,13 +1718,12 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 ---
 
 
-### 📎 Additional Topics
+### Additional Topics
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Flash Page Erase Block</b> · <code>storage</code> <code>real-time</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Flash Page Erase Block</b> · <code>persistent-storage</code> <code>real-time</code></summary>
 
 - **Interviewer:** "Your edge device runs a continuous audio inference loop (every 50ms). When an anomaly is detected, it logs a 20-byte string to internal SPI Flash using a standard filesystem (like LittleFS). The logging function usually takes 1ms. However, once a week, the logging function takes 500ms, causing the audio inference loop to miss its deadline entirely and drop 10 frames of audio. What physical process on the Flash chip causes this massive delay?"
 
@@ -1670,7 +1751,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> TinyML Model Serving Pipeline</b> · <code>serving</code> <code>real-time</code></summary>
@@ -1707,7 +1788,7 @@ Sensor interfaces, real-time scheduling, power management, duty cycling, and mod
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> MCU-Based Edge AI Gateway</b> · <code>serving</code> <code>heterogeneous-compute</code></summary>

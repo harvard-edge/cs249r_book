@@ -17,7 +17,7 @@ Content may be incomplete or change without notice. The published curriculum liv
 # The ML Systems Interview Playbook
 
 <p align="center">
-  <b>1,063 systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
+  <b>1,200+ systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
   <i>You can generate the code, but you cannot prompt your way out of a silicon bottleneck.</i>
 </p>
 
@@ -37,7 +37,7 @@ Content may be incomplete or change without notice. The published curriculum liv
 We are building a next-generation interview platform based on this playbook. You can now use our **[Mock Interview Prompts](MOCK_INTERVIEWS.md)** to turn any LLM into a Principal Engineer who will grill you on hardware physics and system design.
 
 **Platform Status:**
-- ✅ **Content Corpus:** 1,063 questions parsed & categorized.
+- ✅ **Content Corpus:** 1,200+ questions parsed & categorized.
 - ✅ **Physics Engine:** `mlsysim` integrated for deterministic grading.
 - 🏗️ **Website:** Next.js platform under construction.
 - 🏗️ **MCP Server:** Developer extension coming soon.

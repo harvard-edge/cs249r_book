@@ -4,56 +4,45 @@ from pathlib import Path
 
 def parse_md_to_questions(file_path, track, scope):
     content = Path(file_path).read_text(encoding='utf-8')
-    # Use a robust split that handles potential variations in the header
     blocks = content.split('<details>\n<summary><b><img')
     
     questions = []
     for i, block in enumerate(blocks):
-        if i == 0: continue # Header material before first question
+        if i == 0: continue 
         
         try:
-            # Re-add the split delimiter for consistent regex/parsing
             full_block = '<summary><b><img' + block
             
-            # Extract Level
             level = "Unknown"
             if 'Level-L' in full_block:
                 level = full_block.split('Level-')[1].split('_')[0]
             elif 'Level ' in full_block:
-                # Handle Level 1, Level 2 format if it exists
                 level_part = full_block.split('Level ')[1].split('"')[0]
                 level = f"L{level_part}"
             
-            # Extract Title
             title = "Unknown"
             if '</b>' in full_block:
                 title_part = full_block.split('</b>')[0].split('>')[-1].strip()
                 title = title_part
             
-            # Extract Topic
             topic = "Unknown"
             if '<code>' in full_block:
                 topic = full_block.split('<code>')[1].split('</code>')[0]
             
-            # Extract Scenario
             scenario = ""
             if '**Interviewer:**' in full_block:
                 scenario_part = full_block.split('**Interviewer:**')[1]
-                # End at the next <details> or end of block
                 if '<details>' in scenario_part:
                     scenario = scenario_part.split('<details>')[0].strip(' "-:').split('\n\n')[0]
                 else:
                     scenario = scenario_part.strip(' "-:').split('\n\n')[0]
             
-            # Extract Answer Details
             details = {}
             if '**Common Mistake:**' in full_block:
                 details['common_mistake'] = full_block.split('**Common Mistake:**')[1].split('\n')[0].strip()
             
             if '**Realistic Solution:**' in full_block:
-                # Get everything until the next double newline or specific marker
                 sol_part = full_block.split('**Realistic Solution:**')[1].strip()
-                # Split by either double newline or next block like > **Napkin Math:**
                 if '\n\n' in sol_part:
                     details['realistic_solution'] = sol_part.split('\n\n')[0].strip()
                 elif '> **' in sol_part:
@@ -70,8 +59,26 @@ def parse_md_to_questions(file_path, track, scope):
                     details['deep_dive_title'] = link_part.split('[')[1].split(']')[0]
                     details['deep_dive_url'] = link_part.split('(')[1].split(')')[0]
 
+            if '> **Options:**' in full_block:
+                options_block = full_block.split('> **Options:**')[1].split('</details>')[0]
+                options_lines = [line.strip() for line in options_block.split('\n') if line.strip().startswith('> [')]
+                
+                parsed_options = []
+                correct_index = -1
+                
+                for idx, line in enumerate(options_lines):
+                    if '[x]' in line.lower():
+                        correct_index = idx
+                    clean_text = re.sub(r'^>\s*\[[xX\s]\]\s*', '', line).strip()
+                    if clean_text:
+                        parsed_options.append(clean_text)
+                
+                if parsed_options:
+                    details['options'] = parsed_options
+                    details['correct_index'] = correct_index
+
             questions.append({
-                "id": f"{track}-{topic}-{title.lower().replace(' ', '-')[:20]}",
+                "id": f"{track}-{topic}-{title.lower().replace(' ', '-')[:40]}-{len(questions)}",
                 "track": track,
                 "scope": scope,
                 "level": level,
@@ -81,19 +88,17 @@ def parse_md_to_questions(file_path, track, scope):
                 "details": details
             })
         except Exception as e:
-            # print(f"Error parsing block in {file_path}: {e}")
             continue
             
     return questions
 
 def run():
-    base_path = Path("/Users/VJ/GitHub/MLSysBook/interviews")
+    base_path = Path(__file__).parent
     tracks = ["cloud", "edge", "mobile", "tinyml"]
     corpus = []
     
     print("🚀 Building MLSys Interview Corpus...")
     
-    # Process Foundations first (Global track)
     foundations_file = base_path / "foundations.md"
     if foundations_file.exists():
         qs = parse_md_to_questions(foundations_file, "global", "Foundations")
@@ -114,7 +119,6 @@ def run():
             print(f"  - {track}/{md_file.name}: {len(qs)} questions")
             corpus.extend(qs)
             
-    # Normalize Levels
     for q in corpus:
         if q['level'] == 'L6%2B' or q['level'] == 'L6':
             q['level'] = 'L6+'

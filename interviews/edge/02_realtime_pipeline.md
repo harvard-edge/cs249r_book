@@ -17,11 +17,178 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 ---
 
 
-### ⏱️ Real-Time & Latency
+### Real-Time & Latency
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Decaying Sensor Dilemma</b> · <code>sensor-drift-regression</code></summary>
+
+- **Interviewer:** "You've deployed a keyword-spotting model on 50,000 smart speakers. In the lab, it achieved 99.2% accuracy on a 10,000-hour clean audio dataset. After one year in the field, fleet-wide accuracy has dropped by 5 points. Root cause analysis reveals the microphone's noise floor has increased by 6 dB due to dust and aging.
+
+First, explain the physical relationship between this 6 dB noise increase and the model's performance degradation. Second, calculate the approximate amount of new, noisy data you would need to collect to retrain the model and recover the original accuracy."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is assuming a linear relationship, thinking a 'small' 6 dB change only requires a small, linear increase in data (e.g., 10-20% more). This fails to account for the logarithmic nature of the decibel scale and its quadratic impact on sample complexity. Another error is confusing the 2x factor for amplitude with the 4x factor for power when dealing with a 6 dB change.
+
+  **Realistic Solution:** A 6 dB increase in the noise floor means the noise power has quadrupled relative to the signal power. The decibel scale is logarithmic: $\Delta P_{\text{ratio}} = 10^{(\Delta \text{dB} / 10)}$. For a +6 dB change in noise, the noise power ratio is $10^{(6/10)} = 10^{0.6} \approx 4$.
+
+To overcome a 4x increase in noise variance and achieve the same statistical confidence (i.e., accuracy), a general rule is that you need to increase your dataset size by a proportional factor. Therefore, you need approximately 4 times the original data.
+
+Initial Dataset: 10,000 hours
+Required New Dataset: 10,000 hours * 4 = 40,000 hours.
+
+This demonstrates the massive, non-linear operational cost that seemingly minor physical sensor drift can impose on a deployed ML system.
+
+  > **Napkin Math:** 1. **Understand the dB scale:** Decibels are a ratio, calculated as $10 \times \log_{10}(\frac{P_2}{P_1})$.
+2. **Calculate the power increase:** A 6 dB increase in noise means $6 = 10 \times \log_{10}(\frac{P_{\text{noisy}}}{P_{\text{clean}}})$.
+3. **Solve for the ratio:** $\frac{6}{10} = 0.6 = \log_{10}(\frac{P_{\text{noisy}}}{P_{\text{clean}}})$.
+4. **Invert the log:** $\frac{P_{\text{noisy}}}{P_{\text{clean}}} = 10^{0.6} \approx 3.98 \approx 4\text{x}$. The noise power is 4x higher.
+5. **Apply the Data Quality Multiplier:** To maintain model performance, the required volume of training data is inversely proportional to the Signal-to-Noise Ratio (SNR). If noise power quadruples, you need 4x the data.
+6. **Calculate final data volume:** 10,000 hours (original) * 4 = 40,000 hours (new requirement).
+
+  > **Key Equation:** $\text{Data Multiplier} \approx \frac{1}{\text{SNR}} \approx 10^{(\Delta \text{Noise dB} / 10)}
+
+  > **Options:**
+  > [ ] 20,000 hours. A 6dB change corresponds to a 2x factor, so we need to double the data.
+  > [ ] 11,000 hours. A small drift requires a small (10%) increase in data to recalibrate.
+  > [x] 40,000 hours. A 6dB noise increase means 4x the noise power, requiring 4x the data to maintain SNR.
+  > [ ] The data amount is irrelevant; the model architecture needs to be changed to be more robust.
+
+  📖 **Deep Dive:** [Data Selection and Quality](https://mlsysbook.ai/vol1/data_selection.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Camera Data Deluge</b> · <code>sensor-bandwidth</code></summary>
+
+- **Interviewer:** "You are designing the initial data ingestion pipeline for an autonomous delivery robot. The primary sensor is a single 1080p monochrome camera running at 30 frames per second. Before any processing or compression, you need to move the raw pixel data from the sensor to the SoC's memory. What is the approximate bandwidth you must provision for this single camera stream?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the raw sensor bandwidth with the much lower bandwidth of a compressed video stream (like H.264). The ML pipeline, however, must process the uncompressed frames first. Another common error is to be off by an order of magnitude, either underestimating in the KB/s range (like an IMU) or overestimating in the GB/s range (like a high-speed memory bus).
+
+  **Realistic Solution:** The correct answer is ~60 MB/s. This is a fundamental calculation for any vision-based edge system. The ML pipeline needs to handle the full, uncompressed firehose of data coming directly from the sensor's image plane.
+
+  > **Napkin Math:** The calculation is a simple multiplication of the frame's dimensions, pixel depth, and frame rate.
+- **Resolution:** 1080p is approximately 1920 × 1080 ≈ 2 million pixels.
+- **Pixel Depth:** A monochrome (RAW8) camera uses 1 byte per pixel.
+- **Frame Rate:** 30 frames per second.
+
+**Bandwidth = 2,000,000 pixels/frame × 1 byte/pixel × 30 frames/sec = 60,000,000 bytes/sec ≈ 60 MB/s**
+
+  > **Key Equation:** $\text{Bandwidth} = \text{Width} \times \text{Height} \times \frac{\text{Bytes}}{\text{Pixel}} \times \text{FPS}$
+
+  > **Options:**
+  > [ ] ~600 KB/s
+  > [ ] ~6 MB/s
+  > [x] ~60 MB/s
+  > [ ] ~6 GB/s
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Sensor's Front Door Problem</b> · <code>sensor-pipeline-bottleneck</code></summary>
+
+- **Interviewer:** "Your team is developing an autonomous quality inspection drone using a Jetson AGX Orin. It connects to six high-resolution cameras that stream uncompressed video data simultaneously. The software team reports that they are consistently seeing corrupted or dropped frames *before* the data even reaches their processing pipeline in main memory. Given the typical hardware specs for an edge system, identify the most likely component causing this data loss."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on main memory (DRAM) bandwidth or compute (TOPS) as the primary system bottlenecks. They forget that for data to be processed, it must first travel from the sensor to the SoC over a dedicated physical interconnect, which often has a much lower bandwidth than the main memory system.
+
+  **Realistic Solution:** The most likely bottleneck is the camera sensor interconnect, typically a MIPI CSI-2 bus. The aggregate bandwidth of all six cameras is likely exceeding the bandwidth of the physical lanes connecting the camera sensors to the main system-on-a-chip (SoC). The data is being dropped before it can even be written to the much faster LPDDR5 main memory.
+
+  > **Napkin Math:** Let's assume each of the 6 cameras produces a stream of 500 MB/s.
+- Total Required Bandwidth: 6 cameras × 500 MB/s = 3.0 GB/s
+- Typical MIPI CSI-2 (4-lane) interconnect bandwidth: ~2.5 GB/s
+- Jetson AGX Orin LPDDR5 Memory Bandwidth: ~204.8 GB/s
+
+The required 3.0 GB/s from the cameras exceeds the interconnect's ~2.5 GB/s capacity, creating a bottleneck. The main memory's bandwidth (~205 GB/s) is nearly 100x larger and is not the limiting factor.
+
+  > **Options:**
+  > [ ] The LPDDR5 main memory bandwidth is too low to handle six streams.
+  > [ ] The Jetson's GPU is not powerful enough to process the incoming frames.
+  > [x] The MIPI CSI-2 camera interconnect bandwidth is saturated.
+  > [ ] The NVMe SSD is too slow to store the incoming video frames.
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Sensor Bandwidth Limit</b> · <code>sensor-pipeline-bandwidth</code></summary>
+
+- **Interviewer:** "You're designing the input stage for a perception system on a Jetson AGX Orin. A high-resolution camera is connected via a standard 4-lane MIPI CSI-2 interface. To assess potential data bottlenecks, you need to know the physical limits. What is the approximate maximum data rate you can expect to transfer from this single camera interface into the SoC?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers unfamiliar with edge hardware often confuse sensor interface bandwidth with the main system memory bandwidth. They might recall the much larger 204.8 GB/s LPDDR5 bandwidth of the Orin SoC and incorrectly assume the camera can stream data that fast. Another common error is to conflate it with general-purpose interconnects like PCIe or Ethernet, which have very different specifications.
+
+  **Realistic Solution:** The maximum data rate for a standard 4-lane MIPI CSI-2 interface, which is the common standard for connecting cameras in edge and mobile systems, is approximately 2.5 GB/s. This is a fundamental physical limit of the serial interface itself and is a critical number for designing any high-throughput vision pipeline.
+
+  > **Napkin Math:** A modern 12-megapixel automotive camera sensor might produce ~24 MB of raw Bayer data per frame. At a 2.5 GB/s (2500 MB/s) bandwidth limit, the theoretical maximum frame rate from the sensor is 2500 MB/s / 24 MB/frame ≈ 104 FPS. This shows the MIPI interface is often the first bottleneck in a high-speed camera pipeline, dictating the maximum frame rate you can process at full resolution.
+
+  > **Options:**
+  > [ ] ~205 GB/s
+  > [ ] ~50 GB/s
+  > [x] ~2.5 GB/s
+  > [ ] ~125 MB/s
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Production Data Glitch</b> · <code>data-pipelines</code></summary>
+
+- **Interviewer:** "Your team has deployed a visual inspection model on an assembly line using a Hailo-8 accelerator. The system uses a 1920x1080 monochrome (8-bit) camera running at 200 FPS, connected to the host system via USB 3.0. The model's accuracy in production is 20% lower than in the lab, and technicians report the live video feed looks 'glitchy' or 'tears' under load. In the lab, images were captured and saved to disk for training. In production, the camera streams directly to the host for pre-processing. Your colleague suspects the camera interface is the bottleneck. Calculate the data rate produced by the camera and explain if it's a plausible cause for the data quality issues."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often compare the calculated data rate to the *theoretical maximum* bandwidth of an interface (e.g., 5 Gbps for USB 3.0) and incorrectly conclude there's no issue. They fail to account for protocol overhead, host CPU load, and bus contention, which make the *realistic sustained throughput* significantly lower. They might also misinterpret the visual artifacts as a graphics driver or display issue, rather than a data ingestion failure at the source.
+
+  **Realistic Solution:** The camera's data rate is approximately 415 MB/s. While the theoretical maximum bandwidth of USB 3.0 is 625 MB/s (5 Gbps), its realistic, sustained throughput is often closer to 350-400 MB/s, especially on a busy system. The calculated data rate is pushing or exceeding this real-world limit. This creates a bottleneck where the host system cannot service the USB endpoint quickly enough, leading to dropped frames or incomplete data transfers. These data pipeline failures manifest as visual glitches and provide corrupted input to the model, causing the training-serving skew and the significant drop in accuracy.
+
+  > **Napkin Math:** 1. **Calculate pixels per frame:**
+   `1920 width × 1080 height = 2,073,600 pixels`
+
+2. **Calculate data size per frame:**
+   Monochrome 8-bit images use 1 byte per pixel.
+   `2,073,600 pixels × 1 byte/pixel = 2,073,600 bytes ≈ 2.07 MB`
+
+3. **Calculate total data rate:**
+   `2.07 MB/frame × 200 FPS ≈ 414.7 MB/s`
+
+4. **Compare to interface limits:**
+   This data rate is dangerously close to the real-world sustained throughput of USB 3.0 (~400 MB/s), making it a highly likely bottleneck.
+
+  > **Key Equation:** $\text{Data Rate} = \text{Width} \times \text{Height} \times \text{BytesPerPixel} \times \text{FPS}$
+
+  > **Options:**
+  > [ ] ~41.5 MB/s. The data rate is low, so the bottleneck must be elsewhere.
+  > [ ] ~3.3 Gbps. This is comfortably within the 5 Gbps theoretical limit of USB 3.0, so the interface is not the issue.
+  > [x] ~415 MB/s. This rate saturates the real-world throughput of a USB 3.0 interface, likely causing dropped frames and data corruption.
+  > [ ] ~2.1 MB/s. The data rate is trivial; the issue is likely the model's processing speed on the Hailo-8.
+
+  📖 **Deep Dive:** [Edge AI](https://mlsysbook.ai/edge/)
+  </details>
+</details>
+
+
+
+
+
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Frame Budget</b> · <code>real-time</code></summary>
 
@@ -45,7 +212,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Polling Power Trap</b> · <code>interrupt-vs-polling</code> <code>power</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Polling Power Trap</b> · <code>real-time</code> <code>power</code></summary>
 
 - **Interviewer:** "Your battery-powered wildlife camera (STM32H7 at 480 MHz, Cortex-M7, 1 MB SRAM) runs a tiny object detection model to classify animals. The camera checks for motion by polling a PIR sensor every 10ms in a tight loop, then runs inference when motion is detected. Battery life is 2 days — the product requirement is 30 days. The inference model only runs ~5 times per day. Where is all the power going?"
 
@@ -65,7 +232,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Calibration Drift</b> · <code>sensor-calibration</code> <code>data-quality</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Calibration Drift</b> · <code>sensor-pipeline</code> <code>data-quality</code></summary>
 
 - **Interviewer:** "Your agricultural edge AI system uses a multispectral camera (visible + near-infrared) on a Raspberry Pi 4 to detect crop disease. The model achieves 92% accuracy in lab testing. After 6 months of outdoor deployment, accuracy drops to 74%. You retrain with new field data — accuracy recovers to 89% but drops again within 3 months. The model architecture hasn't changed. What is the recurring source of degradation, and how do you build a system that self-corrects?"
 
@@ -114,7 +281,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Jittery Robot Arm</b> · <code>real-time-latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Jittery Robot Arm</b> · <code>real-time</code></summary>
 
 - **Interviewer:** "A robotic arm uses an edge ML model for real-time object tracking to pick and place objects on a conveyor belt. The system requires a consistent end-to-end latency of no more than 50ms for the perception module to ensure accurate grasping. You've optimized the model, but occasionally, inference latency spikes to 100-150ms, causing missed picks. What are the common system-level culprits for this jitter, and how would you diagnose and mitigate them?"
 
@@ -143,7 +310,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Rolling Shutter Distortion</b> · <code>sensors</code> <code>vision</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Rolling Shutter Distortion</b> · <code>sensor-pipeline</code> <code>vision</code></summary>
 
 - **Interviewer:** "You mount an edge AI camera on a drone to read barcodes on fast-moving trains. The model achieves 99% accuracy on stationary barcodes. In flight, the accuracy drops to 15%. The images aren't blurry, but the barcodes look diagonally slanted, like a parallelogram. What hardware choice ruined the model?"
 
@@ -170,9 +337,48 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The AV Pipeline Stall</b> · <code>pipeline-parallelism</code></summary>
 
-#### 🔵 L4 — Apply & Identify
+- **Interviewer:** "You are an ML systems engineer at an autonomous vehicle company. Your perception stack runs a large 3D object detection model across two interconnected Jetson AGX Orin accelerators to meet a 33ms (30 FPS) real-time deadline. The model is split using pipeline parallelism: Orin A runs the first half of the model, and Orin B runs the second half. Profiling shows the total compute time is 25ms, perfectly balanced (12.5ms per Orin). However, the measured end-to-end latency is 30.5ms. You find that the feature map transferred from Orin A to Orin B between stages is 64 MB. The Orins are connected by a dedicated 100 Gbps (12.5 GB/s) link. What is the most likely cause of the 5.5ms overhead you are observing?"
 
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming the compute (i.e., the model is 'too big') or generic 'software overhead' without doing the math. Engineers often underestimate the time cost of moving large tensors between processors, even on seemingly fast networks, and fail to isolate it as the primary bottleneck.
+
+  **Realistic Solution:** The communication link between the two accelerators is the bottleneck. The time required to transfer the 64 MB feature map over the 100 Gbps link is the primary source of the overhead. The pipeline can't be perfectly parallel because Orin B must wait for the data from Orin A. By calculating the transfer time, we can confirm this is the bottleneck before attempting other optimizations like model compression or changing the parallelism strategy.
+
+  > **Napkin Math:** 1.  **Identify Data and Bandwidth:**
+    *   Data to transfer: 64 MB
+    *   Link Bandwidth: 100 Gbps
+
+2.  **Convert Units:**
+    *   Convert bandwidth from Gbps to GB/s: 100 Gbps / 8 = 12.5 GB/s
+    *   Convert GB/s to MB/s: 12.5 GB/s * 1000 = 12,500 MB/s
+
+3.  **Calculate Transfer Time:**
+    *   Time = Data Size / Bandwidth
+    *   Time = 64 MB / 12,500 MB/s = 0.00512 seconds
+
+4.  **Final Result:**
+    *   0.00512 seconds is 5.12 ms. This transfer time accounts for the vast majority of the 5.5ms observed overhead. The remaining ~0.4ms is attributable to network protocol and software stack latency (e.g., kernel driver overhead).
+
+  > **Key Equation:** $\text{Transfer Time} = \frac{\text{Data Size}}{\text{Bandwidth}}$
+
+  > **Options:**
+  > [ ] The model's operators are not fully supported by the Jetson AGX Orin's hardware, causing frequent CPU fallbacks.
+  > [x] The 100 Gbps interconnect is the bottleneck; transferring the 64 MB feature map is taking ~5.1ms.
+  > [ ] Real-time OS scheduling jitter and CUDA kernel launch overhead are consuming the extra 5.5ms.
+  > [ ] The memory bandwidth on one of the Orin modules is saturated, slowing down its 12.5ms computation.
+
+  📖 **Deep Dive:** [Edge: Real-Time Pipelines](https://mlsysbook.ai/edge/02_realtime_pipeline.html)
+  </details>
+</details>
+
+
+
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Pipeline Overlap</b> · <code>real-time</code></summary>
 
@@ -222,7 +428,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The First-Frame Latency</b> · <code>latency</code> <code>sensor-fusion</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The First-Frame Latency</b> · <code>latency</code> <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "Your smart doorbell camera triggers on motion and runs person detection. The ML model takes 30ms. But users complain that the system misses the first 500ms of action — by the time the first detection fires, the person is already at the door. The model is fast enough. Where is the 470ms going?"
 
@@ -256,7 +462,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The TensorRT vs ONNX Runtime</b> · <code>compiler-runtime</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The TensorRT vs ONNX Runtime</b> · <code>compilation</code></summary>
 
 - **Interviewer:** "Your fleet of 5,000 delivery robots runs on Jetson Orin NX. You currently use TensorRT, which gives 2.5× faster inference than ONNX Runtime. But your ML team ships model updates weekly, and each TensorRT engine compilation takes 25 minutes per device. Your fleet manager complains that model updates take 3 days to roll out because devices compile sequentially during overnight idle windows. Should you switch to ONNX Runtime for faster deployment, or is there a better approach?"
 
@@ -280,7 +486,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Rainy Day mAP Cliff</b> · <code>robustness</code> <code>sensor</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Rainy Day mAP Cliff</b> · <code>adversarial</code> <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "Your TI TDA4VM-based ADAS system runs a pedestrian detector at 20 FPS. Lab testing shows 92% mAP. Field data from a rainy Tuesday shows mAP dropped to 61% — a 31-point cliff, not a gradual decline. The camera isn't obstructed and the model runs at full speed. Rain intensity was moderate (5 mm/hr). Why does moderate rain cause such a catastrophic accuracy drop, and why is it a cliff rather than a slope?"
 
@@ -304,7 +510,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The PoE Voltage Drop Mystery</b> · <code>power</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The PoE Voltage Drop Mystery</b> · <code>power</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your NXP i.MX 8M Plus edge AI cameras are powered via Power-over-Ethernet (PoE, IEEE 802.3af — 15.4W max). In the lab with a 2-meter cable, everything works: the camera runs inference at 12W total system power. In the field, cameras on 80-meter cable runs intermittently reboot during inference. Cameras on 30-meter runs work fine. The PoE switch provides 15.4W per port. What's happening at 80 meters?"
 
@@ -360,10 +566,10 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The WCET Analysis Wall</b> · <code>wcet</code> <code>real-time</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The WCET Analysis Wall</b> · <code>real-time</code> <code>real-time</code></summary>
 
 - **Interviewer:** "Your team must certify a neural network for an ASIL-B automotive braking assistant running on an NXP S32Z2 real-time processor (Cortex-R52, 800 MHz, no cache, tightly-coupled memory). The safety assessor demands a WCET bound for every inference. Your ML engineer runs the model 10,000 times and reports 'max observed latency is 4.2ms.' The assessor rejects this. Why is measurement-based WCET insufficient for safety certification, and what does a valid WCET analysis require for a neural network?"
 
@@ -383,7 +589,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The RTOS vs RT-Linux Tradeoff</b> · <code>rtos</code> <code>scheduling</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The RTOS vs RT-Linux Tradeoff</b> · <code>real-time</code> <code>real-time</code></summary>
 
 - **Interviewer:** "Your team is building an industrial quality inspection system. A camera captures parts on a conveyor belt at 60 FPS. You must run a defect detection model and trigger a reject actuator within 16.7ms (one frame period) — a hard real-time deadline. The ML engineer wants Linux (for PyTorch, TensorRT, easy development). The firmware engineer wants FreeRTOS (for deterministic timing). The hardware is a Jetson Orin NX (Cortex-A78AE + Ampere GPU). Who is right?"
 
@@ -403,7 +609,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Hard Real-Time Challenge</b> · <code>rtos-deterministic</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Hard Real-Time Challenge</b> · <code>real-time</code></summary>
 
 - **Interviewer:** "You're designing the ML perception pipeline for a surgical robot that requires a hard real-time latency guarantee of 5ms from sensor input to actuator command. How would you architect the software stack on an edge SoC to ensure this deterministic performance, especially when running complex ML models?"
 
@@ -443,7 +649,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The USB Bandwidth Saturation</b> · <code>sensors</code> <code>bandwidth</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The USB Bandwidth Saturation</b> · <code>sensor-pipeline</code> <code>bandwidth</code></summary>
 
 - **Interviewer:** "You build an edge AI system using a Raspberry Pi 4. You attach three 1080p USB 3.0 webcams to run parallel inference. A single webcam runs at 30 FPS perfectly. When you plug in all three, the framerates randomly drop to 12 FPS, and the video feeds occasionally tear or corrupt. The CPU usage is only 40%. What physical limitation are you hitting?"
 
@@ -473,7 +679,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The ROS 2 IPC Overhead</b> · <code>pipeline</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The ROS 2 IPC Overhead</b> · <code>data-pipeline</code> <code>latency</code></summary>
 
 - **Interviewer:** "You build an autonomous driving stack using ROS 2. Node A (Camera Driver) captures a 4K frame and publishes it. Node B (ML Perception) subscribes to the frame, runs inference, and publishes bounding boxes. The ML inference takes 20ms. However, the end-to-end latency from Node A to Node B is 55ms. What is ROS 2 doing that costs 35ms, and how do you fix it?"
 
@@ -499,7 +705,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Python GIL Multithreading Trap</b> · <code>concurrency</code> <code>pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Python GIL Multithreading Trap</b> · <code>data-parallelism</code> <code>data-pipeline</code></summary>
 
 - **Interviewer:** "You run an object detection model on a Raspberry Pi. The camera capture takes 30ms. The ML model takes 40ms. In a sequential Python script, total time is 70ms (~14 FPS). To speed this up, you put the camera capture and the ML model into two separate Python `threading.Thread` objects. You expect them to run in parallel on the Pi's 4-core CPU, achieving 40ms total time (25 FPS). But the framerate remains exactly 14 FPS. Why did multithreading fail?"
 
@@ -555,7 +761,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Solar Panel Degradation Budget Squeeze</b> · <code>power</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Solar Panel Degradation Budget Squeeze</b> · <code>power</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your solar-powered wildlife monitoring station uses a Jetson Orin Nano (7-15W) with a 50W solar panel and 200Wh LiFePO4 battery in the Mojave Desert. The system was designed for 24/7 operation with 6 hours of peak sun. After 3 years, the station starts shutting down at 4 AM and doesn't restart until 9 AM — a 5-hour daily blackout. The battery tests healthy (92% capacity). Solar panel output has dropped from 50W to 38W peak. How does a 24% panel degradation cause a 5-hour blackout, and how do you adapt the ML workload?"
 
@@ -642,10 +848,10 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Multi-Tenant Edge Scheduler</b> · <code>multi-tenant</code> <code>scheduling</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Multi-Tenant Edge Scheduler</b> · <code>serving</code> <code>real-time</code></summary>
 
 - **Interviewer:** "You manage a fleet of 1,000 edge AI gateways at retail stores, each with a Jetson AGX Orin (275 TOPS, 64 GB RAM). Each gateway runs AI workloads for 4 different internal teams: loss prevention (real-time, safety-critical), inventory tracking (near-real-time), customer analytics (best-effort), and digital signage (background). During Black Friday, all four teams demand peak resources simultaneously. The loss prevention team reports missed detections. Design a multi-tenant scheduling system for shared edge hardware."
 
@@ -665,7 +871,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Preemption Priority Inversion</b> · <code>real-time</code> <code>os</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Preemption Priority Inversion</b> · <code>real-time</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your edge robot runs on a Real-Time Operating System (RTOS). You have a High-Priority ML Thread (inference), a Medium-Priority UI Thread (screen updates), and a Low-Priority I/O Thread (writing logs to SD card). The ML Thread occasionally stalls for hundreds of milliseconds. You discover the ML Thread is waiting for a Mutex held by the Low-Priority I/O Thread. Why didn't the High-Priority ML Thread just preempt the Low-Priority thread?"
 
@@ -726,7 +932,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Sensor Aging Silent Accuracy Rot</b> · <code>mlops</code> <code>sensor-pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Sensor Aging Silent Accuracy Rot</b> · <code>deployment</code> <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "You're the ML platform architect for a fleet of 10,000 Ambarella CV5 devices (20 TOPS) running quality inspection in semiconductor fabs. After 18 months, aggregate defect escape rate has increased from 0.1% to 0.4% — a 4× degradation. But no single device shows a dramatic drop. Every device's accuracy has degraded by a small, nearly imperceptible amount — 0.3–0.5% each. Your monitoring system, which alerts on >2% per-device accuracy drops, never triggered. How do you detect and correct fleet-wide gradual degradation that's invisible at the individual device level?"
 
@@ -756,7 +962,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The V2X Latency Requirement</b> · <code>latency</code> <code>network-fabric</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The V2X Latency Requirement</b> · <code>latency</code> <code>interconnect</code></summary>
 
 - **Interviewer:** "You're architecting a cooperative perception system for an intersection where vehicles share their perception data via C-V2X (Cellular Vehicle-to-Everything) over 5G. Each vehicle runs object detection locally and broadcasts compressed feature maps to nearby vehicles so they can 'see around corners.' The safety requirement: a vehicle approaching the intersection at 60 km/h must receive and fuse perception data from other vehicles within 10ms end-to-end (detection-to-fusion). The 5G network promises 1ms air interface latency. Can you meet the 10ms budget?"
 
@@ -799,13 +1005,14 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 ---
 
 
-### 📡 Sensor Fusion & Pipelines
+### Sensor Fusion & Pipelines
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Foggy Lens Confidence Collapse</b> · <code>sensor</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Foggy Lens Confidence Collapse</b> · <code>sensor-pipeline</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your Google Coral-based security camera runs a MobileNet-V2 person detector at 15 FPS. After a cold night, the lens fogs up at dawn. The model doesn't crash — it keeps running — but the false negative rate jumps from 2% to 65%. The operations team doesn't notice for 3 hours because the system reports 'healthy.' How does lens fog cause this failure, and how do you detect it automatically?"
 
@@ -875,10 +1082,9 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Timestamp Drift</b> · <code>sensor-fusion</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Timestamp Drift</b> · <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "Your autonomous vehicle fuses camera images (30 FPS, MIPI CSI) with LiDAR point clouds (10 Hz, PCIe). In testing, 3D bounding boxes are accurate. In deployment at highway speed, the boxes consistently lag behind the actual vehicle positions by about 1–2 meters. The detection model hasn't changed. What is causing the spatial error?"
 
@@ -928,7 +1134,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The GPS Time Sync Disaster</b> · <code>sensor-fusion</code> <code>timing</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The GPS Time Sync Disaster</b> · <code>sensor-pipeline</code> <code>real-time</code></summary>
 
 - **Interviewer:** "Your Qualcomm RB5-based autonomous delivery robot fuses camera (30 FPS), LiDAR (10 Hz), and IMU (200 Hz) for navigation. GPS provides the time reference. The robot enters a downtown urban canyon and loses GPS lock. Within 45 seconds, the fusion algorithm starts producing wildly incorrect pose estimates — the robot thinks it's 2 meters to the left of its actual position. All three sensors are still producing data. What happened?"
 
@@ -952,7 +1158,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Vibration-Induced Phantom Detections</b> · <code>sensor</code> <code>robustness</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Vibration-Induced Phantom Detections</b> · <code>sensor-pipeline</code> <code>adversarial</code></summary>
 
 - **Interviewer:** "Your Hailo-8 vision system on a robotic welding arm detects weld defects using a 5MP camera at 20 FPS. The system achieves 97% accuracy on the test bench. On the production robot, accuracy drops to 82% — but only during active welding. Between welds (robot stationary), accuracy returns to 96%. The camera is rigidly mounted to the arm. What's different during welding?"
 
@@ -976,7 +1182,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Post-Repair Calibration Disaster</b> · <code>sensor</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Post-Repair Calibration Disaster</b> · <code>sensor-pipeline</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your Qualcomm RB5-based autonomous cart uses stereo cameras for obstacle avoidance. A field technician replaces a cracked left camera lens. After repair, the cart starts veering right and bumping into obstacles on the left side. The new lens is the same model number as the original. Depth estimation error has jumped from ±3cm to ±40cm on the left side. What did the technician miss?"
 
@@ -1002,7 +1208,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Aging Sensor Drift</b> · <code>sensor</code> <code>robustness</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Aging Sensor Drift</b> · <code>sensor-pipeline</code> <code>adversarial</code></summary>
 
 - **Interviewer:** "Your Google Coral-based air quality monitoring system uses a metal-oxide (MOx) gas sensor to detect volatile organic compounds (VOCs), feeding readings into a regression model that estimates PPM concentration. The system was calibrated and deployed in a factory. After 8 months, the model consistently under-reports VOC levels by 25-40%. The factory's reference instrument confirms VOC levels haven't changed. The Coral and model are functioning correctly. What's causing the systematic under-reporting?"
 
@@ -1028,7 +1234,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The YUV Conversion Bottleneck</b> · <code>sensor-io</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The YUV Conversion Bottleneck</b> · <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "Your autonomous driving stack receives 4K camera frames. The hardware ISP (Image Signal Processor) outputs standard YUV420 format. Your object detection model expects RGB input. You add a simple OpenCV `cvtColor(YUV2RGB)` at the start of your Python inference loop. The NPU is only running at 40% utilization, but you are dropping frames. Why?"
 
@@ -1048,7 +1254,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The GPS Time Sync Sensor Fusion Failure</b> · <code>sensor-fusion</code> <code>real-time</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The GPS Time Sync Sensor Fusion Failure</b> · <code>sensor-pipeline</code> <code>real-time</code></summary>
 
 - **Interviewer:** "Your autonomous agricultural robot (TI TDA4VM, 8 TOPS, 20W) fuses camera detections with RTK-GPS positions to map weed locations. After a firmware update, the weed map shows detections offset by 1.5 meters from their true positions — always in the direction of travel. The camera model is accurate (verified on static images), and the GPS has 2 cm RTK accuracy. What's causing the systematic offset?"
 
@@ -1070,7 +1276,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Time-of-Flight Sensor Crosstalk</b> · <code>sensor-fusion</code> <code>monitoring</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Time-of-Flight Sensor Crosstalk</b> · <code>sensor-pipeline</code> <code>monitoring</code></summary>
 
 - **Interviewer:** "Your warehouse uses 50 Rockchip RK3588 devices, each paired with a ToF (Time-of-Flight) depth sensor for pallet dimensioning. Devices are spaced 3 meters apart along a conveyor. When two adjacent devices run simultaneously, both report depth measurements that oscillate wildly — errors of ±15 cm on objects that should measure ±1 cm. When you disable alternating devices (run every other one), accuracy returns to normal. What's happening?"
 
@@ -1094,7 +1300,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> Sensor Fusion Latency Budget</b> · <code>sensor-fusion</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> Sensor Fusion Latency Budget</b> · <code>sensor-pipeline</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your autonomous delivery robot fuses data from a stereo camera (30 FPS, 33ms frame interval), a 2D LiDAR (15 Hz, 67ms scan interval), and an IMU (200 Hz, 5ms). The perception pipeline must produce a fused obstacle map within 50ms of the most recent sensor reading. The camera object detector takes 20ms, the LiDAR scan matcher takes 8ms, and the fusion algorithm takes 5ms. Can you meet the 50ms deadline, and what's the maximum sensor-to-output latency?"
 
@@ -1122,7 +1328,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Phantom Sensor Attack</b> · <code>sensor-fusion</code> <code>adversarial-robustness</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Phantom Sensor Attack</b> · <code>sensor-pipeline</code> <code>adversarial</code></summary>
 
 - **Interviewer:** "Your autonomous ground vehicle relies on GPS, IMU, and a wheel encoder for localization. Malicious actors have developed sophisticated GPS spoofing devices that can broadcast fake GPS signals, making your vehicle believe it's in a different location. How do you design your sensor fusion and localization system to detect and mitigate such GPS spoofing attacks, ensuring the vehicle maintains accurate and trustworthy localization, even in an isolated edge environment without cloud verification?"
 
@@ -1157,10 +1363,10 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Asynchronous Orchestra</b> · <code>sensor-fusion</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Asynchronous Orchestra</b> · <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "You're integrating a 30 FPS camera, a 10 Hz LiDAR, and a 100 Hz IMU for an autonomous navigation system on an edge platform. How do you synchronize these disparate sensor inputs for real-time ML perception without introducing excessive latency or data staleness, especially when ML inference itself takes time?"
 
@@ -1250,7 +1456,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Radar-Camera Fusion Latency</b> · <code>sensor-fusion</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Radar-Camera Fusion Latency</b> · <code>sensor-pipeline</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your ADAS (Advanced Driver Assistance System) on an Ambarella CV5 fuses 77 GHz radar (range, velocity) with a front camera (classification, lane detection). The radar provides detections every 50ms (20 Hz) with 0.5ms processing. The camera pipeline takes 25ms (ISP + neural network). Your fusion algorithm adds 5ms. Your colleague calculates total latency as max(0.5, 25) + 5 = 30ms. But the actual sensor-to-decision latency is 55ms. Where is the extra 25ms hiding, and when does the fusion latency overhead negate the benefit of having radar?"
 
@@ -1280,7 +1486,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Drifting Sensor Problem</b> · <code>multi-sensor-fusion</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Drifting Sensor Problem</b> · <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "An autonomous mobile robot uses LiDAR, cameras, and an Inertial Measurement Unit (IMU) for localization and mapping. Over months of operation in diverse environments, you observe increasing drift and degradation in its localization estimates, especially in feature-poor areas, even after initial factory calibration. How do you design an edge system to detect, quantify, and compensate for sensor calibration drift or degradation in real-time or periodically without human intervention, ensuring long-term accuracy?"
 
@@ -1314,10 +1520,10 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Sensor Calibration Drift</b> · <code>sensor-fusion</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Sensor Calibration Drift</b> · <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "Your autonomous vehicle's camera-LiDAR fusion system was calibrated in the factory. After 6 months of operation (vibration, temperature cycles, minor impacts), the extrinsic calibration between the camera and LiDAR has drifted by 0.3°. Your 3D bounding boxes are now offset by 0.5m at 10m range. The safety team wants recalibration every month, which requires taking the vehicle offline for 2 hours. Design an online calibration system that maintains accuracy without downtime."
 
@@ -1347,7 +1553,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Multi-Sensor Calibration Pipeline</b> · <code>sensor-fusion</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Multi-Sensor Calibration Pipeline</b> · <code>sensor-pipeline</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your autonomous vehicle fleet of 200 trucks has 7 sensors each: 3 cameras (front, left, right), 1 LiDAR, 2 radars (front, rear), and 1 IMU. Each sensor pair requires extrinsic calibration (6-DOF transform). After factory calibration, the trucks operate for months with vibration, temperature cycling, and minor impacts causing calibration drift. Design an automated calibration pipeline that maintains sub-0.1° rotation and sub-2cm translation accuracy across the fleet without taking vehicles offline."
 
@@ -1377,7 +1583,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6%2B_Principal-red?style=flat-square" alt="Level 4" align="center"> The Perpetual Calibration Problem</b> · <code>multi-sensor-fusion</code> <code>long-term-autonomy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6%2B_Principal-red?style=flat-square" alt="Level 4" align="center"> The Perpetual Calibration Problem</b> · <code>sensor-pipeline</code> <code>long-term-autonomy</code></summary>
 
 - **Interviewer:** "You're designing an autonomous inspection robot for critical infrastructure (e.g., nuclear power plant pipes) that must operate unsupervised for 5+ years. It uses a heterogeneous sensor suite (Lidar, Stereo Camera, IMU, Ultrasonic) for SLAM and defect detection. Over time, physical shocks, temperature fluctuations, and material degradation will cause intrinsic and extrinsic calibration parameters to drift. How do you design a system that maintains high-precision sensor fusion and localization accuracy over half a decade without human intervention for recalibration?"
 
@@ -1408,11 +1614,12 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 ---
 
 
-### ⚡ Power & Thermal Management
+### Power & Thermal Management
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Field Thermal Surprise</b> · <code>thermal</code></summary>
 
@@ -1434,7 +1641,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The PoE Voltage Drop Surprise</b> · <code>power-thermal</code> <code>economics</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The PoE Voltage Drop Surprise</b> · <code>power</code> <code>economics</code></summary>
 
 - **Interviewer:** "You're deploying 100 Jetson Orin NX cameras (15W each) in a warehouse using Power-over-Ethernet (PoE+, 802.3at, 25.5W per port). The PoE switch is in a server room 80 meters from the farthest cameras. During commissioning, the 20 nearest cameras boot and run inference fine, but the 30 farthest cameras (60–80m cable runs) keep rebooting every 2–3 minutes. The PoE switch shows all ports delivering power. What's wrong?"
 
@@ -1460,7 +1667,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Battery Saver</b> · <code>power-management</code>, <code>optimization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Battery Saver</b> · <code>power</code>, <code>operator-fusion</code></summary>
 
 - **Interviewer:** "You are deploying a human presence detection model on a battery-powered camera module designed for several months of operation. The model needs to run periodically. How do you maximize battery life while ensuring reliable detection and responsiveness?"
 
@@ -1487,7 +1694,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> Battery Life for Solar-Powered Edge Device</b> · <code>power-thermal</code> <code>economics</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> Battery Life for Solar-Powered Edge Device</b> · <code>power</code> <code>economics</code></summary>
 
 - **Interviewer:** "You're deploying a wildlife monitoring camera in a national park. It runs on a 50 Wh LiFePO4 battery charged by a 10W solar panel. The system has a Coral Edge TPU (2W during inference) and a Raspberry Pi Compute Module 4 (3.5W active, 0.4W suspend). The camera captures an image every 10 seconds during daylight (12 hours) and every 60 seconds at night (12 hours). Each inference takes 50ms. Estimate the daily energy budget and determine if the system can run indefinitely."
 
@@ -1517,10 +1724,9 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Power State Machine</b> · <code>power-management</code> <code>state-machine</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Power State Machine</b> · <code>power</code> <code>state-machine</code></summary>
 
 - **Interviewer:** "You're designing the power management firmware for a smart doorbell with an Ambarella CV25S SoC (quad Cortex-A53 + CVflow NPU, 2.5W active, 15 mW standby). The doorbell must: always-on motion detection, wake to full AI in <200ms when a person is detected, run face recognition for 5 seconds, then return to low power. Your colleague implements two states: ON and OFF. After deployment, users complain about 1.5-second wake delays and the battery dying in 3 days instead of the target 60 days. Design the correct power state machine."
 
@@ -1540,7 +1746,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Zone Juggle</b> · <code>thermal-management</code> <code>multi-model</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Zone Juggle</b> · <code>thermal</code> <code>multi-model</code></summary>
 
 - **Interviewer:** "Your industrial edge box (Jetson AGX Orin, 60W TDP, fan-cooled in a 50°C factory) runs three concurrent AI pipelines: defect detection on GPU (25W), predictive maintenance on DLA (8W), and anomaly detection on CPU (12W). Total: 45W — well under the 60W TDP. After 20 minutes, the defect detection model's latency doubles. The other two pipelines are unaffected. GPU utilization hasn't changed. What is happening?"
 
@@ -1560,7 +1766,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silent Slowdown</b> · <code>thermal-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silent Slowdown</b> · <code>thermal</code></summary>
 
 - **Interviewer:** "Your team has deployed a new edge device with an ML accelerator. Initial benchmarks show it can run your object detection model at 30 FPS. However, after about 30-60 seconds of continuous operation, the frame rate consistently drops to 15 FPS and stays there. What is the most likely cause of this 'silent slowdown,' and how would you design the system to guarantee sustained performance?"
 
@@ -1590,7 +1796,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Overheating Robot Dog</b> · <code>thermal-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Overheating Robot Dog</b> · <code>thermal</code></summary>
 
 - **Interviewer:** "Your company's new robot dog uses an embedded ML accelerator for continuous visual navigation. During extended outdoor missions in warm climates, you observe a significant drop in its navigation performance after about 15-20 minutes. Telemetry data shows the accelerator's temperature frequently hitting its thermal limit (e.g., 85°C), leading to CPU/GPU clock frequency reduction. Describe how you would approach designing a system that maintains acceptable performance despite thermal constraints over long durations."
 
@@ -1644,7 +1850,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Edge Inference Power Profiling</b> · <code>power-thermal</code> <code>monitoring</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Edge Inference Power Profiling</b> · <code>power</code> <code>monitoring</code></summary>
 
 - **Interviewer:** "You're designing a battery-powered inspection drone with a Qualcomm RB5 (15 TOPS, 7W typical). The drone carries a 99.9 Wh battery (the FAA limit for carry-on). Your manager asks: 'How many hours of continuous AI-powered inspection can we get?' You measure idle power at 3W and inference power at 9W. Your colleague divides: 99.9Wh / 9W = 11.1 hours. Why is this estimate both too optimistic and too pessimistic?"
 
@@ -1670,7 +1876,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Overheating Vision Pipeline</b> · <code>thermal-throttling</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Overheating Vision Pipeline</b> · <code>thermal</code></summary>
 
 - **Interviewer:** "Your new edge AI camera, powered by an NVIDIA Jetson Orin Nano, achieves an impressive 50 FPS for YOLOv5s during initial tests. However, after 30 seconds of continuous operation, the framerate drops sharply to a consistent 25 FPS. The CPU/GPU utilization reports are still high. What's the most likely culprit, and how does this phenomenon impact the reliability and design of real-time vision applications?"
 
@@ -1701,7 +1907,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The DVFS Latency Jitter</b> · <code>power-thermal</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The DVFS Latency Jitter</b> · <code>power</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your real-time safety system on a Jetson Orin NX must guarantee inference completes within 25ms (hard deadline — parts of the production line are moving). During testing, 99.5% of inferences complete in 18ms. But 0.5% spike to 35ms, violating the deadline. The spikes don't correlate with model complexity, input content, or GPU temperature. They appear random. What's causing the latency spikes, and how do you guarantee the 25ms deadline?"
 
@@ -1725,7 +1931,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Power-Over-Ethernet Budget</b> · <code>power-thermal</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Power-Over-Ethernet Budget</b> · <code>power</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You're deploying AI-powered security cameras in a warehouse. Each camera connects via a single Ethernet cable using PoE (Power over Ethernet, IEEE 802.3af Type 1: 15.4W at the PSE, 12.95W at the PD after cable loss). The camera needs: image sensor + ISP (2.5W), network PHY + SoC housekeeping (1.5W), IR illuminators for night vision (3W), and an AI accelerator for person detection. How much power budget remains for the AI accelerator, and which chips actually fit?"
 
@@ -1757,7 +1963,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Sealed Enclosure Thermal Trap</b> · <code>power-thermal</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Sealed Enclosure Thermal Trap</b> · <code>power</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your edge AI device runs a 15W SoC inside an IP67-sealed aluminum enclosure (no fans, no vents) deployed outdoors in Phoenix, Arizona. Peak ambient temperature: 50°C. The SoC's maximum junction temperature (Tj_max) is 105°C. Your thermal engineer says the enclosure's thermal resistance from junction to ambient is 3.2°C/W. Will the device survive summer, and if not, what do you do?"
 
@@ -1787,7 +1993,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> Thermal Headroom in a Sealed Enclosure</b> · <code>power-thermal</code> <code>monitoring</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> Thermal Headroom in a Sealed Enclosure</b> · <code>power</code> <code>monitoring</code></summary>
 
 - **Interviewer:** "Your edge AI device runs a 10W SoC (Jetson Orin Nano) inside an IP67-sealed polycarbonate enclosure on a factory floor. The enclosure thermal resistance is 4.5°C/W (junction-to-ambient). Ambient temperature ranges from 15°C (winter) to 45°C (summer, near furnaces). The SoC throttles at Tj = 97°C and shuts down at 105°C. Calculate the thermal headroom in summer and winter, and design a thermal-aware inference policy."
 
@@ -1815,7 +2021,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Throttling Dilemma</b> · <code>power-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Throttling Dilemma</b> · <code>power</code></summary>
 
 - **Interviewer:** "Your edge device, a smart camera running a high-accuracy object detection model, operates in diverse environments. During prolonged operation or in hot climates, the device frequently experiences thermal throttling, leading to significant frame drops and reduced detection accuracy. How would you design the system to maintain a *minimum acceptable* performance level under varying thermal and power constraints, without completely failing or requiring a full shutdown?"
 
@@ -1848,7 +2054,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Thermal Staircase</b> · <code>thermal</code></summary>
@@ -1873,7 +2079,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Thermal Derating Curve</b> · <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Thermal Derating Curve</b> · <code>power</code></summary>
 
 - **Interviewer:** "Your autonomous delivery robot uses a Jetson Orin NX (100 TOPS INT8, 25W TDP) in a fanless aluminum enclosure. In the lab at 25°C, you sustain 30 FPS with the Orin running at its 25W power mode. The robot deploys in Phoenix, Arizona where summer ambient temperatures reach 45°C. After 15 minutes of operation, FPS drops to 21 FPS and stays there. Your thermal engineer says the Orin is 'derating.' Explain what's happening quantitatively and design the power budget for worst-case ambient."
 
@@ -1903,7 +2109,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Thermal Paste Time Bomb</b> · <code>thermal</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Thermal Paste Time Bomb</b> · <code>thermal</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your fleet of 500 Jetson Orin NX devices runs traffic monitoring at intersections. After 2 years in the field, 15% of units show a gradual FPS decline — from 30 FPS to 18 FPS over 3 months. Replacing the software image doesn't help. The devices are in sealed IP67 enclosures in Phoenix, Arizona (summer ambient: 45°C). A technician opens one unit and finds the heatsink is still firmly attached. What's causing the degradation?"
 
@@ -1929,7 +2135,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The High-Altitude Edge AI Failure</b> · <code>thermal</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The High-Altitude Edge AI Failure</b> · <code>thermal</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your TI TDA4VM-based drone inspection system works flawlessly at your sea-level test facility in Houston. You deploy it for power line inspection in the Colorado Rockies at 3,500 meters (11,500 feet) elevation. The system overheats and throttles within 8 minutes of flight, despite air temperature being 10°C cooler than Houston. At sea level in Houston (35°C, humid), the system runs indefinitely. At 3,500m in Colorado (25°C, dry), it overheats. How is a cooler environment causing worse thermal performance?"
 
@@ -1957,7 +2163,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Throttled Vision System</b> · <code>thermal-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Throttled Vision System</b> · <code>thermal</code></summary>
 
 - **Interviewer:** "Your autonomous drone uses an edge AI SoC for real-time object detection. During short bursts of activity (e.g., 30 seconds of intense processing), the system achieves 60 FPS. However, in continuous operation for several minutes, performance drops to 20-25 FPS. The profiler shows NPU utilization dropping from 95% to 40%. What's the most likely culprit, and how would you diagnose it?"
 
@@ -1986,7 +2192,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Factory Floor EMI Ghost</b> · <code>power-thermal</code> <code>functional-safety</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Factory Floor EMI Ghost</b> · <code>power</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your defect detection system uses 200 Hailo-8 modules on RPi CM4 boards along a steel stamping line. Every 12 seconds, when the 500-ton hydraulic press fires, 15–20% of devices report corrupted inference outputs — bounding boxes appear at random coordinates with nonsensical confidence values. Between press cycles, inference is perfect. The model and firmware are identical across all devices, but only devices within 3 meters of the press are affected. What's the root cause, and how do you fix it without moving the devices?"
 
@@ -2008,7 +2214,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Thermal Paste Time Bomb</b> · <code>power-thermal</code> <code>monitoring</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Thermal Paste Time Bomb</b> · <code>power</code> <code>monitoring</code></summary>
 
 - **Interviewer:** "Your fleet of 2,000 Jetson Orin NX devices has been deployed in traffic cabinets for 2 years. You notice a gradual, fleet-wide trend: average inference latency has increased 18% over the last 6 months. The increase is correlated with device age — older devices are slower. The model, firmware, and TensorRT engine are identical across the fleet. Ambient cabinet temperature hasn't changed. What's causing the age-correlated slowdown?"
 
@@ -2032,7 +2238,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Brownout Weight Corruption</b> · <code>power-thermal</code> <code>functional-safety</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Brownout Weight Corruption</b> · <code>power</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your solar-powered wildlife monitoring station (Google Coral Dev Board, Edge TPU, 1 GB RAM) operates in a remote savanna. During cloudy periods, the 12V battery drops to 10.8V — below the voltage regulator's dropout threshold — for 200–500ms before the MPPT controller compensates. After these brownouts, the device continues running but produces wildly wrong detections — classifying elephants as vehicles, missing animals entirely. A full reboot fixes it. What happened to the model, and how do you prevent this?"
 
@@ -2056,7 +2262,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Solar Panel Degradation Power Crunch</b> · <code>power-thermal</code> <code>economics</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Solar Panel Degradation Power Crunch</b> · <code>power</code> <code>economics</code></summary>
 
 - **Interviewer:** "Your remote environmental monitoring network has 800 solar-powered stations, each running a Coral Dev Board Mini (Edge TPU, 3W inference, 0.5W idle) with a 20W solar panel and a 50 Wh LiFePO4 battery. The system was designed for 24/7 operation with 4 hours of daily sunlight (winter minimum). After 3 years, 120 stations (15%) in the sunniest locations are experiencing daily brownouts — shutting down for 2–4 hours before dawn. The batteries test fine. What's failing, and how do you redesign the power budget for a 10-year deployment?"
 
@@ -2086,7 +2292,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Thermal-Aware Inference Scheduler</b> · <code>power-thermal</code> <code>real-time</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Thermal-Aware Inference Scheduler</b> · <code>power</code> <code>real-time</code></summary>
 
 - **Interviewer:** "Your autonomous vehicle's Jetson AGX Orin runs 5 perception models totaling 40W GPU power. The vehicle operates in Phoenix, Arizona (50°C ambient). After 20 minutes of continuous driving, the SoC hits its 97°C thermal throttle point and GPU clocks drop from 1.3 GHz to 0.9 GHz, increasing inference latency by 44%. Your safety system requires <33ms latency at all times. Design a thermal-aware scheduler that prevents throttling while maintaining safety-critical model deadlines."
 
@@ -2121,7 +2327,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Millennial Microgrid Manager</b> · <code>power-management</code> <code>long-term-autonomy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Millennial Microgrid Manager</b> · <code>power</code> <code>long-term-autonomy</code></summary>
 
 - **Interviewer:** "You're designing an edge AI system for managing a remote, off-grid microgrid in a harsh environment (e.g., arctic research station, desert outpost). The system runs predictive maintenance on generators, optimizes solar/wind energy storage, and manages load shedding. It must operate continuously for 10 years with minimal human intervention, relying on intermittent solar/wind power and a finite battery bank. How do you design the power management strategy for the AI compute hardware and sensors to ensure extreme longevity and reliability, adapting to unpredictable energy availability and varying workloads?"
 
@@ -2156,10 +2362,10 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Perpetual Sensor</b> · <code>ultra-low-power</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Perpetual Sensor</b> · <code>power</code></summary>
 
 - **Interviewer:** "Design an edge ML system for a wildlife monitoring camera that needs to operate autonomously for 5 years on a small battery pack. It runs a lightweight object detection model only when motion is detected. Detail the system architecture and power management strategies to achieve this extreme longevity."
 
@@ -2204,7 +2410,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Energy-Aware Reconnaissance Drone</b> · <code>power-management-adaptive</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Energy-Aware Reconnaissance Drone</b> · <code>power</code></summary>
 
 - **Interviewer:** "You're leading the ML systems team for a long-endurance reconnaissance drone. The drone must maintain critical visual perception capabilities (e.g., target tracking, anomaly detection) for a 6-hour mission. However, its power budget is highly dynamic: motor bursts for high-speed maneuvers or strong winds can temporarily draw significant power, leaving only a fraction (e.g., 20-30% of peak) for the ML payload. Design an ML system architecture that adaptively manages its inference workload to maximize mission duration while guaranteeing minimum perception accuracy/frame rate under these highly variable power constraints."
 
@@ -2256,7 +2462,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The EMC Compliance Failure</b> · <code>power-thermal</code> <code>functional-safety</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The EMC Compliance Failure</b> · <code>power</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your edge AI product (Hailo-8 on a custom carrier board with Rockchip RK3588) passes all functional tests but fails FCC Part 15 Class A EMC testing — radiated emissions exceed the limit by 8 dB at 480 MHz and 960 MHz. These are the 1st and 2nd harmonics of the USB 3.0 clock (480 MHz). You cannot ship the product until it passes. Redesigning the PCB will take 4 months and cost $200K. The product launch is in 6 weeks. How do you diagnose and fix the EMC failure without a full board respin?"
 
@@ -2291,13 +2497,14 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 ---
 
 
-### 🔧 Model Optimization
+### Model Optimization
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The TensorRT Engine Portability Trap</b> · <code>optimization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The TensorRT Engine Portability Trap</b> · <code>operator-fusion</code></summary>
 
 - **Interviewer:** "You compiled a TensorRT INT8 engine on your development Jetson AGX Orin (64 GB, Ampere GPU). You copy the engine file to a production Jetson Orin NX (8 GB, same Ampere architecture). Inference crashes immediately. The GPU architecture is the same. What went wrong?"
 
@@ -2317,10 +2524,9 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Model Pruning Speedup Myth</b> · <code>model-compression</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Model Pruning Speedup Myth</b> · <code>pruning</code></summary>
 
 - **Interviewer:** "Your team pruned a YOLOv8-M model to 90% sparsity — 90% of the weights are zero. The intern calculated: 'only 10% of weights remain, so inference should be 10× faster on our Jetson Orin NX.' After deploying the sparse model with TensorRT, inference time is unchanged — 22ms, same as the dense model. The intern is confused. Explain why 90% sparsity gave 0× speedup, and what kind of pruning would actually help."
 
@@ -2344,7 +2550,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Optimization Ladder</b> · <code>optimization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Optimization Ladder</b> · <code>operator-fusion</code></summary>
 
 - **Interviewer:** "Your YOLOv8-S runs at 15 FPS on a Jetson Orin NX. You need 30 FPS. Your team immediately starts designing a custom smaller architecture. Why is this the wrong first step?"
 
@@ -2376,10 +2582,10 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Pruning Paradox</b> · <code>optimization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Pruning Paradox</b> · <code>operator-fusion</code></summary>
 
 - **Interviewer:** "You structured-pruned 40% of channels from your detection model. FLOPs dropped 40%. But when you benchmark on the Hailo-8, latency only dropped 10%. On the Jetson Orin, it dropped 35%. Why does the same pruning give wildly different speedups on different hardware?"
 
@@ -2402,13 +2608,14 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 ---
 
 
-### 📎 Additional Topics
+### Additional Topics
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Safety Watchdog Timer</b> · <code>functional-safety</code> <code>real-time</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Safety Watchdog Timer</b> · <code>fault-tolerance</code> <code>real-time</code></summary>
 
 - **Interviewer:** "Your industrial robot arm uses a TI TDA4VM to run a safety zone monitoring model. A hardware watchdog timer is configured to reset the entire system if the inference pipeline doesn't send a heartbeat within 100ms. Your average inference time is 35ms, so your colleague says 'we have 65ms of margin — the watchdog will never fire.' During a factory demo, the watchdog fires and the robot arm freezes mid-motion. What happened?"
 
@@ -2440,7 +2647,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The RTOS Interconnect Crisis</b> · <code>real-time-systems</code> <code>safety</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The RTOS Interconnect Crisis</b> · <code>real-time</code> <code>safety</code></summary>
 
 - **Interviewer:** "You're building a safety-critical edge ML system for medical diagnostics, running on a real-time operating system (RTOS). It consists of several independent processes: a sensor data acquisition process, an ML inference process, and a decision logic process. These processes need to communicate rapidly and reliably, often exchanging large data buffers (e.g., image frames, sensor arrays). How do you choose and implement an inter-process communication (IPC) mechanism that guarantees real-time deadlines, minimizes latency, handles large data transfers efficiently, and provides fault tolerance to prevent a single process failure from crashing the entire system?"
 
@@ -2478,8 +2685,7 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Edge-Cloud Hybrid Inference</b> · <code>serving</code> <code>latency</code></summary>
 
@@ -2507,10 +2713,10 @@ Real-time scheduling, sensor fusion, latency budgets, power management, and ther
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Deterministic Inference Mirage</b> · <code>deterministic-timing</code> <code>safety</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Deterministic Inference Mirage</b> · <code>real-time</code> <code>safety</code></summary>
 
 - **Interviewer:** "Your medical device runs a diagnostic neural network on an NXP i.MX 8M Plus (Cortex-A53 + Ethos-U65 NPU, 2 TOPS INT8). FDA 510(k) submission requires you to prove that inference time is deterministic — the same input must always produce the same execution time. You run 100,000 inferences with the identical input tensor. The histogram shows a bimodal distribution: 95% of runs at 4.1ms, 5% at 6.8ms. The input is identical every time. What is causing the 2.7ms timing variation on identical inputs?"
 

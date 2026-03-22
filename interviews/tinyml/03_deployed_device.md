@@ -17,11 +17,565 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 ---
 
 
-### 🚀 Deployment & Updates
+### Deployment & Updates
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Duty Cycle Power Drain</b> · <code>duty-cycle-power</code></summary>
+
+- **Interviewer:** "You're designing a battery-powered audio sensor using a Cortex-M4 microcontroller. The device is active for 2 seconds to perform an inference, consuming 50 mW. It then goes into a deep sleep mode for 8 seconds, consuming 10 µW. What is the average power consumption of the device over this 10-second cycle?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often mistake peak power for average power, or incorrectly average the power states without weighting by time. Another common error is to ignore sleep power, which, while small, can be significant for devices with very low duty cycles.
+
+  **Realistic Solution:** The average power is the total energy consumed divided by the total time period. The device is active for 20% of the time (2s out of 10s). The total energy is the sum of energy used in the active and sleep states. This results in an average power consumption of just over 10 mW.
+
+  > **Napkin Math:** Energy_active = P_active × t_active = 50 mW × 2s = 100 mJ
+Energy_sleep = P_sleep × t_sleep = 10 µW × 8s = 0.01 mW × 8s = 0.08 mJ
+Total Energy = 100 mJ + 0.08 mJ = 100.08 mJ
+Average Power = Total Energy / Total Time = 100.08 mJ / 10s = 10.008 mW ≈ 10 mW
+
+  > **Key Equation:** $$ P_{\text{avg}} = \frac{P_{\text{active}} \cdot t_{\text{active}} + P_{\text{sleep}} \cdot t_{\text{sleep}}}{t_{\text{period}}} $$
+
+  > **Options:**
+  > [ ] ~25 mW
+  > [ ] 50 mW
+  > [x] ~10 mW
+  > [ ] ~0.1 mW
+
+  📖 **Deep Dive:** [TinyML](https://mlsysbook.ai/tinyml/01_microcontroller.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The FOTA Flash Tax</b> · <code>fota-flash-budget</code></summary>
+
+- **Interviewer:** "You're deploying a keyword-spotting model to a fleet of microcontrollers, each with 1MB of flash memory. To enable remote updates, you must implement a Firmware-Over-The-Air (FOTA) update strategy. When partitioning the flash, which of these components typically consumes the largest portion of the memory?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers new to the embedded world often misjudge the memory budget. They focus on the size of their ML model and application code, underestimating the significant 'tax' imposed by a robust FOTA mechanism. In a common A/B scheme, you must reserve space for an entire second copy of the firmware, which dwarfs the memory footprint of the bootloader or the RTOS.
+
+  **Realistic Solution:** The OTA (or 'inactive') partition for the next firmware image. To perform a safe, atomic update, you can't overwrite the currently running code. Instead, you download the new firmware to a separate partition. Once the download is complete and verified, the bootloader is instructed to boot from the new partition on the next reset. This A/B partitioning scheme implies that you must set aside roughly 40-50% of your total flash just to hold the next update.
+
+  > **Napkin Math:** With 1MB (~1024 KB) of flash:
+- A minimal bootloader: ~32 KB.
+- A compact RTOS: ~64 KB.
+- Total for system software: `32 + 64 = 96 KB`.
+- Remaining space for the application and OTA: `1024 KB - 96 KB = 928 KB`.
+- For an A/B scheme, this is split in two: `928 KB / 2 = 464 KB`.
+- Thus, the OTA partition alone is ~464 KB, far larger than the bootloader or RTOS.
+
+  > **Options:**
+  > [ ] The Bootloader
+  > [ ] The Real-Time Operating System (RTOS)
+  > [x] The OTA Update Partition
+  > [ ] The model's activation tensors (Tensor Arena)
+
+  📖 **Deep Dive:** [TinyML](https://mlsysbook.ai/tinyml/03_deployed_device.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Wildlife Sensor's Average Power</b> · <code>duty-cycle-power</code></summary>
+
+- **Interviewer:** "A wildlife audio sensor uses a Cortex-M4 microcontroller to listen for a specific animal call. It runs a model for 1 second, consuming 10 mW (active power), and then enters a deep sleep state for 9 seconds, consuming 10 µW (sleep power). Explain to your colleague how to calculate the average power consumption over this 10-second cycle."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate the average power by either completely ignoring the sleep power consumption or by incorrectly averaging the two power states without considering the time spent in each. The former leads to an underestimation, while the latter grossly overestimates the average power because it doesn't account for the fact that the device spends most of its time in the low-power state.
+
+  **Realistic Solution:** The correct way to calculate the average power is to compute a time-weighted average. You calculate the total energy consumed during one full cycle (active + sleep) and then divide by the total period of the cycle. This accounts for the significant energy savings from the long sleep interval.
+
+  > **Napkin Math:** 1.  **Calculate Active Energy:**
+    $E_{\text{active}} = P_{\text{active}} \times t_{\text{active}} = 10\ \text{mW} \times 1\ \text{s} = 10\ \text{mJ}$
+2.  **Calculate Sleep Energy:**
+    $E_{\text{sleep}} = P_{\text{sleep}} \times t_{\text{sleep}} = 10\ \mu\text{W} \times 9\ \text{s} = 0.01\ \text{mW} \times 9\ \text{s} = 0.09\ \text{mJ}$
+3.  **Calculate Total Energy per Cycle:**
+    $E_{\text{total}} = E_{\text{active}} + E_{\text{sleep}} = 10\ \text{mJ} + 0.09\ \text{mJ} = 10.09\ \text{mJ}$
+4.  **Calculate Average Power:**
+    $P_{\text{avg}} = E_{\text{total}} / t_{\text{period}} = 10.09\ \text{mJ} / 10\ \text{s} = 1.009\ \text{mW}$
+
+  > **Key Equation:** $P_{\text{avg}} = \frac{(P_{\text{active}} \times t_{\text{active}}) + (P_{\text{sleep}} \times t_{\text{sleep}})}{t_{\text{period}}}$
+
+  > **Options:**
+  > [ ] 10 mW. The active power dominates so much that sleep is negligible.
+  > [ ] 1.0 mW. This comes from ignoring the sleep power contribution.
+  > [ ] 5.005 mW. A simple average of the active and sleep power values.
+  > [x] 1.009 mW. A time-weighted average of active and sleep power.
+
+  📖 **Deep Dive:** [TinyML Microcontroller Architectures](https://mlsysbook.ai/tinyml/01_microcontroller.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Coin Cell Battery Lifetime</b> · <code>battery-life-estimation</code></summary>
+
+- **Interviewer:** "A remote bird-call detector has a duty cycle where it's active for 500ms (drawing 50mW) and then sleeps for 4.5s (drawing 10µW). It's powered by a standard 3V, 225 mAh coin cell battery. Can this device realistically run for a full week in the field? Calculate its expected lifetime in days."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to calculate the lifetime using only the active power consumption (50 mW), which leads to a massive underestimation of battery life. Another error is confusing power (mW) with energy (mWh) or failing to properly convert the battery's mAh capacity into mWh by multiplying by the voltage.
+
+  **Realistic Solution:** To find the lifetime, you must first calculate the true average power consumption based on the duty cycle. Then, calculate the total energy capacity of the battery in milliamp-hours (mWh). Finally, divide the total energy capacity by the average power consumption to get the total operational hours, which can then be converted to days.
+
+  > **Napkin Math:** 1.  **Calculate Average Power:**
+    $t_{\text{period}} = 0.5\text{s} + 4.5\text{s} = 5\text{s}$
+    $P_{\text{avg}} = \frac{(50\ \text{mW} \times 0.5\ \text{s}) + (0.01\ \text{mW} \times 4.5\ \text{s})}{5\ \text{s}}$
+    $P_{\text{avg}} = \frac{25\ \text{mJ} + 0.045\ \text{mJ}}{5\ \text{s}} = \frac{25.045\ \text{mJ}}{5\ \text{s}} = 5.009\ \text{mW}$
+2.  **Calculate Battery Energy:**
+    $E_{\text{battery}} = \text{Capacity (mAh)} \times \text{Voltage (V)} = 225\ \text{mAh} \times 3\ \text{V} = 675\ \text{mWh}$
+3.  **Calculate Lifetime in Hours:**
+    $\text{Lifetime}_{\text{hours}} = \frac{E_{\text{battery}}}{P_{\text{avg}}} = \frac{675\ \text{mWh}}{5.009\ \text{mW}} \approx 134.75\ \text{hours}$
+4.  **Calculate Lifetime in Days:**
+    $\text{Lifetime}_{\text{days}} = \frac{134.75\ \text{hours}}{24\ \text{hours/day}} \approx 5.6\ \text{days}$
+
+No, it cannot reliably run for a full week (7 days).
+
+  > **Key Equation:** $\text{Lifetime} = \frac{\text{Battery Capacity (Wh)}}{\text{Average Power (W)}}$
+
+  > **Options:**
+  > [ ] ~0.56 days. (Calculated using only the active power draw)
+  > [ ] ~1.1 days. (Calculated by incorrectly averaging power states)
+  > [x] ~5.6 days. (Calculated using the time-weighted average power)
+  > [ ] ~45 days. (Calculated by ignoring battery voltage and dividing mAh by mW)
+
+  📖 **Deep Dive:** [TinyML Microcontroller Architectures](https://mlsysbook.ai/tinyml/01_microcontroller.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Duty Cycle Power Tax</b> · <code>duty-cycling</code></summary>
+
+- **Interviewer:** "A wildlife tracking device using a Cortex-M4 microcontroller wakes up for 1 second to perform an inference, consuming 50 mW. It then returns to a deep sleep state for the next 119 seconds, consuming 10 µW. State the approximate average power consumption of the device over this 2-minute cycle."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often neglect the power consumed during the 'sleep' phase, assuming it's zero. While small, sleep current can dominate the energy budget in very low duty cycle applications. Another common error is mixing units (milliwatts and microwatts) or incorrectly calculating the total period for the average.
+
+  **Realistic Solution:** The average power is the total energy consumed during the cycle divided by the total cycle time. The device is active for 1 second and sleeps for 119 seconds, for a total period of 120 seconds. The average power is therefore slightly above 0.4 mW.
+
+  > **Napkin Math:** Total Period = 1s (active) + 119s (sleep) = 120s
+Energy_active = 50 mW * 1s = 50 mJ
+Energy_sleep = 10 µW * 119s = 0.01 mW * 119s = 1.19 mJ
+Total Energy = 50 mJ + 1.19 mJ = 51.19 mJ
+Average Power = Total Energy / Total Period = 51.19 mJ / 120s ≈ 0.426 mW
+
+  > **Key Equation:** $P_{\text{avg}} = \frac{P_{\text{active}} t_{\text{active}} + P_{\text{sleep}} t_{\text{sleep}}}{t_{\text{active}} + t_{\text{sleep}}}$
+
+  > **Options:**
+  > [ ] 50 mW
+  > [x] ~0.42 mW
+  > [ ] 10 µW
+  > [ ] ~0.41 mW
+
+  📖 **Deep Dive:** [Scaling Rules - TinyML](NUMBERS.md#tinyml)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Wildlife Camera's Power Budget</b> · <code>tinyml-duty-cycle-average-power</code></summary>
+
+- **Interviewer:** "You are designing a wildlife camera that uses a Cortex-M4 MCU for motion detection. The system consumes 50 mW when actively processing an image for 500ms. In deep sleep, it consumes 10 µW. If the camera is triggered on average once every 5 minutes, what is its average power consumption? This will determine the required battery size for a 1-year deployment."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate a simple arithmetic mean of the active and sleep power, completely ignoring the time spent in each state. The correct approach is a time-weighted average, where the minuscule sleep power consumption dominates the total energy budget because the device spends over 99% of its time asleep.
+
+  **Realistic Solution:** The average power is the total energy consumed during one cycle divided by the cycle's duration. Here, a cycle is 5 minutes (300 seconds). The device is active for 0.5s and sleeps for 299.5s. The average power is therefore heavily weighted towards the sleep consumption, as the brief, high-power active periods are amortized over long, low-power sleep periods.
+
+  > **Napkin Math:** 1. **Define the period:** A full cycle is 5 minutes, which is $5 \times 60 = 300$ seconds.
+2. **Define active/sleep times:** $t_{\text{active}} = 0.5$ s. Therefore, $t_{\text{sleep}} = 300 - 0.5 = 299.5$ s.
+3. **Calculate energy per state:**
+   - $E_{\text{active}} = P_{\text{active}} \times t_{\text{active}} = 50 \text{ mW} \times 0.5 \text{ s} = 25 \text{ mJ}$
+   - $E_{\text{sleep}} = P_{\text{sleep}} \times t_{\text{sleep}} = 10 \text{ µW} \times 299.5 \text{ s} = 0.01 \text{ mW} \times 299.5 \text{ s} \approx 2.995 \text{ mJ}$
+4. **Calculate total energy per period:** $E_{\text{total}} = E_{\text{active}} + E_{\text{sleep}} = 25 + 2.995 = 27.995 \text{ mJ}$
+5. **Calculate average power:** $P_{\text{avg}} = E_{\text{total}} / t_{\text{period}} = 27.995 \text{ mJ} / 300 \text{ s} \approx 0.093 \text{ mW}$
+
+  > **Key Equation:** $P_{\text{avg}} = \frac{P_{\text{active}} t_{\text{active}} + P_{\text{sleep}} t_{\text{sleep}}}{t_{\text{period}}}$
+
+  > **Options:**
+  > [ ] ~0.083 mW
+  > [ ] ~25.0 mW
+  > [ ] ~10.1 mW
+  > [x] ~0.093 mW
+
+  📖 **Deep Dive:** [TinyML](https://mlsysbook.ai/tinyml/)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Environmental Sensor's Duty Cycle</b> · <code>tinyml-duty-cycle-lifetime</code></summary>
+
+- **Interviewer:** "You are designing a battery-powered environmental sensor with a target battery life of 1 year. The device is powered by a 2400 mAh, 3.7V battery. When taking a measurement and transmitting data, it consumes 150 mW. In its deep sleep state, it consumes 10 µW. To meet the 1-year lifetime goal, what is the maximum total time, in seconds, that the device can afford to be in its active state each hour?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common error is to miscalculate the total energy available in the battery (e.g., by ignoring the voltage and incorrectly using Amp-hours as a unit of energy). Another mistake is to ignore the energy consumed during the sleep state, which, although small per second, accumulates significantly over a year and reduces the budget available for active operations.
+
+  **Realistic Solution:** First, calculate the total energy in the battery in Watt-hours by multiplying capacity (in Amp-hours) by voltage. Second, calculate the average power budget in milliwatts by dividing the total energy by the target lifetime in hours. Finally, use the average power equation, plugging in the known power values and the 1-hour period (3600s), to solve for the unknown active time ($t_{\text{active}}$).
+
+  > **Napkin Math:** 1. **Calculate total battery energy:** $E_{\text{battery}} = 2400 \text{ mAh} \times 3.7 \text{ V} = 2.4 \text{ Ah} \times 3.7 \text{ V} = 8.88 \text{ Wh}$.
+2. **Calculate target lifetime in hours:** $1 \text{ year} = 365 \times 24 = 8760 \text{ hours}$.
+3. **Calculate average power budget:** $P_{\text{budget}} = E_{\text{battery}} / \text{Lifetime} = 8.88 \text{ Wh} / 8760 \text{ h} \approx 0.001014 \text{ W} \approx 1.014 \text{ mW}$.
+4. **Set up the duty cycle equation for one hour (3600s):** Let $t_a$ be the active time in seconds.
+   $P_{\text{budget}} = \frac{P_{\text{active}} t_a + P_{\text{sleep}} (3600 - t_a)}{3600}$.
+5. **Solve for $t_a$:**
+   $1.014 = \frac{150 t_a + 0.01 (3600 - t_a)}{3600}$
+   $1.014 \times 3600 = 150 t_a + 36 - 0.01 t_a$
+   $3650.4 \approx 149.99 t_a + 36$
+   $3614.4 \approx 149.99 t_a$
+   $t_a \approx 3614.4 / 149.99 \approx 24.1$ seconds.
+
+  > **Key Equation:** $t_{\text{active}} = \frac{P_{\text{avg}} t_{\text{period}} - P_{\text{sleep}} t_{\text{period}}}{P_{\text{active}} - P_{\text{sleep}}}$
+
+  > **Options:**
+  > [ ] ~6.3 seconds
+  > [x] ~24.1 seconds
+  > [ ] ~24.3 seconds
+  > [ ] The budget is impossible; it's below sleep power.
+
+  📖 **Deep Dive:** [TinyML](https://mlsysbook.ai/tinyml/)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Duty Cycle Power Drain</b> · <code>duty-cycling-power</code></summary>
+
+- **Interviewer:** "You are designing a battery-powered sensor with a Cortex-M4 microcontroller. To save energy, you use a duty cycle where the device is active for 1 second and then enters a deep sleep mode for 9 seconds. If the active power is 10 mW and the deep sleep power is 10 µW, what is the approximate average power consumption over the full 10-second period?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often forget how dominant the active power is, even for a short duration, and incorrectly average the two power numbers (e.g., (10mW + 10µW)/2) without considering the time spent in each state. This ignores the core principle of a duty cycle and leads to a massive overestimation of power drain and underestimation of battery life.
+
+  **Realistic Solution:** The average power is the time-weighted average of the active and sleep power consumption. The device is active 10% of the time (1s out of 10s) and in deep sleep 90% of the time (9s out of 10s). The active phase dominates the calculation, while the sleep phase's contribution is almost negligible.
+
+  > **Napkin Math:** Total Period = 1s (active) + 9s (sleep) = 10s
+Active Energy = 10 mW × 1s = 10 mJ
+Sleep Energy = 10 µW × 9s = 90 µJ = 0.09 mJ
+Total Energy = 10 mJ + 0.09 mJ = 10.09 mJ
+Average Power = Total Energy / Total Period = 10.09 mJ / 10s ≈ 1 mW
+
+  > **Key Equation:** $P_{\text{avg}} = \frac{(P_{\text{active}} \times t_{\text{active}}) + (P_{\text{sleep}} \times t_{\text{sleep}})}{t_{\text{period}}}$
+
+  > **Options:**
+  > [ ] ~5 mW
+  > [ ] 10 mW
+  > [x] ~1 mW
+  > [ ] ~100 µW
+
+  📖 **Deep Dive:** [TinyML](https://mlsysbook.ai/tinyml/01_microcontroller.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Forever-Camera Battery Life</b> · <code>duty-cycling-battery-drain</code></summary>
+
+- **Interviewer:** "You are designing a wildlife camera powered by a 2400 mAh, 3.7V Li-ion battery. The device uses a Cortex-M4 MCU. It wakes up for 1 second to perform inference and then goes into deep sleep for 99 seconds. Explain how you would calculate the expected battery life in days. Use the provided hardware constants."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to average the power states (Active, Sleep) without weighting them by time. For example, calculating `(50mW + 10µW) / 2`. This completely ignores that the device spends 99% of its time in the low-power state, leading to a massive underestimation of battery life.
+
+  **Realistic Solution:** The correct approach is to calculate the time-weighted average power consumption. The device is active 1% of the time and asleep 99% of the time. This average power is then divided into the total energy capacity of the battery (Voltage × Amp-hours) to find the total operational time.
+
+  > **Napkin Math:** 1. **Calculate Total Battery Energy:** `Energy (mWh) = 2400 mAh × 3.7V = 8880 mWh`
+2. **Calculate Energy per Cycle (100s):** `E_cycle = (P_active × t_active) + (P_sleep × t_sleep)`
+   - `E_cycle = (50 mW × 1s) + (10 µW × 99s)`
+   - `E_cycle = 50 mWs + 990 µWs = 50 mWs + 0.99 mWs = 50.99 mWs`
+3. **Calculate Average Power:** `P_avg = E_cycle / t_cycle = 50.99 mWs / 100s = 0.5099 mW`
+4. **Calculate Battery Life (Hours):** `Life (h) = Total Energy (mWh) / P_avg (mW) = 8880 mWh / 0.5099 mW ≈ 17,415 hours`
+5. **Convert to Days:** `17,415 hours / 24 hours/day ≈ 725 days`
+
+  > **Key Equation:** P_{\text{avg}} = \frac{P_{\text{active}} \cdot t_{\text{active}} + P_{\text{sleep}} \cdot t_{\text{sleep}}}{t_{\text{period}}}
+
+  > **Options:**
+  > [ ] ~15 days (Incorrectly averaging power states)
+  > [ ] ~739 days (Ignoring sleep power contribution)
+  > [x] ~725 days
+  > [ ] ~196 days (Using battery mAh directly as mWh)
+
+  📖 **Deep Dive:** [TinyML Scaling Rules](https://github.com/ml-prefect/staffml-book-public/blob/main/interviews/NUMBERS.md#4-scaling-rules-arithmetic--hardware-independent)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Solar-Powered Sensor's Energy Budget</b> · <code>energy-harvesting-battery-drain</code></summary>
+
+- **Interviewer:** "A TinyML vibration sensor for industrial machinery is active for 500ms every 10 seconds. It's powered by a small solar cell that generates 0.2 mW in the ambient factory lighting. The sensor's MCU consumes 50 mW when active and 10 µW in sleep mode. Contrast the energy consumed per hour with the energy generated per hour to determine if the device has an energy surplus or deficit."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often compare the peak active power (50 mW) directly to the solar generation rate (0.2 mW). While the conclusion (energy deficit) is the same in this case, the reasoning is flawed. This approach doesn't account for the duty cycle. A device can have a very high peak power draw but a very low average power consumption if it spends most of its time asleep. The correct comparison is always between *average* power consumed and *average* power generated.
+
+  **Realistic Solution:** To determine the energy balance, you must compare the average energy consumed per hour to the energy generated per hour. First, calculate the device's duty cycle to find the total time spent in active and sleep states. Use this to calculate the total energy consumed in Watt-seconds. Then, calculate the energy generated by the solar cell over the same period and compare the two values.
+
+  > **Napkin Math:** 1. **Calculate Duty Cycle:**
+   - `Active time % = 0.5s / 10s = 5%`
+   - `Sleep time % = 9.5s / 10s = 95%`
+2. **Calculate Energy Consumed per Hour (E_consumed):**
+   - `t_active_per_hour = 3600s × 0.05 = 180s`
+   - `t_sleep_per_hour = 3600s × 0.95 = 3420s`
+   - `E_consumed = (50 mW × 180s) + (10 µW × 3420s)`
+   - `E_consumed = 9000 mWs + 34,200 µWs = 9000 mWs + 34.2 mWs = 9034.2 mWs`
+3. **Calculate Energy Generated per Hour (E_generated):**
+   - `E_generated = 0.2 mW × 3600s = 720 mWs`
+4. **Compare:** `9034.2 mWs (consumed) > 720 mWs (generated)`. The device has a significant energy deficit of 8314.2 mWs each hour.
+5. **Average Power View:** `P_avg_consumed = 9034.2 mWs / 3600s ≈ 2.51 mW`. `P_avg_generated = 0.2 mW`. `2.51 mW > 0.2 mW` confirms the deficit.
+
+  > **Key Equation:** E_{\text{balance}} = (P_{\text{generated}} \cdot t) - (P_{\text{active}} \cdot t_{\text{active}} + P_{\text{sleep}} \cdot t_{\text{sleep}})
+
+  > **Options:**
+  > [ ] Energy surplus; average power is low
+  > [x] Energy deficit; consumes ~2.5 mW average, generates 0.2 mW
+  > [ ] Energy deficit; peak power of 50 mW is greater than 0.2 mW
+  > [ ] Energy neutral; sleep power makes up for the active draw
+
+  📖 **Deep Dive:** [TinyML Scaling Rules](https://github.com/ml-prefect/staffml-book-public/blob/main/interviews/NUMBERS.md#4-scaling-rules-arithmetic--hardware-independent)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The OTA Flash Memory Tax</b> · <code>ota-memory-footprint</code></summary>
+
+- **Interviewer:** "You are scoping the flash memory requirements for a new microcontroller that will run a keyword spotting model. The device must support robust Over-the-Air (OTA) firmware updates using an A/B partitioning scheme to prevent bricking during an update. If the total flash on the chip is 1MB, what is the approximate memory cost you must pay for this reliability feature? In other words, how much flash must be reserved specifically for the OTA update partition?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers unfamiliar with embedded constraints often assume they can overwrite the application 'in-place', forgetting that a power failure or failed write would permanently brick the device. Others assume only a small 'patch' or 'diff' is sent, underestimating the need to store a full, second application binary for a safe swap.
+
+  **Realistic Solution:** A robust A/B OTA update scheme requires two separate memory partitions of equal size: one for the currently running application ('A') and one to receive the new application ('B'). After the new firmware is fully downloaded and verified in partition 'B', the bootloader will swap to it on the next boot. This means approximately 50% of the total available flash must be reserved for the update partition. It's a direct 'tax' on memory in exchange for update reliability.
+
+  > **Napkin Math:** Total Flash Memory: 1MB (1024 KB).
+A small bootloader might occupy ~32 KB.
+Remaining Space: 1024 KB - 32 KB = 992 KB.
+This remaining space must be split into two equal partitions for the A/B scheme.
+Size of Partition A (and B) = 992 KB / 2 = 496 KB.
+Therefore, the cost of the OTA feature is the ~496 KB reserved for Partition B, which the main application cannot use.
+
+  > **Options:**
+  > [ ] ~50 KB, for storing a small patch file.
+  > [ ] Effectively 0 KB, as you can overwrite the existing application in-place.
+  > [x] ~500 KB, to hold a complete second copy of the application binary.
+  > [ ] ~32 KB, the space taken by the bootloader itself.
+
+  📖 **Deep Dive:** [TinyML](https://mlsysbook.ai/tinyml/README.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Flash Budget</b> · <code>ota-flash-budget</code></summary>
+
+- **Interviewer:** "Interviewer: You've deployed a fleet of 10,000 environmental sensors based on a Cortex-M4 microcontroller. Each device has 1MB of Flash. The memory is partitioned for a bootloader (32KB), an RTOS (64KB), and the current application binary which is 450KB. For safe Over-the-Air (OTA) updates, you've reserved a partition of the same size as the application. A new model improves accuracy but increases the application binary size to 454KB. Explain whether this OTA update is possible across the fleet."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to only calculate the total *remaining* space on the device (1024KB - 32KB - 64KB - 450KB = 478KB) and incorrectly conclude there is plenty of room. This fails to account for the fact that OTA updates require a dedicated, pre-allocated partition to download the new image before it can be verified and swapped. You cannot use fragmented free space for a monolithic binary download.
+
+  **Realistic Solution:** The update is not possible. The system was designed with an OTA partition exactly matching the original application size: 450KB. The new 454KB binary is too large to fit into this pre-allocated slot. The device cannot dynamically resize the OTA partition in the field; this requires a physical re-flash. The fleet is effectively bricked from receiving this update until a smaller binary can be produced or the devices are manually recalled.
+
+  > **Napkin Math:** 1.  **Total Flash:** 1MB = 1024 KB
+2.  **Fixed Overhead:** 32 KB (Bootloader) + 64 KB (RTOS) = 96 KB
+3.  **Application A size:** 450 KB
+4.  **OTA (Application B) Partition size:** 450 KB (sized for the original app)
+5.  **Total Allocated Space:** 96 KB (Overhead) + 450 KB (App A) + 450 KB (OTA Slot) = 996 KB
+6.  **Remaining Free Space:** 1024 KB - 996 KB = 28 KB
+7.  **Conclusion:** The new 454 KB binary is larger than the 450 KB OTA slot. The update will fail.
+
+  > **Key Equation:** $\text{Flash}_{\text{Required}} > \text{Flash}_{\text{OTA Partition}}$
+
+  > **Options:**
+  > [ ] Yes, it works. The total free space is 478KB, which is more than enough for the 454KB update.
+  > [x] No, it fails. The 454KB new binary is larger than the 450KB reserved OTA partition.
+  > [ ] Yes, it works. The total application space is 928KB (1024KB - 96KB), which can fit two 454KB apps.
+  > [ ] No, it fails. The device only has 28KB of total free space left.
+
+  📖 **Deep Dive:** [TinyML](https://mlsysbook.ai/tinyml/README.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Duty Cycle Power Drain</b> · <code>duty-cycle-power</code></summary>
+
+- **Interviewer:** "You are designing a battery-powered audio sensor that uses a Cortex-M4 microcontroller to detect a wake-word. It wakes up for 1 second to listen and run an inference, then goes into deep sleep for 9 seconds to conserve energy. What is the approximate *average* power consumption of this device?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often forget the massive, orders-of-magnitude difference between active and sleep power. A common error is to only consider the active power (~10 mW), ignoring the fact that the device spends 90% of its time in a low-power state. Another is to incorrectly average the power states without weighting by time.
+
+  **Realistic Solution:** The average power is the time-weighted average of the active and sleep power states. The device is active 10% of the time (1s / 10s) and asleep 90% of the time (9s / 10s).
+
+- **Active Power (Cortex-M4):** ~10 mW
+- **Sleep Power (Deep Sleep):** ~10 µW (or 0.01 mW)
+
+Using the duty cycle formula:
+`P_avg = (P_active * t_active + P_sleep * t_sleep) / t_period`
+`P_avg = (10 mW * 1s + 0.01 mW * 9s) / 10s`
+`P_avg = (10 + 0.09) mW / 10`
+`P_avg ≈ 1.01 mW`
+
+The sleep power is about 1000x smaller than the active power, so its contribution to the average is almost negligible.
+
+  > **Napkin Math:** The device is active 10% of the time (1s out of 10s). The average power will be roughly 10% of its active power. Active power is ~10 mW, so the average is ~1 mW. The sleep power is 1000x smaller, so it's basically a rounding error.
+
+  > **Key Equation:** $\text{P}_{\text{avg}} = \frac{(\text{P}_{\text{active}} \cdot \text{t}_{\text{active}}) + (\text{P}_{\text{sleep}} \cdot \text{t}_{\text{sleep}})}{\text{t}_{\text{period}}}$
+
+  > **Options:**
+  > [ ] ~10 mW
+  > [ ] ~5 mW
+  > [x] ~1 mW
+  > [ ] ~10 µW
+
+  📖 **Deep Dive:** [TinyML Microcontrollers](https://mlsysbook.ai/tinyml/01_microcontroller.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Battery Life Budget</b> · <code>duty-cycling-battery-drain</code></summary>
+
+- **Interviewer:** "You're designing a wildlife audio monitor using a Cortex-M4 microcontroller. It wakes up to run an inference for 1 second, consuming 10mW, then goes into a deep sleep mode for 9 seconds, consuming 10µW. Explain the concept of duty cycling and calculate the approximate average power consumption of the device."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often just average the active and sleep power values, e.g., `(10mW + 10µW) / 2`, completely ignoring the *time* spent in each state. This is arithmetically simple but conceptually wrong, as it doesn't account for the 90% of the time the device is in the ultra-low-power sleep state, leading to a massive overestimation of the power budget.
+
+  **Realistic Solution:** Duty cycling is a core power-saving technique in embedded systems. Instead of running continuously, the device operates in a cycle, spending the vast majority of its time in a low-power 'sleep' state and only waking 'actively' for brief periods to perform tasks. The average power consumption is the time-weighted average of the active and sleep power states over one full cycle.
+
+Here, the total cycle is 1s + 9s = 10s. The device is active 10% of the time and asleep 90% of the time. This allows a device with a relatively high active power draw to achieve a very low average power draw, enabling long battery life.
+
+  > **Napkin Math:** 1. **Unify Units:** Convert all power values to milliwatts (mW). Active Power = 10mW. Sleep Power = 10µW = 0.01mW.
+2. **Define Period:** The total cycle period is `t_active + t_sleep = 1s + 9s = 10s`.
+3. **Calculate Energy per Period:** Calculate the total energy (in milliwatt-seconds) consumed in one cycle.
+   `Energy = (P_active × t_active) + (P_sleep × t_sleep)`
+   `Energy = (10mW × 1s) + (0.01mW × 9s) = 10 mWs + 0.09 mWs = 10.09 mWs`
+4. **Calculate Average Power:** Divide the total energy by the period duration.
+   `P_avg = Energy / Period = 10.09 mWs / 10s ≈ 1.01 mW`
+
+  > **Key Equation:** $\text{P}_{\text{avg}} = \frac{(P_{\text{active}} \times t_{\text{active}}) + (P_{\text{sleep}} \times t_{\text{sleep}})}{t_{\text{period}}}$
+
+  > **Options:**
+  > [ ] ~5.0 mW
+  > [ ] ~10.0 mW
+  > [x] ~1.0 mW
+  > [ ] ~9.0 mW
+
+  📖 **Deep Dive:** [TinyML Microcontrollers](https://mlsysbook.ai/tinyml/01_microcontroller.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Energy Cost of an OTA Update</b> · <code>ota-updates</code></summary>
+
+- **Interviewer:** "A battery-powered environmental sensor needs to receive a 450 KB firmware update over-the-air (OTA). The device uses a low-power microcontroller and a Bluetooth Low Energy (BLE) radio. State which phase of the OTA process typically consumes the most energy from the battery."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing on the peak power consumption of the CPU (during verification) rather than the total energy (Power × Time). While CPU-intensive tasks have high peak power, the long duration of the radio transmission usually dominates the total energy budget.
+
+  **Realistic Solution:** Downloading the firmware image. Radio communication is one of the most energy-intensive operations on a constrained device, not because of its peak power draw, but because of the long time it must remain active to transfer a large amount of data. Even with a low-power protocol like BLE, transferring hundreds of kilobytes can take tens of seconds, far longer than any on-chip computation or memory operation.
+
+  > **Napkin Math:** ### P.I.C.O. (Parameters, Invariants, Calculation, Outputs)
+
+**Parameters:**
+- Firmware Size: 450 KB = 3.6 million bits
+- BLE Throughput: ~100 kbps (a realistic rate in a noisy environment)
+- Radio + Idle CPU Power: ~15 mW
+- CPU Active Power (Flash Write/Verify): ~40 mW (from 'TinyML Active' range)
+- Flash Write Time: ~1 second (for 450 KB)
+- Verification Time: < 1 second
+
+**Invariant:**
+- Energy is the integral of power over time ($E = P \times t$). Total energy, not peak power, drains the battery.
+
+**Calculation:**
+1.  **Download Energy:**
+    -   Time = 3,600,000 bits / 100,000 bps = 36 seconds
+    -   Energy = 36 s × 15 mW = **540 mJ**
+2.  **Flash Write Energy:**
+    -   Time ≈ 1 s
+    -   Energy = 1 s × 40 mW = **40 mJ**
+3.  **Verification Energy:**
+    -   Time ≈ 0.5 s
+    -   Energy = 0.5 s × 40 mW = **20 mJ**
+
+**Output:** The download phase (~540 mJ) consumes over 10x more energy than the flash write (~40 mJ) or verification (~20 mJ) phases because the radio must stay on for a significant duration.
+
+  > **Key Equation:** $$ E = P \times t $$
+
+  > **Options:**
+  > [ ] Writing the 450 KB image to the internal flash memory
+  > [x] Downloading the 450 KB image via the BLE radio
+  > [ ] Verifying the cryptographic signature of the downloaded image
+  > [ ] Rebooting the device to activate the new firmware
+
+  📖 **Deep Dive:** [TinyML: Microcontrollers](https://mlsysbook.ai/tinyml/01_microcontroller.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Flash Budget</b> · <code>ota-updates</code></summary>
+
+- **Interviewer:** "You are deploying a keyword spotting model to a fleet of battery-powered devices. Each device has a microcontroller with 1 MB of total flash memory. For safe Over-the-Air (OTA) updates, the system uses an A/B partitioning scheme, where one partition holds the active firmware while the other receives the update, allowing for a rollback if the update fails. The current firmware includes a 32 KB bootloader and a 64 KB Real-Time Operating System (RTOS). Calculate the absolute maximum size for a new model that can be safely deployed via an OTA update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often forget that for a robust OTA update with rollback capability, the flash memory must be partitioned. This effectively halves the available space for the application (model + OS). A common error is to calculate the available space as `Total Flash - OS Size`, failing to account for the second partition needed for the incoming update.
+
+  **Realistic Solution:** With an A/B partitioning scheme, the 1 MB (1024 KB) of flash is split into two 512 KB partitions. Each partition must be able to hold a complete, bootable image, which includes the OS components and the model. Therefore, the maximum model size is limited by the space remaining in a single partition after the bootloader and RTOS are accounted for.
+
+  > **Napkin Math:** 1. Total Flash: 1 MB = 1024 KB
+2. Partition Size for A/B OTA: 1024 KB / 2 = 512 KB
+3. OS & Bootloader Footprint: 32 KB + 64 KB = 96 KB
+4. Maximum Model Size: 512 KB (Partition Size) - 96 KB (OS Footprint) = 416 KB
+
+  > **Key Equation:** $\text{Max Model Size} = (\frac{\text{Total Flash}}{2}) - (\text{Bootloader Size} + \text{RTOS Size})$
+
+  > **Options:**
+  > [ ] 928 KB
+  > [ ] 512 KB
+  > [x] 416 KB
+  > [ ] 480 KB
+
+  📖 **Deep Dive:** [Deployed Device](https://mlsysbook.ai/tinyml/03_deployed_device.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The FOTA Update Risk</b> · <code>deployment</code></summary>
 
@@ -153,7 +707,7 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> BLE Throughput for Model Update</b> · <code>mlops</code> <code>monitoring</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> BLE Throughput for Model Update</b> · <code>deployment</code> <code>monitoring</code></summary>
 
 - **Interviewer:** "Your TinyML wearable needs an over-the-air model update via BLE 5.0. The new model is 150 KB (INT8 quantized, stored in external flash). BLE 5.0 supports 2 Mbps PHY with a maximum data throughput of ~1.4 Mbps after protocol overhead. The device has a 100 mAh battery at 3.7V. The BLE radio draws 8 mA during active transmission/reception. Estimate the update time and the battery cost of the update."
 
@@ -180,9 +734,46 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The A/B Test Brick-pocalypse</b> · <code>ab-testing-ota-risk</code></summary>
 
-#### 🔵 L4 — Apply & Identify
+- **Interviewer:** "You are managing a fleet of 500,000 battery-powered smart doorbells, each with a 1MB Flash budget. You want to A/B test a new person detection model. The total firmware size is 450KB. The Over-the-Air (OTA) update mechanism is reliable, with only a 0.05% failure rate (e.g., due to power loss or connectivity issues during the write process), but a failure requires a full device replacement. You plan to roll out the new model to a 20% test group. Your manager, accustomed to web-based A/B tests, sees this as a low-risk operation. How would you apply your systems knowledge to diagnose the single greatest quantitative risk to the business from this 'simple' A/B test?"
 
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers from a cloud background often perceive A/B testing as a cheap, reversible software flag change. They might focus on secondary metrics like the new model's latency, power draw, or the network cost of the deployment. They fail to appreciate that on embedded devices, a 'deployment' is a fragile firmware write operation, and a failure at scale, even with a low probability, can lead to catastrophic and irreversible hardware losses.
+
+  **Realistic Solution:** The greatest risk is the number of permanently bricked devices, leading to direct financial loss from hardware replacement and customer support. Unlike a server that can be easily reimaged, a failed OTA update on a consumer device is often unrecoverable. An A/B test isn't just a metadata flip; it's a high-risk firmware operation performed on a massive number of devices simultaneously. The key is to calculate the expected number of failures and translate that into a dollar amount, showing that the 'low probability' event is a near certainty at scale.
+
+  > **Napkin Math:** 1. **Calculate the size of the test group:**
+   500,000 devices * 20% = 100,000 devices
+
+2. **Calculate the expected number of bricked devices:**
+   100,000 devices * 0.05% failure rate = 50 devices
+
+3. **Estimate the financial impact:**
+   Assume a replacement cost (hardware + shipping + support) of $50 per device.
+   50 devices * $50/device = $2,500
+
+4. **Diagnose the Risk:**
+   The A/B test will result in an expected, immediate loss of $2,500 from bricked units. This is a direct, quantifiable cost. While other factors like battery drain exist, the irreversible hardware failure is the most significant and immediate business risk that distinguishes this from a simple web A/B test.
+
+  > **Key Equation:** E[\text{Loss}] = \text{FleetSize} \times \text{TestGroup\%} \times \text{FailureRate} \times \text{UnitCost}
+
+  > **Options:**
+  > [ ] The network cost of sending a 450KB update to 100,000 devices will be the dominant expense.
+  > [ ] The increased power consumption of the new model will drain batteries faster, leading to customer complaints.
+  > [ ] The new model might have higher latency, violating the real-time processing budget of the doorbell.
+  > [x] The expected number of permanently bricked devices due to OTA update failures represents the most significant, direct financial risk.
+
+  📖 **Deep Dive:** [TinyML](https://mlsysbook.ai/tinyml/README.html)
+  </details>
+</details>
+
+
+
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Offline Drift Detector</b> · <code>monitoring</code></summary>
 
@@ -322,10 +913,10 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> Bootloader A/B Firmware Partitioning</b> · <code>deployment</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> Bootloader A/B Firmware Partitioning</b> · <code>deployment</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Design the flash memory layout for a Cortex-M4 with 1 MB flash that supports A/B firmware partitioning with rollback. The firmware includes a bootloader, application code, and a TFLite Micro model. The device is deployed in a location where physical access costs $500 per visit."
 
@@ -370,7 +961,7 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Fleet-Wide Model Update Strategy</b> · <code>deployment</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Fleet-Wide Model Update Strategy</b> · <code>deployment</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You manage 100,000 predictive maintenance sensors across 200 factories. The fleet has 5 hardware variants: Cortex-M0+ (nRF52810, 64 KB flash), Cortex-M4 (STM32L4, 1 MB flash), Cortex-M4F (Apollo4, 2 MB flash), Cortex-M33 (nRF5340, 1 MB flash), and ESP32-S3 (8 MB flash). Connectivity is mixed: 40% BLE-only, 35% LoRaWAN, 25% cellular (LTE-M). You need to deploy a retrained anomaly detection model to the entire fleet. Design the update strategy."
 
@@ -466,7 +1057,7 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Unsigned Integer Wrap</b> · <code>mlops</code> <code>robustness</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Unsigned Integer Wrap</b> · <code>deployment</code> <code>adversarial</code></summary>
 
 - **Interviewer:** "Your predictive maintenance system uses a Cortex-M0+ to monitor motor vibrations. It keeps a running tally of anomalies in a `uint16_t` counter and uploads the total to the cloud every week. After 18 months, the cloud dashboard suddenly reports that the factory had exactly 65,500 *fewer* anomalies this week than last week. The factory hasn't changed. What broke?"
 
@@ -496,10 +1087,10 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Multi-MCU Distributed Inference System</b> · <code>parallelism</code> <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Multi-MCU Distributed Inference System</b> · <code>data-parallelism</code> <code>serving</code></summary>
 
 - **Interviewer:** "You need to run a model that requires 80 KB of activation memory on a system with three Cortex-M0+ MCUs, each with only 32 KB SRAM. No single MCU can hold the full activation tensor. Design a distributed inference system that splits the model across the three MCUs, connected via SPI at 8 MHz. Specify the partitioning strategy, communication protocol, and the latency overhead of distribution."
 
@@ -530,17 +1121,48 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Bricked OTA Update</b> · <code>memory-hierarchy-ota</code></summary>
+
+- **Interviewer:** "You are the firmware architect for a new battery-powered smart lock that uses a keyword spotting model to activate. Your MCU has 1MB of Flash and 256KB of SRAM. The product ships with a 350KB model. Six months post-launch, the ML team develops a new, 450KB model that is much more accurate. Your team attempts to deploy this model via an Over-the-Air (OTA) update. The update process downloads the new model, but the devices start crashing and failing the update, effectively bricking them in the field. Your bootloader, RTOS, and application logic consume 150KB of Flash. Propose a complete memory architecture and update process from scratch for V2 of this product that guarantees safe, atomic OTA updates for future model deployments. Justify your partitioning of Flash and prove your design won't exhaust SRAM during the update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing only on Flash capacity, assuming SRAM is plentiful. A common mistake is to propose buffering the entire new model in SRAM before writing to Flash, which is impossible. Another is failing to account for the memory required by the *currently running* old model and RTOS during the update itself.
+
+  **Realistic Solution:** The core problem is managing three concurrent memory demands: Flash for storage, SRAM for execution (of the old model), and SRAM for the update payload. A robust L6+ design implements A/B partitioning for the model in Flash.
+
+1.  **Flash Partitioning:** The 1MB Flash must be divided. You can't fit Bootloader (32K) + RTOS/App (150K) + Old Model (350K) + New Model (450K) = 982KB, leaving only 42KB for anything else, which is too tight. The critical insight is that the app itself doesn't need two copies. A better layout is: Bootloader (32KB), App State/Config (32KB), RTOS/App (150KB), Model Partition A (450KB), Model Partition B (450KB). Total = 1114KB. This exceeds the 1MB Flash. The candidate must recognize the constraint is impossible as stated and propose a new MCU with 2MB flash or a smaller model. Assuming a 2MB Flash was approved:
+
+2.  **Atomic Update Process:** The bootloader is the key. On boot, it checks a flag in a dedicated config sector to see which partition (A or B) is 'active'. It then jumps to the application, which loads the model from that active partition. The OTA update process, running in the main app, receives the new model and writes it to the *inactive* partition. It only flips the 'active' flag in the config sector *after* the new model has been fully downloaded and its integrity verified. If the device reboots at any point, the bootloader will still load the old, valid model.
+
+3.  **SRAM Management:** This is the crucial part. You cannot buffer the entire 450KB model in the 256KB SRAM. The update must be streamed. The device receives the update in small chunks (e.g., 4KB), buffers just that single chunk in SRAM, writes it to the inactive Flash partition, verifies the write, and then requests the next chunk. This keeps the SRAM overhead for the update minimal.
+
+  > **Napkin Math:** Let's prove the SRAM budget during an update. Total SRAM: 256KB.
+- **RTOS + App:** Let's budget a generous 80KB for the RTOS kernel, application threads, and heap.
+- **Old Model Execution:** The currently running 350KB model needs a tensor arena. Let's assume its peak arena size is 120KB. The device must remain functional during the download.
+- **OTA Update Buffer:** We stream the update in 4KB chunks. So we need a 4KB buffer.
+- **Peak SRAM Usage:** `80KB (RTOS/App) + 120KB (Old Model Arena) + 4KB (Update Chunk Buffer) = 204KB`.
+- **Conclusion:** This peak usage of 204KB is well within the 256KB SRAM limit. The flawed approach of buffering the whole model would require `80KB + 120KB + 450KB = 650KB`, which would instantly crash the device.
+
+  > **Key Equation:** $\text{SRAM}_{\text{peak}} = \text{SRAM}_{\text{RTOS}} + \text{SRAM}_{\text{Arena}(\text{old})} + \text{SRAM}_{\text{buffer}(\text{chunk})} < \text{SRAM}_{\text{total}}$
+
+  📖 **Deep Dive:** [TinyML: Deployed Device](https://mlsysbook.ai/tinyml/03_deployed_device.html)
+  </details>
+</details>
+
+
 
 ---
 
 
-### 🌐 Networking & Connectivity
+### Networking & Connectivity
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Cellular NAT Timeout</b> · <code>networking</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Cellular NAT Timeout</b> · <code>interconnect</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your IoT device connects to AWS IoT Core via MQTT over an LTE-M cellular connection. It sends an ML telemetry payload perfectly upon booting. It then sits idle for 30 minutes. When the next anomaly occurs, the `mqtt_publish()` function claims success, but the message never arrives at AWS. The device didn't sleep and the cellular signal is perfect. Why did the network silently swallow the message?"
 
@@ -566,10 +1188,10 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The OTA Bandwidth Congestion</b> · <code>networking</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The OTA Bandwidth Congestion</b> · <code>interconnect</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You have a fleet of 5,000 smart factory sensors connected via a shared LoRaWAN gateway. You push a 100 KB model update to the fleet simultaneously. The OTA update process stalls, taking days to complete, and normal sensor telemetry stops functioning entirely. What network characteristic of LoRaWAN did you violate?"
 
@@ -599,7 +1221,7 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The OTA Bandwidth Congestion</b> · <code>networking</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The OTA Bandwidth Congestion</b> · <code>interconnect</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You have a fleet of 5,000 smart factory sensors connected via a shared LoRaWAN gateway. You push a 100 KB model update to the fleet simultaneously. The OTA update process stalls, taking days to complete, and normal sensor telemetry stops functioning entirely. What network characteristic of LoRaWAN did you violate?"
 
@@ -632,11 +1254,10 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 ---
 
 
-### 🔒 Security & Privacy
+### Security & Privacy
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The MCU Model Extraction Attack</b> · <code>security</code></summary>
 
@@ -690,7 +1311,7 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Secure Boot Chain for ML Models</b> · <code>security</code> <code>deployment</code></summary>
@@ -733,13 +1354,14 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 ---
 
 
-### 📎 Additional Topics
+### Additional Topics
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The MRAM Wear Illusion</b> · <code>storage</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The MRAM Wear Illusion</b> · <code>persistent-storage</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You switch from traditional SPI Flash to an external MRAM (Magnetoresistive RAM) chip to store telemetry. MRAM is famous for essentially infinite write endurance. You write your ML logs continuously in a tight loop. A year later, the MRAM chip starts returning corrupted bits. If MRAM doesn't wear out like Flash, why did it fail?"
 
@@ -765,10 +1387,9 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Flash Wear-Leveling Blindspot</b> · <code>storage</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Flash Wear-Leveling Blindspot</b> · <code>persistent-storage</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your edge sensors log anomaly data to internal Flash. To prevent wearing out the Flash (which has a 10,000 cycle limit), you write a script to always save logs starting at memory address 0x08000000, and sequentially move forward to 0x08040000 before looping back. After a year, the system crashes because the flash sector at 0x08000000 is physically destroyed. Why didn't your sequential logging work as wear-leveling?"
 
@@ -795,7 +1416,7 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Flash Wear-Leveling Blindspot</b> · <code>storage</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Flash Wear-Leveling Blindspot</b> · <code>persistent-storage</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your edge sensors log anomaly data to internal Flash. To prevent wearing out the Flash (which has a 10,000 cycle limit), you write a script to always save logs starting at memory address 0x08000000, and sequentially move forward to 0x08040000 before looping back. After a year, the system crashes because the flash sector at 0x08000000 is physically destroyed. Why didn't your sequential logging work as wear-leveling?"
 
@@ -822,10 +1443,10 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Continuous Logging Flash Death</b> · <code>storage</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Continuous Logging Flash Death</b> · <code>persistent-storage</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your smart thermostat logs the room temperature and the ML model's occupancy prediction to internal Flash memory every 5 minutes for user analytics. You are using a standard SPIFFS filesystem. The internal flash has a 10,000 cycle erase limit. A year later, 15% of the devices are permanently bricked. How did logging 20 bytes every 5 minutes destroy the Flash?"
 
@@ -854,7 +1475,7 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> Federated Learning on Constrained Devices</b> · <code>training</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> Federated Learning on Constrained Devices</b> · <code>data-parallelism</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You manage 10,000 vibration sensors on factory equipment. Each sensor runs anomaly detection on a Cortex-M4. After 6 months, the model drifts because equipment ages and vibration patterns change. You want to update the model using data from the fleet — but you can't upload raw sensor data (proprietary manufacturing data, 100 TB total). Can you do federated learning on MCUs?"
 
@@ -882,10 +1503,10 @@ FOTA updates, connectivity, monitoring, security, and long-term reliability — 
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> TinyML Federated Learning System</b> · <code>training</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> TinyML Federated Learning System</b> · <code>data-parallelism</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You have a fleet of 10,000 smart electricity meters, each with a Cortex-M4F (256 KB SRAM, 1 MB flash, 168 MHz) and a LoRaWAN radio (250 bps effective throughput after duty cycle limits). Each meter runs a load forecasting model (2-layer LSTM, 15 KB weights) that predicts next-hour consumption. After 1 year, the model has drifted because consumer behavior changed (more EVs, more solar panels). Design a federated learning system that retrains the model across the fleet using LoRaWAN's extreme bandwidth constraints."
 

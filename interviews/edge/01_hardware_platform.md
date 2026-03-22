@@ -17,11 +17,2249 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 ---
 
 
-### 📐 Roofline & Compute Analysis
+### Roofline & Compute Analysis
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Thermal Throttle</b> · <code>tops-vs-efficiency</code></summary>
+
+- **Interviewer:** "You are designing the compute module for an autonomous delivery drone, which has a strict thermal design power (TDP) limit of 10W. You are evaluating two AI accelerators:
+
+*   **Chip A (The "Peak Performer"):** The datasheet boasts **80 TOPS** (INT8), but this peak is achieved at a power draw of 40W.
+*   **Chip B (The "Efficient Performer"):** The datasheet specifies a more modest **25 TOPS** (INT8) peak, achieved at 2.5W.
+
+Which chip provides more *sustained* compute performance for your drone's 10W thermal budget, and what is that level of performance?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often fixate on the advertised peak TOPS number, which is a marketing metric, without considering the power required to achieve it. On power-constrained edge devices, TOPS/W (efficiency) is almost always more important than raw peak TOPS because the thermal envelope, not the silicon's theoretical maximum, becomes the limiting factor.
+
+  **Realistic Solution:** The correct approach is to calculate the efficiency (TOPS/W) of each chip and then determine the maximum sustained performance each can deliver within the 10W power budget.
+
+1.  **Chip A's Efficiency:** 80 TOPS / 40W = **2 TOPS/W**.
+2.  **Chip B's Efficiency:** 25 TOPS / 2.5W = **10 TOPS/W**.
+
+Now, calculate the sustained TOPS for each within the 10W thermal budget:
+
+*   **Chip A Sustained Performance:** 10W * 2 TOPS/W = **20 TOPS**.
+*   **Chip B Sustained Performance:** Chip B can run at its full peak of **25 TOPS** because it only requires 2.5W, which is well below the 10W budget.
+
+Therefore, the more efficient Chip B delivers higher sustained performance despite having a much lower advertised peak.
+
+  > **Napkin Math:** *   **Chip A Efficiency:** `80 TOPS / 40W = 2 TOPS/W`
+*   **Chip A Sustained Perf:** `10W Budget * 2 TOPS/W = 20 TOPS`
+*   **Chip B Efficiency:** `25 TOPS / 2.5W = 10 TOPS/W`
+*   **Chip B Sustained Perf:** `Peak of 25 TOPS` (since `2.5W < 10W` Budget)
+
+**Result:** Chip B (25 TOPS) > Chip A (20 TOPS)
+
+  > **Key Equation:** $\text{Sustained TOPS} = \min(\text{Peak TOPS}, \text{Thermal Budget}_W \times \frac{\text{TOPS}}{W})$
+
+  > **Options:**
+  > [ ] Chip A, providing 80 TOPS.
+  > [ ] Chip B, providing 100 TOPS.
+  > [ ] Chip A, providing 20 TOPS.
+  > [x] Chip B, providing 25 TOPS.
+
+  📖 **Deep Dive:** [Edge / Vision](https://mlsysbook.ai/edge/README.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Case of the Missing Gigabytes</b> · <code>memory-systems</code></summary>
+
+- **Interviewer:** "An engineer is deploying a computer vision model to a Jetson AGX Orin with 32 GB of LPDDR5 RAM. The model's weights and activations for a single inference are calculated to be 24 GB. The engineer is surprised when the application crashes with an out-of-memory (OOM) error. Besides the model itself, what other major consumer of DRAM on an edge device could account for the multi-gigabyte discrepancy?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers from a cloud or desktop background often underestimate how much memory is reserved by the system for hardware-specific operations on an SoC. They might account for 1-2 GB for the OS, but forget that high-bandwidth peripherals like cameras require large, pre-allocated contiguous memory (CMA) buffers for DMA transfers to guarantee real-time performance.
+
+  **Realistic Solution:** The OS (Linux for Tegra) reserves a baseline of 2-4 GB. Critically, the Linux kernel will pre-allocate a large Contiguous Memory Allocator (CMA) region at boot time to service real-time DMA requests from peripherals. For a high-resolution, high-framerate camera connected via MIPI CSI-2, this CMA buffer can be configured to be several gigabytes (e.g., 4-8 GB) to ensure frames are never dropped, even if the processing pipeline momentarily stalls. This reserved memory is not available to user-space applications, leading to the OOM error.
+
+  > **Napkin Math:** Total System RAM: 32 GB. Model Memory: 24 GB. Remaining Before System: 8 GB. A typical Linux OS on the device might use ~2 GB. A pre-allocated DMA buffer (CMA) for a 4K camera stream could easily be set to 6 GB to provide a deep buffer for real-time acquisition. Calculation: 32 GB (Total) - 24 GB (Model) - 2 GB (OS) - 6 GB (CMA) = 0 GB free memory, triggering the OOM.
+
+  > **Options:**
+  > [ ] Page file / swap space on the eMMC storage.
+  > [ ] Memory fragmentation from other running processes.
+  > [ ] The OS kernel, which typically uses a few hundred megabytes.
+  > [x] A large, pre-allocated DMA buffer for the camera sensor stream.
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The INT8 Energy Dividend</b> · <code>numerical-representation</code></summary>
+
+- **Interviewer:** "You're optimizing a computer vision model for a battery-powered drone. To maximize flight time, you're quantizing the model's weights and activations from 32-bit floating point (FP32) to 8-bit integer (INT8). From a pure hardware physics perspective, what is the approximate energy savings per operation you should expect by performing a computation in INT8 versus FP32?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the savings, guessing a small factor like 2-4x. This typically happens by confusing the energy savings of INT8 with the much smaller savings of FP16, or by failing to appreciate how bit width directly impacts the physical energy cost of a computation at the circuit level.
+
+  **Realistic Solution:** The energy saving is approximately 18x. The energy consumed by a digital operation is directly proportional to the number of transistors switching. An 8-bit integer multiplication involves significantly fewer switching events than a 32-bit floating-point multiplication, which has a more complex circuit to handle a mantissa and an exponent. This physical difference is the source of the dramatic energy reduction.
+
+  > **Napkin Math:** If a single FP32 MAC (Multiply-Accumulate) operation costs ~18 picojoules (pJ) of energy, the equivalent INT8 MAC would only cost ~1 pJ.
+
+For a model performing 10 Giga-MACs per inference:
+- **FP32 Energy:** 10e9 ops * 18 pJ/op = 180 millijoules (mJ)
+- **INT8 Energy:** 10e9 ops * 1 pJ/op = 10 millijoules (mJ)
+
+This ~94% reduction in compute energy is critical for extending battery life on power-constrained edge devices.
+
+  > **Key Equation:** E_{\text{FP32}} \approx 18 \times E_{\text{INT8}}
+
+  > **Options:**
+  > [ ] ~3-4×
+  > [x] ~18×
+  > [ ] ~100×
+  > [ ] ~580×
+
+  📖 **Deep Dive:** [The Invariants of ML Systems](ironlaw.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The ViT Memory Wall on the Edge</b> · <code>cnn-vs-transformer-edge</code></summary>
+
+- **Interviewer:** "You're designing a real-time object detection system for a smart camera using a Jetson AGX Orin. You need to hit a 33ms (30 FPS) deadline. You're comparing two models with similar parameter counts and total FLOPs: a MobileNet-style CNN and a Vision Transformer (ViT). For the ViT, what is the most likely primary performance bottleneck that could cause it to miss the 33ms deadline?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often fixate on total FLOPs or parameter count as the sole predictor of performance. On edge devices with limited memory bandwidth, the *pattern* of memory access is often more critical. A ViT's self-attention mechanism requires all-to-all comparisons between image patches, leading to a quadratic explosion in non-local memory accesses that can saturate the memory bus, even if the device's compute units (TOPS) are not fully utilized.
+
+  **Realistic Solution:** The primary bottleneck is memory bandwidth. While the CNN performs convolutions with a local receptive field (e.g., a 3x3 kernel), its memory accesses are predictable and cache-friendly. The ViT's self-attention mechanism is quadratic in the number of image patches (the sequence length). This requires fetching data for all patches to compute the attention score for any single patch, resulting in a massive number of non-local memory accesses that saturate the device's memory bus (e.g., the 204.8 GB/s LPDDR5 on an Orin).
+
+  > **Napkin Math:** Consider a 224x224 image divided into 16x16 patches, creating a sequence of N=196 patches.
+- **CNN:** A convolution's memory access is local. It reads a small 3x3 or 5x5 region for each output pixel. The operation is dominated by compute, making it compute-bound.
+- **ViT:** To compute the attention scores for just *one* patch, the model must read the Key vectors of all 196 patches. To build the full attention matrix, it performs this `N x N = 196 x 196 = 38,416` interaction. This quadratic scaling of memory access, not just computation, is what hits the 'memory wall' and causes high latency on bandwidth-constrained edge hardware, making the model memory-bound.
+
+  > **Key Equation:** $\text{Attention Memory Access} \propto O(N^2)
+
+  > **Options:**
+  > [ ] The total number of FLOPs in the MLP blocks
+  > [ ] The flash storage required for the model's parameters
+  > [x] Memory bandwidth saturation from the quadratic complexity of self-attention
+  > [ ] The latency of the initial patch embedding (stem) layer
+
+  📖 **Deep Dive:** [Edge AI Hardware Platforms](edge/01_hardware_platform.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The 30 FPS Deadline</b> · <code>latency-throughput</code></summary>
+
+- **Interviewer:** "You are designing the perception system for an autonomous vehicle. The system must process camera frames at a rate of 30 frames per second (FPS) to meet its real-time safety requirements. What is the maximum permissible, or 'worst-case execution time', for the entire ML pipeline to process a single frame?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the frame rate number (30) with the latency budget (30ms). Another common mistake is to think about average-case latency, while for hard real-time systems like this, the absolute worst-case execution time (WCET) must stay under the deadline to prevent catastrophic failure.
+
+  **Realistic Solution:** The maximum permissible latency is approximately 33.3 milliseconds. This is the time budget for the entire end-to-end pipeline, from sensor data acquisition to the final output tensor. If the pipeline takes longer than this on any single frame, the system misses its deadline, which is unacceptable in a safety-critical application.
+
+  > **Napkin Math:** The calculation is a direct conversion from frames per second to milliseconds per frame:
+
+1 second = 1000 milliseconds
+Frame Rate = 30 frames/second
+
+Time per frame = 1000 ms / 30 frames ≈ 33.3 ms/frame
+
+  > **Key Equation:** $\text{Latency Budget (ms)} = \frac{1000}{\text{Frame Rate (FPS)}}$
+
+  > **Options:**
+  > [ ] 16.6 ms
+  > [ ] 30 ms
+  > [x] 33.3 ms
+  > [ ] 100 ms
+
+  📖 **Deep Dive:** [Edge AI: Real-Time Pipelines](https://mlsysbook.ai/edge/02_realtime_pipeline.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Throttled Robot</b> · <code>power-thermal</code></summary>
+
+- **Interviewer:** "A delivery robot's compute module, a Jetson AGX Orin, can operate in various power states (P-states) to manage its thermal envelope. The module is rated for a peak of 275 TOPS at its higher power limits (e.g., 60W). To conserve battery, you configure the system to operate in a 15W power-limited mode. What is the approximate sustained INT8 TOPS you can expect to achieve in this mode?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to recall only the peak performance number (275 TOPS) without considering the direct impact of the power budget. Engineers forget that on thermally constrained edge devices, performance is not a fixed value but scales directly with the power allocated via mechanisms like DVFS (Dynamic Voltage and Frequency Scaling). The system's actual throughput is dictated by its power efficiency (TOPS/W) multiplied by the current power budget.
+
+  **Realistic Solution:** The performance scales roughly linearly with the power budget. First, calculate the device's power efficiency from its peak performance and power draw: ~275 TOPS / 60W ≈ 4.6 TOPS/W. Then, multiply this efficiency by the new power budget to find the sustained performance: 4.6 TOPS/W × 15W ≈ 69 TOPS. Therefore, you can expect about 70 TOPS of sustained performance.
+
+  > **Napkin Math:** Efficiency = Peak Performance / Max Power = 275 TOPS / 60W ≈ 4.6 TOPS/W
+Sustained Performance = Efficiency × Power Budget = 4.6 TOPS/W × 15W ≈ 69 TOPS
+
+  > **Key Equation:** $\text{Sustained TOPS} = \text{TOPS/W} \times \text{Thermal Budget (W)}$
+
+  > **Options:**
+  > [ ] 275 TOPS
+  > [ ] ~140 TOPS
+  > [x] ~70 TOPS
+  > [ ] 15 TOPS
+
+  📖 **Deep Dive:** [Edge AI](https://mlsysbook.ai/edge/)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> Pruning for Parallelism</b> · <code>tensorrt-pruning</code></summary>
+
+- **Interviewer:** "You are tasked with optimizing a convolutional neural network on a NVIDIA Jetson AGX Orin, which has hardware-accelerated Tensor Cores. Your goal is to use pruning to reduce the model's latency. To achieve a real-world speedup with the TensorRT runtime, which fundamental type of pruning should you recall as the most effective starting point?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume that any reduction in parameters or FLOPs will directly translate to a proportional decrease in latency. They focus on unstructured pruning because it can remove more weights for a given accuracy drop, but they forget that modern parallel processors like GPUs are not designed for sparse, irregular computation. The random memory access patterns of unstructured sparsity break the very assumptions that make GPUs fast.
+
+  **Realistic Solution:** Structured pruning is the correct approach. This method removes entire channels, filters, or other coarse-grained structures from the model. By doing so, it preserves the dense, regular, and contiguous blocks of data that are essential for high-throughput computation on parallel hardware like GPU Tensor Cores. TensorRT can recognize these dense structures and fuse them into highly optimized, high-arithmetic-intensity kernels, leading to significant latency reduction. Unstructured pruning, in contrast, creates sparse matrices that lead to scattered memory access and prevent the use of these efficient kernels.
+
+  > **Napkin Math:** The key is understanding the hardware's Roofline model. The Jetson AGX Orin has a Ridge Point of ~1,342 Ops/Byte. To achieve peak performance, your code must execute over 1,300 operations for every single byte of data it reads from memory.
+
+- **Structured Pruning:** Maintains large, contiguous tensors. This allows for burst reads from LPDDR5 memory (~204.8 GB/s) and keeps the arithmetic intensity high, staying on the compute-bound part of the roofline.
+
+- **Unstructured Pruning:** Turns the problem into a series of irregular memory accesses. Each access might incur a ~100 ns latency penalty (LPDDR5) without being able to use the full memory bandwidth. This crushes the arithmetic intensity, making the operation memory-bound and leaving the powerful Tensor Cores starved for data. The performance becomes limited by memory latency, not compute capability.
+
+  > **Options:**
+  > [ ] Unstructured pruning, because it provides the highest parameter reduction.
+  > [x] Filter pruning, a type of structured pruning, because it preserves the dense tensors that GPU kernels can accelerate.
+  > [ ] It doesn't matter; TensorRT can automatically detect and accelerate any form of sparsity.
+  > [ ] Unstructured pruning, but only if you re-train the model afterwards to cluster the weights.
+
+  📖 **Deep Dive:** [Model Optimization](https://mlsysbook.ai/edge/07_model_optimization.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The 'Open-Case' Vulnerability</b> · <code>physical-tampering</code></summary>
+
+- **Interviewer:** "An attacker has physical access to one of your company's smart security cameras. They want to bypass your perception model by injecting a pre-recorded video loop directly into the image processing pipeline, making it seem like an area is always empty. Which physical interface on the device's circuit board represents the most direct and highest-bandwidth point of attack for this data injection?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on network-level security (e.g., encrypting the video stream for cloud upload) and forget that on an edge device, the initial data capture pipeline is a major vulnerability. An attacker with physical access can probe the unencrypted, unauthenticated signals traveling between components on the PCB (Printed Circuit Board) before any software-level security is applied.
+
+  **Realistic Solution:** The MIPI CSI-2 (Camera Serial Interface 2) bus is the most vulnerable point. It is the standard high-speed interface connecting the image sensor to the System-on-Chip (SoC). This raw sensor data is typically unencrypted and unauthenticated, making it a prime target for a physical 'man-in-the-middle' attack using a signal injector to feed the SoC a malicious video stream.
+
+  > **Napkin Math:** An attacker needs to inject a data stream that matches the camera's output. Let's calculate the bandwidth for a typical 4MP security camera sensor (e.g., 2688x1520 pixels) running at 30 FPS in a 12-bit RAW format (1.5 bytes/pixel).
+
+1.  **Required Bandwidth:** `2688 pixels * 1520 pixels * 30 fps * 1.5 bytes/pixel ≈ 184 MB/s`
+2.  **Interface Comparison:**
+    *   `UART`: ~115 Kbps. Can't carry video.
+    *   `I2C`: ~400 Kbps. Can't carry video.
+    *   `MIPI CSI-2 (4-lane)`: ~2.5 GB/s. Has more than enough bandwidth.
+
+**Conclusion:** The MIPI CSI-2 bus is the only standard peripheral interface with sufficient bandwidth to carry a raw video stream, making it the logical and primary target for a physical injection attack.
+
+  > **Options:**
+  > [ ] The I2C bus used for sensor configuration.
+  > [ ] The encrypted LPDDR5 DRAM where the model is stored.
+  > [x] The MIPI CSI-2 camera interface.
+  > [ ] The UART serial console used for debugging.
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Throttling Trap</b> · <code>compute-analysis</code></summary>
+
+- **Interviewer:** "You are designing the compute module for a delivery drone, which has a sealed, passively-cooled enclosure with a strict thermal design power (TDP) of 15 W. You're evaluating two edge accelerators:
+
+*   **Chip A ('BruteForce-FX')**: Advertises a peak performance of 200 TOPS (INT8), but has a low power efficiency of 4 TOPS/W.
+*   **Chip B ('EfficientCore-AI')**: Advertises a more modest peak performance of 50 TOPS (INT8), but has an excellent power efficiency of 10 TOPS/W.
+
+Explain which chip will deliver better *sustained* inference performance for your drone and calculate the throughput for each."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often fixate on the advertised 'peak TOPS' figure. They select the chip with the highest number on the datasheet, completely ignoring the fact that in a thermally-constrained system, the chip will never be able to reach that peak. The true performance is dictated by the power budget.
+
+  **Realistic Solution:** The performance of a chip in a thermally constrained environment is limited not by its theoretical peak, but by the power it can dissipate. The maximum sustained performance is the product of the thermal budget and the chip's power efficiency.
+
+*   **Chip A** is limited by the 15 W thermal envelope. Its sustained performance will be 15 W × 4 TOPS/W = 60 TOPS. It will thermally throttle long before it reaches its 200 TOPS peak.
+*   **Chip B** needs 50 TOPS / 10 TOPS/W = 5 W of power to run at its peak. Since 5 W is well below the 15 W thermal budget, it can sustain its peak performance indefinitely.
+
+Therefore, Chip A will deliver 60 TOPS, while Chip B can only deliver 50 TOPS. In this specific scenario with a 15W budget, Chip A is actually the better choice, despite its lower efficiency. This demonstrates that the interplay between budget and efficiency is critical.
+
+  > **Napkin Math:** The key is to calculate the maximum performance each chip can sustain within the 15W power budget.
+
+1.  **Calculate Chip A's Sustained TOPS:**
+    *   `Thermal Budget × Efficiency = Sustained Performance`
+    *   `15 W × 4 TOPS/W = 60 TOPS`
+    *   (This is less than its 200 TOPS peak, so it is thermally limited)
+
+2.  **Calculate Chip B's Sustained TOPS:**
+    *   First, find the power needed to reach its peak: `Peak Performance / Efficiency = Power Draw`
+    *   `50 TOPS / 10 TOPS/W = 5 W`
+    *   Since 5 W is less than the 15 W budget, the chip is NOT thermally limited and can sustain its peak performance.
+    *   `Sustained Performance = 50 TOPS`
+
+3.  **Compare:**
+    *   `Chip A (60 TOPS) > Chip B (50 TOPS)`.
+    *   Chip A provides better sustained performance in this case.
+
+  > **Key Equation:** $\text{Sustained TOPS} = \min(\text{Peak TOPS}, \text{Thermal Budget} \times \text{TOPS/W})$
+
+  > **Options:**
+  > [x] Chip A is better, delivering a sustained 60 TOPS, while Chip B only reaches 50 TOPS.
+  > [ ] Chip B is better because its power efficiency (10 TOPS/W) is 2.5x higher than Chip A's (4 TOPS/W).
+  > [ ] Chip A is better because its peak performance (200 TOPS) is 4x higher than Chip B's (50 TOPS).
+  > [ ] They perform equally, as both will be limited to 15 TOPS by the 15W thermal budget.
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Shared DRAM Budget</b> · <code>memory-systems</code></summary>
+
+- **Interviewer:** "You are designing the software for an autonomous delivery robot using a Jetson AGX Orin with 32 GB of LPDDR5 DRAM. The robot uses four 4K (3840x2160) cameras for 360-degree vision. The camera drivers use DMA to write sensor data directly into DRAM, and to prevent tearing, this pipeline is triple-buffered. The Linux OS, drivers, and safety monitoring processes reserve a fixed 4 GB of DRAM at boot.
+
+Explain the factors consuming DRAM in this system and calculate the realistic maximum memory budget remaining for your ML model's weights and activations."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to cloud environments often assume the advertised RAM (32 GB) is entirely available for their application. They forget that on an SoC, DRAM is a shared resource. The most common error is to ignore the memory footprint of high-resolution camera streams being written into DRAM by the DMA engine, or to forget the OS and other system processes have their own significant, non-negotiable memory reservation.
+
+  **Realistic Solution:** The key is to systematically subtract all non-model memory consumers from the total DRAM. First, calculate the memory consumed by the camera DMA buffers. Then, subtract the fixed OS reservation. The remainder is the budget for the ML model.
+
+1.  **Calculate single frame buffer size:** A 4K frame (3840x2160) with 2 bytes per pixel (for FP16 or YUV422 data) requires `3840 * 2160 * 2 = 16.6 MB`.
+2.  **Account for buffering and multiple cameras:** With triple buffering for 4 cameras, the total reservation is `16.6 MB/frame * 3 buffers * 4 cameras = 199.2 MB`, or about 0.2 GB.
+3.  **Subtract all overhead:** Start with the total 32 GB, subtract the 4 GB for the OS, and subtract the 0.2 GB for the camera buffers.
+
+This leaves a realistic ML budget of `32 - 4 - 0.2 = 27.8 GB`.
+
+  > **Napkin Math:** Total DRAM: 32 GB
+System Reserved: 4 GB
+
+- **Single Camera Frame Size:**
+  3840 pixels * 2160 pixels * 2 bytes/pixel = 16,588,800 bytes ≈ 16.6 MB
+
+- **Total Camera Buffer Reservation:**
+  16.6 MB/frame × 3 buffers × 4 cameras = 199.2 MB ≈ 0.2 GB
+
+- **Available ML Budget:**
+  32 GB (Total) - 4 GB (System) - 0.2 GB (Cameras) = 27.8 GB
+
+  > **Key Equation:** $\text{Available DRAM} = \text{Total DRAM} - \text{OS Reserved} - (W \times H \times BPP \times N_{\text{buffers}} \times N_{\text{cameras}})$
+
+  > **Options:**
+  > [ ] ~31.8 GB
+  > [ ] ~27.9 GB
+  > [x] ~27.8 GB
+  > [ ] 28.0 GB
+
+  📖 **Deep Dive:** [Edge: Real-Time Pipelines](https://mlsysbook.ai/edge/02_realtime_pipeline.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The INT8 Memory Footprint</b> · <code>int8-quantization</code></summary>
+
+- **Interviewer:** "You have a 25 million parameter computer vision model trained in FP32. To meet the performance requirements for deployment on a Jetson AGX Orin, you need to convert it to INT8. Explain the difference in the memory required for the model's weights before and after quantization, and calculate the total memory savings."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the memory reduction ratios. They might incorrectly assume a 2x saving (confusing it with FP16 conversion) or an 8x saving (confusing the bit-width difference with the byte-multiple difference). The correct ratio for FP32 (4 bytes) to INT8 (1 byte) is exactly 4x.
+
+  **Realistic Solution:** An FP32 parameter requires 4 bytes of storage. An INT8 parameter requires 1 byte. Therefore, converting the weights from FP32 to INT8 results in a 4x reduction in the memory footprint for the model weights.
+
+*   **Before (FP32):** 25,000,000 parameters × 4 bytes/parameter = 100,000,000 bytes = 100 MB.
+*   **After (INT8):** 25,000,000 parameters × 1 byte/parameter = 25,000,000 bytes = 25 MB.
+
+This yields a memory saving of 75 MB, which is critical for fitting large models onto edge devices with limited DRAM.
+
+  > **Napkin Math:** 1. **FP32 Size:** 25M params * 4 bytes/param = 100 MB
+2. **INT8 Size:** 25M params * 1 byte/param = 25 MB
+3. **Ratio:** 100 MB / 25 MB = 4x reduction
+4. **Savings:** 100 MB - 25 MB = 75 MB
+
+  > **Key Equation:** $\text{Memory (bytes)} = \text{Parameters} \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] 50 MB (FP32) and 25 MB (INT8), a 2x reduction.
+  > [ ] 200 MB (FP32) and 25 MB (INT8), an 8x reduction.
+  > [x] 100 MB (FP32) and 25 MB (INT8), a 4x reduction.
+  > [ ] 100 MB (FP32) and 12.5 MB (INT8), an 8x reduction.
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Transformer's Quadratic Curse</b> · <code>cnn-vs-transformer-scaling</code></summary>
+
+- **Interviewer:** "You're designing a real-time vision system for an autonomous drone with a 33ms latency budget. The current system uses a lightweight CNN on 320x320 images. To improve accuracy on small objects, the team is considering increasing the resolution to 640x640. Compare how the computational cost (FLOPs) scales for a typical CNN versus a Vision Transformer (ViT) when you quadruple the input pixel count."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming both architectures scale linearly with the number of input pixels. Engineers often forget that for a ViT, image resolution directly impacts the 'sequence length' (number of patches), and self-attention complexity is quadratic in sequence length. They mentally model the ViT as just another feature extractor, not a sequence processor.
+
+  **Realistic Solution:** A CNN's cost scales roughly linearly with the number of pixels. Its convolutional kernels perform a fixed number of operations per pixel region. Quadrupling the pixel count (2x width, 2x height) results in a ~4x increase in FLOPs.
+
+A ViT's self-attention cost scales quadratically with the number of image patches. Quadrupling the pixel count also quadruples the number of patches (N). Since the self-attention mechanism's complexity is O(N²), the computational cost for that part of the model increases by a factor of ~4² = 16x. This scaling makes high-resolution ViTs very expensive for real-time edge applications.
+
+  > **Napkin Math:** 1. **CNN Scaling:**
+   - Initial state: `Cost_CNN_320`
+   - New pixel count = `(640*640) / (320*320)` = 4x initial pixels
+   - New CNN Cost ≈ `4 * Cost_CNN_320`
+
+2. **ViT Scaling:**
+   - Let N be the number of patches at 320x320.
+   - At 640x640, the number of patches becomes `4N`.
+   - Attention cost is proportional to `(num_patches)²`.
+   - New ViT Attention Cost ≈ `(4N)²` = `16 * N²`
+   - The cost scales by a factor of 16.
+
+**Conclusion:** The ViT's cost explodes by 16x, while the CNN's increases by a more manageable 4x. This quadratic scaling is a major barrier for high-resolution, real-time Transformers on the edge.
+
+  > **Key Equation:** $\text{Cost}_{\text{CNN}} \propto \text{Pixels} \quad \text{vs.} \quad \text{Cost}_{\text{ViT}} \propto (\text{NumPatches})^2 \propto (\text{Pixels})^2$
+
+  > **Options:**
+  > [ ] Both architectures scale linearly, leading to a ~4x increase in FLOPs.
+  > [x] The CNN's cost scales ~4x, while the ViT's scales ~16x.
+  > [ ] The CNN's cost scales quadratically (~16x), while the ViT's is linear (~4x).
+  > [ ] The cost increase is negligible (~2x) for both due to hardware acceleration.
+
+  📖 **Deep Dive:** [Network Architectures](https://mlsysbook.ai/vol1/dnn_architectures.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The 30 FPS Frame Deadline</b> · <code>worst-case-execution-time</code></summary>
+
+- **Interviewer:** "You are designing the perception system for a self-driving car, which has a hard real-time requirement to process camera frames at 30 FPS to ensure safety. Your pipeline consists of three stages running sequentially on a Jetson AGX Orin: 1) Image pre-processing (CSI-2 camera ingest, resizing, normalization) which takes 5ms, 2) The main perception model inference, which takes 20ms, and 3) Post-processing (object tracking, sensor fusion) which takes 10ms. Can this pipeline meet its 30 FPS deadline?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus solely on the model inference time and forget to account for the full end-to-end pipeline latency. In real-time systems, every millisecond counts, and the pre- and post-processing steps are often significant contributors to the total 'glass-to-glass' latency. Another mistake is designing for the average case, whereas hard real-time systems must be designed for the worst-case execution time (WCET).
+
+  **Realistic Solution:** No, the pipeline cannot reliably meet its 30 FPS deadline. The deadline for a 30 FPS system is approximately 33.3ms per frame. The total worst-case execution time for the sequential pipeline is the sum of its stages. In this case, 5ms (pre-processing) + 20ms (inference) + 10ms (post-processing) = 35ms. This total latency of 35ms is greater than the 33.3ms budget, meaning the system will drop frames, leading to a critical failure in a safety-critical application like autonomous driving.
+
+  > **Napkin Math:** 1. **Calculate the frame budget:**
+   $\text{Frame Budget} = \frac{1000 \text{ ms/second}}{30 \text{ frames/second}} = 33.3 \text{ ms/frame}$
+
+2. **Calculate total pipeline latency (WCET):**
+   $\text{Total Latency} = T_{\text{preprocess}} + T_{\text{inference}} + T_{\text{postprocess}}$
+   $\text{Total Latency} = 5 \text{ ms} + 20 \text{ ms} + 10 \text{ ms} = 35 \text{ ms}$
+
+3. **Compare latency to budget:**
+   $35 \text{ ms} > 33.3 \text{ ms}$
+
+4. **Conclusion:** The system fails to meet the hard real-time deadline.
+
+  > **Key Equation:** $$T_{\text{pipeline}} = \sum_{i=1}^{N} T_{\text{stage}_i} \le \frac{1000}{\text{FPS}_{\text{target}}}$$
+
+  > **Options:**
+  > [ ] Yes, the 20ms inference time is well within the 33ms budget.
+  > [ ] Yes, the total latency is 30ms, which is just inside the 33ms budget.
+  > [x] No, the 35ms total pipeline latency exceeds the 33.3ms frame budget.
+  > [ ] It depends on the average case; the worst-case 35ms latency might be rare and acceptable.
+
+  📖 **Deep Dive:** [Real-Time Pipelines](https://mlsysbook.ai/edge/02_realtime_pipeline.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Throttling Trap</b> · <code>power-thermal</code></summary>
+
+- **Interviewer:** "You're deploying a perception model to a Jetson AGX Orin, which the datasheet advertises as having 275 TOPS (INT8) of peak performance. However, the autonomous robot chassis it's being installed in can only continuously dissipate 30W of heat. Explain the realistic, sustained inference performance you should actually base your system design on."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming performance scales linearly with power. Engineers often take the peak performance (275 TOPS) and its associated power draw (e.g., 60W) to calculate a single TOPS/Watt efficiency number. They then incorrectly multiply this by the new, lower power budget (30W), failing to account for the non-linear reality of Dynamic Voltage and Frequency Scaling (DVFS), where efficiency changes at different power points.
+
+  **Realistic Solution:** The Jetson AGX Orin, like most complex SoCs, uses DVFS with pre-defined power profiles (P-states) to manage the trade-off between performance and power consumption. When constrained to a 30W thermal envelope, the system will not run at half performance. Instead, it will engage a specific, more efficient 30W power mode. For the AGX Orin, this mode delivers approximately 170 TOPS. This is because the underlying voltages and frequencies are optimized for that power level, resulting in a higher TOPS/Watt efficiency than at peak power.
+
+  > **Napkin Math:** 1. **Find Peak Efficiency:** The Jetson AGX Orin achieves its peak 275 TOPS in MAXN mode, which consumes around 60W. Peak Efficiency ≈ 275 TOPS / 60W ≈ 4.6 TOPS/Watt.
+2. **Calculate Linear Scaling Fallacy:** An incorrect linear assumption would yield: 30W * 4.6 TOPS/W ≈ 138 TOPS. This is the common trap.
+3. **Use Real P-State Performance:** Look up the device's actual power profile. The official 30W mode for the AGX Orin is specified to deliver ~170 TOPS.
+4. **Calculate True Efficiency:** In this mode, the efficiency is actually 170 TOPS / 30W ≈ 5.7 TOPS/Watt.
+5. **Conclusion:** The device is ~24% more energy-efficient in its 30W mode than its MAXN mode, yielding a sustained performance of 170 TOPS, which is significantly higher than the linear scaling estimate.
+
+  > **Key Equation:** $\text{Sustained Performance} = f(\text{Thermal Budget})$
+
+  > **Options:**
+  > [ ] 138 TOPS, because performance scales linearly with the power budget.
+  > [ ] 275 TOPS, the device will just run hotter but should maintain its advertised performance.
+  > [x] Around 170 TOPS, as the device selects its more efficient 30W DVFS power profile.
+  > [ ] 26 TOPS, which is the peak performance of other efficient edge accelerators in that power range.
+
+  📖 **Deep Dive:** [Edge AI](https://mlsysbook.ai/edge/)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Structured Sparsity Speedup</b> · <code>structured-sparsity-tensorrt</code></summary>
+
+- **Interviewer:** "You're optimizing a dense ResNet-50 computer vision model for a self-driving car's perception system, running on a Jetson AGX Orin. Your team applies 2:4 structured pruning, which removes 50% of the weights in the convolutional and linear layers in a hardware-friendly pattern. Assuming the model is entirely compute-bound, explain the theoretical performance speedup you'd expect from this optimization when using NVIDIA's TensorRT."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse unstructured and structured sparsity. Unstructured sparsity (randomly removing individual weights) offers high compression but rarely any inference speedup on standard GPU hardware because the compute patterns are irregular and don't map to efficient hardware execution. Structured sparsity, like the 2:4 pattern, creates fine-grained patterns that specialized hardware, like the Sparse Tensor Cores in NVIDIA's Ampere architecture (which the Jetson AGX Orin uses), can accelerate.
+
+  **Realistic Solution:** With 2:4 structured pruning, 50% of the weights are zeroed out in a regular pattern that Sparse Tensor Cores can recognize. Since the scenario states the model is compute-bound, TensorRT can leverage these cores to effectively skip the computations involving these zeroed weights. This halves the number of required multiply-accumulate operations (FLOPs) for the pruned layers. Halving the computational work directly leads to a theoretical 2× speedup.
+
+  > **Napkin Math:** The core of the calculation is understanding the relationship between sparsity and computational work.
+
+1.  **Define Sparsity:** 2:4 structured sparsity means 50% of the weights are zero.
+    - `Sparsity Ratio = 0.5`
+
+2.  **Calculate Remaining Work:** Since 50% of the operations are skipped, only 50% of the original work remains.
+    - `Remaining FLOPs = Original FLOPs * (1 - Sparsity Ratio)`
+    - `Remaining FLOPs = Original FLOPs * (1 - 0.5) = 0.5 * Original FLOPs`
+
+3.  **Calculate Speedup:** Speedup is the ratio of original work to new work.
+    - `Theoretical Speedup = Original FLOPs / Remaining FLOPs`
+    - `Theoretical Speedup = Original FLOPs / (0.5 * Original FLOPs) = 1 / 0.5 = 2x`
+
+  > **Key Equation:** $\text{Theoretical Speedup} = \frac{1}{1 - \text{Sparsity Ratio}}$
+
+  > **Options:**
+  > [ ] No speedup, it only saves memory.
+  > [ ] 1.5× speedup, due to framework overheads.
+  > [x] 2× speedup.
+  > [ ] 4× speedup.
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Compromised Robot</b> · <code>physical-tampering-defense</code></summary>
+
+- **Interviewer:** "Your company deploys a fleet of 1,000 delivery robots, each using a Jetson AGX Orin for its vision-based navigation system. A competitor gets physical access to one of the robots. Their goal is to tamper with the onboard model weights stored in flash memory, making the robot fail to recognize stop signs. As the ML systems engineer, what is the most fundamental and effective *first line of defense* you should explain to your team to prevent the robot from ever running this maliciously modified model?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often jump to software-only or network-level solutions (like firewalls or adversarial training) and forget that physical access bypasses those layers entirely. They may also suggest encrypting the model, but this is insufficient if the attacker can compromise the operating system to intercept the decryption key or dump the model from RAM after it's loaded.
+
+  **Realistic Solution:** The correct first step is to enable Secure Boot on the Jetson AGX Orin. Secure Boot creates a hardware root of trust. It uses cryptographic signatures to ensure that every piece of software, from the bootloader to the operating system and finally to the ML model itself, is authentic and untampered. If an attacker modifies even a single bit of the model file on the flash storage, the signature verification will fail during the boot process, and the compromised code will be blocked from executing. This prevents the robot from ever running the dangerous, tampered model.
+
+  > **Napkin Math:** Let's calculate the immediate operational cost of a fleet-wide vulnerability that requires manual intervention because Secure Boot and a secure OTA (Over-The-Air) update mechanism were not implemented.
+
+- **Fleet Size:** 1,000 robots
+- **Technician Time per Robot:** 30 minutes (0.5 hours) to manually access, re-flash, and verify each device.
+- **Technician Labor Rate:** $100 / hour
+
+**Calculation:**
+Total Recall Time = 1,000 robots × 0.5 hours/robot = 500 hours
+Total Labor Cost = 500 hours × $100/hour = **$50,000**
+
+This $50,000 is a direct, immediate cost, excluding downtime, brand damage, or potential accident liability. Implementing a hardware-rooted defense like Secure Boot from the start is critical to enabling a secure, scalable OTA update mechanism and avoiding such costs.
+
+  > **Key Equation:** $\text{Trust Chain: } H_{RoT} \xrightarrow{\text{verifies}} \text{Bootloader} \xrightarrow{\text{verifies}} \text{OS} \xrightarrow{\text{verifies}} \text{ML Model}$
+
+  > **Options:**
+  > [ ] Encrypt the model file stored on the robot's flash memory.
+  > [ ] Retrain the vision model using adversarial training to make it robust to sticker attacks.
+  > [x] Enable Secure Boot to create a hardware-rooted chain of trust.
+  > [ ] Configure a firewall on the robot to block all incoming network traffic.
+
+  📖 **Deep Dive:** [Responsible Engineering](https://mlsysbook.ai/vol1/responsible_engr.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Power Efficiency Fallacy</b> · <code>tops-per-watt-efficiency</code></summary>
+
+- **Interviewer:** "Your team is building a vision system for a battery-powered drone and needs to choose an accelerator. The primary constraint is maximizing inference throughput per watt. Between a Jetson AGX Orin and a Hailo-8, which device is fundamentally more power-efficient in terms of TOPS/W?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often fixate on the advertised peak TOPS of a device (275 TOPS for Jetson vs. 26 TOPS for Hailo) and incorrectly assume the higher number implies better performance in all scenarios. This ignores the crucial context of the power budget, which is often the primary constraint at the edge.
+
+  **Realistic Solution:** The Hailo-8 is significantly more power-efficient. Power efficiency is measured in TOPS per Watt (TOPS/W). While the Jetson has much higher absolute performance, the Hailo-8 delivers more compute for every watt it consumes, making it the superior choice for severely power-constrained applications.
+
+  > **Napkin Math:** We calculate the TOPS/W for each device using the spec sheet values.
+
+- **Hailo-8:** 26 TOPS / 2.5W = **10.4 TOPS/W**
+- **Jetson AGX Orin (peak power):** 275 TOPS / 60W = **~4.6 TOPS/W**
+
+The Hailo-8 offers more than double the computational efficiency of the Jetson running at its peak.
+
+  > **Key Equation:** $\text{Efficiency} = \frac{\text{Peak Performance (TOPS)}}{\text{Power Consumption (W)}}$
+
+  > **Options:**
+  > [ ] The Jetson AGX Orin, because its 275 TOPS is over 10x higher than the Hailo-8's 26 TOPS.
+  > [x] The Hailo-8, because it delivers over 2x the TOPS/W compared to the Jetson.
+  > [ ] They are roughly equivalent in efficiency; the choice depends on other factors.
+  > [ ] It's impossible to tell without knowing the specific model architecture.
+
+  📖 **Deep Dive:** [Edge AI](https://mlsysbook.ai/edge/)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Edge Roofline Trap</b> · <code>roofline-on-edge-accelerators</code></summary>
+
+- **Interviewer:** "You are deploying a classic convolutional neural network, which is known to be memory-bound. Based on their hardware specs, which device, a Jetson AGX Orin or a Hailo-8, is more likely to be bottlenecked by memory bandwidth rather than its compute units?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to only look at peak TOPS and ignore the memory system. A device can have immense computational power, but if its memory can't supply data fast enough, that power is useless. This is the core concept of the Roofline Model.
+
+  **Realistic Solution:** The Jetson AGX Orin is more likely to be memory-bottlenecked for a typical memory-bound model. This can be quantified by its 'Ridge Point,' which is the Arithmetic Intensity needed to become compute-bound. The Jetson's high Ridge Point means a model needs to perform many FLOPs for every byte of data it reads to use its compute units effectively. The Hailo-8, with its extremely high-bandwidth on-chip SRAM, has a much lower Ridge Point, meaning it is 'easier' for a model to be compute-bound.
+
+  > **Napkin Math:** The Ridge Point is the ratio of compute to memory bandwidth. A higher Ridge Point means a device is 'hungrier' for compute and more easily starved by memory.
+
+- **Jetson AGX Orin Ridge Point:** 275 TOPS / 204.8 GB/s ≈ **1342 Ops/Byte**
+- **Hailo-8 Ridge Point:** 26 TOPS / 2500 GB/s (2.5 TB/s) ≈ **10.4 Ops/Byte**
+
+Since the Jetson's Ridge Point is over 100x higher, it requires models with significantly higher arithmetic intensity to avoid being stuck on the memory-bound slope of the roofline.
+
+  > **Key Equation:** $\text{Ridge Point} = \frac{\text{Peak Performance (Ops/sec)}}{\text{Memory Bandwidth (Bytes/sec)}}$
+
+  > **Options:**
+  > [ ] The Hailo-8, because its compute (26 TOPS) is lower, making it the bottleneck.
+  > [x] The Jetson AGX Orin, because its memory bandwidth is much lower relative to its peak compute power.
+  > [ ] Neither, as both use modern memory systems that eliminate bottlenecks.
+  > [ ] The device with more RAM, as it will try to process more data at once.
+
+  📖 **Deep Dive:** [Edge AI](https://mlsysbook.ai/edge/)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Unified Memory Contention</b> · <code>unified-memory-architecture</code></summary>
+
+- **Interviewer:** "You deploy a computer vision model that requires 8 GB of memory for weights and activations on a Jetson AGX Orin, which has 32 GB of total LPDDR5 DRAM. During operation, the device must also run a separate, high-priority process that streams and records 4K video. You notice that your model's inference latency becomes unstable and sometimes the entire system lags. Identify the fundamental hardware constraint causing this issue."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to cloud GPUs (like the H100) often assume the edge GPU has its own dedicated, high-bandwidth memory (like HBM). They diagnose the problem as a lack of 'VRAM', when the real issue is the shared nature of the entire memory system.
+
+  **Realistic Solution:** The Jetson AGX Orin, like most edge SoCs, uses a unified memory architecture. The 32 GB of LPDDR5 DRAM is a single pool of memory shared by the CPU (running the OS, video stream process) and the integrated GPU (running the model). There is no separate, dedicated GPU memory. The instability arises because the model's memory accesses are competing for the same DRAM bandwidth with the CPU and the high-throughput video stream, causing contention on the memory bus.
+
+  > **Napkin Math:** A 4K video stream (3840x2160) using a common YUV420 format (1.5 bytes/pixel) at 30 fps requires `3840 * 2160 * 1.5 * 30 ≈ 373 MB/s` of sustained memory bandwidth. While the Jetson AGX Orin has a peak bandwidth of 204.8 GB/s, this video stream creates constant pressure on the same resource your model needs for loading weights and activations, leading to latency spikes.
+
+  > **Options:**
+  > [ ] The GPU's dedicated HBM memory is too small for the model.
+  > [x] The CPU and GPU are competing for access to the same shared LPDDR5 DRAM.
+  > [ ] The PCIe bus connecting the CPU and GPU is saturated.
+  > [ ] The Linux OS is swapping model memory to the NVMe drive.
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The CPU-Free Camera Ingest</b> · <code>dma-offload</code></summary>
+
+- **Interviewer:** "You're building a real-time perception system for a drone with a 33ms end-to-end latency budget per frame. A camera streams high-resolution images that must be processed by the GPU. To meet the tight deadline, the CPU must remain available for flight control calculations while the camera frame is being transferred into memory. State the critical hardware feature that enables the camera to write an image into system DRAM for the GPU to read, all without involving the CPU in the data copying process."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common misconception is that the CPU must always act as a data mover, executing a `memcpy` to shuttle data from peripheral buffers to the main memory accessible by the GPU. This would consume thousands of CPU cycles, violating the premise of keeping the CPU free for other tasks.
+
+  **Realistic Solution:** The mechanism is Direct Memory Access (DMA). A DMA controller allows the camera's hardware interface (e.g., its Image Signal Processor) to gain control of the memory bus and write frame data directly into a pre-allocated buffer in system DRAM. Once the data is there, the GPU can also use its own DMA engine to read it. The CPU is only needed to set up the DMA transfer initially and then receives an interrupt upon completion, leaving it free to perform other critical tasks during the multi-megabyte data transfer.
+
+  > **Napkin Math:** A 12 MP camera frame (e.g., 4000x3000) with 12-bit RAW data (1.5 bytes/pixel) is `4000 * 3000 * 1.5 ≈ 18 MB`. A CPU `memcpy` on an edge device might achieve 5 GB/s. The copy would take `18 MB / 5 GB/s ≈ 3.6 ms`. This would consume over 10% of the 33ms frame budget in a CPU-blocking operation. DMA performs this transfer with zero CPU usage during the copy.
+
+  > **Options:**
+  > [ ] A high-priority CPU thread performs a `memcpy` from the camera to DRAM.
+  > [ ] The GPU reads pixels directly from the camera sensor's private SRAM.
+  > [x] Direct Memory Access (DMA) controllers manage the transfer independent of the CPU.
+  > [ ] The camera data is sent to the GPU through a series of L1 cache line fills.
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Edge Robot's Memory Tax</b> · <code>dram-budget-sharing</code></summary>
+
+- **Interviewer:** "You're deploying a new object detection model to an autonomous delivery robot equipped with a Jetson AGX Orin with 32 GB of LPDDR5 DRAM. The robot's OS and safety-critical navigation stack reserve 6 GB of DRAM at all times. The new model has 5 billion parameters and will run in FP16. Its peak activation memory is 4 GB. Explain if the model will fit in the remaining DRAM."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often forget that the advertised DRAM of a device is not fully available to their application. They calculate the model's memory footprint and compare it against the total system DRAM, ignoring the significant 'tax' imposed by the OS, drivers, and other system processes, leading to out-of-memory errors at runtime.
+
+  **Realistic Solution:** First, calculate the available memory for the application. Then, calculate the model's total memory requirement (weights + activations). Finally, compare the two to see if it fits.
+1.  **Available DRAM:** 32 GB (Total) - 6 GB (OS/System) = 26 GB.
+2.  **Model Memory:** (5 Billion params × 2 bytes/param for FP16) + 4 GB (Activations) = 10 GB (Weights) + 4 GB (Activations) = 14 GB.
+3.  **Conclusion:** The model requires 14 GB, and there is 26 GB of available DRAM. Yes, it will fit with a comfortable margin.
+
+  > **Napkin Math:** # Calculate available memory
+Total DRAM: 32 GB
+System Reserved: 6 GB
+Available DRAM = 32 GB - 6 GB = 26 GB
+
+# Calculate model memory requirement
+Parameter Count: 5.0e9
+Precision: FP16 (2 bytes/param)
+Weight Memory = 5e9 * 2 bytes = 10e9 bytes = 10 GB
+Activation Memory: 4 GB
+Total Model Memory = 10 GB + 4 GB = 14 GB
+
+# Compare
+14 GB (Required) < 26 GB (Available) -> It fits.
+
+  > **Key Equation:** $\text{Available DRAM} = \text{Total DRAM} - (\text{OS Overhead} + \text{System Apps})$
+
+  > **Options:**
+  > [ ] No, the model's 5B parameters require 20 GB in FP16, which is too large for the 26 GB available after activations.
+  > [ ] No, it won't fit because the 14 GB model requirement exceeds the total system DRAM.
+  > [x] Yes, it requires 14 GB (10 GB for FP16 weights + 4 GB for activations), which is less than the 26 GB of available DRAM.
+  > [ ] Yes, it fits because the model's 10 GB of weights is less than the total 32 GB of DRAM.
+
+  📖 **Deep Dive:** [Edge Compute Analysis](https://mlsysbook.ai/edge/01_compute_analysis.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The High-Speed Camera's DMA Budget</b> · <code>dma-transfer-time</code></summary>
+
+- **Interviewer:** "An industrial inspection system uses a high-speed camera connected to an edge device over a 4-lane MIPI CSI-2 bus. It captures 4K images (3840x2160) with 3 color channels (RGB), using 8 bits per channel (1 byte). The system must process frames at 60 FPS. Interpret the MIPI CSI-2 bandwidth spec and calculate the time it takes to transfer a single frame via DMA. Does this transfer time fit within the per-frame latency budget?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is confusing bandwidth units (GB/s vs Gbps), leading to an 8x error. Another is using the wrong bus's bandwidth from the spec sheet (e.g., using the much faster DRAM bandwidth for a slower camera interconnect), leading to a wildly optimistic and incorrect calculation.
+
+  **Realistic Solution:** 1.  **Calculate Frame Size:** A 4K image is 3840 pixels wide by 2160 pixels high. With 3 channels at 8 bits (1 byte) each, the size is `3840 * 2160 * 3 * 1 byte = 24,883,200 bytes`, or ~24.9 MB.
+2.  **Find Transfer Bandwidth:** From the hardware specs, a 4-lane MIPI CSI-2 bus has a bandwidth of ~2.5 GB/s.
+3.  **Calculate Transfer Time:** `Time = Size / Bandwidth = 24.9 MB / 2.5 GB/s = 0.0249 GB / 2.5 GB/s ≈ 0.00996 seconds`, or ~10 ms.
+4.  **Compare to Budget:** The per-frame budget for 60 FPS is `1000 ms / 60 = 16.67 ms`. Since 10 ms is less than 16.67 ms, the DMA transfer fits comfortably within the latency budget.
+
+  > **Napkin Math:** # Calculate Frame Size in MB
+Frame Size = 3840 * 2160 * 3 channels * 1 byte/channel
+Frame Size = 24,883,200 bytes ≈ 24.9 MB
+
+# Find Bandwidth from Specs
+MIPI CSI-2 (4-lane) Bandwidth: 2.5 GB/s (or 2500 MB/s)
+
+# Calculate Transfer Time
+Transfer Time = 24.9 MB / 2500 MB/s ≈ 0.00996 s ≈ 10 ms
+
+# Calculate Latency Budget
+Budget = 1000 ms / 60 FPS = 16.67 ms
+
+# Compare
+10 ms (Required) < 16.67 ms (Budget) -> It fits.
+
+  > **Key Equation:** $\text{Transfer Time} = \frac{\text{Data Size}}{\text{Interconnect Bandwidth}}$
+
+  > **Options:**
+  > [ ] No, the transfer takes ~80 ms, which exceeds the 16.7 ms budget.
+  > [x] Yes, the transfer takes ~10 ms, which is well within the 16.7 ms budget.
+  > [ ] No, the transfer time is only ~0.12 ms because it uses the Jetson's 204.8 GB/s DRAM bandwidth, but the processing will be the bottleneck.
+  > [ ] Yes, the transfer is nearly instantaneous because DMA operations don't consume bus bandwidth.
+
+  📖 **Deep Dive:** [Edge Compute Analysis](https://mlsysbook.ai/edge/01_compute_analysis.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The 30 FPS Deadline</b> · <code>real-time-frame-budget</code></summary>
+
+- **Interviewer:** "You are designing an obstacle detection system for an autonomous warehouse robot that must process video at a minimum of 30 frames per second (FPS) to ensure safe navigation. To meet this hard real-time requirement, what is the maximum latency budget for the entire ML inference pipeline for a single frame?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the frame rate directly with the millisecond budget, assuming 30 FPS means a 30ms budget. Another common mistake is to calculate the budget for 60 FPS (16.6ms) out of habit from UI development, which is a much stricter target.
+
+  **Realistic Solution:** A rate of 30 frames per second means that 30 frames must be processed within one second. The total time in a second is 1000 milliseconds. Therefore, the budget for each frame is 1000 milliseconds divided by 30 frames, which is 33.3 milliseconds.
+
+  > **Napkin Math:** $\frac{1000 \text{ ms}}{1 \text{ second}} \times \frac{1 \text{ second}}{30 \text{ frames}} = 33.3 \text{ ms/frame}$
+
+  > **Key Equation:** $\text{Latency Budget (ms)} = \frac{1000}{\text{Frames Per Second}}$
+
+  > **Options:**
+  > [ ] 16.6 ms
+  > [ ] 30 ms
+  > [x] 33.3 ms
+  > [ ] 100 ms
+
+  📖 **Deep Dive:** [Edge AI](https://mlsysbook.ai/edge/)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> Worst-Case vs. Average-Case</b> · <code>worst-case-execution-time</code></summary>
+
+- **Interviewer:** "A new traffic light control system uses a model on a Jetson AGX Orin to detect emergency vehicles. The system has a hard real-time requirement to react within 33ms (a 30 FPS SLA). Profiling shows your model's *average* inference time is 28ms, but its P99 (worst-case) latency is 45ms. Does this system satisfy the real-time requirement?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing on average-case latency. In safety-critical or hard real-time systems, the *worst-case* execution time (WCET) is the only metric that matters for guaranteeing performance. An average time that meets the budget is irrelevant if the system can unpredictably miss its deadline.
+
+  **Realistic Solution:** No, the system does not meet the requirement. For a hard real-time system, the worst-case latency must be less than or equal to the deadline. Here, the P99 latency of 45ms is greater than the 33ms budget, meaning the system will fail to react in time in at least 1% of cases, which is unacceptable.
+
+  > **Napkin Math:** $\text{Worst-Case Latency} (45 \text{ ms}) > \text{Frame Deadline} (33 \text{ ms}) \rightarrow \text{Requirement NOT Met}$
+
+  > **Key Equation:** $\text{WCET} \le \text{Deadline}$
+
+  > **Options:**
+  > [ ] Yes, because the average latency (28ms) is well below the 33ms deadline.
+  > [x] No, because the worst-case latency (45ms) exceeds the 33ms deadline.
+  > [ ] Yes, because the Jetson AGX Orin has over 200 TOPS, which is sufficient.
+  > [ ] It's impossible to say without knowing the P99.9 latency.
+
+  📖 **Deep Dive:** [Edge AI](https://mlsysbook.ai/edge/)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The 30 FPS Frame Deadline</b> · <code>frame-deadline-calculation</code></summary>
+
+- **Interviewer:** "An autonomous delivery robot uses a vision model to detect obstacles. To operate safely, the system has a hard real-time requirement to process camera frames at a minimum of 30 Frames Per Second (FPS). Explain what the maximum permissible latency, or 'frame budget,' is in milliseconds for the entire vision pipeline to meet this requirement."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common error is to forget the units conversion from seconds to milliseconds, calculating `1 / 30 = 0.033` and reporting that as the answer. Another mistake is to confuse the 30 FPS target with the 60 FPS target common in user interfaces, leading to an answer of ~16.7ms.
+
+  **Realistic Solution:** To meet a 30 FPS target, each frame must be processed from capture to final output in under the time allocated for a single frame. Since there are 1000 milliseconds in a second, the budget is calculated by dividing the total time by the number of frames. This gives a hard deadline of 33.3 milliseconds per frame.
+
+  > **Napkin Math:** 1 second = 1000 milliseconds. Frame Budget = 1000 ms / 30 frames ≈ 33.3 ms/frame.
+
+  > **Key Equation:** $\text{Frame Budget (ms)} = \frac{1000 \text{ ms/s}}{\text{Target FPS}}$
+
+  > **Options:**
+  > [ ] 16.7 ms
+  > [ ] 30 ms
+  > [x] 33.3 ms
+  > [ ] 0.033 ms
+
+  📖 **Deep Dive:** [Edge](https://mlsysbook.ai/edge/README.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> Throughput vs. Latency</b> · <code>compute-throughput-analysis</code></summary>
+
+- **Interviewer:** "You are designing a smart security camera that must run an object detection model at 30 FPS. The model requires 2 Trillion Operations (TOPs) to process a single frame. You are considering using a Hailo-8 accelerator, which has a peak performance of 26 TOPS. Compare the accelerator's throughput to the model's requirement and determine if it can meet the 30 FPS deadline."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often look at the peak TOPS number (26) and assume it's 'big enough' without doing the rate calculation. Another mistake is inverting the division, calculating `Model TOPs / Accelerator TOPs`, which yields a meaningless ratio.
+
+  **Realistic Solution:** The core task is to calculate the maximum theoretical frame rate the hardware can support for this specific model. The Hailo-8 provides 26 Trillion Operations per second. The model consumes 2 Trillion Operations per frame (inference). By dividing the hardware's capacity by the model's cost, we find the achievable frame rate. In this case, it's 13 FPS, which fails to meet the 30 FPS requirement.
+
+  > **Napkin Math:** Achievable FPS = Accelerator Throughput / Model Workload = 26 TOPs / (2 TOPs/frame) = 13 frames/second (FPS). Since 13 FPS is less than the required 30 FPS, the Hailo-8 cannot meet the deadline for this model.
+
+  > **Key Equation:** $\text{Achievable FPS} = \frac{\text{Accelerator TOPS}}{\text{Model TOPs per Inference}}$
+
+  > **Options:**
+  > [ ] Yes, 26 TOPS is much greater than the 2 TOPS required.
+  > [ ] No, it can only achieve about 7.7 FPS.
+  > [x] No, it can only achieve 13 FPS.
+  > [ ] Yes, it can run at 520 FPS.
+
+  📖 **Deep Dive:** [Edge](https://mlsysbook.ai/edge/README.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Thermal Handcuffs</b> · <code>tops-per-watt</code></summary>
+
+- **Interviewer:** "You are selecting an edge accelerator for a drone with a strict 15W thermal budget. Your vendor provides a datasheet stating the chip's efficiency is 4.6 TOPS/W. What is the *maximum sustained performance* you can realistically expect from this chip under that thermal constraint?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse a chip's headline peak performance (which is often thermally unconstrained) with its *sustained* performance, which is dictated by the system's power and thermal limits. Another mistake is to misuse the TOPS/W metric, not realizing it's a simple multiplier.
+
+  **Realistic Solution:** The TOPS/W metric directly tells you the operational performance you get for a given power input. Under a 15W thermal budget, the chip's compute performance is limited by that budget. Therefore, the maximum sustained performance is the efficiency multiplied by the power budget.
+
+  > **Napkin Math:** Sustained TOPS = Efficiency (TOPS/W) × Thermal Budget (W)
+Sustained TOPS = 4.6 TOPS/W × 15W = 69 TOPS.
+
+  > **Key Equation:** $\text{Sustained Performance} = \text{Efficiency}_{\text{TOPS/W}} \times \text{Power Budget}_{\text{W}}$
+
+  > **Options:**
+  > [ ] 4.6 TOPS
+  > [ ] 275 TOPS
+  > [x] 69 TOPS
+  > [ ] 0.3 TOPS
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> Crossing the Ridge Point</b> · <code>roofline-analysis</code></summary>
+
+- **Interviewer:** "An engineer profiles a model on a Jetson AGX Orin and finds its Arithmetic Intensity is 2,000 Ops/Byte. The Orin's hardware ridge point is approximately 1,342 Ops/Byte. Based on these numbers, identify the primary performance bottleneck for this model."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common misconception is thinking that a high Arithmetic Intensity (AI) means the model is memory-bound because it's 'doing a lot of math'. The correct interpretation is the opposite: a high AI means the model performs many operations for each byte of data it fetches. If this AI is higher than the hardware's ridge point, the system has enough memory bandwidth to feed the compute units, making the compute units themselves the bottleneck.
+
+  **Realistic Solution:** The roofline model defines the relationship between Arithmetic Intensity, memory bandwidth, and peak compute. The 'ridge point' is the AI where the system transitions from being memory-bound to compute-bound. Since the model's AI (2,000 Ops/Byte) is greater than the hardware's ridge point (1,342 Ops/Byte), the model's performance is limited by the speed of the compute units, not the memory system.
+
+  > **Napkin Math:** If Model AI > Hardware Ridge Point → Compute-Bound
+If Model AI < Hardware Ridge Point → Memory-Bound
+
+In this case: 2,000 Ops/Byte > 1,342 Ops/Byte, therefore the model is Compute-Bound.
+
+  > **Key Equation:** $\text{Arithmetic Intensity} = \frac{\text{Total Operations}}{\text{Total Data Movement (Bytes)}}$
+
+  > **Options:**
+  > [ ] The model is Memory-Bound.
+  > [x] The model is Compute-Bound.
+  > [ ] The model is Network-Bound.
+  > [ ] The model is Power-Bound.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Orin Utilization Puzzle</b> · <code>gpu-roofline-arithmetic-intensity</code></summary>
+
+- **Interviewer:** "You're optimizing a new object detection model for a drone equipped with a Jetson AGX Orin. Profiling shows a single inference performs 50 Giga-operations (INT8) and requires reading a total of 100 MB of data (weights and activations) from its LPDDR5 memory. Based on the Orin's specs, explain whether this model's performance is limited by compute or memory bandwidth."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus only on the peak TOPS of a processor and assume their model will achieve it. They forget that data movement (memory bandwidth) is often the real bottleneck, especially for models with a low ratio of computation to memory access (low arithmetic intensity). Simply having a high TOPS number doesn't guarantee high performance.
+
+  **Realistic Solution:** The model is memory-bound. To determine this, we calculate the model's Arithmetic Intensity (AI) and compare it to the hardware's Ridge Point. If the model's AI is lower than the Ridge Point, it's memory-bound; if it's higher, it's compute-bound.
+
+The Jetson AGX Orin has 275 TOPS (INT8) of compute and 204.8 GB/s of memory bandwidth. Its Ridge Point is the ratio of these two values. The model's AI is the ratio of its operations to its memory accesses. Because the model's AI is significantly lower than the Orin's Ridge Point, the memory system cannot supply data fast enough to keep the powerful compute cores fully utilized.
+
+  > **Napkin Math:** 1. **Calculate Hardware Ridge Point:** This is the ratio of peak operations to memory bandwidth, defining the boundary between memory-bound and compute-bound regions.
+   - `Ridge Point = Peak Compute / Memory Bandwidth`
+   - `Ridge Point = 275 TOPS / 204.8 GB/s = (275 * 10^12 Ops/s) / (204.8 * 10^9 Bytes/s) ≈ 1342 Ops/Byte`
+
+2. **Calculate Model Arithmetic Intensity (AI):** This is the ratio of operations performed to data moved for the specific workload.
+   - `Model AI = Total Operations / Total Memory Moved`
+   - `Model AI = 50 GOps / 100 MB = (50 * 10^9 Ops) / (100 * 10^6 Bytes) = 500 Ops/Byte`
+
+3. **Compare:**
+   - `500 Ops/Byte (Model AI) < 1342 Ops/Byte (Ridge Point)`
+   - Since the model's AI is less than the hardware's Ridge Point, it is **memory-bound**.
+
+  > **Key Equation:** $\text{Arithmetic Intensity (AI)} = \frac{\text{Total Operations (Ops)}}{\text{Total Memory Moved (Bytes)}}$
+
+  > **Options:**
+  > [x] The model is memory-bound because its Arithmetic Intensity (~500 Ops/Byte) is less than the Orin's Ridge Point (~1342 Ops/Byte).
+  > [ ] The model is compute-bound because the Jetson Orin has a very high peak compute of 275 TOPS.
+  > [ ] The model is compute-bound because its Arithmetic Intensity is high (50 Giga-ops is a large number).
+  > [ ] The model is memory-bound because its power consumption (TOPS/W) would be too high otherwise.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Edge SRAM Speed Advantage</b> · <code>memory-hierarchy</code></summary>
+
+- **Interviewer:** "An edge accelerator, like a Hailo-8, integrates a large on-chip SRAM for computation. Roughly how much faster is accessing this on-chip SRAM compared to accessing the main system LPDDR5 DRAM?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often either underestimate the gap, thinking it's only 2-3x, or they overestimate it by applying cloud-scale HBM vs L1 latency ratios (~300x). The edge memory hierarchy has its own distinct physics.
+
+  **Realistic Solution:** On-chip SRAM access is physically close to the compute units, making its latency comparable to an L2 cache, around ~4 ns. LPDDR5 DRAM is on a separate chip, and access is much slower, around ~100 ns. Therefore, SRAM is roughly 100 ns / 4 ns = 25x faster.
+
+  > **Napkin Math:** If an on-chip SRAM read felt like 4 seconds (like an L2 cache access), waiting for an off-chip LPDDR5 read would feel like 100 seconds, or about 1.5 minutes. This is why data locality is critical for accelerator performance.
+
+  > **Key Equation:** $\text{Latency Ratio} = \frac{\text{Latency}_{\text{DRAM}}}{\text{Latency}_{\text{SRAM}}}$
+
+  > **Options:**
+  > [ ] ~2x faster
+  > [ ] ~300x faster
+  > [x] ~25x faster
+  > [ ] They are about the same speed
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> Defining the Tensor Arena</b> · <code>sram-tensor-arena</code></summary>
+
+- **Interviewer:** "When deploying a model to a microcontroller with only a few hundred kilobytes of SRAM, the TensorFlow Lite Micro runtime requires you to pre-allocate a 'Tensor Arena'. What is the primary purpose of this memory region?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Many engineers incorrectly assume the Tensor Arena holds the model's weights (which are usually kept in read-only flash memory) or that it's a dynamic memory pool. Its core purpose is the exact opposite: to *prevent* dynamic memory allocation (`malloc`) in a resource-constrained, real-time environment.
+
+  **Realistic Solution:** The Tensor Arena is a single, large, statically pre-allocated block of memory in SRAM. The TFLite Micro interpreter uses this arena for all temporary tensors created during inference, including the model's inputs, outputs, and intermediate activation layers. This avoids the overhead, non-determinism, and potential for memory fragmentation associated with dynamic memory allocation, which is critical for reliability on a microcontroller.
+
+  > **Napkin Math:** On a device with 256KB of SRAM, the OS and runtime might consume 150KB. This leaves only 106KB for the model. If you load the 50KB of weights into SRAM, you only have 56KB left for the Tensor Arena. If the largest simultaneous activation footprint is 60KB (e.g., the output of layer N and input to layer N+1), inference will fail. This forces strict memory accounting.
+
+  > **Key Equation:** $\text{SRAM}_{\text{Available}} > \text{SRAM}_{\text{Arena}} + \text{SRAM}_{\text{Runtime}}$
+
+  > **Options:**
+  > [ ] To store the model's immutable weight parameters read from flash.
+  > [ ] To dynamically allocate memory for activations using `malloc` as needed.
+  > [x] To provide a static memory block for all activation tensors, avoiding `malloc`.
+  > [ ] To serve as a high-speed cache for the main system DRAM.
+
+  📖 **Deep Dive:** [TinyML Microcontrollers](https://mlsysbook.ai/tinyml/01_microcontroller.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The SRAM Tensor Arena Squeeze</b> · <code>tensor-arena-memory</code></summary>
+
+- **Interviewer:** "You are deploying a simple CNN on a microcontroller with 256 KB of SRAM available for the model's tensor arena. The model has two convolutional layers. The input tensor is `[1, 128, 128, 3]`. The output of the first layer is `[1, 64, 64, 16]`. The output of the second layer is `[1, 32, 32, 32]`. All tensors use FP16 precision. To minimize memory, the runtime will reuse memory buffers. Explain what the peak memory usage of the tensor arena will be and determine if the model will fit."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often make one of two mistakes: 1) They sum the size of all activation tensors, assuming none are freed. 2) They only account for the single largest tensor, forgetting that during an operation, both the input and output tensor must exist in memory simultaneously.
+
+  **Realistic Solution:** The correct approach is to calculate the memory required for the input and output of *each* operation, and the peak is the maximum of those sums. The runtime needs to hold the input to a layer and the output of that layer in memory at the same time. The peak is therefore the largest sum of `input_tensor_size + output_tensor_size` across all layers.
+
+- **Transition to Layer 1:** Needs memory for its input (the model's input) and its output. `96 KB + 128 KB = 224 KB`.
+- **Transition to Layer 2:** Needs memory for its input (Layer 1's output) and its output. `128 KB + 64 KB = 192 KB`.
+
+The peak memory required is the maximum of these, which is 224 KB. Since this is less than the available 256 KB, the model will fit.
+
+  > **Napkin Math:** 1.  **Calculate tensor sizes in bytes (FP16 = 2 bytes):**
+    -   `Input`: `1 * 128 * 128 * 3 * 2 bytes` = 98,304 bytes = **96 KB**
+    -   `Layer 1 Output`: `1 * 64 * 64 * 16 * 2 bytes` = 131,072 bytes = **128 KB**
+    -   `Layer 2 Output`: `1 * 32 * 32 * 32 * 2 bytes` = 65,536 bytes = **64 KB**
+
+2.  **Calculate peak memory for each transition:**
+    -   `Peak @ Layer 1`: `size(Input) + size(L1_Output)` = 96 KB + 128 KB = **224 KB**
+    -   `Peak @ Layer 2`: `size(L1_Output) + size(L2_Output)` = 128 KB + 64 KB = **192 KB**
+
+3.  **Determine max peak:**
+    -   `max(224 KB, 192 KB)` = **224 KB**.
+
+  > **Key Equation:** $\text{Arena Peak} = \max_{\text{layer}_i}(\text{Size}(\text{Input}_i) + \text{Size}(\text{Output}_i))$
+
+  > **Options:**
+  > [ ] 288 KB, because you sum all the tensors (96+128+64). It will not fit.
+  > [ ] 128 KB, because that is the size of the largest tensor. It will fit.
+  > [x] 224 KB, because the peak is the sum of the input and output of the first layer (96+128). It will fit.
+  > [ ] 112 KB, because you calculated with INT8 instead of FP16. It will fit.
+
+  📖 **Deep Dive:** [TinyML Microcontroller Architectures](tinyml/01_microcontroller.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The DMA Offload Dividend</b> · <code>dma-memory-transfer</code></summary>
+
+- **Interviewer:** "You're optimizing an inference pipeline on a Jetson AGX Orin. A preprocessing step produces a 300 KB tensor that needs to be moved from general LPDDR5 DRAM to a specific memory region for the GPU. You can use a CPU-driven `memcpy` or set up a DMA transfer. Assume a realistic `memcpy` can achieve 10 GB/s, while the DMA controller can achieve 100 GB/s for this path. Compare the time it would take for each method to transfer the tensor."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume a CPU `memcpy` can achieve the device's theoretical peak memory bandwidth (e.g., ~200 GB/s for a Jetson Orin). In practice, CPU overhead, cache effects, and bus contention mean `memcpy` is significantly slower than a dedicated DMA engine, which is designed for exactly this kind of memory-to-memory transfer without CPU intervention.
+
+  **Realistic Solution:** The correct way to solve this is to apply the bandwidth formula (Time = Size / Bandwidth) to each case using the *realistic* bandwidth numbers provided. The DMA controller, being specialized hardware, can move the data much more efficiently than the general-purpose CPU, resulting in a significantly lower transfer time and freeing up the CPU for other tasks.
+
+- **CPU `memcpy`:** 300 KB / 10 GB/s = 30 µs
+- **DMA Transfer:** 300 KB / 100 GB/s = 3 µs
+
+The DMA transfer is 10 times faster than the CPU copy.
+
+  > **Napkin Math:** 1.  **Data Size:** 300 KB = 300 * 10^3 bytes
+
+2.  **CPU `memcpy` Time:**
+    -   `Bandwidth`: 10 GB/s = 10 * 10^9 bytes/s
+    -   `Time` = `(300 * 10^3) / (10 * 10^9)` = 30 * 10^-6 seconds = **30 µs**
+
+3.  **DMA Transfer Time:**
+    -   `Bandwidth`: 100 GB/s = 100 * 10^9 bytes/s
+    -   `Time` = `(300 * 10^3) / (100 * 10^9)` = 3 * 10^-6 seconds = **3 µs**
+
+4.  **Comparison:** The DMA transfer is 30 µs / 3 µs = **10x faster**.
+
+  > **Key Equation:** $\text{Transfer Time} = \frac{\text{Data Size}}{\text{Bandwidth}}$
+
+  > **Options:**
+  > [ ] The CPU takes ~1.5 µs, the DMA takes ~0.3 µs. Both are very fast.
+  > [x] The CPU takes 30 µs, the DMA takes 3 µs.
+  > [ ] Both take roughly the same time, ~1.5 µs, as they are limited by the device's 204.8 GB/s peak memory bandwidth.
+  > [ ] The CPU takes ~240 µs, the DMA takes ~24 µs, because you confused GB/s with Gb/s.
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](edge/01_hardware_platform.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Energy Cost of Precision</b> · <code>quantization-energy-ratio</code></summary>
+
+- **Interviewer:** "You're optimizing a computer vision model for a battery-powered drone. To meet the power budget, you are considering quantizing the model from FP16 to INT8. From a hardware physics perspective, roughly how much more energy does a single FP16 multiply-accumulate (MAC) operation consume compared to a single INT8 MAC?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often incorrectly assume that energy consumption scales linearly with bit width, leading them to guess the ratio is 2x (since 16 bits / 8 bits = 2). They fail to account for the non-linear relationship between bit width and the switching energy in the digital logic of the arithmetic units.
+
+  **Realistic Solution:** An FP16 operation consumes approximately 5x more energy than an INT8 operation. This is a fundamental hardware invariant. The energy cost of a computation is directly related to the number of transistors switching, which does not scale linearly with the bit width of the operands. This significant energy saving is a primary motivator for quantization on power-constrained edge devices.
+
+  > **Napkin Math:** We can derive this from the invariant table. An FP32 op is ~18x the energy of an INT8 op. An FP32 op is ~3.4x the energy of an FP16 op. Therefore, the ratio of FP16 to INT8 energy is:
+
+Energy(FP16) / Energy(INT8) ≈ (Energy(FP32) / 3.4) / (Energy(FP32) / 18) = 18 / 3.4 ≈ 5.3×.
+
+This 5x energy reduction per operation is the physical basis for quantization's effectiveness in edge AI.
+
+  > **Key Equation:** $\frac{E_{FP16}}{E_{INT8}} \approx \frac{E_{FP32} / 3.4}{E_{FP32} / 18} \approx 5.3$
+
+  > **Options:**
+  > [ ] About 2x more energy
+  > [ ] About 18x more energy
+  > [x] About 5x more energy
+  > [ ] The energy difference is negligible
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Stereo Vision Memory Squeeze</b> · <code>quantization-memory-savings</code></summary>
+
+- **Interviewer:** "You are an engineer on a smart camera team. Your current object detection model is 50 MB in FP16 precision. Your product manager wants to add a second camera for a stereo vision feature, which requires running a second, identical model in parallel. The edge device you're using has a hard 60 MB memory budget available for model weights in its high-speed SRAM. Your team proposes quantizing both models to INT8 to meet this constraint. Explain whether this strategy will work and why."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to confuse the baseline precision. Engineers moving from a 32-bit world often default to thinking of quantization as a 4x memory saving (FP32 -> INT8). However, when the starting point is FP16, the saving is only 2x. Another error is forgetting the request is for *two* models, and only calculating the memory for one.
+
+  **Realistic Solution:** Yes, this strategy will work. An FP16 model uses 2 bytes for every parameter, while an INT8 model uses only 1 byte. Quantizing the 50 MB FP16 model to INT8 will halve its size.
+
+Each quantized model will now be 25 MB. Running two of these models in parallel will require 50 MB of memory, which fits comfortably within the 60 MB budget.
+
+  > **Napkin Math:** 1. **Initial State:**
+   - Single FP16 model size: 50 MB
+   - Required memory for two FP16 models: 2 * 50 MB = 100 MB
+   - Memory budget: 60 MB
+   - Conclusion: Fails, as 100 MB > 60 MB.
+
+2. **Proposed Strategy (Quantization):**
+   - Memory reduction from FP16 (2 bytes/param) to INT8 (1 byte/param) is 2x.
+   - Size of one INT8 model: 50 MB / 2 = 25 MB.
+   - Required memory for two INT8 models: 2 * 25 MB = 50 MB.
+
+3. **Final Check:**
+   - Required memory vs. budget: 50 MB < 60 MB.
+   - Conclusion: Success. The strategy works.
+
+  > **Key Equation:** $\text{Memory}_{\text{total}} = N_{\text{models}} \times \frac{\text{Memory}_{\text{FP16}}}{2}$
+
+  > **Options:**
+  > [ ] No, the total size is still 100 MB, which is over the 60 MB budget.
+  > [ ] Yes, the total size will be 25 MB, leaving plenty of extra space.
+  > [x] Yes, the total size will be 50 MB, which fits within the 60 MB budget.
+  > [ ] No, the quantization only provides a 1.5x reduction, resulting in a total size of ~67 MB, which is still too large.
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Depthwise Separable Dividend</b> · <code>depthwise-separable-convolution</code></summary>
+
+- **Interviewer:** "An edge vision model is processing a `112x112x32` (HWC) feature map. You need to apply a convolution with a `3x3` kernel that produces a `112x112x64` output feature map. Compare the computational cost of a standard `3x3` convolution to a `3x3` depthwise separable convolution for this task. Calculate the approximate reduction factor in total FLOPs."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often miscalculate the reduction in one of two ways: 1) They only consider the depthwise pass, leading them to believe the reduction is ~K^2 (e.g., 9x for a 3x3 kernel). 2) They forget the cost of the subsequent pointwise pass, which is often the dominant term. The true reduction is limited by the sum of both stages.
+
+  **Realistic Solution:** A depthwise separable convolution replaces a single, dense convolutional layer with two smaller ones: a depthwise convolution that filters each input channel independently, and a pointwise (1x1) convolution that linearly combines the outputs of the depthwise pass. This factorization dramatically reduces computation.
+
+1.  **Standard Convolution FLOPs:** `2 * H * W * C_out * C_in * K * K = 2 * 112 * 112 * 64 * 32 * 3 * 3 ≈ 462 MFLOPs`.
+2.  **Depthwise Pass FLOPs:** `2 * H * W * C_in * K * K = 2 * 112 * 112 * 32 * 3 * 3 ≈ 7.2 MFLOPs`.
+3.  **Pointwise Pass FLOPs:** `2 * H * W * C_out * C_in * 1 * 1 = 2 * 112 * 112 * 64 * 32 ≈ 51.4 MFLOPs`.
+4.  **Total Depthwise Separable FLOPs:** `7.2M + 51.4M = 58.6 MFLOPs`.
+5.  **Reduction Factor:** `462 MFLOPs / 58.6 MFLOPs ≈ 7.89x`.
+
+The calculation simplifies to a ratio dependent only on the output channels and kernel size, which is a powerful rule of thumb.
+
+  > **Napkin Math:** Standard Conv FLOPs = 2 * (112*112) * 64_out * 32_in * (3*3) = 462,422,016
+
+Depthwise Pass (filters per channel) = 2 * (112*112) * 32_in * (3*3) = 7,225,344
+Pointwise Pass (combines channels) = 2 * (112*112) * 64_out * 32_in * (1*1) = 51,380,224
+Total DS FLOPs = 7.2M + 51.4M = 58,605,568
+
+Reduction = 462.4M / 58.6M ≈ 7.9x
+
+  > **Key Equation:** $\text{Reduction} = \frac{\text{FLOPs}_{\text{std}}}{\text{FLOPs}_{\text{ds}}} = \frac{C_{out} \cdot K^2}{K^2 + C_{out}}$
+
+  > **Options:**
+  > [ ] The reduction is ~64x
+  > [ ] The reduction is ~9x, which is K^2
+  > [x] The reduction is ~8x
+  > [ ] The reduction is ~2x, the ratio of output to input channels
+
+  📖 **Deep Dive:** [Network Architectures](https://mlsysbook.ai/vol1/dnn_architectures.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Real-Time Batching Trap</b> · <code>real-time-latency</code></summary>
+
+- **Interviewer:** "You're designing the perception system for an autonomous forklift in a warehouse. The system has a hard real-time deadline of 33ms to process each camera frame to avoid collisions. A single model inference takes 20ms. To improve overall throughput, a teammate suggests batching two frames together before processing. What is the most immediate and critical consequence of this choice for this real-time system?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Confusing throughput with latency. Engineers often focus on maximizing the number of inferences per second (throughput) without considering that static batching adds significant latency, which is fatal for hard real-time systems. They mistakenly believe higher throughput always equates to better performance, ignoring the per-frame deadline.
+
+  **Realistic Solution:** The system will miss its real-time deadline. While batching might increase aggregate throughput, the latency for any given frame increases because it must wait for the batch to be filled and then processed. The time to get a result for the first frame is now at least the inference time for the *entire* batch, which is `~2 * 20ms = 40ms` (optimistically). This 40ms latency violates the 33ms hard deadline, leading to potential system failure.
+
+  > **Napkin Math:** Deadline = 33ms. Latency (Batch Size 1) = 20ms. This meets the deadline. Latency (Batch Size 2) ≈ 2 × 20ms = 40ms. Since 40ms > 33ms, the system fails its real-time constraint. This is the critical failure mode.
+
+  > **Key Equation:** $T_{\text{latency}} > T_{\text{deadline}}$
+
+  > **Options:**
+  > [x] It will cause the system to miss its 33ms deadline.
+  > [ ] It will increase the system's throughput, improving performance.
+  > [ ] It will have no effect on the 33ms deadline.
+  > [ ] It will reduce the power consumption per inference.
+
+  📖 **Deep Dive:** [Real-Time Pipelines](https://harvard-edge.github.io/cs249r_book_dev/contents/edge/02_realtime_pipeline.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Perception of Speed on Edge Devices</b> · <code>perceived-latency</code></summary>
+
+- **Interviewer:** "You are optimizing a local voice assistant on a smart display. User feedback indicates the device 'feels slow' when asked a question. The system uses a small language model to generate answers. Which of the following metrics is the most crucial to minimize to address the user's perception of slowness?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing only on the raw generation speed (e.g., tokens per second) rather than the initial delay. A system can generate text very quickly (high TPOT), but if there's a long pause after the user finishes speaking (high TTFT), the interaction feels laggy and unresponsive.
+
+  **Realistic Solution:** Time to First Token (TTFT) is the most critical metric for perceived responsiveness. TTFT measures the 'thinking time' from the end of the user's prompt to the generation of the first output token. A low TTFT makes the system feel instantaneous, even if the subsequent tokens are generated more slowly. A high TTFT creates a noticeable, frustrating delay for the user.
+
+  > **Napkin Math:** System A: TTFT = 250ms, TPOT = 100ms/token. System B: TTFT = 1,200ms, TPOT = 50ms/token. The user perceives System A as much faster because it starts responding in 0.25 seconds. The 1.2-second pause before System B responds makes it feel broken, even though its subsequent tokens generate twice as fast.
+
+  > **Key Equation:** $T_{\text{perceived_latency}} \approx T_{\text{TTFT}}$
+
+  > **Options:**
+  > [x] Time to First Token (TTFT)
+  > [ ] Time per Output Token (TPOT)
+  > [ ] Peak Memory Usage
+  > [ ] Model FLOPS
+
+  📖 **Deep Dive:** [Serving Stack](https://harvard-edge.github.io/cs249r_book_dev/contents/cloud/03_serving_stack.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Real-Time Deadline Trap</b> · <code>real-time-batching</code></summary>
+
+- **Interviewer:** "You are designing the perception system for an autonomous forklift in a warehouse. The safety protocol requires the obstacle detection model to process each camera frame within a 33ms deadline to ensure a 30 FPS response rate. On your edge accelerator, the model takes 20ms for inference on a single frame. To improve the accelerator's efficiency, you consider batching two frames together. Explain whether this is a feasible strategy."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on optimizing for throughput (frames per second) by increasing batch size, forgetting that in a real-time system, latency is the primary constraint. They might calculate the amortized/average time per frame, which is misleading, instead of the total wall-clock time to process the entire batch.
+
+  **Realistic Solution:** This is not a feasible strategy. While batching can improve throughput, it increases the latency for each individual frame in the batch. The total time to process a batch of two would be at least 40ms, which violates the hard real-time deadline of 33ms. For the system to be safe, the result for the first frame must be available before the 33ms window closes, but with batching, it won't be ready until the entire batch is processed.
+
+  > **Napkin Math:** 1. **Identify Deadline:** The system has a hard real-time deadline of 33ms per frame.
+2. **Identify Single-Frame Latency:** Inference for one frame takes 20ms.
+3. **Calculate Batched Latency:** Assuming linear scaling, processing a batch of 2 frames takes `2 frames * 20 ms/frame = 40 ms`.
+4. **Compare to Deadline:** The calculated batch latency (40 ms) is greater than the system deadline (33 ms).
+5. **Conclusion:** The deadline is missed. Batching is not acceptable.
+
+  > **Key Equation:** $\text{Latency}_{\text{batch}} = \text{Latency}_{\text{single}} \times N_{\text{items}} > \text{Deadline}$
+
+  > **Options:**
+  > [ ] Yes, because the amortized time per frame is still 20ms, which is under the deadline.
+  > [x] No, the total processing time for the batch (40ms) exceeds the 33ms real-time deadline.
+  > [ ] Yes, because batching increases compute efficiency and overall FPS.
+  > [ ] Yes, because the time per frame in the batch becomes 10ms (20ms / 2), which is faster.
+
+  📖 **Deep Dive:** [Real-Time Pipelines](https://mlsysbook.ai/edge/02_realtime_pipeline.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Continuous Batching Queue</b> · <code>continuous-batching-latency</code></summary>
+
+- **Interviewer:** "An edge device in a smart store uses continuous batching to process analytics from a video feed. The model's inference latency is 30ms for a single frame. The system is configured to form and dispatch a new batch every 40ms. A camera captures a frame (Frame A) at time `T=10ms`. Interpret the system's behavior and calculate the total time until the result for Frame A is ready, assuming it's the only frame in the queue."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the components of total latency. They might only consider the inference time itself, forgetting to add the queuing delay—the time a request spends waiting for the next batching window to open. The total latency experienced by the user (or downstream service) is the sum of time spent in the queue and time spent in processing.
+
+  **Realistic Solution:** Frame A arrives at T=10ms and must wait in a queue for the next scheduled batch dispatch, which occurs at T=40ms. The queuing delay is 30ms (40ms - 10ms). At T=40ms, the batch containing Frame A begins processing. Since it's the only frame, inference takes 30ms. The result is ready at T=40ms + 30ms = 70ms. The total latency is 60ms from the frame's arrival time.
+
+  > **Napkin Math:** 1. **Identify Arrival Time:** Frame A is captured at `T_arrival = 10ms`.
+2. **Identify Next Batch Window:** The system dispatches batches every 40ms, so the next dispatch after arrival is at `T_dispatch = 40ms`.
+3. **Calculate Queuing Delay:** The frame must wait in the queue: `Delay_queue = T_dispatch - T_arrival = 40ms - 10ms = 30ms`.
+4. **Calculate Completion Time:** Processing starts at the dispatch time and takes 30ms: `T_complete = T_dispatch + Latency_inference = 40ms + 30ms = 70ms`.
+5. **Calculate Total Latency:** `Latency_total = T_complete - T_arrival = 70ms - 10ms = 60ms`.
+
+  > **Key Equation:** $\text{T}_{\text{complete}} = \text{T}_{\text{dispatch}} + \text{L}_{\text{inference}}$
+
+  > **Options:**
+  > [ ] 30ms, the time it takes for the model to run inference.
+  > [ ] 40ms, the time from arrival until the batch is dispatched.
+  > [x] 70ms, the clock time when the inference finishes.
+  > [ ] 10ms, because the frame is processed immediately.
+
+  📖 **Deep Dive:** [Serving Stack](https://mlsysbook.ai/cloud/03_serving_stack.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Edge Device Power Average</b> · <code>duty-cycling</code></summary>
+
+- **Interviewer:** "An edge device, like a Hailo-8 accelerator in a smart camera, has a duty cycle. It runs inference at 2.5W for 2 seconds, then enters a low-power idle state at 250mW for 8 seconds before repeating the cycle. What is its average power consumption?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate the simple average of the active and idle power states, e.g., (2.5W + 0.25W) / 2 = 1.375W. This is incorrect because it fails to account for the *duration* spent in each state; the device spends 4 times longer in the idle state than the active state.
+
+  **Realistic Solution:** The correct way to calculate average power is to find the total energy consumed over one full period and divide by the period's duration. The device consumes (2.5W * 2s) in the active phase and (0.25W * 8s) in the idle phase, for a total energy of 7 Joules over 10 seconds. This yields an average power of 0.7W or 700mW.
+
+  > **Napkin Math:** Total Energy = (P_active × t_active) + (P_idle × t_idle)
+Total Energy = (2.5 W × 2 s) + (0.25 W × 8 s)
+Total Energy = 5 J + 2 J = 7 J
+
+Average Power = Total Energy / Total Time
+Average Power = 7 J / 10 s = 0.7 W = 700 mW
+
+  > **Key Equation:** $$ P_{\text{avg}} = \frac{P_{\text{active}} \cdot t_{\text{active}} + P_{\text{idle}} \cdot t_{\text{idle}}}{t_{\text{active}} + t_{\text{idle}}} $$
+
+  > **Options:**
+  > [ ] 1.375 W
+  > [ ] 500 mW
+  > [x] 700 mW
+  > [ ] 2.5 W
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Passive Cooling Limit</b> · <code>thermal-throttling</code></summary>
+
+- **Interviewer:** "You are designing an AI-powered quality inspection camera for a manufacturing line. The system uses a Hailo-8 accelerator, which consumes 2.5W during active inference. The entire camera is in a sealed, fanless aluminum enclosure that can only passively dissipate 1W of heat continuously at the maximum factory ambient temperature. To prevent the system from overheating, what is the maximum sustainable duty cycle (the percentage of time the accelerator can be active)?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to ignore the thermal dissipation limit and assume the device can run at 100% duty cycle as long as the power supply allows. This overlooks the fact that in passively cooled edge systems, heat removal is almost always the primary bottleneck, not power delivery.
+
+  **Realistic Solution:** The system's average power consumption over time must not exceed its continuous heat dissipation capacity. Assuming the idle power consumption is negligible compared to the active power, the maximum sustainable duty cycle is the ratio of the thermal budget to the active power consumption. Any higher, and the device will continuously build up heat, eventually leading to thermal throttling or failure.
+
+  > **Napkin Math:** Continuous Thermal Budget = 1W
+Active Power Consumption (Hailo-8) = 2.5W
+
+Max Duty Cycle = (Thermal Budget / Active Power) = 1W / 2.5W = 0.4
+
+Therefore, the accelerator can only be active for a maximum of 40% of the time to stay within the thermal limits of the enclosure.
+
+  > **Key Equation:** $\text{Max Duty Cycle} (%) = \frac{P_{\text{thermal\_budget}}}{P_{\text{active}}} \times 100$
+
+  > **Options:**
+  > [ ] 100%
+  > [ ] 60%
+  > [x] 40%
+  > [ ] 2.5%
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Kernel Launch Tax</b> · <code>operator-fusion</code></summary>
+
+- **Interviewer:** "An engineer is optimizing a vision model for a 33ms real-time deadline on an edge device. They use a compiler to fuse a `Conv2D` layer, a `BatchNorm` layer, and a `ReLU` activation into a single GPU kernel. What is the primary overhead that this operator fusion reduces?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often mistakenly believe that fusion reduces the total number of computations (FLOPs). The number of arithmetic operations is identical. The performance gain comes from eliminating the overhead associated with launching separate, sequential operations and the memory traffic between them.
+
+  **Realistic Solution:** The primary overhead reduced is kernel launch latency and intermediate memory I/O. Each time the CPU asks the GPU to run a kernel, there's a fixed overhead cost (typically several microseconds). Furthermore, the output of each separate operation (e.g., `Conv2D`) must be written to main memory (LPDDR5) and then read back by the next kernel (`BatchNorm`). A fused kernel is launched only once, and the intermediate data can often stay within the GPU's much faster on-chip SRAM/caches, avoiding the slow round-trip to main memory.
+
+  > **Napkin Math:** A kernel launch on an edge GPU can take ~5 µs. Accessing the Jetson AGX Orin's LPDDR5 memory takes ~100 ns. Therefore, the overhead of launching just one kernel is equivalent in latency to 5000 ns / 100 ns = 50 separate memory accesses. By fusing three kernels into one, you save two launches. This saves 10 µs of pure overhead, which is the latency equivalent of avoiding 100 slow trips to main memory.
+
+  > **Options:**
+  > [ ] Total floating-point operations (FLOPs) of the model.
+  > [ ] The model's memory footprint on disk.
+  > [x] Kernel launch overhead and DRAM traffic between layers.
+  > [ ] The peak power draw of the accelerator.
+
+  📖 **Deep Dive:** [Model Optimization](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Fusion Overhead Fallacy</b> · <code>operator-fusion</code></summary>
+
+- **Interviewer:** "You are optimizing a small CNN on a Jetson AGX Orin for a real-time object detection pipeline. A profiler reveals a critical sequence of three operations: a 3x3 depth-wise convolution, a ReLU activation, and a batch normalization layer. Each operation is dispatched as a separate CUDA kernel. The execution times are 15µs for the convolution, 2µs for the ReLU, and 3µs for the batch norm. You know from the device specs that the kernel launch overhead is approximately 5µs per kernel. If you fuse these three operations into a single kernel, what is the approximate latency speedup for this specific sequence?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often miscalculate the impact of fusion. A primary mistake is to assume fusion reduces the core computational time of the operations themselves, rather than just eliminating the overhead of launching separate kernels. Another error is to calculate the raw time saved instead of the percentage speedup, or to only account for the elimination of one kernel launch instead of all but the first.
+
+  **Realistic Solution:** The speedup comes from reducing the number of kernel launches from three to one, thereby eliminating two instances of launch overhead. The core computation time remains the same.
+
+**Old Latency:**
+- 3 kernels * 5µs/kernel launch = 15µs (Overhead)
+- 15µs (Conv) + 2µs (ReLU) + 3µs (BatchNorm) = 20µs (Execution)
+- Total Old Latency = 15µs + 20µs = 35µs
+
+**New Latency (Fused):**
+- 1 kernel * 5µs/kernel launch = 5µs (Overhead)
+- 15µs + 2µs + 3µs = 20µs (Execution)
+- Total New Latency = 5µs + 20µs = 25µs
+
+**Speedup Calculation:**
+- Latency Reduction = 35µs - 25µs = 10µs
+- Speedup = (Latency Reduction / Old Latency) * 100%
+- Speedup = (10µs / 35µs) * 100% ≈ 28.6%
+
+  > **Napkin Math:** Total execution time = 15µs (Conv) + 2µs (ReLU) + 3µs (BN) = 20µs
+Kernel launch overhead = 5µs
+
+Original Latency = (3 launches × 5µs/launch) + 20µs = 15µs + 20µs = 35µs
+Fused Latency = (1 launch × 5µs/launch) + 20µs = 5µs + 20µs = 25µs
+
+Speedup = (Old - New) / Old = (35 - 25) / 35 = 10 / 35 ≈ 0.286
+
+  > **Key Equation:** $\text{Speedup} = \frac{T_{\text{old}} - T_{\text{new}}}{T_{\text{old}}}$
+
+  > **Options:**
+  > [ ] ~14.3% speedup
+  > [x] ~28.6% speedup
+  > [ ] ~50.0% speedup
+  > [ ] 10µs
+
+  📖 **Deep Dive:** [Model Optimization](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Edge Watchdog</b> · <code>fault-tolerance</code></summary>
+
+- **Interviewer:** "You are deploying a vision model on a Jetson AGX Orin for a factory assembly line. The system has a hard real-time constraint, requiring it to process each frame within a 33ms budget to keep up with the conveyor belt. To handle potential software freezes, you must configure a hardware watchdog timer to automatically reboot the device. What is the most appropriate timeout to set for this watchdog?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to cloud services often select overly long timeouts (e.g., several seconds), failing to appreciate the immediate response needed in a hard real-time edge environment. Conversely, setting the timeout too close to the 33ms deadline can cause spurious reboots due to normal performance jitter, leading to system instability.
+
+  **Realistic Solution:** The correct approach is to set the watchdog timeout to be a small multiple (typically 3-5x) of the task's deadline. For a 33ms processing budget, a timeout of ~100ms is a reasonable choice. This provides enough of a buffer to prevent resets from minor, transient delays while ensuring the system recovers from a genuine freeze in a timely manner, preventing prolonged downtime on the factory floor.
+
+  > **Napkin Math:** A watchdog timer's period must be greater than the normal processing loop but short enough to detect a fatal hang.
+
+- **System Deadline:** 33ms (to achieve ~30 FPS)
+- **Safety Multiplier:** ~3x (a standard engineering heuristic)
+- **Calculated Timeout:** 33ms * 3 = 99ms
+
+Therefore, 100ms is a standard and safe timeout value. A 5-second timeout would mean the assembly line is stalled for over 150 frames, which is a critical failure.
+
+  > **Options:**
+  > [ ] ~100 µs (microseconds)
+  > [ ] ~33 ms
+  > [x] ~100 ms
+  > [ ] ~5 s (seconds)
+
+  📖 **Deep Dive:** [Edge: Deployed Systems](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Watchdog Timer and the Checkpoint Tax</b> · <code>fault-tolerance-checkpointing</code></summary>
+
+- **Interviewer:** "You are designing the fault-tolerance system for a vision-based autonomous robot. A hardware watchdog timer is configured to reboot the system if the main control loop doesn't 'pet' it within a 50ms deadline. The loop consists of 5ms for image preprocessing and 2ms for motor control commands. To ensure rapid recovery after a reboot, the system periodically saves a state checkpoint to its NVMe SSD, an operation which takes 1ms. Explain how this checkpoint operation impacts the system's real-time performance, and calculate the maximum allowed inference latency for a control loop that includes a checkpoint."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus solely on the average-case inference latency and forget to budget for worst-case execution paths. They might ignore the I/O cost of checkpointing, assuming it's negligible, or forget to subtract it from the *total* time budget provided by the watchdog timer. This can lead to unexpected, cascading watchdog timeouts under real-world conditions.
+
+  **Realistic Solution:** The watchdog timer imposes a hard real-time budget on the entire control loop. Every operation within the loop consumes a portion of this budget. A checkpoint, even if infrequent, creates a 'worst-case' execution path that is longer than a typical path. To guarantee system stability, we must design for this worst case. The total time spent on fixed overhead (preprocessing, postprocessing) and the checkpoint operation must be subtracted from the watchdog's deadline to find the remaining time budget for the variable-length operation, which is the model inference.
+
+  > **Napkin Math:** 1. **Total Budget:** The watchdog timer provides a 50ms total time budget.
+2. **Fixed Overhead:** Preprocessing (5ms) and motor control (2ms) consume a fixed `5 + 2 = 7ms` per loop.
+3. **Checkpoint Cost:** The NVMe checkpoint operation costs an additional 1ms in the loops where it occurs.
+4. **Remaining Budget for Inference:** `50ms (Total Budget) - 7ms (Fixed Overhead) - 1ms (Checkpoint Cost) = 42ms`.
+5. **Conclusion:** To prevent a watchdog timeout, the maximum allowed inference latency is 42ms during a loop that includes a checkpoint.
+
+  > **Key Equation:** $\text{T}_{\text{inference}} < \text{T}_{\text{watchdog}} - (\text{T}_{\text{preprocess}} + \text{T}_{\text{postprocess}} + \text{T}_{\text{checkpoint}})$
+
+  > **Options:**
+  > [ ] 43ms
+  > [ ] 49ms
+  > [x] 42ms
+  > [ ] 42.9ms
+
+  📖 **Deep Dive:** [Edge AI: Real-Time Pipelines](https://mlsysbook.ai/edge/02_realtime_pipeline.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Dusty Lens Problem</b> · <code>data-quality-skew</code></summary>
+
+- **Interviewer:** "You've deployed a vision model on a Jetson AGX Orin for quality control on a factory floor, with a hard real-time deadline of 33ms per frame. The model was trained on pristine, high-contrast images. In production, you discover that dust accumulating on the camera lens degrades image contrast, causing training-serving skew and dropping accuracy. To fix this, you propose adding a contrast normalization pre-processing step. Before implementing the algorithm, your manager asks for a back-of-the-envelope estimate: to make this change, how much of our latency budget will be consumed simply by reading one full 1920x1080, 8-bit grayscale image frame from system DRAM into the processor's registers for this new step?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often overestimate the latency of memory reads on modern edge devices, confusing it with much slower I/O like disk access or network calls. They might guess it takes milliseconds, failing to appreciate the sheer speed of on-platform memory bandwidth. Another common mistake is using the wrong bandwidth number, such as the camera sensor interface bandwidth (MIPI) instead of the system's main memory bandwidth (LPDDR5).
+
+  **Realistic Solution:** The correct answer is that the data transfer time is negligible, around 10 microseconds. The Jetson AGX Orin has an LPDDR5 memory bandwidth of 204.8 GB/s. A single 1080p grayscale frame is just over 2 MB. The time to read this data is the total data size divided by the memory bandwidth. This calculation shows that the memory read consumes a tiny fraction (<0.1%) of the 33ms (33,000 µs) frame budget. The real performance cost to investigate is the *compute* cost of the normalization algorithm itself, not the data movement to get it there.
+
+  > **Napkin Math:** 1. **Calculate Image Size:** An 8-bit (1 Byte) 1920x1080 image is `1920 * 1080 * 1 = 2,073,600` Bytes, or ~2.07 MB.
+2. **Identify Correct Bandwidth:** The question asks for the time to read from DRAM to the processor, so we use the Jetson's LPDDR5 memory bandwidth: 204.8 GB/s.
+3. **Calculate Transfer Time:** `Time = Total Data / Bandwidth`
+   `Time = 2,073,600 Bytes / 204,800,000,000 Bytes/s ≈ 0.0000101 s`
+4. **Convert to Microseconds:** `0.0000101 s * 1,000,000 µs/s ≈ 10.1 µs`.
+
+  > **Key Equation:** $\text{Time}_\text{transfer} = \frac{\text{Data Size (Bytes)}}{\text{Memory Bandwidth (Bytes/s)}}$
+
+  > **Options:**
+  > [ ] ~830 µs
+  > [ ] ~1.2 ms
+  > [x] ~10 µs
+  > [ ] ~81 µs
+
+  📖 **Deep Dive:** [Edge AI](https://mlsysbook.ai/edge/README.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Communication Tax of Federated Learning</b> · <code>federated-learning-economics</code></summary>
+
+- **Interviewer:** "You are planning the infrastructure for a federated learning system that will deploy to one million edge devices. Each device will periodically send a 20 MB model update to your central servers for aggregation. From an operational cost perspective, what factor do you need to identify as the primary driver of your budget?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on the compute cost of the central server that aggregates the models. While this requires compute, the process is usually a simple, fast operation (like averaging weights). The true cost comes from the sheer volume of data being ingested from the fleet, which dwarfs the aggregation compute cost.
+
+  **Realistic Solution:** The primary operational cost driver is the network bandwidth required to upload the 20 MB model updates from one million devices. At this scale, the total data transfer is massive and directly translates to high cloud provider bills for data ingress and transfer.
+
+  > **Napkin Math:** Total data per update cycle = 1,000,000 devices × 20 MB/device = 20,000,000 MB = 20 TB. At a conservative cloud data ingress price of ~$0.02/GB, a single learning cycle costs 20 TB × 1024 GB/TB × $0.02/GB = ~$409. This cost is incurred for every single training round, making it the dominant recurring operational expenditure.
+
+  > **Options:**
+  > [ ] The compute cost of aggregating the one million models on the central server.
+  > [ ] The power drawn by the one million edge devices to train the model locally.
+  > [x] The network bandwidth cost to transfer all model updates to the cloud.
+  > [ ] The storage cost for the historical archive of all global models.
+
+  📖 **Deep Dive:** [Numbers Every ML Systems Engineer Should Know](https://mlsysbook.ai/vol1/appendix/numbers.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Federated vs. Centralized Upload Tax</b> · <code>federated-learning-economics</code></summary>
+
+- **Interviewer:** "Your team is deploying a fleet of 1,000 smart cameras to retail stores for person detection. You're comparing two strategies for model updates: a centralized approach where each camera uploads 1,000 training images (100 KB each, compressed) daily to the cloud, versus a federated learning approach where each camera trains locally and only uploads the updated model weights once per day. The model is a 4 million parameter MobileNetV3 variant.
+
+Explain the data upload trade-off. To be precise, calculate the total daily upload data required for the entire fleet for both the centralized and the federated (using FP16 precision) strategies."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often miscalculate the model size, typically by using 4 bytes for FP32 instead of 2 bytes for FP16, doubling the federated cost. Another common error is calculating the per-device data cost but forgetting to multiply by the 1,000 devices in the fleet, drastically underestimating the total operational expenditure (OpEx).
+
+  **Realistic Solution:** The core trade-off is between raw data volume (centralized) and model weight volume (federated). The federated approach sends significantly less data, saving on network costs and preserving user privacy, at the cost of higher on-device compute requirements.
+
+**Centralized:** Each of the 1,000 devices sends 1,000 images of 100 KB each. This results in 100 MB per device, or 100 GB total for the fleet.
+**Federated:** Each of the 1,000 devices sends one model update. At 4 million parameters and 2 bytes per parameter (for FP16), each model is 8 MB. This results in 8 GB total for the fleet.
+
+The centralized strategy requires 12.5 times more upload data per day than the federated strategy (100 GB vs. 8 GB).
+
+  > **Napkin Math:** Centralized Data = 1,000 devices × (1,000 images/device) × (100 KB/image) = 100,000,000 KB = 100 GB
+Federated Data = 1,000 devices × (4,000,000 params × 2 bytes/param) = 8,000,000,000 bytes = 8 GB
+Ratio = 100 GB / 8 GB = 12.5x
+
+  > **Key Equation:** \text{Model Memory (bytes)} = \text{Parameters} \times \text{Bytes per Parameter}
+
+  > **Options:**
+  > [ ] Centralized: ~100 MB, Federated: ~8 MB. Centralized is more expensive but only by about 12.5x.
+  > [ ] Centralized: ~100 GB, Federated: ~16 GB. Centralized is ~6.25x more expensive.
+  > [x] Centralized: ~100 GB, Federated: ~8 GB. Centralized is ~12.5x more expensive.
+  > [ ] Centralized: ~100 GB, Federated: ~4 GB. Centralized is ~25x more expensive.
+
+  📖 **Deep Dive:** [Deployed Systems](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Edge Efficiency Metric</b> · <code>tops-per-watt</code></summary>
+
+- **Interviewer:** "For an edge AI accelerator, power efficiency is a critical metric. Identify the approximate power efficiency in TOPS-per-Watt for a Hailo-8 accelerator running at its nominal power envelope."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus only on peak TOPS, ignoring the power cost to achieve it. On the edge, performance-per-watt is almost always a more important metric than raw performance. Another mistake is misremembering the order of magnitude; efficiency can vary dramatically between architectures.
+
+  **Realistic Solution:** The Hailo-8 is rated for 26 TOPS (INT8) at a typical power consumption of 2.5W. Its efficiency is therefore approximately 10.4 TOPS/W. This is a measure of how many Tera-Operations it can perform for each Watt of power consumed.
+
+  > **Napkin Math:** Efficiency = Peak Performance / Power Consumption
+Efficiency = 26 TOPS / 2.5 W ≈ 10 TOPS/W
+
+  > **Key Equation:** $\text{Efficiency} = \frac{\text{Performance (TOPS)}}{\text{Power (W)}}$
+
+  > **Options:**
+  > [ ] ~1 TOPS/W
+  > [ ] ~4.5 TOPS/W
+  > [x] ~10 TOPS/W
+  > [ ] ~26 TOPS/W
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Roofline Ridge Point</b> · <code>roofline-analysis</code></summary>
+
+- **Interviewer:** "A key characteristic of a processor's roofline model is its 'ridge point'. The Jetson AGX Orin has an INT8 ridge point of ~1,342 Ops/Byte. If you are deploying a CNN that has an arithmetic intensity of only 500 Ops/Byte, identify the primary performance bottleneck."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to reverse the roofline logic, thinking a low arithmetic intensity means the model is simple and therefore compute-bound. In reality, low arithmetic intensity means you perform few operations for every byte you fetch, indicating the processor is starving for data and is memory-bound.
+
+  **Realistic Solution:** The model's performance is memory-bound. The ridge point represents the arithmetic intensity needed to saturate the compute units. Since the model's intensity (500 Ops/Byte) is well below the hardware's ridge point (1,342 Ops/Byte), the system will spend most of its time waiting for data from memory. Performance is limited by the memory bandwidth, not the peak TOPS of the processor.
+
+  > **Napkin Math:** The comparison is the calculation: `Model AI (500 Ops/Byte) < Hardware Ridge Point (1,342 Ops/Byte)`. This places the model in the memory-bound section of the roofline graph, where performance is limited by the 'slanted' part of the roofline.
+
+  > **Key Equation:** $\text{Arithmetic Intensity (AI)} = \frac{\text{Operations}}{\text{Bytes Moved}}$
+
+  > **Options:**
+  > [ ] Compute (TOPS)
+  > [x] Memory Bandwidth (GB/s)
+  > [ ] Power Consumption (Watts)
+  > [ ] On-chip Interconnect
+
+  📖 **Deep Dive:** [Edge Compute Analysis](https://mlsysbook.ai/edge/01_compute_analysis.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Edge Ridge Point</b> · <code>roofline-analysis</code></summary>
+
+- **Interviewer:** "You are leading a team evaluating the NVIDIA Jetson AGX Orin for a real-time object detection pipeline that must run at 30 FPS. A junior engineer is confused about why some models are 'memory-bound' while others are 'compute-bound'.
+
+Explain the concept of the 'ridge point' for an accelerator like the Orin. Calculate its ridge point using its peak INT8 TOPS and memory bandwidth from the playbook, and interpret what this number tells you about a model's performance characteristics on this specific hardware."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is a simple unit mismatch, dividing TOPS directly by GB/s without accounting for the factor of 1000 difference between Tera- and Giga- prefixes. Another mistake is inverting the formula (Bandwidth / Compute). Finally, engineers often misinterpret the result, believing a lower Arithmetic Intensity is better.
+
+  **Realistic Solution:** The 'ridge point' is a key concept in the Roofline Model. It represents the minimum Arithmetic Intensity (AI), measured in Operations per Byte, that an application must have to be limited by the accelerator's peak compute rather than its memory bandwidth.
+
+To calculate it, you divide the peak compute rate by the memory bandwidth. For the Jetson AGX Orin, this means taking its peak INT8 compute and dividing by its LPDDR5 memory bandwidth. Any model with an AI *higher* than the ridge point is compute-bound, meaning its performance is limited by the processor's calculation speed. Any model with an AI *lower* than the ridge point is memory-bound, meaning its performance is bottlenecked by how fast it can feed the processor data from memory.
+
+  > **Napkin Math:** 1. **Identify Specs:** From the playbook, the Jetson AGX Orin has:
+   - Peak INT8 Compute: 275 TOPS (Trillion Operations/sec)
+   - Memory Bandwidth: 204.8 GB/s (GigaBytes/sec)
+
+2. **Standardize Units:** To divide them, we must use the same prefix or the full number.
+   - `Peak Compute = 275 x 10^12` Operations/sec
+   - `Memory Bandwidth = 204.8 x 10^9` Bytes/sec
+
+3. **Calculate Ridge Point:**
+   - `Ridge Point = (275 x 10^12 Ops/sec) / (204.8 x 10^9 Bytes/sec)`
+   - `Ridge Point = (275,000 G-Ops/sec) / (204.8 G-Bytes/sec) ≈ 1342.7 Ops/Byte`
+
+   A model on the Orin needs to perform over 1342 operations for every byte of data it reads from memory to be considered compute-bound.
+
+  > **Key Equation:** $\text{Ridge Point (Ops/Byte)} = \frac{\text{Peak Compute (Ops/sec)}}{\text{Memory Bandwidth (Bytes/sec)}}$
+
+  > **Options:**
+  > [ ] ~1.34 Ops/Byte. This happens from dividing 275 by 204.8 without converting units.
+  > [ ] ~0.0007 Bytes/Op. This results from incorrectly inverting the formula (Bandwidth / Compute).
+  > [x] ~1343 Ops/Byte. A model's Arithmetic Intensity must be higher than this to be compute-bound.
+  > [ ] ~1343 Ops/Byte. A model's Arithmetic Intensity must be lower than this to be compute-bound.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html#the-roofline-model-a-visual-tool)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The On-Chip vs. Off-Chip Memory Chasm</b> · <code>memory-hierarchy-edge</code></summary>
+
+- **Interviewer:** "You're profiling a real-time object detection model on an edge device like a Jetson AGX Orin. You notice significant latency comes from the accelerator waiting for data. The profiler shows the bottleneck is moving intermediate tensors between the accelerator's on-chip L2 cache and the main system's LPDDR5 DRAM. Roughly identify how much slower a read from LPDDR5 is compared to a read that hits the on-chip L2 cache."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the 'memory wall' on edge devices. They may know DRAM is slower, but not grasp the order-of-magnitude penalty for going 'off-chip' (from the processor silicon to external memory chips). This leads to poor data layout choices where tensors are unnecessarily evicted from cache, breaking real-time deadlines.
+
+  **Realistic Solution:** An access to LPDDR5 DRAM is approximately 25 times slower than an L2 cache hit. On-chip L2 cache latency is around 4 ns, while LPDDR5 latency is about 100 ns. This physical reality is why techniques like layer fusion (to keep intermediate tensors in cache) and careful memory management are not optional optimizations but core requirements for performant edge AI.
+
+  > **Napkin Math:** Using the 'human time' analogy from the playbook: If an L2 cache read took 4 seconds, waiting for the same data from LPDDR5 DRAM would take ~100 seconds. This is over a minute and a half of waiting, which is an eternity for a system with a 33ms (30 FPS) deadline.
+
+  > **Options:**
+  > [ ] ~2-3x slower
+  > [x] ~25x slower
+  > [ ] ~300x slower
+  > [ ] The speed is the same, just the capacity is different
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Edge LLM's Memory Budget</b> · <code>kv-cache-vram</code></summary>
+
+- **Interviewer:** "You're deploying a 2B parameter transformer model onto a Jetson AGX Orin for a real-time conversational agent. The model uses 24 layers, 32 attention heads, and a head dimension of 64. If the device needs to support a context window of 4096 tokens in FP16 precision, how much of the Jetson's VRAM will be consumed *solely* by the KV-cache?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Forgetting that the KV-cache stores *both* a Key and a Value tensor for every token in the context, leading to a 2x underestimate. Another common mistake is confusing the VRAM required for model weights (e.g., `2B params * 2 bytes/param = 4 GB`) with the VRAM for the KV-cache, which scales dynamically with sequence length.
+
+  **Realistic Solution:** The KV-cache stores a Key and a Value vector for each token, for each head, in each layer. The total size is calculated by multiplying these dimensions by the size of the data type. For this scenario, it's `2 (K/V) * 24 layers * 4096 tokens * 32 heads * 64 head_dim * 2 bytes (FP16)`, which comes out to approximately 805 MB.
+
+  > **Napkin Math:** 1.  **Memory per token per layer:** `2 (for K and V) × 32 heads × 64 head_dim × 2 bytes/value (FP16) = 8,192 bytes`
+2.  **Total memory for all layers:** `8,192 bytes/token/layer × 24 layers = 196,608 bytes/token`
+3.  **Total cache size for full context:** `196,608 bytes/token × 4096 tokens = 805,306,368 bytes`
+4.  **Convert to MB:** `805,306,368 bytes / (1024*1024) ≈ 768 MiB` (or ~805 MB for simplicity). The closest answer is 805 MB.
+
+  > **Key Equation:** $\text{KV Cache Size} = 2 \times N_{\text{layers}} \times L_{\text{seq}} \times N_{\text{heads}} \times d_{\text{head}} \times \text{sizeof}(\text{dtype})$
+
+  > **Options:**
+  > [ ] ~402 MB
+  > [ ] ~4 GB
+  > [x] ~805 MB
+  > [ ] ~1.6 GB
+
+  📖 **Deep Dive:** [Numbers Every ML Systems Engineer Should Know](NUMBERS.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The TinyML Tensor Arena Calculation</b> · <code>sram-tensor-arena</code></summary>
+
+- **Interviewer:** "You are optimizing a keyword-spotting model for a Cortex-M4 microcontroller with 256KB of SRAM. To minimize memory, you must calculate the required size for the TensorFlow Lite for Microcontrollers 'tensor arena'. At the most memory-intensive point, the interpreter must hold a 25KB input tensor to a convolutional layer *and* that layer's resulting 40KB output tensor concurrently. What is the minimum required size for the tensor arena to execute this specific operation?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often pick the size of the single largest tensor (40 KB) and assume that's the peak requirement. This is incorrect because the interpreter needs memory for a layer's input(s) *and* output(s) simultaneously during execution. Another mistake is summing all tensors in the model, ignoring the fact that memory is reused after a tensor is no longer needed.
+
+  **Realistic Solution:** The tensor arena is a single contiguous memory block that must be large enough for the point of maximum concurrent memory usage. For a single layer's execution, this peak is typically the sum of its input tensor(s) and output tensor(s). Therefore, the minimum required arena size for this operation is the sum of the input and output tensor sizes.
+
+  > **Napkin Math:** 1.  **Input Tensor Size:** `25 KB`
+2.  **Output Tensor Size:** `40 KB`
+3.  **Peak Concurrent Memory:** `Input Tensor Size + Output Tensor Size`
+4.  **Calculation:** `25 KB + 40 KB = 65 KB`
+
+  > **Key Equation:** $\text{Arena Peak} \ge \sum_{t \in \text{Live Tensors}} \text{sizeof}(t)$
+
+  > **Options:**
+  > [ ] 40 KB
+  > [ ] 95 KB
+  > [x] 65 KB
+  > [ ] 256 KB
+
+  📖 **Deep Dive:** [TinyML: Microcontroller Architectures](tinyml/01_microcontroller.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Energy Cost of Precision</b> · <code>quantization-energy-ratio</code></summary>
+
+- **Interviewer:** "You are optimizing a model for a battery-powered drone. To reduce power consumption, you are considering quantizing a key convolution layer from FP16 to INT8. Recall the approximate energy savings *for the arithmetic operations alone* when switching from one FP16 MAC (fused multiply-add) to one INT8 MAC."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the memory savings (2x) with the energy savings. While reducing bit width from 16 to 8 halves the data size, the energy reduction for the computation itself is non-linear and much greater. Another common mistake is recalling the FP32-to-INT8 energy ratio (~18x) instead of the more common FP16-to-INT8 path on modern edge accelerators.
+
+  **Realistic Solution:** An FP16 arithmetic operation consumes approximately 5x more energy than an INT8 operation. This is a fundamental physical relationship based on the energy required to switch transistors for floating-point versus integer calculations at these bit widths. On a device where every milliwatt matters for flight time, this 5x reduction in compute energy is a critical optimization.
+
+  > **Napkin Math:** The energy savings are derived from the physics-based invariants. An FP32 operation costs ~18x the energy of an INT8 op. An FP32 operation costs ~3.4x the energy of an FP16 op. Therefore, the relative cost of FP16 to INT8 is the ratio of these two numbers: `18 / 3.4 ≈ 5.3x`. For a quick, memorable estimate, a 5x energy saving for compute is a reliable rule of thumb.
+
+  > **Key Equation:** $\frac{E_{FP16}}{E_{INT8}} \approx \frac{E_{FP32}/3.4}{E_{FP32}/18} = \frac{18}{3.4} \approx 5.3$
+
+  > **Options:**
+  > [ ] Roughly 2x, because you are halving the bit width from 16 to 8.
+  > [ ] Roughly 18x, the standard energy ratio for integer vs. float.
+  > [x] Roughly 5x.
+  > [ ] Roughly 1.5x; the savings are minor.
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Quantization Memory Payoff</b> · <code>quantization-memory-savings</code></summary>
+
+- **Interviewer:** "You are deploying a 350 million parameter computer vision model to an edge device. The model weights are currently stored in FP16 format. To reduce the application's memory footprint, you decide to quantize the model to INT8. Explain the expected percentage reduction in memory required for the model's weights."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the memory savings of FP16-to-INT8 quantization with FP32-to-INT8. They mistakenly calculate a 75% saving (a 4-byte float to a 1-byte integer) instead of the correct 50% saving (a 2-byte float to a 1-byte integer). Another common error is confusing the '2x smaller' factor with a '100%' or '200%' reduction, which is arithmetically impossible.
+
+  **Realistic Solution:** Moving from FP16 to INT8 cuts the memory requirement per parameter in half. FP16 (half-precision float) uses 2 bytes per parameter, while INT8 (8-bit integer) uses just 1 byte. Therefore, the total memory required for the model's weights is reduced by exactly 50%.
+
+  > **Napkin Math:** Initial FP16 Memory = 350,000,000 parameters × 2 bytes/parameter = 700 MB
+Quantized INT8 Memory = 350,000,000 parameters × 1 byte/parameter = 350 MB
+
+Memory Reduction = (Initial Memory - Quantized Memory) / Initial Memory
+Memory Reduction = (700 MB - 350 MB) / 700 MB = 350 MB / 700 MB = 0.50
+
+This is a 50% reduction.
+
+  > **Key Equation:** $\text{Reduction \%} = \frac{\text{Size}_{FP16} - \text{Size}_{INT8}}{\text{Size}_{FP16}} = \frac{2N - 1N}{2N} = 50\%$
+
+  > **Options:**
+  > [ ] A 75% reduction.
+  > [ ] A 100% reduction.
+  > [x] A 50% reduction.
+  > [ ] A 25% reduction.
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Edge Transformer Parameter Tax</b> · <code>compute-analysis</code></summary>
+
+- **Interviewer:** "You're designing a real-time object detection model for a new edge device, like a smart doorbell. The device has a very limited memory budget. Your team is debating the first layer of the network which processes 64x64 patches of the input image.
+
+One engineer proposes a standard 3x3 depthwise separable convolution. Another argues for using a small Vision Transformer (ViT) layer with a single attention head for 'better global context'. Both layers will have an input and output channel/embedding dimension of 128.
+
+Explain the difference in parameter cost between these two options. Which one is more memory-efficient in terms of parameters?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse computational complexity (FLOPs) with parameter cost (memory). They might incorrectly believe the transformer is 'cheaper' because the attention mechanism itself is just a series of matrix multiplications, forgetting that the weight matrices (Wq, Wk, Wv, Wo) that create the Q, K, and V vectors are where the parameter costs lie. They also might not know how to calculate parameters for a modern depthwise separable convolution.
+
+  **Realistic Solution:** The depthwise separable convolution is significantly more memory-efficient. The parameter cost of a transformer's self-attention layer scales quadratically with the embedding dimension, while the depthwise separable convolution scales linearly.
+
+The Transformer layer needs four matrices (for Q, K, V, and the final output projection), and each matrix has `embedding_dim x embedding_dim` parameters. In contrast, the depthwise separable convolution splits the operation into a depthwise part (scaling with kernel size) and a pointwise part (scaling with channels), resulting in far fewer parameters.
+
+  > **Napkin Math:** Let C = embedding dimension = 128. Let K = kernel size = 3.
+
+1.  **Depthwise Separable Convolution Parameters:**
+    *   Depthwise part: `K * K * C` = `3 * 3 * 128` = 1,152 params
+    *   Pointwise part: `C * C` = `128 * 128` = 16,384 params
+    *   **Total CNN Params: 1,152 + 16,384 = 17,536**
+
+2.  **Transformer Self-Attention Layer Parameters:**
+    *   Query (Wq), Key (Wk), Value (Wv), and Output (Wo) matrices are each `C x C`.
+    *   Total Params: `4 * (C * C)` = `4 * (128 * 128)` = `4 * 16,384` = **65,536 params**
+
+3.  **Comparison:** The Transformer layer requires `65,536 / 17,536` ≈ **3.7x more parameters** than the depthwise separable convolution for the same embedding dimension.
+
+  > **Key Equation:** $\text{Params (Attention)} = 4 \times d_{\text{model}}^2 \quad \gg \quad \text{Params (DWSC)} = (K^2 \times C_{\text{in}}) + (C_{\text{in}} \times C_{\text{out}})$
+
+  > **Options:**
+  > [ ] The Transformer is cheaper; its parameter cost is `128*128` which is less than the `3*3*128*128` of a standard CNN.
+  > [x] The CNN is cheaper; it has ~17.5k parameters while the Transformer has ~65.5k, a ~3.7x difference.
+  > [ ] They are roughly equal; the Transformer's `4*128*128` cost is similar to a standard convolution's `3*3*128*128` cost.
+  > [ ] The Transformer is cheaper; the attention calculation `softmax(Q*K^T)` has no parameters, making it more efficient.
+
+  📖 **Deep Dive:** [Network Architectures](https://mlsysbook.ai/vol1/dnn_architectures.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Real-Time Batching Tax</b> · <code>real-time-batching</code></summary>
+
+- **Interviewer:** "An edge device is processing a video stream from a factory assembly line, with a hard real-time deadline of 33ms per frame to detect defects. To improve overall processing capacity, your team suggests batching incoming frames. What is the fundamental trade-off you must immediately identify for a real-time system like this?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers, especially those from a cloud background, often see batching as a 'free' way to boost throughput. They forget that in a real-time, continuous stream, creating a batch forces the first frame to wait for the last frame, directly adding to its end-to-end latency and potentially violating the deadline. Throughput is a system-level metric, but latency is a per-item metric.
+
+  **Realistic Solution:** The primary trade-off is between throughput and latency. While batching increases the system's overall throughput (more frames processed per second), it unavoidably increases the latency for each individual frame. The first frame in a batch is delayed by the time it takes to collect the rest of the frames for that batch. This 'queuing delay' can easily cause the system to miss its real-time deadline.
+
+  > **Napkin Math:** Assume the model takes 20ms to process one frame and the real-time deadline is 33ms.
+
+*   **No Batch (Batch Size = 1):** Frame 1 arrives, processing starts immediately. End-to-end latency = 20ms. **Deadline MET.**
+*   **Batch Size = 2:** Frame 1 arrives at T=0ms. The system must wait for Frame 2. On a 30 FPS camera, Frame 2 arrives 33ms later. Processing of the 2-frame batch only *starts* at T=33ms. Even if batch processing were instantaneous, Frame 1's latency is already 33ms. **Deadline MISSED.**
+
+This waiting period is the 'batching tax' you pay for higher throughput.
+
+  > **Key Equation:** $\text{Total Latency} = \text{Wait Time (for batch)} + \text{Processing Time}$
+
+  > **Options:**
+  > [ ] It strictly improves throughput by amortizing computation, with no significant impact on individual frame latency.
+  > [ ] It primarily reduces the power consumption of the edge device by increasing utilization.
+  > [x] It increases system throughput but also increases the processing latency for every single frame.
+  > [ ] It mainly increases the required on-chip memory, which is the key constraint.
+
+  📖 **Deep Dive:** [Edge AI](https://mlsysbook.ai/edge/)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Real-Time Batching Trap</b> · <code>real-time-deadline</code></summary>
+
+- **Interviewer:** "An autonomous vehicle's perception system processes frames from a camera running at 30 FPS. The system has a hard real-time deadline: the result for any given frame must be available within 33ms of its capture. The model inference for a single frame takes 25ms on the edge accelerator.
+
+To improve system efficiency, the team considers batching frames before sending them to the accelerator. Explain the impact of batching on the end-to-end latency for the first frame in a batch. What is the maximum batch size (N) the system can use without violating its hard real-time deadline?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus only on the inference time, thinking 'my model takes 25ms, which is less than the 33ms deadline, so I have 8ms of slack for batching.' They forget that creating a batch introduces a queuing/waiting delay. For a batch of size N, the system must wait for N frames to arrive, and the first frame's latency clock is ticking the whole time.
+
+  **Realistic Solution:** The maximum batch size is 1. Any batch size greater than 1 will violate the hard real-time deadline for the first frame in the batch.
+
+The total latency for the first frame in a batch is the time spent waiting for the batch to be formed plus the inference time. The time between frames is 33ms (1000ms / 30 FPS). To create a batch of size N, the system must wait for N-1 additional frames to arrive after the first one. This waiting time is `(N-1) * 33ms`. The total latency for the first frame is therefore `(N-1) * 33ms + 25ms`. We must satisfy `Total Latency <= 33ms`.
+
+For N=1: `(1-1) * 33ms + 25ms = 25ms`, which is `<= 33ms`. (PASS)
+For N=2: `(2-1) * 33ms + 25ms = 33ms + 25ms = 58ms`, which is `> 33ms`. (FAIL)
+
+Thus, any batch size greater than 1 is impossible.
+
+  > **Napkin Math:** 1.  **Define Deadline & Frame Rate:**
+    - Deadline: 33 ms
+    - Frame Inter-arrival Time: 1000 ms / 30 FPS = 33.3 ms
+2.  **Define Latency Equation:**
+    - Total Latency = (Wait Time) + (Inference Time)
+    - Wait Time for first frame in batch N: `(N-1) * 33.3 ms`
+    - Inference Time: 25 ms
+3.  **Set up the Constraint:**
+    - `(N-1) * 33.3 ms + 25 ms <= 33.3 ms`
+4.  **Solve for N:**
+    - `(N-1) * 33.3 ms <= 8.3 ms`
+    - `N-1 <= 8.3 / 33.3`
+    - `N-1 <= 0.25`
+    - `N <= 1.25`
+5.  **Conclusion:** Since the batch size N must be an integer, the maximum possible value for N is 1.
+
+  > **Key Equation:** $$T_{\text{total}} = (N_{\text{batch}} - 1) \times T_{\text{inter-arrival}} + T_{\text{inference}} \le T_{\text{deadline}}$$
+
+  > **Options:**
+  > [x] 1
+  > [ ] 2
+  > [ ] As many as fit in memory
+  > [ ] 1.32
+
+  📖 **Deep Dive:** [Edge: The Real-time Pipeline](https://mlsysbook.ai/edge/02_realtime_pipeline.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Continuous Batching Sweet Spot</b> · <code>continuous-batching-throughput</code></summary>
+
+- **Interviewer:** "You are designing a video analytics server for a factory floor, processing streams from 10 cameras. Each camera sends a frame every 100ms (10 FPS). Your accelerator's inference time scales with batch size N according to the formula: `T_inference(N) = 40ms + 5ms * (N-1)`.
+
+Your goal is to maximize throughput (total frames processed per second) while keeping the average end-to-end latency for any frame below 150ms. Using a continuous batching strategy, what is the optimal batch size (N) to achieve this?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers make two common mistakes here. The first is to be greedy and assume the largest possible batch size is always best for throughput, ignoring the latency constraint. The second is to calculate latency but forget the waiting time component. They solve for `T_inference(N) <= 150ms` but forget that in continuous batching, a frame has to wait for the rest of its batch to arrive, adding `T_avg_wait` to the total latency.
+
+  **Realistic Solution:** The optimal batch size is 11. This maximizes throughput while keeping the average latency just under the 150ms budget.
+
+First, calculate the total frame arrival rate: 10 cameras * 10 FPS = 100 FPS. This means a new frame arrives every 10ms.
+
+Second, model the average latency (TPOT). For continuous batching, the average wait time for a frame is half the time it takes to form the batch.
+- Batch formation time: `N * 10ms`
+- Average wait time: `(N * 10ms) / 2 = 5N`
+- Total Average Latency = `T_avg_wait + T_inference(N) = 5N + (40 + 5(N-1)) = 5N + 40 + 5N - 5 = 10N + 35`.
+
+Third, apply the latency constraint: `10N + 35 <= 150` -> `10N <= 115` -> `N <= 11.5`. The maximum integer batch size is 11.
+
+Fourth, model throughput: `Throughput(N) = N / T_inference(N) = N / (5N + 35)`. Since the derivative of this function is always positive for N>0, throughput is always increasing with N. Therefore, to maximize throughput, we should choose the largest N that satisfies the latency constraint, which is N=11.
+
+  > **Napkin Math:** 1.  **Calculate Total Arrival Rate:**
+    - 10 cameras × 10 FPS/camera = 100 FPS total
+    - Inter-arrival time = 1000ms / 100 FPS = 10 ms/frame
+2.  **Model Average Latency (TPOT):**
+    - `TPOT(N) = T_avg_wait + T_inference(N)`
+    - `T_avg_wait` (for batch of N) = `(Time_to_form_batch) / 2 = (N * 10 ms) / 2 = 5N` ms
+    - `T_inference(N) = 40 + 5 * (N-1)` ms
+    - `TPOT(N) = 5N + 40 + 5N - 5 = 10N + 35` ms
+3.  **Apply Latency Constraint to find Max N:**
+    - `10N + 35 <= 150`
+    - `10N <= 115`
+    - `N <= 11.5`. So max integer N is 11.
+4.  **Analyze Throughput:**
+    - `Throughput(N) = N / T_inference(N) = N / (40 + 5(N-1)) = N / (5N + 35)`
+    - The derivative `d/dN [N / (5N + 35)]` is `35 / (5N + 35)^2`, which is always positive. Throughput increases with N.
+5.  **Conclusion:** To maximize throughput, we must pick the largest N allowed by the latency constraint. The optimal batch size is 11.
+
+  > **Key Equation:** $$\text{TPOT}(N) = \frac{N \times T_{\text{inter-arrival}}}{2} + T_{\text{inference}}(N) \le T_{\text{deadline}}$$
+
+  > **Options:**
+  > [ ] 8
+  > [ ] 23
+  > [x] 11
+  > [ ] As large as memory allows
+
+  📖 **Deep Dive:** [Edge: The Real-time Pipeline](https://mlsysbook.ai/edge/02_realtime_pipeline.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Duty Cycle Power Calculation</b> · <code>duty-cycling</code></summary>
+
+- **Interviewer:** "A TinyML device is active for 1 second, consuming 10 mW, and then enters a deep sleep state for 9 seconds, consuming 10 µW. Recognize and state the average power consumption over this 10-second period."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to ignore the energy consumed during the sleep phase. While it's orders of magnitude smaller than the active power, it's non-zero and contributes to the total energy budget, especially over long periods. Another frequent error is taking a simple, unweighted average of the power states, like `(10mW + 10µW)/2`, failing to account for the duration of each state.
+
+  **Realistic Solution:** The correct way to calculate average power is to find the total energy consumed over the period and divide by the period's duration. The total energy is the sum of the energy used in the active state and the energy used in the sleep state.
+
+Energy = (Power_active × Time_active) + (Power_sleep × Time_sleep)
+Average Power = Total Energy / Total Time
+
+  > **Napkin Math:** 1. **Convert powers to the same unit (mW):**
+   - Active Power: 10 mW
+   - Sleep Power: 10 µW = 0.01 mW
+
+2. **Calculate total energy over the 10-second period:**
+   - Energy = (10 mW × 1 s) + (0.01 mW × 9 s)
+   - Energy = 10 mJ + 0.09 mJ = 10.09 mJ
+
+3. **Calculate average power:**
+   - Average Power = 10.09 mJ / 10 s = **1.009 mW**
+
+  > **Key Equation:** $$P_{\text{avg}} = \frac{(P_{\text{active}} \times t_{\text{active}}) + (P_{\text{sleep}} \times t_{\text{sleep}})}{t_{\text{period}}}$$
+
+  > **Options:**
+  > [ ] ~1.0 mW (Mistake: Ignoring sleep power)
+  > [ ] ~5.0 mW (Mistake: Unweighted average of power states)
+  > [x] ~1.01 mW
+  > [ ] ~10.0 mW (Mistake: Ignoring the duty cycle)
+
+  📖 **Deep Dive:** [TinyML](tinyml/README.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Edge Compute Ceiling</b> · <code>edge-compute-limits</code></summary>
+
+- **Interviewer:** "A team is considering an OTA update to deploy a new object detection model to a fleet of autonomous retail cameras running on Jetson AGX Orin devices. Before analyzing the model architecture in detail, they need to know the fundamental compute limit of the hardware. What is the advertised peak INT8 compute performance of a single Jetson AGX Orin?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the compute capabilities of different hardware classes. They might recall the spec for a smaller edge accelerator like a Hailo-8 (~26 TOPS) or misremember the spec for a datacenter GPU (~1000 TOPS), leading to an order-of-magnitude error in their feasibility analysis. Another common mistake is not differentiating between different Orin modules (e.g., AGX vs. Nano).
+
+  **Realistic Solution:** The Jetson AGX Orin provides a peak performance of 275 TOPS for INT8 operations. This number represents the theoretical maximum throughput and is the first and most important check for model deployment feasibility on the edge. If a model's required operations per second exceed this, it cannot be deployed without significant modification.
+
+  > **Napkin Math:** This is a direct recall question based on hardware specifications. For a system with a 33ms latency budget (i.e., ~30 FPS), the per-frame compute budget is `275 TOPS / 30 FPS ≈ 9.17 TOPs`. Any model requiring more than ~9 trillion operations per frame will not meet the real-time deadline.
+
+  > **Key Equation:** $\text{Per-Frame Budget} = \frac{\text{Peak Device TOPS}}{\text{Target FPS}}$
+
+  > **Options:**
+  > [ ] 26 TOPS
+  > [ ] 989 TOPS
+  > [x] 275 TOPS
+  > [ ] 100 TOPS
+
+  📖 **Deep Dive:** [Numbers Every ML Systems Engineer Should Know](https://mlsysbook.ai/interviews/NUMBERS.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Watchdog Timer's Deadline</b> · <code>fault-tolerance</code></summary>
+
+- **Interviewer:** "You are designing the fault tolerance system for a vision-based obstacle avoidance model on an autonomous drone. The system runs on a Jetson AGX Orin. To prevent the entire system from hanging due to a frozen inference process, you implement a hardware watchdog timer with a 500ms timeout. If the application fails to 'pet' the watchdog within this window, the hardware will force a hard reboot. Your system requires 150ms to perform a clean shutdown (e.g., log the failure, save state to flash). Explain the purpose of the watchdog timer and calculate the absolute maximum permissible inference latency your model can have before it risks a hard reboot."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume the entire 500ms watchdog timeout is their latency budget for inference. They forget that the watchdog is a hard deadline for the *entire* application loop, which includes not just inference but also sensor I/O, post-processing, and critically, the time needed to safely shut down if a problem is detected. Exceeding this budget means the system doesn't have time to perform a clean shutdown, leading to an abrupt, potentially dangerous, hard reboot.
+
+  **Realistic Solution:** The watchdog timer is a 'dead man's switch' for system reliability. The application must reset (or 'pet') the timer at the end of every successful processing loop. If the loop hangs, the petting stops, the timer expires, and the system reboots. To calculate the maximum allowed inference latency, you must subtract the time required for a safe shutdown from the total watchdog timeout. This ensures that even in the worst-case scenario where inference takes its maximum allowed time, there is still just enough time to perform a clean shutdown before the watchdog forces a hard reset. Any latency beyond this limit eats into the safety window and risks an uncontrolled system failure.
+
+  > **Napkin Math:** 1. **Identify the total budget:** The hardware watchdog provides a total window of 500ms.
+2. **Identify the safety requirement:** The system needs 150ms to shut down cleanly.
+3. **Calculate the remaining budget for work:** The time available for the main application loop (including inference) is the total budget minus the safety requirement.
+   `500ms (Watchdog Timeout) - 150ms (Safe Shutdown) = 350ms`.
+4. **Conclusion:** The maximum permissible inference latency is 350ms. Any longer, and the system cannot guarantee a clean shutdown if the process hangs.
+
+  > **Key Equation:** $\text{t}_{\text{inference_max}} = \text{t}_{\text{watchdog}} - \text{t}_{\text{safe_reboot}}$
+
+  > **Options:**
+  > [ ] 500ms. The entire watchdog window is the latency budget.
+  > [ ] 650ms. The shutdown time is added to the watchdog timeout.
+  > [x] 350ms. The safe shutdown time must be subtracted from the total budget.
+  > [ ] 150ms. The inference budget is equal to the safe shutdown time.
+
+  📖 **Deep Dive:** [Edge AI: Real-Time Pipelines](https://mlsysbook.ai/edge/02_realtime_pipeline)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Data Gravity of Federated Learning</b> · <code>federated-learning-economics</code></summary>
+
+- **Interviewer:** "You're designing a system for a fleet of 100,000 smart security cameras deployed in homes. You need to continuously improve the on-device person detection model. The two options are: 1) Centralized training, where you upload user images to the cloud for retraining, and 2) Federated Learning, where you train on-device and only upload model gradients. From a Total Cost of Ownership (TCO) perspective, what is the single largest operational cost you avoid by choosing Federated Learning over a centralized approach?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing on device compute cost or central server aggregation cost. While Federated Learning does add compute load to the edge device and requires a central server to average gradients, these costs are typically dwarfed by the massive operational expense of transmitting raw image data over the network at scale. Engineers often underestimate the OpEx of data transfer.
+
+  **Realistic Solution:** The dominant cost avoided is the network data transfer cost. Uploading raw images for centralized training requires orders of magnitude more bandwidth than uploading compressed model gradients. This egress/ingress traffic from thousands of devices becomes the primary driver of operational cost.
+
+  > **Napkin Math:** Let's assume we need 100 images per device for a retraining batch, and each compressed image is 500 KB. The model's gradients can be compressed to 4 MB.
+
+*   **Centralized Data / Device:** 100 images × 500 KB/image = 50 MB
+*   **Federated Data / Device:** 4 MB (gradient update)
+
+For a fleet of 100,000 devices, the difference per training cycle is:
+*   **Centralized Fleet Data:** 100,000 devices × 50 MB/device = 5,000,000 MB = 5 TB
+*   **Federated Fleet Data:** 100,000 devices × 4 MB/device = 400,000 MB = 400 GB
+
+The centralized approach requires **12.5x more data transfer**, which directly translates to significantly higher operational costs from network providers.
+
+  > **Key Equation:** $\text{TCO} = \text{CapEx} + \sum (\text{OpEx}_{\text{Network}} + \text{OpEx}_{\text{Compute}} + \text{OpEx}_{\text{Storage}})$
+
+  > **Options:**
+  > [ ] The cost of on-device compute for local training.
+  > [ ] The cost of the central server to aggregate model updates.
+  > [x] The cost of network data transfer to and from the devices.
+  > [ ] The initial hardware cost (CapEx) of the devices.
+
+  📖 **Deep Dive:** [Deployed System Economics](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Federated vs. Centralized Upload Tax</b> · <code>federated-learning-economics</code></summary>
+
+- **Interviewer:** "You are leading an A/B test comparing two training strategies for a fleet of 10,000 edge devices that monitor industrial equipment. Your goal is to select the most cost-effective strategy in terms of data upload volume.
+
+- **Strategy A (Centralized):** Each device uploads its daily collected sensor data (500 MB) to a central cloud server for training.
+- **Strategy B (Federated Learning):** Each device uses its local data to compute gradient updates for a 10 million parameter model and uploads only those gradients to the central server. The gradients are represented in standard FP32 precision.
+
+Explain the primary trade-off being tested here and calculate the total daily upload volume for the entire fleet under Strategy B."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to confuse the precision, using 2 bytes (FP16) instead of 4 bytes (FP32) for the gradient calculation. Another error is calculating the upload volume for a single device (40 MB) rather than the entire fleet of 10,000 devices. Some candidates may also incorrectly compare it to the 5TB from the centralized approach.
+
+  **Realistic Solution:** The core trade-off is between privacy/communication cost (Federated) and computational simplicity (Centralized). Strategy A requires uploading a massive 5 TB of raw data daily (10,000 devices * 500 MB/device). Strategy B, while requiring on-device compute, dramatically reduces the data upload requirement.
+
+For Strategy B, the upload volume is determined by the size of the model gradients from each device, multiplied by the number of devices in the fleet. Since the gradients correspond to the model parameters, each device uploads a payload equivalent to the model size.
+
+  > **Napkin Math:** 1. **Calculate gradient size per device:**
+   - Model parameters: 10,000,000
+   - Precision: FP32 = 4 bytes per parameter
+   - Size = 10,000,000 params * 4 bytes/param = 40,000,000 bytes = 40 MB
+
+2. **Calculate total fleet upload volume:**
+   - Devices: 10,000
+   - Volume = 10,000 devices * 40 MB/device = 400,000 MB = 400 GB
+
+The federated approach uploads 400 GB per day, compared to 5,000 GB (5 TB) for the centralized approach—a greater than 10x reduction in data transfer costs.
+
+  > **Key Equation:** $\text{Total Upload} = \text{Number of Devices} \times (\text{Model Parameters} \times \text{Bytes per Parameter})$
+
+  > **Options:**
+  > [ ] 200 GB. (Misconception: Assumes FP16/2-byte precision instead of FP32/4-byte)
+  > [ ] 40 MB. (Misconception: Calculates for a single device, not the whole fleet)
+  > [x] 400 GB.
+  > [ ] 5 TB. (Misconception: Reports the volume for the centralized strategy, not federated)
+
+  📖 **Deep Dive:** [Edge AI: Real-Time Pipelines](https://mlsysbook.ai/edge/02_realtime_pipeline.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The TOPS Illusion</b> · <code>roofline</code></summary>
 
@@ -67,7 +2305,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The YOLO vs ViT Question</b> · <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The YOLO vs ViT Question</b> · <code>model-cost</code></summary>
 
 - **Interviewer:** "A researcher on your team wants to replace your YOLOv8-S detector with a ViT-B/16 vision transformer because it scores 2% higher mAP on COCO. You're deploying on a Jetson Orin NX at 30 FPS. Why do you push back?"
 
@@ -111,7 +2349,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Fleet Firmware Fragmentation Crisis</b> · <code>mlops</code> <code>heterogeneous-compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Fleet Firmware Fragmentation Crisis</b> · <code>deployment</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "Your company has 4,000 edge AI devices across 3 hardware generations: 1,000 Coral Dev Boards (Edge TPU, TF Lite 2.5), 1,500 Hailo-8 on RPi CM4 (HailoRT 4.14), and 1,500 Jetson Orin NX (JetPack 5.1.2). Over 2 years, firmware updates were applied inconsistently — some devices accepted updates, others were offline or had failed updates. You now have 23 distinct firmware versions across the fleet. A new model requires TF Lite ≥2.8, HailoRT ≥4.16, and JetPack ≥5.1.3. Only 40% of the fleet meets the requirements. How do you untangle this?"
 
@@ -167,7 +2405,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> Power Budget for Multi-Model Edge Pipeline</b> · <code>power-thermal</code> <code>heterogeneous-compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> Power Budget for Multi-Model Edge Pipeline</b> · <code>power</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You're building a smart retail camera that runs three models simultaneously: person detection (YOLOv8n, runs on GPU), pose estimation (MoveNet, runs on DLA), and face blur for privacy (a small U-Net, runs on GPU). The system is powered by PoE+ delivering 25.5W at the device. The camera sensor + ISP draws 3W, the network stack draws 1.5W, and the SoC housekeeping draws 2W. Estimate the power budget remaining for ML inference and determine if all three models can run concurrently on a Jetson Orin Nano."
 
@@ -195,7 +2433,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> OTA Update Time for Edge Fleet</b> · <code>mlops</code> <code>flash-memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> OTA Update Time for Edge Fleet</b> · <code>deployment</code> <code>persistent-storage</code></summary>
 
 - **Interviewer:** "You manage a fleet of 500 edge AI cameras deployed across a city. Each device has a 4G LTE connection averaging 5 Mbps download and 32 GB eMMC storage with A/B partitioning. You need to push a model update: a new TensorRT engine file (45 MB) plus a firmware delta update (12 MB). Estimate the total fleet update time and identify the bottleneck."
 
@@ -224,11 +2462,559 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Kernel Overhead Traffic Jam</b> · <code>tensorrt-optimization</code></summary>
 
-#### 🔵 L4 — Apply & Identify
+- **Interviewer:** "You are an ML systems engineer deploying a custom MobileNet-style vision model to a fleet of Jetson AGX Orin devices for a robotics application. The model consists of many sequential depthwise-separable convolutions, each followed by a batch norm and a ReLU6 activation. Profiling reveals that despite the model's low GFLOPs, its end-to-end latency is 45ms, missing your 33ms deadline. `ncu` (NVIDIA's profiler) shows that individual kernel execution times are tiny, but the time between kernels is significant. What is the most likely cause of this high latency, and how would you use TensorRT to solve it?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming the hardware's TOPS. Engineers often assume latency issues are purely about compute power and might suggest a more powerful (and expensive) device. They might also incorrectly suggest that pruning or quantization is the *first* step, without identifying the primary bottleneck.
+
+  **Realistic Solution:** The problem is not compute, but memory access and kernel launch overhead. Each small operation (Conv, BN, ReLU) requires launching a separate GPU kernel, which has a fixed latency cost (~5-10 µs). More importantly, the intermediate activation tensors must be written to and read back from the Orin's LPDDR5 DRAM between each kernel. This DRAM access is orders of magnitude slower than on-chip computation. The solution is to use TensorRT to perform 'layer fusion'. TensorRT's optimizer can automatically merge the Conv, BN, and ReLU layers into a single, highly-optimized kernel. This eliminates the launch overhead and keeps the intermediate data in fast on-chip registers and L2 cache, drastically reducing DRAM traffic and overall latency.
+
+  > **Napkin Math:** Let's analyze just one `Conv -> BN -> ReLU` block. Assume a small intermediate tensor of 4MB.
+- Kernel Launch Overhead: 3 launches × ~10µs/launch = 30µs
+- Data Movement: The tensor is written to DRAM after Conv, read by BN, written by BN, read by ReLU. That's 2 reads + 2 writes = 4 transfers.
+- Jetson Orin LPDDR5 BW: 204.8 GB/s
+- Time per transfer: 4MB / 204.8 GB/s ≈ 19.5µs
+- Total Data Movement Time: 4 × 19.5µs = 78µs
+- Total overhead for one block: 30µs (launch) + 78µs (memory) = 108µs.
+If the model has 50 such blocks, the overhead is 50 × 108µs = 5.4ms, just from overhead! Fusing this into one kernel reduces the launch overhead to 10µs and keeps data on-chip, nearly eliminating the 78µs of memory I/O per block. This saves over 5ms, which can be the difference in meeting a tight deadline.
+
+  > **Key Equation:** $\text{Latency}_{total} = \sum_{i=1}^{N} (\text{Latency}_{kernel\_launch} + \text{Latency}_{memory\_io} + \text{Latency}_{compute})$
+
+  > **Options:**
+  > [ ] The model has too many parameters. Apply 80% unstructured pruning to reduce its size.
+  > [ ] The Jetson's compute is insufficient. Switch to a more powerful GPU like an L4.
+  > [x] The latency is dominated by kernel launch overhead and DRAM access between layers. Use TensorRT to fuse the Conv-BN-ReLU sequences into single kernels.
+  > [ ] The model is memory-bound. Convert all layers to INT8 precision to reduce the memory footprint.
+
+  📖 **Deep Dive:** [Edge AI](https://mlsysbook.ai/edge/)
+  </details>
+</details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The GPU Power Gating Latency</b> · <code>power-gating</code> <code>gpu</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Sparsity Illusion</b> · <code>structured-pruning-for-edge</code></summary>
+
+- **Interviewer:** "You are tasked with optimizing a dense object detection model for a real-time perception system on a Hailo-8 edge accelerator, which has a hard 33ms latency budget. The current FP32 model runs at 60ms. Your teammate proudly proclaims they've achieved 50% sparsity using unstructured, magnitude-based pruning, but the latency has not improved. Why is the model still slow, and what pruning strategy should you apply to actually get a speedup?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming all sparsity is equal. Many engineers believe that achieving a high percentage of zero-weighted connections (unstructured sparsity) will automatically lead to a speedup. However, most hardware, especially structured accelerators like the Hailo-8 or GPUs, can't take advantage of fine-grained, random sparsity and still have to perform the multiplications.
+
+  **Realistic Solution:** The Hailo-8, like most modern accelerators, gains its efficiency from performing dense matrix multiplications in parallel on highly structured data. With unstructured sparsity, the weight matrices are still dimensionally the same; they just contain many zeros. The hardware still has to execute the full number of multiply-accumulate (MAC) operations. This is why latency doesn't improve. The correct approach is **structured pruning**. This involves removing entire filters (channels) or nodes from a layer. This physically changes the dimensions of the weight tensors (e.g., reducing the number of output channels in a convolution), which directly reduces the total number of FLOPs required. This is a change the hardware can understand and translate into a real latency reduction.
+
+  > **Napkin Math:** Consider a single convolutional layer with 256 input channels and 512 output channels on a 14x14 feature map.
+- Key Equation: $\text{FLOPs} = 2 \times H \times W \times C_{in} \times C_{out} \times K^2$
+- Original FLOPs (3x3 kernel): $2 \times 14 \times 14 \times 256 \times 512 \times 3^2 \approx 460 MFLOPs$.
+- **Unstructured Pruning (50%):** You still have a $256 \times 512$ weight matrix, just with half the values being zero. The hardware still performs 460 MFLOPs. No speedup.
+- **Structured Pruning (50%):** You remove half the output filters, so $C_{out}$ becomes 256.
+- New FLOPs: $2 \times 14 \times 14 \times 256 \times 256 \times 3^2 \approx 230 MFLOPs$.
+This is a true 2x reduction in compute for this layer, which will translate to a measurable speedup on the Hailo-8 accelerator.
+
+  > **Key Equation:** $\text{FLOPs}_{conv} = 2 \times H \times W \times C_{in} \times C_{out} \times K^2$
+
+  > **Options:**
+  > [ ] The pruning is not aggressive enough. Increase unstructured sparsity to 90% or higher.
+  > [ ] The model is memory bandwidth-bound. The pruned model needs to be quantized to INT8.
+  > [x] The hardware can't skip zero-multiplies. Apply structured pruning to remove entire filters, which reduces the dimensions of the weight tensors and thus the total FLOPs.
+  > [ ] The CPU is the bottleneck. The model processing needs to be offloaded to a dedicated DSP.
+
+  📖 **Deep Dive:** [Edge AI](https://mlsysbook.ai/edge/)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Invisible Inventory</b> · <code>adversarial-patch-physical</code></summary>
+
+- **Interviewer:** "You are the ML Systems Engineer for a fleet of smart retail cameras that use an object detection model to track inventory. The system runs on NVIDIA Jetson AGX Orin devices. Suddenly, the system-wide inventory count for one specific high-value product, 'Glo-Cola,' flatlines, even though store staff confirm the shelves are fully stocked. All other products are detected correctly. You inspect the device dashboards and see that GPU utilization is consistently high and inference latency is normal. Diagnosing the issue, what is the most likely cause of this sudden, targeted failure?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming standard operational issues like model drift or data pipeline errors. Drift is a gradual process, not a sudden cliff-edge failure for a single category. Similarly, a data issue during training would require a model update to have an effect, whereas this failure was instantaneous across the deployed fleet.
+
+  **Realistic Solution:** The most likely cause is a physical adversarial attack. An attacker has designed a sticker (an 'adversarial patch') and placed it on the Glo-Cola bottles in the store. This patch is a carefully crafted pattern of noise that is innocuous to the human eye but specifically designed to fool the object detection model, causing it to ignore the product. The GPU runs normally because it's still processing frames; the input data from the camera sensor itself has been manipulated in the physical world.
+
+  > **Napkin Math:** An adversarial patch attack surface is surprisingly small. Assume the camera input is 640x640 pixels.
+1.  **Total Pixels:** $640 \times 640 = 409,600$ pixels.
+2.  **Patch Size:** A highly effective patch can be as small as 5% of the object's surface. If the object occupies 300x100 pixels, the patch might be just 50x50 pixels.
+3.  **Adversarial Pixels:** $50 \times 50 = 2,500$ pixels.
+4.  **Attack Surface Ratio:** $\frac{2,500}{409,600} \approx 0.6\%$.
+A change to just 0.6% of the image pixels, concentrated in a specific physical pattern, is sufficient to cause a complete failure of the system's objective. This demonstrates the fragility of vision models to targeted physical-world attacks.
+
+  > **Key Equation:** $x' = x + \delta \quad \text{such that} \quad f_{\theta}(x') \neq y_{\text{true}}$
+
+  > **Options:**
+  > [ ] The model has drifted due to a change in store lighting, and the 'Glo-Cola' bottle was the first to be affected.
+  > [ ] A recent OTA model update was corrupted, causing it to fail on this specific object class.
+  > [x] A physical adversarial patch has been placed on the 'Glo-Cola' bottles, making them invisible to the model.
+  > [ ] The camera sensors across the fleet have simultaneously developed a hardware fault that prevents them from seeing the specific red color of the 'Glo-Cola' logo.
+
+  📖 **Deep Dive:** [Edge: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Kernel Launch Storm</b> · <code>operator-fusion</code></summary>
+
+- **Interviewer:** "You are tasked with optimizing a CNN-based object detection model on a Jetson AGX Orin. The model is fully quantized to INT8. Your profiler reports that while the GPU is constantly active, end-to-end latency is poor, and overall TOPS utilization is less than 10% of the Orin's 275 TOPS peak. A deeper look reveals that the execution graph consists of hundreds of sequential, very short-duration kernel calls (e.g., Conv, Add, ReLU), each taking 20-50µs. What is the most effective first step to solve this performance bottleneck?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often see low TOPS utilization and immediately blame the model architecture or batch size, thinking the GPU isn't being 'fed' enough math. They fail to account for the overhead of launching a kernel and moving data from DRAM for each of those tiny operations, which can dominate the actual compute time.
+
+  **Realistic Solution:** The primary bottleneck is the combination of kernel launch overhead and memory bandwidth limitations from repeatedly reading/writing intermediate tensors to/from LPDDR5 DRAM for each separate operation. Even though each operation is fast, the cumulative overhead is massive. The most effective solution is to apply operator fusion. By fusing sequential operations like 'Conv -> Add -> ReLU' into a single, larger kernel, you launch one kernel instead of three, and the intermediate data stays hot in the GPU's much faster on-chip SRAM/registers, drastically reducing DRAM traffic and launch overhead.
+
+  > **Napkin Math:** Let's analyze the overhead for one small intermediate tensor of 4MB (e.g., a 256x256x64 INT8 tensor).
+
+1.  **DRAM Access Time:** The Jetson AGX Orin has 204.8 GB/s of memory bandwidth. Time to read 4MB from DRAM = 4 MB / 204.8 GB/s ≈ 19.5µs.
+2.  **Kernel Launch Overhead:** A typical CUDA kernel launch has a fixed cost of ~5-10µs.
+3.  **Unfused Operation (e.g., Add):** Total time ≈ 10µs (launch) + 19.5µs (read inputs) + [Compute Time] + 19.5µs (write output) ≈ 49µs + Compute.
+4.  **Chain of 3 Unfused Ops:** The overhead alone (ignoring compute) is roughly 3 × (10µs launch + 19.5µs read) ≈ 88.5µs. The GPU reads from DRAM, computes, writes to DRAM, then the next kernel reads from DRAM again.
+5.  **Fused Operation:** The overhead is 1 × (10µs launch + 19.5µs read) ≈ 29.5µs. The intermediate data never returns to DRAM.
+
+In this scenario, fusion reduces overhead by ~66%, allowing the GPU to spend more time on useful computation rather than waiting for data.
+
+  > **Key Equation:** $$ \text{Latency} = N_{kernels} \times (T_{launch} + T_{memory}) + T_{compute} $$
+
+  > **Options:**
+  > [ ] The model's arithmetic intensity is too low for the hardware; the batch size must be increased to provide more parallel work.
+  > [ ] The model needs to be pruned more aggressively to reduce the total number of FLOPs, as the compute is clearly the bottleneck.
+  > [x] The system is bottlenecked by kernel launch overhead and DRAM traffic; apply operator fusion to combine sequential operations into single kernels.
+  > [ ] The model is not properly quantized, and using FP16 would provide better hardware mapping on the Tensor Cores.
+
+  📖 **Deep Dive:** [Volume I: Frameworks](https://mlsysbook.ai/vol1/frameworks.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Real-Time Radar Deadline</b> · <code>model-distillation</code></summary>
+
+- **Interviewer:** "You are deploying a radar signal classifier on an edge device with a Hailo-8 accelerator, which has 26 TOPS (INT8) of performance but only a few dozen MB of on-chip SRAM. Your highly accurate teacher model has 90MB of INT8 weights and takes 180ms per inference, missing the 33ms hard real-time deadline required for the application. Your profiler shows the Hailo-8 is compute-bound for very short bursts, but there are long stalls in between. Given this data, what is the most direct way to meet the deadline?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to focus only on the accelerator's peak TOPS and the model's operation count (G-MACs). Engineers might incorrectly conclude the model has too many operations or the accelerator isn't fast enough. They fail to recognize that on specialized hardware like the Hailo-8, on-chip memory capacity is the most critical resource, and performance collapses when a model's state doesn't fit.
+
+  **Realistic Solution:** The root cause of the slow performance is memory thrashing. The 90MB model is far too large to fit into the Hailo-8's SRAM. The device must constantly swap layers or tiles of the model back and forth from the host CPU's main memory over a relatively slow bus (e.g., PCIe), and these data movement stalls dominate the latency. The accelerator's massive compute power is wasted while it waits for data. The most direct solution is to use knowledge distillation to train a much smaller 'student' model (e.g., <16MB) that fits entirely in the Hailo-8's SRAM. This eliminates host-device swapping, allowing the inference to run in a single, compute-bound pass.
+
+  > **Napkin Math:** 1.  **Teacher Model (90MB):** The model doesn't fit in the accelerator's SRAM. Let's assume the effective host-to-device bandwidth is 1 GB/s.
+2.  **Memory Transfer Time:** Just moving the model weights for one inference would take at least 90 MB / 1000 MB/s = 90ms. This transfer time alone is nearly 3x the 33ms deadline, not even counting computation or activation data movement.
+3.  **Student Model (e.g., 10MB):** A distilled student model can easily fit within the SRAM.
+4.  **Student Compute Time:** Let's say the student model requires 2 G-OPs (1 G-MAC). On a 26 TOPS accelerator, the pure compute time would be: 2 × 10⁹ OPs / (26 × 10¹² OPS) ≈ 0.000077s or 77µs.
+5.  **Conclusion:** By creating a student model that fits in SRAM, the latency becomes purely a function of computation (~77µs) instead of being dominated by memory transfer (~90ms+). This easily meets the 33ms deadline.
+
+  > **Key Equation:** $$ T_{total} \approx T_{compute} + T_{memory\_swap} $$
+
+  > **Options:**
+  > [ ] The model has too many G-MACs. Use aggressive unstructured pruning to reduce the operation count by at least 80%.
+  > [ ] The accelerator's clock speed is insufficient. Overclock the Hailo-8 to increase its TOPS and meet the compute demand.
+  > [x] The model's weight matrix is too large for the on-chip SRAM, causing stalls from memory swapping. Use knowledge distillation to create a smaller student model that fits in SRAM.
+  > [ ] The host CPU is bottlenecking the pipeline. Rewrite the data pre-processing code in C++ instead of Python to feed the accelerator faster.
+
+  📖 **Deep Dive:** [Volume I: Model Compression](https://mlsysbook.ai/vol1/compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The AV Training Bottleneck</b> · <code>parallelism-edge</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer at an autonomous vehicle company, optimizing the in-car training loop for a 500M parameter perception model. The prototype compute unit has two identical accelerators on a single board, connected by a 50 GB/s interconnect. Each accelerator is rated for 50 TFLOPS (FP16). When using a standard data parallel strategy, you only achieve a 1.2x speedup over a single accelerator, far from the ideal 2x. A profiler identifies the gradient `AllReduce` step as a 20ms bottleneck in every training step. Given this data, diagnose the scaling problem and propose a solution."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often default to data parallelism without analyzing the communication-to-compute ratio. A common mistake is to blame an unrelated component like the data input pipeline (CPU starvation) or to assume the hardware is simply flawed. Another incorrect path is attempting to brute-force the problem with larger batches, which fails to fix the underlying ratio of serial communication to parallel compute governed by Amdahl's Law.
+
+  **Realistic Solution:** The diagnosis is a communication bottleneck that creates a serial bottleneck, limiting parallel efficiency. The time to synchronize 1GB of gradients (20ms) is a substantial fraction of the parallelized compute time (30ms). The total time per step is `T_compute + T_sync`, not `T_compute / 2`. The correct solution is to change the parallelism strategy to one that communicates less data. **Pipeline Parallelism** is the best choice here. By splitting the model's layers across the two accelerators, the large `AllReduce` operation is replaced by a much smaller activation transfer between the two chips only at the layer(s) where they meet. This dramatically reduces the communication overhead, allowing for much better scaling.
+
+  > **Napkin Math:** 1. **Calculate Gradient Size:** A 500M parameter model with FP16 gradients requires `500M params * 2 bytes/param = 1 GB` of data to be synchronized.
+2. **Calculate Communication Time:** The `AllReduce` operation over the 50 GB/s interconnect takes `1 GB / 50 GB/s = 0.02s = 20 ms`. This matches the profiler data.
+3. **Calculate Compute Time:** A 500M parameter model requires roughly `6 * 500M = 3` TFLOPs per training step. On a single 50 TFLOPS accelerator, this would take `3 TFLOPs / 50 TFLOPS = 0.06s = 60 ms`.
+4. **Calculate Data Parallel Total Time:** With two accelerators, the compute is parallelized: `60 ms / 2 = 30 ms`. However, the communication is serial. Total time is `T_parallel_compute + T_sync = 30 ms + 20 ms = 50 ms`.
+5. **Verify Speedup:** The speedup is `T_single / T_total = 60 ms / 50 ms = 1.2x`. This confirms the diagnosis.
+
+  > **Key Equation:** $\text{Speedup} = \frac{T_{single}}{ (T_{single} / N_{devices}) + T_{communication}}$
+
+  > **Options:**
+  > [ ] The data input pipeline is starving the accelerators. Increase the number of CPU data loader workers.
+  > [ ] The interconnect is insufficient for data parallelism. The hardware is flawed and a faster version (>200 GB/s) is needed.
+  > [x] The `AllReduce` communication is a serial bottleneck. Switch to Pipeline Parallelism to reduce cross-accelerator data transfer.
+  > [ ] The batch size is too small, leading to low arithmetic intensity. Double the batch size to better saturate the hardware.
+
+  📖 **Deep Dive:** [Volume II: Distributed Training](https://mlsysbook.ai/vol2/dist_training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Robot's Split Brain</b> · <code>compute-analysis</code></summary>
+
+- **Interviewer:** "You are the lead systems engineer for an autonomous warehouse robot. The robot uses two co-located Jetson AGX Orin modules in the same chassis: Module A runs a stereo vision model, and Module B runs path planning. Module A generates a 256 MB feature map that must be transferred to Module B for every frame. To maintain real-time performance, the total perception-to-action latency must be under 33ms. You diagnose the system and find the cross-module transfer is the primary bottleneck. Your team proposes several interconnects to link the two modules. Which of the following solutions will solve the latency problem, and why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often misapply datacenter interconnect knowledge to edge platforms, assuming technologies like NVLink or InfiniBand are options. A second common mistake is focusing purely on protocol latency (e.g., benefits of RDMA) while ignoring the much larger bottleneck of raw network bandwidth, especially when dealing with large, high-frequency data transfers like video feature maps.
+
+  **Realistic Solution:** The only feasible option is connecting the two AGX Orin modules via a high-speed PCIe switch. The Jetson AGX Orin platform supports PCIe Gen 4, which provides sufficient bandwidth to transfer the 256 MB feature map within the tight real-time budget. Standard Ethernet is far too slow, and while RDMA reduces CPU overhead, it cannot fix a fundamental bandwidth limitation. NVLink is a datacenter technology and is not available on the Jetson AGX Orin.
+
+  > **Napkin Math:** Requirement: Transfer 256 MB within a fraction of the 33ms budget. Let's target < 20ms for the transfer.
+
+Key Equation: Transfer Time = Data Size / Bandwidth
+
+- **Analysis of 10GbE:**
+  - Bandwidth: 10 Gbps = 1.25 GB/s
+  - Transfer Time: 256 MB / 1.25 GB/s ≈ 205 ms
+  - Verdict: **FAILS**. Exceeds the total 33ms budget by over 6x.
+
+- **Analysis of PCIe Gen 4 (assuming an x8 link via a switch):**
+  - Bandwidth: ~16 GB/s
+  - Transfer Time: 256 MB / 16 GB/s = 16 ms
+  - Verdict: **SUCCESS**. This leaves 17ms (33ms - 16ms) for the actual compute, which is a realistic budget for this task.
+
+- **Analysis of NVLink:**
+  - Verdict: **INCOMPATIBLE**. Jetson AGX Orin does not feature NVLink bridges.
+
+- **Analysis of RDMA over 10GbE:**
+  - RDMA reduces protocol latency (microseconds), but the transfer is bandwidth-bound. The time is still dominated by the ~205ms transfer duration.
+  - Verdict: **FAILS**.
+
+  > **Key Equation:** $\text{Time}_{\text{transfer}} = \frac{\text{Data Size}}{\text{Bandwidth}}$
+
+  > **Options:**
+  > [ ] Use a 10GbE connection with RDMA to minimize latency.
+  > [ ] Bridge the two modules with an NVLink connector.
+  > [x] Connect the modules via a PCIe Gen 4 switch.
+  > [ ] Use a standard 10GbE connection between the modules.
+
+  📖 **Deep Dive:** [Edge Hardware & Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Federated TCO Fallacy</b> · <code>federated-learning-tco</code></summary>
+
+- **Interviewer:** "You are the Staff ML Systems Engineer for a company deploying a new 'unfamiliar face' detector to a fleet of 1 million edge cameras. You must choose between two strategies:
+- **Strategy A (Centralized):** Uses a cheap ($5) SoC. Each camera streams 10 MB of video daily to the cloud for analysis and retraining.
+- **Strategy B (Federated Learning):** Uses a more powerful ($8) SoC to perform on-device training, only sending 50 KB of model updates daily.
+
+The finance department sees the $3 million extra hardware cost for the federated approach and argues it's a non-starter. Your task is to apply TCO analysis to diagnose this claim. Calculate the breakeven point in days for the extra hardware investment, focusing only on data transmission costs at $0.01/GB. Which approach has the superior long-term economics?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing solely on the initial Capital Expenditure (CapEx) is a classic TCO fallacy. At scale, Operational Expenditure (OpEx) like data transmission, power, and maintenance often dominates the total cost. A small per-unit cost increase can be easily justified if it enables massive OpEx savings across the fleet.
+
+  **Realistic Solution:** The Federated Learning approach has an overwhelmingly superior Total Cost of Ownership (TCO). The $3M extra hardware cost is paid back in just 30 days by the massive savings in data transmission costs. The centralized approach would cost ~$100,000 per day in data fees, totaling ~$36.5M annually. The federated approach's data costs are negligible in comparison (~$183/year). This demonstrates that for large fleets, optimizing for network traffic is often the most critical economic lever.
+
+  > **Napkin Math:** # 1. Calculate the one-time extra hardware cost (ΔCapEx)
+ΔCapEx = 1,000,000 cameras * ($8/SoC - $5/SoC) = $3,000,000
+
+# 2. Calculate the daily data cost for the Centralized strategy (OpEx_A)
+Data_A = 1,000,000 cameras * 10 MB/camera/day = 10,000,000 MB/day = 10 TB/day
+OpEx_A = 10,000 GB/day * $0.01/GB = $100,000 per day
+
+# 3. Calculate the daily data cost for the Federated strategy (OpEx_B)
+Data_B = 1,000,000 cameras * 50 KB/camera/day = 50,000,000 KB/day = 50 GB/day
+OpEx_B = 50 GB/day * $0.01/GB = $0.50 per day
+
+# 4. Calculate the daily operational savings (ΔOpEx)
+ΔOpEx = OpEx_A - OpEx_B ≈ $100,000 per day
+
+# 5. Calculate the breakeven point
+Breakeven Time = ΔCapEx / ΔOpEx = $3,000,000 / $100,000/day = 30 days
+
+  > **Key Equation:** $\text{Breakeven Time} = \frac{\Delta \text{CapEx}}{\Delta \text{Daily OpEx}}$
+
+  > **Options:**
+  > [ ] The centralized approach is cheaper because it saves the company $3 million in upfront hardware costs.
+  > [x] The federated approach is far cheaper, breaking even on the extra hardware cost in just 30 days due to enormous data transfer savings.
+  > [ ] The federated approach is cheaper, but the breakeven point is over 2 years, making it a risky investment.
+  > [ ] Neither is viable, as the on-device compute power cost for the federated fleet would exceed any potential data savings.
+
+  📖 **Deep Dive:** [Edge: Hardware Platform](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Edge Roofline Dilemma</b> · <code>gpu-roofline-analysis</code></summary>
+
+- **Interviewer:** "You are an ML systems engineer at an autonomous robotics company, tasked with deploying a new perception model on a fleet of drones equipped with NVIDIA Jetson AGX Orin modules running in a 60W power profile. You have two candidate models profiled:
+
+*   **Model A (Dense CNN):** Performs 200 Giga-Ops (INT8) and reads 50 MB of data (weights + activations) per inference.
+*   **Model B (Vision Transformer):** Performs 50 Giga-Ops (INT8) and reads 200 MB of data per inference.
+
+To maximize battery life, you must select the model with the highest efficiency (TOPS/W). Using the Roofline model, diagnose the bottleneck for each model and determine which one will likely achieve better power efficiency."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often mistakenly assume the model with fewer total operations (G-Ops) is inherently more efficient. This overlooks the cost of data movement. On power-constrained edge devices, memory access can dominate the energy budget, and a model that is memory-bound will waste energy with its compute units sitting idle.
+
+  **Realistic Solution:** The key is to calculate the Arithmetic Intensity (AI) for each model and compare it to the hardware's ridge point. The model whose AI is higher and closer to (or beyond) the ridge point will better utilize the expensive compute units, leading to higher effective TOPS and superior power efficiency.
+
+Model A is compute-bound, meaning its performance is limited by the Orin's compute capacity. It can effectively use the 275 TOPS. Model B is severely memory-bound; its performance is limited by the 204.8 GB/s memory bandwidth, and it cannot get close to the Orin's peak TOPS. Therefore, Model A will achieve higher hardware utilization and better TOPS/W.
+
+  > **Napkin Math:** First, calculate the Jetson AGX Orin's ridge point, which is the AI required to saturate the compute units.
+- Peak Compute: 275 TOPS (275e12 Ops/sec)
+- Memory Bandwidth: 204.8 GB/s
+- **Orin Ridge Point** = 275e12 Ops/sec / 204.8e9 Bytes/sec ≈ **1342 Ops/Byte**
+
+Next, calculate the AI for each model:
+- **Model A (CNN) AI** = 200e9 Ops / 50e6 Bytes = **4000 Ops/Byte**
+- **Model B (ViT) AI** = 50e9 Ops / 200e6 Bytes = **250 Ops/Byte**
+
+Finally, compare:
+- Model A: AI (4000) > Ridge Point (1342) -> **Compute-Bound**.
+- Model B: AI (250) < Ridge Point (1342) -> **Memory-Bound**.
+
+Because Model A is compute-bound, it will more effectively saturate the hardware's compute units, leading to higher realized performance and better efficiency.
+
+  > **Key Equation:** $\text{Arithmetic Intensity (AI)} = \frac{\text{Total Operations (OPs)}}{\text{Total Memory Access (Bytes)}}$
+
+  > **Options:**
+  > [ ] Model B, because it requires 4x fewer G-Ops, making it fundamentally more efficient.
+  > [x] Model A, because its higher Arithmetic Intensity means it is compute-bound and will better utilize the Orin's expensive compute units.
+  > [ ] Model B, because its large memory footprint is better suited for the Orin's large 204.8 GB/s memory bandwidth.
+  > [ ] Both are memory-bound. The Orin's ridge point is too high for any modern network, so the choice depends on other factors.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Smart Doorbell Latency Crisis</b> · <code>depthwise-separable-convolution</code></summary>
+
+- **Interviewer:** "You are an ML systems engineer at a smart home company. Your team's new person-detection model for a smart doorbell is missing its 33ms (30 FPS) latency budget on the device's edge accelerator, which has a peak performance of 26 TOPS. Profiling reveals that a single standard 3x3 convolutional layer is the bottleneck. This layer takes a 56x56 feature map with 128 input channels and produces 256 output channels. What is the most effective way to solve this latency problem by changing the model architecture?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Immediately jumping to quantization or pruning. While these are valid optimization techniques, they don't address the fundamental computational inefficiency of the standard convolution itself. Another common mistake is to suggest removing the layer, which would hurt accuracy too much.
+
+  **Realistic Solution:** The correct approach is to replace the standard 3x3 convolution with a 3x3 depthwise separable convolution. This architectural change dramatically reduces the number of multiply-accumulate (MAC) operations, which directly translates to lower latency, while preserving much of the model's expressive power and accuracy. It's a standard and highly effective technique for optimizing CNNs for resource-constrained edge devices.
+
+  > **Napkin Math:** First, calculate the computational cost (in FLOPs, where 1 MAC ≈ 2 FLOPs) of the original standard convolution:
+- Cost_standard = H × W × C_in × C_out × K_h × K_w × 2
+- Cost_standard = 56 × 56 × 128 × 256 × 3 × 3 × 2 ≈ 1.85 GFLOPs
+
+Next, calculate the cost of a depthwise separable convolution:
+- Cost_depthwise = 56 × 56 × 128 × 3 × 3 × 2 = 7.2 MFLOPs
+- Cost_pointwise = 56 × 56 × 128 × 256 × 1 × 1 × 2 = 205 MFLOPs
+- Cost_total = 7.2 + 205 = 212.2 MFLOPs
+
+The reduction in computation is 1.85 GFLOPs / 212.2 MFLOPs, which is approximately an 8.7x speedup for this layer, making it the most impactful architectural change for reducing latency.
+
+  > **Key Equation:** \text{Reduction Factor} \approx \frac{K^2 \cdot C_{out}}{K^2 + C_{out}}
+
+  > **Options:**
+  > [ ] Apply INT8 quantization to the layer's weights and activations.
+  > [ ] Increase the batch size to improve the device's throughput.
+  > [x] Replace the standard convolution with a depthwise separable convolution.
+  > [ ] Replace the CNN block with a more powerful Vision Transformer block.
+
+  📖 **Deep Dive:** [Network Architectures](https://mlsysbook.ai/vol1/dnn_architectures.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Drone Vision Architecture Debate</b> · <code>cnn-vs-transformer</code></summary>
+
+- **Interviewer:** "You are designing a vision system for a delivery drone that uses a Hailo-8 edge accelerator (26 TOPS, ~2.5 TB/s on-chip SRAM bandwidth). The goal is real-time object detection with a hard 33ms deadline. Two architectures are proposed: a lightweight Vision Transformer (ViT) and a MobileNetV2-style CNN. The ViT is newer and has higher accuracy on ImageNet. Using the principles of hardware-software co-design, diagnose which architecture is a better fit for this specific accelerator."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming the model with the highest accuracy on a benchmark (ImageNet) is always the best choice. This ignores the critical factor of the underlying hardware's architecture. Another mistake is believing a sufficiently advanced compiler can optimize any model to fit any hardware, ignoring fundamental dataflow mismatches.
+
+  **Realistic Solution:** The MobileNetV2-style CNN is the better choice. The Hailo-8 is a streaming dataflow accelerator, designed to efficiently process data flowing through a static compute graph. CNNs, particularly those using depthwise and pointwise convolutions, map perfectly to this paradigm. Their operations exhibit high spatial locality and data reuse, allowing the hardware to keep data on-chip in SRAM and maximize compute utilization. A ViT's self-attention mechanism, in contrast, has a global data-dependent access pattern (N^2 complexity on tokens) that breaks the spatial locality and is less friendly to a streaming dataflow architecture, leading to lower hardware utilization despite its theoretical compute needs.
+
+  > **Napkin Math:** The key is to consider the Arithmetic Intensity (AI) and dataflow, not just TOPS. The Hailo-8's extremely high SRAM bandwidth (~2.5 TB/s) relative to its compute (26 TOPS) means it has a high ridge point and is hungry for high-AI operations to avoid being memory-bound.
+
+- **CNN (Depthwise Conv):** A 3x3 kernel has massive data reuse from overlapping patches. Its AI is very high, making it compute-bound on the Hailo-8 and able to fully utilize the 26 TOPS.
+
+- **ViT (Self-Attention):** The operation computes an attention map of size N x N from an input sequence of N tokens. This requires holding large intermediate matrices (Q, K, V, and the attention map itself) in SRAM. For a 224x224 image with 16x16 patches, N=196. The attention matrix alone is 196x196 = 38.4K elements. This global communication pattern is less efficient on a spatially-optimized dataflow architecture than a CNN's local communication. The CNN's dataflow is a better match for the hardware's dataflow.
+
+  > **Key Equation:** \text{Arithmetic Intensity (AI)} = \frac{\text{Total Operations (FLOPs)}}{\text{Total Data Movement (Bytes)}}
+
+  > **Options:**
+  > [ ] The ViT is better because its global self-attention is more powerful than local convolutions.
+  > [x] The CNN is better because its operations have high spatial locality, matching the dataflow architecture of the accelerator.
+  > [ ] It doesn't matter which model is chosen; the accelerator's compiler will optimize the dataflow for maximum performance.
+  > [ ] The ViT is better because it requires fewer parameters than the CNN.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Fragmented Inference Graph</b> · <code>operator-fusion</code></summary>
+
+- **Interviewer:** "You are an ML systems engineer deploying a custom vision model to a Jetson AGX Orin for a real-time object detection task. The system requires 30 FPS performance (a 33ms per-frame deadline), but your model is currently running at 22 FPS (45ms per-frame).
+
+You run the model through a profiler and get the following breakdown of on-device inference time:
+
+| Layer Type      | Total Time (ms) | % of Total Time | Total GFLOPs | % of Total FLOPs |
+|-----------------|-----------------|-----------------|--------------|------------------|
+| Conv2D          | 30.0            | 66.7%           | 15.0         | 99.3%            |
+| BatchNorm2d     | 8.0             | 17.8%           | 0.05         | 0.3%             |
+| Activation (SiLU) | 6.0             | 13.3%           | 0.05         | 0.3%             |
+| Add             | 1.0             | 2.2%            | 0.01         | <0.1%            |
+| **Total**       | **45.0**        | **100%**        | **~15.11**   | **100%**         |
+
+The `BatchNorm` and `Activation` layers are consuming 14ms (31% of the total time) but contribute less than 1% of the arithmetic operations. How do you most effectively solve this bottleneck to meet your 33ms deadline?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus only on FLOPs, assuming that computational layers like `Conv2D` are the only source of latency. They misdiagnose the problem as compute-bound and suggest optimizations like pruning or increasing clock speed, which fail to address the true bottleneck: memory bandwidth and kernel launch overhead for small, element-wise operations.
+
+  **Realistic Solution:** The correct approach is to apply operator fusion. The profiler data clearly shows that the `BatchNorm` and `Activation` layers are memory-bound; their execution time is dominated by the cost of reading data from DRAM and writing it back, plus the overhead of launching a separate GPU kernel for each one. By fusing these operations into their preceding `Conv2D` layers (e.g., creating a single `Conv-BN-SiLU` operator), the intermediate tensors never have to be written to or read from main memory. The calculations are performed on-the-fly in the GPU's fast on-chip caches or registers. This effectively eliminates the DRAM roundtrips and kernel launch overhead, saving almost the entire 14ms currently spent in those layers and bringing the total inference time down to ~31ms, thus meeting the 33ms deadline.
+
+  > **Napkin Math:** The key insight is that the `BatchNorm` and `Activation` layers have extremely low Arithmetic Intensity (AI).
+
+1.  **Calculate AI for an Activation Layer:** Consider a typical activation tensor of `128x128x64` in FP16 (2 bytes).
+    -   Bytes Moved: `(128*128*64 * 2) bytes_in + (128*128*64 * 2) bytes_out ≈ 4.2 MB`
+    -   FLOPs: 1 FLOP per element = `128*128*64 ≈ 1 MFLOPs`
+    -   Arithmetic Intensity (AI) = `1 MFLOPs / 4.2 MB ≈ 0.24 FLOPs/Byte`.
+
+2.  **Compare to Hardware:** The Jetson AGX Orin has a ridge point of ~1,342 Ops/Byte. An AI of 0.24 is thousands of times below the hardware's balance point, confirming the operation is severely memory-bound. Its latency is almost entirely due to memory access and overhead.
+
+3.  **Estimate Savings:** The profiler shows these layers cost 14ms (`8ms + 6ms`). By fusing them, we eliminate the separate kernel launches and DRAM roundtrips. This should reclaim almost the entire 14ms.
+    -   New estimated time: `45ms (current) - 14ms (saved) = 31ms`.
+    -   This new time of 31ms is below the 33ms deadline.
+
+  > **Key Equation:** $\text{Arithmetic Intensity} = \frac{\text{Total FLOPs}}{\text{Total Bytes Moved}}$
+
+  > **Options:**
+  > [ ] Increase the GPU clock speed and power draw to make the existing kernels run faster.
+  > [ ] Apply structured pruning to the `Conv2D` layers to reduce the model's total FLOPs.
+  > [x] Fuse the `BatchNorm` and `Activation` layers into their preceding `Conv2D` operations.
+  > [ ] Convert the entire model to INT8 precision to reduce memory bandwidth pressure.
+
+  📖 **Deep Dive:** [Volume 2: Frameworks](https://mlsysbook.ai/vol2/frameworks.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Drone's 25ms Mystery</b> · <code>edge-interconnect-bottleneck</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer diagnosing a real-time perception pipeline on an autonomous drone. The system uses two co-processors (Module A and Module B, both Jetson AGX Orins) on the same carrier board, connected by a PCIe Gen4 bus. Module A performs sensor fusion and generates a 67 MB feature map, which it sends to Module B for object detection. Your profiling reveals the following:
+
+- Module A (fusion) execution time: 10ms
+- Module B (detection) execution time: 15ms
+- **End-to-end pipeline latency: 50ms**
+
+This means the data transfer is taking a staggering 25ms (50 - 10 - 15), causing you to miss your 30 FPS (33ms) deadline. Given that a PCIe Gen4 x8 bus has a theoretical bandwidth of ~15.75 GB/s, diagnose the most likely cause for this massive transfer delay."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate theoretical bandwidth (`Time = Data / Bandwidth`) but forget that without a direct memory access path, the host CPU and OS get involved. This 'software overhead' from managing the transfer can be 5-10x larger than the physical data movement time, especially for moderately sized transfers where setup costs dominate.
+
+  **Realistic Solution:** The root cause is the lack of a true peer-to-peer (P2P) transfer. The data transfer is being mediated by the host CPU, causing a 'CPU bounce': Module A's VRAM -> Host System RAM -> Module B's VRAM. Each leg of this journey (VRAM to RAM, RAM to VRAM) incurs significant driver and OS scheduling overhead. The solution is to ensure the system's driver, BIOS, and IOMMU are correctly configured to allow Remote Direct Memory Access (RDMA, also called P2P DMA). This enables Module A to write directly into Module B's memory without any CPU intervention, eliminating the software overhead and bringing the transfer time down to what the physics of the bus allows.
+
+  > **Napkin Math:** Payload size: 67 MB
+Theoretical PCIe Gen4 x8 Bandwidth: ~15.75 GB/s
+
+Theoretical Physical Transfer Time:
+67 MB / 15.75 GB/s = 0.067 GB / 15.75 GB/s ≈ 0.00425 s = 4.25 ms
+
+Observed Transfer Time: ~25 ms
+
+Software Overhead = Observed Time - Physical Time
+25 ms - 4.25 ms ≈ 20.75 ms
+
+This ~21ms overhead is characteristic of the CPU managing two separate memory copy operations plus OS scheduling delays, confirming a non-P2P 'CPU bounce' transfer path is the bottleneck.
+
+  > **Key Equation:** $t_{\text{total}} = t_{\text{physical}} + t_{\text{software}} = (\frac{\text{Data}}{\text{Bandwidth}}) + \text{Overhead}_{\text{CPU}}$
+
+  > **Options:**
+  > [ ] The 67 MB payload is too large for the PCIe Gen4 bus, which is saturated. The system requires an interconnect with higher bandwidth like NVLink.
+  > [ ] The LPDDR5 memory on the receiving module (Module B) is the bottleneck; its bandwidth is insufficient to ingest the 67 MB payload from the PCIe bus at speed.
+  > [x] The transfer is defaulting to a CPU-mediated path instead of using direct peer-to-peer DMA (RDMA), introducing significant OS and driver overhead.
+  > [ ] The system is using a TCP/IP stack over the PCIe bus for communication, and the network protocol overhead is the source of the high latency.
+
+  📖 **Deep Dive:** [Volume I: Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Federated Learning Power Tax</b> · <code>federated-learning-economics</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer at a smart security camera company. To improve privacy, your team is A/B testing a new, more accurate person detection model trained via Federated Learning (FL). Users in the FL test group are reporting noticeable battery degradation. Your task is to diagnose the energy impact.
+
+The device, similar to a Jetson AGX Orin, has two states:
+1.  **Active (15W):** During FL training (5 seconds) and gradient upload (1 second).
+2.  **Idle (0.5W):** All other times.
+
+FL devices perform one training round per hour. Control group devices are always idle except for negligible, brief moments of standard inference. You can assume their incremental cost is zero.
+
+Given 100,000 devices in the FL test group and an electricity cost of $0.15/kWh, solve for the total annual electricity cost increase caused by enabling FL."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often make unit conversion errors between watt-seconds (Joules), watt-hours, and kilowatt-hours, leading to a cost estimate that is orders of magnitude wrong. Another common mistake is to only calculate the cost of either compute or networking, instead of the total active time. Finally, some may forget to subtract the idle power that would have been consumed anyway, slightly overestimating the cost.
+
+  **Realistic Solution:** The correct approach is to calculate the incremental energy consumed per hour by an FL device compared to a control device. This difference, scaled across the entire fleet for a full year, gives the total additional cost.
+
+The primary cost driver is the periodic elevation from a low-power idle state (0.5W) to a high-power active state (15W). While 6 seconds per hour seems small, aggregating this across 100,000 devices for a year reveals the true fleet-level TCO.
+
+  > **Napkin Math:** 1. **Calculate Incremental Power:** The power increase during an active cycle is the difference between active and idle states.
+   - `ΔPower = P_active - P_idle = 15W - 0.5W = 14.5W`
+
+2. **Calculate Incremental Energy per Hour:** This is the incremental power multiplied by the total active time per round.
+   - `t_active = t_compute + t_upload = 5s + 1s = 6s`
+   - `E_joules_per_hour = ΔPower × t_active = 14.5W × 6s = 87 Joules`
+
+3. **Calculate Annual Energy per Device (kWh):** Convert Joules per hour to kilowatt-hours per year.
+   - `E_joules_per_year = 87 J/hr × 24 hr/day × 365 days/yr = 762,120 J/yr`
+   - `1 kWh = 3,600,000 Joules`
+   - `E_kwh_per_year = 762,120 J / 3,600,000 J/kWh ≈ 0.2117 kWh`
+
+4. **Calculate Total Annual Fleet Cost:** Multiply the annual energy cost per device by the number of devices and the price of electricity.
+   - `Total_kWh = 0.2117 kWh/device × 100,000 devices = 21,170 kWh`
+   - `Total_Cost = 21,170 kWh × $0.15/kWh ≈ $3,175.50`
+
+From a fleet energy TCO perspective, this feature is remarkably inexpensive at ~$3,200 per year.
+
+  > **Key Equation:** $\text{Annual Cost} = (P_{\text{active}} - P_{\text{idle}}) \times t_{\text{active}} \times N_{\text{rounds}} \times N_{\text{devices}} \times \text{Price}_{\text{kWh}}$
+
+  > **Options:**
+  > [ ] ~$320,000 per year. This cost is prohibitive.
+  > [x] ~$3,200 per year. The energy cost is negligible at the fleet level.
+  > [ ] ~$530 per year. The cost is driven by the 1-second network upload, which is the main bottleneck.
+  > [ ] ~$3,200,000 per year. This feature will bankrupt the company.
+
+  📖 **Deep Dive:** [Edge: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.md)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 🔵 L4
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The GPU Power Gating Latency</b> · <code>power</code> <code>roofline</code></summary>
 
 - **Interviewer:** "Your battery-powered drone runs a Jetson Orin Nano (15W TDP) for obstacle avoidance. During straight-line flight (80% of mission time), the GPU is idle — only the CPU runs a lightweight IMU fusion algorithm. Your power engineer enables GPU power gating to save battery. On the next test flight, the drone clips a tree branch during a sudden turn. Investigation reveals the obstacle detection model took 180ms to produce its first detection after the turn began, instead of the expected 25ms. What happened?"
 
@@ -248,7 +3034,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Watchdog Timeout Freeze</b> · <code>real-time</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Watchdog Timeout Freeze</b> · <code>real-time</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your autonomous drone uses a Jetson Nano. The flight controller expects a heartbeat signal from your ML perception script over UART every 200ms. If it doesn't get one, it assumes the Jetson crashed and triggers an emergency landing. Your ML inference takes 50ms. However, once a minute, the drone emergency lands. Your inference didn't crash. What OS-level event stalled your script for over 200ms?"
 
@@ -277,7 +3063,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The UVC Camera MJPEG CPU Tax</b> · <code>sensors</code> <code>cpu</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The UVC Camera MJPEG CPU Tax</b> · <code>sensor-pipeline</code> <code>cpu</code></summary>
 
 - **Interviewer:** "You attach a USB webcam to a Raspberry Pi to run a vision model. To save USB bandwidth, you configure the camera via V4L2 to output compressed MJPEG video at 1080p 30FPS instead of raw YUYV. The USB bandwidth drops significantly, which is good. But your ML inference time increases by 40%, and the Pi runs incredibly hot. Why did saving USB bandwidth destroy your CPU?"
 
@@ -305,7 +3091,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Preempt-RT Kernel Tick Overhead</b> · <code>os</code> <code>cpu</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Preempt-RT Kernel Tick Overhead</b> · <code>deployment</code> <code>cpu</code></summary>
 
 - **Interviewer:** "You compile a custom Linux kernel with the PREEMPT_RT patch to guarantee hard real-time latency for your edge robot's motor controller. You configure the kernel timer tick frequency (HZ) to 1000 Hz for maximum responsiveness. The motor controller works perfectly. However, the background ML perception model (which ran fine at 30 FPS on standard Linux) now struggles to hit 15 FPS. Why did a real-time kernel destroy your throughput?"
 
@@ -355,7 +3141,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Tracker Addition Budget</b> · <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Tracker Addition Budget</b> · <code>model-cost</code></summary>
 
 - **Interviewer:** "Your perception stack runs YOLOv8-S detection at 20ms per frame on a Jetson Orin NX, leaving 13ms of headroom in your 33ms budget. Your team wants to add a Transformer-based tracker (ByteTrack with a ReID model, ~15 GFLOPs). The ReID model alone takes 12ms. Your colleague says '20 + 12 = 32ms — we fit with 1ms to spare.' Why is this estimate dangerously wrong?"
 
@@ -375,7 +3161,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Depth-wise Conv Bandwidth Bottleneck</b> · <code>roofline</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Depth-wise Conv Bandwidth Bottleneck</b> · <code>roofline</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your team chose MobileNetV3 for a drone obstacle avoidance system on a Rockchip RK3588 (6 TOPS NPU, 51.2 GB/s LPDDR4X). MobileNetV3 uses depth-wise separable convolutions to minimize FLOPs — only 0.22 GFLOPs for 224×224 input. But the NPU profiler shows only 18% utilization. Your colleague says 'the model is too small for the hardware.' What's actually happening, and why are depth-wise convolutions particularly bad for edge NPUs?"
 
@@ -401,7 +3187,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The CAN Bus Bandwidth Crunch</b> · <code>networking</code> <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The CAN Bus Bandwidth Crunch</b> · <code>interconnect</code> <code>roofline</code></summary>
 
 - **Interviewer:** "Your Ambarella CV5-based ADAS system runs 4 perception models and sends results over CAN bus to the vehicle ECU. Each model outputs bounding boxes, lane lines, and free-space polygons at 30 Hz. The vehicle's CAN bus is standard CAN 2.0B running at 500 kbps, shared with 15 other ECUs (engine, brakes, steering, etc.). Your ML telemetry is causing CAN bus errors and the engine ECU is missing messages. Quantify the problem."
 
@@ -427,7 +3213,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The GPU Driver Crash Recovery</b> · <code>reliability</code> <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The GPU Driver Crash Recovery</b> · <code>fault-tolerance</code> <code>roofline</code></summary>
 
 - **Interviewer:** "Your Jetson Orin-based autonomous forklift runs a safety-critical obstacle detection model. The NVIDIA GPU driver crashes once every ~72 hours (a known issue with the specific L4T version). The driver recovers in 3 seconds, but during recovery, the forklift has no perception. At 2 m/s, the forklift travels 6 meters blind. Your safety engineer says this is unacceptable. How do you maintain perception during a GPU driver crash?"
 
@@ -449,7 +3235,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The ToF Sensor Crosstalk</b> · <code>sensor</code> <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The ToF Sensor Crosstalk</b> · <code>sensor-pipeline</code> <code>roofline</code></summary>
 
 - **Interviewer:** "Your warehouse deploys 8 Rockchip RK3588 edge nodes, each with a time-of-flight (ToF) depth sensor, for pallet detection along a 50-meter aisle. Each node works perfectly in isolation. When all 8 are powered on simultaneously, depth readings become noisy — range error jumps from ±2cm to ±30cm — and pallet detection accuracy drops from 95% to 60%. The nodes are spaced 6 meters apart. What's happening?"
 
@@ -473,7 +3259,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The DVFS Latency Jitter</b> · <code>compute</code> <code>thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The DVFS Latency Jitter</b> · <code>roofline</code> <code>thermal</code></summary>
 
 - **Interviewer:** "Your Google Coral Dev Board runs a gesture recognition model for a kiosk application. Average inference latency is 8ms, but you observe periodic spikes to 25ms every 10-15 seconds, causing visible UI stutter. The spikes don't correlate with input complexity — simple and complex gestures both spike. CPU temperature is a stable 65°C, well below the 85°C throttle point. What's causing the periodic latency variance?"
 
@@ -497,7 +3283,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Fleet Firmware Fragmentation</b> · <code>deployment</code> <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Fleet Firmware Fragmentation</b> · <code>deployment</code> <code>roofline</code></summary>
 
 - **Interviewer:** "Your company has 2,000 Hailo-8 edge devices deployed across 50 retail stores for customer analytics. Over 18 months of OTA updates, the fleet has fragmented: 400 devices run firmware v2.1, 600 run v2.3, 500 run v2.5, 300 run v3.0, and 200 run v3.1. Each firmware version has a different Hailo runtime and supports different model formats. You need to deploy a new model across the entire fleet. How do you handle this?"
 
@@ -565,7 +3351,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Hailo-8L vs Jetson Orin NX Trade-off</b> · <code>architecture</code> <code>economics</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Hailo-8L vs Jetson Orin NX Trade-off</b> · <code>model-cost</code> <code>economics</code></summary>
 
 - **Interviewer:** "Your company is deploying smart traffic cameras across a city. Each intersection needs real-time vehicle detection (YOLOv8n, ~6 GFLOPs). You're choosing between the Hailo-8L ($50, 13 TOPS INT8, 2.5W) and the Jetson Orin NX ($400, 100 TOPS INT8, 15–25W). Your procurement team says 'buy the Orin — it's 8× more powerful.' Your fleet is 2,000 intersections. Which do you choose, and why?"
 
@@ -593,7 +3379,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Ambarella CV5 Encoding Bottleneck</b> · <code>architecture</code> <code>sensor-pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Ambarella CV5 Encoding Bottleneck</b> · <code>model-cost</code> <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "You're building an 8K dashcam with on-device AI using the Ambarella CV5. The CV5 can encode 8K30 video (H.265) and run a CVflow neural network accelerator (20 TOPS) simultaneously. But during testing, your object detection model's inference latency spikes from 15ms to 40ms whenever the encoder is active. The model and encoder use separate hardware blocks. What's happening?"
 
@@ -625,7 +3411,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Qualcomm RB5 Hexagon DSP</b> · <code>architecture</code> <code>heterogeneous-compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Qualcomm RB5 Hexagon DSP</b> · <code>model-cost</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "Your robotics team is building a warehouse inventory drone on the Qualcomm Robotics RB5 platform. The RB5 has an Adreno 650 GPU (1.4 TFLOPS FP16), a Hexagon 698 DSP (15 TOPS INT8), and a Kryo 585 CPU. Your primary workload is MobileNetV2 classification (0.3 GFLOPs) running at 60 FPS on barcode/label images. A junior engineer put the model on the GPU because 'GPUs are for ML.' The drone's battery life is 18 minutes. Can you do better?"
 
@@ -653,7 +3439,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silent NPU Killer</b> · <code>hardware-acceleration</code> <code>fault-tolerance</code> <code>safety</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silent NPU Killer</b> · <code>roofline</code> <code>fault-tolerance</code> <code>safety</code></summary>
 
 - **Interviewer:** "Your safety-critical edge system relies heavily on a specialized Neural Processing Unit (NPU) for high-performance ML inference. What happens if the NPU experiences a silent failure (e.g., incorrect computation due to a hardware fault, memory corruption, or a transient error) that doesn't crash the system but produces subtly wrong results? How do you design the system to detect such silent NPU failures, ensure functional safety, and implement graceful degradation or recovery mechanisms without external intervention?"
 
@@ -691,11 +3477,157 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Pruning Paradox on Edge AI Accelerators</b> · <code>compute-analysis</code></summary>
 
-#### 🟡 L5 — Analyze & Predict
+- **Interviewer:** "You are optimizing a dense CNN-based perception model for a real-time system running on a Jetson AGX Orin. The system has a hard 33ms (30 FPS) deadline. Your profiler shows a specific 3x3 convolution layer is the main latency bottleneck. To accelerate it, you apply 80% unstructured magnitude pruning to the layer's weights, expecting a significant speedup close to 5x. However, when you re-deploy and benchmark, you are shocked to find the end-to-end latency has *increased*, and the utilization of the Orin's Tensor Cores has dropped to near 0% for that layer. Analyze the interaction between unstructured pruning and the underlying hardware architecture of the Jetson AGX Orin. Differentiate the performance characteristics you'd expect from unstructured vs. structured pruning in this context, and explain why the naive expectation of 'fewer FLOPs = faster inference' fails here."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Believing that FLOPs are a universal measure of performance. Engineers often assume '80% fewer FLOPs means 80% less latency', ignoring that *how* you compute matters more than *how much* you compute. This fallacy ignores the data movement patterns, memory access irregularity, and specialized hardware units (like Tensor Cores) that dominate modern performance.
+
+  **Realistic Solution:** The root cause is a fundamental mismatch between the irregular memory access patterns induced by unstructured sparsity and the Jetson AGX Orin's architecture, which is optimized for dense, regular computation.
+
+1.  **Tensor Core Incompatibility:** The Orin's high performance (275 TOPS) comes from its Tensor Cores, which execute dense matrix-matrix multiplications (GEMM) with extreme efficiency. Unstructured pruning destroys the dense block structure of the weight matrix. The hardware can no longer use its fast-path GEMM kernels and must fall back to general-purpose CUDA cores, which are far less efficient for this task.
+
+2.  **The Memory Wall:** The operation shifts from being compute-bound to being severely memory-bound. Instead of loading a contiguous block of weights, the processor must now perform indexed lookups for each non-zero weight, a form of 'pointer chasing' from DRAM. This leads to cache misses, pipeline stalls, and a dramatic drop in Arithmetic Intensity (the ratio of compute to memory access). The latency of these random DRAM accesses completely overwhelms the theoretical savings from performing fewer multiplications.
+
+3.  **Structured vs. Unstructured:** Structured pruning (e.g., removing entire filters or channels) would have been the correct approach. This technique creates a smaller but still dense model. The resulting smaller convolution can still be executed as a dense GEMM operation, fully leveraging the Tensor Cores and maintaining high Arithmetic Intensity. While it removes more parameters for the same theoretical FLOP reduction, the hardware utilization is dramatically higher, leading to a real-world latency reduction.
+
+  > **Napkin Math:** Let's use the Roofline model to prove why performance collapses.
+
+**Hardware Specs (Jetson AGX Orin):**
+- Peak Compute (INT8): 275 TOPS (275 * 10^12 Ops/sec)
+- Memory Bandwidth: 204.8 GB/sec
+- Ridge Point (INT8): ~1,342 Ops/Byte. An operation is compute-bound if its Arithmetic Intensity (AI) is higher than this.
+
+**1. Baseline (Dense Layer):**
+A dense convolution has high data reuse, resulting in a very high AI (e.g., > 2,000 Ops/Byte). Since AI > Ridge Point, the layer is compute-bound.
+- Performance = Peak Compute = **275 TOPS**.
+
+**2. After Unstructured Pruning (Sparse Layer):**
+The operation now involves fetching individual indexed weights from DRAM. For each multiplication (2 Ops), we must fetch a weight (1 byte for INT8) and its index (e.g., 4 bytes), plus the input activation. The AI plummets.
+- Bytes per Op ≈ (4 bytes index + 1 byte weight) / 2 Ops ≈ 2.5 Bytes/Op
+- Arithmetic Intensity (AI) = 1 / 2.5 = **0.4 Ops/Byte**.
+
+**3. Performance Analysis:**
+The new AI of 0.4 is far below the Ridge Point of 1,342. The layer is now completely memory-bound.
+- Performance = Memory Bandwidth × AI
+- Performance = 204.8 GB/s × 0.4 Ops/Byte = 81.92 GOPS = **~0.082 TOPS**.
+
+The 'optimized' layer is now running at 0.082 TOPS, a catastrophic drop from the dense-matrix performance of 275 TOPS (>3000x slower in theoretical throughput). This explains why end-to-end latency increases despite the 80% reduction in theoretical FLOPs.
+
+  > **Key Equation:** $\text{Performance} = \min(\text{Peak Compute}, \text{Peak Bandwidth} \times \text{Arithmetic Intensity})$
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Unaligned Memory DMA Fault</b> · <code>hardware</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Autonomous Drone's Latency Crisis</b> · <code>distributed-inference-edge</code></summary>
+
+- **Interviewer:** "You are the lead ML Systems Engineer for a new autonomous delivery drone. The perception system uses two co-packaged accelerator chips on a single board, connected by a high-speed 50 GB/s custom interconnect. The new perception model is a 400MB Vision Transformer that exceeds the 256MB on-chip SRAM of a single accelerator. The drone has a hard real-time deadline of 33ms per frame to detect and avoid obstacles.
+
+A junior engineer suggests using tensor parallelism to run the model across the two chips, drawing from their cloud experience with LLMs. However, early prototypes are failing to meet the deadline. Differentiate between using tensor parallelism and pipeline parallelism for this inference scenario. Analyze the trade-offs and determine which strategy is more likely to meet the latency budget."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to datacenter environments often assume tensor parallelism is the default solution for large models. They underestimate the massive performance gap between datacenter interconnects like NVLink (900 GB/s) and even high-end edge interconnects (50 GB/s). This leads them to ignore the crippling cumulative latency penalty from the frequent All-Reduce operations required by tensor parallelism in a relatively lower-bandwidth regime.
+
+  **Realistic Solution:** Pipeline parallelism is the superior strategy in this edge context. The core issue is the communication overhead relative to the latency budget.
+
+1.  **Tensor Parallelism (TP):** Splits each model layer (or part of it, like the attention heads) across the two chips. This requires a bandwidth-intensive All-Reduce communication step *within every transformed layer* to synchronize results. While compute is parallelized, the frequent communication becomes the bottleneck.
+
+2.  **Pipeline Parallelism (PP):** Splits the model into sequential stages (e.g., layers 1-12 on chip A, layers 13-24 on chip B). Communication only occurs *once* per inference, when the intermediate activation tensor is passed from one stage to the next. This minimizes communication overhead.
+
+The single, larger data transfer in PP incurs far less total latency than the dozens of smaller, repeated transfers in TP, making it the only viable option for meeting the strict 33ms deadline on an edge device.
+
+  > **Napkin Math:** Let's assume the 400MB model has 20 transformer layers and total inference compute takes 25ms on one chip if it had enough memory. We split this across two chips.
+
+**Tensor Parallelism Analysis:**
+- Each of the 20 layers requires an All-Reduce operation.
+- Assume the activation output that needs to be synchronized is 32MB.
+- All-Reduce time for one layer (using a ring algorithm): `Time ≈ (Size / Bandwidth) = 32MB / 50 GB/s = 0.64ms`.
+- Total communication time: `20 layers * 0.64ms/layer = 12.8ms`.
+- Total latency: `(25ms Compute / 2 chips) + 12.8ms Comm = 12.5ms + 12.8ms = 25.3ms`.
+This seems to fit, but this calculation assumes perfect overlap and ignores activation transfers. A more realistic model adds communication for activations as well as weights, pushing the communication cost per layer higher, and synchronization overhead often makes the latency `max(compute_A, compute_B) + comm`, making the total much closer to the deadline and riskier.
+
+**Pipeline Parallelism Analysis:**
+- We create a 2-stage pipeline. Stage 1 (Chip A) runs layers 1-10; Stage 2 (Chip B) runs layers 11-20. Compute is `25ms / 2 = 12.5ms` per stage.
+- A single communication event occurs between stages. Assume the intermediate activation is 64MB.
+- Communication time: `64MB / 50 GB/s = 1.28ms`.
+- Total latency for a single frame: `T_compute_A + T_comm + T_compute_B = 12.5ms + 1.28ms + 12.5ms = 26.28ms`.
+
+**Conclusion:** While both seem close, the pipeline parallelism approach is simpler, has less communication overhead, and is fundamentally safer. The tensor parallelism model has many small communication steps, each adding a potential point of failure and synchronization overhead not captured in the simple math, making it much riskier for a hard real-time system.
+
+  > **Key Equation:** $$\text{Latency}_{\text{Total}} \approx \sum_{i=1}^{\text{layers}} (T_{\text{compute}, i} + T_{\text{comm}, i})$$
+
+  📖 **Deep Dive:** [Cloud: Distributed Systems](https://github.com/harvard-edge/MLSysBook/blob/main/interviews/cloud/02_distributed_systems.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Edge Parallelism Dilemma</b> · <code>compute-analysis</code></summary>
+
+- **Interviewer:** "You are designing the inference system for an autonomous warehouse robot. The system uses two cameras feeding into two identical accelerator chips on a single board, connected by a PCIe Gen4 x8 bus (~16 GB/s). The software is a multi-modal model: a separate 10 GFLOP (INT8) vision tower runs on each accelerator for its dedicated camera, followed by a 5 GFLOP fusion block that must run on one of the chips. The robot has a hard real-time deadline of 33ms (30 FPS). The accelerators are Hailo-8s, each providing 26 TOPS (INT8). Analyze the trade-offs between implementing pipeline parallelism versus tensor parallelism for the vision towers. Differentiate how each strategy interacts with the PCIe interconnect and calculate which approach meets the latency budget."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to apply cloud-native thinking directly to the edge. Candidates might suggest data parallelism (which is useless for a real-time batch size of 1), or assume tensor parallelism is always better because it 'perfectly balances the load.' They fail to account for the fact that on-board interconnects like PCIe have orders of magnitude less bandwidth than NVLink, making the high-frequency communication of tensor parallelism prohibitively expensive.
+
+  **Realistic Solution:** The correct analysis differentiates the communication patterns. At a batch size of 1, data parallelism is not a viable option. The choice is between pipeline and tensor parallelism.
+
+1.  **Tensor Parallelism:** This would involve splitting the weights of each 10 GFLOP vision tower across the two accelerators. While this balances the FLOPs (5 GFLOPs per chip), every single layer (e.g., in a transformer block) would require an AllReduce operation across the slow 16 GB/s PCIe bus. This high frequency of small data transfers creates a massive communication bottleneck that dominates the total latency.
+
+2.  **Pipeline Parallelism:** This is the superior strategy here, though non-obvious. You would run the full 10 GFLOP vision tower for camera 1 on accelerator A, and the tower for camera 2 on accelerator B, concurrently. The 5 GFLOP fusion block would run on accelerator A. The only cross-chip communication is when accelerator B sends its final activation (~2MB for a typical vision model) to accelerator A for fusion. This happens only ONCE per frame. The latency is determined by the longest path: the execution of Tower A followed by the Fusion block on Accelerator A. The bubble is minimal because the two towers run in parallel.
+
+This design minimizes cross-chip communication, which is the key bottleneck, ensuring the system can meet its real-time deadline.
+
+  > **Napkin Math:** **System Constraints:**
+- Compute per accelerator: 26 TOPS (26e12 Ops/sec)
+- Interconnect Bandwidth: 16 GB/s
+- Vision Tower Compute: 10 GFLOPs (10e9 Ops)
+- Fusion Block Compute: 5 GFLOPs (5e9 Ops)
+- Latency Budget: 33ms
+
+**Analysis of Pipeline Parallelism:**
+1.  Tower A (10 GFLOPs) runs on Accelerator A.
+2.  Tower B (10 GFLOPs) runs on Accelerator B.
+3.  Fusion Block (5 GFLOPs) runs on Accelerator A.
+- Compute time for a tower: `10e9 Ops / 26e12 Ops/sec = ~0.38ms`
+- Compute time for fusion block: `5e9 Ops / 26e12 Ops/sec = ~0.19ms`
+- Since Tower A and the Fusion Block are on the same accelerator, their latencies add up. Tower B runs in parallel.
+- Total Latency = `Latency(Tower A) + Latency(Fusion Block)`
+- Total Latency = `0.38ms + 0.19ms = 0.57ms`
+- This easily meets the 33ms budget. The communication of Tower B's output to A is negligible and happens in parallel.
+
+**Analysis of Tensor Parallelism (showing why it fails):**
+- Let's assume each 10 GFLOP tower is split across both accelerators. Each layer requires an AllReduce.
+- A vision transformer might have 12 blocks, each with 2 MLP layers requiring AllReduce. That's 24 AllReduce operations per tower.
+- Activation size for AllReduce: `seq_len * hidden_dim * bytes = 512 * 768 * 1 (INT8) = ~0.4 MB`
+- Time for one AllReduce: `Data / Bandwidth = 0.4 MB / 16 GB/s = 0.025ms`
+- Total communication time per tower: `24 AllReduce ops * 0.025ms/op = 0.6ms`
+- Total compute time per tower (now parallel): `(10e9 Ops / 2) / 26e12 Ops/sec = ~0.19ms`
+- Latency for ONE tower with tensor parallelism = `Compute + Communication = 0.19ms + 0.6ms = 0.79ms`
+- While this also seems to meet the budget, this is a simplified best-case. A more realistic AllReduce model (e.g., Ring) and protocol overhead would make this significantly worse (`2*(N-1)/N * M/B`). The key takeaway is that communication now takes 3x longer than the compute itself, making it incredibly inefficient and the clear bottleneck.
+
+  > **Key Equation:** $$ \text{Latency}_{\text{Pipeline}} = \max(\text{Stage}_1, \text{Stage}_2, ...) + \text{Comm}_{\text{overhead}} $$
+
+  📖 **Deep Dive:** [Distributed Systems and Parallelism](https://mlsysbook.ai/cloud/02_distributed_systems.html)
+  </details>
+</details>
+
+
+
+
+
+#### 🟡 L5
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Unaligned Memory DMA Fault</b> · <code>model-cost</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You configure a hardware DMA (Direct Memory Access) controller to stream incoming camera pixels directly into the `tensor_arena` array of your TFLite Micro model. It works perfectly on your Cortex-M4 dev board. You move the exact same C++ code to a Cortex-M0+ production board. The moment the DMA starts, the system crashes with a Hard Fault. Why does the exact same DMA code crash on the M0+?"
 
@@ -723,7 +3655,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Shared Bus Arbitration Lock</b> · <code>architecture</code> <code>hardware</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Shared Bus Arbitration Lock</b> · <code>model-cost</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your edge gateway runs a 4K camera feed into an NPU. You also have an external Gigabit Ethernet controller on the same physical PCIe bus. The NPU requires 3 GB/s of memory bandwidth to run the model at 30 FPS. The Ethernet controller uses 100 MB/s. The PCIe bus supports 4 GB/s. Theoretically, there is plenty of bandwidth. But when Ethernet traffic spikes, the NPU frame rate drops to 15 FPS. Why?"
 
@@ -751,7 +3683,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The USB Power Suspension</b> · <code>os</code> <code>hardware</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The USB Power Suspension</b> · <code>deployment</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "You deploy a Coral Edge TPU USB Accelerator to a Linux edge server to speed up inference. When the application starts, inference takes 2ms per frame. If the application stops and you restart it an hour later, the first inference takes 3 seconds, and then it goes back to 2ms. What OS power management feature is causing this massive cold-start penalty on the USB bus?"
 
@@ -797,7 +3729,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Resolution-Accuracy Pareto</b> · <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Resolution-Accuracy Pareto</b> · <code>model-cost</code></summary>
 
 - **Interviewer:** "Your edge camera system needs to detect people at distances from 5m to 100m. Your 4K camera (3840×2160) feeds a YOLOv8-M detector, but running at full 4K resolution takes 85ms — far over your 33ms budget. Your colleague says 'just resize to 640×640.' What critical information does resizing destroy, and how do you design a system that meets the deadline while preserving long-range detection?"
 
@@ -817,7 +3749,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Stereo Depth vs Monocular Trade-off</b> · <code>sensor-pipeline</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Stereo Depth vs Monocular Trade-off</b> · <code>sensor-pipeline</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your autonomous forklift uses stereo cameras (2× 1080p at 30 FPS) for depth estimation. The stereo matching algorithm runs on the TI TDA4VM's hardware stereo accelerator and produces dense depth maps at 5ms per frame. A colleague proposes replacing stereo with a single camera plus a monocular depth estimation neural network (MiDaS-small, 2 GFLOPs), arguing it halves the camera cost and cable complexity. Walk me through the bandwidth, compute, and accuracy trade-offs."
 
@@ -843,7 +3775,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Real-Time Scheduling Priority</b> · <code>real-time</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Real-Time Scheduling Priority</b> · <code>real-time</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your robotics team runs an obstacle detection model on an Intel Movidius Myriad X (4 TOPS) connected via USB 3.0 to an ARM Cortex-A72 host. The inference thread is set to Linux SCHED_FIFO priority 90 (near maximum). Average inference latency is 15ms, well within your 33ms deadline. But once every ~200 frames, latency spikes to 55ms, causing the robot to jerk. Your colleague says 'SCHED_FIFO should prevent preemption.' Why are you still missing deadlines?"
 
@@ -873,7 +3805,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Multi-Resolution Input Strategy</b> · <code>latency</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Multi-Resolution Input Strategy</b> · <code>latency</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your autonomous security patrol robot runs YOLOv8-S on a Jetson Orin NX at 640×640 input resolution, achieving 28 FPS at 22W. During summer patrols, the sealed enclosure heats up and the Orin throttles to 15W, dropping to 19 FPS — below your 25 FPS safety minimum. Your colleague proposes a simple fix: 'When thermal throttling is detected, switch to 320×320 input.' Analyze the compute savings, accuracy impact, and design a proper adaptive resolution system."
 
@@ -899,7 +3831,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Factory Floor EMI Ghost</b> · <code>reliability</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Factory Floor EMI Ghost</b> · <code>fault-tolerance</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your Hailo-8 defect detection system on a factory floor produces correct results during weekend testing but generates random misclassifications every 30-90 seconds during weekday production. The model, firmware, and inputs are identical. A 500kW variable-frequency drive (VFD) motor starts up 3 meters away when the production line runs. How is EMI corrupting inference, and where in the data path is it entering?"
 
@@ -923,7 +3855,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Clock Drift Time-Series Poison</b> · <code>timing</code> <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Clock Drift Time-Series Poison</b> · <code>real-time</code> <code>roofline</code></summary>
 
 - **Interviewer:** "Your Ambarella CV5-based predictive maintenance system on an oil pipeline samples vibration data at 4 kHz and runs a 1D-CNN anomaly detection model every 500ms. The system works perfectly for the first 3 weeks, then starts generating false alarms that increase linearly — 1 per day in week 4, 3 per day in week 5, 7 per day in week 6. The vibration sensor is fine (verified with an oscilloscope). What's causing the linearly increasing false alarm rate?"
 
@@ -949,7 +3881,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The EMC Compliance Nightmare</b> · <code>reliability</code> <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The EMC Compliance Nightmare</b> · <code>fault-tolerance</code> <code>roofline</code></summary>
 
 - **Interviewer:** "Your Jetson Orin NX-based traffic monitoring system passes all functional tests but fails EMC (electromagnetic compatibility) compliance testing — specifically radiated emissions at 125 MHz and 375 MHz exceed FCC Class B limits by 8 dB. Without FCC certification, you can't sell the product. The emissions only appear when the neural network is running inference. When the system is idle, it passes. What is the neural network doing that generates RF emissions, and how do you fix it without changing the model?"
 
@@ -975,7 +3907,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Thermal Camera Calibration Ghost</b> · <code>sensor</code> <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Thermal Camera Calibration Ghost</b> · <code>sensor-pipeline</code> <code>roofline</code></summary>
 
 - **Interviewer:** "Your Ambarella CV5-based perimeter security system uses a LWIR thermal camera (640×512, 30 Hz) for person detection at night. The system works well from October through March. Starting in April, false positive rate climbs from 2% to 35% — the model detects 'people' where there are none, always near concrete walls and metal structures. By July, the system is unusable. Come October, it starts working again. The model hasn't changed. What's happening?"
 
@@ -1001,7 +3933,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Physical Intruder</b> · <code>security</code>, <code>hardware</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Physical Intruder</b> · <code>security</code>, <code>model-cost</code></summary>
 
 - **Interviewer:** "Your company's edge AI devices are deployed in public, physically accessible locations. A sophisticated competitor gains physical access to a device and attempts to extract your proprietary ML model or inject malicious firmware. What hardware and software mechanisms should be in place to detect and mitigate such an attack?"
 
@@ -1027,7 +3959,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Early vs Late Fusion Trade-off</b> · <code>sensor-fusion</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Early vs Late Fusion Trade-off</b> · <code>sensor-pipeline</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your autonomous vehicle has a camera and a LiDAR. You need to detect and localize objects in 3D. Your team is debating two architectures: early fusion (concatenate raw camera pixels + LiDAR points, feed to one model) vs late fusion (run separate camera and LiDAR detectors, merge results). What are the system-level trade-offs, and which do you recommend for a Jetson Orin deployment?"
 
@@ -1057,7 +3989,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Edge-Cloud Split Inference</b> · <code>architecture</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Edge-Cloud Split Inference</b> · <code>model-cost</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your edge camera needs to run a large model (ResNet-152, 60 GFLOPs) that doesn't fit the 33ms latency budget on a Jetson Nano (128 CUDA cores). The camera has a 50ms round-trip to a cloud GPU. Your colleague says 'just run inference in the cloud.' Why might splitting the model between edge and cloud be better than either extreme?"
 
@@ -1083,7 +4015,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The Dark Silicon Enigma</b> · <code>system-on-chip</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The Dark Silicon Enigma</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You are designing an edge AI camera with an advanced SoC that has an 8-core CPU, a 4-core GPU, and a 4-core NPU. You write a brilliant pipeline that utilizes 100% of all three processors simultaneously to process video at 120 FPS. When you deploy it, the board immediately crashes and reboots. The power supply is perfectly adequate. What SoC physical limit did you violate?"
 
@@ -1103,7 +4035,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The TDA4VM Vision Pipeline</b> · <code>architecture</code> <code>real-time</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The TDA4VM Vision Pipeline</b> · <code>model-cost</code> <code>real-time</code></summary>
 
 - **Interviewer:** "You're designing an ADAS system on the TI TDA4VM SoC. It has a C7x DSP (80 GFLOPs), an MMA deep learning accelerator (8 TOPS INT8), two R5F safety cores (lockstep, ASIL-D capable), and an A72 application processor. Your perception pipeline must run simultaneously: (1) a primary object detection model (YOLOv5s, 7.2 GFLOPs), (2) a lane detection model (1.5 GFLOPs), and (3) a driver monitoring model (0.8 GFLOPs). All three must complete within 33ms. How do you partition across the heterogeneous cores?"
 
@@ -1133,7 +4065,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The eMMC Wear-Out Time Bomb</b> · <code>flash-memory</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The eMMC Wear-Out Time Bomb</b> · <code>persistent-storage</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your fleet of 5,000 industrial inspection cameras runs 24/7. Each device writes inference metadata (bounding boxes, confidence scores, timestamps) to its 32 GB eMMC at a rate of 50 KB per inference, 10 inferences per second. The eMMC is rated for 3,000 P/E cycles with 128 KB erase blocks. Six months after deployment, devices start failing in clusters — 200 devices die in week 26, another 300 in week 27. What happened, and how do you prevent the next wave?"
 
@@ -1162,8 +4094,53 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Futile Pruning</b> · <code>pruning-fusion-edge</code></summary>
 
-#### 🔴 L6+ — Synthesize & Derive
+- **Interviewer:** "You are leading the optimization of a real-time perception model for a delivery robot, targeting a Jetson AGX Orin with a strict 33ms latency budget. To meet this deadline, your team applies 80% unstructured weight pruning to the model's main convolutional layers, expecting a nearly 5x speedup in those layers. However, in hardware tests, the end-to-end latency improves by only 15%. Your junior engineer, seeing the model is still too slow, proposes increasing the pruning to 95% sparsity. Critically evaluate the initial pruning result. Why did the massive reduction in FLOPs yield such a disappointing latency improvement, and why is the proposal to 'just prune more' likely to fail? Justify an alternative optimization strategy that addresses the actual bottleneck."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing solely on algorithmic complexity (FLOPs) and assuming it translates linearly to performance. A junior engineer might say, 'The pruning wasn't aggressive enough,' or 'We must still be compute-bound,' failing to see that the system has become entirely memory-bound, and the bottleneck is no longer the arithmetic itself.
+
+  **Realistic Solution:** The initial pruning strategy failed because it addressed the wrong bottleneck. On hardware like the Jetson Orin, many convolutional layers are memory-bandwidth-bound, not compute-bound. Unstructured pruning reduces the number of computations, but it doesn't change the amount of data that must be read from slow LPDDR5 memory. The hardware's memory subsystem still has to load the entire (or mostly entire) weight tensor, and the performance is dominated by this memory access time, not the compute time. The irregular, sparse memory access patterns can also lead to cache misses and inefficient use of the memory bus, negating the theoretical FLOP reduction.
+
+The better strategy is Operator Fusion. Instead of having separate kernels for Conv -> BatchNorm -> ReLU, a fused kernel combines these operations. This is a memory optimization. It eliminates the need to write the intermediate activation tensors from the Conv and BatchNorm layers back to DRAM, only to immediately read them again for the next operation. By keeping the intermediate data 'hot' in fast on-chip SRAM, you drastically reduce DRAM traffic, which is the real bottleneck. This directly attacks the latency problem in a way that unstructured pruning cannot.
+
+  > **Napkin Math:** Let's analyze a single convolutional layer on the Jetson AGX Orin. Assume its baseline latency is 5ms, broken down into 4ms for memory access (loading weights and activations from LPDDR5) and 1ms for compute.
+
+**Initial State:**
+- `T_memory` = 4.0ms
+- `T_compute` = 1.0ms
+- `T_total` = 4.0ms + 1.0ms = 5.0ms
+
+**After 80% Unstructured Pruning:**
+- FLOPs are reduced by 5x. We assume this translates to a 5x compute time reduction.
+- Memory access patterns are irregular, but the full weight tensor is likely still read from DRAM. `T_memory` is unchanged.
+- `T_compute'` = 1.0ms / 5 = 0.2ms
+- `T_total'` = 4.0ms + 0.2ms = 4.2ms
+- **Predicted Speedup:** 5.0ms / 4.2ms ≈ 1.19x. This aligns with the disappointing ~15% observed improvement and shows why simply 'pruning more' won't help—the latency floor is the 4.0ms memory access time.
+
+**Evaluating Operator Fusion:**
+- Consider a block of three such layers: Conv, BN, ReLU, each with a similar 5ms profile.
+- **Unfused:** Total latency = 3 * 5ms = 15ms. The output of Conv is written to DRAM, then read by BN. The output of BN is written to DRAM, then read by ReLU. These two intermediate write/read cycles are part of the `T_memory` cost.
+- **Fused:** By fusing the three operations, we eliminate the two intermediate DRAM write/read cycles. Let's assume each cycle costs 2ms (half the memory time).
+- `T_saved` = 2 * 2.0ms = 4.0ms
+- `T_fused_total` = 15ms - 4ms = 11ms
+- **Fusion Speedup:** 15ms / 11ms ≈ 1.36x. This is a ~27% latency reduction, a much more significant gain that directly addresses the memory bottleneck.
+
+  > **Key Equation:** $\text{Performance} = \min(\text{Peak FLOP/s}, \text{Memory Bandwidth} \times \frac{\text{FLOPs}}{\text{Bytes}}) $
+
+Unstructured pruning reduces FLOPs but keeps Bytes constant, lowering Arithmetic Intensity (FLOPs/Bytes) and pushing an operator further into the memory-bound region of the Roofline plot. Fusion reduces Bytes by eliminating intermediate I/O, increasing Arithmetic Intensity.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+
+
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Integer Roofline</b> · <code>roofline</code></summary>
@@ -1188,7 +4165,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Watchdog Priority Inversion</b> · <code>real-time</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Watchdog Priority Inversion</b> · <code>real-time</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your edge robot has a hardware watchdog timer. A high-priority real-time thread must ping the watchdog every 100ms. You add a low-priority thread to run a background ML log-compression task. The system runs perfectly for hours, then the robot suddenly hard-resets because the watchdog wasn't pinged. You check the logs; the high-priority thread was blocked. How did a low-priority background ML task kill the real-time thread?"
 
@@ -1244,7 +4221,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The High-Altitude Edge AI Failure</b> · <code>power-thermal</code> <code>heterogeneous-compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The High-Altitude Edge AI Failure</b> · <code>power</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "Your company deploys an edge AI avalanche detection system at 4,200 meters altitude in the Himalayas. The system uses a TI TDA4VM (8 TOPS, 20W) with radar and camera sensors. During lab testing at sea level, the system runs flawlessly — 30 FPS, 22ms inference, 45°C junction temperature. At altitude, the system throttles to 12 FPS within 30 minutes of startup, and the junction temperature reads 78°C despite the ambient temperature being -15°C (much colder than the 25°C lab). The same hardware, same firmware, same model. Why is the device overheating in freezing conditions, and how do you design edge AI systems for extreme altitude?"
 
@@ -1272,7 +4249,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Power-Adaptive Inference System</b> · <code>power-thermal</code> <code>heterogeneous-compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Power-Adaptive Inference System</b> · <code>power</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "Your edge AI device is deployed on a cell tower with unreliable power. It has a 100 Wh battery backup and a solar panel that provides 0–30W depending on weather and time of day. The device runs a 5G small cell (15W fixed) and an AI-based RF anomaly detector. The AI workload can run three model variants: a large model (ResNet-50, 8W, 95% accuracy), a medium model (MobileNetV2, 3W, 91% accuracy), and a tiny model (MCUNet, 0.5W on a co-processor, 84% accuracy). Design a power-adaptive inference system that maximizes detection accuracy while guaranteeing 48 hours of battery backup for the 5G radio."
 
@@ -1304,17 +4281,312 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Drone Fleet Vision Upgrade</b> · <code>cnn-vs-transformer-real-time-vision</code></summary>
+
+- **Interviewer:** "You are the lead ML Systems Engineer for a company that operates a fleet of thousands of autonomous drones for agricultural monitoring. The current drones use a highly optimized CNN-based model on a Jetson AGX Orin to detect crop diseases, operating under a strict 30W power budget to maximize flight time. A new Vision Transformer (ViT) model promises a 15% accuracy improvement, which could save millions in crop losses. However, early prototyping shows the ViT model, despite having a similar parameter count to the CNN, runs 5x slower and pushes the Orin to its 60W maximum power profile, making it a non-starter. Your VP of Engineering wants a definitive proposal: can we leverage the power of Transformers without buying a new fleet of drones? Formulate your architectural plan. What are your first three design decisions, and how do you justify them quantitatively?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing only on parameter count or FLOPs. Engineers might assume that since the models have similar GFLOPs, the performance should be similar. They might also suggest naive quantization or pruning, which helps, but doesn't address the fundamental architectural mismatch between Transformers and current-gen edge GPUs.
+
+  **Realistic Solution:** The core issue is the mismatch between the ViT's computational pattern and the edge hardware's strengths. The self-attention mechanism's memory access is scattered and has low arithmetic intensity, leading to memory bandwidth bottlenecks. This contrasts with CNNs, whose dense, localized computations keep the Tensor Cores fed efficiently. A full ViT is infeasible.
+
+The correct approach is a hybrid architecture that plays to the strengths of both:
+1.  **Decision 1: Adopt a CNN-Transformer Hybrid Model.** I would propose replacing the current model with a hybrid architecture. Specifically, we would use a lightweight CNN (like MobileNetV3) as an efficient 'stem' to perform initial feature extraction and downsampling on the input image. This produces a much smaller sequence of feature-rich 'patches' than simple image patching would.
+2.  **Decision 2: Architect a Shallow Transformer Backend.** The output of the CNN stem is fed into a shallow Transformer (e.g., 4-6 layers). By operating on the CNN's output, the Transformer's quadratic self-attention mechanism now works on a much shorter sequence length (e.g., 14x14=196 tokens instead of 56x56=3136 tokens), making it computationally tractable and reducing the memory bandwidth pressure.
+3.  **Decision 3: Profile for Arithmetic Intensity, Not Just Latency.** I will mandate that the validation platform profiles not just FPS, but also memory bandwidth usage (GB/s) and achieved TOPS vs. the chip's peak (arithmetic intensity). This allows us to prove that the hybrid model keeps the Orin's execution units highly utilized, staying within the power budget. The CNN stem will be compute-bound, and the smaller Transformer stage will be less demanding on memory bandwidth, preventing the system from stalling.
+
+  > **Napkin Math:** Let's quantify why the naive ViT fails. The Jetson AGX Orin has 204.8 GB/s of memory bandwidth and a 'Ridge Point' of ~1,342 Ops/Byte (INT8). To stay compute-bound and power-efficient, a model's Arithmetic Intensity (AI) must be >> 1,342.
+
+**CNN (e.g., ResNet-like):** The AI of a convolution is roughly `(2 * C_out * K^2) / (4 * (C_in + C_out))`. For a typical depthwise-separable convolution, this AI is very high, in the thousands. It is easily compute-bound on the Orin.
+
+**Naive ViT (e.g., on 448x448 image, 16x16 patches):**
+- Sequence Length N = (448/16)^2 = 28^2 = 784.
+- AI of Attention ≈ N/2 = 784/2 = 392 Ops/Byte.
+- This AI (392) is far below the Orin's ridge point (1,342). This means the GPU will spend most of its time waiting for data from memory (memory-bound), not doing math. This starves the compute units, causing overall TOPS to plummet and power efficiency to be terrible as the whole chip stays powered up waiting for data.
+
+**Hybrid Model (CNN Stem + ViT Backend):**
+- The CNN stem downsamples the 448x448 image to a 28x28 feature map.
+- The ViT backend now operates on a sequence length of N=28. Wait, that's not right. The CNN stem downsamples to, say, a 14x14 feature map.
+- Sequence Length N = 14 * 14 = 196 tokens.
+- AI of Attention ≈ N/2 = 196/2 = 98 Ops/Byte.
+- While this AI is even lower, the total number of operations is vastly smaller (`196^2` vs `784^2` is a 16x reduction in the attention matrix size). The smaller total memory footprint and reduced compute means it can execute quickly, and the highly efficient CNN stem does the heavy lifting. The overall system AI becomes a blended average, dominated by the efficient CNN part, keeping the system on the correct side of the roofline.
+
+  > **Key Equation:** $\text{Arithmetic Intensity} = \frac{\text{Total Operations (FLOPs)}}{\text{Total Memory Access (Bytes)}} \gg \text{Ridge Point}$
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Hard Real-Time Factory Defect Detector</b> · <code>cnn-vs-transformer-real-time-vision</code></summary>
+
+- **Interviewer:** "You are the Principal Engineer designing a visual inspection system for a high-speed bottling line. The system must detect microscopic cracks in glass bottles using a 4K resolution camera (3840x2160) and trigger a robotic arm, all within a hard real-time budget of 10ms. A state-of-the-art Vision Transformer has shown unparalleled accuracy for this kind of fine-grained defect detection in offline tests. Your available hardware is a Hailo-8 accelerator, known for its extreme TOPS/W efficiency (26 TOPS at 2.5W). Propose a system architecture that meets the 10ms deadline using the ViT. You must prove, with quantitative analysis, why a naive implementation is impossible and why your design is feasible."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Simply downsampling the 4K image to a smaller size like 224x224. This would make the ViT computationally feasible, but it would also destroy the high-frequency details required to see the microscopic cracks, making the entire system useless. Another common mistake is to only calculate FLOPs without considering the memory implications of the attention matrix.
+
+  **Realistic Solution:** A naive ViT on a 4K image is mathematically impossible within the time budget. The quadratic complexity of self-attention on a large sequence of patches creates an insurmountable computational and memory burden. The only viable solution is a cascaded or hierarchical architecture.
+
+My proposed design is a two-stage pipeline:
+1.  **Stage 1: CNN 'Fast Scan' for Regions of Interest (ROI).** I will design a very lightweight, fully-convolutional network (e.g., a custom 5-layer CNN) to run on the Hailo-8. Its sole purpose is to perform a rapid scan of the 4K image to identify a handful of small (e.g., 256x256) candidate regions where defects are likely to be. This CNN would be trained on 'defect vs. no-defect' at a coarse level. Its linear scaling with pixel count makes it extremely fast.
+2.  **Stage 2: ViT 'Deep Dive' on ROIs.** The coordinates of the ROIs from Stage 1 are used to crop high-resolution patches from the original 4K image buffer in memory. The powerful Vision Transformer is then executed *only* on these few small patches. This keeps the ViT's sequence length short and its computational cost low, allowing it to perform its powerful contextual analysis without violating the time budget.
+3.  **System Orchestration.** The entire pipeline would be managed by a lightweight process on a host CPU. Stage 1 (CNN) runs, Stage 2 (ViT) is triggered on the results. Since the latency of both stages combined is a fraction of the 10ms budget, this architecture is robust. This design combines the sheer scanning speed of CNNs with the analytical precision of Transformers, applying the expensive computation only where it is most needed.
+
+  > **Napkin Math:** Let's prove the naive ViT is impossible.
+**Hardware:** Hailo-8 at 26 TOPS (26 * 10^12 Ops/sec).
+**Input:** 4K image (3840x2160). Patches are 16x16 pixels.
+
+**1. Naive ViT Calculation:**
+- Number of patches (Sequence Length) N = (3840 / 16) * (2160 / 16) = 240 * 135 = **32,400**.
+- The attention mechanism computes a matrix of size N x N = 32,400 x 32,400 ≈ 1.05 billion elements. In FP16, this matrix alone is **2.1 GB**, which won't fit in any edge accelerator's on-chip SRAM and would saturate DRAM bandwidth.
+- FLOPs for just the QK^T dot product in one attention head (model dimension d=256) ≈ N^2 * d = (32,400)^2 * 256 ≈ 2.68 x 10^14 FLOPs = 268 TFLOPs.
+- Time to compute on Hailo-8 = 268 TFLOPs / 26 TOPS = **~10.3 seconds**. This is over 1000x slower than our 10ms budget.
+
+**2. Hybrid Architecture Calculation:**
+- **Stage 1 (CNN Fast Scan):** A lightweight CNN for ROI detection might be ~2 GFLOPs.
+  - Time on Hailo-8 = 2 GFLOPs / 26 TOPS = **0.077 ms**.
+- **Stage 2 (ViT on 256x256 ROI):**
+  - New Sequence Length N = (256/16)^2 = 16^2 = **256**.
+  - FLOPs for QK^T (d=256) ≈ N^2 * d = 256^2 * 256 ≈ 16.7 MFLOPs.
+  - Let's say the entire small ViT model is ~1 GFLOPs.
+  - Time on Hailo-8 = 1 GFLOPs / 26 TOPS = **0.038 ms**.
+- **Total Latency:** 0.077ms (CNN) + 0.038ms (ViT) + ~1ms overhead (cropping, data movement) ≈ **1.1 ms**. This is well within our 10ms hard real-time budget.
+
+  > **Key Equation:** $T_{\text{attention}} \propto N^2 = (\frac{H \cdot W}{P^2})^2$
+
+  📖 **Deep Dive:** [ML Systems](https://mlsysbook.ai/vol1/ml_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The OTA Thermal Brick</b> · <code>tensorrt-optimization-structured-pruning-for-edge</code></summary>
+
+- **Interviewer:** "You are the ML Systems architect for a company building smart security cameras powered by the Jetson AGX Orin. To improve person detection, you roll out a new model via an over-the-air (OTA) update. The model is aggressively optimized using 2:4 structured pruning and compiled into a TensorRT engine. All your lab benchmarks show a 30% latency improvement.
+
+A week after deployment, customer complaints flood in: cameras in sunny or poorly ventilated locations are missing events. Your telemetry shows that on these devices, inference latency has degraded by over 500%, making the camera useless. The devices haven't crashed, but they are thermally throttling. Propose a new architecture for your ML deployment and CI/CD pipeline that prevents this class of failure, justifying your first three decisions with quantitative reasoning."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming the hardware or suggesting a simple fix like adding a fan. This ignores the systemic issue: the model's performance characteristics are not robust to environmental changes. Another common mistake is assuming that TensorRT optimization is a one-shot, static process that is independent of the device's runtime state.
+
+  **Realistic Solution:** The core problem is a 'Profile Drift' between the lab environment and the field. TensorRT's optimizer selects highly specialized kernels (CUDA, and especially those for sparse tensors) based on the GPU's clock frequencies during engine creation. When the Jetson Orin throttles due to heat, its clock speeds decrease, which can invalidate the chosen kernels' performance assumptions or even cause TensorRT to fall back to slower, generic implementations. The 2:4 structured pruning is particularly sensitive to this, as its speedup relies entirely on the availability of specialized Tensor Core instructions which are often the first to be impacted by thermal down-clocking. The architecture must be robust to this dynamic state.
+
+My first three architectural decisions would be:
+1.  **Construct a Multi-Profile TensorRT Engine:** Instead of a single engine, I will create multiple optimization profiles within the same engine file, each targeting a different power mode of the Jetson Orin (e.g., 15W, 30W, 60W). At runtime, the application will monitor the device's thermal state and select the appropriate optimization profile. This ensures that TensorRT is always using kernels optimized for the current clock frequency, avoiding performance cliffs.
+2.  **Develop a Thermally-Aware CI Pipeline:** I will mandate that all performance validation happens in a 'thermal chamber' that simulates real-world conditions (e.g., 45°C ambient). The CI pipeline will now build and test against all optimization profiles, and the PR will be blocked if the latency in the 15W throttled-state profile exceeds the 33ms real-time deadline for the security application.
+3.  **Formulate a Pruning Stability Score:** I will introduce a new metric into our MLOps platform that measures the performance variance of a pruned model across all power profiles. A model that is 30% faster at 60W but 500% slower at 15W is less stable than a model that is only 15% faster at 60W but maintains that gain at 15W. This 'Stability Score' will be a primary release criterion, forcing model developers to consider performance under constraint, not just at peak.
+
+  > **Napkin Math:** Let's quantify the performance cliff.
+- **Constraint:** The security camera must process frames in real-time, let's say a 33ms deadline (30 FPS).
+- **Lab (60W profile):** The Jetson AGX Orin runs at its peak of ~275 TOPS. The pruned model's latency, measured in CI, is 20ms. This is well within the 33ms budget.
+- **Field (Throttled to 15W):** Power is reduced by 4x. A naive assumption is a 4x latency increase: 20ms * 4 = 80ms. This is already bad.
+- **Realistic Field Scenario:** The problem is worse. The 2:4 sparse kernels relied on by TensorRT become inefficient at the lower clock speed. The runtime falls back to slower, dense math. The model's arithmetic intensity plummets, and it becomes memory-bound. The performance degradation is not 4x, but closer to 10-20x.
+- **Calculation:** New latency = 20ms * 15 = 300ms.
+- **Impact:** The camera can now only process 1000ms / 300ms ≈ 3.3 frames per second. It is no longer a real-time security camera and will miss most events. This proves that performance at peak power is a vanity metric; performance under thermal constraint is the real requirement.
+
+  > **Key Equation:** $\text{Latency}_{effective} = f(\text{Power}_{profile}, \text{Sparsity}_{support}, \text{Temp}_{ambient})$
+
+  📖 **Deep Dive:** [Edge: Hardware & Platform](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Multi-Sensor Contention Collapse</b> · <code>tensorrt-optimization-structured-pruning-for-edge</code></summary>
+
+- **Interviewer:** "You are designing the perception system for an autonomous delivery robot using a Jetson AGX Orin. The system must fuse data from three 4K cameras and one LiDAR sensor in real-time (33ms cycle). To accelerate the vision models, the team used 2:4 structured pruning, achieving a 2x speedup in standalone benchmarks. However, during integration testing, the end-to-end pipeline latency is now *worse* than with the original dense models. The system is suffering from massive, unpredictable frame drops. What is the most likely physical bottleneck causing this counter-intuitive result, and how would you redesign the system software architecture to resolve it?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing only on compute (FLOPs). The candidate might suggest further pruning or quantization, but this misses the root cause. Another common error is to blame the OS scheduler or suggest simple process priority tweaks, which are insufficient for this level of hardware contention.
+
+  **Realistic Solution:** The physical bottleneck is the shared DRAM memory bandwidth. While structured pruning reduces the computational load (FLOPs), it transforms the memory access patterns from mostly contiguous to sparse and irregular. In a standalone benchmark, this is fine. But in a multi-sensor system, you now have multiple models plus the LiDAR processing pipeline all making simultaneous, chaotic requests to the single 204.8 GB/s memory controller on the Orin. This leads to severe memory bandwidth contention, causing all processes to stall waiting for data. The dense model, though computationally slower, had more predictable, sequential memory access patterns that were easier for the DRAM controller to schedule efficiently, resulting in better *system-wide* throughput.
+
+My proposed architecture redesign:
+1.  **Construct a Heterogeneous Compute Graph:** I will not run everything on the main GPU. The Orin has two DLAs (Deep Learning Accelerators) which are highly efficient for standard convolutions and have their own memory pathways. I will design a graph that partitions the models: run the early, memory-intensive convolutional layers of the vision models on the DLAs. This isolates their memory traffic from the main GPU and DRAM bus. The GPU will be reserved for the irregular layers (e.g., attention, post-processing) and the LiDAR fusion logic. This physically separates the sources of memory contention.
+2.  **Design an 'Irregularity-Aware' Pruning Strategy:** Instead of uniform 2:4 pruning, I will develop a new strategy that prioritizes memory access regularity. We will use a profiler to identify layers with the most irregular memory access post-pruning and selectively un-prune them or apply a different pruning technique (like block pruning) that preserves locality. The goal is to trade a small amount of compute speedup for a large gain in memory bus efficiency.
+3.  **Implement Static Memory Allocation & Locking:** To prevent unpredictable memory stalls, I will use CUDA's `cudaMallocManaged` with `cudaMemAdviseSetAccessedBy` to explicitly associate memory regions with the processor that will access them (GPU or DLA). For the most critical data paths, like the LiDAR point cloud, I will pre-allocate and lock pages in memory using `mlock` to ensure they are never paged out and are always available with the lowest possible latency, guaranteeing the fidelity of the most safety-critical sensor.
+
+  > **Napkin Math:** Let's quantify the memory bandwidth contention.
+- **Hardware Limit:** Jetson AGX Orin has 204.8 GB/s of LPDDR5 memory bandwidth.
+- **System Load:** Let's assume the 3 cameras and LiDAR processing require a baseline of 100 GB/s for data movement and non-ML compute.
+- **Dense Model Scenario:** The dense model is memory-bound. Let's say it requires 120 GB/s to run. Total demand: 100 + 120 = 220 GB/s. This is ~8% over budget (220 / 204.8). The memory controller will stall requests, but the predictable access patterns lead to a somewhat graceful degradation. The model's 40ms standalone latency might become 50ms.
+- **Pruned Model Scenario:** The pruned model is compute-bound and runs in 20ms. However, its irregular access pattern means it still has high peak bandwidth demand, let's say 100 GB/s. Total demand: 100 + 100 = 200 GB/s. This seems to fit within the budget.
+- **The Flaw:** This calculation ignores the *efficiency* of the memory access. The 204.8 GB/s is a theoretical peak for perfectly regular, sequential access. For the chaotic, random-like access from multiple pruned models, the *effective* bandwidth might drop by 30-50%. The real available bandwidth is closer to ~140 GB/s.
+- **Impact:** The system demanding 200 GB/s from a bus that can only effectively deliver 140 GB/s results in a contention collapse. All processes are starved, and latency skyrockets. The pruned model's 20ms latency could easily become 100ms+, causing the entire 33ms real-time cycle to fail.
+
+  > **Key Equation:** $\eta_{bandwidth} = f(\text{AccessPattern}_{regularity}, \text{Contention}_{sources})$
+
+  📖 **Deep Dive:** [Edge: Real-time Pipeline](https://mlsysbook.ai/edge/02_realtime_pipeline.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Headlight Blindness Problem</b> · <code>quantization-overflow-mixed-precision</code></summary>
+
+- **Interviewer:** "You are the Tech Lead for the perception team building an autonomous delivery robot. The product requires 24/7 operation, meaning the robot must function in lighting conditions from bright, direct sunlight to dark nights with only its headlights for illumination. The core perception model is a 300 GOps vision transformer, running on a Jetson AGX Orin with a hard real-time latency budget of 33ms (30 FPS) for safe obstacle avoidance.
+
+The team's initial FP32 model is accurate but too slow, running at ~25 FPS. Using standard post-training INT8 quantization (PTQ) with a large, balanced dataset, they successfully hit a blistering 50 FPS. However, during field trials, a critical failure emerges: the robot fails to detect cars with bright LED brake lights at night, and often misses pedestrians when they are under harsh, direct sunlight. The activations in the early layers are clearly saturating and overflowing the INT8 range in these high-dynamic-range scenarios.
+
+The junior engineers are panicking. Their proposal is to fall back to a full FP16 model, but this would mean missing the 30 FPS safety target. As the lead, you must propose a more nuanced solution. Formulate a mixed-precision architecture for this model. Which specific *types* of layers are the most likely culprits, and why? Justify your proposed architecture with napkin math to prove it will be both accurate and meet the 33ms latency budget."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common answers are 'Just use Quantization-Aware Training (QAT)' or 'The calibration dataset is bad, add more extreme lighting examples.' While not wrong, these answers miss the architectural point. QAT is an expensive full retraining process that may not even solve a fundamental dynamic range mismatch between trained weights and extreme real-world inputs. Simply adding more data to the calibration set for PTQ can help, but it often fails to prevent overflow for outlier inputs and doesn't demonstrate a deep understanding of *which* layers are sensitive and why.
+
+  **Realistic Solution:** The correct approach is to architect a mixed-precision model that surgically addresses the points of failure. The most vulnerable layers to activation overflow are typically the **first few convolutional or patch-embedding layers** and the **final output/head layers**.
+
+1.  **Early Layers:** These layers directly process the raw input pixels. High-intensity light sources (headlights, sun glare) create pixel values near the maximum (e.g., 255). When these values are multiplied by the first layer's weights, the resulting activations can easily exceed the `[-128, 127]` range of INT8, causing them to be clipped (overflow). This loses all gradient information in that region, effectively making the model 'blind' to whatever was there.
+2.  **Final Layers:** The logit values in the final classification or regression head, before activation functions like softmax, can also have a very large dynamic range. Quantizing these can lead to significant precision loss or overflow, distorting the final output.
+
+The robust architectural proposal is to keep the first ~2-3 layers and the final prediction head in FP16 precision, while quantizing the deep, numerically-stable middle layers of the transformer to INT8. The middle layers operate on feature maps, not raw pixels, and their activation distributions are typically more well-behaved and centered around zero, making them ideal candidates for INT8 quantization.
+
+  > **Napkin Math:** The core of the solution is proving that this surgical, mixed-precision approach meets latency targets where a full FP16 model fails.
+
+**Hardware Constraints (Jetson AGX Orin):**
+- Let's assume a realistic, sustained throughput (not peak marketing numbers):
+- Sustained INT8 throughput: **15 TOPS** (15 * 10^12 ops/sec)
+- Sustained FP16 throughput: **7.5 TFLOPS** (7.5 * 10^12 ops/sec)
+- Model Size: 300 GOps (300 * 10^9 ops)
+- Latency Budget: **33ms**
+
+**Analysis of Options:**
+1.  **Full FP16 Model (Team's Fallback):**
+    - Latency = Total Ops / FP16 Throughput
+    - Latency = (300 * 10^9) / (7.5 * 10^12) = 0.04 seconds = **40ms**
+    - *Result: 40ms > 33ms. This misses the safety budget, as the team suspected.*
+
+2.  **Full INT8 Model (Current Failing Model):**
+    - Latency = Total Ops / INT8 Throughput
+    - Latency = (300 * 10^9) / (15 * 10^12) = 0.02 seconds = **20ms**
+    - *Result: 20ms < 33ms. Fast, but inaccurate.*
+
+3.  **Proposed Mixed-Precision Architecture:**
+    - Assume the sensitive early layers and final head constitute **20%** of the model's total GOps. The stable middle layers are **80%**.
+    - FP16 Ops = 300 GOps * 0.20 = **60 GOps**
+    - INT8 Ops = 300 GOps * 0.80 = **240 GOps**
+
+    - Latency (FP16 part) = 60 GOps / 7.5 TFLOPS = 0.008s = **8ms**
+    - Latency (INT8 part) = 240 GOps / 15 TOPS = 0.016s = **16ms**
+    - Total Latency = 8ms + 16ms = **24ms**
+
+    - *Result: 24ms < 33ms. This architecture successfully meets the safety-critical latency budget while using higher precision for the sensitive layers, directly addressing the overflow failures.*
+
+  > **Key Equation:** $$T_{\text{total}} = \frac{\text{Ops}_{\text{FP16}}}{\text{FLOPS}_{\text{FP16}}} + \frac{\text{Ops}_{\text{INT8}}}{\text{OPS}_{\text{INT8}}}$$
+
+  📖 **Deep Dive:** [Edge: Compute Analysis](https://mlsysbook.ai/edge/01_compute_analysis.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Autonomous Drone's Reflex Gap</b> · <code>multi-model-optimization-edge</code></summary>
+
+- **Interviewer:** "You are the tech lead for an agricultural AI startup. Your fleet of autonomous drones uses a large Vision-Language Model (VLM) to identify crop diseases from aerial footage. The current system runs on a Jetson AGX Orin with a strict 30W power budget, and it barely achieves the required 15 FPS. An urgent new business requirement has come in: the drones must also detect and issue an immediate alert for a highly invasive locust species, which requires running a second, lightweight detection model. Your constraints are to stay within the 30W power envelope and on the existing Orin hardware. Propose a system architecture that can run both the existing VLM and the new locust detector, while also increasing the primary VLM's effective frame rate to 30 FPS and issuing any locust alerts within 100ms of detection."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often propose brute-force solutions like simply running the two models sequentially, which would halve the frame rate, violating the requirements. Another common mistake is focusing only on one type of optimization (e.g., only quantization) without a holistic system view that combines multiple techniques.
+
+  **Realistic Solution:** A successful design requires a multi-pronged optimization strategy that treats the two models as a cooperative system, not two independent processes. The key is to realize the VLM is over-qualified for most frames and the locust model can act as a high-speed 'trigger'.
+
+1.  **Optimize the Base Models:** Apply aggressive optimization to both models individually. For the VLM, distill it to a smaller, domain-specific version and apply structured pruning to remove redundant capacity. For both models, apply INT8 quantization and use an optimized runtime like TensorRT to perform operator fusion (e.g., Conv-BN-ReLU), which reduces memory bandwidth pressure and kernel launch overhead.
+
+2.  **Architect a Speculative System:** This is the critical L6+ insight. Don't run the expensive VLM on every frame. Instead, run the tiny, fast locust model (e.g., a small YOLO) on every single frame. This becomes the system's 'fast path'.
+    *   **If no locust is detected:** The VLM can run at a lower frequency (e.g., every 2nd or 3rd frame), effectively time-slicing the compute resource. The last known VLM output can be repeated for the intermediate frames, meeting the 30 FPS *effective* output rate for the user, assuming high temporal correlation in the video feed.
+    *   **If a locust IS detected:** The system immediately triggers the alert (meeting the 100ms requirement as the locust model is very fast) and can dedicate the next compute cycle to running the full VLM for a more detailed analysis if needed.
+
+3.  **Advanced (Bonus) Insight:** A truly advanced solution would use the locust model as a 'draft model' for the VLM in a speculative decoding-like framework. If the locust model's embeddings are similar to the last frame's, the VLM pass can be skipped entirely. This moves from simple time-slicing to a content-aware execution strategy, maximizing compute efficiency.
+
+  > **Napkin Math:** Let's quantify the performance gains.
+
+**1. Baseline:** The current VLM takes ~66ms per frame (1000ms / 15 FPS). The Jetson AGX Orin has a memory bandwidth of 204.8 GB/s. A heavy model's latency is often dominated by memory bandwidth, not compute.
+
+**2. Operator Fusion:** A single unfused Conv-BN-ReLU block involves multiple kernel launches and reads/writes to DRAM. Fusing them into one kernel keeps intermediate activations in SRAM. For a 224x224x64 tensor, reading it from DRAM takes (224*224*64*2 bytes) / 204.8 GB/s ≈ 0.03ms. While small, this happens hundreds of times. Fusing can save 5-10ms off the total latency.
+
+**3. Distillation & Quantization:** Distilling and quantizing the VLM might reduce its latency from 66ms to 25ms. The new locust model (e.g., MobileNet-based) could be extremely fast, perhaps 5ms.
+
+**4. Sequential Execution (The Trap):** Running them back-to-back would take 25ms + 5ms = 30ms. This yields 1000ms / 30ms = 33 FPS. This *seems* to meet the spec, but it's brittle and leaves no room for system jitter or more complex logic.
+
+**5. Speculative/Triggered Architecture:** The locust model runs on every frame: 5ms latency. This is well within the 100ms alert budget. Let's say a locust appears once every 1000 frames. For 999 frames, we run only the locust model. We run the VLM every 2nd frame. The total compute time over two frames is: `(Frame 1: 5ms) + (Frame 2: 5ms + 25ms) = 35ms`. The average time per frame is 17.5ms. This is an average of 57 FPS, easily clearing the 30 FPS target and leaving significant power/compute headroom.
+
+  > **Key Equation:** $\text{T}_{avg} = p_{trigger} \times (T_{fast} + T_{slow}) + (1 - p_{trigger}) \times T_{fast}$
+
+  📖 **Deep Dive:** [Volume II: Model Optimization](https://mlsysbook.ai/vol2/optimization.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Jet-Lagged Copilot LLM</b> · <code>llm-inference-avionics</code></summary>
+
+- **Interviewer:** "You are the Principal Engineer designing a 'Digital Copilot' for a next-gen private jet. The system must run a 7B parameter LLM, completely offline, to answer pilot voice queries against the aircraft's technical manuals (~4000 token context). The hardware is a power-constrained, air-gapped board equivalent to a Jetson AGX Orin (275 INT8 TOPS, 32 GB LPDDR5 RAM). The flight safety requirements are non-negotiable: Time-To-First-Token (TTFT) must be under 500ms, and sustained generation throughput must exceed 30 tokens/second. Your initial baseline using a standard 7B model is failing catastrophically: prefill with the 4k context causes an OOM error, and generation throughput is barely 15 tokens/sec. Design the full-stack model and software architecture to meet these life-or-death performance targets."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers unfamiliar with LLM internals will focus on the wrong bottleneck. They might suggest a smaller model (which could compromise accuracy) or focus only on quantization, failing to realize that the primary bottlenecks are memory capacity during prefill (from the attention matrix) and memory bandwidth during generation (from weight loading).
+
+  **Realistic Solution:** This is a classic edge LLM problem that requires tackling both memory capacity and memory bandwidth. The solution lies in a combination of state-of-the-art algorithms and aggressive optimization.
+
+1.  **Solve Prefill OOM with FlashAttention:** The OOM error during prefill is caused by the standard attention mechanism materializing a massive `(N, N)` attention matrix in memory for the 4k context. For each layer and head, this requires quadratic memory. The correct solution is to replace the standard attention with an IO-aware algorithm like **FlashAttention**. FlashAttention computes attention in smaller tiles, avoiding the need to store the full matrix in HBM and reducing memory usage from quadratic to linear with respect to context length. This is non-negotiable for enabling long context on memory-constrained devices.
+
+2.  **Solve Throughput with Speculative Decoding:** Hitting >30 tokens/sec on a 7B model is impossible with naive auto-regressive decoding because each token requires a full pass over the 7GB of model weights, making it memory-bandwidth bound. The solution is **Speculative Decoding**. This involves creating a much smaller, faster 'draft' model (e.g., a 300M parameter model distilled from the 7B model) that runs on the same device. The draft model generates a 'draft' of 4-5 tokens very quickly. The large 7B model then validates all 4-5 tokens in a single, parallel forward pass. Since most tokens in a coherent sentence are predictable, the acceptance rate is high. This allows the system to generate multiple tokens for the cost of a single large model pass, dramatically increasing throughput.
+
+3.  **Foundation & Integration:** These advanced algorithms must be built on a solid foundation:
+    *   **Aggressive Quantization:** The 7B model and its KV cache must be quantized to INT8 or even INT4 to reduce the memory footprint and bandwidth requirements. This is essential to even fit the model and its state in RAM.
+    *   **Operator Fusion:** Use TensorRT or a similar framework to fuse the MLP and other layers of both the large and draft models. This minimizes kernel launch overhead and maximizes the use of on-chip memory.
+
+  > **Napkin Math:** **1. Why naive generation is too slow (Memory Bandwidth Bottleneck):**
+*   A 7B model quantized to INT8 has weights of ~7 GB.
+*   The Orin's LPDDR5 memory bandwidth is 204.8 GB/s.
+*   The theoretical minimum time to generate one token is the time to stream the entire model weights through the processor: `7 GB / 204.8 GB/s ≈ 34.2 ms`.
+*   This yields a theoretical max throughput of `1 / 0.0342s ≈ 29 tokens/sec`. In reality, due to system overhead and non-ideal memory access, you'd be lucky to get 50-60% of this, i.e., ~15-17 tokens/sec. This fails the >30 tokens/sec requirement.
+
+**2. Why prefill OOMs (Attention Memory Capacity Bottleneck):**
+*   Context length `N = 4096`. Standard attention computes a score matrix of size `N x N`.
+*   The size of this matrix is `4096 * 4096 = 16.7M` elements.
+*   Storing this in FP16 for the softmax calculation requires `16.7M * 2 bytes = 33.5 MB`. This doesn't seem like much, but this is *per attention head*. A 7B model has 32 layers and 32 heads. A naive implementation that materializes this for all heads would require `33.5 MB/head * 32 heads = 1.07 GB` per layer. Across all 32 layers, this is `34.3 GB`—more than the system's entire RAM.
+*   FlashAttention avoids this `O(N^2)` memory cost, making the prefill feasible.
+
+**3. How Speculative Decoding Hits the Throughput Target:**
+*   Assume we use a 300M draft model (300 MB weights) and the 7B verification model.
+*   Time for one large model validation pass: `~34.2ms` (realistically, ~50ms).
+*   The small model generates a draft of `k=4` tokens. Let's say 3 are accepted on average.
+*   Total time is dominated by the single validation pass (~50ms).
+*   Effective throughput: `3 tokens / 50ms = 60 tokens/sec`. This comfortably exceeds the 30 tokens/sec requirement.
+
+  > **Key Equation:** $\text{Throughput}_{spec} \approx \frac{\gamma}{T_{verify}}$
+
+  📖 **Deep Dive:** [Volume II: Inference At Scale](https://mlsysbook.ai/vol2/inference.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
 
 ---
 
 
-### 🧠 Memory Systems
+### Memory Systems
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Shared DRAM Budget</b> · <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Shared DRAM Budget</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your edge box has 8 GB of LPDDR5 DRAM. Your ML model needs 1.5 GB for weights and activations. Your colleague says 'we have 6.5 GB of headroom — plenty.' Why is this dangerously optimistic?"
 
@@ -1334,7 +4606,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Unexpected Cache Miss Storm</b> · <code>cache-performance</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Unexpected Cache Miss Storm</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're writing a pre-processing routine for an image classification model on an embedded Linux device. A simple loop that iterates over a 10MB image buffer, applying a pixel-wise transformation, is running much slower than expected, even on a high-frequency ARM core. The core is rated for 2.0 GHz. What's a common reason for such a slowdown in data-intensive loops, even on fast CPUs?"
 
@@ -1362,7 +4634,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Over-Memory Model</b> · <code>memory-footprint</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Over-Memory Model</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You have an edge device with 512MB of total RAM. Your ML model's `.tflite` file is 150MB. After attempting to load and run inference, the application crashes with an Out-Of-Memory (OOM) error. You check `top` and see your application using 400MB of RAM. Why is the actual memory usage so much higher than the model file size, and what are the main components contributing to this?"
 
@@ -1397,7 +4669,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Bloated INT8 Model</b> · <code>quantization-memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Bloated INT8 Model</b> · <code>quantization</code></summary>
 
 - **Interviewer:** "You've successfully quantized your FP32 object detection model to INT8 for deployment on an edge device, expecting a 4x reduction in model memory footprint (weights). However, after deployment, you notice the total RAM usage during inference is only reduced by about 2x-2.5x compared to the FP32 version. What explains this discrepancy, and what other components contribute significantly to the overall memory footprint?"
 
@@ -1495,8 +4767,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The DMA Contention Blind Spot</b> · <code>dma</code> <code>memory-bus</code></summary>
 
@@ -1518,7 +4789,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The MMIO Sensor Bottleneck</b> · <code>mmio</code> <code>sensor-interface</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The MMIO Sensor Bottleneck</b> · <code>dma</code> <code>sensor-interface</code></summary>
 
 - **Interviewer:** "Your edge AI system reads data from 8 environmental sensors via I2C at 400 kHz. Your sensor fusion model expects 100 Hz input data (10ms intervals), but the I2C bus overhead limits you to 60 Hz. How does the I2C sensor polling rate limit the ML model's input freshness, and why does this bus bottleneck cause the model's accuracy to drop despite the GPU running at full speed?"
 
@@ -1570,7 +4841,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Swap File Latency Cliff</b> · <code>memory</code> <code>os</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Swap File Latency Cliff</b> · <code>memory-hierarchy</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You deploy a 4GB model to a Jetson Nano that has exactly 4GB of physical RAM. You enable a 4GB Linux Swap File on the SD card to prevent OOM crashes. The model loads successfully. However, when the inference runs, the latency is completely erratic—sometimes it takes 50ms, sometimes it takes 4,000ms. The CPU and GPU are barely being utilized during the 4,000ms spikes. Why?"
 
@@ -1598,7 +4869,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The eMMC Cold Start</b> · <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The eMMC Cold Start</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your edge device loads a 200 MB model from eMMC flash into DRAM at boot. The eMMC spec says 300 MB/s sequential read, so you expect a 0.67-second load time. In practice, first inference takes over 3 seconds. Where did the other 2.3 seconds go?"
 
@@ -1674,7 +4945,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Inference Memory Leak</b> · <code>memory</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Inference Memory Leak</b> · <code>memory-hierarchy</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your TI TDA4VM-based dashcam runs a lane detection model 24/7. Memory usage starts at 1.8 GB after boot (of 8 GB total). After 3 days of continuous operation, memory usage reaches 7.2 GB and the OOM killer terminates the inference process. The model is loaded once at startup and never reloaded. The input pipeline processes frames in a fixed-size ring buffer. Where is the 5.4 GB leak coming from?"
 
@@ -1698,7 +4969,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Quantized Performance Paradox</b> · <code>quantization-memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Quantized Performance Paradox</b> · <code>quantization</code></summary>
 
 - **Interviewer:** "You've successfully quantized a large FP32 model to INT8, reducing its size by 4x. Benchmarks show a significant speedup in MAC operations. However, when deployed on your edge device, the overall inference latency only improved by 10-20%, far less than the expected 2-4x. What could be the primary bottleneck preventing better performance gains?"
 
@@ -1724,7 +4995,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Always-On Power Drain</b> · <code>memory-power</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Always-On Power Drain</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're designing an always-on security camera system powered by a small battery. The ML model weights (500MB) need to be accessible quickly for immediate inference, but the device spends 99% of its time in a low-power idle state, waiting for a trigger. You're considering storing the model weights directly in LPDDR5 RAM versus loading them from eMMC flash storage on demand. Which option would you choose for optimal power efficiency in the 'always-on idle' scenario, and why?"
 
@@ -1756,7 +5027,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Real-Time Jitter Bomb</b> · <code>dynamic-memory-allocation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Real-Time Jitter Bomb</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're developing a real-time object tracking system on an embedded Linux platform. The ML inference itself is highly optimized and deterministic, completing within 10ms. However, the overall tracking pipeline occasionally experiences unpredictable latency spikes, sometimes exceeding 50ms, leading to dropped frames. You suspect it's not the ML model. What common programming practice, especially problematic in embedded real-time systems, could be causing this unpredictable latency?"
 
@@ -1788,7 +5059,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The DSP's Memory Dilemma</b> · <code>scratchpad-memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The DSP's Memory Dilemma</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're optimizing a critical CNN layer (e.g., depthwise convolution) for a proprietary DSP (Digital Signal Processor) often found in edge SoCs. This DSP has a small (e.g., 256KB) but extremely fast, software-managed scratchpad memory, and no hardware cache for data. Why would an ML engineer prefer explicit DMA transfers to the scratchpad over simply relying on the main system DRAM, even if it requires more complex code and manual data management?"
 
@@ -1845,10 +5116,10 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The Zero-Copy Illusion</b> · <code>dma-transfers</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The Zero-Copy Illusion</b> · <code>dma</code></summary>
 
 - **Interviewer:** "You are optimizing an Edge TPU pipeline on a Coral Dev Board. You use a 'zero-copy' memory pointer to pass a tensor from the CPU directly to the NPU's input buffer. However, the system profiler shows a massive latency spike right before inference begins. If the pointer was passed directly, why is there still a latency spike?"
 
@@ -1868,7 +5139,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Multi-Model Memory Sharing</b> · <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Multi-Model Memory Sharing</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your autonomous vehicle runs four models concurrently: detection (YOLOv8-L, 80 MB weights), tracking (DeepSORT, 30 MB), depth estimation (MiDaS, 200 MB), and path planning (custom, 50 MB). Total: 360 MB of weights plus ~400 MB of activation buffers. Your Jetson AGX Orin has 32 GB DRAM, but after the OS and sensor pipelines, only 4 GB is available for ML. How do you fit 760 MB of ML workload into 4 GB with room for growth?"
 
@@ -1888,7 +5159,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Edge LLM Memory Wall</b> · <code>memory</code> <code>kv-cache</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Edge LLM Memory Wall</b> · <code>memory-hierarchy</code> <code>kv-cache</code></summary>
 
 - **Interviewer:** "You're deploying a 3B parameter small language model (Phi-3-mini) on a Jetson Orin NX with 8 GB DRAM. The model weights in INT4 are 1.5 GB. Your colleague says 'plenty of room — we have 6.5 GB free.' The first few conversation turns work fine, but at turn 15 the system crashes with an OOM error. What's consuming the memory?"
 
@@ -1944,7 +5215,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Brownout Weight Corruption</b> · <code>memory</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Brownout Weight Corruption</b> · <code>memory-hierarchy</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your Intel Movidius-based industrial inspection system is deployed in a rural factory with unstable power. After a brief brownout (voltage sag to 85V AC for 200ms), the system continues running but starts classifying every part as 'defective' — a 100% false positive rate. A full power cycle fixes it. The model file on eMMC is intact (checksum matches). What happened to the model in RAM?"
 
@@ -1968,7 +5239,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Sparse Performance Illusion</b> · <code>sparsity-memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Sparse Performance Illusion</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You've successfully pruned a large transformer model to achieve 90% unstructured sparsity in its weight matrices, reducing the *number* of non-zero weights by 10x. You expect a proportional reduction in memory footprint and a significant speedup. However, after implementing it, the memory footprint only decreases by 50-60%, and the speedup is a modest 2x, not 10x. Explain why the expected gains are not fully realized, considering both compute and memory aspects."
 
@@ -2006,7 +5277,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The On-Chip Memory Misconception</b> · <code>on-chip-memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The On-Chip Memory Misconception</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're optimizing a convolutional layer for a custom NPU with a 2MB on-chip scratchpad memory. You've successfully tiled the input, weights, and output activations to fit entirely within this 2MB scratchpad for each tile. However, profiling shows that the NPU is still not achieving its peak theoretical TOPS, and memory stalls are still a significant factor. What crucial aspect of on-chip memory utilization might you be overlooking beyond simply 'fitting the data'?"
 
@@ -2035,7 +5306,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Real-Time Heap Headache</b> · <code>dynamic-memory-allocation</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Real-Time Heap Headache</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're developing a safety-critical ML inference engine on an embedded microcontroller (e.g., ARM Cortex-M7 with RTOS) for an autonomous system. During stress testing, you observe sporadic, unpredictable latency spikes. Profiling reveals these spikes correlate with calls to `malloc()` and `free()`. Explain why dynamic memory allocation is generally avoided in hard real-time edge systems and detail at least two robust alternatives."
 
@@ -2077,7 +5348,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The Transformer Patch Limit</b> · <code>memory-capacity</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The Transformer Patch Limit</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You decide to replace a standard CNN with a Vision Transformer (ViT) for a drone's obstacle avoidance system. The ViT has the exact same number of parameters as the CNN. However, when you increase the input camera resolution from 224x224 to 448x448 to see smaller wires, the CNN runs slightly slower, but the ViT completely crashes with an Out-of-Memory (OOM) error. Why?"
 
@@ -2131,10 +5402,10 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The NUMA-Aware Edge AI</b> · <code>numa-multicore</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The NUMA-Aware Edge AI</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're deploying a complex multi-stage ML pipeline on a high-end edge SoC (e.g., a server-grade ARM chip like NVIDIA Grace, or a multi-cluster automotive SoC) with multiple CPU clusters and integrated NPUs. You observe that scaling the number of CPU threads for pre-processing beyond a certain point actually *decreases* overall throughput, even though there are available cores. What advanced memory architecture concept might explain this, and how would you mitigate it?"
 
@@ -2166,7 +5437,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Shared Bandwidth Bottleneck</b> · <code>shared-bandwidth</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Shared Bandwidth Bottleneck</b> · <code>memory-bandwidth</code></summary>
 
 - **Interviewer:** "Your company develops a next-gen edge AI SoC featuring a 100 TOPS NPU, a 500 GFLOPS GPU, and a powerful multi-core CPU. All units are theoretically capable of high throughput. However, when running a complex vision pipeline where the CPU does pre-processing, the GPU handles a custom filter, and the NPU performs inference, the overall system throughput is significantly lower than individual unit benchmarks, and all units show low average utilization. What is the most probable system-level bottleneck, and how would you redesign the system to mitigate it?"
 
@@ -2205,7 +5476,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Zero-Copy Nightmare</b> · <code>heterogeneous-memory-coherence</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Zero-Copy Nightmare</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your team is designing a next-generation edge AI SoC that integrates a high-performance CPU, a dedicated NPU, and a low-power GPU. The goal is to minimize inference latency and power by implementing a 'zero-copy' data pipeline between these heterogeneous compute units. Describe the underlying architectural requirements, the significant challenges, and potential pitfalls in achieving true zero-copy for ML tensor data on such an SoC."
 
@@ -2257,11 +5528,12 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 ---
 
 
-### 🔢 Numerical Precision & Quantization
+### Numerical Precision & Quantization
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Fixed-Point Trade-off</b> · <code>quantization</code></summary>
 
@@ -2323,7 +5595,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Coral Edge TPU Quantization Constraint</b> · <code>quantization</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Coral Edge TPU Quantization Constraint</b> · <code>quantization</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "You're deploying a custom object detection model on a Google Coral Edge TPU (USB Accelerator, 4 TOPS INT8). The model has 52 layers. After full INT8 quantization and compilation with the Edge TPU Compiler, the compiler report shows that only 48 of 52 layers are mapped to the TPU — 4 layers fall back to the CPU. One of those CPU-fallback layers is a critical attention layer that loses 15% mAP when quantized to INT8. What are your options?"
 
@@ -2353,8 +5625,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Night Scene Calibration Failure</b> · <code>quantization</code></summary>
 
@@ -2400,7 +5671,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> INT8 Calibration Set Size vs Accuracy</b> · <code>quantization</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> INT8 Calibration Set Size vs Accuracy</b> · <code>quantization</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You're quantizing YOLOv8s (11.2M params, FP32) to INT8 for deployment on a Jetson Orin using TensorRT's post-training quantization. The calibration step requires a representative dataset to determine the dynamic range of each layer's activations. Your training set has 50,000 images. How many calibration images do you actually need, and what happens if you use too few or too many?"
 
@@ -2459,7 +5730,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The QAT Cliff</b> · <code>quantization</code></summary>
@@ -2484,7 +5755,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Disappearing Pedestrian</b> · <code>quantization-robustness</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Disappearing Pedestrian</b> · <code>quantization</code></summary>
 
 - **Interviewer:** "Your team deployed a highly accurate pedestrian detection model (trained in FP32) to an autonomous vehicle's edge perception unit, which uses an integer-only accelerator (INT8). Initial tests in controlled environments showed minimal accuracy drop. However, during field trials, the model frequently misses pedestrians in specific, challenging conditions like low light, heavy rain, or when objects are far away. What are the common pitfalls of deploying FP32 models to INT8 hardware, especially concerning robustness, and how would you diagnose and mitigate these issues?"
 
@@ -2516,7 +5787,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Mixed-Precision Perception Stack</b> · <code>quantization</code></summary>
@@ -2548,11 +5819,12 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 ---
 
 
-### 🏗️ Architecture & Heterogeneous Compute
+### Architecture & Heterogeneous Compute
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Multi-Core Bottleneck</b> · <code>heterogeneous-compute</code></summary>
 
@@ -2586,8 +5858,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The DLA vs GPU Scheduling</b> · <code>heterogeneous-compute</code></summary>
 
@@ -2637,7 +5908,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> DLA vs GPU Energy per Inference</b> · <code>heterogeneous-compute</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> DLA vs GPU Energy per Inference</b> · <code>heterogeneous-compute</code> <code>power</code></summary>
 
 - **Interviewer:** "The Jetson AGX Orin has both a GPU (2048 CUDA cores, 275 TOPS INT8) and two DLAs (each ~40 TOPS INT8). Your workload is EfficientNet-B0 classification (0.4 GFLOPs, INT8). A junior engineer says 'run it on the GPU — it's faster.' Calculate the energy per inference on GPU vs DLA and determine which is the right choice for a battery-powered drone with a 50 Wh battery."
 
@@ -2696,7 +5967,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Edge LLM Context Window</b> · <code>serving</code> <code>memory-hierarchy</code></summary>
@@ -2770,7 +6041,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Multi-Hardware Model Optimization Pipeline</b> · <code>heterogeneous-compute</code> <code>compiler-runtime</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Multi-Hardware Model Optimization Pipeline</b> · <code>heterogeneous-compute</code> <code>compilation</code></summary>
 
 - **Interviewer:** "Your fleet has three hardware targets: Jetson Orin NX (TensorRT), Hailo-8 (Hailo Dataflow Compiler), and Google Coral (Edge TPU Compiler). You train one PyTorch model and need to deploy optimized binaries to all three. Each compiler has different quantization requirements, operator support, and calibration procedures. Design a CI/CD pipeline that produces validated binaries for all three targets from a single model checkpoint."
 
@@ -2803,7 +6074,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Adaptive Model Diet</b> · <code>model-optimization</code> <code>heterogeneous-compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Adaptive Model Diet</b> · <code>pruning</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "Your edge device for real-time video analytics needs to dynamically adapt its ML model performance based on available power, thermal limits, and real-time workload (e.g., number of objects to detect, scene complexity). You have a base model, but also several optimized variants (e.g., pruned, quantized to different precisions, smaller architectures). How do you design a runtime system that intelligently switches between these model variants, or even dynamically optimizes the model, to meet varying latency/throughput targets and power budgets without human intervention?"
 
@@ -2841,7 +6112,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Heterogeneous Choreographer</b> · <code>heterogeneous-compute</code></summary>
@@ -2893,13 +6164,13 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 ---
 
 
-### 📎 Additional Topics
+### Additional Topics
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The Functional Safety Redundancy Cost</b> · <code>functional-safety</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The Functional Safety Redundancy Cost</b> · <code>fault-tolerance</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your autonomous vehicle perception system must meet ISO 26262 ASIL-D. The safety architecture requires a redundant perception path: if the primary neural network fails or produces an implausible result, a secondary path must independently detect obstacles within 50ms. Your primary path runs on the Orin's GPU (YOLOv8m, 25ms). The naive approach is to duplicate everything — second GPU, second model, second sensor set. The CFO says the $1,200 BOM increase per vehicle is unacceptable across a 50,000-unit fleet. Design a redundant perception architecture that meets ASIL-D without doubling the hardware cost."
 
@@ -2929,7 +6200,7 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Safety-Certified Perception Pipeline</b> · <code>functional-safety</code> <code>heterogeneous-compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Safety-Certified Perception Pipeline</b> · <code>fault-tolerance</code> <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You're designing the perception system for an autonomous mining truck operating in an open-pit mine (no public roads, but ISO 17757 applies for autonomous mining equipment). The truck must detect people, vehicles, and cliff edges at 200m range in dust, rain, and darkness. The system must achieve Performance Level d (PLd) per ISO 13849. Design the full perception pipeline — sensors, compute, redundancy, and safety architecture — specifying which models run on which hardware and how you achieve the required safety integrity."
 
@@ -2960,4 +6231,44 @@ Edge accelerator rooflines, memory hierarchies, numerical precision, SoC archite
 
   </details>
 
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The NPU Definition</b> · <code>model-cost</code></summary>
+
+- **Interviewer:** "Modern edge devices often feature an NPU alongside the CPU and GPU. What does NPU stand for, and what mathematical operation is it physically optimized to perform?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Thinking it stands for Network Processing Unit or assuming it's just a faster CPU.
+
+  **Realistic Solution:** Neural Processing Unit. It is highly optimized for massively parallel, low-precision Multiply-Accumulate (MAC) operations, which form the backbone of matrix multiplications in neural networks.
+
+  > **Options:**
+  > [ ] Network Processing Unit; optimized for fast Wi-Fi routing.
+  > [x] Neural Processing Unit; optimized for dense Multiply-Accumulate (MAC) operations.
+  > [ ] Node Partition Unit; optimized for virtualizing the edge operating system.
+  > [ ] Numeric Precision Unit; optimized for high-accuracy 64-bit floating point math.
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Foundation-brightgreen?style=flat-square" alt="Level 2" align="center"> Thermal Throttling on Edge</b> · <code>roofline</code></summary>
+
+- **Interviewer:** "You deploy an object detection model to an edge camera. It runs at 30 FPS for the first minute, but then drops to 12 FPS permanently. What physical constraint is most likely causing this?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming a memory leak or a garbage collection pause.
+
+  **Realistic Solution:** Thermal Throttling. Edge devices often lack active cooling (fans). Running intensive matrix math heats up the silicon quickly. To prevent physical damage, the OS automatically drops the clock frequency of the processor, drastically reducing FPS.
+
+  > **Options:**
+  > [ ] The model's weights have drifted due to prolonged inference.
+  > [ ] The OS garbage collector is pausing the inference thread.
+  > [x] The device overheated, causing the OS to drop the clock frequency (thermal throttling).
+  > [ ] The L1 cache has become permanently fragmented.
+  </details>
 </details>

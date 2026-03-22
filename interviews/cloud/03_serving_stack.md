@@ -17,11 +17,537 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 ---
 
 
-### ⏱️ Latency & Throughput
+### Latency & Throughput
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Per-Token KV-Cache Cost</b> · <code>kv-cache-cost</code></summary>
+
+- **Interviewer:** "You are calculating the memory requirements for serving a large language model. The model has 40 layers, 64 attention heads per layer, and a head dimension of 128. If you are using FP16 precision, calculate the amount of memory the KV-cache consumes for *each single token* added to the sequence."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common errors are forgetting to account for both the Key (K) and the Value (V) tensors (an off-by-2x error) or using the wrong precision (e.g., 4 bytes for FP32 instead of 2 for FP16). Another mistake is calculating for just one layer instead of all of them.
+
+  **Realistic Solution:** For each token in the input sequence, every attention layer must store a Key and a Value vector. The size of these vectors is determined by the number of heads and the head dimension. The total memory per token is the sum of the sizes of these K and V vectors across all layers.
+
+The calculation is: `2 (for K and V) × num_layers × num_heads × head_dim × bytes_per_element`.
+
+  > **Napkin Math:** 1. **Identify dimensions:** 40 layers, 64 heads, 128 head dimension.
+2. **Identify precision:** FP16 = 2 bytes.
+3. **Apply the formula:** 2 (K and V) × 40 layers × 64 heads × 128 dim × 2 bytes/element.
+4. **Calculate:** 2 × 40 × 64 × 128 × 2 = 1,310,720 bytes.
+5. **Convert to a readable unit:** 1,310,720 bytes / 1,000,000 ≈ 1.31 MB.
+
+  > **Key Equation:** $\text{KV Cache (token)} = 2 \times N_{layers} \times N_{heads} \times d_{head} \times \text{sizeof(dtype)}$
+
+  > **Options:**
+  > [ ] About 655 KB
+  > [ ] About 2.62 MB
+  > [ ] About 32.7 KB
+  > [x] About 1.31 MB
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Continuous Batching Target</b> · <code>llm-inference-latency</code></summary>
+
+- **Interviewer:** "A user of your LLM API complains about the long initial wait before their generated text starts appearing. A teammate suggests implementing continuous batching to specifically reduce this initial wait time. Which of the following metrics is continuous batching designed to primarily improve?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often believe that any batching technique will speed up all aspects of inference. They incorrectly assume continuous batching will reduce the 'Time To First Token' (TTFT) for a new request, when its main benefit lies in improving overall system efficiency rather than the latency of a single, isolated request.
+
+  **Realistic Solution:** Continuous batching primarily improves overall throughput, which is measured in tokens per second across all concurrent users. This has the effect of reducing the average 'Time Per Output Token' (TPOT). It achieves this by eliminating head-of-line blocking and ensuring the GPU is always busy decoding *some* token for *some* user, rather than waiting for a full batch to complete. The initial wait (TTFT) is dominated by the prefill stage for the new prompt, which is not the primary target of this optimization.
+
+  > **Napkin Math:** Imagine a GPU that can process one prompt prefill in 500ms or one token decoding in 50ms.
+- Without batching, TTFT is 500ms. TPOT is 50ms.
+- With continuous batching, a new request still takes 500ms to prefill, so TTFT remains ~500ms.
+- However, by packing tokens from many users together, the GPU can generate a token every 50ms for the *system*, drastically increasing total tokens/second (throughput) and lowering the average TPOT for all users.
+
+  > **Options:**
+  > [ ] Time To First Token (TTFT)
+  > [x] System Throughput / Average Time Per Output Token (TPOT)
+  > [ ] Model Loading Time
+  > [ ] GPU Idle Time
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The KV-Cache Memory Hog</b> · <code>kv-cache-sizing</code></summary>
+
+- **Interviewer:** "An LLM with 80 layers is processing a single inference request with a context (sequence length) of 100,000 tokens. Each token's state is represented by Key and Value vectors totaling 32KB per layer. What is the approximate VRAM consumed by the KV cache for this single request?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is an order-of-magnitude error, either by calculating the memory for a single layer and forgetting to multiply by the number of layers, or by misplacing the decimal when converting from MB to GB. Another error is to calculate the memory for just one token instead of the full sequence.
+
+  **Realistic Solution:** The KV-cache stores the Key and Value vectors for every token in the sequence at every layer of the model. This allows the model to attend to previous tokens without re-computing their states.
+The total size is the memory per token per layer, multiplied by the number of layers and the number of tokens.
+
+  > **Napkin Math:** 1. Memory per token: `32 KB/layer × 80 layers = 2,560 KB` or `~2.56 MB`
+2. Total KV Cache Size: `2.56 MB/token × 100,000 tokens = 256,000 MB`
+3. Convert to GB: `256,000 MB / 1000 ≈ 256 GB`.
+This demonstrates how quickly the KV cache can become the dominant memory consumer in long-context scenarios, often dwarfing the model weights themselves.
+
+  > **Key Equation:** V_{cache} \approx S \times L \times (H_{keys} + H_{values})
+
+  > **Options:**
+  > [ ] ~2.56 GB
+  > [ ] ~32 GB
+  > [x] ~256 GB
+  > [ ] ~2.56 MB
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The KV-Cache Memory Bomb</b> · <code>kv-cache</code></summary>
+
+- **Interviewer:** "You are planning the deployment for a 70-billion parameter LLM. A product requirement is to support very long context windows up to 128,000 tokens. For a single user request with a full context window, what is the approximate VRAM required just to store the KV-cache?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to only consider the model's weight memory (~140GB for a 70B model in FP16), completely forgetting that the KV-cache's memory footprint scales linearly with the sequence length and can easily surpass the model weight memory.
+
+  **Realistic Solution:** The KV-cache for a single 128k-token request will require approximately 335 GB of VRAM. This is why serving models with long context windows is extremely challenging and expensive.
+
+  > **Napkin Math:** KV Cache Size ≈ (Batch Size × Sequence Length × 2 × Num Layers × Hidden Dim) × Bytes/Value.
+For Llama 70B (80 layers, 8192 hidden dim) and a 128k sequence length in FP16:
+1 × 128,000 × 2 × 80 × 8192 × 2 bytes ≈ 3.35 × 10¹¹ bytes ≈ 335 GB.
+
+  > **Key Equation:** $\text{KV Cache Memory} \approx B \times S \times 2 \times L \times D_{model} \times \text{bytes}$
+
+  > **Options:**
+  > [ ] ~140 GB
+  > [ ] ~2.6 MB
+  > [x] ~335 GB
+  > [ ] ~1.1 TB
+
+  📖 **Deep Dive:** [Scaling Rules for Cloud/LLM](https://github.com/mlsysbook/interviews/blob/main/ironlaw.qmd#4-scaling-rules-arithmetic--hardware-independent)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The VRAM Cost of Context</b> · <code>kv-cache-vram</code></summary>
+
+- **Interviewer:** "You are deploying a large language model for a chatbot service. The model architecture is similar to Llama-2 70B, which has a hidden dimension of 8192 (`d_model`) and 80 layers. The product team wants to guarantee support for a 4096-token context window. Explain how you would calculate the VRAM required *just for the KV-cache* for a single user request, assuming the cache is stored in FP16 precision."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to only account for model weights and forget the KV-cache, which scales linearly with the context length and can easily dominate VRAM usage for long sequences. Another frequent error is to miscalculate the cache size, often by forgetting one of the key factors: the `x2` for storing both Keys and Values, or the bytes per parameter (2 for FP16).
+
+  **Realistic Solution:** The KV-cache stores the Key and Value vectors for every token in the context, for every layer. For a single sequence, its size can be estimated by multiplying the sequence length by the size of the K and V vectors required for each token across all layers. A simple and safe estimation uses the model's hidden dimension (`d_model`) to represent the combined vector size per layer.
+
+  > **Napkin Math:** The calculation is as follows:
+1.  **Formula:** `Total Cache = Seq. Length × Num Layers × Hidden Dimension × 2 (for K/V) × Bytes per Value`
+2.  **Parameters:**
+    - Sequence Length: 4,096 tokens
+    - Num Layers: 80
+    - Hidden Dimension: 8,192
+    - Bytes per Value: 2 (for FP16)
+3.  **Calculation:** `Cache = 4096 × 80 × 8192 × 2 (K/V) × 2 (bytes)`
+    - `Cache = 4096 × 80 × 8192 × 4`
+    - `Cache = 10,737,418,240` bytes
+4.  **Conversion:** `10,737,418,240 bytes / (1024^3) = 10 GB`
+
+  > **Key Equation:** $\text{KV Cache (Bytes)} = S \times L \times D_{model} \times 2 \times B_{val}$
+
+  > **Options:**
+  > [ ] 1.25 GB
+  > [ ] 5 GB
+  > [x] 10 GB
+  > [ ] 80 GB
+
+  📖 **Deep Dive:** [Cloud / LLM Scaling Rules](https://github.com/mlsysbook/mlsysbook/blob/main/interviews/NUMBERS.md#4-scaling-rules-arithmetic--hardware-independent)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Continuous Batching Deadline</b> · <code>continuous-batching-latency</code></summary>
+
+- **Interviewer:** "You're designing an interactive LLM-based chatbot service running on H100 GPUs. The system uses continuous batching, where new user requests can be added to the processing queue between token generation steps. Your measurement team has determined that a single token generation step for the live batch takes a constant 150ms. Your service level objective (SLO) for user experience is a Time-To-First-Token (TTFT) of 500ms.
+
+Explain the worst-case TTFT a new user might experience. Does your current system design meet the SLO?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to assume the TTFT is simply the processing time of a single step (150ms). This ignores the 'waiting in line' problem, where a request might arrive just after a batch has been kicked off, forcing it to wait for the entire next processing cycle before it can even begin.
+
+  **Realistic Solution:** The worst-case scenario happens when a user's request arrives immediately after the server has started an iteration. The request must wait for that 150ms iteration to complete before it can be included in the next batch. Then, its own batch iteration takes another 150ms to generate the first token.
+
+Therefore, the worst-case TTFT is the sum of the maximum wait time and the processing time. This is 150ms (wait) + 150ms (process) = 300ms.
+
+Since 300ms is less than the 500ms SLO, the system currently meets its latency requirements. The binding constraint on scaling this single GPU is not the TTFT, but likely the total number of concurrent users that can fit into HBM before causing an out-of-memory error.
+
+  > **Napkin Math:** 1. **Define Iteration Time**: $T_{\text{iteration}} = 150\text{ms}$
+2. **Define Wait Time**: A new request's worst-case wait time, $T_{\text{wait}}$, is one full iteration, as it just missed the bus. $T_{\text{wait}} = T_{\text{iteration}} = 150\text{ms}$.
+3. **Define Processing Time**: The time to process the request's first token is one iteration. $T_{\text{process}} = T_{\text{iteration}} = 150\text{ms}$.
+4. **Calculate Worst-Case TTFT**: $TTFT_{\text{worst}} = T_{\text{wait}} + T_{\text{process}} = 150\text{ms} + 150\text{ms} = 300\text{ms}$.
+5. **Compare to SLO**: $300\text{ms} < 500\text{ms}$. The system meets the SLO.
+
+  > **Key Equation:** $TTFT_{\text{worst}} = T_{\text{wait}} + T_{\text{process}} \approx 2 \times T_{\text{iteration}}$
+
+  > **Options:**
+  > [ ] The worst-case TTFT is 150ms, which meets the SLO. (Forgets wait time)
+  > [ ] The worst-case TTFT is 650ms (500ms SLO + 150ms process), which violates the SLO. (Incorrectly adds SLO to calculation)
+  > [x] The worst-case TTFT is 300ms, which meets the SLO. (Correctly accounts for wait time + process time)
+  > [ ] It's impossible to know without the number of users in the batch. (Incorrectly assumes iteration time depends on batch size)
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Throughput Saturation Fallacy</b> · <code>throughput-queueing</code></summary>
+
+- **Interviewer:** "You are capacity planning for an LLM service that uses H100 GPUs. When fully saturated, your monitoring shows a single H100 can produce a total of 3,000 tokens per second using continuous batching. You need to calculate the total time required to serve a workload of 5,000 total tokens.
+
+Compare Scenario A (100 concurrent users, each requesting 50 tokens) with Scenario B (1 user requesting 5,000 tokens). Assuming the GPU operates at its peak saturated throughput, calculate the total time to complete the entire workload in each scenario."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often conflate per-user latency with total system throughput. They might incorrectly assume that handling 100 concurrent users (Scenario A) must be inherently slower due to 'overhead' or 'context switching', even when the total amount of computational work (5,000 tokens) is identical to the single-user scenario and the system is specified to be operating at a constant peak throughput.
+
+  **Realistic Solution:** From a total throughput perspective, the scenarios are identical. The GPU's job is to generate 5,000 tokens, and it does so at a rate of 3,000 tokens per second. The distribution of those tokens among users doesn't change the total amount of work.
+
+The calculation is the same for both scenarios: Total Time = Total Tokens / Token Rate. This results in 5,000 tokens / 3,000 tokens/sec ≈ 1.67 seconds. While the user-perceived latency would be drastically different between the scenarios (especially TTFT), the time for the GPU to complete the *entire batch of work* is the same.
+
+  > **Napkin Math:** 1. **Define Total Workload (Scenario A)**: $100 \text{ users} \times 50 \frac{\text{tokens}}{\text{user}} = 5,000 \text{ tokens}$.
+2. **Define Total Workload (Scenario B)**: $1 \text{ user} \times 5,000 \frac{\text{tokens}}{\text{user}} = 5,000 \text{ tokens}$.
+3. **Define System Throughput**: $R = 3,000 \frac{\text{tokens}}{\text{second}}$.
+4. **Calculate Time to Complete**: $T_{\text{total}} = \frac{\text{Total Tokens}}{R}$.
+5. **Result**: $T_{\text{total}} = \frac{5,000}{3,000} \approx 1.67 \text{ seconds for both scenarios}$.
+
+  > **Key Equation:** $T_{\text{total}} = \frac{\sum(\text{Tokens per request})}{\text{System Throughput}}$
+
+  > **Options:**
+  > [ ] Scenario A is slower due to multi-user overhead. (Misinterprets 'saturated throughput')
+  > [ ] Scenario B is slower because long generations are inefficient. (Confuses sequence length with system throughput)
+  > [x] Both scenarios take ~1.67 seconds to complete. (Correctly calculates total work / rate)
+  > [ ] Both scenarios take ~0.06 seconds to complete. (Unit error, likely 3000 / 5000 / 100 or similar)
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Network Tax: NVLink vs. InfiniBand</b> · <code>interconnect-latency-comparison</code></summary>
+
+- **Interviewer:** "You are optimizing a large-scale LLM training job. To make informed decisions about your communication strategy, you need to know your hardware's limits. Roughly how much slower is a cross-rack data transfer using InfiniBand NDR compared to a GPU-to-GPU transfer within the same server using NVLink 4.0?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often conflate different types of interconnects, assuming all 'fast networks' are roughly equivalent. They might underestimate the significant latency penalty of leaving the server chassis and traversing the data center fabric, assuming it's a minor difference (e.g., 2x) rather than an order-of-magnitude jump.
+
+  **Realistic Solution:** A cross-rack InfiniBand NDR transfer is approximately 10 times slower than an intra-server NVLink 4.0 transfer. NVLink latency is ~500 ns, while crossing racks over InfiniBand takes ~5,000 ns (5 µs). This 'network tax' is a fundamental constraint in distributed systems design and dictates choices like communication-avoiding algorithms and network topology-aware scheduling.
+
+  > **Napkin Math:** Using the 'human time' analogy where 1ns is 1 second:
+- An NVLink 4.0 transfer takes ~500 seconds, or about **8 minutes**.
+- An InfiniBand NDR transfer takes ~5,000 seconds, or about **1.4 hours**.
+
+The ratio is `1.4 hours / 8 minutes ≈ 84 minutes / 8 minutes ≈ 10.5×`.
+
+  > **Options:**
+  > [ ] They are roughly the same latency (~1x)
+  > [ ] About 2x slower
+  > [x] About 10x slower
+  > [ ] About 100x slower
+
+  📖 **Deep Dive:** [Distributed Systems](https://mlsysbook.ai/vol2/distributed_training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Speed of Light Constraint in RAG</b> · <code>latency-rag-network</code></summary>
+
+- **Interviewer:** "You're designing a Retrieval-Augmented Generation (RAG) system. The core LLM is in a datacenter in Virginia, but to satisfy data residency requirements, the vector database for European users is hosted in a datacenter in Ireland. Ignoring all other sources of latency (compute, disk I/O, queuing), what is the approximate, physics-imposed round-trip time (RTT) for a single document retrieval across the Atlantic?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse inter-rack latency (microseconds) with cross-continental latency (tens of milliseconds). They dramatically underestimate the non-optimizable delay imposed by the speed of light in fiber, assuming it's a few milliseconds at most.
+
+  **Realistic Solution:** The absolute minimum round-trip latency is dictated by the speed of light through fiber optic cables. A trip across the US is roughly 40ms, and across the Atlantic is similar or slightly longer. The closest order-of-magnitude answer is ~40ms. This is a hard physical floor on performance for any synchronous, cross-continental operation.
+
+  > **Napkin Math:** From the 'ML Latency Hierarchy' numbers, a cross-country fiber round trip in the US is ~40,000,000 ns (40 ms).
+
+To put this in perspective: If a single clock cycle on the CPU (L1 cache access) took 1 second, then this 40ms network round trip would take 1.2 years. This is a fundamental, non-negotiable cost of distance.
+
+  > **Options:**
+  > [ ] ~5 µs
+  > [ ] ~1 ms
+  > [x] ~40 ms
+  > [ ] ~500 ms
+
+  📖 **Deep Dive:** [Distributed Systems](https://mlsysbook.ai/cloud/02_distributed_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Blue/Green Memory Budget</b> · <code>model-serving-rollout</code></summary>
+
+- **Interviewer:** "You are deploying an updated 7-billion parameter LLM to your company's RAG-based chatbot service. The model is served in FP16 precision. Your Kubernetes cluster uses a blue/green deployment strategy, where the new model pod must be healthy and running before traffic is switched over from the old one. To ensure a smooth rollout without evicting other pods, you need to calculate the peak GPU memory required on a single multi-model node during this transition. Explain how you would calculate the total GPU memory required to hold both the old and the new models simultaneously during the update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to calculate the memory for only a single model instance. This forgets that during a blue/green deployment, the node must have enough capacity to hold both the old and new model containers in memory at the same time before the old one is terminated. Another common error is using the memory footprint for a different precision, like INT8 (1 byte/param) or FP32 (4 bytes/param), instead of the specified FP16.
+
+  **Realistic Solution:** To calculate the peak memory, you need to account for both models co-existing on the same GPU. For a 7B parameter model in FP16 (which uses 2 bytes per parameter), a single instance requires 14 GB of memory. Since a blue/green deployment requires both the old and new versions to be resident before traffic switchover, the total required memory is double that of a single instance.
+
+  > **Napkin Math:** 1. **Memory for one model:** 7 Billion parameters × 2 bytes/parameter (for FP16) = 14 GB.
+2. **Peak memory for Blue/Green:** 2 models (old + new) × 14 GB/model = 28 GB.
+
+  > **Key Equation:** $\text{Peak Memory} = (\text{Parameters} \times \text{Bytes per Parameter}) \times N_{\text{concurrent_models}}$
+
+  > **Options:**
+  > [ ] 14 GB. The new model replaces the old one, so you only need space for one.
+  > [ ] 7 GB. A 7B model requires 7GB of memory.
+  > [x] 28 GB. Both the old and new 14 GB models must be in memory at the same time.
+  > [ ] 56 GB. An FP16 model uses 4 bytes/param, and you need two of them.
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Geographic Skew Tax</b> · <code>data-latency</code></summary>
+
+- **Interviewer:** "You're debugging a production model and suspect training-serving skew. Your offline training pipeline pulls raw logs from a cheap archival storage system located in a different country, while your online serving system uses a feature store running on local NVMe SSDs. To quantify the data access bottleneck, state the approximate latency difference: how much slower is a single read from the cross-country archive compared to the local SSD?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the speed-of-light penalty for wide-area networks (WANs). They might intuitively guess it's 10-50x slower, failing to realize that a cross-country round trip is hundreds of times slower than even 'slow' local storage like SSDs.
+
+  **Realistic Solution:** A read from the cross-country archive is approximately 400 times slower. A cross-country fiber round-trip takes about 40ms, while a local NVMe SSD read is about 100µs. The difference is a factor of 400, highlighting a massive potential source of training-serving skew if data preprocessing differs.
+
+  > **Napkin Math:** Cross-country Fiber RTT ≈ 40,000,000 ns
+NVMe SSD Read ≈ 100,000 ns
+
+Ratio = 40,000,000 ns / 100,000 ns = 400x
+
+In human-scaled time: If an SSD read took 1 day, waiting for the cross-country data would take 1.2 years.
+
+  > **Options:**
+  > [ ] ~4x slower
+  > [ ] ~40x slower
+  > [x] ~400x slower
+  > [ ] ~4,000x slower
+
+  📖 **Deep Dive:** [Distributed Systems](https://mlsysbook.ai/vol2/distributed_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Llama 3 KV Cache Footprint</b> · <code>kv-cache-vram</code></summary>
+
+- **Interviewer:** "You are deploying a Llama 3 8B model for inference, which uses Grouped-Query Attention (GQA). A request comes in with a sequence length of 8,192 tokens. Explain how you would calculate the VRAM required just for the FP16 KV-cache for this single request, and compare the potential options."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to confuse the number of query heads (32 for Llama 3 8B) with the much smaller number of key/value heads (8 for Llama 3 8B). In GQA, the number of KV heads is the one that determines the cache size. Other frequent errors include forgetting to account for both the Key and the Value tensors (a 2x factor) or using the wrong number of bytes for FP16 precision (it's 2, not 4 like FP32).
+
+  **Realistic Solution:** The KV-cache stores the key and value vectors for every token in the context window, across all attention layers. The total size is the product of the sequence length, number of layers, 2 (for K and V), number of KV heads, the dimension of each head, and the number of bytes per value. For a model with Grouped-Query Attention (GQA) like Llama 3 8B, it's critical to use the number of KV heads, which is intentionally smaller than the number of query heads to save memory.
+
+  > **Napkin Math:** Llama 3 8B specs: 32 layers, 8 KV heads, 128 head dimension.
+- Precision: FP16 = 2 bytes per value.
+- Sequence Length: 8,192 tokens.
+
+- Total Bytes = `seq_len` × `layers` × 2 (for K and V) × `kv_heads` × `head_dim` × `bytes_per_value`
+- Total Bytes = 8,192 × 32 × 2 × 8 × 128 × 2
+- Total Bytes = 1,073,741,824 bytes
+
+- Convert to GiB: 1,073,741,824 / (1024^3) = 1 GiB.
+
+  > **Key Equation:** $\text{KV Cache Size} = S \times L \times 2 \times H_{kv} \times D_h \times B_p$
+
+  > **Options:**
+  > [ ] 4 GiB
+  > [ ] 0.5 GiB
+  > [x] 1 GiB
+  > [ ] 2 GiB
+
+  📖 **Deep Dive:** [The Serving Stack](https://mlsysbook.ai/cloud/03_serving_stack.html#kv-cache)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The True Cost of Batching on TTFT</b> · <code>llm-serving-latency</code></summary>
+
+- **Interviewer:** "You're designing an LLM serving system on a single H100 GPU. The product manager insists on a 'real-time' user experience, which they've defined with a strict Service Level Objective (SLO): Time-To-First-Token (TTFT) must be under 250ms. Your system improves GPU utilization by queueing incoming requests and forming batches. A new batch is processed every 100ms. Given that the prompt processing (prefill) for a single request takes about 15ms on this hardware, explain the maximum number of requests you can group into a single batch without violating the TTFT SLO."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate the max batch size by only considering the processing time (`250ms / 15ms ≈ 16 requests`). They forget to account for the maximum time a request might have to wait in the queue *before* processing begins, which is a critical component of the end-to-end latency.
+
+  **Realistic Solution:** The total latency experienced by a user is the sum of the time spent waiting for a batch to be formed (queue time) and the time it takes to process the batch. In the worst-case scenario, a request arrives just after a batch has been dispatched, meaning it must wait the full 100ms for the next batching window. This leaves `250ms (SLO) - 100ms (Max Queue Time) = 150ms` for the actual batch processing. To find the max batch size, we divide the remaining time by the per-request processing time: `150ms / 15ms/request = 10 requests`.
+
+  > **Napkin Math:** 1. **Identify the Total Latency Budget:** SLO for TTFT = 250ms.
+2. **Identify Worst-Case Queue Time:** The system forms a batch every 100ms. A request could arrive 1ms after a batch starts, so it waits ~100ms. `T_queue_max = 100ms`.
+3. **Calculate the Remaining Time for Processing:** `T_processing_budget = TTFT_SLO - T_queue_max = 250ms - 100ms = 150ms`.
+4. **Calculate Max Batch Size:** The entire batch prefill must complete within this budget. `Max_Batch_Size = T_processing_budget / T_prefill_per_request = 150ms / 15ms = 10 requests`.
+
+  > **Key Equation:** $\text{TTFT} = T_{\text{queue}} + (N_{\text{batch}} \times T_{\text{prefill}})$
+
+  > **Options:**
+  > [x] 10 requests. The worst-case queueing time must be subtracted from the SLO before calculating batch capacity.
+  > [ ] 16 requests. The SLO of 250ms can be divided directly by the 15ms per-request time.
+  > [ ] 6 requests. This assumes the queue time (100ms) and processing time (150ms) are independent.
+  > [ ] It's unlimited. The H100 is fast enough that prefill time is negligible.
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The TPOT Memory Wall</b> · <code>llm-serving-throughput</code></summary>
+
+- **Interviewer:** "Your team is serving a 70B parameter LLM on a single H100 GPU. A user complains that while the first token appears almost instantly, the subsequent text generates very slowly, making the chatbot feel sluggish. They expect a comfortable reading speed of at least 20 tokens per second. Interpret this complaint: what is the primary hardware bottleneck for Time Per Output Token (TPOT), and can the H100 GPU theoretically meet this user's expectation? Use the provided hardware constants."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to assume that token generation is compute-bound. An engineer might incorrectly try to calculate the FLOPs required per token and divide by the H100's TFLOPS rating. This ignores the fact that autoregressive decoding is a memory-bound operation, as the entire model's weights must be read from HBM for each token generated.
+
+  **Realistic Solution:** The user's complaint correctly distinguishes between TTFT (fast) and TPOT (slow). The bottleneck for TPOT in autoregressive models is memory bandwidth, as generating each token requires reading all model parameters from High Bandwidth Memory (HBM).
+
+A 70B parameter model using FP16 precision requires `70 * 10^9 params * 2 bytes/param = 140 GB` of memory. The H100 has an HBM3 memory bandwidth of 3.35 TB/s. The time to read the entire model is `140 GB / 3350 GB/s ≈ 0.0418 seconds`, or 41.8ms per token. This translates to a theoretical maximum generation speed of `1 / 0.0418s ≈ 23.9 tokens/second`.
+
+Therefore, the hardware is theoretically capable of meeting the user's 20 token/sec expectation. The perceived slowness is likely due to software overhead, network latency, or inefficient kernel implementation, not a fundamental hardware limitation.
+
+  > **Napkin Math:** 1. **Identify the Bottleneck:** Autoregressive token generation (TPOT) is memory-bandwidth bound.
+2. **Calculate Model Size in Memory:** For a 70B model in FP16: `70B params * 2 bytes/param = 140 GB`.
+3. **Look up Hardware Spec:** H100 HBM3 Memory Bandwidth = 3.35 TB/s (or 3350 GB/s).
+4. **Calculate Time per Token:** `Time = Total Data / Bandwidth = 140 GB / 3350 GB/s ≈ 0.0418 s/token` (or 41.8 ms/token).
+5. **Calculate Tokens per Second:** `TPOT = 1 / Time_per_token = 1 / 0.0418 s ≈ 23.9 tokens/sec`.
+6. **Compare to Requirement:** `23.9 tokens/sec (theoretical max) > 20 tokens/sec (user expectation)`. The hardware is sufficient.
+
+  > **Key Equation:** $\text{TPOT (tokens/sec)} = \frac{\text{Memory Bandwidth (Bytes/sec)}}{\text{Model Size (Bytes)}}$
+
+  > **Options:**
+  > [ ] No, the H100 is compute-bound during generation and cannot meet this demand.
+  > [ ] No, the H100's memory bandwidth is only 3.35 GB/s, making this impossible.
+  > [x] Yes, the H100's memory bandwidth supports a theoretical speed of ~24 tokens/sec, so the issue is likely in the software.
+  > [ ] Yes, because the KV-cache makes all subsequent token generation instantaneous.
+
+  📖 **Deep Dive:** [ML Systems](https://mlsysbook.ai/vol1/ml_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The RAG Retrieval Step-Cost</b> · <code>rag-latency</code></summary>
+
+- **Interviewer:** "You're debugging a slow Retrieval-Augmented Generation (RAG) pipeline. The system takes a user query, retrieves relevant documents from a vector index, and then feeds them to an LLM. The vector index is too large for memory and is stored on a datacenter-grade NVMe SSD. What is the approximate latency you should expect for a single, random read from this SSD to retrieve a document chunk?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate I/O latency, thinking of it in the single-digit microsecond range. They confuse the speed of storage I/O with much faster network or memory access, failing to realize that reading from flash is orders of magnitude slower than HBM or even DRAM.
+
+  **Realistic Solution:** The expected latency is around 100,000 nanoseconds (100 µs). This is a fundamental physical limitation of current flash storage technology in datacenters. While a full RAG pipeline has many components (embedding, LLM inference), isolating the retrieval step shows that I/O can be a significant bottleneck compared to on-chip operations.
+
+  > **Napkin Math:** Based on the standard ML Latency Hierarchy, an L1 cache access is ~1 ns. A read from an NVMe SSD is ~100,000 ns. If you scale that to human time where 1 ns is 1 second, the L1 access takes 1 second, but the SSD read takes over a day (1.1 days). This is the 'cost' of going to storage.
+
+  > **Options:**
+  > [ ] ~300 ns
+  > [ ] ~5,000 ns (5 µs)
+  > [x] ~100,000 ns (100 µs)
+  > [ ] ~40,000,000 ns (40 ms)
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The FP16 Memory Footprint</b> · <code>model-serving-memory</code></summary>
+
+- **Interviewer:** "Your team is upgrading a production language model from 7B to 13B parameters as part of a new rollout. Your serving stack uses NVIDIA H100 GPUs and the model is served in FP16 precision. To inform the container orchestration plan, calculate the memory required for the new 13B model's weights and explain the impact on a single GPU's memory capacity."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the memory requirements for *training* versus *inference*. During training with the Adam optimizer, memory usage is ~16 bytes per parameter. For inference, it's only the model weights, which is much lower. Another common error is using the wrong number of bytes for the given precision (e.g., 4 for FP32 or 1 for INT8 instead of 2 for FP16).
+
+  **Realistic Solution:** The new 13B model will require 26 GB of HBM to store the model weights. This is a significant increase from the 14 GB required by the 7B model, but it still fits comfortably within the 80 GB of HBM available on a single H100 GPU. This calculation is critical for capacity planning in your orchestration system (like Kubernetes) to ensure pods are scheduled on nodes with sufficient available GPU memory.
+
+  > **Napkin Math:** 1. Identify the number of parameters: 13 Billion
+2. Identify the bytes per parameter for the precision: FP16 uses 2 bytes.
+3. Calculate the total memory: 13,000,000,000 parameters × 2 bytes/parameter = 26,000,000,000 bytes.
+4. Convert bytes to gigabytes: 26,000,000,000 bytes / (1024^3 bytes/GB) ≈ 24.2 GB. In industry napkin math, we often approximate by dividing by 10^9, giving 26 GB.
+
+  > **Key Equation:** $\text{Inference Memory (Bytes)} = \text{Parameters} \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] 13 GB. (Error: Assumes 1 byte per parameter, as with INT8 quantization)
+  > [ ] 208 GB. (Error: Confuses inference memory with training memory using the Adam optimizer, which needs ~16 bytes/param)
+  > [x] 26 GB. (Correct: 13 billion parameters × 2 bytes for FP16 precision)
+  > [ ] 52 GB. (Error: Assumes 4 bytes per parameter, as with FP32 precision)
+
+  📖 **Deep Dive:** [The Iron Law of ML Systems](ironlaw.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Skew from the Disk</b> · <code>training-serving-skew</code></summary>
+
+- **Interviewer:** "A new fraud detection model performs perfectly during offline training, where feature data is loaded from large files that are effectively cached in memory. In the live production environment, its performance drops significantly. You discover that for each inference request, one critical feature must be fetched from a database running on a server with NVMe SSDs. Based on the fundamental physics of a computer, what is a primary suspect for this drop in performance?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often attribute all training-serving skew to software bugs in the feature transformation code. They forget that the *physical reality* of data retrieval is often a major culprit. The difference between having data 'ready' in memory (training) versus fetching it from a much slower medium like an SSD (serving) can introduce significant latency. This delay can cause the system to use a default or stale value for the feature, a pattern the model was never trained on, leading to skew.
+
+  **Realistic Solution:** Accessing data from an NVMe SSD is orders of magnitude slower than accessing data already in HBM or DRAM. According to the standard latency hierarchy, an HBM memory access is around 300 ns, while a random read from an NVMe SSD is about 100,000 ns (100 µs). This massive latency gap (over 300x) means the feature data may not arrive in time for the inference deadline, forcing the system to impute a value. The model's performance degrades because it is seeing a data distribution (with imputed values) that it was never exposed to in training.
+
+  > **Napkin Math:** Using the human-scaled latency numbers: If one memory access from HBM felt like 5 minutes, a single read from the NVMe SSD would feel like 1.1 days. The system is waiting an eternity for the feature at inference time compared to having it instantly available during training.
+
+  > **Options:**
+  > [ ] The NVMe SSD read is roughly 10x slower than the memory access, which is a minor source of error.
+  > [ ] A subtle floating-point precision difference between the Python training and C++ serving environments.
+  > [x] The NVMe SSD read is over 300x slower than HBM memory access, likely causing data to be unavailable at inference time.
+  > [ ] The CPU clock speed is dynamically throttled lower during inference, affecting numerical stability.
+
+  📖 **Deep Dive:** [ML Systems](https://mlsysbook.ai/vol1/ml_systems.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Serving Inversion</b> · <code>latency</code></summary>
 
@@ -42,9 +568,410 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The P99 Latency Spike</b> · <code>llm-serving-latency</code></summary>
 
-#### 🔵 L4 — Apply & Identify
+- **Interviewer:** "You are the on-call engineer for a new LLM-based chatbot service deployed on H100s. The service uses a simple static batching strategy with a batch size of 32 and a fixed 100ms timeout to collect requests. During a load test, you observe that while average Time to First Token (TTFT) is acceptable at ~120ms, the P99 TTFT spikes to over 500ms, violating your SLO. `nvidia-smi` shows the GPU is consistently busy. Diagnose the most likely cause of this high tail latency."
 
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming the hardware. Engineers often assume latency spikes are due to the GPU being underpowered, the model being too large, or network issues. They might suggest scaling up to more powerful GPUs (e.g., B200s) without addressing the underlying scheduling problem.
+
+  **Realistic Solution:** The most likely cause is head-of-line blocking exacerbated by the static batching policy. A user request that arrives just after a batch has been dispatched to the GPU must wait for the *entire* 100ms timeout window to elapse, and *then* wait for the next full batch to be processed. Under load, most requests experience some queueing, but the unlucky 'tail' requests that just miss the window experience the maximum possible delay. This creates a bimodal latency distribution, where some users get fast responses and others get very slow ones, dragging up the P99. The solution is to implement continuous batching, which processes requests as they arrive and adds new requests to the running batch dynamically, eliminating the fixed timeout and drastically reducing queue times.
+
+  > **Napkin Math:** Let's analyze the worst-case scenario (the P99 tail).
+1. **Request Arrival:** A user request arrives at time `t = 1ms`, just after a full batch was sent for processing at `t = 0ms`.
+2. **Queue Wait:** This request must wait in the queue. The server will wait up to `99ms` more for other requests to arrive to fill the next batch (the `100ms` static timeout).
+3. **Processing Delay:** Assume a forward pass for a full batch of 32 takes `~50ms` on an H100.
+4. **Total TTFT:** The TTFT for this unlucky request is `Wait Time + Processing Time`. So, `TTFT ≈ 99ms (queueing) + 50ms (batch processing) = 149ms`.
+However, under load, the queue isn't empty. Little's Law tells us the number of users in the system `L` is arrival rate `λ` times wait time `W`. As `λ` (requests/sec) increases, the wait time `W` increases non-linearly, especially with fixed batch windows. The P99 latency spike to >500ms indicates severe queueing delay where requests are waiting for multiple batch cycles.
+
+  > **Key Equation:** $\text{Little's Law: } L = \lambda W$
+
+  > **Options:**
+  > [ ] The H100's memory bandwidth is insufficient, causing delays when loading model weights for each batch.
+  > [ ] The model is too large, and the raw computation time for the forward pass exceeds the latency budget.
+  > [x] The static batching timeout is causing head-of-line blocking, leading to severe queueing delays for requests that just miss the batch window.
+  > [ ] The InfiniBand network connecting the GPU servers is saturated, causing high latency for internode communication.
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Throughput Trap</b> · <code>ttft-vs-tpot</code></summary>
+
+- **Interviewer:** "Your team has optimized an LLM inference server for maximum throughput, achieving 5,000 tokens/sec on a single H100. The deployment uses large static batches to maximize GPU utilization. However, user feedback is poor, with complaints that the chatbot feels 'laggy' and 'unresponsive' on the first response. You profile the system and find that while Time Per Output Token (TPOT) is extremely low (~5ms), the Time To First Token (TTFT) can be very high. Apply your knowledge of serving latency to explain this phenomenon."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing only on throughput as the primary success metric. Engineers often equate high tokens/second with a good user experience. They fail to distinguish between the system's overall processing rate (TPOT-driven throughput) and the perceived responsiveness for an individual user (TTFT).
+
+  **Realistic Solution:** This is a classic trade-off between throughput and latency. Large static batches are excellent for throughput because they maximize the arithmetic intensity of the computation, keeping the GPU cores busy. However, this comes at the cost of high TTFT. A request arriving at the server may have to wait a significant amount of time for the batch to fill before it is even processed. While the subsequent tokens (TPOT) are generated quickly as part of the efficient batch, the initial wait time dominates the user's perception of latency. The system is optimized for batch processing, not for single-user responsiveness. To fix this, one would need to switch to a system like continuous batching that can start processing requests immediately, improving TTFT at the potential cost of slightly lower overall throughput.
+
+  > **Napkin Math:** 1. **Batching Policy:** Assume the server waits up to 80ms to form a large batch (e.g., 64 requests).
+2. **Request Arrival:** A user sends a request at `t=1ms`. The server just started a new batching window.
+3. **Wait Time:** The request sits in the queue for the full `79ms` waiting for the batch window to close.
+4. **Processing Time:** Let's say processing this large batch takes `120ms`.
+5. **TTFT vs TPOT:** The TTFT for this user is `79ms (wait) + 120ms (processing) = 199ms`. This is perceived as lag. However, once the batch starts, the server generates tokens for all 64 users in parallel. If it generates 2048 tokens in that 120ms across all users, the *average* TPOT is `120ms / (2048 tokens / 64 users) = 3.75ms/token`, which is very fast, but this speed is not what the user experiences initially.
+
+  > **Key Equation:** $\text{TTFT} = T_{\text{queue}} + T_{\text{process_first_token}}$
+
+  > **Options:**
+  > [ ] The server has high TTFT because the H100 has low clock speed, making the first forward pass slow.
+  > [ ] The high TTFT is due to the latency of loading the model from NVMe SSD into HBM for every new user.
+  > [x] The system's large static batching policy creates high queueing delays, leading to high TTFT, even though the per-token generation speed (TPOT) is fast.
+  > [ ] The Python Global Interpreter Lock (GIL) is preventing true parallelism, causing the first token to be delayed.
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Memory Wall of Long Contexts</b> · <code>kv-cache-memory</code></summary>
+
+- **Interviewer:** "You are running a multi-tenant LLM serving system on H100 GPUs (80 GB HBM3). The system uses continuous batching and performs well with short user prompts. However, when a few users start engaging in very long conversations (e.g., summarizing a document with 16k tokens), you receive out-of-memory (OOM) errors and the entire batch fails. Your manager asks why the system, which can handle 64 concurrent users with short prompts, is failing with just a few users with long contexts. Using the scaling rules, diagnose the problem."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming memory usage is only for model weights. Many engineers calculate the memory required for the model parameters (e.g., Llama-70B FP16 ≈ 140GB) and forget that the KV cache for the context window is often a much larger and more dynamic consumer of memory during inference.
+
+  **Realistic Solution:** The problem is the massive memory consumption of the KV cache for long sequences. In a transformer, the key-value (KV) states for every token in the context window must be stored in GPU memory to generate the next token. This memory usage scales linearly with sequence length and batch size. While continuous batching is efficient, it doesn't eliminate the fundamental memory requirement of the KV cache. A few users with very long contexts can quickly exhaust the 80 GB of HBM on an H100, causing an OOM that kills the entire batch of users currently being processed. The system needs KV cache compression (like quantization), paged attention mechanisms, or a stricter limit on the maximum sequence length per user to manage this.
+
+  > **Napkin Math:** Let's use the provided formula for KV cache size per token, simplified as `Bytes ≈ 2 * layers * d_model * 2`. For a Llama-70B class model, let's approximate this as `2 Bytes/param/token` is too simplistic, let's use the formula from the table: `2 × layers × heads × head_dim × 2 bytes` which is `2 * n_layers * d_model * 2 bytes`.
+For Llama-70B: 80 layers, head_dim 128, 64 heads -> `d_model = 8192`.
+1. **KV Cache per User (16k context):** `Memory = sequence_length × 2 × num_layers × d_model × 2 bytes` (the first 2 is for K and V, the last is for FP16). So, `16,384 tokens * 2 * 80 layers * 8192 * 2 bytes/float ≈ 42.9 GB`.
+2. **System Failure:** Just TWO users with a 16k context would require `2 * 42.9 GB = 85.8 GB` for their KV caches alone.
+3. **Conclusion:** This exceeds the H100's 80 GB HBM, before even accounting for model weights (~140GB, so this requires 2 GPUs) or activations for other users in the batch. This calculation clearly demonstrates how a few long-context users can create an OOM condition.
+
+  > **Key Equation:** $\text{KV Cache} \approx B \times S \times 2 \times L \times D_{\text{model}} \times \text{bytes/param}$
+
+  > **Options:**
+  > [ ] The OOM is caused by the model weights being loaded multiple times for each user.
+  > [x] The KV cache for users with long sequence lengths is consuming all available HBM3 memory.
+  > [ ] The PCIe Gen5 bus is too slow to transfer the long prompts, causing a memory backlog.
+  > [ ] The continuous batching algorithm has a memory leak that gets worse with longer sequences.
+
+  📖 **Deep Dive:** [Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Continuous Batching Paradox</b> · <code>continuous-batching-tradeoffs</code></summary>
+
+- **Interviewer:** "Your team is deciding whether to switch from static batching to continuous batching for your LLM service. A junior engineer argues against it, stating: 'Continuous batching is less efficient. By processing requests one-by-one as they arrive instead of in large, optimized batches, we will lower our GPU utilization and reduce our total throughput (tokens/sec).' You are the tech lead. Solve this dispute by demonstrating how continuous batching can actually *increase* system throughput."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Misunderstanding how GPU time is spent. The misconception is that continuous batching means processing one request at a time (batch size of 1). It's also easy to think that if you aren't running max-size batches, you are wasting GPU potential. This ignores the time the GPU spends *idle*.
+
+  **Realistic Solution:** The junior engineer's concern is valid but misses a key point: GPU idle time. With static batching, the GPU is often idle, waiting for a batch to fill. This is especially true with a wide distribution of request arrival times. Continuous batching (or 'dynamic batching') eliminates this idle time. When a sequence in the current batch finishes, a new waiting sequence is immediately swapped in. This keeps the total number of users being processed by the GPU (the 'batch size') consistently high, leading to higher overall utilization. While a single 'iteration' of the batch may not be at the *maximum theoretical* size, the GPU is performing useful work more of the time. This reduction in idle time often outweighs the slightly lower efficiency of not *always* running a full batch, leading to higher effective throughput.
+
+  > **Napkin Math:** Let's compare two scenarios over a 200ms period.
+**Scenario A: Static Batching (Max batch 32, 100ms timeout)**
+- `t=0-100ms`: Server waits. Let's say 10 requests arrive. The GPU is 100% idle.
+- `t=100-150ms`: GPU processes the batch of 10. Let's say this takes 25ms (since it's not a full batch).
+- `t=150-200ms`: GPU is idle again.
+- **Result:** In 200ms, the GPU was busy for 25ms. **GPU Utilization: 12.5%**.
+
+**Scenario B: Continuous Batching**
+- `t=0ms`: 2 requests are waiting. Batch starts immediately.
+- `t=0-50ms`: GPU processes the batch of 2. During this time, 8 more requests arrive.
+- `t=50ms`: The first 2 requests finish. They are replaced by 2 of the waiting requests. The batch continues with 8 users.
+- `t=50-200ms`: The GPU is continuously processing a batch, swapping users in as others finish. The batch size might fluctuate but it never drops to zero.
+- **Result:** The GPU is busy for nearly the entire 200ms. **GPU Utilization: ~90-100%**. Higher utilization directly translates to more tokens processed over time.
+
+  > **Key Equation:** $\eta_{\text{effective}} = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{idle}}}$
+
+  > **Options:**
+  > [ ] Continuous batching uses speculative decoding to predict future tokens, which is faster.
+  > [x] Continuous batching reduces GPU idle time by immediately swapping in new requests when old ones finish, leading to higher overall utilization and throughput.
+  > [ ] Continuous batching works by quantizing the model to INT8 on the fly, making each computation faster.
+  > [ ] Continuous batching uses more HBM bandwidth, which the H100 has in excess, allowing it to process more tokens.
+
+  📖 **Deep Dive:** [Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Interactive API Latency Spike</b> · <code>ttft-vs-tpot</code></summary>
+
+- **Interviewer:** "You are managing an interactive LLM API using a 70B model on H100 GPUs. Users are complaining about poor Time To First Token (TTFT), with P99 latency exceeding your 500ms SLA. The system uses static batching with a fixed timeout of 100ms to form batches. Monitoring shows that during peak load, GPU utilization is spiky (oscillating between 90% and 20%) and the request queue is consistently long. Diagnose the most likely cause for the high TTFT."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus only on throughput (TPOT) and assume high batching is always better. They might blame the model's inference speed or the network, ignoring that for interactive use-cases, TTFT is dominated by scheduling and queueing delays, a phenomenon known as head-of-line blocking.
+
+  **Realistic Solution:** The most likely cause is head-of-line blocking induced by the static batching strategy. A new, short-sequence request arriving in the queue is forced to wait up to the full 100ms timeout for a batch to form. If it gets batched with a long-running request from another user, it must also wait for that entire generation to complete. This inflates the wait time (W) for every request. The spiky GPU utilization confirms this: the GPU processes a batch quickly, then waits idly while the next batch is slowly formed by the timeout mechanism. Switching to a continuous batching scheduler (like vLLM's) would solve this by processing requests on a token-by-token basis, eliminating idle time and head-of-line blocking.
+
+  > **Napkin Math:** Let's use Little's Law. If the arrival rate (λ) is high, the queue length (L) grows. The total time a request spends (W) is the sum of wait time in the queue (W_q) and service time (W_s). With static batching, W_q includes up to the 100ms timeout *plus* the service time of the *longest* request in the batch. If a request for 1 token gets batched with a request for 500 tokens, its perceived latency isn't just its own generation time; it's the time for all 500 tokens. Continuous batching decouples requests, so a new request can start processing on the next GPU iteration, dramatically reducing W_q and thus improving TTFT.
+
+  > **Key Equation:** W = W_q + W_s \quad (\text{Total Latency = Wait Time + Service Time})
+
+  > **Options:**
+  > [ ] The H100 GPU is compute-bound and cannot generate tokens fast enough for the user load.
+  > [ ] The network latency between the API server and the inference server is the primary contributor to the 500ms delay.
+  > [x] Head-of-line blocking from the static batching timeout is causing excessive queueing delays for new requests.
+  > [ ] The HBM3 memory bandwidth on the H100 is insufficient, causing a bottleneck when loading model weights for each batch.
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Code-Gen Throughput Ceiling</b> · <code>continuous-batching-throughput</code></summary>
+
+- **Interviewer:** "Your team runs a code-generation service using a 34B parameter model. The primary goal is maximizing overall throughput (Tokens Per Second, or TPOT) as generations are often long. The service uses static batching with a batch size of 8. You observe that GPU utilization averages only 60%. You propose a switch to continuous batching. To justify the engineering effort, you need to demonstrate the potential throughput gain. Given a representative batch of 8 requests with the following output token lengths: [20, 50, 80, 100, 150, 200, 300, 1000], solve for the approximate throughput improvement."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common misconception is that total computation is just the sum of tokens, so batching strategy shouldn't affect theoretical max throughput. This ignores the massive waste from padding and idle time in static batching, where all requests in a batch are only as fast as the slowest member.
+
+  **Realistic Solution:** The throughput improvement comes from eliminating the computational waste of static batching. In static batching, every request in the batch must wait for the longest request to finish. The total computational work is proportional to the size of the padded tensor. In continuous batching, as soon as a request finishes, its slot can be used for a new request, maximizing GPU utilization.
+
+For the static batch, the total 'token-iterations' the GPU must perform is `1000 tokens * 8 requests = 8000`.
+For continuous batching, the GPU only performs the necessary work, which is the sum of all tokens: `20+50+80+100+150+200+300+1000 = 1900` token-iterations.
+
+The static method forces the GPU to do `8000 / 1900 ≈ 4.2×` more work for the same output. Therefore, switching to continuous batching could lead to a ~4.2x improvement in throughput by reclaiming the wasted compute cycles.
+
+  > **Napkin Math:** 1. **Static Batching Cost:** The batch's execution time is dictated by the longest sequence. All 8 requests are padded to a length of 1000. Total GPU work is `8 requests * 1000 tokens/request = 8000` effective token generations.
+2. **Continuous Batching Cost:** The GPU only works on the actual tokens needed for each request. Total GPU work is the sum of all tokens: `20 + 50 + 80 + 100 + 150 + 200 + 300 + 1000 = 1900` token generations.
+3. **Improvement Ratio:** The ratio of work is `8000 / 1900 ≈ 4.21`. By eliminating the waste, continuous batching offers a theoretical throughput speedup of over 4x for this specific batch.
+
+  > **Key Equation:** \text{Throughput Gain} = \frac{\text{Work}_{\text{static}}}{\text{Work}_{\text{continuous}}} = \frac{N \times L_{\max}}{\sum_{i=1}^{N} L_i}
+
+  > **Options:**
+  > [ ] There will be no improvement, as the total number of tokens to generate is the same regardless of batching strategy.
+  > [ ] The improvement will be marginal (~10-20%) because the overhead of managing dynamic requests will negate most of the gains.
+  > [x] A speedup of approximately 4.2x is possible by eliminating the idle GPU time and computation on padded tokens.
+  > [ ] The system will likely crash due to KV cache memory fragmentation when handling so many variable-length sequences.
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Unstable Translation Queue</b> · <code>queueing-theory-deadlines</code></summary>
+
+- **Interviewer:** "You are designing a real-time translation service with a hard deadline: Time To First Token (TTFT) must be under 200ms. The system uses a 7B parameter model on an H100, which takes 20ms for prefill and 8ms per generated token. At peak, the service receives requests at an average rate (λ) of 10 requests/second. The average request needs 15 tokens. The current design uses a simple FIFO queue feeding a single inference worker. Use queueing theory to diagnose if this system can meet its deadline."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate the average service time and, if it's less than the deadline, assume the system is fine. This completely ignores queueing delay, which becomes non-linear and explosive as system utilization approaches 100%. They fail to check the fundamental stability condition: arrival rate must be less than service rate.
+
+  **Realistic Solution:** The system is unstable and cannot meet its deadline. The critical issue is that the arrival rate (λ) is higher than the service rate (μ), which guarantees that the queue will grow infinitely long over time, causing unbounded latency.
+
+First, we calculate the average service time for one request: `20ms (prefill) + 15 tokens * 8ms/token = 20 + 120 = 140ms`.
+This means the system can process `1 / 0.140s ≈ 7.14` requests per second. This is the service rate (μ).
+
+The arrival rate (λ) is 10 requests/second. Since `λ (10) > μ (7.14)`, the system utilization `ρ = λ/μ > 1`. An M/M/1 queue is only stable if ρ < 1. Because the queue is unstable, wait times will grow without bound, and the 200ms deadline will be missed consistently.
+
+  > **Napkin Math:** 1. **Calculate Service Time (W_s):**
+   `W_s = T_prefill + (N_tokens * T_per_token)`
+   `W_s = 20ms + (15 * 8ms) = 140ms`
+
+2. **Calculate Service Rate (μ):**
+   `μ = 1 / W_s = 1 / 0.140s ≈ 7.14` requests/sec
+
+3. **Calculate System Utilization (ρ):**
+   `ρ = λ / μ = 10 req/s / 7.14 req/s ≈ 1.4`
+
+4. **Diagnose Stability:**
+   Since `ρ > 1`, the queue is unstable. The number of requests waiting will grow to infinity, and latency will become effectively infinite, making the 200ms deadline impossible to meet.
+
+  > **Key Equation:** \rho = \frac{\lambda}{\mu} < 1 \quad (\text{Stability Condition})
+
+  > **Options:**
+  > [ ] The system is stable, as the average service time of 140ms is less than the 200ms deadline.
+  > [x] The system is unstable because the arrival rate is greater than the service rate, leading to an infinitely growing queue.
+  > [ ] The system can be fixed by increasing the batch size, which will increase the service rate μ.
+  > [ ] The model is the bottleneck; switching to a smaller model would make the system stable.
+
+  📖 **Deep Dive:** [ML Operations](https://mlsysbook.ai/vol1/ops.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Continuous Batching OOM</b> · <code>kv-cache-memory</code></summary>
+
+- **Interviewer:** "Your team is serving a 70B parameter LLM using INT8 quantization on H100s (80GB HBM). You've implemented continuous batching with a paged KV cache, which has boosted throughput. However, under spiky traffic with long user contexts, the server is crashing with out-of-memory (OOM) errors. You need to apply napkin math to demonstrate to your team where the memory pressure is coming from. Assume the Llama-70B architecture (80 layers, 8 KV heads, 128-dim head) and that the KV cache is stored in FP16."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Many engineers underestimate the memory footprint of the KV cache, especially with long contexts. They focus on the model weights' size, which is static, and forget that the KV cache grows dynamically with every user and every generated token. They might incorrectly blame memory leaks or fragmentation without calculating the cache's fundamental memory requirement.
+
+  **Realistic Solution:** The primary source of memory pressure is the KV cache. While the model weights have a large but fixed size, the KV cache's memory footprint scales linearly with the sequence length and the number of concurrent requests. With only 10GB of free memory after loading the weights, a few users with long contexts can easily exhaust all available HBM.
+
+Calculation shows that a single request with a sequence length of 8192 tokens consumes ~2.68 GB of KV cache. With only 10GB of memory available for the cache, the server can only handle 3-4 such users simultaneously before OOMing. The 'spiky traffic with long contexts' is the exact workload that would trigger this memory exhaustion.
+
+  > **Napkin Math:** 1. **Calculate Weight Memory:**
+   Model weights occupy `70B parameters * 1 byte/param (INT8) = 70 GB`.
+
+2. **Calculate Available Memory for KV Cache:**
+   `Available Memory = Total HBM - Weight Memory = 80 GB - 70 GB = 10 GB`.
+
+3. **Calculate KV Cache Size per Token:**
+   Formula: `2 (K/V) * num_layers * num_kv_heads * head_dim * bytes_per_element`
+   `Size per token = 2 * 80 layers * 8 heads * 128 dim * 2 bytes (FP16) = 327,680 bytes/token ≈ 0.328 MB/token`.
+
+4. **Calculate KV Cache for a Single Long Request:**
+   For a context length of 8192 tokens: `8192 tokens * 0.328 MB/token ≈ 2687 MB ≈ 2.68 GB`.
+
+5. **Calculate Maximum Concurrent Users:**
+   `Max Users = Available Memory / Memory_per_User = 10 GB / 2.68 GB/user ≈ 3.7 users`.
+
+This shows the system cannot support more than 3 long-context users before running out of memory.
+
+  > **Key Equation:** M_{KV} = N_{req} \times L_{seq} \times 2 \times N_{layers} \times D_{model}
+
+  > **Options:**
+  > [ ] The server has a memory leak, as the number of active requests is low when the OOMs occur.
+  > [ ] The memory is becoming heavily fragmented by the paged KV cache allocator, leaving no large blocks free.
+  > [x] The KV cache for just a few users with long sequences is consuming the entire 10GB of available HBM.
+  > [ ] The intermediate activations from the model's forward pass are causing the memory to run out.
+
+  📖 **Deep Dive:** [Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Interactive Playground Dilemma</b> · <code>ttft-memory-bound</code></summary>
+
+- **Interviewer:** "You are the tech lead for a new user-facing LLM playground running on H100s. The product manager wants to guarantee a Time-To-First-Token (TTFT) of under 200ms for a 70B parameter model to ensure a snappy user experience. The model is fully pre-loaded into HBM. For this analysis, you can ignore network latency between the user and the datacenter. Can you apply your systems knowledge to tell the PM if this is a feasible promise?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate TTFT using the model's FLOPs and the GPU's TFLOPS. This gives a deceptively small number (sub-millisecond) and ignores the fact that a single-token forward pass (prefill) for a batch size of 1 is entirely constrained by memory bandwidth, not compute.
+
+  **Realistic Solution:** Yes, this is a feasible promise. For a pre-loaded model, the primary latency for the first token is the time it takes to complete a single forward pass. With a batch size of 1, this operation is memory-bound, not compute-bound. A simple way to estimate this is to calculate the time required to read the entire model's parameters from HBM. The H100's memory bandwidth is the limiting factor.
+
+  > **Napkin Math:** 1. **Model Size:** A 70B parameter model using FP16 precision requires 70B × 2 bytes/param = 140 GB of memory.
+2. **Hardware Spec:** An NVIDIA H100 has an HBM3 memory bandwidth of 3.35 TB/s.
+3. **Calculate Time:** Time = Total Size / Bandwidth = 140 GB / 3.35 TB/s ≈ 41.8 ms.
+4. **Conclusion:** This ~42ms represents a theoretical lower bound for the forward pass. Even with real-world overheads from kernel launches and non-sequential memory access, the actual TTFT will be comfortably under the 200ms target.
+
+  > **Key Equation:** T_{\text{forward_pass}} \approx \frac{\text{Model Size}}{\text{Memory Bandwidth}}
+
+  > **Options:**
+  > [ ] No, it's impossible. Loading the 140GB model from the NVMe SSD before every request will take several seconds.
+  > [x] Yes, it's feasible. The bottleneck is memory bandwidth, not compute. The time to stream the ~140GB model through the H100's 3.35 TB/s HBM is roughly 42ms, leaving ample room in the 200ms budget.
+  > [ ] No, it's not feasible. A 70B model requires ~140 TFLOPs per token, and the H100 can't compute this in under 200ms.
+  > [ ] Yes, it's trivial. An H100 performs ~1 PetaFLOP, so the compute time is microseconds. The latency will be dominated by the ~5µs InfiniBand transfer, so it will be almost instant.
+
+  📖 **Deep Dive:** [Single Machine Performance](https://mlsysbook.ai/cloud/01_single_machine.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The High-Throughput API Crisis</b> · <code>continuous-batching-padding</code></summary>
+
+- **Interviewer:** "You're running a high-throughput LLM inference API on H100s. During a traffic spike with varied sequence lengths, you diagnose a major problem: P99 latency skyrockets and Time Per Output Token (TPOT) is terrible, yet `nvidia-smi` shows GPU utilization is only hovering around 60-70%. What is the most likely cause of this poor performance despite the GPU not being fully utilized?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Seeing GPU utilization below 100% and assuming the bottleneck must be upstream (e.g., CPU, network). While this can be true, in this scenario, the moderate utilization combined with high latency points towards *inefficient* use of the GPU, not starvation.
+
+  **Realistic Solution:** The system is using static batching. With varied sequence lengths, shorter sequences in a batch are padded to the length of the longest one. The GPU wastes a significant number of cycles performing useless computations on these padding tokens. This means the GPU is busy, but not on productive work, leading to low *effective* throughput. Shorter jobs get stuck waiting for long jobs to finish, causing tail latency to explode. The solution is to implement continuous batching, which processes and evicts sequences from the batch as they complete, maximizing useful computation.
+
+  > **Napkin Math:** 1. **Scenario:** A batch contains two requests. Req A: 1000 tokens. Req B: 100 tokens.
+2. **Static Batching:** Both sequences are padded to 1000 tokens. The total work for the GPU is `2 * 1000 = 2000` tokens.
+3. **Waste Calculation:** The work for Req B only needed 100 tokens. The wasted work is `1000 - 100 = 900` tokens. The waste percentage is `900 / 2000 = 45%`.
+4. **Impact:** The GPU spends nearly half its time on padding. Req B, which should have finished quickly, is now tied to the completion time of the much longer Req A, drastically increasing its perceived latency.
+
+  > **Key Equation:** \text{Waste %} = \frac{\sum (L_{\text{max}} - L_i)}{N \times L_{\text{max}}}
+
+  > **Options:**
+  > [ ] The model's KV cache is too large, saturating HBM memory bandwidth.
+  > [x] The system is using static batching, causing massive internal fragmentation and wasted computation on padding tokens, which lowers useful throughput.
+  > [ ] The CPU is bottlenecked on tokenizing incoming requests, which is starving the GPU and preventing it from reaching 100% utilization.
+  > [ ] The network is the bottleneck; requests are arriving too slowly to form large enough batches, leaving the GPU idle between batches.
+
+  📖 **Deep Dive:** [Serving Stack](https://mlsysbook.ai/cloud/03_serving_stack.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Real-Time Ad Bidding SLA</b> · <code>queueing-theory-tail-latency</code></summary>
+
+- **Interviewer:** "You are designing a cloud service for real-time ad bidding which must respond to 99.9% of requests within a 50ms SLA. Your inference model, running on a dedicated H100, has an average processing time of 30ms. However, due to feature variability, you observe that 5% of requests are 'complex' and take 80ms to process. Using queueing theory, determine if the current system can meet this strict SLA."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Looking only at the average processing time (30ms) and concluding that since it's well under the SLA deadline (50ms), the system is healthy. This completely ignores the cascading failure effect of tail latency in any system with queues and strict deadlines.
+
+  **Realistic Solution:** No, the system cannot meet the SLA. While the average time is acceptable, the P95 latency of 80ms guarantees failure. Any request that takes 80ms will immediately miss its own 50ms deadline. More importantly, it occupies the server for an extra 30ms, forcing the next request to wait in a queue. This initial wait time is then added to the next request's processing time, likely causing it to miss its deadline as well. This creates a cascade of failures. Since 5% of requests trigger this failure mode, it's impossible to achieve a 99.9% success rate.
+
+  > **Napkin Math:** 1. **Deadline:** 50ms.
+2. **Slow Request:** An 80ms request arrives. It misses the deadline by 30ms.
+3. **Queue Forms:** While the server is busy, other requests arrive. Let's say a 'fast' 30ms request arrives just after the slow one started. It must wait 80ms for the server to become free.
+4. **Cascading Failure:** The total time for the 'fast' request becomes `80ms (wait) + 30ms (process) = 110ms`. It also misses the 50ms deadline catastrophically.
+5. **Conclusion:** The system has a 5% chance of entering a state that causes multiple, consecutive deadline misses. This far exceeds the 0.1% failure rate allowed by the SLA.
+
+  > **Key Equation:** T_{\text{total}} = T_{\text{wait}} + T_{\text{process}}
+
+  > **Options:**
+  > [ ] Yes. The average processing time of 30ms leaves a 20ms buffer, which is more than enough to absorb occasional slow requests.
+  > [x] No. The 80ms P95 latency exceeds the 50ms SLA, which will cause a request queue to form and trigger cascading deadline misses, making the 99.9% SLA impossible.
+  > [ ] Yes, but only if you upgrade to a B200 GPU to reduce the average processing time.
+  > [ ] It's impossible to say without knowing the network RTT from the ad exchange.
+
+  📖 **Deep Dive:** [Serving Stack](https://mlsysbook.ai/cloud/03_serving_stack.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Continuous Batching Trade-off</b> · <code>latency-throughput-tradeoff</code></summary>
+
+- **Interviewer:** "Your team is tuning a continuous batching server (like vLLM or TGI) for a production LLM. An engineer proposes dramatically increasing the `max_batch_prefill_tokens` parameter, which governs how many prompt tokens from new requests are collected before being processed in one large batch. How does increasing this value from a small number (e.g., 2048) to a very large one (e.g., 16384) affect the system's average Time-To-First-Token (TTFT) and its overall throughput?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming that any change that increases throughput must be beneficial for all latency metrics. Engineers often miss the 'batch formation time'—the waiting period for a batch to fill up—which is a key component of TTFT.
+
+  **Realistic Solution:** This change creates a classic latency-throughput trade-off. Increasing `max_batch_prefill_tokens` will almost certainly **increase overall system throughput** but will also **worsen (increase) the average TTFT**. The higher throughput is achieved because processing one massive prefill batch is far more GPU-efficient (higher arithmetic intensity, less kernel launch overhead) than processing many small ones. However, individual requests now have to wait longer in a queue until this very large batch is assembled, and this waiting time is a direct component of TTFT.
+
+  > **Napkin Math:** 1. **Low `max_tokens` (2048):** Assume average prompt is 200 tokens. The server waits for ~10 requests to form a batch. If requests arrive every 50ms, the 10th request waits `9 * 50ms = 450ms` to be batched.
+2. **High `max_tokens` (16384):** The server now waits for `16384 / 200 ≈ 82` requests. The 82nd request could wait up to `81 * 50ms = 4050ms` (4 seconds) just to be batched.
+3. **Trade-off:** The 4-second wait time is a huge regression for TTFT. However, running one prefill on 16k tokens is much more efficient per-token than running 8 separate prefills on 2k tokens, thus increasing the total number of requests processed per minute (throughput).
+
+  > **Key Equation:** TTFT = T_{\text{queue_wait}} + T_{\text{prefill}} + T_{\text{decode_1}}
+
+  > **Options:**
+  > [ ] It will improve TTFT but worsen throughput.
+  > [ ] It will improve both TTFT and throughput by making the GPU more efficient.
+  > [ ] It will worsen both TTFT and throughput due to increased overhead.
+  > [x] It will worsen TTFT due to longer batch formation times, but improve overall throughput due to more efficient GPU utilization during prefill.
+
+  📖 **Deep Dive:** [Serving Stack](https://mlsysbook.ai/cloud/03_serving_stack.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The LLM Metrics</b> · <code>latency</code> <code>serving</code></summary>
 
@@ -66,7 +993,7 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Shadow GPU Budget</b> · <code>mlops</code> <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Shadow GPU Budget</b> · <code>deployment</code> <code>serving</code></summary>
 
 - **Interviewer:** "We want to shadow-test a new 70B LLM before replacing our production 13B model. The plan: mirror all production traffic to the new model, compare outputs, then swap. The infrastructure team comes back and says the shadow deployment will cost more than the production deployment itself. Why is shadow-testing an LLM so much more expensive than shadow-testing a traditional ML model, and how do you make it feasible?"
 
@@ -125,8 +1052,326 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The P99 Latency Anomaly</b> · <code>llm-serving-latency</code></summary>
 
-#### 🟡 L5 — Analyze & Predict
+- **Interviewer:** "You're analyzing the performance of a new LLM serving system for a 70B parameter model on H100s. The team is using a basic static batching strategy. Your dashboards show that as request volume increases, the average latency per output token (TPOT) remains stable, but the P99 time-to-first-token (TTFT) has exploded, violating your SLO. Differentiate the system dynamics causing the stable TPOT from those causing the high P99 TTFT. Analyze the root cause of the TTFT explosion, referencing the interaction between your batching strategy and queueing dynamics."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Attributing the high P99 TTFT to a simple hardware bottleneck like being 'compute-bound' or 'memory-bound'. While the system is using hardware, the problem is a logical one introduced by the scheduling strategy. Another common mistake is confusing TTFT and TPOT, assuming that if one is good, the other must be.
+
+  **Realistic Solution:** The root cause is head-of-line blocking inherent to static batching. TPOT is stable because once a batch starts generating, it's an efficient, parallel operation limited by the H100's memory bandwidth, and this throughput is consistent batch-over-batch. However, P99 TTFT represents the worst-case user experience. This user likely arrives just after a large batch has begun processing. They must first wait in the queue for that *entire* batch (prefill and all subsequent token generation) to complete. Then, they must wait for their *own* batch to fill and for its expensive, compute-heavy prefill operation to finish. This double-waiting period (waiting for the previous batch + waiting for your own prefill) is what causes the P99 TTFT to explode, even while the per-token generation speed (TPOT) of a running batch looks good. The system isn't necessarily overloaded; its scheduling is just inefficient for latency-sensitive users.
+
+  > **Napkin Math:** Let's model the P99 TTFT. Assume a batch size of 8 and a batch processing time `T_batch` of 800ms (e.g., 200ms prefill + 600ms for token generation).
+1. A user arrives just after a batch begins. They wait `T_queue` ≈ 800ms for the current batch to finish.
+2. Their request then enters a new batch. Let's assume the batch fills quickly. This new batch must perform its own prefill. `T_prefill` ≈ 200ms.
+3. The user's P99 TTFT is the sum of these waiting periods: `P99 TTFT ≈ T_queue + T_prefill`
+4. `P99 TTFT ≈ 800ms + 200ms = 1000ms`.
+This is a full second, likely violating a typical <500ms SLO. Meanwhile, the TPOT is determined by the generation phase, which might be `600ms / (8 users * 100 tokens/user)` = 0.75ms/token, which appears extremely fast and masks the severe entry latency.
+
+  > **Key Equation:** $\text{TTFT}_{p99} \approx \text{T}_{\text{process}}(\text{Batch}_{n-1}) + \text{T}_{\text{prefill}}(\text{Batch}_n)$
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Continuous Batching Plateau</b> · <code>continuous-batching-bottlenecks</code></summary>
+
+- **Interviewer:** "A team migrates their Llama-70B service from static batching to a continuous batching system (like PagedAttention) on H100 GPUs. They expected a 2-3x throughput increase based on papers, but they only observe a modest ~30% gain at their target latency. Profiling shows high KV cache utilization, but the GPU is not at 100% utilization. Analyze this outcome. What practical system constraint is preventing them from reaching the theoretical throughput gains? Differentiate the bottleneck solved by continuous batching from the new bottleneck it has exposed."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming continuous batching is a 'free' throughput win. Engineers often believe it solves all scaling issues, without realizing it trades one bottleneck (memory fragmentation) for another (often prefill compute or memory bandwidth). They might incorrectly diagnose it as a network issue or a bug in the implementation.
+
+  **Realistic Solution:** Continuous batching brilliantly solves the problem of memory fragmentation by allowing requests of different lengths to be packed together efficiently. This is why KV cache utilization is high. However, it does not eliminate the fundamental costs of inference. The modest throughput gain and sub-100% GPU utilization suggest the system is now bottlenecked by the *prefill phase* for new, incoming requests. While the GPU is efficiently decoding tokens for the existing batch (a memory-bandwidth bound task), it must periodically switch to the compute-heavy prefill operation for new requests. If new requests arrive frequently, the system spends a significant fraction of its time in this compute-bound prefill state, which has a lower arithmetic intensity than the decode phase and can't always saturate the H100's massive compute resources. The 'plateau' occurs because they have traded a memory capacity/fragmentation bottleneck for a prefill compute bottleneck.
+
+  > **Napkin Math:** 1. **Decode (Memory-Bound):** To generate one token for the batch, the GPU must stream the 70B model weights from HBM. Time is `Weight Size / BW`. `(70B params * 2 bytes/param) / 3.35 TB/s` = `140 GB / 3350 GB/s` ≈ 42ms. This is the theoretical time per token for the *entire batch*.
+2. **Prefill (Compute-Bound):** A new request with 1024 prompt tokens arrives. Compute is `2 * Params * Tokens`. `2 * 70B * 1024` ≈ 1.4x10¹⁷ FLOPs. On an H100 with ~989 TFLOPS, this takes `140 PFLOPs / 989 TFLOPS` ≈ 141ms.
+3. **Analysis:** The system juggles these two states. If a new request arrives every 200ms, the system spends `141ms / 200ms` = ~70% of its time in the prefill state. The massive throughput gains of continuous batching are primarily in the decode phase, where many users' token generations are parallelized. If the system is constantly bogged down with expensive prefills, it can't spend enough time in the highly efficient decode state, thus limiting the overall throughput gain.
+
+  > **Key Equation:** $T_\text{total} = \alpha \cdot T_\text{prefill} + (1-\alpha) \cdot T_\text{decode}$
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The SLO vs. Throughput Squeeze</b> · <code>serving-queue-slos</code></summary>
+
+- **Interviewer:** "You are designing an LLM serving system for a 13B model on H100 GPUs. Your workload consists of long conversations (average 2048 prompt tokens, 2048 completion tokens). The business requires a P99 TTFT of less than 400ms. Using a simple static batching strategy, analyze the trade-off between throughput (batch size) and this strict TTFT SLO. Calculate the maximum batch size you can support, and explain the implications for your system's throughput."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Focusing only on the inference time for a single request. This ignores the queuing dynamics that dominate P99 latency. Engineers often calculate the best-case TTFT (an empty queue) and assume they have plenty of headroom, failing to account for the 'wait for previous batch' time in a production system under load.
+
+  **Realistic Solution:** The P99 TTFT is dominated by the time a request spends waiting for the previous batch to complete, plus the time for its own batch's prefill. To meet a strict 400ms SLO with long generations, the total processing time of a batch must be kept extremely short. This forces the system into using a very small batch size, which in turn cripples throughput.
+
+The core tension is that `P99 TTFT ≈ T_process(Batch_N-1) + T_prefill(Batch_N)`. Since `T_process` includes a long, multi-second decoding phase, this value will almost always be larger than the SLO. The only way to satisfy the equation is to make `T_process` incredibly small. With long generation lengths, this can only be achieved by reducing the batch size to its absolute minimum (i.e., 1), which makes the GPU highly inefficient.
+
+  > **Napkin Math:** 1. **Define the P99 TTFT equation:** `P99 TTFT ≈ T_process(B) + T_prefill(B)`. We need this to be `< 400ms`.
+2. **Estimate `T_prefill(B)`:** For a 13B model and 2k tokens, compute is `2 * 13B * 2048` ≈ 53 TFLOPs. On an H100 (989 TFLOPS), this is `53 / 989` ≈ 54ms. For a small batch `B`, let's round this up to `T_prefill(B)` ≈ 60ms.
+3. **Estimate `T_process(B)`:** `T_process(B) = T_prefill(B) + T_decode(B)`. `T_decode(B)` is the time to generate `B * 2048` tokens. H100s can generate ~3000 tokens/sec on 13B models. Let's assume this is for an optimal batch size. The throughput scales with batch size. Let's model token time as `T_token_time(B)`. A simple model could be `T_decode(B) = (B * 2048) / (1500 * B)` = ~1.36s. So `T_process(B) ≈ 60ms + 1360ms = 1420ms`.
+4. **Calculate P99 TTFT:** `P99 TTFT ≈ 1420ms + 60ms = 1480ms`.
+5. **Analysis:** This is nearly 4x the 400ms SLO. To meet the SLO, `T_process(B) + 60ms < 400ms`, meaning `T_process(B) < 340ms`. With a decode time over 1 second, this is impossible for any batch size `B >= 1`. This demonstrates that for this workload and SLO, static batching is fundamentally unworkable. The system cannot provide both long generation and low TTFT without a more advanced scheduling strategy like continuous batching.
+
+  > **Key Equation:** $T_\text{process}(\text{Batch}) = T_\text{prefill}(\text{Batch}) + N_\text{tokens} \times T_\text{per_token}(\text{Batch})$
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The ROI of Heterogeneity</b> · <code>continuous-batching-economics</code></summary>
+
+- **Interviewer:** "Your company runs many LLM services on H100s with a bimodal workload: 95% of requests are short (100 prompt/100 completion tokens), but 5% are long-context 'power user' requests (4k prompt/4k completion). All services use static batching, causing inefficient partitioning of the expensive H100 fleet. A platform team proposes a 3-month project to build a central continuous batching service. Compare the performance of static vs. continuous batching for this specific workload. Calculate the potential throughput gain to build a business case for the project."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Averaging the workload. Engineers might calculate the average sequence length and assume the system behaves according to the average. This completely misses the point that in static batching, the *maximum* length in the batch dictates performance, and the tail wags the dog. The cost of heterogeneity is the core issue.
+
+  **Realistic Solution:** The business case is extremely strong. Static batching is pathologically bad for heterogeneous workloads. When a single long-context (8k total tokens) request enters a batch, all other short-context requests (200 tokens) in that batch are padded to the 8k length. This creates massive memory and compute waste. The KV cache allocation is based on the 8k length for all requests, meaning a batch with just one power user can fit almost no one else. In practice, this leads to de-facto batch size 1 for all power users, leaving the GPU idle most of the time.
+
+Continuous batching (with PagedAttention) solves this directly by eliminating internal fragmentation. Memory is allocated proportional to the *actual* length of each request. This allows the system to pack one or more power users alongside hundreds of short-running users, dramatically increasing hardware utilization and overall throughput. The project is not just an optimization; it's a fundamental enabler for efficiently serving the mixed workload on the same hardware fleet.
+
+  > **Napkin Math:** 1. **Static Batching Waste:** Consider a batch of 8 containing one 8k-token power user and seven 200-token normal users. Due to padding, the system effectively processes eight 8k-token requests.
+   - Useful compute FLOPs are proportional to `(1 * 8000) + (7 * 200) = 9400` tokens.
+   - Wasted compute FLOPs are proportional to `(7 * 8000) - (7 * 200) = 47600` tokens.
+   - **Waste Ratio:** `Wasted / Useful = 47600 / 9400` ≈ 5x. Over 80% of the compute is spent on padding.
+2. **Continuous Batching Gain:** It eliminates this waste. The potential throughput gain is proportional to this waste elimination. A conservative estimate would be a 2-3x increase in effective throughput across the fleet.
+3. **ROI Calculation:** If the current fleet is 100 H100s, a 2x throughput gain means you can serve the same traffic with only 50 H100s.
+   - Hardware saved: 50 H100s.
+   - H100 cost: ~$30,000.
+   - CapEx savings: `50 * $30,000 = $1,500,000`.
+   A 3-month engineering project is easily justified by millions of dollars in hardware savings, not to mention power and operational cost reductions.
+
+  > **Key Equation:** $\text{Waste} \propto \sum_{i \in \text{batch}} (L_{\text{max}} - L_i)$
+
+  📖 **Deep Dive:** [ML Operations](https://mlsysbook.ai/vol1/ops.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The SLO Squeeze: Interactive vs. Batch Throughput</b> · <code>queueing-theory-slo</code></summary>
+
+- **Interviewer:** "You run a unified inference service for a 70B parameter model on a cluster of 8 H100 GPUs. Your traffic is mixed: 80% is low-latency interactive chat with a P99 Time-to-First-Token (TTFT) SLO of 500ms, and 20% is high-throughput batch summarization jobs. Your current system uses a single FIFO queue with continuous batching. You're meeting your batch throughput goals, but violating the chat TTFT SLO due to head-of-line blocking from large summarization requests. Analyze the fundamental trade-off between two alternative designs:
+
+1.  **Static Partitioning:** Dedicate 6 GPUs to a low-latency chat queue and 2 GPUs to a batch queue.
+2.  **Priority Scheduling:** Keep the unified 8-GPU cluster, but implement a priority-based scheduler that can preempt batch requests to service interactive ones.
+
+Distinguish the failure modes and resource utilization implications of each approach."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming that simply splitting the cluster is optimal. This ignores the risk of idle resources and mis-provisioning. For example, if chat traffic lulls, the 6 GPUs in that partition sit idle, while the batch queue may be overloaded. Conversely, a priority scheduler is more complex to implement and can lead to starvation for low-priority tasks if not designed carefully.
+
+  **Realistic Solution:** The core of the analysis is the trade-off between isolation and efficiency.
+
+**1. Static Partitioning:** This design provides strong isolation. The chat service's latency is protected from the batch service. However, it's statically provisioned and inefficient. If chat traffic is low, its 6 dedicated GPUs are underutilized. If batch traffic spikes, its 2 GPUs might be insufficient, leading to a large backlog, even while chat GPUs are idle. It trades overall cluster utilization for latency predictability.
+
+**2. Priority Scheduling:** This design is more efficient, as all 8 GPUs are part of a single fungible pool. It can absorb bursts in either traffic type by dynamically allocating resources. The key challenge is the implementation complexity of preemption. A naive priority queue could starve the batch jobs. A well-designed system would need preemption (pausing a batch forward pass, servicing a chat request, then resuming) and potentially aging or other mechanisms to guarantee some forward progress for the batch queue. It trades implementation complexity for higher hardware utilization and dynamic load handling.
+
+The superior engineering solution is typically Priority Scheduling, as hardware is expensive and maximizing utilization is key, but it requires a much more sophisticated software layer to manage the queueing and preemption logic without violating either SLO or starving tasks.
+
+  > **Napkin Math:** Let's model the head-of-line blocking.
+
+**Assumptions:**
+- An H100 with continuous batching can achieve a throughput of ~300 tokens/sec for a 70B model.
+- An interactive request is small (e.g., generates 50 tokens).
+- A batch summarization request is large (e.g., processes a 2000 token prompt and generates 500 tokens).
+- Time per output token (TPOT) is ~3ms.
+- Let's say a batch summarization forward pass (prefill+decode) for one iteration takes 50ms on the batch.
+
+**FIFO Scenario:** An interactive request arrives right after a batch job starts processing. The batch job might hold the batch for, say, 10 iterations to generate 500 tokens. The wait time for the interactive request is `10 iterations * 50ms/iteration = 500ms`. This *alone* blows the 500ms P99 TTFT SLO, before even considering other queueing delays. This is classic head-of-line blocking.
+
+**Partitioning Scenario:** The 6-GPU chat cluster is isolated. Its queue length is determined only by chat arrivals (λ_chat). Using Little's Law, `L = λW`, the wait time `W` is kept low. The 2-GPU batch cluster handles its own queue. Utilization on the chat cluster might only be 50% on average, meaning 3 GPUs worth of capacity is wasted.
+
+**Priority Scenario:** The batch job is running. The interactive request arrives, and the scheduler preempts. It pauses the batch job's state, runs the interactive request (e.g., TTFT of 40ms), and then resumes the batch job. The interactive user is happy. The batch job's total time is extended by only 40ms, which is negligible for a long-running job. The cluster utilization remains high.
+
+  > **Key Equation:** $\text{Little's Law: } L = \lambda W \text{ (Average items in system = Arrival Rate × Average Time in System)}$
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Continuous Batching Tail Latency Paradox</b> · <code>continuous-batching-latency</code></summary>
+
+- **Interviewer:** "Your LLM inference service uses a state-of-the-art continuous batching scheduler on H100s. Your average Time-to-First-Token (TTFT) is excellent, around 150ms. However, your P99 TTFT metric is failing its 500ms SLO, with frequent spikes into the 1.5-2 second range. Your manager suspects a hardware or network issue is causing intermittent stalls. You, however, notice in the logs that these latency spikes correlate with the arrival of requests with very long prompts (e.g., 4000+ tokens for summarization) mixed in with normal, short-prompt chat requests. Differentiate the underlying mechanism of how a continuous batching scheduler's prefill phase can create this tail latency from a potential hardware fault. Examine the relationship between the prefill operation and the decode operation in the batching loop."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming the hardware (like the manager) or assuming continuous batching is 'magic'. A common misconception is that continuous batching completely isolates requests. While it's a huge improvement over static batching, the core scheduling loop is still a shared resource, and a single monolithic operation can become a bottleneck.
+
+  **Realistic Solution:** This is not a hardware fault, but a fundamental characteristic of how Transformer inference and batching schedulers work. The process is two-phased:
+
+1.  **Prefill/Prompt Processing:** The system takes the initial prompt tokens and processes them in a single, large forward pass to generate the KV cache for the first output token. This operation's duration is *proportional to the prompt length*.
+2.  **Decode/Generation:** The system takes the KV cache and, one token at a time, generates the output sequence. Each step is very fast and its duration is constant.
+
+A continuous batching scheduler typically cannot add *new* requests to the batch while a prefill operation is running. If a request with a 4000-token prompt arrives, the system might spend hundreds of milliseconds just on its prefill step. Any other (short-prompt) requests that arrive during this window must wait until the prefill is complete and the next scheduling iteration begins. This wait time is what creates the P9ax latency spike. It's a form of head-of-line blocking *at the iteration level*. A hardware fault would likely manifest as random, uncorrelated latency spikes or crashes, not ones that correlate perfectly with long-prompt requests.
+
+  > **Napkin Math:** **Assumptions:**
+- H100 GPU serving a 70B model.
+- Per-token decode time: ~3ms.
+- For simplicity, assume prefill time per token is also ~3ms (in reality it's less efficient, but let's use this as a lower bound).
+
+**Normal Request:**
+- Prompt: 20 tokens. Prefill time: `20 tokens * 3ms/token = 60ms`.
+- Any request arriving during this 60ms window has to wait. This is acceptable.
+
+**Long-Prompt Request:**
+- Prompt: 4000 tokens. Prefill time: `4000 tokens * 3ms/token = 12,000ms = 12 seconds.` (This is too high, let's use a more realistic number based on compute).
+
+**Let's re-calculate prefill time using FLOPs:**
+- A 70B model needs `~2 * 70B = 140 GFLOPs` per token.
+- An H100 provides `~989 TFLOPS` of FP16 compute.
+- Time per token (compute): `140e9 / 989e12 = ~0.14ms`. This is compute-bound time, not wall time. Wall time is dominated by memory access.
+- A more realistic wall-time measurement for a well-optimized system is ~0.5ms per prefill token for large prompts.
+
+**Revised Napkin Math:**
+- Long-Prompt (4000 tokens) Prefill Time: `4000 tokens * 0.5ms/token = 2000ms = 2 seconds`.
+
+During these 2 seconds, the scheduler is locked processing the long prompt. No new requests can be added to the batch. A normal chat request that arrives at the beginning of this window will have its TTFT be `2 seconds (wait time) + 60ms (its own prefill) = 2.06 seconds`. This perfectly explains why the P99 latency is spiking to over 2 seconds while the average (dominated by non-blocked requests) remains low.
+
+  > **Key Equation:** $T_{\text{TTFT}} = T_{\text{wait_queue}} + T_{\text{prefill}}(N_{\text{prompt_tokens}})$
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Throttling Dilemma: Per-User vs. Global Queueing</b> · <code>queueing-rate-limiting</code></summary>
+
+- **Interviewer:** "You are designing the queueing and rate-limiting architecture for a new multi-tenant LLM API. The system must provide fair service and prevent a single 'power user' from degrading performance for others. You need to analyze the latency implications of two different designs under a 'thundering herd' scenario where one user submits a large burst of requests.
+
+1.  **Global FIFO Queue:** A single queue for all users' requests feeding the GPU batcher.
+2.  **Per-User Queues:** Each user/API key gets their own logical queue. A scheduler (e.g., weighted fair queueing) pulls from these user queues to build a batch.
+
+Examine how these two systems handle a burst of 100 requests from a single power user. Specifically, calculate the expected wait time for a normal, low-volume user who submits a request immediately after the burst."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Only considering the total throughput. A global queue might seem simpler and achieve the same theoretical maximum throughput. The mistake is ignoring the variance in wait time and the lack of fairness. A single user can easily saturate the system's capacity, leading to extreme tail latency for everyone else. Fairness is not just a 'nice-to-have'; it's a critical part of the SLO for a multi-tenant service.
+
+  **Realistic Solution:** The two designs have fundamentally different fairness and latency profiles.
+
+**1. Global FIFO Queue:** This design is simple but unfair. When the power user submits 100 requests, they are all enqueued ahead of the normal user's request. The normal user must wait for all 100 of those requests to be processed before their own request even enters the batcher. The power user monopolizes the service capacity, leading to high latency for all other tenants. The system has no concept of 'fairness'.
+
+**2. Per-User Queues:** This design isolates user impacts. The power user's 100 requests fill their *own* queue. The normal user's single request goes into their separate queue. The scheduler, designed for fairness, will not exclusively service the power user. Using a round-robin or weighted fair queueing policy, it will pick one request from the power user's queue, then one from the normal user's queue, and so on. The normal user's request gets processed almost immediately, experiencing minimal wait time. The power user's requests are processed over time, but they don't block other users. This architecture provides strong performance isolation between tenants, which is essential for a multi-tenant service.
+
+  > **Napkin Math:** **Assumptions:**
+- The system can process a batch of 10 requests every 100ms. So, the service rate (`μ`) is 100 requests/second.
+- Arrival rate (`λ`) is low, say 20 requests/second, so the system is normally not overloaded (`ρ = λ/μ = 0.2`).
+
+**Scenario:** A power user dumps 100 requests at t=0. A normal user sends 1 request at t=0.1s.
+
+**Global FIFO Queue Analysis:**
+- At t=0, the queue length `L` jumps to 100.
+- At t=0.1s, the normal user's request arrives and is placed at position 101 in the queue.
+- The system processes 10 requests every 100ms. To process the 100 requests ahead of the normal user, it will take `100 requests / (10 requests / 0.1s) = 1 second`.
+- The **wait time for the normal user is at least 1 second**. This is a massive latency spike caused by another user.
+
+**Per-User Queue Analysis:**
+- At t=0, User_Power's queue length becomes 100.
+- At t=0.1s, User_Normal's queue length becomes 1.
+- The fair scheduler's turn is at t=0.1s. It sees two non-empty queues. It builds a batch. Let's say it pulls 9 requests from User_Power and 1 from User_Normal (or just round-robins 1 from each).
+- The normal user's request is included in the very next batch, which is processed at t=0.1s.
+- The **wait time for the normal user is effectively near-zero** (just the scheduler iteration time, maybe a few milliseconds). The 100-request burst from the power user is handled without impacting the normal user's latency.
+
+  > **Key Equation:** $\text{Fairness: WaitTime}(\text{User}_A) \stackrel{?}{\approx} \text{WaitTime}(\text{User}_A | \text{Load}(\text{User}_B))$
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The P99 Latency Volcano</b> · <code>queueing-theory-latency</code></summary>
+
+- **Interviewer:** "You are operating a fleet of H100 GPUs serving a 70B parameter LLM using a static batching strategy with a batch size of 8. As your request volume approaches 50% of the theoretical maximum throughput, you notice that average GPU utilization is stable around 60%, but the P99 latency for end-users is exploding, leading to frequent timeouts. A team member suggests adding more GPUs to handle the load. Differentiate the impact of adding more hardware versus redesigning the batching strategy. Analyze the root cause of the latency spike."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume that latency problems at moderate utilization are due to insufficient hardware capacity. They would recommend adding more GPUs (scaling out). While this reduces the arrival rate (λ) per machine, it doesn't solve the core issue of service time variance, known as head-of-line blocking.
+
+  **Realistic Solution:** The root cause is head-of-line blocking exacerbated by high service time variance in a static batching system. An LLM request for a long generation (e.g., 2048 tokens) paired in a static batch with a request for a short generation (e.g., 32 tokens) forces the short request to wait for the entire long generation to complete. This disproportionately affects tail latency (P99). Adding more GPUs is a brute-force solution that reduces the probability of a short request getting stuck, but it's inefficient. The correct solution is to switch to a continuous batching (or 'dynamic batching') scheduler. This strategy decouples batching from request arrival. The server can continuously add new requests to a running batch as soon as space is available (i.e., another request in the batch finishes), dramatically reducing queueing delay for short requests and improving overall GPU utilization.
+
+  > **Napkin Math:** Let's analyze two requests arriving close together: R1 (long) needs 2048 tokens, R2 (short) needs 32 tokens.
+
+- **Hardware:** H100 provides ~989 TFLOPS (FP16).
+- **Compute per token (70B model):** `C ≈ 2 * P = 2 * 70e9 = 140 GFLOPs`.
+- **Time per token (unbatched):** `T_token = 140e9 FLOPs / 989e12 FLOPS ≈ 0.14 ms`.
+- **Static Batching Scenario:** If R1 and R2 are batched together, the batch isn't done until the longest request is done.
+  - `T_R1 = 2048 tokens * 0.14 ms/token ≈ 287 ms`.
+  - R2 is finished in `32 * 0.14 ≈ 4.5 ms`, but it is trapped in the batch. Its effective latency becomes `287 ms`, an inflation of `287 / 4.5 ≈ 64×`.
+- **Continuous Batching Scenario:** R2 can be processed and leave the batch as soon as it's done. Its latency is its own processing time plus a very small queueing delay. R1's presence doesn't block it for the full duration. GPU utilization increases because as soon as R2's slots in the batch are free, a new request can be swapped in.
+
+  > **Key Equation:** $W_q \approx \frac{\lambda E[S^2]}{2(1-\rho)}$
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Two-Tier Traffic Jam</b> · <code>tpot-vs-ttft-batching</code></summary>
+
+- **Interviewer:** "You manage a single GPU serving cluster for a 13B parameter model on H100s. The service has two use cases: interactive chat, where users demand low Time-To-First-Token (TTFT), and offline document summarization, where total job time (which depends on Throughput of Output Tokens, or TPOT) is the key metric. You are using continuous batching with a single configuration. Chat users complain of high latency, while the summarization workload is inefficient. Differentiate between a system optimized for TTFT and one for TPOT, and analyze why a single configuration fails for both. Propose an alternative architecture."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often conflate latency and throughput, attempting to find a single 'optimal' batch size. The common mistake is failing to recognize that TTFT and TPOT are fundamentally different metrics driven by different system dynamics. TTFT is sensitive to queueing delays, while TPOT is sensitive to computational efficiency. A compromise configuration is mediocre at both.
+
+  **Realistic Solution:** A single configuration fails because the two workloads are at opposite ends of the performance spectrum defined by the Roofline model.
+- **TTFT Optimization (Chat):** To minimize TTFT, you must minimize the time a request waits in a queue before processing begins. This requires using a very small batch size and a short batching timeout. This keeps the system highly responsive. However, small batches have low arithmetic intensity, making them memory-bandwidth bound. The GPU is 'starved' for computation, leading to low efficiency and poor TPOT.
+- **TPOT Optimization (Summarization):** To maximize TPOT, you need to make the GPU as efficient as possible. This requires assembling large batches to increase arithmetic intensity, pushing the workload over the 'ridge point' of the Roofline model into the compute-bound regime. This maximizes FLOPs utilization but introduces long queueing delays, which is poison for TTFT.
+
+**Proposed Architecture:** Split the cluster into two pools or implement a two-level scheduler:
+1.  **Real-time Pool (Chat):** A dedicated set of GPUs configured for small batches (e.g., max_batch_size=4) and short timeouts (e.g., 5ms). This pool will provide excellent TTFT.
+2.  **Batch Pool (Summarization):** Another set of GPUs configured for large batches (e.g., max_batch_size=128) and longer timeouts (e.g., 50ms). This pool will deliver maximum TPOT.
+
+  > **Napkin Math:** Let's compare a small batch vs. a large batch for a 13B model on an H100.
+
+- **Hardware:** H100: 989 TFLOPS peak compute, 3.35 TB/s memory bandwidth. Ridge Point `I_c = 989e12 / 3.35e12 ≈ 295` FLOPs/Byte.
+- **Compute per token (13B model):** `2 * 13e9 = 26 GFLOPs`.
+- **Case 1 (Chat, Batch Size 1):**
+  - Memory traffic is dominated by loading the `13e9 * 2 = 26 GB` of weights.
+  - Arithmetic Intensity `I = 26e9 FLOPs / 26e9 Bytes = 1.0` FLOP/Byte.
+  - Since `1.0 < 295`, we are deeply memory-bound.
+  - Achieved Performance: `Perf = I * BW = 1.0 * 3.35 TB/s = 3.35 TFLOPS`.
+  - TPOT: `3.35e12 FLOPS / (26e9 FLOPs/token) ≈ 128` tokens/sec. TTFT is excellent due to low queueing delay.
+- **Case 2 (Summarization, Batch Size 128):**
+  - Weight memory access is amortized: `26 GB` for `128` tokens. Activation memory becomes significant but let's assume total traffic gives an AI > 295.
+  - The system is now compute-bound.
+  - Achieved Performance: `Perf = 989 TFLOPS` (Peak).
+  - TPOT: `989e12 FLOPS / (26e9 FLOPs/token) ≈ 38,000` tokens/sec.
+- **Analysis:** The large batch yields `38000 / 128 ≈ 300×` higher throughput. A chat request stuck in the queue for a large batch to form would have unacceptable TTFT, while running summarization jobs with a tiny batch size is incredibly inefficient.
+
+  > **Key Equation:** $\text{Performance} = \min(\text{Peak Compute}, \text{Arithmetic Intensity} \times \text{Memory Bandwidth})$
+
+  📖 **Deep Dive:** [Benchmarking](https://mlsysbook.ai/vol1/benchmarking.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Black Friday Collapse</b> · <code>latency</code> <code>queueing</code></summary>
@@ -180,11 +1425,118 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Continuous Batching Paradox</b> · <code>continuous-batching-queueing-theory</code></summary>
 
-#### 🔴 L6+ — Synthesize & Derive
+- **Interviewer:** "Your team implements a state-of-the-art continuous batching engine, like vLLM, for your LLM serving stack to increase GPU utilization. As expected, aggregate throughput (tokens/sec/GPU) skyrockets. However, you receive an alert that P99 Time-To-First-Token (TTFT) has degraded by 500%, violating your interactive chat SLO. Your dashboard shows GPU utilization is pegged at 100%. Evaluate this situation: why would an optimization that improves overall throughput cause a severe latency regression for newly arriving requests? Justify your reasoning with queueing theory."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The system is just overloaded and needs more GPUs. Or, the Python overhead of batching is too high. These are symptoms or minor factors, not the root cause. The core issue is a policy choice within the batcher itself that creates a specific type of queuing delay.
+
+  **Realistic Solution:** The root cause is that the continuous batcher, in its aggressive pursuit of maximizing throughput, has created a head-of-line blocking scenario at the token level. To keep the GPU fed, the scheduler prioritizes filling every available slot in the next forward pass. Under high load, these slots are overwhelmingly filled by extending existing, long-running generation requests (optimizing for TPOT) rather than admitting new, incoming requests (which need a fast TTFT). A newly arrived request must wait for the current, large, and relatively slow forward pass to complete before it can be scheduled. The larger the batch configured to maximize throughput, the longer this 'batching tax' delay becomes for every new request, causing P99 TTFT to explode. The system is optimized for global throughput at the expense of fairness and latency for individual new tasks.
+
+  > **Napkin Math:** Let's assess the 'batching tax' on TTFT. We'll use a 70B model on an H100.
+
+1.  **Parameters:**
+    *   Model Compute per Token: ~2 FLOPs * 70B Params = 140 GFLOPs/token
+    *   GPU Peak Compute: ~989 TFLOPS (H100 FP16)
+
+2.  **Scenario A (Low Load / Small Batch):** The batcher forms a small batch of 8 requests.
+    *   Compute per forward pass: 8 requests * 140 GFLOPs/token/req = 1.12 TFLOPs.
+    *   Time per forward pass: 1.12 TFLOPs / 989 TFLOPS ≈ **1.1 ms**.
+    *   A new request waits at most 1.1 ms before its first token is processed. This is excellent TTFT.
+
+3.  **Scenario B (High Load / Throughput-Optimized Batch):** The batcher is configured to maximize utilization and forms a large batch of 128 requests.
+    *   Compute per forward pass: 128 requests * 140 GFLOPs/token/req = 17.92 TFLOPs.
+    *   Time per forward pass: 17.92 TFLOPs / 989 TFLOPS ≈ **18.1 ms**.
+    *   A new request arriving just as this batch is submitted must wait the full 18.1 ms before it can even be considered for the *next* batch. This wait time is a direct addition to its TTFT, representing a >16x increase in base latency before processing even begins.
+
+  > **Key Equation:** L = \lambda W
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Continuous Batching Stall</b> · <code>queueing-theory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The SLO-Violating Deadline Scheduler</b> · <code>real-time-scheduling-queueing-theory</code></summary>
+
+- **Interviewer:** "You run a multi-tenant LLM inference service. To ensure fairness, you design a strict deadline-based scheduler. Requests specify a deadline (e.g., 'generate 50 tokens within 2 seconds'), and the scheduler preemptively drops any request about to miss its deadline. After launch, your high-priority customers with short requests are happy. However, customers submitting long-running analysis jobs (e.g., 4000 tokens with a 60-second deadline) complain their jobs are almost always dropped, despite overall GPU utilization being only 50%. Assess this scheduler design. Why is it failing long jobs, and what underlying statistical phenomenon is being ignored?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The deadlines are too tight for the long jobs. Or, we just need more GPUs. The first is a configuration issue, not a design flaw. The second is incorrect because the system is underutilized on average.
+
+  **Realistic Solution:** The scheduler's design is flawed because it fails to account for service time variance, a key concept in queueing theory. By always prioritizing requests with the nearest deadlines (the short jobs), it creates a system where long-running jobs are perpetually starved of compute. The arrival of many short, high-priority requests constantly interrupts the processing of the long jobs. Each interruption pushes the long job further down the queue, increasing its total time in the system until its generous deadline is finally breached. The core problem is that 50% *average* utilization is masking short, intense bursts of 100% utilization dedicated to the high-priority traffic. This high variance in service times (e.g., 20ms vs. 2000ms) leads to disastrously high wait times for the longer jobs, a predictable outcome in M/G/1 queues (queues with general service time distributions).
+
+  > **Napkin Math:** Let's model the queueing behavior.
+
+1.  **Parameters:**
+    *   System Capacity: Can generate 2,000 tokens/sec.
+    *   Traffic Mix: 95% 'short' jobs (40 tokens, 1s deadline), 5% 'long' jobs (3000 tokens, 60s deadline).
+
+2.  **Service Time Calculation:**
+    *   Short Job Service Time: 40 tokens / 2000 tokens/s = **20 ms**.
+    *   Long Job Service Time: 3000 tokens / 2000 tokens/s = **1,500 ms**.
+
+3.  **Queue Dynamics Analysis:**
+    *   A 'long' job arrives. It needs 1.5s of compute. Its deadline is a far-off 60s.
+    *   While it's waiting, a stream of 'short' jobs arrives. Since their deadlines are much closer, the scheduler always processes them first.
+    *   To get its required 1.5s of execution time, the long job needs to find a 1.5s continuous gap where no high-priority jobs arrive. In a high-traffic system, this is statistically improbable.
+    *   Instead, it might get 5ms of compute here, 10ms there, constantly being preempted. Its total time spent waiting in the queue skyrockets. After 60 seconds of wall-clock time, it has only accumulated a fraction of its required 1.5s of service, the deadline is breached, and the scheduler drops it. The system isn't failing due to a lack of *average* capacity, but a lack of *contiguous, non-preempted* capacity for low-priority tasks.
+
+  > **Key Equation:** W_{M/G/1} = \frac{\lambda E[S^2]}{2(1-\rho)}
+
+  📖 **Deep Dive:** [ML Operations](https://mlsysbook.ai/vol1/ops.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Speculative Decoding Memory Bomb</b> · <code>speculative-decoding-kv-cache-memory</code></summary>
+
+- **Interviewer:** "To improve Time Per Output Token (TPOT), your team implements speculative decoding for a 70B model on H100s. You use a small draft model to generate 4 candidate tokens, and the 70B orchestrator model verifies them in a single, parallel forward pass. In staging, TPOT improves by 2.5x. You deploy to production. Shortly after, the service suffers a cascading failure from OOM errors, even though the number of concurrent users did not increase. Your observability tools show that peak GPU memory usage *per request* has inexplicably quadrupled. Critique this implementation. Why did an optimization designed to reduce latency cause a catastrophic memory failure?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The draft model itself uses too much memory. A 7B model uses ~14GB, which is significant, but it's a fixed cost and doesn't explain the per-request memory explosion. Another mistake is to blame weight loading overhead, which affects latency, not memory capacity.
+
+  **Realistic Solution:** The catastrophic failure stems from a misunderstanding of the memory access pattern during the verification step. The 4x increase in memory per request is not a coincidence; it's a direct result of the speculation length (k=4). To verify 4 candidate tokens in parallel, the attention mechanism's internal data structures grow proportionally. The query tensor becomes `[batch, k, dim]` instead of `[batch, 1, dim]`, and the intermediate attention score matrices become `k` times larger. These temporary activation tensors, which must exist in HBM during the forward pass, are the source of the memory explosion. The system was provisioned for the memory profile of standard decoding, where activations grow linearly with sequence length. It was not provisioned for the multiplicative peak memory required by the parallel verification step of speculative decoding, causing any GPU serving a moderate number of users to instantly OOM.
+
+  > **Napkin Math:** Let's analyze the peak activation memory during one forward pass.
+
+1.  **Parameters:**
+    *   Speculation length (k): 4.
+    *   Let's assume for a long-sequence request, the model weights take 50GB and the KV cache + other activations take 25GB of HBM on an 80GB H100, leaving a 5GB buffer.
+
+2.  **Scenario A (Standard Decoding):**
+    *   To generate one token, the model computes attention for a single new query vector.
+    *   Peak Memory Usage: 50GB (weights) + 25GB (activations) = **75 GB**.
+    *   The system is stable.
+
+3.  **Scenario B (Speculative Decoding):**
+    *   To verify `k=4` tokens, the model computes attention for 4 query vectors in parallel against the existing KV cache.
+    *   Key intermediate data structures, like the query-key attention matrix, are now `k` times larger than in standard decoding. This bloats the activation memory footprint.
+    *   Peak Activation Memory (approximate): 25GB * k = 25GB * 4 = **100 GB**.
+    *   Peak Total Memory: 50GB (weights) + 100GB (peak activations) = **150 GB**.
+    *   This massively exceeds the H100's 80GB HBM capacity, causing an immediate OOM error for any request being speculatively decoded. The system fails not because average memory grew, but because the instantaneous peak memory during the verification step became insurmountably large.
+
+  > **Key Equation:** \text{Memory}_{\text{peak}} \propto \text{Memory}_{\text{params}} + N_{\text{users}} \times (k \times \text{Memory}_{\text{activations}})
+
+  📖 **Deep Dive:** [Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+
+
+
+
+#### 🔴 L6+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Continuous Batching Stall</b> · <code>queueing</code></summary>
 
 - **Interviewer:** "You implement continuous batching (iteration-level scheduling) for an LLM endpoint to improve throughput. Under low load, TTFT (Time To First Token) is 100ms. Under high load, your throughput triples, but users start complaining that TTFT spikes to over 4 seconds, even though token generation speed (TPOT) remains fast. What scheduling flaw caused this?"
 
@@ -203,17 +1555,101 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Multi-Tenant SLO Crisis</b> · <code>serving-architecture-queueing-theory</code></summary>
+
+- **Interviewer:** "You are the Principal Engineer for the AI Serving Platform at a major cloud provider. Your platform serves two models on the same H100 GPU cluster:
+
+1.  **"Swift"**: A 7B parameter model for a real-time coding assistant (SLO: P99 TTFT < 250ms).
+2.  **"Deep"**: A 70B parameter model for offline code repository analysis (SLO: Throughput-oriented, no strict latency).
+
+Currently, you meet the "Swift" model's SLO by dedicating a silo of GPUs to it, running a simple batching server with a tiny batch timeout. This results in an average GPU utilization of only 15%, and your CFO is demanding you improve hardware efficiency by co-locating both services on all GPUs. Your initial attempt to mix workloads on a standard batching server caused the "Swift" model's P99 TTFT to skyrocket to over 2 seconds, a major SLO violation.
+
+Propose a new serving architecture that allows both 'Swift' and 'Deep' workloads to share the same H100 GPUs. Your design must (1) provably protect the 'Swift' model's 250ms P99 TTFT SLO and (2) significantly improve overall cluster utilization. Justify your core architectural decisions with napkin math."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common but insufficient proposal is to simply add a priority queue. While this ensures 'Swift' requests are picked before 'Deep' requests from the waiting queue, it doesn't solve the fundamental problem: **Head-of-Line Blocking**. If a 'Deep' model prefill has already started, the non-preemptive nature of standard batching means the 'Swift' request must wait for the entire multi-hundred-millisecond 'Deep' computation to finish, violating the SLO.
+
+  **Realistic Solution:** The correct architecture replaces the standard batching server with one that supports **fine-grained, preemptive scheduling**, like the mechanisms found in modern engines such as vLLM or Orca. This is often called 'continuous batching'.
+
+This design decouples the monolithic 'prefill' operation into a series of smaller, schedulable chunks (e.g., at the transformer layer or operator level). When a high-priority 'Swift' request arrives, the scheduler doesn't wait for the entire 'Deep' prefill to complete. Instead, it waits for the current, very short, computational chunk of the 'Deep' request to finish. It then **preempts** the 'Deep' request, serves the entire 'Swift' request (which is computationally very small), and then resumes the 'Deep' request. This prevents head-of-line blocking from the long-running task and guarantees low latency for the short, high-priority task, allowing both to safely co-exist and drive up utilization.
+
+  > **Napkin Math:** The justification is proven by comparing the worst-case queue time for the 'Swift' model under both architectures.
+
+**1. Architecture Failure (Standard Batching):**
+- A 'Deep' request (70B model, 4k prompt) begins its prefill computation.
+- Compute required: `C ≈ 2 × P × D = 2 × 70B × 4096 ≈ 5.7e14 FLOPs`.
+- Time on an H100: `T_deep = 5.7e14 FLOPs / 989 TFLOPS ≈ 580 ms`.
+- A 'Swift' request arriving just after this starts must wait for the entire 'Deep' prefill.
+- Worst-case `T_queue` for Swift is `~580 ms`.
+- `P99 TTFT (Swift) = T_queue + T_prefill (Swift) ≈ 580ms + (a few ms)`. This massively violates the 250ms SLO.
+
+**2. Proposed Architecture (Preemptive Continuous Batching):**
+- The 'Deep' model's 580ms prefill is broken into schedulable chunks. A Llama-70B model has 80 layers, so we can preempt at layer boundaries.
+- Duration of one chunk: `T_chunk = T_deep / num_layers = 580 ms / 80 ≈ 7.25 ms`.
+- A 'Swift' request's maximum wait time is now the time to finish one chunk, not the whole sequence.
+- `T_queue_max (Swift) ≈ 7.25 ms`.
+- Now, let's calculate the 'Swift' model's own service time (7B model, 128 token prompt).
+- Compute required: `C ≈ 2 × 7B × 128 ≈ 1.8e12 FLOPs`.
+- Time on H100: `T_prefill(Swift) = 1.8e12 FLOPs / 989 TFLOPS ≈ 1.8 ms`.
+- New protected P99 TTFT: `P99 TTFT (Swift) = T_queue_max + T_prefill(Swift) = 7.25 ms + 1.8 ms = 9.05 ms`.
+- This is well within the 250ms SLO, allowing the 'Deep' model to use all spare cycles and dramatically increasing cluster utilization.
+
+  > **Key Equation:** $$T_{\text{TTFT}} = T_{\text{queue}} + T_{\text{service}}$$
+
+  📖 **Deep Dive:** [Cloud: Serving Stack](https://mlsysbook.ai/cloud/03_serving_stack)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Phoenix False Positive</b> · <code>training-serving-skew</code></summary>
+
+- **Interviewer:** "You are the Principal Engineer for a new 'Vigilant Driver' feature that uses in-car cameras to detect driver drowsiness. After a successful offline evaluation, you roll it out to 1% of the fleet. Within hours, alerts spike for drivers in sunny cities like Phoenix. The model is flagging them as drowsy, but dashcam footage shows their eyes are open. Your constraints: the model was trained on data from the overcast Bay Area; the in-car camera has a fixed auto-exposure; the edge device only does a simple resize and greyscale conversion before running inference; and to save on cellular costs, high-resolution video is only uploaded at the end of a driver's 8-hour shift. Propose how you would triage this crisis, and then design the long-term architectural changes to the data and training pipeline to prevent this class of 'environmental skew' failure."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common reaction is to state the obvious: 'We need to retrain the model on data from Phoenix.' This is reactive, not systemic. It doesn't explain *how* to identify the root cause without waiting a full day for data, nor does it create a system that *anticipates* this problem in the future. Another mistake is to assume it's a model bug without first looking for a data-driven explanation for the geographic correlation.
+
+  **Realistic Solution:** The root cause is a severe case of training-serving skew driven by an unmodeled environmental variable: ambient brightness. The model, trained on overcast data, has incorrectly learned that 'squinting due to bright sun' is equivalent to 'eyes closing from drowsiness.'
+
+**Triage (Immediate):** The end-of-day upload policy means we're flying blind. We can't wait 20+ hours for video. The key is to derive a proxy for 'brightness' from the metadata we *can* get quickly. My first step is to ask the on-call team to immediately start logging the *average pixel intensity* of the greyscale frames being processed on the edge device, alongside the model's score. This is a tiny payload. By plotting `avg_pixel_intensity` vs. `drowsiness_score`, we can quickly confirm the hypothesis that high brightness is causing false positives. This proves it's a data problem, not a code bug.
+
+**Architectural Fix (Long-Term):** The system must be redesigned to be environment-aware.
+1.  **Sensor Pipeline:** The edge device's preprocessing must be upgraded from a simple converter to a feature extractor. It must now compute and stream a 'metadata packet' for every frame, including `avg_pixel_intensity` and maybe an `image_histogram_percentiles`. This is a few dozen bytes, cheap to transmit in near real-time.
+2.  **Feature Store:** These new environmental features must be ingested into the feature store as first-class citizens, time-synced with the inference results.
+3.  **Model & Training Pipeline:** The model architecture must change. We will move to a multi-modal input, feeding it both the image embedding AND the environmental feature vector. This allows the model to learn the crucial difference between `(squint, high_brightness)` and `(squint, low_brightness)`.
+4.  **Proactive Monitoring:** We will build a data quality monitoring system that perpetually tracks the statistical distribution of these environmental features across the fleet. If we launch in a new city and its `avg_pixel_intensity` distribution is vastly different from our training set's, the system automatically creates an active learning task to label a small sample of this new data, allowing us to proactively retrain *before* a false positive crisis occurs.
+
+  > **Napkin Math:** The 'end-of-shift' upload policy is a critical failure point that prevents effective triage. Let's quantify why.
+- **Data per Shift:** An 8-hour shift at 10 FPS with 640x480 greyscale frames (307.2 KB/frame) generates:
+  `8 hr × 3600 s/hr × 10 FPS × 0.3072 MB/frame ≈ 88.5 GB`
+- **Upload Time:** A typical vehicle's 4G connection averages ~10 Mbps (1.25 MB/s).
+  `88,500 MB / 1.25 MB/s = 70,800 seconds`
+- **The Blind Spot:** `70,800 s / 3600 s/hr ≈ 19.6 hours`.
+It takes nearly 20 hours to upload 8 hours of data. This cost-saving measure makes rapid-response debugging impossible and proves why a new real-time metadata-first telemetry strategy is essential for operational stability.
+
+  > **Key Equation:** $$ P(\text{Drowsy} | \text{Image}, \text{Brightness}) \neq P(\text{Drowsy} | \text{Image}) $$
+
+  📖 **Deep Dive:** [Volume I: Data Engineering](https://mlsysbook.ai/vol1/data_engineering.html)
+  </details>
+</details>
+
+
+
 
 ---
 
 
-### 🔄 Batching & Scheduling
+### Batching & Scheduling
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Underutilized Accelerator</b> · <code>continuous-batching</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Underutilized Accelerator</b> · <code>batching</code></summary>
 
 - **Interviewer:** "You're optimizing an LLM inference service running on A100 GPUs. You've already implemented dynamic batching, where requests are grouped together until the GPU queue is full or a timeout is reached. However, under bursty traffic with highly variable input sequence lengths, you still observe significant GPU underutilization and high tail latencies. What is the fundamental limitation of standard dynamic batching in this scenario, and what advanced technique would you propose to maximize GPU throughput and reduce tail latency?"
 
@@ -248,13 +1684,13 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 ---
 
 
-### 🗂️ KV-Cache & Memory Management
+### KV-Cache & Memory Management
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The OOMing Generator</b> · <code>kv-cache-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The OOMing Generator</b> · <code>kv-cache</code></summary>
 
 - **Interviewer:** "You're responsible for deploying a large language model (LLM) on a GPU cluster for real-time inference. Under high concurrent user requests, you observe frequent Out-Of-Memory (OOM) errors on the GPUs, despite the total memory of the model weights fitting comfortably. What is the most likely cause of these OOMs, and what advanced technique would you implement to mitigate this?"
 
@@ -289,11 +1725,12 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 ---
 
 
-### 🏗️ Serving Architecture
+### Serving Architecture
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Serverless Freeze</b> · <code>serving</code></summary>
 
@@ -455,8 +1892,7 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Pre-computation Trade-off</b> · <code>serving</code></summary>
 
@@ -581,7 +2017,7 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The A/B Testing at Scale</b> · <code>serving</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The A/B Testing at Scale</b> · <code>serving</code> <code>deployment</code></summary>
 
 - **Interviewer:** "We want to A/B test our current 13B model against a new 70B model in shadow mode. The product team says 'just mirror 100% of traffic to both models for a week to gather data.' Why is this statistically unnecessary but infrastructure-ruinous, and how does the GPU memory asymmetry between these models dictate your A/B testing architecture?"
 
@@ -808,7 +2244,7 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Multi-Tenant GPU Sharing Problem</b> · <code>serving</code> <code>economics</code></summary>
@@ -926,7 +2362,7 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Continuous Batching Starvation</b> · <code>serving</code> <code>scheduling</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Continuous Batching Starvation</b> · <code>serving</code> <code>real-time</code></summary>
 
 - **Interviewer:** "You implement Continuous Batching (iteration-level scheduling) for your LLM server. It successfully groups users together to maximize GPU utilization. However, you notice that users asking for very short, 10-token answers are experiencing incredibly long wait times, even though their requests require very little compute. How did your batching algorithm starve the easy requests?"
 
@@ -952,7 +2388,7 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The LLM Canary Trap</b> · <code>canary-deployment</code> <code>llm-serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The LLM Canary Trap</b> · <code>rollout</code> <code>llm-serving</code></summary>
 
 - **Interviewer:** "You're deploying a fine-tuned 70B LLM to replace your production 13B model. You set up a standard canary: route 5% of traffic to the new model, monitor error rate and latency for 30 minutes, then promote. After full rollout, users report the new model occasionally hallucinates wildly long, repetitive outputs. Your canary detected no latency or error spikes. Why do standard infra metrics miss LLM quality regressions, and how could you have used the GPU's KV-cache memory profile as a hardware-level canary signal?"
 
@@ -1032,7 +2468,7 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Batching Dilemma</b> · <code>serving</code> <code>batching</code></summary>
@@ -1055,7 +2491,7 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Speculative Decoding Accept Rate Crash</b> · <code>serving</code> <code>algorithms</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Speculative Decoding Accept Rate Crash</b> · <code>serving</code> <code>roofline</code></summary>
 
 - **Interviewer:** "You implement Speculative Decoding to speed up an LLM. You use a 1B draft model to guess 5 tokens, and a 70B target model to verify them in a single pass. On standard English text, it yields a 2.5x speedup. When you deploy it to your coding assistant API, the overall throughput actually *drops* by 15% compared to not using Speculative Decoding at all. Why did the optimization become a penalty?"
 
@@ -1091,13 +2527,12 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 ---
 
 
-### 🚀 Advanced Inference
+### Advanced Inference
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The KV-Cache Context Explosion</b> · <code>attention-mechanisms</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The KV-Cache Context Explosion</b> · <code>attention</code></summary>
 
 - **Interviewer:** "You are serving a Llama-3 8B model. At a batch size of 1 with a 1,000-token prompt, inference requires roughly 16GB of VRAM. A customer wants you to increase the context window to 128,000 tokens for document summarization. Your PM assumes it will just take a bit more memory and asks you to deploy it on a 24GB RTX 4090. Why is this physically impossible?"
 
@@ -1121,7 +2556,7 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Inference Cost Attribution Puzzle</b> · <code>cost-attribution</code> <code>inference</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Inference Cost Attribution Puzzle</b> · <code>economics</code> <code>serving</code></summary>
 
 - **Interviewer:** "Your platform serves 5 different LLMs on a shared pool of 64 A100 GPUs using vLLM with continuous batching. The finance team wants to charge each product team for their inference costs. Your colleague proposes: 'Divide total GPU cost by total requests, charge per request.' The search team (short prompts, 50-token outputs) and the content team (long prompts, 2,000-token outputs) both object. Design a fair cost attribution model."
 
@@ -1141,7 +2576,7 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The Speculative Memory Trade-off</b> · <code>speculative-decoding</code></summary>
@@ -1164,7 +2599,7 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Serverless Freeze</b> · <code>serverless-inference</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Serverless Freeze</b> · <code>serving</code></summary>
 
 - **Interviewer:** "Your team is exploring serverless functions (e.g., AWS Lambda, Google Cloud Functions) for an on-demand, low-volume ML inference endpoint to minimize operational overhead and cost. However, initial tests reveal significant 'cold start' latencies, sometimes exceeding 5 seconds, which is unacceptable for the user experience. What are the main contributors to serverless cold starts for ML workloads, and what strategies would you employ to bring them within an acceptable range?"
 
@@ -1202,4 +2637,80 @@ Latency budgets, batching strategies, KV-cache management, autoscaling, and spec
 
   </details>
 
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Foundation-brightgreen?style=flat-square" alt="Level 2" align="center"> Handling KV Cache Fragmentation</b> · <code>kv-cache</code></summary>
+
+- **Interviewer:** "When serving a large language model with multiple concurrent requests, we notice that memory utilization is poor despite having free memory available, leading to out-of-memory errors for new requests. How does PagedAttention specifically solve this issue in the KV cache?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Thinking that PagedAttention compresses the KV cache to save memory rather than managing fragmentation.
+  **Realistic Solution:** PagedAttention partitions the KV cache into fixed-size blocks (pages) that can be non-contiguous in memory, similar to virtual memory in OS, virtually eliminating external fragmentation.
+
+  > **Options:**
+  > [ ] It compresses the key and value tensors using quantization before storing them in the cache.
+  > [x] It partitions the KV cache into non-contiguous fixed-size blocks, eliminating external fragmentation and allowing dynamic memory allocation per token.
+  > [ ] It proactively evicts the least recently used KV cache tensors to free up contiguous memory blocks for new requests.
+  > [ ] It offloads the KV cache to CPU RAM when GPU memory is fragmented and prefetches it when needed.
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> Advantages of Continuous Batching</b> · <code>batching</code></summary>
+
+- **Interviewer:** "In traditional static batching, the inference engine waits for all sequences in a batch to finish generating before starting a new batch. How does continuous batching (also known as in-flight batching) improve throughput compared to static batching?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming continuous batching increases the generation speed of individual tokens rather than the overall system throughput.
+  **Realistic Solution:** Continuous batching inserts new requests into the batch as soon as a sequence finishes, instead of waiting for the longest sequence in the batch to complete, thereby reducing idle compute resources.
+
+  > **Options:**
+  > [ ] It increases the clock speed of the GPU dynamically to generate tokens faster for shorter sequences.
+  > [x] It allows new requests to join the active batch as soon as other sequences complete, preventing GPU underutilization caused by waiting for the longest sequence.
+  > [ ] It batches all requests that have the exact same prompt length together, ensuring synchronized generation steps.
+  > [ ] It caches the output tokens of the continuous stream to reuse them across different users in real-time.
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Foundation-brightgreen?style=flat-square" alt="Level 2" align="center"> Mechanism of Speculative Decoding</b> · <code>speculative-decoding</code></summary>
+
+- **Interviewer:** "Speculative decoding aims to speed up LLM inference without changing the output distribution. It uses a smaller 'draft' model and a larger 'target' model. What is the fundamental mechanism that allows it to achieve speedup?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Believing that the target model is only used when the draft model is uncertain, rather than verifying every token in parallel.
+  **Realistic Solution:** The smaller draft model sequentially generates multiple candidate tokens quickly. The larger target model then verifies all these candidate tokens in a single parallel forward pass, accepting the valid ones and correcting the first mistake.
+
+  > **Options:**
+  > [ ] The target model is used only for the first few tokens, and the draft model completes the rest of the sequence to save time.
+  > [x] The draft model generates multiple tokens sequentially, which the target model then verifies in a single parallel forward pass, accepting correct tokens and correcting the first divergence.
+  > [ ] The draft model and target model generate tokens in parallel, and a majority vote decides which token to output.
+  > [ ] The draft model continuously fine-tunes the target model during inference to make it generate tokens faster.
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> Applying Little's Law to Inference Servers</b> · <code>queueing</code></summary>
+
+- **Interviewer:** "According to Little's Law ($L = \lambda W$), if our LLM inference server has an average arrival rate of 10 requests per second ($\lambda$) and each request takes an average of 5 seconds to process ($W$), what does the system need to support in terms of concurrent requests ($L$) to remain stable?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Confusing the arrival rate with throughput or thinking the server only needs to handle the arrival rate concurrently.
+  **Realistic Solution:** Little's Law states that the average number of items in the system ($L$) equals the arrival rate multiplied by the average time spent in the system. $10 	ext{ req/s} 	imes 5 	ext{ s} = 50$ concurrent requests.
+
+  > **Options:**
+  > [ ] The server needs to support 5 concurrent requests at any given time.
+  > [ ] The server needs to support 15 concurrent requests to have a buffer for peak loads.
+  > [x] The server needs to support an average of 50 concurrent requests in the system.
+  > [ ] The server needs to support 2 concurrent requests, as 10 divided by 5 is 2.
+  </details>
 </details>

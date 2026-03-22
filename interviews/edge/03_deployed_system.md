@@ -17,11 +17,356 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 ---
 
 
-### 🚀 Deployment & Fleet Management
+### Deployment & Fleet Management
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The A/B Partitioning Storage Tax</b> · <code>ota-firmware-updates</code></summary>
+
+- **Interviewer:** "You are designing an edge device with a 1 MB application firmware image (model + code). To ensure safe and reliable over-the-air (OTA) updates with rollback capabilities, you're using an A/B partitioning scheme. Identify the approximate minimum flash storage required for the device, accounting for the two application partitions and a typical 100 KB overhead for the bootloader and operating system."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often forget that A/B partitioning for OTA updates requires provisioning space for *two* complete copies of the application image. They calculate storage based on just one copy, failing to account for the inactive partition that holds the old version for rollback or receives the new version during an update.
+
+  **Realistic Solution:** The correct approach is to sum the storage for the operating system/bootloader overhead and two full application partitions. One partition (A) runs the active firmware, while the other (B) is used to download the new firmware. Once validated, the bootloader switches to boot from partition B. Partition A is kept as a fallback until the next update cycle. Therefore, the minimum required storage is the OS overhead plus twice the application image size.
+
+  > **Napkin Math:** Total Flash = (OS + Bootloader) + (App Image Size × 2)
+Total Flash ≈ 100 KB + (1 MB × 2)
+Total Flash ≈ 100 KB + 2 MB = 2.1 MB
+
+  > **Key Equation:** $\text{Flash}_{\text{total}} = \text{Overhead} + (\text{ImageSize} \times 2)$
+
+  > **Options:**
+  > [ ] ~1.1 MB
+  > [x] ~2.1 MB
+  > [ ] ~2.0 MB
+  > [ ] Slightly more than 1 MB, for a delta update
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Hard Real-Time Heartbeat</b> · <code>watchdog-timers</code></summary>
+
+- **Interviewer:** "You are designing a safety-critical perception system for an industrial robot. The main processing loop, which runs inference on a camera stream, must complete every 33 milliseconds to meet its hard real-time deadline. To prevent the system from freezing due to a software fault, you use a hardware watchdog timer. What is a reasonable timeout to set for this watchdog?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistakes are setting the timeout either too short or too long. A timeout shorter than the task deadline (e.g., 10ms) will cause constant, spurious resets during normal operation. A timeout that is orders of magnitude too long (e.g., 1 second) defeats the purpose of a *real-time* safeguard, as it allows the system to be non-responsive for a catastrophically long period before recovering.
+
+  **Realistic Solution:** A reasonable timeout should be slightly longer than the deadline to provide a buffer for normal system jitter, but not so long that it compromises the real-time guarantee. A value of around 100ms is a good choice. It's roughly 3 times the deadline, ensuring the system resets only after several consecutive missed deadlines, indicating a true fault rather than a transient hiccup. This watchdog is the lowest and most critical rung on a 'degradation ladder'; its failure signals an unrecoverable software state, necessitating a hard reset to return to a known-good state.
+
+  > **Napkin Math:** A hard real-time deadline of 33ms implies a processing rate of 30 frames per second (1000ms / 33ms ≈ 30 FPS). Setting a watchdog for 100ms means the system will be reset if it fails to process approximately 3 consecutive frames (100ms / 33ms ≈ 3). This is a fast failure detection. In contrast, a 1-second timeout would mean waiting for ~30 frames to be missed before a reset, which is far too slow for a safety-critical system.
+
+  > **Key Equation:** $$ T_{\text{watchdog}} > T_{\text{deadline}} $$
+
+  > **Options:**
+  > [ ] 10 ms
+  > [x] 100 ms
+  > [ ] 1 second
+  > [ ] 40 ms, the round-trip-time for US cross-country fiber
+
+  📖 **Deep Dive:** [Monitoring and Reliability](https://mlsysbook.ai/edge/09_monitoring_reliability.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Storage Tax</b> · <code>ota-firmware-updates-ab-partitioning</code></summary>
+
+- **Interviewer:** "You're designing the firmware for a fleet of smart environmental sensors. Each device has a microcontroller with 1MB of total Flash memory. To ensure you can deploy updates reliably, the system must use an A/B partitioning scheme for Over-the-Air (OTA) updates. The bootloader is allocated 32KB of flash, and the real-time operating system (RTOS) requires another 64KB. Explain the storage layout and calculate the maximum possible size for your application binary (which includes the model weights and inference code)."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to calculate the available space after subtracting system overhead, but forgetting that an A/B scheme requires *two* identical application slots, effectively halving the remaining space. Another error is to only divide the total flash by two, ignoring the fixed space consumed by the bootloader and RTOS.
+
+  **Realistic Solution:** The correct approach is to first account for the fixed storage costs that are outside the updatable application partitions. The bootloader and RTOS are essential and static. After subtracting their footprint from the total flash, the remaining space is what's available for the A/B partitions. Because one partition must be active while the other is receiving the update, this available space must be divided by two.
+
+Total Flash: 1 MB = 1024 KB
+Fixed Overhead: 32 KB (Bootloader) + 64 KB (RTOS) = 96 KB
+Space available for partitions: 1024 KB - 96 KB = 928 KB
+Maximum app size (per partition): 928 KB / 2 = 464 KB.
+
+  > **Napkin Math:** 1. Total Flash: 1024 KB
+2. Subtract Bootloader: 1024 KB - 32 KB = 992 KB
+3. Subtract RTOS: 992 KB - 64 KB = 928 KB
+4. Divide by 2 for A/B partitions: 928 KB / 2 = 464 KB
+
+  > **Key Equation:** $\text{Max App Size} = \frac{\text{Total Flash} - (\text{Bootloader Size} + \text{RTOS Size})}{2}$
+
+  > **Options:**
+  > [ ] 928 KB
+  > [ ] 512 KB
+  > [x] 464 KB
+  > [ ] 416 KB
+
+  📖 **Deep Dive:** [TinyML: Deployed Device](https://mlsysbook.ai/tinyml/03_deployed_device.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Degradation Ladder</b> · <code>degradation-ladder-watchdog</code></summary>
+
+- **Interviewer:** "You're designing the reliability system for a fleet of Jetson AGX Orin devices performing real-time object detection for a security application. The system must never be down for more than a few minutes. You design a three-stage degradation ladder triggered by a watchdog process.
+
+- **Stage 1:** A user-space watchdog monitors the inference application. If the app is unresponsive for 10 seconds, it triggers a software restart of the service.
+- **Stage 2:** If the service doesn't respond within 15 seconds *after* the restart is issued, the watchdog escalates and triggers a full OS reboot.
+- **Stage 3:** If the OS fails to boot and re-establish the watchdog process within 90 seconds of the reboot command, a hardware watchdog (which hasn't been 'pet' during this time) performs a hard power cycle of the entire device.
+
+Explain the maximum possible time from the moment the application first becomes unresponsive to a guaranteed hard power cycle."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the Maximum Time to Recovery by only considering the longest single timeout (the 90-second hardware watchdog) instead of summing the timeouts of the sequential stages. They forget that the system must fail through each preceding stage before the next one is triggered, making the total time cumulative.
+
+  **Realistic Solution:** The maximum time to recovery is the sum of the timeouts for each sequential stage in the degradation ladder. The clock starts when the application hangs, and each stage must fail for its full timeout period before the next one begins.
+
+1.  **Detection:** The user-space watchdog waits 10 seconds to detect the initial unresponsiveness.
+2.  **Service Restart:** It then attempts a restart, which is allowed to fail for 15 seconds.
+3.  **OS Reboot:** It then attempts an OS reboot, which is allowed to fail for 90 seconds.
+
+The total time is the sum of these sequential timeouts.
+
+  > **Napkin Math:** Total Time = (Initial Detection Timeout) + (Service Restart Timeout) + (OS Reboot Timeout)
+Total Time = 10s + 15s + 90s
+Total Time = 115 seconds (or 1 minute, 55 seconds)
+
+  > **Key Equation:** T_{\text{max_recovery}} = T_{\text{detect}} + T_{\text{stage1_timeout}} + T_{\text{stage2_timeout}}
+
+  > **Options:**
+  > [ ] 90 seconds
+  > [ ] 105 seconds
+  > [x] 115 seconds
+  > [ ] 25 seconds
+
+  📖 **Deep Dive:** [Deployed Edge Systems](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Overnight Update Dilemma</b> · <code>firmware-convergence</code></summary>
+
+- **Interviewer:** "You are an engineer managing a fleet of 10,000 autonomous delivery robots. A critical 500 MB firmware update must be rolled out. The robots are only available to download this update during a 2-hour window each night while charging. The cellular connection to each robot is unreliable, giving it only a 90% chance of successfully completing the download on any given night.
+
+Calculate the minimum number of nights required for at least 99% of the fleet to be successfully updated. Explain your reasoning."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to focus on the best-case scenario for a single device. Engineers calculate the download time (which is short), see it fits in the 2-hour window, and incorrectly conclude the entire fleet will update in one night. This fails to model the probabilistic nature of network reliability at scale, which results in a 'long tail' of devices that repeatedly fail to update.
+
+  **Realistic Solution:** This is a problem of modeling the exponential decay of the non-updated device population. If 90% of devices succeed each night, it means 10% of the remaining un-updated devices will fail and carry over to the next night. We need to find the number of nights, 't', until the un-updated population is less than or equal to 1% of the total fleet.
+
+The target is to have ≤ 1% of 10,000 = 100 devices remaining on the old firmware. We can model the number of remaining devices day by day.
+
+  > **Napkin Math:** Total Fleet Size: 10,000 devices
+Target Updated Percentage: 99%
+Target Remaining (Un-updated) Devices: 10,000 * (1 - 0.99) = 100 devices
+Daily Success Probability (P_success): 0.90
+Daily Failure Probability (P_fail): 1.0 - 0.90 = 0.10
+
+- **End of Day 0:** 10,000 devices are un-updated.
+- **End of Day 1:** 10,000 * P_fail = 10,000 * 0.10 = 1,000 devices remain un-updated.
+- **End of Day 2:** 1,000 * P_fail = 1,000 * 0.10 = 100 devices remain un-updated.
+
+After 2 full days, the number of un-updated devices is 100, which meets the 99% convergence target.
+
+  > **Key Equation:** N_{remaining}(t) = N_{total} \times (P_{fail})^t
+
+  > **Options:**
+  > [ ] 1 day. The download time for a single device is much less than the 2-hour window, so all devices should finish on the first night.
+  > [ ] 44 days. This is the time required based on the decay of the 'successful' population, not the failing one.
+  > [x] 2 days. The un-updated portion of the fleet decays by 90% each day, reaching the 1% target after two days.
+  > [ ] 10 days. This confuses the fleet convergence with the expected number of trials for a single device to experience one failure (1 / 0.1).
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The A/B Storage Tax</b> · <code>ota-storage-management</code></summary>
+
+- **Interviewer:** "You are designing the Over-the-Air (OTA) update strategy for a fleet of autonomous edge devices. Each device has 16 GB of storage, and the complete system image (OS, runtime, and models) is 4 GB. To ensure that a failed update doesn't brick the device, you must implement a seamless A/B partitioning scheme. Identify the minimum total storage that must be reserved for the A and B system partitions combined."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers unfamiliar with embedded systems reliability often only budget for a single system partition, forgetting that a robust A/B scheme requires a full, independent copy of the entire system image. They mistakenly think about patch/delta sizes, not the space for the inactive slot that receives the full update before being swapped to active.
+
+  **Realistic Solution:** A robust A/B OTA update mechanism requires two identical partitions. One is the 'active' partition, running the current firmware. The other is the 'inactive' partition, which serves as the target for the new OTA update. This allows the system to remain fully functional while the update is downloaded and installed. If the update fails, the system can simply boot back into the original, untouched active partition. Therefore, the total storage required is twice the size of a single system image.
+
+  > **Napkin Math:** System Image Size: 4 GB
+Required Partitions for A/B Scheme: 2 (one active, one inactive)
+Total Reserved Storage = System Image Size × 2
+Total Reserved Storage = 4 GB × 2 = 8 GB
+
+This leaves the remaining 8 GB (16 GB total - 8 GB reserved) for user data, logs, and other application assets.
+
+  > **Key Equation:** $\text{Storage}_{\text{A/B}} = 2 \times S_{\text{image}}$
+
+  > **Options:**
+  > [ ] 4 GB
+  > [ ] 16 GB
+  > [x] 8 GB
+  > [ ] 6 GB
+
+  📖 **Deep Dive:** [Deployed Systems & Fleet Management](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Frozen Robot Problem</b> · <code>watchdog-timer-fusa</code></summary>
+
+- **Interviewer:** "You are designing the safety system for an autonomous delivery robot. If the main perception software enters an infinite loop and completely freezes, what is the most fundamental hardware mechanism you would rely on to force a system reboot and recover the robot from this non-responsive state?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers from a cloud background often confuse hardware watchdogs with software-level health checks (like a Kubernetes liveness probe). A software check fails when the OS scheduler itself hangs. Another common confusion is with ECC memory, which only protects against memory bit-flips, not logical software freezes.
+
+  **Realistic Solution:** A hardware watchdog timer. This is a simple, independent hardware counter physically separate from the main processor. The main application software must 'pet the dog' (reset the timer) at a regular interval. If the software freezes, it fails to reset the timer. When the timer overflows, it triggers a hardware reset line on the CPU, forcing a full reboot. It's the ultimate hardware failsafe for a non-responsive system, which is critical for functional safety in robotics.
+
+  > **Napkin Math:** A typical edge system has a hard real-time deadline, for instance, a 33ms perception-action loop for a 30 FPS camera. A watchdog timer might be configured with a 100ms timeout. This means the software must successfully complete its loop and 'pet the dog' at least once every 100ms. If just 3 consecutive frames are dropped or the main loop gets stuck, the watchdog will trigger, rebooting the system before the robot can remain unresponsive for a dangerous amount of time.
+
+  > **Options:**
+  > [ ] A software liveness probe that pings a monitoring service.
+  > [ ] Error-Correcting Code (ECC) memory to prevent corruption.
+  > [x] A hardware watchdog timer that triggers a CPU reset.
+  > [ ] A graceful degradation module that switches to a simpler model.
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The OTA Download Tax</b> · <code>ota-update-bottleneck</code></summary>
+
+- **Interviewer:** "You need to roll out a 500 MB containerized model update to a fleet of Jetson devices in a factory. These devices are connected via an industrial 4G LTE link with a stable 20 Mbps download speed. State the approximate time required for the download phase of this Over-the-Air (OTA) update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to multi-gigabit datacenter networking often forget that edge connectivity is far more constrained. They incorrectly assume the download is nearly instantaneous and that the bottleneck must be container decompression or model loading into memory. In reality, on slow or unreliable links, the network transfer time dominates all other steps.
+
+  **Realistic Solution:** The primary bottleneck is the network download. The solution requires converting the network speed from Megabits per second (Mbps) to MegaBytes per second (MB/s) and then calculating the total transfer time.
+
+1.  **Convert bits to bytes:** A byte has 8 bits, so a 20 Mbps link is 20 / 8 = 2.5 MB/s.
+2.  **Calculate time:** Transferring a 500 MB file at 2.5 MB/s takes 500 MB / 2.5 MB/s = 200 seconds.
+3.  **Convert to minutes:** 200 seconds is equal to 3 minutes and 20 seconds.
+
+  > **Napkin Math:** $\text{Download Speed (MB/s)} = \frac{\text{20 Mbps}}{\text{8 bits/byte}} = 2.5 \text{ MB/s}$
+
+$\text{Time} = \frac{\text{500 MB}}{\text{2.5 MB/s}} = 200 \text{ seconds} \approx 3.3 \text{ minutes}$
+
+  > **Key Equation:** $\text{Time} = \frac{\text{Total Size in Bytes}}{\text{Speed in Bits per Second} / 8}$
+
+  > **Options:**
+  > [ ] Less than 5 seconds
+  > [ ] ~25 seconds
+  > [x] ~3.3 minutes
+  > [ ] Over 30 minutes
+
+  📖 **Deep Dive:** [Edge AI: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Edge OTA Bandwidth Bottleneck</b> · <code>ota-update-bandwidth</code></summary>
+
+- **Interviewer:** "You're an ML Systems Engineer managing a fleet of 1,000 traffic cameras, each powered by a Jetson AGX Orin. You need to roll out a critical OTA (Over-the-Air) update. The new computer vision model is 250 MB. It is packaged inside a container that adds 450 MB for the base image, dependencies, and new safety guardrails. Each camera has a stable, dedicated 400 Mbps network connection. Explain the total time required to download the complete update package to a single device."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to focus only on the model artifact size (250 MB) and ignore the container overhead. In real-world edge deployments, the container—with its OS, libraries, and other dependencies—often constitutes the majority of the payload. Another frequent error is confusing megabits per second (Mbps) with megabytes per second (MB/s), leading to an 8x miscalculation.
+
+  **Realistic Solution:** To solve this, you must account for the *total* payload size and correctly convert network speed from bits to bytes.
+
+1.  **Calculate Total Payload Size:** The total size is the model plus the container overhead: 250 MB + 450 MB = 700 MB.
+2.  **Convert Network Bandwidth:** Network speeds are measured in bits, while file sizes are in bytes. You must divide the network speed by 8 to get bytes per second: 400 Mbps / 8 = 50 MB/s.
+3.  **Calculate Download Time:** Divide the total payload by the network speed in MB/s: 700 MB / 50 MB/s = 14 seconds.
+
+  > **Napkin Math:** 1. **Total Payload:** 250 MB (Model) + 450 MB (Container) = 700 MB
+2. **Network Speed in Bytes:** 400 Mbps / 8 bits/byte = 50 MB/s
+3. **Time to Download:** 700 MB / 50 MB/s = 14 seconds
+
+  > **Key Equation:** $\text{Time (s)} = \frac{(\text{Model Size (MB)} + \text{Container Overhead (MB)})}{\text{Bandwidth (MB/s)}}$
+
+  > **Options:**
+  > [ ] 5 seconds
+  > [ ] 1.75 seconds
+  > [x] 14 seconds
+  > [ ] 112 seconds
+
+  📖 **Deep Dive:** [Deployed Edge Systems](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Overnight OTA Dilemma</b> · <code>ota-update-analysis</code></summary>
+
+- **Interviewer:** "You are the systems engineer for a fleet of 10,000 autonomous delivery robots. A critical software update is required, which includes a new 500 MB perception model and a 1 GB local database for RAG, making the total update package 1.5 GB per device.
+
+Your cloud infrastructure provides a dedicated egress bandwidth of 10 Gbps for this rollout. The entire fleet must be updated during an 8-hour overnight maintenance window.
+
+Calculate the minimum time required to push this update to the entire fleet and explain if this rollout is feasible within the given maintenance window."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing bits and bytes. Network speeds are measured in Gigabits per second (Gbps), while file sizes are in Gigabytes (GB). Failing to convert units by multiplying the data size by 8 results in an 8x underestimation of the required time, leading to the incorrect conclusion that the update is trivial.
+
+  **Realistic Solution:** The rollout is feasible. The total data to be transferred is 15 TB, which will take approximately 3.33 hours over a 10 Gbps link, fitting comfortably within the 8-hour maintenance window.
+
+First, calculate the total data volume in Gigabytes (GB):
+1.5 GB/device × 10,000 devices = 15,000 GB
+
+Next, convert the total data volume to Gigabits (Gb) to match the network bandwidth units:
+15,000 GB × 8 Gb/GB = 120,000 Gb
+
+Finally, calculate the time required by dividing the total data volume in bits by the network speed:
+Time = 120,000 Gb / 10 Gbps = 12,000 seconds
+
+Convert seconds to hours:
+12,000 seconds / 3600 seconds/hour ≈ 3.33 hours.
+
+  > **Napkin Math:** 1. **Total Data (GB):** 1.5 GB/device * 10,000 devices = 15,000 GB
+2. **Total Data (Gb):** 15,000 GB * 8 Gb/GB = 120,000 Gb
+3. **Network Speed:** 10 Gbps
+4. **Time (seconds):** 120,000 Gb / 10 Gbps = 12,000 s
+5. **Time (hours):** 12,000 s / 3600 s/hr = 3.33 hours
+6. **Conclusion:** 3.33 hours < 8-hour window. Feasible.
+
+  > **Key Equation:** $\text{Time}_{\text{total}} = \frac{(\text{Update Size}_{\text{Bytes}} \times 8 \times \text{Fleet Size})}{\text{Network Bandwidth}_{\text{bps}}}$
+
+  > **Options:**
+  > [ ] ~25 minutes. The rollout is trivial.
+  > [ ] < 1 minute. It's nearly instantaneous.
+  > [ ] ~333 hours. The rollout is impossible with this infrastructure.
+  > [x] ~3.3 hours. The rollout is feasible.
+
+  📖 **Deep Dive:** [Edge AI](https://mlsysbook.ai/edge/)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Edge Container Overhead</b> · <code>deployment</code></summary>
 
@@ -48,7 +393,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Bricked OTA Update</b> · <code>deployment</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Bricked OTA Update</b> · <code>deployment</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your fleet of 200 NXP i.MX 8M Plus devices monitors crop health on farms across Iowa. You push a 45 MB model update over 4G/LTE. 30 devices (15%) lose connectivity mid-update and are now bricked with a partially written model file. Why are ML model updates significantly more dangerous than generic firmware updates in constrained environments, and how does the model's size dictate your partition architecture?"
 
@@ -146,7 +491,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Brick Avoidance Protocol</b> · <code>ota-updates</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Brick Avoidance Protocol</b> · <code>ota</code></summary>
 
 - **Interviewer:** "A critical OTA update for a new vision model fails on 10% of your 50,000 edge devices due to insufficient disk space. How do you prevent these devices from becoming unrecoverable and ensure they can eventually receive a working update?"
 
@@ -168,7 +513,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Gradual Rollout Guru</b> · <code>model-versioning</code>, <code>a/b-testing</code>, <code>rollout-strategies</code>, <code>feature-flags</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Gradual Rollout Guru</b> · <code>model-registry</code>, <code>a/b-testing</code>, <code>rollout-strategies</code>, <code>feature-flags</code></summary>
 
 - **Interviewer:** "Your team has developed a new, improved version of an object detection model for your fleet of smart home security cameras. Before a full fleet rollout, you want to test its real-world performance on a small, controlled group of devices (e.g., 5% of your fleet) for a week. How would you design the system to enable this A/B testing, ensuring a smooth rollout and easy rollback if issues arise?"
 
@@ -207,10 +552,9 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The OTA Brick Risk</b> · <code>model-update</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The OTA Brick Risk</b> · <code>ota</code></summary>
 
 - **Interviewer:** "You manage a fleet of 10,000 edge AI cameras running object detection. Each camera has a Jetson Orin Nano. You need to deploy an updated YOLOv8 model compiled with TensorRT. Your colleague suggests: 'Just push the new .engine file over the air and restart inference.' Why does the tight coupling between the ML model's tensor format and the hardware-specific runtime make this OTA update riskier than a generic firmware update, and how must your deployment strategy change to handle this?"
 
@@ -232,7 +576,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Boot Time Budget</b> · <code>boot-time</code> <code>edge-deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Boot Time Budget</b> · <code>firmware</code> <code>edge-deployment</code></summary>
 
 - **Interviewer:** "Your edge AI security camera (Jetson Orin Nano, 8 GB RAM, 128 GB NVMe) must begin producing detections within 3 seconds of power-on. Currently, boot takes 22 seconds: 2s UEFI, 8s Linux kernel + systemd, 4s loading Python + PyTorch, 8s loading the YOLOv8-L model and building the TensorRT engine. How do you cut boot-to-first-detection from 22 seconds to under 3 seconds?"
 
@@ -252,7 +596,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Resource Tug-of-War</b> · <code>resource-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Resource Tug-of-War</b> · <code>deployment</code></summary>
 
 - **Interviewer:** "An edge device is running two independent ML models on a single NPU: one for critical safety monitoring (high priority, low latency, e.g., collision avoidance) and another for background analytics (lower priority, best-effort, e.g., long-term behavior analysis). How do you ensure the safety model always meets its deadlines without significantly starving the analytics model, especially when both are contending for the NPU?"
 
@@ -281,7 +625,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Edge Model A/B Testing</b> · <code>deployment</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Edge Model A/B Testing</b> · <code>deployment</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your cloud ML team A/B tests model updates by routing 5% of traffic to the new model and comparing metrics in real-time. They suggest the same approach for your fleet of 2,000 industrial inspection robots running on Hailo-8 (26 TOPS, 2.5W). You push back. Why doesn't cloud-style A/B testing work on edge, and what's the alternative?"
 
@@ -563,7 +907,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CAN Bus Telemetry Flood</b> · <code>network-fabric</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CAN Bus Telemetry Flood</b> · <code>interconnect</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your autonomous forklift (TI TDA4VM, 8 TOPS) runs pallet detection and publishes results over the vehicle's CAN bus at 20 Hz. The forklift also has 15 other ECUs (motor controller, battery management, safety systems) sharing the same 500 Kbps CAN bus. After adding ML telemetry (detection count, confidence, latency, model version) to the CAN traffic, the safety system starts missing emergency stop messages. What went wrong, and how do you fix it without removing the telemetry?"
 
@@ -587,7 +931,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Cellular Diet</b> · <code>ota-updates</code>, <code>bandwidth</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Cellular Diet</b> · <code>ota</code>, <code>bandwidth</code></summary>
 
 - **Interviewer:** "You need to deploy a 250MB model update to a fleet of 100,000 smart cameras in rural areas. Each camera has a cellular plan limited to an average of 500KB/day of free data for system updates. Exceeding this incurs significant costs. How do you efficiently manage this deployment without massive overages?"
 
@@ -635,7 +979,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Data Ferry</b> · <code>data-management</code>, <code>connectivity</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Data Ferry</b> · <code>data-pipeline</code>, <code>connectivity</code></summary>
 
 - **Interviewer:** "Your fleet of agricultural IoT sensors collects environmental data and inference results (e.g., crop health scores). These devices operate in fields with highly intermittent and unreliable cellular connectivity. You need to ensure all critical data eventually reaches the cloud for analytics, without losing data or exhausting limited on-device storage (e.g., 2GB total)."
 
@@ -662,7 +1006,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Offline-First Edge Design</b> · <code>deployment</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Offline-First Edge Design</b> · <code>deployment</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your edge AI system monitors a remote oil pipeline in the Alaskan wilderness. It has satellite connectivity that works 4 hours per day (weather-dependent) with 256 Kbps bandwidth. The system must detect pipeline leaks 24/7. How do you design the system to operate independently of cloud connectivity?"
 
@@ -690,7 +1034,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Model Versioning Fleet Problem</b> · <code>deployment</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Model Versioning Fleet Problem</b> · <code>deployment</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You manage a fleet of 10,000 edge devices deployed across 200 retail stores for shelf monitoring. The fleet has 5 different hardware SKUs: (A) Jetson Orin Nano, (B) Hailo-8L on RPi5, (C) Google Coral on RPi4, (D) Intel NCS2 on x86 mini-PC, (E) Qualcomm RB3 Gen 2. You currently have 3 model versions in production (v2.1, v2.2, v2.3) because you can't update all devices simultaneously — OTA rollouts take 2 weeks per wave. How many distinct model binaries do you need to maintain, and what's the real operational cost?"
 
@@ -730,10 +1074,10 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Hardware Lifecycle Cliff</b> · <code>hardware-lifecycle</code> <code>fleet-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Hardware Lifecycle Cliff</b> · <code>deployment</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your company deployed 50,000 edge AI devices in 2022 using NVIDIA Jetson TX2 modules (Pascal GPU, 256 CUDA cores, 8 GB LPDDR4). It's now 2026. NVIDIA has announced end-of-life for the TX2: no more JetPack updates after 2027, no TensorRT updates after 2026. Your latest models require TensorRT 10 features (FP8 quantization, transformer engine) that will never be backported to Pascal. You can't replace 50,000 devices overnight. Design a 3-year hardware transition strategy."
 
@@ -753,7 +1097,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Disconnected Brain</b> · <code>edge-cloud-sync</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Disconnected Brain</b> · <code>interconnect</code></summary>
 
 - **Interviewer:** "You're deploying an ML model to autonomous agricultural robots operating in remote fields with intermittent and low-bandwidth cellular connectivity. How do you ensure reliable model updates, send diagnostic telemetry, and maintain local inference capability when the connection drops for extended periods?"
 
@@ -934,7 +1278,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Canary in the Coal Mine</b> · <code>deployment</code>, <code>fleet-management</code>, <code>a/b-testing</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Canary in the Coal Mine</b> · <code>deployment</code>, <code>deployment</code>, <code>a/b-testing</code></summary>
 
 - **Interviewer:** "You need to deploy a new, potentially risky ML model update to a fleet of 100,000 critical edge devices (e.g., medical imaging devices). A full rollout could have severe consequences if the model introduces regressions. How do you implement a safe, phased rollout strategy with robust monitoring to catch issues early?"
 
@@ -962,7 +1306,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Privacy-Preserving Data Whisperer</b> · <code>data-collection</code>, <code>privacy</code>, <code>bandwidth-constraints</code>, <code>federated-learning</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Privacy-Preserving Data Whisperer</b> · <code>data-pipeline</code>, <code>privacy</code>, <code>bandwidth-constraints</code>, <code>federated-learning</code></summary>
 
 - **Interviewer:** "You're operating a fleet of 100,000 smart cameras in sensitive environments (e.g., retail stores, homes) and need to collect data for continuous model improvement. Each camera generates ~10GB of raw video per day. Your challenge: bandwidth is extremely limited (average 1Mbps uplink), privacy regulations are strict (e.g., GDPR, CCPA), and you cannot upload raw video. Design an end-to-end data curation pipeline from the edge to the cloud for retraining, emphasizing data reduction, privacy, and efficiency."
 
@@ -997,7 +1341,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Fleet-Wide Model Drift Detection Threshold</b> · <code>mlops</code> <code>monitoring</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Fleet-Wide Model Drift Detection Threshold</b> · <code>deployment</code> <code>monitoring</code></summary>
 
 - **Interviewer:** "You manage 2,000 edge cameras for traffic monitoring. Each device reports hourly inference statistics: mean confidence score, detection count per class, and a 64-bin histogram of confidence values. After 6 months, you notice that 150 devices in one region show a gradual decline in mean confidence from 0.82 to 0.71 over 3 weeks. Calculate the statistical threshold for triggering a drift alert, and determine whether this decline is real drift or normal variance."
 
@@ -1027,7 +1371,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Inconspicuous Sticker Attack</b> · <code>adversarial-robustness</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Inconspicuous Sticker Attack</b> · <code>adversarial</code></summary>
 
 - **Interviewer:** "Your company deploys ML-powered traffic cameras that classify vehicles (car, truck, bus, etc.) and read license plates. Researchers demonstrate a 'physical adversarial attack' where a specially designed, inconspicuous sticker placed on a vehicle's license plate consistently causes your edge model to misclassify it (e.g., a sedan is seen as a motorcycle) or misread the plate. How would you design your edge vision system to detect and mitigate such physical-world adversarial attacks?"
 
@@ -1064,7 +1408,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Fleet Health Dashboard</b> · <code>monitoring</code></summary>
@@ -1132,7 +1476,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Privacy Guardian</b> · <code>privacy</code>, <code>data-management</code>, <code>federated-learning</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Privacy Guardian</b> · <code>privacy</code>, <code>data-pipeline</code>, <code>federated-learning</code></summary>
 
 - **Interviewer:** "Your smart home devices collect audio and video data to detect activity and provide personalized experiences. This data potentially contains highly sensitive PII. You need to leverage this data for model improvement and debugging, but strict privacy regulations (GDPR, CCPA) prohibit sending raw PII to the cloud. How do you design an end-to-end system that respects privacy while enabling ML development?"
 
@@ -1227,7 +1571,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Self-Healing Edge AI Fleet</b> · <code>mlops</code> <code>fault-tolerance</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Self-Healing Edge AI Fleet</b> · <code>deployment</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "You operate a fleet of 5,000 edge AI devices deployed across 300 retail stores for loss prevention. The devices run 24/7 and you have 2 SREs managing the fleet. Current state: 3% of devices require manual intervention each week (150 devices), consuming 80% of SRE time. Design a self-healing system that reduces manual interventions by 90% — from 150/week to <15/week — without adding headcount."
 
@@ -1261,13 +1605,14 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 ---
 
 
-### 🛡️ Monitoring & Reliability
+### Monitoring & Reliability
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Watchdog Blind Spot</b> · <code>watchdog</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Watchdog Blind Spot</b> · <code>watchdog</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your edge AI cameras have a hardware watchdog timer (WDT) set to 60 seconds. The CPU application process kicks the watchdog every 10 seconds. You receive reports that cameras are freezing — the video stream stops and no detections are sent — but the devices aren't rebooting. You SSH in and find the CPU is running fine, but the GPU is deadlocked running a custom CUDA kernel for a new ML model. Why didn't the hardware watchdog trigger a reboot, and how do you design a watchdog system that actually monitors the ML hardware?"
 
@@ -1289,7 +1634,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Boot Loop of Doom</b> · <code>reliability</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Boot Loop of Doom</b> · <code>fault-tolerance</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your Rockchip RK3588 edge device runs a safety monitoring model in a chemical plant. After a power outage, the device enters a boot loop — it starts up, attempts to load the model, crashes, and reboots. The cycle repeats every 45 seconds. The eMMC filesystem shows no corruption (fsck passes). The model file exists and has the correct size. But the model fails to load with 'invalid header' error. What happened, and how do you prevent this in the future?"
 
@@ -1315,10 +1660,9 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The OTA Rollback Dilemma</b> · <code>fleet-management</code>, <code>ota</code>, <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The OTA Rollback Dilemma</b> · <code>deployment</code>, <code>ota</code>, <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "A critical OTA update for your vision model has been pushed to 50,000 edge devices. Two hours later, telemetry indicates a 5% failure rate in model inference on the updated devices. You need to initiate an immediate rollback for the affected devices while maintaining service for the rest of the fleet. Describe your rollback strategy, including how you identify affected devices and ensure data consistency."
 
@@ -1348,7 +1692,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The eMMC Wear-Out Problem</b> · <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The eMMC Wear-Out Problem</b> · <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your edge device writes inference metadata (bounding boxes, confidence scores) to its eMMC flash storage at 30 FPS. The eMMC is rated for 3,000 P/E (program/erase) cycles. The device has a 32 GB eMMC. Why does the high-frequency, small-payload nature of ML inference outputs create a massive write amplification problem, and how do you calculate the true time-to-failure for this ML workload?"
 
@@ -1370,10 +1714,10 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The 5-Year Edge Device Lifecycle</b> · <code>reliability</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The 5-Year Edge Device Lifecycle</b> · <code>fault-tolerance</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You're designing an edge AI system for industrial quality inspection. The customer requires a 5-year operational lifetime with <1 hour of unplanned downtime per year (99.99% availability). The system runs 24/7 in a factory with ambient temperatures of 30-45°C. What are the failure modes you must design for, and how do you achieve the availability target?"
 
@@ -1407,10 +1751,10 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Unattended Fleet</b> · <code>long-term-reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Unattended Fleet</b> · <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "You manage a fleet of thousands of edge ML devices deployed in remote, inaccessible locations (e.g., agricultural sensors, remote pipeline monitoring, deep-sea exploration buoys) that are expected to operate autonomously for 5+ years with minimal human intervention. Design a system architecture that ensures continuous, reliable ML inference over this period, accounting for hardware failures, software bugs, model degradation (concept drift), and environmental changes. How do you achieve 'self-healing' and predictive maintenance for both the ML models and the underlying hardware/software stack?"
 
@@ -1459,13 +1803,13 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 ---
 
 
-### 🔒 Functional Safety
+### Functional Safety
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Graceful Degradation Under Sensor Failure</b> · <code>functional-safety</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Graceful Degradation Under Sensor Failure</b> · <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your autonomous delivery robot has 3 sensors: a stereo camera pair, a 2D LiDAR, and an ultrasonic array. During a delivery, mud splashes onto the left stereo camera lens. Your perception stack loses stereo depth estimation. The robot is 500 meters from its destination on a busy sidewalk. What happens next?"
 
@@ -1491,10 +1835,10 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Degradation Ladder</b> · <code>functional-safety</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Degradation Ladder</b> · <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "You're the ML systems architect for an autonomous delivery robot. Your perception stack runs three models on a Jetson Orin: a primary YOLOv8-L detection model (22ms, 43.7 mAP), a semantic segmentation model (15ms), and a depth estimation model (12ms). During a delivery, the Orin's GPU develops a hardware fault — the DLA is still functional but the GPU CUDA cores are offline. Your total compute budget just dropped from 275 TOPS to 100 TOPS (DLA only). Design the graceful degradation strategy from first principles."
 
@@ -1524,7 +1868,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The ISO 26262 Neural Network Problem</b> · <code>functional-safety</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The ISO 26262 Neural Network Problem</b> · <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your autonomous vehicle uses a neural network for pedestrian detection. The safety team says you need ISO 26262 ASIL-D certification for this function (the highest automotive safety integrity level). But ISO 26262 was written for deterministic software — it requires 100% code coverage, formal verification, and traceable requirements. Neural networks are stochastic, opaque, and their 'requirements' are learned from data. How do you certify a neural network under ISO 26262?"
 
@@ -1552,7 +1896,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6%2B_Principal-red?style=flat-square" alt="Level 4" align="center"> The Remote Fleet Update Dilemma</b> · <code>model-deployment</code> <code>functional-safety</code> <code>long-term-autonomy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6%2B_Principal-red?style=flat-square" alt="Level 4" align="center"> The Remote Fleet Update Dilemma</b> · <code>deployment</code> <code>fault-tolerance</code> <code>long-term-autonomy</code></summary>
 
 - **Interviewer:** "You are responsible for deploying and maintaining ML models on a fleet of thousands of safety-critical edge devices (e.g., industrial robots, medical devices) operating in remote locations with intermittent connectivity. These devices must operate for years without human intervention. How do you design a robust, secure, and fault-tolerant over-the-air (OTA) update system for ML models and associated runtime software, ensuring functional safety, preventing device bricking, and enabling safe rollbacks, even if connectivity drops mid-update?"
 
@@ -1588,11 +1932,12 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 ---
 
 
-### 🔐 Security & Privacy
+### Security & Privacy
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Supply Chain Attack</b> · <code>security</code></summary>
 
@@ -1618,7 +1963,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Unverifiable Edge Inference</b> · <code>data-provenance</code> <code>security</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Unverifiable Edge Inference</b> · <code>data-versioning</code> <code>security</code></summary>
 
 - **Interviewer:** "Your company develops smart cameras for retail analytics. These cameras perform on-device ML inference (e.g., people counting, dwell time) and only send aggregated, anonymized data to the cloud. However, clients are concerned about the integrity and auditability of these local inferences, especially if disputes arise. How do you design the system to ensure data provenance and tamper-proof audit trails for on-device ML inferences, even with limited storage and intermittent cloud connectivity?"
 
@@ -1647,10 +1992,9 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Secure Boot Chain</b> · <code>secure-boot</code> <code>security</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Secure Boot Chain</b> · <code>firmware</code> <code>security</code></summary>
 
 - **Interviewer:** "Your team is deploying a proprietary face liveness detection model on a fleet of smart locks. You must extend the Secure Boot chain of trust to verify the model weights before inference. How does model weight integrity verification add to boot time, and how do you trade off boot-to-first-inference latency against model authenticity checks?"
 
@@ -1734,7 +2078,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Model Theft from Edge Device</b> · <code>security</code></summary>
@@ -1797,7 +2141,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Tamper-Proof Model Fortress</b> · <code>security</code>, <code>hardware-root-of-trust</code>, <code>secure-boot</code>, <code>attestation</code>, <code>supply-chain-security</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Tamper-Proof Model Fortress</b> · <code>security</code>, <code>hardware-root-of-trust</code>, <code>firmware</code>, <code>attestation</code>, <code>supply-chain-security</code></summary>
 
 - **Interviewer:** "Your company develops highly sensitive ML models for critical infrastructure (e.g., energy grid optimization). These models are deployed on edge devices in remote, potentially unsecured locations. A malicious actor could gain physical access to a device. Design a strategy to ensure the integrity and authenticity of the deployed ML models, preventing unauthorized modification, replacement, or exfiltration, from manufacturing to runtime operation."
 
@@ -1832,7 +2176,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Physical Adversarial Gauntlet</b> · <code>adversarial-robustness</code> <code>physical-security</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Physical Adversarial Gauntlet</b> · <code>adversarial</code> <code>physical-security</code></summary>
 
 - **Interviewer:** "Your company's autonomous delivery robots operate in urban environments. A new threat emerges: malicious actors are placing subtly modified physical objects (e.g., stickers on stop signs, projected patterns on roads, specific sound frequencies) to trick the robots' perception systems, causing unsafe behaviors. How do you design the robot's perception and decision-making system to be robust against such 'physical world' adversarial attacks, and what detection and mitigation strategies would you implement?"
 
@@ -1861,7 +2205,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Model Fortress</b> · <code>security</code>, <code>ip-protection</code></summary>
@@ -1895,13 +2239,14 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 ---
 
 
-### 📎 Additional Topics
+### Additional Topics
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Silent eMMC Death</b> · <code>storage</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Silent eMMC Death</b> · <code>persistent-storage</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your fleet of 1,000 edge AI cameras runs a quality inspection model at 30 FPS. The system logs the bounding boxes and confidence scores of every detection to the local 16 GB eMMC. After 14 months, devices start failing with read-only filesystems. How does continuous ML inference result logging create a write amplification pattern that kills eMMC faster than generic logging, and what is the ML-specific write rate math?"
 
@@ -1921,10 +2266,10 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Edge-Cloud Federated Learning System</b> · <code>training</code> <code>privacy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Edge-Cloud Federated Learning System</b> · <code>data-parallelism</code> <code>privacy</code></summary>
 
 - **Interviewer:** "Your fleet of 500 hospital bedside monitors runs a patient fall detection model. After 6 months, accuracy has dropped from 94% to 87% due to distribution shift (new patient demographics, seasonal clothing changes). HIPAA prohibits uploading patient video to the cloud. Design a federated learning system that retrains the model across the fleet without any raw data leaving the devices. Specify the communication protocol, privacy guarantees, convergence timeline, and the compute/bandwidth budget per device."
 

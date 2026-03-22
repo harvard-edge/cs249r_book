@@ -17,13 +17,269 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 ---
 
 
-### ⏱️ Latency & Responsiveness
+### Latency & Responsiveness
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Cold Start Problem</b> · <code>cold-start-latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Cellular Download Wall</b> · <code>app-store-delivery</code></summary>
+
+- **Interviewer:** "Your team has developed a new 250 MB generative AI model for your company's popular photo editing app. The lead engineer suggests bundling the model directly into the app binary for simplicity. The current app is 50 MB. From a platform distribution perspective, what is the most critical, immediate problem with this approach?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers without mobile-specific experience often focus on total device storage or RAM constraints. While valid concerns, they overlook the hard, platform-enforced limit on the initial app download size over cellular networks, which is a much more immediate and critical barrier to user acquisition.
+
+  **Realistic Solution:** The combined size of the app (50 MB) and the model (250 MB) is 300 MB. This exceeds the ~200 MB over-the-air (OTA) download limit set by major mobile platforms like the Apple App Store and Google Play. Forcing users to be on Wi-Fi to download or update the app is a major deterrent that severely impacts acquisition rates. The standard practice is to use on-demand resource frameworks to download large assets like models after the initial installation.
+
+  > **Napkin Math:** App Binary Size (50 MB) + Model Size (250 MB) = 300 MB Total App Size.
+
+Since 300 MB > ~200 MB Cellular Download Limit, the app cannot be acquired by a user on a cellular connection. This is a critical distribution failure.
+
+  > **Options:**
+  > [ ] The model is too large to fit into the device's RAM during runtime.
+  > [x] It exceeds the ~200 MB cellular download limit, preventing users from installing the app without Wi-Fi.
+  > [ ] The 300 MB app size will take up too much of the user's total phone storage.
+  > [ ] Large app binaries significantly increase the time it takes for app store review and approval.
+
+  📖 **Deep Dive:** [Mobile: Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The App Memory Budget</b> · <code>app-memory-eviction</code></summary>
+
+- **Interviewer:** "You're building a new 'AI stylist' feature for a fashion app. It uses a generative model to let users 'try on' clothes. Your target device is a high-end smartphone with 8 GB of RAM. As a systems engineer, you need to give the team a safe memory budget for the entire application to avoid being terminated by the operating system. What is a realistic upper limit for your app's memory consumption?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume their application can use the majority of the advertised device RAM (e.g., 6 GB out of 8 GB). They forget that the OS, critical background services (like networking and location), and other apps in memory all consume a significant and protected share. Exceeding the implicit budget assigned by the OS leads to 'Jetsam' events on iOS or 'LMK' (Low Memory Killer) events on Android, where the OS forcefully terminates the app to reclaim memory.
+
+  **Realistic Solution:** A standard rule of thumb for mobile development is that a single application should not exceed about 25% of the total device RAM. This provides a safe margin, accounting for the OS's own needs and ensuring a stable user experience. For a device with 8 GB of RAM, the safe memory budget for your entire application is approximately 2 GB.
+
+  > **Napkin Math:** Device RAM = 8 GB
+Rule of Thumb for App Budget = 25%
+
+App Memory Budget = 8 GB * 0.25 = 2 GB
+
+  > **Key Equation:** $\text{App Memory Budget} \approx \text{Device RAM} \times 0.25$
+
+  > **Options:**
+  > [ ] 6 GB. The OS only needs about 2 GB.
+  > [ ] 8 GB. The app can use all available memory.
+  > [x] 2 GB. The app gets about a quarter of the total RAM.
+  > [ ] 4 GB. The app can safely use half of the device's RAM.
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Eviction Threshold</b> · <code>app-memory-eviction</code></summary>
+
+- **Interviewer:** "An ML engineer is profiling a new video editing app on a flagship Android device with 12 GB of RAM. They notice that when applying a complex, multi-frame style transfer filter, the app is frequently terminated by the OS. Explain to the engineer what is happening and calculate the approximate memory usage (in GB) at which their app is likely being targeted for eviction."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common misconception is that app terminations are random bugs or are solely related to high CPU usage. Many developers are not quantitatively aware of the hard memory limits imposed by mobile operating systems. They might profile CPU and GPU performance extensively but fail to monitor their app's total RAM footprint, which is often the primary reason for eviction under memory pressure.
+
+  **Realistic Solution:** The operating system is terminating the app because it's exceeding its allocated memory budget and causing system-wide memory pressure. This is a standard mechanism on both Android (Low Memory Killer daemon) and iOS (Jetsam) to maintain system stability. Given a device with 12 GB of RAM, we can estimate the eviction threshold using the 25% rule of thumb. The app is likely being terminated when its memory usage spikes above 3 GB.
+
+  > **Napkin Math:** Device RAM = 12 GB
+Rule of Thumb for App Eviction Threshold ≈ 25% of total RAM
+
+Eviction Threshold = 12 GB * 0.25 = 3 GB
+
+  > **Key Equation:** $\text{Eviction Threshold} \approx \text{Device RAM} \times 0.25$
+
+  > **Options:**
+  > [ ] 6 GB. The app is allowed to use half the system RAM.
+  > [x] 3 GB. The app is exceeding the standard 25% memory budget.
+  > [ ] 9 GB. The OS is malfunctioning; it should reserve at least 75% for the foreground app.
+  > [ ] 12 GB. The app is only terminated if it tries to allocate more RAM than the device physically has.
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Jank Budget</b> · <code>ui-jank-budget</code></summary>
+
+- **Interviewer:** "A new on-device recommendation model runs on the app's main UI thread. During testing, you notice the scrolling animation stutters every time the model runs. To maintain a perfectly smooth 60 frames-per-second experience, what is the maximum time budget you have for all work (rendering + model inference) within a single frame?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the frame budget with general latency targets. They might think 100ms is 'fast enough' for a user, but for smooth animation, the budget is far stricter. Others might confuse the jank budget with the much longer ANR (Application Not Responding) timeout.
+
+  **Realistic Solution:** To maintain a 60 FPS refresh rate, the total work for each frame must complete in under 16.67 milliseconds. If inference and rendering exceed this budget, the frame is dropped, leading to visible stuttering or 'jank'. This is why any non-trivial ML inference must be moved off the main UI thread.
+
+  > **Napkin Math:** The calculation is a direct conversion from frequency to period:
+
+`Frame Budget = 1000 ms / 60 FPS = 16.67 ms`
+
+If an inference takes just 20ms, it has already consumed more than a full frame's time budget, guaranteeing jank.
+
+  > **Key Equation:** $\text{Time Budget (ms)} = \frac{1000}{\text{Frames Per Second}}$
+
+  > **Options:**
+  > [ ] 5000 ms
+  > [ ] 100 ms
+  > [x] 16 ms
+  > [ ] 33 ms
+
+  📖 **Deep Dive:** [Mobile: Systems & SoC](https://mlsysbook.ai/mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The ANR Timeout</b> · <code>anr-timeout</code></summary>
+
+- **Interviewer:** "You are developing an on-device image filter. When the user applies the filter, a 7-second-long model inference runs directly on the UI thread. Beta testers report that the app frequently freezes and then shows a system dialog asking if they want to 'Close' or 'Wait'. What is the name of this event, and what is the standard time limit that is being exceeded?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to confuse the ANR timeout with the jank budget (16ms) or to assume the OS will wait indefinitely for a task to complete. Engineers without mobile experience often don't realize there is a hard, system-enforced limit for blocking the main thread.
+
+  **Realistic Solution:** This is an 'Application Not Responding' (ANR) error. On Android, if the main UI thread is blocked for more than 5 seconds (e.g., by a long-running inference), the operating system will intervene and present the ANR dialog to the user. This is a critical error that must be fixed by moving the work to a background thread.
+
+  > **Napkin Math:** The check is a simple comparison to a system constant:
+
+`Inference Time = 7 seconds`
+`ANR Timeout = 5 seconds`
+
+Since `7s > 5s`, the inference will always trigger an ANR if run synchronously on the main thread.
+
+  > **Key Equation:** $\text{Time}_{	ext{UI Thread}} > 5s \implies \text{ANR}
+
+  > **Options:**
+  > [ ] Jank Event, 16 ms
+  > [x] ANR Event, 5 seconds
+  > [ ] System Crash, 1 second
+  > [ ] ANR Event, 30 seconds
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The 60 FPS Jank Budget</b> · <code>jank-budget-analysis</code></summary>
+
+- **Interviewer:** "You're building a new feature for a social media app: a real-time cat-ear filter on the camera preview. To feel smooth, the UI must run at a constant 60 FPS. Your ML model needs to process each frame from the camera. Explain the maximum permissible latency for your model's inference to avoid causing UI 'jank', and what 'jank' means in this context."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Stating the model can take the full 16.67ms. This is a naive answer that ignores all other work happening on the main thread, such as UI drawing, layout calculations, animations, and other application logic. The ML inference is only *part* of the total frame time; it doesn't own the entire budget.
+
+  **Realistic Solution:** The total time budget for a single frame at 60 FPS is approximately 16.67ms (1000ms / 60). 'Jank' occurs when the system cannot complete all the work for a frame (input, animation, layout, drawing, and ML inference) within this budget. This causes the frame to be displayed late, effectively being 'skipped', which the user perceives as a stutter or lag in the animation.
+
+The ML model cannot consume this entire budget. A safe allocation might be 5-8ms, leaving the rest for the Android or iOS UI system and other app logic. If the total work on the UI thread exceeds 16.67ms, a frame is missed, and the user experiences jank.
+
+  > **Napkin Math:** Total Frame Budget = 1000 ms / 60 FPS = 16.67 ms.
+
+Let's assume a typical frame's workload:
+- UI rendering (drawing views, etc.): 4ms
+- System overhead & other logic: 2ms
+
+Remaining ML Budget = 16.67ms - 4ms - 2ms = 10.67ms.
+
+If the model takes longer than ~10ms in this example, it will cause a frame to be dropped.
+
+  > **Key Equation:** T_{\text{frame}} = T_{\text{ui}} + T_{\text{logic}} + T_{\text{ml}} \le 16.67ms
+
+  > **Options:**
+  > [ ] 33.33ms.
+  > [ ] 16.67ms.
+  > [x] Significantly less than 16.67ms, because the model shares the frame budget with UI rendering and other logic.
+  > [ ] It depends entirely on the mobile NPU's peak TOPS.
+
+  📖 **Deep Dive:** [Mobile: Systems & SoC](https://mlsysbook.ai/mobile/01_systems_and_soc.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Synchronous Inference ANR</b> · <code>anr-timeout-analysis</code></summary>
+
+- **Interviewer:** "A junior engineer on your team implements a new 'Magic Retouch' feature. When the user clicks a button, a large, synchronous ML model runs on the main UI thread to apply a filter to a high-resolution photo. The model takes 6 seconds to complete. Explain the exact user experience on an Android device when that button is tapped."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Describing the problem simply as the UI 'freezing' or becoming 'unresponsive' for 6 seconds. While true, this answer misses the most critical OS-level event: the ANR (Application Not Responding) dialog, which is a much more severe failure mode than simple UI lag.
+
+  **Realistic Solution:** When the user taps the button, the main UI thread will be blocked by the 6-second model inference. Since this duration exceeds the standard 5-second input dispatch timeout on Android, the operating system will intervene. After 5 seconds of unresponsiveness, the OS will display the 'Application Not Responding' (ANR) dialog. This system dialog gives the user the option to either 'Wait' or 'Close' the app. This is a critical failure state, much worse than simple jank, and frequently leads users to kill the app and leave negative reviews. The correct implementation is to run the inference on a background thread and display a loading indicator.
+
+  > **Napkin Math:** Model Inference Time = 6 seconds.
+Android ANR Threshold (for input events) = 5 seconds.
+
+Calculation: 6 seconds > 5 seconds.
+
+Result: The ANR condition is met. After 5 seconds of the UI thread being blocked, the system will display the ANR dialog to the user.
+
+  > **Key Equation:** T_{\text{main\_thread\_task}} > T_{\text{anr\_threshold}}
+
+  > **Options:**
+  > [ ] The app will feel unresponsive for 6 seconds, then continue normally.
+  > [ ] The app will immediately crash due to an out-of-memory error.
+  > [x] The UI will freeze, and after 5 seconds, an 'Application Not Responding' (ANR) dialog will appear.
+  > [ ] The OS will automatically restart the app after detecting the long-running task.
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The App Store Budget</b> · <code>app-store-delivery-on-demand-model-download-a-b-testing</code></summary>
+
+- **Interviewer:** "Your product manager wants to A/B test a new, larger generative model (1.5 GB in memory) against the current, smaller model (500 MB in memory) in your photo editing app. Your app's core functionality, excluding any ML model, already consumes about 400 MB of RAM. The target device for the A/B test is a typical modern smartphone with 8 GB of RAM. Explain the primary memory constraint you face. Can you safely load the large model for the A/B test?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume their app can use a large fraction of the device's total RAM. They forget that the OS imposes a much stricter per-app memory budget to maintain system stability and a good user experience for multitasking. They also often neglect the app's own non-model memory footprint.
+
+  **Realistic Solution:** No, you cannot safely load the 1.5 GB model. The primary constraint is the OS-enforced per-app memory budget. On a typical 8 GB device, an app is generally budgeted around 25% of the total RAM, which is 2 GB. After accounting for the app's 400 MB base memory usage, you only have about 1.6 GB remaining for the model. While the 1.5 GB model *might* just fit, it leaves almost no headroom, making the app highly susceptible to being terminated by the OS (OOM kill) during memory pressure spikes. The A/B test would be unreliable.
+
+  > **Napkin Math:** 1.  **Calculate Per-App Budget:**
+    8 GB Device RAM * 0.25 (App Budget Ratio) = 2 GB Budget
+
+2.  **Calculate Required Memory for Large Model:**
+    1.5 GB (Model) + 0.4 GB (App Base) = 1.9 GB
+
+3.  **Compare to Budget:**
+    1.9 GB (Required) is dangerously close to the 2.0 GB (Budget), leaving only 100 MB of headroom.
+
+4.  **Conclusion:** This is too risky for a production A/B test. The smaller model (0.5 GB + 0.4 GB = 0.9 GB) is safe.
+
+  > **Key Equation:** $\text{App Memory Budget} \approx \text{Device RAM} \times 0.25$
+
+  > **Options:**
+  > [ ] Yes, it's fine. The 1.5 GB model is much smaller than the device's 8 GB of RAM.
+  > [ ] Yes, it should be okay. The app's total memory budget is 2 GB, and the 1.5 GB model fits within that.
+  > [x] No, it's too risky. The total required memory of 1.9 GB (1.5 GB model + 0.4 GB app) leaves almost no headroom within the ~2 GB per-app budget.
+  > [ ] No, it's impossible. The 1.5 GB model alone is larger than the app's base memory of 400 MB.
+
+  📖 **Deep Dive:** [Mobile: Ship & Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+#### 🟢 L3
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Cold Start Problem</b> · <code>latency</code></summary>
 
 - **Interviewer:** "Your mobile ML app works great after the first inference, but the *very first* time a user opens the app and triggers the model, there's a noticeable 500ms delay. Subsequent inferences are much faster (e.g., 50ms). What are the primary contributors to this 'cold start' latency on a mobile device?"
 
@@ -130,7 +386,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Accessibility Breakage</b> · <code>app-lifecycle</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Accessibility Breakage</b> · <code>deployment</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your messaging app uses an on-device ML model to generate smart reply suggestions. After your latest update, blind users using VoiceOver (iOS) and TalkBack (Android) report that the app is 'unusable' — the smart reply buttons appear but VoiceOver reads them as 'button, button, button' instead of reading the suggested text. Sighted users see the suggestions fine. What went wrong?"
 
@@ -158,7 +414,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The 3-Second App Launch Penalty</b> · <code>latency</code> <code>compiler-runtime</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The 3-Second App Launch Penalty</b> · <code>latency</code> <code>compilation</code></summary>
 
 - **Interviewer:** "Your fitness app loads an on-device pose estimation model at launch to power its exercise tracking feature. On the Samsung Galaxy S23 (Snapdragon 8 Gen 2), users see a splash screen for 4.2 seconds before the app is interactive. Without the ML model, the app launches in 1.1 seconds. The model file is 18 MB (INT8). Your PM says 'users abandon apps that take more than 2 seconds to launch.' How do you cut the ML-related launch time from 3.1 seconds to under 500 ms?"
 
@@ -188,7 +444,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The App Store Binary Size Limit</b> · <code>deployment</code> <code>model-compression</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The App Store Binary Size Limit</b> · <code>deployment</code> <code>pruning</code></summary>
 
 - **Interviewer:** "Apple's App Store enforces a 200 MB limit for downloads over cellular. Your iOS app is 60 MB without the ML model. Your product requires an on-device image generation model (Stable Diffusion-like) with INT8 weights totaling 800 MB. How do you ship this to users without exceeding the cellular download limit?"
 
@@ -216,10 +472,9 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Jank Budget</b> · <code>latency-budgets</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Jank Budget</b> · <code>latency</code></summary>
 
 - **Interviewer:** "You're building an AR face filter for a social media app targeting 60 FPS. Your face mesh model runs in 8ms on the Apple A17 Pro's ANE. The PM says 'we have 16.7ms per frame, and the model only takes 8ms — we have 8ms of headroom, add a style transfer pass.' Why is the PM's math dangerously wrong?"
 
@@ -244,7 +499,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Heterogeneous Scheduling Dilemma</b> · <code>scheduling</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Heterogeneous Scheduling Dilemma</b> · <code>real-time</code></summary>
 
 - **Interviewer:** "Your app runs three ML models simultaneously on a Snapdragon 8 Gen 3: always-on keyword detection (Sensing Hub), camera-based object detection (Hexagon NPU), and an LLM for text generation (CPU+GPU). The user activates the LLM while the camera pipeline is running. Suddenly, object detection latency spikes from 8ms to 25ms, and the LLM generates at 3 tokens/sec instead of the expected 8. Neither workload saturates its assigned compute unit. What's happening?"
 
@@ -272,7 +527,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Display Pipeline Collision</b> · <code>display-pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Display Pipeline Collision</b> · <code>latency</code></summary>
 
 - **Interviewer:** "Your AR app overlays ML-generated segmentation masks on the camera feed at 60 FPS on an iPhone 14 Pro (A16 Bionic, ProMotion 120 Hz display). When you enable the 120 Hz mode, the segmentation mask visibly 'lags' behind the camera feed — objects move but the mask follows 1-2 frames behind. At 60 Hz, the lag is imperceptible. Your ML inference time hasn't changed. What's happening?"
 
@@ -298,7 +553,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Concurrency Collision</b> · <code>resource-contention</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Concurrency Collision</b> · <code>memory-bound</code></summary>
 
 - **Interviewer:** "You are developing an app that needs to run two independent ML models simultaneously on a mobile device: a real-time face detection model and a background scene analysis model. When run individually, both models achieve their target FPS on the NPU. However, when run concurrently, both models experience a greater-than-expected performance degradation (e.g., each drops to 30% of its individual FPS, not 50%). What system-level factors contribute to this 'more-than-halving' performance drop?"
 
@@ -331,7 +586,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Janky Background App</b> · <code>resource-contention</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Janky Background App</b> · <code>memory-bound</code></summary>
 
 - **Interviewer:** "Your production mobile ML app experiences sporadic but significant latency spikes (e.g., from 20ms to 150ms) during inference, even on high-end devices with plenty of theoretical headroom. These spikes are not correlated with thermal throttling. What common mobile systems issue is likely at play, and how would you try to identify the culprit?"
 
@@ -416,7 +671,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Model Update Delta Compression</b> · <code>deployment</code> <code>model-compression</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Model Update Delta Compression</b> · <code>deployment</code> <code>pruning</code></summary>
 
 - **Interviewer:** "Your app ships a 100 MB INT8 object detection model. You've retrained with 5% more data and fine-tuned the last 10 layers. Pushing a full 100 MB update over cellular wastes user bandwidth. Design a delta update system and calculate the expected patch size. What makes delta compression particularly effective — or tricky — for quantized models?"
 
@@ -530,7 +785,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Hardware Decoder Synchronization</b> · <code>pipeline</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Hardware Decoder Synchronization</b> · <code>data-pipeline</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your app runs an action recognition model on a live video stream. You use the Android MediaCodec API to decode the H.264 video using hardware. You then convert the frame to a tensor and run inference. The model takes 15ms. The hardware decode takes 10ms. You should easily hit 30 FPS. However, the app frequently drops frames and stutters. What is fundamentally wrong with putting hardware decoding in the critical path of a synchronous loop?"
 
@@ -559,7 +814,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Double JPEG Decode Tax</b> · <code>pipeline</code> <code>vision</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Double JPEG Decode Tax</b> · <code>data-pipeline</code> <code>vision</code></summary>
 
 - **Interviewer:** "Your mobile app allows users to select a photo from their gallery to run through an image classifier. The ML model takes 10ms. However, from the moment the user taps the image to the moment the result appears, it takes over 150ms. You are using standard Android/iOS image picker APIs. Where did the other 140ms go, and how do you bypass it?"
 
@@ -587,7 +842,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CoreML Model Compilation Jitter</b> · <code>deployment</code> <code>os</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CoreML Model Compilation Jitter</b> · <code>deployment</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You deploy a CoreML model in your iOS app. The `.mlmodel` file is bundled in the app. When the user taps 'Start Camera', you initialize the model using `let model = try MyModel(configuration: config)`. The very first time the user taps this button after downloading the app, the UI freezes for 3 seconds. Every subsequent tap is instant. What is iOS doing under the hood during that first initialization?"
 
@@ -613,7 +868,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Android NNAPI Driver Fallback</b> · <code>deployment</code> <code>os</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Android NNAPI Driver Fallback</b> · <code>deployment</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You deploy a TFLite model on Android and enable the NNAPI (Neural Networks API) delegate to run it on the hardware NPU. On Samsung phones, it takes 5ms. On a specific Xiaomi model, it takes 80ms. You verify that the Xiaomi phone physically has a powerful NPU. Why is NNAPI making the model 16x slower than it should be?"
 
@@ -640,10 +895,10 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Thermal Cliff</b> · <code>battery-impact</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Thermal Cliff</b> · <code>battery</code></summary>
 
 - **Interviewer:** "Your on-device LLM generates tokens at 12 tokens/sec for the first 30 seconds, then drops to 4 tokens/sec and stays there. The user hasn't changed anything. CPU/GPU/NPU utilization all drop simultaneously. What is happening, and why can't you just 'push through it'?"
 
@@ -668,7 +923,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Zero-Copy Imperative</b> · <code>zero-copy-pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Zero-Copy Imperative</b> · <code>dma</code></summary>
 
 - **Interviewer:** "You're building a real-time video effects application that applies an ML-based filter to the camera's live feed. Despite having a very fast NPU (5ms inference time), you observe significant end-to-end latency from camera capture to screen display (e.g., 100ms). You suspect memory copies are a major bottleneck. Describe how memory copies introduce latency and power overhead in this pipeline, and propose a 'zero-copy' architecture for Android/iOS."
 
@@ -711,7 +966,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Adaptive Bitrate Inference</b> · <code>latency</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Adaptive Bitrate Inference</b> · <code>latency</code> <code>power</code></summary>
 
 - **Interviewer:** "Your camera app runs continuous object detection on a Snapdragon 8 Gen 3 phone. After 3 minutes of sustained inference, the SoC junction temperature hits 95°C and the NPU throttles from 45 TOPS to 18 TOPS. Your INT8 model now misses the 33ms frame deadline. Design an adaptive system that switches between INT8 and INT4 precision based on thermal state, and calculate the latency and accuracy at each operating point."
 
@@ -739,7 +994,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> Optimal Heterogeneous Graph Execution</b> · <code>heterogeneous-compute-scheduling-latency-power</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> Optimal Heterogeneous Graph Execution</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You have a complex ML model with a mix of convolutional, recurrent, and custom attention layers. Profiling shows that convolutions run best on the NPU, recurrent layers on the DSP, and custom attention layers (due to their sparsity patterns) are most efficient on the CPU. How would you design the execution strategy to minimize overall latency and power consumption on a mobile SoC with these heterogeneous compute units?"
 
@@ -779,7 +1034,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Inference Timing Jitter Mystery</b> · <code>latency</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Inference Timing Jitter Mystery</b> · <code>latency</code> <code>power</code></summary>
 
 - **Interviewer:** "Your real-time sign language recognition app runs a pose estimation model on the Qualcomm Snapdragon 8 Gen 3. You measure inference latency over 1000 consecutive runs: P50 = 11 ms, P95 = 18 ms, P99 = 47 ms. The 3× variation between P50 and P99 causes visible stutter in the UI — sign language recognition requires consistent frame timing. The model, input, and code are identical every run. Why does the same computation take 3× longer sometimes?"
 
@@ -809,7 +1064,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Cross-Platform ML Runtime Decision</b> · <code>deployment</code> <code>frameworks</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Cross-Platform ML Runtime Decision</b> · <code>deployment</code> <code>compilation</code></summary>
 
 - **Interviewer:** "Your team needs to deploy the same image classification model on iOS (Apple Neural Engine), Android flagships (Qualcomm Hexagon NPU), and Android budget phones (MediaTek APU). You're debating between Core ML + TFLite (native per-platform), ONNX Runtime (single runtime, multiple backends), and a custom solution. Walk through the trade-offs."
 
@@ -846,7 +1101,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The 1000-Device Android Fragmentation Problem</b> · <code>deployment</code> <code>optimization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The 1000-Device Android Fragmentation Problem</b> · <code>deployment</code> <code>operator-fusion</code></summary>
 
 - **Interviewer:** "Your app runs on 1000+ Android device models. The top 10 devices account for 30% of users; the remaining 970 devices account for 70%. You have NPU support on Qualcomm (Hexagon), Samsung (Exynos NPU), MediaTek (APU), and Google (Tensor TPU) — each with different operator support, quantization formats, and performance characteristics. How do you ship one model that works well across all of them?"
 
@@ -880,7 +1135,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Cross-Platform Model Optimization</b> · <code>deployment</code> <code>compiler-runtime</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Cross-Platform Model Optimization</b> · <code>deployment</code> <code>compilation</code></summary>
 
 - **Interviewer:** "Your company ships a speech recognition model to iOS (Core ML + ANE), Android Qualcomm (QNN + Hexagon), and Android Samsung (NNAPI + Exynos NPU). Each platform has different quantization support, operator coverage, and compiler optimizations. How many optimized model binaries do you actually need, and what does the build pipeline look like?"
 
@@ -951,10 +1206,10 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Battery Accounting Inversion</b> · <code>battery-impact</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Battery Accounting Inversion</b> · <code>battery</code></summary>
 
 - **Interviewer:** "Your team optimized an on-device model from FP16 to INT8, cutting MACs by 2× and NPU inference time from 10ms to 5ms. The PM is thrilled — until field data shows battery drain *increased* by 15% in the feature that uses this model. How is a faster model draining more battery?"
 
@@ -978,7 +1233,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Adaptive Power Maestro</b> · <code>dvfs</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Adaptive Power Maestro</b> · <code>power</code></summary>
 
 - **Interviewer:** "For a critical real-time ML feature (e.g., video stabilization using optical flow) on a mobile device, you need to guarantee a minimum inference rate (e.g., 30 FPS) while simultaneously minimizing average power consumption. The computational load can vary significantly depending on scene complexity. How would you design a system to dynamically adapt the SoC's operating parameters to meet both the performance and power constraints?"
 
@@ -1010,7 +1265,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The OS Scheduler's Dilemma</b> · <code>os-scheduling</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The OS Scheduler's Dilemma</b> · <code>real-time</code></summary>
 
 - **Interviewer:** "You're designing a complex multi-modal mobile AI application that simultaneously uses a vision model (on GPU/NPU) and an audio model (on CPU). Both need low-latency, real-time inference. How does the mobile OS scheduler (e.g., Android's CFS with EAS) interact with these heterogeneous workloads, and what challenges arise in ensuring QoS for both?"
 
@@ -1107,7 +1362,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Double FPU Context Save</b> · <code>os</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Double FPU Context Save</b> · <code>deployment</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your mobile app does complex ML preprocessing in C++ (heavy floating-point math). It then passes the data to an ML model running on the same CPU core, handled by an RTOS-like microkernel on a dedicated wearable companion chip. You notice that every time the OS context-switches between your preprocessing thread and the ML inference thread, the context switch takes 3x longer than normal. What is the OS doing differently because of your math?"
 
@@ -1136,7 +1391,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Double FPU Context Save</b> · <code>os</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Double FPU Context Save</b> · <code>deployment</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your mobile app does complex ML preprocessing in C++ (heavy floating-point math). It then passes the data to an ML model running on the same CPU core, handled by an RTOS-like microkernel on a dedicated wearable companion chip. You notice that every time the OS context-switches between your preprocessing thread and the ML inference thread, the context switch takes 3x longer than normal. What is the OS doing differently because of your math?"
 
@@ -1168,13 +1423,14 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 ---
 
 
-### ⚡ Power & Thermal Management
+### Power & Thermal Management
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Sustained vs Burst Reality</b> · <code>thermal-throttling</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Sustained vs Burst Reality</b> · <code>thermal</code></summary>
 
 - **Interviewer:** "You benchmark a new MobileNetV3 variant on an Android phone, and the first 10 inferences take 12ms each. You report to your manager that the model can comfortably run at 60 FPS (16.6ms deadline). However, when the AR filter is used by customers for more than 2 minutes, the UI becomes extremely choppy. Why was your benchmark misleading?"
 
@@ -1194,7 +1450,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Cellular Modem Power Surprise</b> · <code>power-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Cellular Modem Power Surprise</b> · <code>power</code></summary>
 
 - **Interviewer:** "Your mobile health app runs an ECG classification model on-device (Apple Watch Ultra 2, S9 SiP). The model itself draws negligible power — 0.5 mW for a 2ms inference every second. But when you enable 'cloud sync' to upload classification results (50 bytes per result, once per second), the Watch's battery life drops from 36 hours to 18 hours. You're uploading 50 bytes per second — how can that halve battery life?"
 
@@ -1224,7 +1480,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Throttling Treadmill</b> · <code>thermal-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Throttling Treadmill</b> · <code>thermal</code></summary>
 
 - **Interviewer:** "You've deployed a new on-device object detection model. Initial tests show excellent latency (20ms per frame). However, after 30 seconds of continuous use, the latency consistently rises to 60ms. What is the most likely root cause, and how would you diagnose it?"
 
@@ -1246,7 +1502,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Silent Battery Drain</b> · <code>power-consumption</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Silent Battery Drain</b> · <code>power</code></summary>
 
 - **Interviewer:** "Your social media app includes an AI feature that continuously analyzes user content in the background for personalization. Users are reporting significant battery drain, even when they're not actively using the app. What are the common pitfalls in mobile ML background processing that lead to excessive battery consumption, and how can you mitigate them?"
 
@@ -1283,7 +1539,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Battery Drain Dilemma</b> · <code>power-consumption</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Battery Drain Dilemma</b> · <code>power</code></summary>
 
 - **Interviewer:** "Your team is profiling an on-device ML model for a new camera feature. You observe that running the model on the CPU uses less peak power than on the GPU, but the GPU still completes inference faster. Why might this be the case, and which would you prefer for a battery-sensitive application?"
 
@@ -1304,7 +1560,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Thermal Throttling Death Spiral</b> · <code>power-thermal</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Thermal Throttling Death Spiral</b> · <code>power</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your mobile game runs a super-resolution AI model to upscale 720p to 1080p at 60 FPS. When the user launches the game, it runs perfectly. After 15 minutes of gameplay, the framerate halves to 30 FPS, and the phone feels hot. Your CPU/GPU utilization logs say they are only at 50% capacity. What physical reality is taking down your app?"
 
@@ -1333,7 +1589,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Accelerometer Inference Power</b> · <code>power-thermal</code> <code>sensor-pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Accelerometer Inference Power</b> · <code>power</code> <code>sensor-pipeline</code></summary>
 
 - **Interviewer:** "You're building an always-on activity recognition feature (walking, running, cycling, stationary) on a Pixel 8 using the accelerometer at 50 Hz. The feature must run 24/7 without noticeably impacting battery life. Break down the power budget: sensor sampling, inference, and BLE transmission of activity labels to a paired smartwatch. Can you keep total power under 5 mW?"
 
@@ -1365,7 +1621,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The "Warm-Up" Performance Drop</b> · <code>thermal-power-sustained-perf</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The "Warm-Up" Performance Drop</b> · <code>thermal</code></summary>
 
 - **Interviewer:** "Your mobile ML model performs exceptionally well for the first 10-15 seconds after launch, achieving 30 FPS. However, after this initial period, the frame rate consistently drops to 15-20 FPS and stays there. The phone isn't running any other heavy applications. What's the primary cause for this behavior, and how would you confirm it?"
 
@@ -1392,10 +1648,9 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The TDP Wall</b> · <code>thermal-design</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The TDP Wall</b> · <code>thermal</code></summary>
 
 - **Interviewer:** "Apple claims the A17 Pro's Neural Engine delivers 35 TOPS. Qualcomm claims the Snapdragon 8 Gen 3's Hexagon NPU delivers 45 TOPS. Your ML team benchmarks the same INT8 MobileNetV2 on both and gets nearly identical inference times (~3.8ms). How can a 45 TOPS chip tie with a 35 TOPS chip, and what does this tell you about evaluating mobile SoCs for ML?"
 
@@ -1423,7 +1678,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Throttling Trap</b> · <code>thermal-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Throttling Trap</b> · <code>thermal</code></summary>
 
 - **Interviewer:** "Your team has developed a real-time AR filter model that runs at a blazing 15ms inference time on a fresh Android flagship. However, after 5 minutes of continuous use, the frame rate drops significantly, and inference latency rises to 40ms. What's the most likely root cause on a mobile SoC, and how would you investigate it?"
 
@@ -1448,7 +1703,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The DVFS Polling Delay</b> · <code>power-thermal</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The DVFS Polling Delay</b> · <code>power</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your app has a 'Magic Enhance' button that runs a heavy GAN on a photo. The user taps the button, and the inference takes 800ms. You notice that if the user taps the button *while* they are actively scrolling a list, the exact same inference only takes 400ms. Why does doing *more* work (scrolling + inference) make the inference 2x faster?"
 
@@ -1478,7 +1733,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Background ML Battery Drain</b> · <code>power-thermal</code> <code>app-lifecycle</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Background ML Battery Drain</b> · <code>power</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your photo app has a background ML feature that auto-tags photos using an on-device classification model (MobileNetV3, 5 MB, INT8) on an iPhone 16 (A18 chip). Users report 15% battery drain overnight even when they haven't opened the app. The model inference itself takes only 3ms per photo. With 200 photos to process, that's 600ms of compute — negligible. Where is the battery going?"
 
@@ -1512,7 +1767,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Power Hungry Framework</b> · <code>power-efficiency-frameworks-android-ios</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Power Hungry Framework</b> · <code>power</code></summary>
 
 - **Interviewer:** "You're tasked with deploying a computer vision model on both Android and iOS, with a strict power consumption budget for inference (e.g., <100mW average over 30 seconds). You've benchmarked the model using TensorFlow Lite (TFLite) on Android and Core ML on iOS. You observe that while TFLite on Android achieves the latency target, its power draw is consistently 20-30% higher than Core ML on iOS for a similar model and device class. What factors could explain this power discrepancy, and how would you optimize TFLite's power efficiency?"
 
@@ -1552,7 +1807,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Pocket Furnace</b> · <code>power-thermal</code> <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Pocket Furnace</b> · <code>power</code> <code>serving</code></summary>
 
 - **Interviewer:** "Your company ships an on-device LLM assistant (3B parameters, INT4, 1.7 GB) on the Samsung Galaxy S24 Ultra (Snapdragon 8 Gen 3). Users love it, but support tickets spike: 'My phone gets really hot when I use the AI chat.' One user reports their phone shut down with a thermal warning during a 10-minute conversation. The Snapdragon 8 Gen 3 has a 12.4W TDP. What's happening and how do you fix it without degrading the chat experience?"
 
@@ -1580,7 +1835,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Background ML Battery Vampire</b> · <code>power-thermal</code> <code>battery</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Background ML Battery Vampire</b> · <code>power</code> <code>battery</code></summary>
 
 - **Interviewer:** "Your health app runs an on-device activity recognition model in the background to count steps and detect falls. Users on Pixel 7 (Tensor G2) complain of 15% daily battery drain from your app alone — Android's battery settings page shows your app as the #1 consumer. The model itself is tiny (2 MB, 0.3 ms inference). How can a 0.3 ms model drain 15% of a 4355 mAh battery?"
 
@@ -1608,10 +1863,10 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Power Domain Juggling Act</b> · <code>power-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Power Domain Juggling Act</b> · <code>power</code></summary>
 
 - **Interviewer:** "Your always-on keyword detection model runs on a Snapdragon 8 Gen 3's Sensing Hub (a low-power DSP island). It draws 2 mW and wakes the main NPU only when it hears the keyword. The product team wants to add always-on face detection using the front camera. They say 'just run a tiny model on the Sensing Hub too.' Why does this seemingly small addition blow up the power budget by 100×?"
 
@@ -1643,7 +1898,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Sustained Performance Cliff</b> · <code>thermal-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Sustained Performance Cliff</b> · <code>thermal</code></summary>
 
 - **Interviewer:** "You've deployed a high-performance computer vision model on a flagship Android device. Initial tests show excellent latency (e.g., 20ms/frame). However, after about 30-60 seconds of continuous operation, the inference latency consistently jumps to 60-80ms/frame. This happens even with the device plugged into power. What is the most likely cause, and how would you design your ML system to provide more *sustained* performance?"
 
@@ -1685,7 +1940,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Background Thermal Throttling</b> · <code>power-thermal</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Background Thermal Throttling</b> · <code>power</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your photo app runs an on-device facial clustering model in the background while the user's phone is charging overnight. The model processes 10,000 photos. When run in the foreground, it takes 5 minutes. But in the overnight background task, telemetry shows it takes 45 minutes, and sometimes gets killed by the OS entirely. Why is the background execution 9x slower?"
 
@@ -1709,7 +1964,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Background Inference Power Budget</b> · <code>power-thermal</code> <code>battery</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Background Inference Power Budget</b> · <code>power</code> <code>battery</code></summary>
 
 - **Interviewer:** "Your health app runs a heart rhythm classification model on Apple Watch sensor data forwarded to the paired iPhone. iOS gives background apps approximately 30 seconds of CPU time per background fetch cycle, and the system schedules these opportunistically (roughly every 15-30 minutes). The model takes 12ms per inference on the ANE. How many inferences can you run per background cycle, and what's the energy cost of running on ANE vs CPU?"
 
@@ -1737,7 +1992,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Thermal Throttling Prediction</b> · <code>power-thermal</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Thermal Throttling Prediction</b> · <code>power</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your video editing app runs a style transfer model at 30 FPS. For the first 45 seconds, inference takes a steady 12ms per frame on the Snapdragon 8 Gen 3 NPU. Then latency gradually climbs to 24ms over the next 30 seconds and stabilizes there. The user complains about 'stuttering after a minute.' You can't make the model faster. How do you deliver a smooth user experience despite thermal throttling?"
 
@@ -1772,13 +2027,14 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 ---
 
 
-### ⚙️ Compilers & Frameworks
+### Compilers & Frameworks
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Profiling Tool Blind Spot</b> · <code>profiling</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Profiling Tool Blind Spot</b> · <code>observability</code></summary>
 
 - **Interviewer:** "You profile your ML inference pipeline on a Pixel 7 (Tensor G2) using Android's Systrace. The trace shows your inference function takes 12ms. You then profile with TFLite's built-in benchmark tool, which reports 8ms. Finally, you use Perfetto and see 15ms. Three tools, three numbers. Which one is 'right,' and why do they disagree?"
 
@@ -1806,10 +2062,9 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The iOS vs Android ML Framework Maze</b> · <code>frameworks</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The iOS vs Android ML Framework Maze</b> · <code>compilation</code></summary>
 
 - **Interviewer:** "Your company ships a cross-platform camera app with real-time style transfer. On iOS (iPhone 15, A16 Bionic), the model runs at 22ms via CoreML. On Android (Pixel 8, Tensor G3), the same ONNX model runs at 45ms via TFLite with NNAPI delegate. The hardware specs are comparable. Why is there a 2× performance gap, and how do you close it?"
 
@@ -1837,7 +2092,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Dynamic Shape Inference</b> · <code>compiler-runtime</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Dynamic Shape Inference</b> · <code>compilation</code> <code>latency</code></summary>
 
 - **Interviewer:** "You're deploying a text classification model on the Apple ANE via CoreML. With a fixed input shape of 128 tokens, inference takes 2ms. When you enable dynamic input shapes (1-512 tokens), the same 128-token input takes 6ms — 3× slower on identical hardware and identical input. Why does dynamic shape support cost so much, and when is padding to a fixed shape the better strategy despite wasting compute?"
 
@@ -1867,7 +2122,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The CoreML Custom Op Conversion Failure</b> · <code>frameworks</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The CoreML Custom Op Conversion Failure</b> · <code>compilation</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You train a PyTorch model with a custom `RotaryPositionEmbedding` (RoPE) layer for an on-device LLM. When converting to CoreML with `coremltools`, the conversion fails with `RuntimeError: PyTorch convert function for op 'custom::rope' not found`. Your colleague says 'just rewrite the model without RoPE.' Why is that a bad idea, and what are the three correct approaches to handle unsupported ops in CoreML conversion?"
 
@@ -1895,7 +2150,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CoreML Conversion Black Hole</b> · <code>compiler-runtime</code> <code>frameworks</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CoreML Conversion Black Hole</b> · <code>compilation</code> <code>compilation</code></summary>
 
 - **Interviewer:** "Your PyTorch model uses a custom 'GatedLinearUnit' activation: `GLU(x) = x[:, :n] * sigmoid(x[:, n:])`. The model works perfectly in PyTorch. After converting to Core ML via `coremltools`, inference produces garbage — all outputs are near zero. No conversion error was raised. The model has 45 layers and you don't know which one is broken. How do you diagnose and fix this?"
 
@@ -1923,7 +2178,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Dynamic Shape Recompilation</b> · <code>compiler</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Dynamic Shape Recompilation</b> · <code>compilation</code> <code>latency</code></summary>
 
 - **Interviewer:** "You are running a text-to-image diffusion model on iOS using CoreML. The user can select any output resolution between 256x256 and 512x512. The NPU is capable of generating an image in 2 seconds. However, every time the user changes the resolution slider, the very first generation takes 15 seconds, making the app feel incredibly unresponsive. What is CoreML doing during those extra 13 seconds?"
 
@@ -1947,7 +2202,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The WebGPU ML Inference</b> · <code>frameworks</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The WebGPU ML Inference</b> · <code>compilation</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your team debates shipping an ML feature as a native mobile SDK (Core ML / TFLite) vs running it in the browser via WebGPU. The PM argues 'WebGPU means write once, run everywhere — no app review, instant updates, works on any device with a browser.' The model is a 50M parameter image classifier. Walk me through the real performance gap and when WebGPU is the right call."
 
@@ -1978,13 +2233,14 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 ---
 
 
-### 🔧 Model Optimization
+### Model Optimization
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Cellular Model Download Failure</b> · <code>model-compression</code> <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Cellular Model Download Failure</b> · <code>pruning</code> <code>serving</code></summary>
 
 - **Interviewer:** "Your AI writing assistant app downloads a 180 MB language model on first launch. Analytics show 40% of users in India and Southeast Asia never complete the download — the app shows a perpetual 'Preparing AI...' spinner. These users are on 4G connections. Users in the US and Europe download fine. The model server is hosted in us-east-1. What's going wrong and how do you fix it?"
 
@@ -2014,10 +2270,10 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Big.LITTLE Task Migration</b> · <code>os</code> <code>performance</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Big.LITTLE Task Migration</b> · <code>deployment</code> <code>performance</code></summary>
 
 - **Interviewer:** "Your AR app runs a hand-tracking model continuously on the CPU. When the app launches, inference takes 8ms per frame. After exactly 2 minutes of continuous usage, the inference time suddenly drops to 30ms per frame. The device is NOT hot, so thermal throttling is not active. What OS-level power management feature ruined your latency?"
 
@@ -2047,13 +2303,12 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 ---
 
 
-### 📡 Sensor & Media Pipelines
+### Sensor & Media Pipelines
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Camera Defocus</b> · <code>sensors</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Camera Defocus</b> · <code>sensor-pipeline</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You deploy an edge ML model on a thermal security camera. It detects humans perfectly in the winter. In the summer, the camera enclosure heats up significantly. The model's accuracy drops to near zero. The camera isn't thermal throttling, and the ambient temperature isn't higher than a human body. You look at the raw thermal images, and they are completely blurry. What physical property of the hardware failed?"
 
@@ -2083,7 +2338,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Camera Defocus</b> · <code>sensors</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Camera Defocus</b> · <code>sensor-pipeline</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You deploy an edge ML model on a thermal security camera. It detects humans perfectly in the winter. In the summer, the camera enclosure heats up significantly. The model's accuracy drops to near zero. The camera isn't thermal throttling, and the ambient temperature isn't higher than a human body. You look at the raw thermal images, and they are completely blurry. What physical property of the hardware failed?"
 
@@ -2113,7 +2368,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Camera VSync Deadlock</b> · <code>sensors</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Camera VSync Deadlock</b> · <code>sensor-pipeline</code> <code>latency</code></summary>
 
 - **Interviewer:** "Your mobile app captures camera frames, runs ML inference, and draws the bounding box to the screen. The screen refreshes at 60Hz (16.6ms). The ML model takes 12ms. The camera outputs frames at 60 FPS (16.6ms). Logically, you have 4.6ms of headroom per frame. However, the app consistently drops every other frame, running at a jittery 30 FPS. What pipeline synchronization issue caused this?"
 
@@ -2150,13 +2405,13 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 ---
 
 
-### 📎 Additional Topics
+### Additional Topics
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Memory-Mapped File Deadlock</b> · <code>storage</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Memory-Mapped File Deadlock</b> · <code>persistent-storage</code> <code>latency</code></summary>
 
 - **Interviewer:** "You are using `mmap` to load a 100 MB model on Android. The model loads instantly, which is great. However, during the first few seconds of inference, the UI thread occasionally stalls for 50-100ms. You are running inference on a background thread. Why is a background memory read stalling the foreground UI?"
 
@@ -2184,10 +2439,10 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Federated Learning Battery Drain</b> · <code>training</code> <code>power</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Federated Learning Battery Drain</b> · <code>data-parallelism</code> <code>power</code></summary>
 
 - **Interviewer:** "You implement Federated Learning to update a next-word prediction model directly on users' phones. The on-device training takes 10 minutes and consumes 2% of the battery. However, users are complaining that the app is destroying their battery life overnight. If the math only takes 2%, where is the energy going?"
 
@@ -2214,7 +2469,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The Federated Learning Communication Cost</b> · <code>training</code> <code>battery</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The Federated Learning Communication Cost</b> · <code>data-parallelism</code> <code>battery</code></summary>
 
 - **Interviewer:** "You're building federated learning for a keyboard prediction model (30M parameters, FP32) across 100 million Android devices. Each training round selects 5,000 devices. Walk me through the communication cost, cellular data usage, and battery drain per training round per device. At what point does the user notice?"
 
@@ -2251,7 +2506,7 @@ Latency budgets, UI jank, thermal throttling, power management, compiler optimiz
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Federated Learning Radio Drain</b> · <code>training</code> <code>power</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Federated Learning Radio Drain</b> · <code>data-parallelism</code> <code>power</code></summary>
 
 - **Interviewer:** "You implement Federated Learning to update a next-word prediction model directly on users' phones. The on-device training takes 5 minutes and consumes 1% of the battery. However, users complain that the app is destroying their battery life overnight. If the math only takes 1%, where is the massive energy drain coming from?"
 

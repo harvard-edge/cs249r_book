@@ -17,13 +17,46 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 ---
 
 
-### 🚀 Deployment & Model Delivery
+### Deployment & Model Delivery
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Conversion Cliff</b> · <code>model-formats</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The App Store Diet</b> · <code>on-demand-model-download</code></summary>
+
+- **Interviewer:** "You are a Mobile ML Engineer building a new "Magic Stylus" feature that uses an on-device model with 70 million parameters. Your base app is already 150 MB. To avoid exceeding the app store's ~200 MB cellular download limit and forcing users onto Wi-Fi, you plan to use on-demand resource APIs to download the model after the initial install.
+
+For your technical design document, you need to state the storage footprint of the model. Calculate the size of the 70M parameter model if stored in FP16 precision."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing the byte requirements for different precisions. Engineers often default to thinking '1 parameter = 1 byte', which is only true for INT8 quantization. This leads to an answer that is half the correct size. A less common error is using 4 bytes per parameter, the standard for FP32, which would be correct for training weights but is overkill for most mobile inference scenarios and results in a 2x overestimate.
+
+  **Realistic Solution:** The correct answer is 140 MB. A 70 million parameter model requires 140 MB of storage in FP16 precision. This is because each FP16 parameter requires 2 bytes of storage. Adding this to the 150 MB base app size would create a 290 MB binary, which is significantly over the cellular download limit, confirming that an on-demand download strategy is necessary.
+
+  > **Napkin Math:** 1. **Identify parameters:** 70,000,000
+2. **Identify bytes per parameter:** FP16 precision uses 16 bits, which is 2 bytes.
+3. **Calculate total size:** 70,000,000 parameters × 2 bytes/parameter = 140,000,000 bytes
+4. **Convert to megabytes:** 140,000,000 bytes ≈ 140 MB
+
+  > **Key Equation:** $\text{Model Size (Bytes)} = \text{Number of Parameters} \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] 70 MB
+  > [ ] 280 MB
+  > [x] 140 MB
+  > [ ] 17.5 MB
+
+  📖 **Deep Dive:** [Mobile: Shipping and Updating](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+#### 🟢 L3
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Conversion Cliff</b> · <code>deployment</code></summary>
 
 - **Interviewer:** "You trained a PyTorch model with a custom GELU activation and grouped query attention. You convert it to CoreML for iPhone deployment. The conversion succeeds with no errors, but on-device accuracy is significantly worse than your PyTorch baseline. What went wrong?"
 
@@ -240,7 +273,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The ML Notification Backlash</b> · <code>mlops</code> <code>monitoring</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The ML Notification Backlash</b> · <code>deployment</code> <code>monitoring</code></summary>
 
 - **Interviewer:** "Your news app uses an on-device ML model to predict which articles a user will click, and sends push notifications for high-confidence predictions. After launching the feature on the Google Pixel 8 (Tensor G3), your app's rating drops from 4.5 to 3.2 stars in two weeks. Reviews say 'too many notifications' and 'the app thinks it knows what I want but it's wrong.' The model has 78% precision on your test set. What went wrong?"
 
@@ -270,7 +303,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The App Size Bloat</b> · <code>deployment</code> <code>storage</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The App Size Bloat</b> · <code>deployment</code> <code>persistent-storage</code></summary>
 
 - **Interviewer:** "Your team is adding an offline translation feature to your iOS app. The models total 300 MB. You bundle them directly into the app binary and ship the update. The next week, your product manager reports that app installations from new users have plummeted by 40%. Why did bundling the model destroy your acquisition metrics?"
 
@@ -294,8 +327,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Secure Enclave Boundary</b> · <code>security</code></summary>
 
@@ -325,7 +357,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Cold Start Jitter</b> · <code>model-loading</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Cold Start Jitter</b> · <code>serving</code></summary>
 
 - **Interviewer:** "Your ML-powered camera app experiences a noticeable 'hiccup' the very first time a user opens it and tries to snap a photo, even though subsequent photo captures are instantaneous. The inference itself is fast (5ms). What system-level factors contribute to this initial delay, and how would you optimize them?"
 
@@ -681,7 +713,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Device-Free ML Testing Strategy</b> · <code>testing</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Device-Free ML Testing Strategy</b> · <code>monitoring</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your team ships an ML-powered camera feature to 200 million users across iOS and Android. You don't have a device farm — you have 5 test phones on your desk. How do you test the ML pipeline across devices without a device farm?"
 
@@ -711,7 +743,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Cross-Version Compatibility Maze</b> · <code>deployment</code></summary>
@@ -833,10 +865,10 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Delivery Paradox</b> · <code>model-delivery</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Delivery Paradox</b> · <code>deployment</code></summary>
 
 - **Interviewer:** "You're shipping an on-device LLM assistant (3B parameters, INT4) to a global Android app with 500 million installs. The quantized model is 1.7 GB. Google Play's install-time APK limit is 150 MB, and on-demand delivery via Play Asset Delivery has a 2 GB limit. Design the model delivery system. What breaks at this scale that doesn't break in a demo?"
 
@@ -866,7 +898,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Multi-Model Orchestration Nightmare</b> · <code>multi-model-inference</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Multi-Model Orchestration Nightmare</b> · <code>serving</code></summary>
 
 - **Interviewer:** "Your team is building a sophisticated AR application that requires running three ML models concurrently: a body pose estimation (high-res video input, GPU/NPU), a small speech recognition (audio input, CPU), and a gesture classifier (low-res video region, NPU). All must run in real-time. Describe how you would design the inference pipeline to manage resource contention, prioritize tasks, and ensure real-time performance on a single mobile SoC."
 
@@ -909,11 +941,12 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 ---
 
 
-### 🔒 Privacy & Security
+### Privacy & Security
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The User Consent Minefield</b> · <code>privacy</code></summary>
 
@@ -967,8 +1000,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Federated Keyboard</b> · <code>privacy</code></summary>
 
@@ -1002,7 +1034,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The On-Device Personalization Privacy</b> · <code>privacy</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The On-Device Personalization Privacy</b> · <code>privacy</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "Your photo search app needs to learn each user's personal categories — 'my dog,' 'my office,' 'my kids' soccer games.' You'll fine-tune a CLIP-like vision encoder (150M params, FP16 = 300 MB) on-device using LoRA. The adapted weights never leave the device. Walk me through the LoRA adapter sizing, training memory, time to convergence, and what happens when the user gets a new phone."
 
@@ -1032,7 +1064,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Keyboard Prediction Privacy Leak</b> · <code>privacy</code> <code>deployment</code></summary>
@@ -1131,10 +1163,10 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Federated Learning System for a Social Media App</b> · <code>privacy</code> <code>distributed</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Federated Learning System for a Social Media App</b> · <code>privacy</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "Design a federated learning system for a social media app with 500 million daily active users. The model personalizes the content feed. You must improve the model without collecting user interaction data on your servers. Cover device selection, communication efficiency, convergence, and privacy guarantees."
 
@@ -1165,13 +1197,12 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 ---
 
 
-### 🏋️ On-Device Training & Federated Learning
+### On-Device Training & Federated Learning
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The On-Device Fine-Tuning Pipeline</b> · <code>training</code> <code>privacy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The On-Device Fine-Tuning Pipeline</b> · <code>data-parallelism</code> <code>privacy</code></summary>
 
 - **Interviewer:** "Your photo app has a 'search by description' feature powered by a CLIP-like model. Users in Japan complain it doesn't understand Japanese food categories. Users in Brazil say it misclassifies local bird species. You can't collect user photos on your servers. Design an on-device personalization system that adapts the model to each user's photo library."
 
@@ -1201,10 +1232,10 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Privacy-Utility Squeeze</b> · <code>on-device-training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Privacy-Utility Squeeze</b> · <code>continual-learning</code></summary>
 
 - **Interviewer:** "You're implementing federated learning for a next-word prediction model across 100 million Android devices. Each device fine-tunes locally and uploads gradient updates. The privacy team mandates differential privacy with ε = 2. After deployment, the model's perplexity is 40% worse than centralized training. The PM asks you to 'just increase epsilon.' What do you tell them?"
 
@@ -1228,10 +1259,10 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> Designing Cross-Device Federated Personalization</b> · <code>training</code> <code>privacy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> Designing Cross-Device Federated Personalization</b> · <code>data-parallelism</code> <code>privacy</code></summary>
 
 - **Interviewer:** "You're the ML systems architect for a health platform spanning Apple Watch (S9 chip, 1 GB RAM), iPhone (A18 Pro, 8 GB RAM), and iPad (M4, 16 GB RAM). Each device collects different health signals: the Watch has heart rate and motion, the iPhone has location and app usage, and the iPad has extended workout videos. You want to train a personalized health model that fuses data from all three devices — but Apple's privacy framework prohibits sending raw health data between devices, even within the same user's iCloud account. Design a federated personalization system that trains across a single user's device ecosystem without centralizing raw data."
 
@@ -1261,7 +1292,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> Designing an On-Device Continual Learning System</b> · <code>training</code> <code>security</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> Designing an On-Device Continual Learning System</b> · <code>data-parallelism</code> <code>security</code></summary>
 
 - **Interviewer:** "You're designing a continual learning system for a mobile keyboard that adapts to each user's evolving vocabulary — new slang, work jargon, names of new contacts, trending topics. The model must learn new patterns without forgetting old ones, train entirely on-device for privacy, resist adversarial manipulation (a malicious app trying to poison the model via accessibility services), and work across the Snapdragon 8 Gen 3 (12 GB RAM) down to the Helio G99 (4 GB RAM). Design the system."
 
@@ -1294,13 +1325,13 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 ---
 
 
-### 💰 Economics & Platform Constraints
+### Economics & Platform Constraints
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The 50-Feature Mobile ML Platform</b> · <code>platform</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The 50-Feature Mobile ML Platform</b> · <code>deployment</code></summary>
 
 - **Interviewer:** "You're the ML platform architect for a super-app (like WeChat or Grab) that has 50 different ML features: face filters, speech recognition, recommendation, fraud detection, OCR, translation, smart replies, and more. Each feature team wants to ship their own model. The app is already 300 MB. Users on budget phones with 3 GB RAM complain about performance. Design the mobile ML platform."
 
@@ -1335,13 +1366,12 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 ---
 
 
-### 📎 Additional Topics
+### Additional Topics
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Model Loading I/O Cliff</b> · <code>storage-io</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Model Loading I/O Cliff</b> · <code>persistent-storage</code></summary>
 
 - **Interviewer:** "Your Android app loads a 200 MB on-device LLM from internal storage. On a Pixel 8 Pro (UFS 4.0), the model loads in 180ms. On a Samsung Galaxy A15 (eMMC 5.1), the same model takes 4.2 seconds. The user sees a blank screen for 4 seconds on the budget phone. Both devices have enough RAM. Why is there a 23× difference, and how do you fix the user experience?"
 

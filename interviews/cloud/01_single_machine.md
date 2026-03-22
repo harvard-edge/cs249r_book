@@ -17,11 +17,1531 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 ---
 
 
-### 📐 Roofline & Compute Analysis
+### Roofline & Compute Analysis
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Roofline Ridge Point</b> · <code>gpu-roofline-model</code></summary>
+
+- **Interviewer:** "What does the 'ridge point' on a GPU roofline model represent?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the ridge point with either the peak TFLOPS (the compute ceiling) or the peak memory bandwidth. They might think it's a fixed hardware spec on its own, rather than a crucial *ratio* between two specs.
+
+  **Realistic Solution:** The ridge point defines the transition point between being memory-bound and compute-bound. It is the minimum Arithmetic Intensity (the ratio of compute operations per byte of memory accessed) a workload must have to be able to saturate the GPU's compute units and achieve peak TFLOPS. If a workload's arithmetic intensity is below the ridge point, its performance is limited by memory bandwidth; if it is above, it is limited by the raw compute power.
+
+  > **Napkin Math:** The ridge point is calculated by dividing the peak compute performance by the peak memory bandwidth. For a NVIDIA H100 GPU:
+- Peak FP16 Compute: 989 TFLOPS
+- HBM3 Memory Bandwidth: 3.35 TB/s
+
+Ridge Point = (989 × 10¹² FLOPs/s) / (3.35 × 10¹² Bytes/s) ≈ 295 FLOPs/Byte.
+
+This means a workload needs to perform at least 295 FLOPs for every byte it pulls from HBM3 to be compute-bound.
+
+  > **Key Equation:** $\text{Ridge Point} = \frac{\text{Peak Compute (FLOPs/s)}}{\text{Peak Memory Bandwidth (Bytes/s)}}$
+
+  > **Options:**
+  > [ ] The maximum memory bandwidth (TB/s) of the GPU.
+  > [ ] The maximum theoretical compute performance (TFLOPS).
+  > [x] The minimum arithmetic intensity (FLOPs/Byte) required to be compute-bound.
+  > [ ] The power consumption (Watts) when the GPU is idle.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> Identifying the Bottleneck</b> · <code>compute-vs-memory-bound</code></summary>
+
+- **Interviewer:** "A workload running on an H100 GPU has an arithmetic intensity of 40 FLOPs/Byte. Given the H100's ridge point is about 295 FLOPs/Byte, state whether the workload is compute-bound or memory-bound."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common misconception is to invert the logic: thinking that a low arithmetic intensity means the workload isn't doing much compute, so it must be 'compute-bound' (i.e., limited by a lack of compute). The reality is the opposite: the low ratio of compute-to-memory-access means the GPU spends most of its time waiting for data.
+
+  **Realistic Solution:** The workload is **memory-bound**. Its arithmetic intensity (40 FLOPs/Byte) is significantly lower than the H100's ridge point (295 FLOPs/Byte). This places it on the left side of the roofline model, where the performance is dictated by the sloped line representing memory bandwidth limitations. The GPU's powerful compute cores are starved for data and cannot run at their full potential.
+
+  > **Napkin Math:** The performance of a memory-bound workload is limited by the memory bandwidth multiplied by its arithmetic intensity.
+- Arithmetic Intensity (AI): 40 FLOPs/Byte
+- H100 HBM3 Bandwidth: 3.35 TB/s
+
+Achievable Performance = 40 FLOPs/Byte × 3.35 × 10¹² Bytes/s = 134 × 10¹² FLOPs/s = 134 TFLOPS.
+
+Since 134 TFLOPS is much less than the H100's peak of 989 TFLOPS, we can quantitatively confirm the workload is not reaching the compute ceiling and is therefore memory-bound.
+
+  > **Key Equation:** $\text{If AI} < \text{Ridge Point} \rightarrow \text{Memory-Bound}$
+
+  > **Options:**
+  > [ ] Compute-bound, because its arithmetic intensity is a low number.
+  > [x] Memory-bound, because its arithmetic intensity is below the ridge point.
+  > [ ] Neither, it is perfectly balanced on the ridge point.
+  > [ ] It's impossible to tell without knowing the model's size.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Role of HBM Bandwidth</b> · <code>hbm-bandwidth</code></summary>
+
+- **Interviewer:** "In the context of the GPU roofline model, what aspect of performance does the HBM (High Bandwidth Memory) bandwidth primarily determine?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers sometimes confuse memory bandwidth (a rate, in TB/s) with memory capacity (a size, in GB). Another common mistake is thinking that bandwidth sets the absolute peak performance (the flat ceiling of the roofline), when in fact that is the job of the compute cores.
+
+  **Realistic Solution:** HBM bandwidth determines the **slope of the roofline for memory-bound workloads**. This sloped section represents the performance limit for any application whose arithmetic intensity is below the ridge point. A higher memory bandwidth leads to a steeper slope, which means higher achievable performance for the same (low) arithmetic intensity. It essentially defines the performance ceiling for data-starved applications.
+
+  > **Napkin Math:** Let's compare two GPUs with the same compute but different bandwidths on a workload with an AI of 50 FLOPs/Byte.
+- GPU A (H100): 3.35 TB/s Bandwidth -> Perf = 50 * 3.35 = 167.5 TFLOPS
+- GPU B (Hypothetical): 1.5 TB/s Bandwidth -> Perf = 50 * 1.5 = 75 TFLOPS
+
+Even if both GPUs have a 989 TFLOPS compute peak, the one with higher bandwidth performs over 2x better on this memory-bound task. This shows bandwidth sets the performance limit in this region.
+
+  > **Key Equation:** $\text{Performance}_{(\text{mem-bound})} = \text{Arithmetic Intensity} \times \text{Memory Bandwidth}$
+
+  > **Options:**
+  > [ ] The flat part of the roofline (the peak TFLOPS ceiling).
+  > [ ] The total capacity (GB) of the GPU's memory.
+  > [x] The slope of the roofline for memory-bound workloads.
+  > [ ] The latency (in nanoseconds) of a single L1 cache access.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The 70B Parameter Litmus Test</b> · <code>fp16-model-footprint</code></summary>
+
+- **Interviewer:** "A team wants to serve a 70 billion parameter language model for inference. Explain how you would calculate its memory footprint in FP16 precision and determine if it fits onto a single NVIDIA H100 GPU."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often forget the bytes-per-parameter for a given precision. A common error is to assume 1 byte per parameter (like INT8), or to confuse the inference memory footprint with the much larger training memory footprint which includes optimizer states.
+
+  **Realistic Solution:** Each parameter in FP16 precision requires 2 bytes of storage. To calculate the total memory required for the model weights, you multiply the number of parameters by the size of each parameter. This calculation does not include the KV cache or temporary activation memory, but it's the baseline for just loading the model. In this case, 70 billion parameters multiplied by 2 bytes/parameter equals 140 GB. This exceeds the 80 GB of HBM3 memory available on a single H100 GPU, so the model will not fit without being sharded or compressed.
+
+  > **Napkin Math:** 70,000,000,000 parameters × 2 bytes/parameter = 140,000,000,000 bytes = 140 GB. Since 140 GB > 80 GB, it will not fit.
+
+  > **Key Equation:** $\text{Memory (GB)} = \frac{\text{Parameters} \times \text{Bytes per Parameter}}{10^9}$
+
+  > **Options:**
+  > [ ] 70 GB, so it fits with 10 GB to spare.
+  > [ ] 1120 GB, so it does not fit.
+  > [x] 140 GB, so it does not fit.
+  > [ ] 280 GB, so it does not fit.
+
+  📖 **Deep Dive:** [ML Systems](https://mlsysbook.ai/vol1/ml_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The B200's Architectural Balance</b> · <code>ridge-point-calculation</code></summary>
+
+- **Interviewer:** "NVIDIA's B200 GPU is specified with 2,250 TFLOPS of FP16 compute and 8.0 TB/s of HBM3e memory bandwidth. Explain how to calculate the GPU's ridge point and interpret what this value tells you about the types of workloads that will run efficiently on it."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A frequent error is mismatching units, such as confusing Terabits per second (Tb/s) with Terabytes per second (TB/s), which results in an 8x error. Another is inverting the ratio, calculating Bytes/Op instead of Ops/Byte, which obscures the meaning of arithmetic intensity.
+
+  **Realistic Solution:** The ridge point defines the architectural balance of an accelerator by calculating the ratio of its peak compute to its peak memory bandwidth. It tells you the minimum arithmetic intensity (measured in Ops/Byte) a workload must have to become compute-bound rather than memory-bound. For the B200, you divide its FP16 TFLOPS by its HBM TB/s. The resulting value of ~281 Ops/Byte means that for every byte of data moved from HBM, a program must perform at least 281 floating-point operations to fully saturate the compute units.
+
+  > **Napkin Math:** Ridge Point = (2,250 × 10¹² FLOPS) / (8.0 × 10¹² Bytes/s) = 281.25 Ops/Byte
+
+  > **Key Equation:** $\text{Ridge Point (Ops/Byte)} = \frac{\text{Peak Compute (FLOPS)}}{\text{Peak Memory Bandwidth (Bytes/s)}}$
+
+  > **Options:**
+  > [ ] ~295 Ops/Byte, because it's similar to the H100.
+  > [ ] ~2,250 Ops/Byte, assuming bandwidth was specified in Tb/s.
+  > [ ] ~0.0035 Bytes/Op, because the ratio was inverted.
+  > [x] ~281 Ops/Byte, indicating it's a compute-bound architecture.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Chinchilla Time Tax</b> · <code>training-time-estimation</code></summary>
+
+- **Interviewer:** "According to Chinchilla scaling laws, training a 70B parameter model optimally requires approximately 5.8 x 10²³ FLOPs. Explain how you would estimate the time it would take to complete this training run on a single NVIDIA H100 GPU, assuming 100% hardware utilization."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is mismatching the orders of magnitude for compute, for example, confusing the total FLOPs (in the 10²³ range) with PetaFLOPs (10¹⁵), or treating the GPU's performance in TFLOPS/s (10¹²) as PFLOPS/s (10¹⁵). This can lead to an answer that is off by a factor of 1,000 or more, making an infeasible project seem possible.
+
+  **Realistic Solution:** To estimate the training time, you divide the total number of FLOPs required for the training run by the per-second performance of the hardware. First, you get the H100's FP16 performance, which is 989 TFLOPS (989 × 10¹² FLOPs/sec). Then, you divide the total 5.8 × 10²³ FLOPs by this value. Finally, you convert the resulting time in seconds to a more human-readable unit like days to understand the feasibility. The calculation demonstrates that training a model of this scale on a single GPU would take thousands of years, illustrating why large-scale distributed training is necessary.
+
+  > **Napkin Math:** Total FLOPs = 5.8 × 10²³ FLOPs.
+H100 Speed = 989 × 10¹² FLOPs/sec.
+Time (seconds) = (5.8 × 10²³) / (989 × 10¹²) ≈ 5.86 × 10⁸ seconds.
+Time (days) = (5.86 × 10⁸ seconds) / (86,400 seconds/day) ≈ 6,788 days.
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{Total Compute (FLOPs)}}{\text{Performance (FLOPs/s)}}$
+
+  > **Options:**
+  > [ ] ~6.8 days.
+  > [x] ~6,800 days.
+  > [ ] ~1,130 days.
+  > [ ] ~2,980 days.
+
+  📖 **Deep Dive:** [Model Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Optimizer's Tax</b> · <code>vram-accounting</code></summary>
+
+- **Interviewer:** "You need to train a 70 billion parameter LLM using the standard Adam optimizer. State the approximate VRAM required just for the optimizer states and gradients, excluding the model weights themselves."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often dramatically underestimate training memory requirements, thinking only of the model's weight size (e.g., 70B params × 2 bytes/param for FP16 ≈ 140 GB). They forget that the Adam optimizer needs to store not just gradients, but also first-moment (momentum) and second-moment (variance) estimates, which are typically kept in FP32 for stability, massively increasing the memory footprint.
+
+  **Realistic Solution:** The standard rule of thumb is that Adam requires approximately 12-16 bytes per model parameter. This breaks down into: 2 bytes for FP16 gradients, 4 bytes for FP32 momentum, 4 bytes for FP32 variance, and often another 2-4 bytes for a master copy of the weights. Taking the conservative 12 bytes/param for optimizer states alone (gradients + moments) is a safe bet. A full accounting including weights is often quoted as 16x.
+
+  > **Napkin Math:** Let's calculate the memory for just the gradients and optimizer states:
+- FP16 Gradients: 70B params × 2 bytes/param = 140 GB
+- FP32 Momentum: 70B params × 4 bytes/param = 280 GB
+- FP32 Variance: 70B params × 4 bytes/param = 280 GB
+- **Total Optimizer State:** 140 + 280 + 280 = **700 GB**.
+This shows that just the optimizer states require ~5x the memory of the model weights, and why a single 80GB H100 is insufficient.
+
+  > **Key Equation:** $\text{Memory}_{\text{Adam}} \approx (2_{\text{grad}} + 4_{\text{momentum}} + 4_{\text{variance}}) \times P$
+
+  > **Options:**
+  > [ ] 140 GB
+  > [ ] 280 GB
+  > [x] ~700 GB
+  > [ ] 80 GB
+
+  📖 **Deep Dive:** [Model Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Voracious KV-Cache</b> · <code>vram-accounting</code></summary>
+
+- **Interviewer:** "When serving an LLM, a significant portion of VRAM is consumed by the KV-cache. Recall which of these factors is the primary driver of the KV-cache's memory size."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Many engineers incorrectly assume the model's parameter count is the dominant factor for all memory components. While it defines the dimensions of the key/value vectors, the cache's total size grows linearly with the number of tokens in the input sequence. For modern LLMs with very long context windows, the sequence length quickly becomes the bottleneck, causing the KV-cache to consume more memory than the model weights themselves.
+
+  **Realistic Solution:** The KV-cache stores the key (K) and value (V) vectors for every token processed so far. Its size is a direct function of the sequence length. The formula is `Memory_KV = 2 × sequence_length × num_layers × hidden_dim`. As `sequence_length` increases, the memory usage scales linearly and can become enormous, far exceeding the static memory cost of the weights.
+
+  > **Napkin Math:** Let's compare weights vs. a long KV-cache for Llama-70B:
+- **Weights (FP16):** 70B params × 2 bytes/param = **140 GB**.
+- **KV-Cache (per token):** `2 × num_layers × hidden_dim × 2 bytes` = `2 × 80 layers × 8192 hidden_dim × 2 bytes` ≈ 2.6 MB per token.
+- **KV-Cache (128k sequence):** 128,000 tokens × 2.6 MB/token ≈ **335 GB**.
+The KV-cache for a long sequence is over 2.3x larger than the model weights.
+
+  > **Key Equation:** $\text{Memory}_{\text{KV}} \propto \text{sequence_length}$
+
+  > **Options:**
+  > [ ] The number of model parameters (P)
+  > [ ] The batch size (B)
+  > [x] The input sequence length (S)
+  > [ ] The GPU's memory bandwidth
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Activation Memory Bubble</b> · <code>vram-accounting</code></summary>
+
+- **Interviewer:** "Identify the scenario where the memory used for model activations is most likely to be larger than the memory used for the model's weights."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** It's a common misconception that model weights are always the largest consumer of VRAM. While true for many large language models, it's false for architectures that process high-dimensional inputs, like Convolutional Neural Networks (CNNs) on high-resolution images. In these cases, the intermediate activation maps that must be stored during training for the backward pass can be massive.
+
+  **Realistic Solution:** During training, every layer's output (its activation) must be saved in memory to compute gradients during backpropagation. For a CNN processing high-resolution images (e.g., 1024x1024) with a large batch size, the size of these activation tensors (`Batch x Channels x Height x Width`) can easily exceed the memory required for the model's parameters. This is especially true in the early layers of a CNN where the spatial dimensions (Height, Width) are still large.
+
+  > **Napkin Math:** Compare weights vs. a single activation tensor in a large vision model:
+- **Model Weights:** A 50M parameter CNN (like ResNet-50) requires `50M × 4 bytes/param (FP32) = 200 MB`.
+- **One Activation Layer:** For a batch of 32 on 1024x1024 images, an early layer might have an activation size of `(32, 64, 512, 512)`.
+- **Activation Memory (FP32):** `32 × 64 × 512 × 512 × 4 bytes` = `2,147,483,648 bytes` ≈ **2.1 GB**.
+This single activation tensor is already 10x larger than the entire model's weight memory.
+
+  > **Key Equation:** $\text{Memory}_{\text{activations}} \propto B \times C \times H \times W$
+
+  > **Options:**
+  > [ ] Serving a 13B LLM with a short context length.
+  > [x] Training a large CNN on high-resolution images with a large batch size.
+  > [ ] Fine-tuning a 1B parameter model with a small batch size.
+  > [ ] Running inference with a quantized MobileNet on a single image.
+
+  📖 **Deep Dive:** [Neural Network Architectures](https://mlsysbook.ai/vol1/dnn_architectures.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Adam Optimizer Memory Footprint</b> · <code>adam-optimizer-memory</code></summary>
+
+- **Interviewer:** "A team wants to fine-tune an 8 billion parameter language model using the Adam optimizer with mixed precision (FP16 parameters/gradients, FP32 optimizer states). They have a single server with one 80 GB H100 GPU. Explain whether the model and its optimizer states will fit into GPU memory, ignoring activations and the KV-cache for now."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often only account for the model parameters' size (e.g., 8B params × 2 bytes/param = 16 GB), completely forgetting the substantial memory required for gradients and the Adam optimizer's momentum and variance tensors.
+
+  **Realistic Solution:** It will not fit. A reliable rule of thumb for mixed-precision training with Adam is that it requires approximately 16 bytes per model parameter. This accounts for FP16 parameters (2 bytes), FP16 gradients (2 bytes), and two 32-bit (4-byte) optimizer states (momentum and variance) plus a 32-bit master copy of the parameters, which are often maintained in FP32 for stable updates.
+
+Therefore, an 8B parameter model will consume roughly 128 GB, which far exceeds the 80 GB of HBM3 memory available on a single H100 GPU. The team would need to use memory-saving techniques like DeepSpeed ZeRO or model parallelism.
+
+  > **Napkin Math:** 1. **Identify parameters:** Model has 8 billion (8B) parameters.
+2. **Apply the rule of thumb:** Mixed-precision training with Adam requires ~16 bytes per parameter.
+3. **Calculate total memory:** 8,000,000,000 parameters × 16 bytes/parameter = 128,000,000,000 bytes.
+4. **Convert to GB:** 128,000,000,000 bytes / (1024^3 bytes/GB) ≈ 119.2 GB (or ~128 GB using 10^9 for estimation).
+5. **Compare to hardware:** 128 GB > 80 GB. It doesn't fit.
+
+  > **Key Equation:** $\text{Training Memory (Adam)} \approx 16 \times \text{Parameters}$
+
+  > **Options:**
+  > [ ] Yes, it fits. It only needs ~16 GB.
+  > [ ] Yes, it fits. It needs ~64 GB.
+  > [x] No, it does not fit. It needs ~128 GB.
+  > [ ] Yes, it fits. It needs ~32 GB.
+
+  📖 **Deep Dive:** [Model Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Gradient Memory Tax</b> · <code>gradient-memory-tax</code></summary>
+
+- **Interviewer:** "You are training a large model with a parameter count 'P'. After the forward pass, you have a certain peak memory usage. When you initiate the backward pass (e.g., with `loss.backward()`), how much *additional* memory must be allocated specifically for the gradients, assuming you are training in FP16 precision? Contrast this with the memory used by the parameters themselves."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to think that gradients are just temporary, small values. Engineers forget that for every single parameter in the model, a corresponding gradient must be stored in memory, effectively doubling the memory footprint of the weights alone.
+
+  **Realistic Solution:** The backward pass will allocate additional memory equal in size to the model's parameters. Since the model has 'P' parameters and is being trained in FP16 (2 bytes per parameter), the model weights themselves consume `P × 2` bytes.
+
+The gradients will also be stored in FP16, so they will require an identical amount of memory: `P × 2` bytes. This is often called the 'gradient memory tax'—it's a 100% overhead on top of the parameter memory.
+
+  > **Napkin Math:** 1. **Model Parameter Memory:** `P` parameters × 2 bytes/parameter (for FP16) = `2P` bytes.
+2. **Gradient Memory:** `P` gradients × 2 bytes/gradient (for FP16) = `2P` bytes.
+3. **Comparison:** The additional memory for gradients (`2P` bytes) is equal to the memory consumed by the model parameters themselves.
+
+  > **Key Equation:** $\text{Gradient Memory} = \text{Parameters} \times \text{bytes\_per\_parameter}$
+
+  > **Options:**
+  > [ ] A small, fixed amount of memory, like a few MB.
+  > [x] An amount equal to the size of the model parameters.
+  > [ ] Half the size of the model parameters.
+  > [ ] Double the size of the model parameters.
+
+  📖 **Deep Dive:** [Model Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Datacenter Power Wall</b> · <code>gpu-power-thermal</code></summary>
+
+- **Interviewer:** "You are designing a new server rack for training large language models. The facilities team needs to know the power budget for a standard 8-GPU server. To start, what is the approximate Thermal Design Power (TDP) of a single modern datacenter GPU like the NVIDIA H100?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Candidates often underestimate the power draw of datacenter GPUs, confusing them with consumer or workstation cards. They might guess a number in the 100-300W range, failing to realize that modern accelerators have pushed power consumption to the physical limits of air cooling, necessitating entirely new datacenter infrastructure like liquid cooling.
+
+  **Realistic Solution:** A single NVIDIA H100 GPU has a TDP of approximately 700W. This is a critical number for datacenter design, as it dictates power delivery, cooling infrastructure, and ultimately, operational cost.
+
+  > **Napkin Math:** To estimate the power draw from the GPUs alone in an 8-GPU server:
+- Power per GPU: ~700 W
+- Total GPU Power: 8 GPUs × 700 W/GPU = 5,600 W = 5.6 kW
+This calculation shows that just the accelerators can consume more power than an entire rack of traditional CPUs from a decade ago, highlighting why power is a first-class constraint.
+
+  > **Options:**
+  > [ ] ~150 W
+  > [ ] ~350 W
+  > [x] ~700 W
+  > [ ] ~1200 W
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Energy Cost of Solitude</b> · <code>batch-size-energy-math</code></summary>
+
+- **Interviewer:** "You are optimizing an inference serving stack on an H100 GPU which has a 700W TDP. For your model, you've measured that latency for a single request (batch size 1) is 10ms. By creating micro-batches of 32 requests, the latency for the entire batch only increases to 60ms. Explain the impact of this batching strategy by calculating how much more energy is consumed *per individual request* when using batch size 1 compared to batch size 32."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to confuse power (Watts) with energy (Joules). Engineers might incorrectly assume that since the GPU power is 700W in both cases, the energy consumption is similar. Another mistake is to assume latency scales linearly with batch size, which would incorrectly imply that batching provides no energy benefit.
+
+  **Realistic Solution:** The key is to calculate the total energy (Power × Time) for each scenario and then divide by the number of requests to find the per-request energy. For batch size 1, the GPU is active for a short time for just one request. For batch size 32, the GPU is active for a slightly longer time, but that energy cost is amortized across 32 requests, leading to a dramatic reduction in per-request energy consumption.
+
+  > **Napkin Math:** 1. **Calculate Energy per Request for Batch Size 1:**
+   - Energy = Power × Time
+   - Energy = 700 W × 0.010 s = 7 Joules
+
+2. **Calculate Energy per Request for Batch Size 32:**
+   - First, find total energy for the batch: 700 W × 0.060 s = 42 Joules
+   - Then, amortize across 32 requests: 42 J / 32 requests ≈ 1.31 Joules/request
+
+3. **Compare:**
+   - Ratio = Energy (BS=1) / Energy (BS=32)
+   - Ratio = 7 J / 1.31 J ≈ 5.3×
+
+   - Using batch size 1 consumes over 5 times more energy per request than using a batch size of 32.
+
+  > **Key Equation:** $\text{Energy per Request} = \frac{\text{Power} \times \text{Batch Latency}}{\text{Batch Size}}$
+
+  > **Options:**
+  > [ ] It's about the same, since power is the same.
+  > [ ] It's about 2x more energy per request.
+  > [x] It's over 5x more energy per request.
+  > [ ] It's over 30x more energy per request.
+
+  📖 **Deep Dive:** [The Serving Stack](https://mlsysbook.ai/cloud/03_serving_stack.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> Defining Arithmetic Intensity</b> · <code>gpu-roofline-arithmetic-intensity</code></summary>
+
+- **Interviewer:** "In the context of the GPU Roofline Model, what does the term 'Arithmetic Intensity' fundamentally represent?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse Arithmetic Intensity with raw performance (TFLOPS) or memory bandwidth (GB/s). Another common mistake is inverting the ratio, thinking it's Bytes per FLOP instead of FLOPs per Byte.
+
+  **Realistic Solution:** Arithmetic Intensity is the ratio of total floating-point operations (FLOPs) performed by a kernel to the total bytes of data moved from memory (HBM, in the case of a datacenter GPU) to serve those operations. It quantifies how much computation a workload performs for each byte of data it fetches. A high AI means a lot of compute work for little memory traffic, while a low AI means the workload is memory-heavy.
+
+  > **Napkin Math:** Imagine a simple operation, like adding two vectors of 1000 FP32 numbers (4 bytes each).
+- To read the two input vectors, you move `2 * 1000 * 4 = 8000` bytes.
+- To write the output vector, you move `1 * 1000 * 4 = 4000` bytes.
+- Total Bytes Moved = 12,000 bytes.
+- Total FLOPs = 1000 (for the additions).
+- Arithmetic Intensity = `1000 FLOPs / 12,000 Bytes ≈ 0.083 FLOPs/Byte`. This is a very low AI.
+
+  > **Key Equation:** $\text{Arithmetic Intensity (AI)} = \frac{\text{Total Operations (FLOPs)}}{\text{Total Data Movement (Bytes)}}$
+
+  > **Options:**
+  > [ ] The peak theoretical performance of the GPU in TFLOPS.
+  > [ ] The ratio of data moved from memory (Bytes) to compute operations (FLOPs).
+  > [x] The ratio of compute operations (FLOPs) to data moved from memory (Bytes).
+  > [ ] The memory bandwidth of the GPU in GB/s.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> Identifying a Memory-Bound Workload</b> · <code>gpu-roofline-memory-bound</code></summary>
+
+- **Interviewer:** "You're analyzing a GPU kernel using a roofline plot. You observe that its performance (in GFLOPS) directly increases with its Arithmetic Intensity and lies on the slanted portion of the 'roof'. What does this tell you about the workload?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common misconception is that any workload running on a powerful GPU must be limited by its compute power. Engineers sometimes forget that the roofline has two distinct regions, and most real-world models have parts that are heavily constrained by memory speed, not just FLOPS.
+
+  **Realistic Solution:** The workload is **memory-bound**. The slanted part of the roofline represents the performance limit imposed by the memory subsystem's bandwidth. In this region, the compute units are starved for data; they are waiting for operands to arrive from HBM. Performance is determined entirely by how fast the GPU can supply data, which is the product of its memory bandwidth (Bytes/sec) and the kernel's arithmetic intensity (FLOPs/Byte).
+
+  > **Napkin Math:** An H100 GPU has a memory bandwidth of 3.35 TB/s. If a kernel has a low Arithmetic Intensity of 10 FLOPs/Byte, its maximum achievable performance is `3.35e12 Bytes/s * 10 FLOPs/Byte = 33.5 TFLOPS`. This is far below the H100's peak of 989 TFLOPS. The only way to improve performance is to increase the Arithmetic Intensity (e.g., through operator fusion) or wait for a GPU with higher memory bandwidth. The workload is on the slanted part of the roof because its AI is far below the H100's ridge point of ~295 FLOPs/Byte.
+
+  > **Key Equation:** $\text{Achieved GFLOPS} = \text{min}(\text{Peak GFLOPS, AI} \times \text{Memory Bandwidth})$
+
+  > **Options:**
+  > [ ] The workload is compute-bound.
+  > [ ] The workload has an inefficient implementation that should be discarded.
+  > [x] The workload is memory-bound.
+  > [ ] The workload is perfectly optimized.
+
+  📖 **Deep Dive:** [Benchmarking](https://mlsysbook.ai/vol1/benchmarking.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> Calculating GEMM Kernel Intensity</b> · <code>arithmetic-intensity</code></summary>
+
+- **Interviewer:** "Imagine a single GEMM (General Matrix-Matrix Multiplication) kernel is the core of your model's attention layer. This specific kernel performs 200 GFLOPs of computation. To do this, it needs to read two 500MB matrices from HBM and write a 500MB result matrix back to HBM. Explain how you would calculate the Arithmetic Intensity for this kernel and what the result is."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to only count the input data (the two 500MB reads) and forget to include the output data (the 500MB write) in the total memory traffic. This undercounts the total bytes moved and inflates the perceived arithmetic intensity. Another error is inverting the ratio to Bytes/FLOP.
+
+  **Realistic Solution:** Arithmetic Intensity (AI) is the ratio of total floating-point operations to the total bytes moved to and from memory. The total data moved includes all reads and all writes required for the computation.
+
+In this case, the total bytes moved are: 500MB (read matrix A) + 500MB (read matrix B) + 500MB (write matrix C) = 1.5 GB. The total computation is 200 GFLOPs. The AI is therefore the total FLOPs divided by the total bytes.
+
+  > **Napkin Math:** 1. **Calculate Total FLOPs:**
+   - `Total FLOPs = 200 * 10^9 FLOPs`
+
+2. **Calculate Total Bytes Moved:**
+   - `Bytes Moved = (500 * 10^6) + (500 * 10^6) + (500 * 10^6) = 1.5 * 10^9 Bytes`
+
+3. **Calculate Arithmetic Intensity:**
+   - `AI = (200 * 10^9 FLOPs) / (1.5 * 10^9 Bytes) = 133.3 FLOPs/Byte`
+
+  > **Key Equation:** $\text{Arithmetic Intensity (AI)} = \frac{\text{Total FLOPs}}{\text{Total Bytes Moved}}$
+
+  > **Options:**
+  > [ ] 200 FLOPs/Byte
+  > [ ] 0.0075 Bytes/FLOP
+  > [x] 133.3 FLOPs/Byte
+  > [ ] 400 FLOPs/Byte
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The H100's Roofline Ridge Point</b> · <code>gpu-roofline</code></summary>
+
+- **Interviewer:** "An NVIDIA H100 GPU has a peak FP16 tensor core performance of 989 TFLOPS and a memory bandwidth of 3.35 TB/s. Interpret these two numbers to calculate the 'ridge point' of the H100's roofline model. What does this value represent for a kernel running on the GPU?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A frequent error is unit mismatch. Engineers often divide the numbers directly (989 / 3.35) without ensuring the units are consistent (e.g., both in Tera- or both in Giga-). Since TFLOPS and TB/s both use the same 10^12 prefix, the prefixes cancel out, but this is often a point of confusion.
+
+  **Realistic Solution:** The ridge point is the value of Arithmetic Intensity (AI) at which a workload transitions from being memory-bound to compute-bound. It is the intersection of the memory bandwidth roof and the compute performance ceiling in a roofline plot. It's calculated by dividing the peak compute performance by the peak memory bandwidth.
+
+For the H100, we divide its peak TFLOPS by its peak TB/s. Any kernel with an AI lower than this value is limited by memory bandwidth; any kernel with a higher AI is limited by the GPU's compute capacity.
+
+  > **Napkin Math:** 1. **Identify Peak Compute:**
+   - `Peak Compute = 989 TFLOPS = 989 * 10^12 FLOPs/s`
+
+2. **Identify Peak Memory Bandwidth:**
+   - `Peak Bandwidth = 3.35 TB/s = 3.35 * 10^12 Bytes/s`
+
+3. **Calculate Ridge Point:**
+   - `Ridge Point = (989 * 10^12 FLOPs/s) / (3.35 * 10^12 Bytes/s) ≈ 295.2 FLOPs/Byte`
+
+This means a kernel needs to perform at least ~295 FLOPs for every byte it moves from HBM to be limited by compute rather than memory.
+
+  > **Key Equation:** $\text{Ridge Point} = \frac{\text{Peak Performance (FLOPs/s)}}{\text{Peak Memory Bandwidth (Bytes/s)}}$
+
+  > **Options:**
+  > [ ] 0.0034 FLOPs/Byte
+  > [x] 295.2 FLOPs/Byte
+  > [ ] 295,200 FLOPs/Byte
+  > [ ] 3.32 Ops/Byte
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The 16x VRAM Multiplier for Training</b> · <code>vram-accounting</code></summary>
+
+- **Interviewer:** "You are planning the training run for a 70B parameter LLM using the Adam optimizer with full FP32 precision. State the approximate VRAM required *just* to store the model weights, gradients, and optimizer states."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to forget that the Adam optimizer stores two state variables (momentum and variance) for each model parameter, in addition to the parameters themselves and their gradients. A candidate might only account for the parameters (4 bytes/param) or parameters plus gradients (8 bytes/param), leading to a significant underestimation.
+
+  **Realistic Solution:** For each parameter in the model, the training process needs to store four separate FP32 values:
+1. The parameter (weight) itself (4 bytes).
+2. The gradient for that parameter (4 bytes).
+3. The Adam optimizer's first moment estimate (momentum) (4 bytes).
+4. The Adam optimizer's second moment estimate (variance) (4 bytes).
+
+This results in a total of `4 + 4 + 4 + 4 = 16` bytes required for every single parameter in the model.
+
+  > **Napkin Math:** Total VRAM = `70 billion parameters × 16 bytes/parameter = 1120 billion bytes = 1120 GB`. This massive requirement is why techniques like mixed-precision training and optimizer state sharding (like in ZeRO) are essential.
+
+  > **Key Equation:** V_{train} \approx P \times (B_{weights} + B_{grads} + B_{optimizer}) \approx P \times 16
+
+  > **Options:**
+  > [ ] ~280 GB
+  > [ ] ~560 GB
+  > [x] ~1120 GB
+  > [ ] ~140 GB
+
+  📖 **Deep Dive:** [Model Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Energy Cost of Precision</b> · <code>quantization-energy</code></summary>
+
+- **Interviewer:** "When optimizing a model for energy efficiency on a cloud GPU, you're considering quantizing parts of your network from 32-bit floating point (FP32) to 8-bit integer (INT8). Roughly how much more energy does a single FP32 compute operation consume compared to a single INT8 operation?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often mistakenly assume that energy scales linearly with bit width, leading them to believe the cost is 4× (32 bits / 8 bits). They forget that the complexity and energy draw of the underlying multiplier circuits do not scale linearly. The energy is dominated by the switching activity in the multiplier array, which grows much faster than the bit width.
+
+  **Realistic Solution:** An FP32 operation consumes approximately 18 times more energy than an INT8 operation. This non-linear relationship is a fundamental principle of digital logic design, where the energy cost of arithmetic units like multipliers grows quadratically, not linearly, with the number of bits.
+
+  > **Napkin Math:** This is a direct ratio from hardware physics, not a calculation.
+
+- **FP32 vs INT8 Energy Ratio:** ~18×
+
+If an INT8 operation costs 1 picojoule, an FP32 operation will cost ~18 picojoules. This is a core hardware invariant.
+
+  > **Options:**
+  > [ ] ~4× more energy
+  > [ ] ~50× more energy
+  > [x] ~18× more energy
+  > [ ] The energy is roughly the same
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Mixed Precision Memory Budget</b> · <code>mixed-precision-training</code></summary>
+
+- **Interviewer:** "You are tasked with training a 7 billion parameter language model using the Adam optimizer. A standard FP32 training run requires approximately 16 bytes of memory per parameter (4 for the model weights, 4 for the gradients, and 8 for the Adam optimizer's momentum and variance). Your H100 GPU has 80GB of HBM. To reduce the memory footprint, you switch to mixed-precision training. In this setup, the forward and backward passes use FP16 for weights and gradients, but you still maintain a master copy of the weights and the full optimizer state in FP32 for stable updates. Explain the new memory composition and calculate the total peak memory requirement in Gigabytes (GB)."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is assuming 'mixed precision' simply halves the total memory requirement (e.g., from 16 bytes/param to 8 bytes/param). This is incorrect because the Adam optimizer's state (its momentum and variance accumulators) must be kept in FP32 to prevent loss of precision during updates, and a master copy of the weights is also kept in FP32. These components do not get compressed and constitute the majority of the memory footprint.
+
+  **Realistic Solution:** In mixed-precision training, only the model weights used during computation and the gradients are downcast to FP16. The high-precision master copy of the weights and the optimizer state remain in FP32.
+
+- The FP32 master weights still require 4 bytes/param.
+- The FP32 Adam optimizer state still requires 8 bytes/param.
+- The gradients are now in FP16, requiring only 2 bytes/param.
+
+The new total is the sum of these components: 4 (master weights) + 8 (optimizer) + 2 (gradients) = 14 bytes per parameter.
+
+  > **Napkin Math:** 1. Identify persistent FP32 components: Master Weights (4 bytes) and Optimizer State (8 bytes).
+2. Identify reduced precision components: Gradients (2 bytes).
+3. Sum the memory per parameter: `4 + 8 + 2 = 14` bytes/parameter.
+4. Calculate total memory for the 7B model: `14 bytes/param * 7 * 10^9 params = 98 * 10^9 bytes`.
+5. Convert to Gigabytes: `98 * 10^9 bytes = 98 GB`.
+
+  > **Key Equation:** $\text{Mem}_{\text{mixed}} = (\text{Bytes}_{\text{FP32_weights}} + \text{Bytes}_{\text{FP32_optim}} + \text{Bytes}_{\text{FP16_grads}}) \times N_{\text{params}}$
+
+  > **Options:**
+  > [ ] 56 GB
+  > [ ] 84 GB
+  > [x] 98 GB
+  > [ ] 112 GB
+
+  📖 **Deep Dive:** [Model Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The MoE Compute Fallacy</b> · <code>moe-scaling-laws</code></summary>
+
+- **Interviewer:** "You are planning the training run for a new Mixture-of-Experts (MoE) LLM. The model has a total of 1 Trillion parameters, composed of 10 experts of 100B parameters each. During a forward pass, the router sends each token to the 2 best experts.
+
+Using the Chinchilla scaling laws, state the approximate compute (in FLOPs) required to train this model to convergence."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to use the total parameter count (1T) in the scaling law formula, rather than the active parameter count (200B). This overestimates the required compute by a significant margin, leading to a wildly incorrect budget and resource allocation. Another mistake is forgetting the factor of 6 for the forward and backward pass, underestimating the compute needed.
+
+  **Realistic Solution:** The Chinchilla scaling law for training compute is `C ≈ 6 * P * D`, where `P` is the active parameter count and `D` is the optimal number of tokens (`D ≈ 20 * P`). For an MoE model, the active parameter count is the number of parameters a single token 'sees' during a forward pass. Here, with 2 active experts of 100B each, `P_active = 200B`.
+
+  > **Napkin Math:** 1. **Identify Active Parameters (P):** 2 experts × 100B params/expert = 200B params.
+2. **Calculate Optimal Tokens (D):** `D ≈ 20 * P = 20 * 200B = 4T` tokens.
+3. **Calculate Training FLOPs (C):** `C ≈ 6 * P * D = 6 * (200 * 10^9) * (4 * 10^{12}) = 4.8 x 10^{24}` FLOPs.
+
+  > **Key Equation:** C \approx 6 \times P_{\text{active}} \times D
+
+  > **Options:**
+  > [ ] ~1.2 x 10^26 FLOPs
+  > [ ] ~8.0 x 10^23 FLOPs
+  > [x] ~4.8 x 10^24 FLOPs
+  > [ ] ~2.4 x 10^25 FLOPs
+
+  📖 **Deep Dive:** [Distributed Systems](cloud/02_distributed_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Chinchilla Compute Budget</b> · <code>scaling-laws-transformer-architecture-cost</code></summary>
+
+- **Interviewer:** "You're scoping the training budget for a new 100-billion parameter dense transformer model. Your team plans to follow the Chinchilla scaling laws for an optimally-trained model.
+
+Calculate the approximate total number of floating-point operations (FLOPs) required for this single training run."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to underestimate the cost of the backward pass. Many engineers incorrectly assume training FLOPs are simply `2PD` (a forward pass and an equally expensive backward pass). In reality, the backward pass requires re-computation and gradient calculations that make it approximately twice as expensive as the forward pass, leading to the `6PD` approximation (`2PD` for forward, `4PD` for backward).
+
+  **Realistic Solution:** The correct approach uses two key formulas from scaling laws. First, the Chinchilla-optimal number of training tokens (`D`) is roughly 20 times the number of non-embedding parameters (`P`). Second, the total training compute (`C`) is approximately `6PD` FLOPs. This factor of 6 accounts for the forward pass (2PD) and the more computationally expensive backward pass (4PD).
+
+  > **Napkin Math:** 1. **Parameters (P):** 100 Billion (`1e11`)
+2. **Optimal Tokens (D):** `D ≈ 20 × P = 20 × 100e9 = 2e12` (2 Trillion tokens)
+3. **Training FLOPs (C):** `C ≈ 6 × P × D = 6 × (1e11) × (2e12) = 12 × 1e23 = 1.2 × 1e24` FLOPs.
+
+  > **Key Equation:** C \approx 6 \times P \times D
+
+  > **Options:**
+  > [ ] 4.0 x 10^23 FLOPs
+  > [ ] 1.2 x 10^23 FLOPs
+  > [x] 1.2 x 10^24 FLOPs
+  > [ ] 6.0 x 10^22 FLOPs
+
+  📖 **Deep Dive:** [Training](https://harvard-edge.github.io/cs249r_book_dev/contents/training/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The H100 Ridge Point</b> · <code>gpu-roofline-ridge-point</code></summary>
+
+- **Interviewer:** "On a roofline plot for an NVIDIA H100 GPU, what does the 'ridge point' represent, and what is its approximate value for FP16 operations?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the ridge point with either the peak computational performance (TFLOPS) or the peak memory bandwidth (TB/s). They see it as just another performance number rather than the critical ratio that determines the boundary between being memory-bound and compute-bound.
+
+  **Realistic Solution:** The ridge point is the point of minimum arithmetic intensity (the ratio of compute operations to data movement) required to achieve the processor's peak computational performance. Below this intensity, a workload is memory-bound; above it, it becomes compute-bound.
+
+For an H100, the ridge point is the peak FP16 TFLOPS divided by the peak HBM3 bandwidth.
+
+  > **Napkin Math:** Ridge Point = Peak FLOPS / Peak Memory Bandwidth
+- H100 Peak FP16 FLOPS: ~989 TFLOPS (989e12 Ops/sec)
+- H100 Peak Memory Bandwidth: ~3.35 TB/s (3.35e12 Bytes/sec)
+- Ridge Point ≈ (989e12 Ops/sec) / (3.35e12 Bytes/sec) ≈ 295 Ops/Byte
+
+A workload on an H100 needs to perform at least 295 FP16 operations for every byte it pulls from HBM to be compute-bound.
+
+  > **Key Equation:** $\text{Ridge Point} = \frac{\text{Peak Performance (FLOPS)}}{\text{Peak Memory Bandwidth (Bytes/s)}}$
+
+  > **Options:**
+  > [ ] ~989 TFLOPS. It's the maximum theoretical compute performance.
+  > [ ] ~3.35 TB/s. It's the maximum speed of the HBM3 memory.
+  > [x] ~295 Ops/Byte. It's the arithmetic intensity needed to become compute-bound.
+  > [ ] ~700 W. It's the thermal design power of the card.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The TOPS/W Efficiency Metric</b> · <code>compute-efficiency-topsw</code></summary>
+
+- **Interviewer:** "Define the metric TOPS/W. Why is this a critical metric for a datacenter architect managing a large fleet of thousands of GPUs?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common misconception is that TOPS/W is primarily a concern for power-constrained environments like mobile or edge devices. Engineers sometimes fail to recognize its massive economic impact at datacenter scale, where power and cooling dominate operational expenditures (OpEx).
+
+  **Realistic Solution:** TOPS/W stands for Tera-Operations Per Second per Watt. It is a metric of energy efficiency, quantifying how much computational throughput an accelerator delivers for every watt of power it consumes.
+
+For a datacenter architect, this is a critical metric because at the scale of thousands of GPUs, energy efficiency directly translates to Total Cost of Ownership (TCO). A higher TOPS/W ratio means lower electricity bills and reduced capital expenditure on cooling infrastructure, which are two of the largest costs in running a datacenter.
+
+  > **Napkin Math:** Consider a 10,000-GPU cluster of H100s:
+- Power per GPU: 700 W
+- Total GPU Power: 10,000 GPUs * 700 W/GPU = 7,000,000 W = 7 MW
+- With a Power Usage Effectiveness (PUE) of 1.1 (for cooling, etc.), the total facility power is 7 MW * 1.1 = 7.7 MW.
+
+Improving TOPS/W by just 10% would mean saving 770 kW of continuous power draw, resulting in millions of dollars in electricity savings annually. This is why it's a first-class metric for fleet architecture.
+
+  > **Key Equation:** $\text{Efficiency} = \frac{\text{Performance (TOPS)}}{\text{Power (W)}}$
+
+  > **Options:**
+  > [ ] It's a measure of peak performance, and higher is always better.
+  > [ ] It's primarily a concern for battery-powered mobile devices, not datacenters.
+  > [x] It measures compute efficiency, which directly impacts power and cooling costs at scale.
+  > [ ] It defines the maximum thermal output a GPU can sustain before throttling.
+
+  📖 **Deep Dive:** [ML Systems](https://mlsysbook.ai/vol1/ml_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Roofline Ridge Point</b> · <code>gpu-roofline-analysis</code></summary>
+
+- **Interviewer:** "An NVIDIA H100 GPU has a peak FP16 throughput of 989 TFLOPS and a memory bandwidth of 3.35 TB/s. Explain what the 'ridge point' of this GPU's roofline model is, calculate its value, and then calculate the GPU's theoretical peak TOPS-per-Watt, given its 700W TDP."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate the ridge point by inverting the fraction (Bandwidth / Compute) or making a unit conversion error (e.g., using TB/s with GFLOPS). For TOPS/W, a common mistake is to use the compute number for a different precision (like FP8 or INT8) instead of the specified FP16, leading to an inflated efficiency number.
+
+  **Realistic Solution:** The 'ridge point' represents the minimum Arithmetic Intensity (AI) in FLOPs/Byte that a workload must have to be compute-bound rather than memory-bound. It is the point where the diagonal memory roof intersects the flat compute roof.
+
+Workloads with an AI higher than the ridge point are limited by the GPU's compute speed. Workloads with a lower AI are limited by how fast the GPU can feed the cores with data from memory.
+
+For the TOPS-per-Watt, this is a measure of power efficiency, indicating how much peak performance you get for each watt of power consumed.
+
+  > **Napkin Math:** 1.  **Calculate the Ridge Point (Arithmetic Intensity):**
+    - Peak Compute: 989 TFLOPS = 989 × 10¹² FLOPs/s
+    - Memory Bandwidth: 3.35 TB/s = 3.35 × 10¹² Bytes/s
+    - Ridge Point = (989 × 10¹² FLOPs/s) / (3.35 × 10¹² Bytes/s) ≈ **295 FLOPs/Byte**
+
+2.  **Calculate TOPS-per-Watt:**
+    - Peak Compute: 989 TFLOPS
+    - Power Consumption (TDP): 700 W
+    - TOPS/W = 989 TFLOPS / 700 W ≈ **1.41 TOPS/W**
+
+  > **Key Equation:** $\text{Ridge Point (FLOPs/Byte)} = \frac{\text{Peak Compute (FLOPs/s)}}{\text{Memory Bandwidth (Bytes/s)}}$
+
+  > **Options:**
+  > [ ] Ridge Point: ~0.0034 FLOPs/Byte, TOPS/W: ~0.71 TOPS/W
+  > [x] Ridge Point: ~295 FLOPs/Byte, TOPS/W: ~1.41 TOPS/W
+  > [ ] Ridge Point: ~295,000 FLOPs/Byte, TOPS/W: ~1.41 TOPS/W
+  > [ ] Ridge Point: ~295 FLOPs/Byte, TOPS/W: ~2.82 TOPS/W
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The HBM Latency Penalty</b> · <code>memory-hierarchy</code></summary>
+
+- **Interviewer:** "You're debugging a GPU kernel and suspect it's memory-bound due to random memory access patterns. To build intuition, what is the approximate latency you should recall for a single memory access to HBM3 on a modern datacenter GPU like an H100?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate this latency, confusing it with on-chip cache speeds. They might guess 10-50ns, failing to appreciate the 'penalty' for going off-chip to the HBM stacks, which is a major factor in kernel optimization.
+
+  **Realistic Solution:** A single random memory access to HBM3 takes approximately 300 nanoseconds. While this sounds fast, it's orders of magnitude slower than accessing on-chip caches.
+
+  > **Napkin Math:** The key is the ratio. If an L1 cache access (~1ns) took 1 second in human time, an L2 cache access (~4ns) would take 4 seconds. That HBM3 access (~300ns) would take 5 minutes. This highlights why data locality is critical for performance.
+
+  > **Options:**
+  > [ ] ~4 ns
+  > [x] ~300 ns
+  > [ ] ~1,000 ns (1 µs)
+  > [ ] ~40 ns
+
+  📖 **Deep Dive:** [The ML Latency Hierarchy](https://github.com/mlsysbook/interviews/blob/main/ironlaw.qmd#2-the-ml-latency-hierarchy-2025-update)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Energy Cost of Precision</b> · <code>quantization-energy</code></summary>
+
+- **Interviewer:** "An LLM inference request executes a large matrix multiplication. From a pure energy consumption perspective, what is the approximate energy savings per operation if you can perform the compute using INT8 versus FP32?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the 4x memory footprint reduction (32 bits vs 8 bits) or the 4x theoretical throughput gain (on SIMD units) with the energy savings. The actual energy saving per operation is much larger because an FP32 multiplier is significantly more complex and energy-intensive than an INT8 multiplier due to the hardware required for handling the exponent and mantissa.
+
+  **Realistic Solution:** An FP32 operation consumes roughly 18 times more energy than an INT8 operation. This is a fundamental physical invariant. The energy cost of a digital operation is proportional to the number of transistors switching, and the hardware for an 8-bit integer multiplication is far simpler than that for a 32-bit floating-point multiplication, which must handle a wide dynamic range via exponents and mantissas.
+
+  > **Napkin Math:** Let's use the constants. The energy ratio for `FP32 vs INT8 compute` is ~18x.
+- If a single FP32 MAC (Multiply-Accumulate) operation consumes `~5 pJ` (picojoules).
+- Then a single INT8 MAC operation consumes `5 pJ / 18 ≈ 0.28 pJ`.
+This means for every billion operations, you save `(5 - 0.28) * 1e-12 * 1e9 = 4.72` millijoules.
+
+  > **Key Equation:** $\text{Energy}_{\text{op}} \propto \text{BitWidth}^2$
+
+  > **Options:**
+  > [ ] ~4x more energy
+  > [ ] ~3.4x more energy
+  > [x] ~18x more energy
+  > [ ] The energy is roughly the same
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Inference Memory Diet</b> · <code>quantization-memory</code></summary>
+
+- **Interviewer:** "You are tasked with deploying a 70 billion parameter Large Language Model for inference. The model is currently stored in FP16 precision. To reduce the memory footprint and cost, you are considering quantizing it to INT8. Explain the difference in memory required to hold the model weights in these two formats and calculate the total memory savings in Gigabytes."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the memory requirements for different precisions, typically by assuming the baseline is FP32 (4 bytes) instead of the more common FP16 (2 bytes) for inference, leading to an overestimation of savings. Another common error is to report the final INT8 size instead of the *savings*.
+
+  **Realistic Solution:** FP16 (half-precision floating point) uses 16 bits, or 2 bytes, per parameter. INT8 (8-bit integer) uses 8 bits, or 1 byte, per parameter. Quantizing from FP16 to INT8 effectively halves the memory required for the model's weights.
+
+*   **FP16 Memory:** 70 Billion parameters × 2 bytes/parameter = 140 Billion bytes = 140 GB.
+*   **INT8 Memory:** 70 Billion parameters × 1 byte/parameter = 70 Billion bytes = 70 GB.
+*   **Total Savings:** 140 GB (FP16) - 70 GB (INT8) = 70 GB.
+
+  > **Napkin Math:** 1. Parameters: 70B
+2. FP16 bytes/param: 2
+3. INT8 bytes/param: 1
+4. FP16 size: 70B * 2 = 140 GB
+5. INT8 size: 70B * 1 = 70 GB
+6. Savings: 140 GB - 70 GB = 70 GB
+
+  > **Key Equation:** $\text{Memory Savings (GB)} = \frac{\text{Params} \times (\text{Bytes}_{\text{FP16}} - \text{Bytes}_{\text{INT8}})}{10^9}$
+
+  > **Options:**
+  > [ ] 140 GB. (Misconception: Calculated savings from an assumed FP32 baseline, or reported original FP16 size)
+  > [ ] 210 GB. (Misconception: Assumed baseline was FP32 (4 bytes) and calculated savings relative to that, i.e., 4 bytes -> 1 byte)
+  > [x] 70 GB. (Correct calculation: 140 GB for FP16 minus 70 GB for INT8)
+  > [ ] 35 GB. (Misconception: Simple arithmetic error, likely halving the correct answer by mistake)
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Chinchilla Data-Compute Ratio</b> · <code>scaling-laws</code></summary>
+
+- **Interviewer:** "You're planning a training run for a new 70-billion-parameter LLM. To ensure you're not compute-or-data-limited, you recall the Chinchilla scaling laws. State the approximate number of training tokens required for a model of this size."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to assume a 1:1 relationship between parameters and tokens (e.g., 70B parameters need 70B tokens), or to misremember the scaling constant by an order of magnitude. The Chinchilla paper established that for optimal training, data should scale linearly with model size, but with a specific constant (~20) that is larger than 1.
+
+  **Realistic Solution:** According to the Chinchilla scaling law, the optimal number of training tokens (D) is approximately 20 times the number of model parameters (P). For a 70B parameter model, this is 1.4 Trillion tokens.
+
+  > **Napkin Math:** Parameters (P) = 70B
+Optimal Tokens (D) ≈ 20 × P
+D ≈ 20 × 70,000,000,000 = 1,400,000,000,000
+**Result: ~1.4 Trillion tokens**
+
+  > **Key Equation:** $$ D \approx 20 \times P $$
+
+  > **Options:**
+  > [ ] 70 Billion tokens
+  > [ ] 3.5 Billion tokens
+  > [x] 1.4 Trillion tokens
+  > [ ] 14 Trillion tokens
+
+  📖 **Deep Dive:** [Model Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Chinchilla Data Budget</b> · <code>scaling-laws</code></summary>
+
+- **Interviewer:** "You're scoping a project to train a new 70-billion-parameter LLM from scratch. To secure the data acquisition budget, you need to estimate the optimal amount of training data required. According to the compute-optimal 'Chinchilla' scaling laws, approximately how many training tokens should you plan to acquire?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often misremember the scaling rule, either confusing it with the training compute formula (6PD) or recalling older, pre-Chinchilla research where models were significantly undertrained (e.g., the original GPT-3 was trained on only ~300B tokens for 175B parameters). The Chinchilla paper demonstrated that for a given compute budget, a smaller model trained on more data is superior.
+
+  **Realistic Solution:** The correct answer is **1.4 Trillion tokens**. The Chinchilla scaling law provides a simple rule of thumb: optimal training for a given compute budget requires approximately 20 tokens for every parameter in the model.
+
+  > **Napkin Math:** 1. **Parameters (P):** 70 Billion
+2. **Optimal Token/Parameter Ratio:** 20
+3. **Calculation:** D = 20 × P = 20 × 70 Billion = 1,400 Billion tokens
+4. **Result:** 1.4 Trillion tokens
+
+  > **Key Equation:** $$\text{Optimal Training Tokens (D)} \approx 20 \times \text{Parameters (P)}$$
+
+  > **Options:**
+  > [ ] 140 Trillion tokens
+  > [ ] 420 Billion tokens
+  > [x] 1.4 Trillion tokens
+  > [ ] 120 Billion tokens
+
+  📖 **Deep Dive:** [Model Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The 700W Question</b> · <code>power-consumption</code></summary>
+
+- **Interviewer:** "When planning a new AI cluster, one of the first things you need to know is the power budget per server. What is the approximate Thermal Design Power (TDP) you should state for a single modern datacenter GPU, like the NVIDIA H100, to correctly inform the datacenter facilities team?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often anchor on consumer or desktop GPU power figures (~300W) or even older server GPUs. They fail to internalize that modern datacenter accelerators operate at a completely different power scale, closer to a kilowatt per chip, which fundamentally changes the requirements for power delivery and cooling.
+
+  **Realistic Solution:** The correct answer is approximately 700 W. This high power consumption is a critical parameter for datacenter design. It dictates rack power density and is a primary reason why modern AI clusters require specialized high-density racks and often direct liquid cooling, as traditional air cooling becomes ineffective and inefficient at this wattage.
+
+  > **Napkin Math:** A single H100 GPU draws about as much power as a powerful household microwave oven. A standard server rack with 8 of these GPUs will have a GPU power load of `8 * 700W = 5.6 kW`. Including the host CPU and other components, the rack's total power can easily exceed 7-8 kW, necessitating specialized power infrastructure.
+
+  > **Options:**
+  > [ ] 150 W
+  > [ ] 350 W
+  > [x] 700 W
+  > [ ] 2000 W
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Datacenter Rack Power Budget</b> · <code>thermal-cooling-power</code></summary>
+
+- **Interviewer:** "You're designing a new AI cluster. Your datacenter provider has allocated you a single, liquid-cooled rack with a total power and thermal budget of 70 kilowatts (kW). You plan to populate this rack with servers, each containing one NVIDIA H100 GPU. Each H100 GPU has a Thermal Design Power (TDP) of 700 watts. The non-GPU components in each server (CPU, memory, NICs) add another 300 watts of power draw. The datacenter has a Power Usage Effectiveness (PUE) of 1.1. Explain how many H100 GPUs you can safely install in this rack before exceeding its thermal limit."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to only divide the rack budget by the GPU TDP (70,000W / 700W = 100 GPUs). This ignores both the significant power draw from the rest of the server components (CPU, memory, etc.) and the cooling overhead tax represented by the PUE. This leads to a massive overestimation and a rack that would immediately trip its breakers.
+
+  **Realistic Solution:** To find the correct number, you must calculate the total power consumption per server *at the facility level* and then divide the rack's total power budget by that number. First, calculate the power per server: 700W for the GPU plus 300W for the rest of the server equals 1000W, or 1kW. Next, you must account for the Power Usage Effectiveness (PUE) of 1.1, which means for every 1W of compute power, an additional 0.1W is needed for cooling. So, the total facility power per server is 1kW * 1.1 = 1.1kW. Finally, divide the rack's 70kW budget by the 1.1kW per-server draw: 70 / 1.1 ≈ 63.63. Since you can't install a fraction of a server, you must round down. You can safely install 63 H100s.
+
+  > **Napkin Math:** 1. **Calculate Power per Server:**
+   700W (H100 GPU) + 300W (CPU, RAM, etc.) = 1,000W = 1.0 kW
+
+2. **Account for Cooling Overhead (PUE):**
+   1.0 kW/server * 1.1 PUE = 1.1 kW per server at the facility level
+
+3. **Calculate Max Servers/GPUs in Rack:**
+   70 kW (Rack Budget) / 1.1 kW/server ≈ 63.63
+
+4. **Round Down to Nearest Whole Unit:**
+   You can install a maximum of 63 servers (and thus 63 GPUs).
+
+  > **Key Equation:** $\text{Max GPUs} = \bigg\lfloor \frac{\text{Rack Power Budget}}{(\text{GPU TDP} + \text{Server Overhead}) \times \text{PUE}} \bigg\rfloor$
+
+  > **Options:**
+  > [ ] 100 GPUs. (Calculation: 70,000W / 700W)
+  > [ ] 70 GPUs. (Calculation: 70,000W / (700W + 300W))
+  > [x] 63 GPUs. (Calculation: 70,000W / ((700W + 300W) * 1.1))
+  > [ ] 90 GPUs. (Calculation: 70,000W / (700W * 1.1))
+
+  📖 **Deep Dive:** [Numbers Every ML Systems Engineer Should Know](https://mlsysbook.ai/vol1/appendix/numbers.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Fusion Bottleneck</b> · <code>operator-fusion</code></summary>
+
+- **Interviewer:** "When an ML compiler performs 'operator fusion,' what is the primary hardware bottleneck it is designed to reduce?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming fusion reduces the total number of floating-point operations (FLOPs). It does not; the arithmetic is identical. The performance gain comes from eliminating memory I/O and kernel launch overhead.
+
+  **Realistic Solution:** The primary bottleneck reduced by operator fusion is HBM Memory Bandwidth. By combining multiple sequential operations (like a convolution and its activation function) into a single GPU kernel, intermediate result tensors can stay in fast on-chip memory (registers or L1/L2 cache) instead of being written out to and read back from much slower HBM. This dramatically reduces memory traffic.
+
+  > **Napkin Math:** Each time an intermediate tensor is written to HBM, it incurs a latency penalty of ~300 ns just for the access, separate from the data transfer time. If an L1 cache access were 1 second, this HBM access would take 5 minutes. Fusion avoids this costly round-trip.
+
+  > **Options:**
+  > [ ] Total computational FLOPs
+  > [ ] Cross-node network traffic
+  > [x] HBM Memory Bandwidth
+  > [ ] Model storage size on disk
+
+  📖 **Deep Dive:** [ML Frameworks](https://mlsysbook.ai/vol1/frameworks.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The GPU Failure Cadence</b> · <code>fault-tolerance</code></summary>
+
+- **Interviewer:** "You are managing a large training cluster of 10,000 H100 GPUs. Given a typical Mean Time To Failure (MTTF) for a single GPU, what is the expected frequency of a GPU failure somewhere in your fleet?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often misinterpret MTTF as a guarantee of minimum time before failure, rather than a statistical average. At scale, the probability of *any* single device failing becomes a near-certainty over short time horizons. They might think a 50,000-hour MTTF means failures are rare, forgetting this applies to a fleet, not a single unit.
+
+  **Realistic Solution:** The correct answer is that a GPU will fail approximately every 5 hours. At a large enough scale, individual component reliability translates into a continuous operational failure rate for the fleet as a whole.
+
+  > **Napkin Math:** The calculation is based on the total operational hours of the fleet versus the MTTF of a single component.
+
+- **GPU MTTF:** ~50,000 hours
+- **Fleet Size:** 10,000 GPUs
+
+**Calculation:**
+Time between failures = (MTTF per GPU) / (Number of GPUs)
+Time between failures = 50,000 hours / 10,000 GPUs = 5 hours.
+
+Therefore, you should expect one GPU to die approximately every 5 hours.
+
+  > **Key Equation:** $\text{Fleet MTTF} = \frac{\text{Component MTTF}}{\text{Number of Components}}$
+
+  > **Options:**
+  > [ ] About once a month
+  > [ ] About once a week
+  > [x] About once every 5 hours
+  > [ ] About once every 50,000 hours
+
+  📖 **Deep Dive:** [ML Systems Playbook](https://github.com/ml-pre-fyi/ml-systems-playbook/blob/main/README.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Inescapable Cost of Failures</b> · <code>fault-tolerance</code></summary>
+
+- **Interviewer:** "You are managing a training job for a large language model on a 10,000 H100 GPU cluster. The full training run is expected to take 30 days. Using the provided hardware specifications, explain how you would calculate the total number of GPU failures you should budget for during this run. This number is critical for planning both hardware spares and checkpointing strategy."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often think of component failure as a rare, one-off event. They fail to internalize that at the scale of a modern AI datacenter (10k+ GPUs), 'rare' individual failures become a continuous, predictable background rate. A common error is to calculate the failure probability for a single GPU over 30 days, forgetting to multiply by the fleet size, thus underestimating the problem by orders of magnitude.
+
+  **Realistic Solution:** At a scale of 10,000 GPUs, individual failures are a statistical certainty. The key metric is the entire fleet's Mean Time To Failure (MTTF), not an individual GPU's. The provided data states that for a 10,000 GPU fleet, we should expect one GPU to fail approximately every 5 hours. Over a 30-day run, we can calculate the total expected failures by converting the run time to hours and dividing by the failure interval.
+
+  > **Napkin Math:** 1.  **Total run time in hours:** 30 days × 24 hours/day = 720 hours.
+2.  **Failure rate (from specs):** 1 failure / 5 hours.
+3.  **Total expected failures:** 720 hours / (5 hours/failure) = 144 failures.
+
+This means you must have a fault-tolerant system prepared to handle approximately 144 training interruptions and have enough spare hardware on hand to replace the failed units.
+
+  > **Key Equation:** $\text{Total Failures} = \frac{\text{Total Run Time}}{\text{Fleet Failure Interval}}$
+
+  > **Options:**
+  > [ ] Approximately 6 failures. Calculated by dividing the 30-day run by the 5-hour failure interval.
+  > [ ] Less than 1. The 50,000-hour MTTF of a single GPU makes a failure within a 720-hour run extremely unlikely.
+  > [x] Approximately 144 failures. The 720-hour run will see a failure roughly every 5 hours.
+  > [ ] About 3,600 failures. Calculated by multiplying the 720-hour run by the 5-hour failure interval.
+
+  📖 **Deep Dive:** [Cloud: Production Ops](https://mlsysbook.ai/cloud/04_production_ops.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Data Loading Bottleneck</b> · <code>data-pipelines</code></summary>
+
+- **Interviewer:** "Your team is training a vision model on a 10 TB dataset of raw images stored on a local NVMe SSD. For each training epoch, the dataloader must read the raw images from disk for the model. Your team is debating whether this 'on-the-fly' loading is a bottleneck that is starving the expensive H100 GPUs.
+
+Explain the primary bottleneck in this 'on-the-fly' approach. To quantify this, calculate the minimum theoretical time to read the entire 10 TB dataset from the NVMe SSD for a single epoch. Assume a sustained NVMe read throughput of 7 GB/s, which is typical for a high-performance cloud instance."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus exclusively on GPU compute (TFLOPS) and forget the critical path of getting data to the GPU. A common mistake is to underestimate the I/O time required to read data from storage, assuming it's negligible compared to computation. Another error is confusing the throughput specifications of different hardware, such as using network bandwidth for a storage calculation or assuming legacy HDD speeds for modern SSDs.
+
+  **Realistic Solution:** The primary bottleneck is the I/O required to read the data from the NVMe SSD. While 7 GB/s is fast, reading 10 TB of data is a significant operation that can take many minutes. During this time, the H100 GPUs may be idle or under-utilized, waiting for data to arrive. This is known as being 'I/O-bound'.
+
+By pre-processing the data and storing it in a more optimized format (perhaps on a faster, parallel filesystem), this I/O cost can be paid once, and subsequent training epochs can load data much more quickly, maximizing GPU utilization. This calculation demonstrates that data loading is not a trivial component of total training time.
+
+  > **Napkin Math:** The calculation is a straightforward application of the relationship between data size, throughput, and time.
+
+1. **Convert units:** The dataset is 10 TB. To match the throughput units (GB/s), we convert TB to GB.
+   - `10 TB * 1024 GB/TB = 10,240 GB`
+
+2. **Calculate time:** Divide the total data size by the read throughput.
+   - `Time = 10,240 GB / 7 GB/s ≈ 1463 seconds`
+
+3. **Convert to minutes:** For easier interpretation, convert seconds to minutes.
+   - `1463 seconds / 60 s/min ≈ 24.4 minutes`
+
+For every single training epoch, the system will spend at least 24 minutes just reading data from the disk.
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{Total Data Size (GB)}}{\text{Throughput (GB/s)}}$
+
+  > **Options:**
+  > [ ] ~19 hours
+  > [ ] ~3.4 minutes
+  > [x] ~24 minutes
+  > [ ] ~3.25 hours
+
+  📖 **Deep Dive:** [Data Engineering](https://mlsysbook.ai/vol1/data_engineering.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Iceberg of ML Costs</b> · <code>economics-tco</code></summary>
+
+- **Interviewer:** "You are budgeting for a new, large-scale AI service that will run for three years. The initial model training is a major, one-time capital expense. However, the service will need to run 24/7 on a fleet of GPUs to serve user requests.
+
+State which of the following typically dominates the Total Cost of Ownership (TCO) for such a system over its three-year lifecycle."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often fixate on the large, headline-grabbing cost of a single training run, which can be millions of dollars. They underestimate how the continuous, operational cost of running inference on a large fleet of servers accumulates over time, an effect sometimes called the 'iceberg of ML costs'.
+
+  **Realistic Solution:** The cumulative cost of inference overwhelmingly dominates the TCO. While training is a large, visible spike in capital expenditure (CapEx), the continuous operational expenditure (OpEx) of powering, cooling, and maintaining a large inference fleet for several years typically outweighs the initial training cost by a factor of 5x to 10x or more.
+
+  > **Napkin Math:** Let's compare a one-time training cost to a 3-year inference cost:
+
+1.  **One-Time Training Cost:** A large foundation model might cost **$10,000,000** to train once.
+
+2.  **Cumulative Inference TCO (3 years):**
+    *   Assume the service requires a fleet of 2,000 H100s to meet SLOs.
+    *   **Inference Hardware CapEx:** 2,000 GPUs × $30,000/GPU = **$60,000,000**.
+    *   **Annual OpEx (Power & Maint.):** A single H100 uses 700W. With a PUE of 1.1 and electricity at $0.15/kWh, the annual power cost is ~`$1,011`. Add ~5% ($1,500) for maintenance, for a total of ~$2,500/GPU/year.
+    *   **Total 3-Year OpEx:** 2,000 GPUs × $2,500/yr × 3 yrs = **$15,000,000**.
+    *   **Total Inference TCO:** $60M (CapEx) + $15M (OpEx) = **$75,000,000**.
+
+Over 3 years, the inference TCO (~$75M) is 7.5x larger than the one-time training cost (~$10M).
+
+  > **Key Equation:** $\text{TCO} = \text{CapEx}_{\text{training}} + \text{CapEx}_{\text{inference}} + \sum_{t=1}^{N} \text{OpEx}_{\text{inference}}(t)$
+
+  > **Options:**
+  > [ ] The one-time model training cost.
+  > [x] The cumulative cost of running inference.
+  > [ ] The cost of data acquisition and labeling.
+  > [ ] The salaries of the R&D and engineering teams.
+
+  📖 **Deep Dive:** [Responsible Engineering](https://mlsysbook.ai/vol1/responsible_engr.html#lifecycle-economics-who-pays-the-bill)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The CapEx vs. TCO Fallacy</b> · <code>tco-economics</code></summary>
+
+- **Interviewer:** "Your team plans to purchase a small, dedicated cluster of 10 H100 GPUs for fine-tuning experiments. Using the standard hardware constants, calculate the estimated first-year Total Cost of Ownership (TCO), focusing only on the initial hardware purchase (CapEx) and the annual maintenance costs. Explain why simply looking at the sticker price is misleading."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is focusing only on the upfront hardware purchase price (Capital Expenditure or CapEx) and completely ignoring ongoing Operational Expenditures (OpEx). In reality, costs like maintenance, power, and cooling are significant and recurring, making the initial sticker price a poor indicator of the true long-term cost.
+
+  **Realistic Solution:** Total Cost of Ownership (TCO) is a more holistic financial metric than the initial purchase price because it includes both the one-time CapEx and the recurring OpEx. For the first year of hardware ownership, you must sum the total purchase price of the cluster with the contractually obligated annual maintenance fee, which is typically a percentage of the initial CapEx.
+
+  > **Napkin Math:** 1. **Calculate Total CapEx**: The cost of purchasing all 10 GPUs.
+   - `10 GPUs × $30,000/GPU = $300,000`
+2. **Calculate Annual Maintenance Cost**: This is given as 5% of the total CapEx.
+   - `0.05 × $300,000 = $15,000`
+3. **Calculate First-Year TCO**: Sum the CapEx and the first year's maintenance OpEx.
+   - `$300,000 (CapEx) + $15,000 (OpEx) = $315,000`
+
+  > **Key Equation:** $\text{TCO} = \text{CapEx} + \sum \text{OpEx}$
+
+  > **Options:**
+  > [ ] $300,000
+  > [ ] $301,500
+  > [x] $315,000
+  > [ ] $45,000
+
+  📖 **Deep Dive:** [The Iron Law of ML Systems](ironlaw.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> Defining Arithmetic Intensity</b> · <code>arithmetic-intensity</code></summary>
+
+- **Interviewer:** "What is the definition of Arithmetic Intensity in the context of a GPU roofline model?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Confusing Arithmetic Intensity with raw performance (FLOPs/sec) or power efficiency (FLOPs/Watt). Engineers often focus on peak FLOPs and forget that memory bandwidth is frequently the real bottleneck.
+
+  **Realistic Solution:** Arithmetic Intensity is the ratio of floating-point operations performed to bytes of data moved from memory. Its unit is FLOPs/Byte. It is the key metric that determines whether a given workload running on specific hardware will be compute-bound or memory-bound.
+
+  > **Napkin Math:** A model with an Arithmetic Intensity of 350 Ops/Byte running on an NVIDIA H100 (which has a roofline 'ridge point' of ~295 Ops/Byte) would be compute-bound. Its performance is limited by the GPU's 989 TFLOPS of compute. In contrast, a model with an AI of 50 Ops/Byte would be memory-bound, limited by the H100's 3.35 TB/s of HBM3 memory bandwidth.
+
+  > **Key Equation:** $\text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes}}$
+
+  > **Options:**
+  > [ ] The number of operations per second (FLOPs/sec)
+  > [ ] The number of operations per Watt (FLOPs/Watt)
+  > [x] The ratio of operations to data movement (FLOPs/Byte)
+  > [ ] The total memory bandwidth (GB/s)
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Meaning of TOPS/W</b> · <code>compute-efficiency</code></summary>
+
+- **Interviewer:** "You are doing a cost analysis for a new datacenter build-out. An NVIDIA H100 GPU provides about 989 TFLOPS of FP16 performance with a 700W TDP. What does the TFLOPS/W metric primarily allow you to calculate?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming that the GPU with the highest peak TFLOPS is always the most performant choice, ignoring the severe constraints of power delivery and cooling at the rack and datacenter level. This leads to poor total cost of ownership (TCO) calculations.
+
+  **Realistic Solution:** The TFLOPS/W metric defines the power efficiency of the processor. It allows you to calculate how much sustained throughput you can achieve within a given power budget. A higher TFLOPS/W is more desirable for maximizing performance within a fixed power envelope, which is the fundamental constraint in any large-scale deployment.
+
+  > **Napkin Math:** An H100 GPU's efficiency is 989 TFLOPS / 700 W ≈ 1.4 TFLOPS/W. If your rack has a power budget of 70 kW (70,000 W), and assuming 100 GPUs per rack isn't feasible due to physical space, you could theoretically power 100 H100s. The rack's total potential compute would be 100 GPUs * 989 TFLOPS/GPU = 98.9 PFLOPS, but this is only achievable if the 70kW power budget (700W * 100) is available, which it is in modern AI racks.
+
+  > **Key Equation:** $\text{Efficiency} = \frac{\text{Peak Performance (TFLOPS)}}{\text{Power Consumption (Watts)}}$
+
+  > **Options:**
+  > [ ] The peak theoretical speed of a single GPU
+  > [x] The compute performance per unit of power, indicating efficiency
+  > [ ] The latency of a single operation
+  > [ ] The speed of the memory subsystem
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Batch Size 1 Bottleneck</b> · <code>gpu-roofline-arithmetic-intensity-compute-bound-vs-memory-bound-topsw</code></summary>
+
+- **Interviewer:** "An engineer is profiling a ResNet-50 vision model for a real-time inference application on an NVIDIA H100 GPU. The profiler shows that for a single image (batch size 1), the forward pass requires approximately 8 GFLOPs of computation and involves moving 32 MB of data (weights and activations) from HBM3 to the compute cores.
+
+First, calculate the arithmetic intensity of this operation. Then, based on the H100's hardware characteristics, explain whether this workload is compute-bound or memory-bound."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often misinterpret arithmetic intensity as an absolute measure. A value like '250 Ops/Byte' might sound high, leading them to incorrectly assume the workload is compute-bound. The critical step is comparing this value to the GPU's *ridge point*. Anything below the ridge point is memory-bound, regardless of the absolute number.
+
+  **Realistic Solution:** The workload is memory-bound. The arithmetic intensity (AI) is the ratio of compute to memory operations. Since the model's AI is lower than the H100's ridge point, it means the GPU's memory system cannot supply data fast enough to keep the powerful compute cores fully saturated. The system will spend more time waiting for data than it does computing on it.
+
+  > **Napkin Math:** 1. **Calculate Arithmetic Intensity (AI):**
+   - FLOPs = 8 GFLOPs = 8 × 10^9 Operations
+   - Memory = 32 MB = 32 × 10^6 Bytes
+   - AI = (8 × 10^9 Ops) / (32 × 10^6 Bytes) = 250 Ops/Byte
+
+2. **Compare to Hardware Ridge Point:**
+   - H100 Ridge Point ≈ 295 Ops/Byte
+
+3. **Interpret the Result:**
+   - Since 250 Ops/Byte (workload) < 295 Ops/Byte (hardware), the operation is **memory-bound**.
+
+  > **Key Equation:** $\text{Arithmetic Intensity (AI)} = \frac{\text{Total FLOPs}}{\text{Total Bytes Moved}}$
+
+  > **Options:**
+  > [ ] Compute-bound, because 250 Ops/Byte is a high arithmetic intensity.
+  > [ ] Memory-bound, because the AI is ~0.004 Bytes/Op, which is far below the ridge point.
+  > [x] Memory-bound, because the AI of 250 Ops/Byte is less than the H100's ridge point of ~295 Ops/Byte.
+  > [ ] Compute-bound, because with 8 GFLOPs of work, the compute units will be the bottleneck.
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The INT8 Energy Dividend</b> · <code>quantization-energy</code></summary>
+
+- **Interviewer:** "During a model optimization review, your team is considering quantizing parts of a large model from 32-bit floating point (FP32) to 8-bit integer (INT8) for inference. To a first-order approximation, identify the energy consumption ratio between a single FP32 operation and a single INT8 operation."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often mistakenly assume energy savings scale linearly with bit-width (i.e., 32 bits / 8 bits = 4×). The actual savings are much greater because the energy cost of digital multipliers doesn't scale linearly. Another common error is to confuse the FP32-to-INT8 savings with the smaller FP32-to-FP16 savings (~3.4x).
+
+  **Realistic Solution:** An FP32 operation consumes approximately 18 times more energy than an INT8 operation. This is a fundamental physical invariant of digital logic. The energy consumed by CMOS circuits is dominated by the dynamic power from switching transistors, and reducing the bit width from 32 to 8 dramatically reduces the number of switching events required for an arithmetic operation like multiplication.
+
+  > **Napkin Math:** This is a direct recall from the physical invariants of ML systems.
+
+- **Energy(FP32) / Energy(INT8) ≈ 18×**
+
+This means for every 1 Joule spent on INT8 compute, you would have spent roughly 18 Joules to perform the same number of operations in FP32, ignoring all other system effects.
+
+  > **Options:**
+  > [ ] An FP32 op consumes ~4× more energy than INT8
+  > [ ] An FP32 op consumes ~3.4× more energy than INT8
+  > [x] An FP32 op consumes ~18× more energy than INT8
+  > [ ] An FP32 op consumes ~580× more energy than INT8
+
+  📖 **Deep Dive:** [NUMBERS: The Invariants](https://github.com/ml-explore/mlx/blob/main/mlx/backend/common/default_primitives.cpp)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Datacenter Power Budget</b> · <code>thermal-and-power</code></summary>
+
+- **Interviewer:** "You are designing a new AI cluster and your datacenter provides racks with a maximum power and cooling capacity of 70 kW. You plan to populate these racks with NVIDIA H100 GPUs. Given that an H100 has a Thermal Design Power (TDP) of 700 W, and your datacenter has a Power Usage Effectiveness (PUE) of 1.1, explain how many H100s you can safely install per rack and calculate the rack's total power draw from the grid."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to ignore the Power Usage Effectiveness (PUE) and calculate the GPU count based only on their Thermal Design Power (TDP). This leads to provisioning 100 GPUs (70,000W / 700W), which would draw 77 kW after accounting for cooling, exceeding the rack's 70 kW limit and causing thermal throttling or tripped breakers.
+
+  **Realistic Solution:** The 70 kW limit applies to the total power drawn from the grid, which includes both the GPUs and the energy needed to cool them (the PUE overhead). Therefore, you must first calculate the power budget available to the components themselves. You then divide this component budget by the TDP of a single GPU to find the maximum number you can install.
+
+With a PUE of 1.1, only 1/1.1 (or ~90.9%) of the total power is available for the actual hardware. The rest is consumed by the cooling infrastructure.
+
+  > **Napkin Math:** 1. **Calculate the component power budget:** The rack's grid limit must be divided by the PUE to find the power available to the GPUs.
+   $\frac{70,000 \text{ W}}{1.1 \text{ PUE}} = 63,636 \text{ W}$
+
+2. **Calculate the maximum number of GPUs:** Divide the component power budget by the TDP of a single H100.
+   $\frac{63,636 \text{ W}}{700 \text{ W per GPU}} = 90.9 \text{ GPUs}$
+
+3. **Round down and calculate final draw:** You can only install whole GPUs, so we round down to 90. The total draw is 90 GPUs multiplied by their TDP and the PUE.
+   $90 \text{ GPUs} \times 700 \text{ W} \times 1.1 \text{ PUE} = 69,300 \text{ W} = \mathbf{69.3 \text{ kW}}$
+
+**Answer:** You can install 90 H100s, for a total grid draw of 69.3 kW.
+
+  > **Key Equation:** $\text{Max Components} = \lfloor \frac{\text{Rack Power Limit} / \text{PUE}}{\text{Component TDP}} \rfloor$
+
+  > **Options:**
+  > [ ] 100 GPUs, drawing 70.0 kW
+  > [ ] 90 GPUs, drawing 63.0 kW
+  > [x] 90 GPUs, drawing 69.3 kW
+  > [ ] 100 GPUs, drawing 77.0 kW
+
+  📖 **Deep Dive:** [Hardware Numbers](https://mlsysbook.ai/NUMBERS.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Intra-Node Speed Advantage</b> · <code>nvlink-vs-infiniband</code></summary>
+
+- **Interviewer:** "Identify the approximate latency for a data transfer using NVLink 4.0 within an HGX server, compared to a transfer between servers using cross-rack InfiniBand NDR."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the 'leaving the box' penalty. They might know NVLink is faster but assume it's a small difference, like 2-3×. They anchor on PCIe latency (~1,000 ns) and incorrectly assume a modern datacenter network is nearly as fast. In reality, the physics of signaling across racks, through switches, and via optical cables imposes a significant, order-of-magnitude latency penalty compared to the tightly integrated on-board NVLink fabric.
+
+  **Realistic Solution:** An NVLink 4.0 transfer has a latency of about 500 ns. A cross-rack InfiniBand NDR transfer is roughly 5,000 ns (5 µs). Therefore, the on-node (intra-server) transfer is approximately 10 times faster from a latency perspective than the inter-server transfer.
+
+  > **Napkin Math:** Using the '1 ns = 1 second' human-scale analogy: an NVLink transfer takes about 8 minutes (500 ns), while a cross-rack InfiniBand trip takes about 1.4 hours (5,000 ns).
+
+  > **Options:**
+  > [ ] NVLink: ~500 ns, InfiniBand: ~1,000 ns
+  > [ ] NVLink: ~5,000 ns, InfiniBand: ~500 ns
+  > [x] NVLink: ~500 ns, InfiniBand: ~5,000 ns
+  > [ ] NVLink: ~1 ns, InfiniBand: ~5,000 ns
+
+  📖 **Deep Dive:** [Distributed Systems](https://mlsysbook.ai/cloud/02_distributed_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The I/O-Bound Cost Fallacy</b> · <code>data-pipelines</code></summary>
+
+- **Interviewer:** "Your team needs to run a feature engineering job on a 100 TB dataset stored in a cloud bucket. The job will run on a single H100 instance, which costs $4.10 per hour. The node is connected to the storage with a 400 Gbps InfiniBand link. Assuming the job is entirely bottlenecked by loading the data from storage, calculate the cost of a single run and explain your reasoning."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing bits (Gbps) and bytes (GB/s). Network bandwidth is specified in bits per second, while storage and memory are measured in bytes. Forgetting to divide by 8 leads to an 8x error in time and cost estimation. A second mistake is failing to convert cost from dollars-per-hour to dollars-per-second, leading to a massive overestimation.
+
+  **Realistic Solution:** The correct approach is to first determine the true data transfer rate in the correct units (GB/s), then calculate the total time required to transfer the dataset, and finally convert that time into a cost.
+
+1.  **Bandwidth Conversion:** Convert the network speed from gigabits per second (Gbps) to gigabytes per second (GB/s). Since there are 8 bits in a byte, you divide by 8.
+    `400 Gbps / 8 = 50 GB/s`
+2.  **Data Size Conversion:** The dataset is 100 TB. To match the bandwidth units, convert this to GB.
+    `100 TB * 1024 GB/TB = 102,400 GB`
+3.  **Time Calculation:** Calculate the total time to transfer the data.
+    `102,400 GB / 50 GB/s = 2048 seconds`
+4.  **Cost Calculation:** Convert the instance cost to a per-second rate and multiply by the total time.
+    `($4.10 / 3600 seconds/hour) * 2048 seconds ≈ $2.33`
+
+  > **Napkin Math:** 1. Convert network to Bytes: `400 Gbps / 8 = 50 GB/s`
+2. Convert data to GB: `100 TB * 1024 ≈ 100,000 GB`
+3. Calculate time: `100,000 GB / 50 GB/s = 2000 s`
+4. Calculate cost: `(2000 s / 3600 s/hr) * $4.10/hr ≈ 0.55 * $4.10 ≈ $2.25` (Rounding gives a close-enough estimate). The exact answer is $2.33.
+
+  > **Key Equation:** $\text{Total Cost} = \frac{\text{Data Size (GB)}}{\text{Bandwidth (GB/s)}} \times \frac{\text{Instance Cost (\$/hr)}}{3600 \text{ (s/hr)}}$
+
+  > **Options:**
+  > [ ] $0.29
+  > [ ] $8,396.80
+  > [x] $2.33
+  > [ ] The cost is negligible as compute is fast.
+
+  📖 **Deep Dive:** [ML Systems](https://mlsysbook.ai/vol1/ml_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The TCO Iceberg</b> · <code>economics-tco</code></summary>
+
+- **Interviewer:** "A team is evaluating the 3-year Total Cost of Ownership (TCO) for a new, large-scale language model feature. A junior engineer argues the biggest expense will be the initial multi-million dollar purchase of H100s for training. When considering the entire lifecycle of a successful production ML system, which component typically dominates the TCO?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often fixate on the high, visible upfront cost of training (CapEx). They underestimate how the small, recurring cost of inference (OpEx) accumulates to a much larger number over a product's multi-year lifecycle, especially with millions of users. The training cluster is just the tip of the TCO iceberg.
+
+  **Realistic Solution:** Inference. For any widely adopted product, the cumulative operational cost of running inference servers 24/7 for millions of users over several years almost always outweighs the one-time (or periodic) capital expense of training. The sheer volume of inference requests makes it the dominant factor in the system's TCO.
+
+  > **Napkin Math:** Consider a simplified 3-year TCO model.
+
+**Training (CapEx):** A one-time cost, e.g., $3M for a GPU cluster purchase.
+
+**Inference (OpEx):** If serving a successful feature with 10 million users costs $200k/month in cloud bills (compute, energy, networking), over 3 years that is:
+
+$200,000/month * 36 months = $7.2M
+
+In this realistic scenario, the long-term inference cost is over 2x the initial training hardware cost. For very large services, this ratio can easily exceed 5-10x.
+
+  > **Options:**
+  > [ ] The initial CapEx for the training GPU cluster.
+  > [x] The cumulative OpEx for inference servers and energy.
+  > [ ] Data acquisition and labeling costs.
+  > [ ] Salaries for the research and ML engineering teams.
+
+  📖 **Deep Dive:** [Responsible Engineering](https://mlsysbook.ai/vol1/responsible_engr.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Annual TCO of a Single H100</b> · <code>cloud-economics-tco</code></summary>
+
+- **Interviewer:** "You are a cloud infrastructure planner tasked with calculating the first-year Total Cost of Ownership (TCO) for a single NVIDIA H100 GPU to be deployed in your new liquid-cooled datacenter (PUE of 1.1). Your goal is to understand the true annual cost for budget planning, moving beyond just the sticker price.
+
+Using the hardware constants provided, calculate the approximate TCO for a single H100 for one year. Assume the GPU's capital expenditure (CapEx) is amortized linearly over a 3-year lifespan and that industrial electricity costs $0.10/kWh."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to only consider the upfront hardware purchase price (CapEx), completely ignoring the significant operational costs (OpEx) like power, cooling, and maintenance. This leads to a massive underestimation of the true cost of running AI infrastructure. A second common error is forgetting to account for the Power Usage Effectiveness (PUE), which adds the overhead of cooling systems to the GPU's direct power draw.
+
+  **Realistic Solution:** The TCO is the sum of the amortized capital cost and all operational costs for the year.
+1.  **Amortized CapEx:** The H100 unit cost is ~$30,000. Amortized over 3 years, the annual hardware cost is `$30,000 / 3 = $10,000`.
+2.  **Annual Maintenance:** The standard rate is ~5% of the initial CapEx, so `$30,000 * 0.05 = $1,500` per year.
+3.  **Annual Power & Cooling Cost:** The H100's TDP is 700W (0.7 kW). With a PUE of 1.1, the total power draw from the wall is `0.7 kW * 1.1 = 0.77 kW`. Over one year (8760 hours), the total energy consumption is `0.77 kW * 8760 hours = 6745.2 kWh`. At $0.10/kWh, the annual power cost is `6745.2 kWh * $0.10/kWh ≈ $675`.
+
+Adding these components together gives the total annual TCO.
+
+  > **Napkin Math:** 1. **Amortized CapEx:** `$30,000 / 3 \text{ years} = $10,000 / \text{year}`
+2. **Maintenance:** `$30,000 * 5\% = $1,500 / \text{year}`
+3. **Power Cost:** `700W * 1.1 \text{ PUE} * 8760 \text{ hr/yr} * $0.10/\text{kWh} = 0.77 \text{ kW} * 8760 \text{h} * $0.10/\text{kWh} \approx $675 / \text{year}`
+4. **Total:** `$10,000 + $1,500 + $675 = $12,175`
+
+  > **Key Equation:** $\text{TCO}_{\text{annual}} = \frac{\text{CapEx}}{\text{Lifespan}} + (\text{CapEx} \times \%_{\text{Maint}}) + (\text{TDP} \times \text{PUE} \times \text{Hours}_{\text{year}} \times \text{Cost}_{\text{kWh}})$
+
+  > **Options:**
+  > [ ] ~$32,175
+  > [ ] ~$10,675
+  > [x] ~$12,175
+  > [ ] ~$12,113
+
+  📖 **Deep Dive:** [Production ML Operations](https://mlsysbook.ai/cloud/04_production_ops.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Data Pipeline Stall</b> · <code>data-pipeline</code></summary>
 
@@ -103,7 +1623,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Small Batch Anomaly</b> · <code>cpu-gpu-arch</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Small Batch Anomaly</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You're running inference for a small convolutional neural network (CNN) with a batch size of 1. To your surprise, you find that a powerful CPU completes the inference faster than a high-end GPU. Explain why this counter-intuitive result might occur."
 
@@ -132,7 +1652,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The OOM Error</b> · <code>parallelism</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The OOM Error</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "We are training a 30B parameter model using standard Data Parallelism on 80GB GPUs. The model weights are 60GB, but the system OOMs instantly on step 1. Why?"
 
@@ -154,7 +1674,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The GPU Utilization Paradox</b> · <code>mlops</code> <code>data-pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The GPU Utilization Paradox</b> · <code>deployment</code> <code>data-pipeline</code></summary>
 
 - **Interviewer:** "Your team rents 64 A100 GPUs to train a large vision model. After a month, the cloud bill arrives: $800,000. You pull the utilization logs and discover average GPU compute utilization was 23%. The team swears the training loop is optimized. Where did 77% of your GPU-hours go?"
 
@@ -194,7 +1714,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Gradient Memory Tax</b> · <code>parallelism</code> <code>memory-hierarchy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Gradient Memory Tax</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're fine-tuning a 7B-parameter model in FP16. Your GPU has 24 GB of VRAM. The model weights are 14 GB. Your engineer says 'we have 10 GB left — plenty for training.' Why will this OOM immediately?"
 
@@ -235,9 +1755,702 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Datacenter Power Budget</b> · <code>power-and-cooling</code></summary>
 
-#### 🔵 L4 — Apply & Identify
+- **Interviewer:** "You are a systems engineer at a cloud provider designing a new AI datacenter. Your standard rack configuration includes four servers, and each server contains eight H100 GPUs. Assuming a modern datacenter with a Power Usage Effectiveness (PUE) of 1.1, apply your knowledge of hardware specifications to determine if these racks can be air-cooled."
 
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate total power consumption by focusing only on the GPU's nameplate TDP. They forget to account for the rest of the server components (CPU, memory, networking) and the critical overhead from the datacenter's cooling infrastructure, represented by the PUE.
+
+  **Realistic Solution:** The conclusion is that the rack requires liquid cooling. The total power draw exceeds the typical ~30 kW limit for air cooling. The calculation must account for the full server power draw, not just the GPUs, and then multiply the total IT load by the PUE to find the true power required from the facility.
+
+  > **Napkin Math:** 1. **Single GPU Power:** An H100 GPU has a Thermal Design Power (TDP) of 700 W.
+2. **Full Server Power:** An 8-GPU server (like an HGX H100) consumes far more than just the GPUs. A realistic power draw for the entire server under load is ~10 kW.
+3. **Rack IT Power:** With 4 servers per rack, the total IT power is $4 \times 10\text{ kW} = 40\text{ kW}$.
+4. **Total Facility Power:** We must account for cooling overhead using the PUE. The total power drawn by the rack from the datacenter grid is $40\text{ kW} \times 1.1\text{ PUE} = 44\text{ kW}$.
+5. **Conclusion:** The industry limit for air-cooling a rack is around 30 kW. Since $44\text{ kW} > 30\text{ kW}$, this rack configuration mandates liquid cooling.
+
+  > **Key Equation:** $\text{Total Power} = (\text{Number of Servers} \times \text{Power per Server}) \times \text{PUE}$
+
+  > **Options:**
+  > [ ] Yes, the total GPU power is 22.4 kW, which is under the 30 kW air-cooling limit.
+  > [ ] No, the IT load is 40 kW, which is over the 30 kW limit.
+  > [x] No, the total power draw including cooling overhead is 44 kW, which exceeds the ~30 kW limit of air cooling.
+  > [ ] Yes, the total power is 40 kW + 1.1 kW = 41.1 kW, which can be managed with high-flow air cooling.
+
+  📖 **Deep Dive:** [Volume 2: Cloud Infrastructure](https://mlsysbook.ai/vol2/cloud.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Mid-Afternoon Throttling</b> · <code>thermal-throttling</code></summary>
+
+- **Interviewer:** "You are training a large model on a cluster of H100 GPUs. The job starts with full performance, but you notice that every afternoon, around 2 PM, the training throughput drops by ~15-20%. Using `nvidia-smi`, you observe that the GPU power draw is consistently capped at ~560W, well below the 700W TDP limit, during these slowdowns. Diagnose the most likely cause of this recurring performance degradation."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often jump to complex software or hardware fault explanations. They might blame the training script, the scheduler, or a failing power supply unit. However, the most fundamental principle is often the cause: a system's ability to perform is limited by its ability to cool itself. The symptoms—a power cap below TDP correlated with a specific time of day—are classic signs of environmental thermal issues.
+
+  **Realistic Solution:** The most likely cause is thermal throttling due to an increase in the datacenter's ambient temperature. The afternoon is often the hottest part of the day, which can strain the facility's cooling infrastructure, raising the temperature of the 'cold aisle' air supplied to the servers. A GPU's ability to dissipate heat is relative to this ambient temperature. If the incoming air is hotter, the GPU must reduce its power consumption to keep its internal silicon temperature below the safety limit (e.g., 95°C), causing the observed throttling and performance drop.
+
+  > **Napkin Math:** 1. **Thermal Headroom:** A GPU's cooling system is designed to dissipate max power (700W) at a certain ambient temperature (e.g., design temp of 20°C) to stay below a thermal limit (e.g., 95°C).
+2. **Loss of Headroom:** The problem states the power is capped at 560W. Let's see what ambient temperature would cause this. The throttling is proportional to the loss of thermal delta.
+3. **Calculate the Ratio:** The GPU is being forced to operate at $560\text{W} / 700\text{W} = 0.8$ or 80% of its maximum power.
+4. **Solve for Ambient Temp:** This implies the temperature delta between the GPU's limit and the ambient air has shrunk to 80% of the original design. Let $T_{\text{limit}} = 95^\circ\text{C}$ and $T_{\text{design}} = 20^\circ\text{C}$. The design delta is $75^\circ\text{C}$. The new, reduced delta is $75^\circ\text{C} \times 0.8 = 60^\circ\text{C}$.
+5. **Find the New Ambient Temp:** Therefore, the new ambient temperature must be $T_{\text{new}} = T_{\text{limit}} - 60^\circ\text{C} = 95^\circ\text{C} - 60^\circ\text{C} = 35^\circ\text{C}$ (or 95°F). An increase in ambient datacenter temperature from 20°C to 35°C fully explains the power throttling.
+
+  > **Key Equation:** $P_{\text{throttle}} \propto (T_{\text{limit}} - T_{\text{ambient}})$
+
+  > **Options:**
+  > [ ] The server's Power Supply Unit (PSU) is failing and cannot provide the full 700W to the GPU.
+  > [ ] The training script has a software bug that reduces computational intensity after a few hours of running.
+  > [ ] A 'noisy neighbor' is running on the same server, stealing CPU cycles and starving the GPU of data.
+  > [x] The datacenter's ambient temperature is rising in the afternoon, reducing the GPU's thermal headroom and forcing it to throttle power.
+
+  📖 **Deep Dive:** [Volume 2: Cloud Infrastructure](https://mlsysbook.ai/vol2/cloud.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Illusion of Sparsity</b> · <code>pruning-unstructured-sparsity</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer at a large cloud provider. A team has applied a new unstructured pruning algorithm to a 100B parameter LLM, achieving 50% sparsity. They expected this to roughly double inference throughput on H100 GPUs. However, in production, they observe less than a 5% throughput improvement. They've checked the model size, and it's indeed half the original on disk. `nvidia-smi` shows 100% GPU utilization during requests. Why is the speedup so negligible?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Believing that '50% fewer parameters' automatically translates to a 2x speedup. This ignores the critical difference between theoretical FLOPs and actual hardware execution, especially how modern accelerators are optimized for dense, not sparse, computation.
+
+  **Realistic Solution:** The root cause is the use of unstructured pruning. H100 GPUs achieve their performance through Tensor Cores, which are specialized hardware units designed to perform matrix-matrix multiplications on small, dense blocks of data (e.g., 16x16). Unstructured pruning creates a fine-grained, random pattern of zeros in the weight matrices. The GPU cannot use its Tensor Cores on these sparse matrices. It falls back to general-purpose CUDA cores, which are much less efficient, or it loads the data as if it were dense and uses masking, nullifying the potential compute savings. The memory access patterns also become irregular, leading to cache inefficiency. The solution is to use structured pruning, where entire blocks, channels, or attention heads are removed, resulting in smaller *dense* matrices that can be efficiently processed by Tensor Cores.
+
+  > **Napkin Math:** Let's analyze the hardware behavior. An H100's performance comes from its Tensor Cores, offering 989 TFLOPS on dense FP16 matrices. A 50% unstructured sparse matrix cannot be fed into these cores. The operation might fall back to simulation on CUDA cores, which provides a tiny fraction of the peak FLOPs. Even if a special kernel could skip zero-multiplications, the core problem is memory access. The indices of the non-zero weights must be read from HBM (~300 ns latency), and the weight values themselves must be read. This random-access pattern is extremely inefficient compared to streaming a dense matrix block into SRAM. The GPU spends all its time waiting for data from HBM rather than computing, hence it is memory-access bound despite showing 100% utilization (the cores are active, but stalled waiting for data). The theoretical 2x FLOP reduction is completely overshadowed by the massive penalty from losing structured, dense computation.
+
+  > **Key Equation:** $\eta_{speedup} = \frac{\text{Time}_{dense}}{\text{Time}_{sparse}} \ll 2.0 \quad (\text{for unstructured on GPU})
+
+  > **Options:**
+  > [ ] The model is now memory-bandwidth bound because loading the sparse weight indices from HBM is slower than the compute savings.
+  > [x] The pruning is unstructured, which prevents the H100's Tensor Cores from accelerating the matrix math and leads to inefficient, irregular memory access.
+  > [ ] Kernel launch overhead now dominates the execution time, as the pruned model still requires launching the same number of CUDA kernels.
+  > [ ] The model has been compressed on disk, but the GPU driver is decompressing it back to a dense format in memory, nullifying the pruning.
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/model_compression.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Distillation Cost-Benefit Analysis</b> · <code>distillation-economics</code></summary>
+
+- **Interviewer:** "Your team plans to distill a 175B parameter teacher model to a 7B student model to reduce serving costs. The distillation process involves training the 7B student on 140B tokens of data, using the 175B teacher to generate soft labels for each token. Your manager asks you to demonstrate if the project is financially viable. Assuming H100s cost $2/hour and you can achieve 40% MFU, calculate the cost of this distillation run and determine the primary driver of that cost."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Forgetting to include the compute cost of the teacher model's forward passes. A common trap is to calculate only the training cost for the student model ($6PD$), completely ignoring the massive overhead of running inference on the much larger teacher model ($2PD_{teacher}$) for the entire dataset, which is often the dominant cost.
+
+  **Realistic Solution:** The total compute cost is the sum of training the student and running inference on the teacher. The student training requires $6 \times P_{student} \times D$ FLOPs. The teacher inference requires $2 \times P_{teacher} \times D$ FLOPs. The teacher's contribution is significant. Once the total FLOPs are calculated, we can determine the required H100-hours by dividing by the effective FLOPS of an H100, which accounts for the 40% utilization (MFU).
+
+  > **Napkin Math:** 1. **Calculate Student Training FLOPs:**
+   $C_{student} = 6 \times (7 \times 10^9) \times (140 \times 10^9) = 5.88 \times 10^{21}$ FLOPs.
+
+2. **Calculate Teacher Inference FLOPs:**
+   $C_{teacher} = 2 \times (175 \times 10^9) \times (140 \times 10^9) = 4.9 \times 10^{22}$ FLOPs.
+
+3. **Calculate Total FLOPs:**
+   $C_{total} = C_{student} + C_{teacher} = 5.88 \times 10^{21} + 4.9 \times 10^{22} \approx 5.49 \times 10^{22}$ FLOPs. The teacher inference is nearly 90% of the total compute.
+
+4. **Calculate Effective H100 FLOPS:**
+   An H100 provides 989 TFLOPS (FP16). Effective FLOPS = $989 \times 10^{12} \times 0.40 = 3.956 \times 10^{14}$ FLOPs/sec.
+
+5. **Calculate Total H100-Hours:**
+   Total Seconds = $(5.49 \times 10^{22}) / (3.956 \times 10^{14}) \approx 1.39 \times 10^8$ seconds.
+   Total Hours = $(1.39 \times 10^8) / 3600 \approx 38,600$ H100-hours.
+
+6. **Calculate Total Cost:**
+   Cost = $38,600 \text{ hours} \times \$2/\text{hour} \approx \$77,200$. The primary cost driver is clearly the teacher model's repeated forward passes.
+
+  > **Key Equation:** $C_{distill} \approx (6 P_{student} + 2 P_{teacher}) \times D$
+
+  > **Options:**
+  > [ ] Around $7,700, primarily driven by the student model's backpropagation steps.
+  > [ ] Around $193,000, because the MFU is so low that it makes the hardware inefficient.
+  > [x] Around $77,200, primarily driven by the compute required for the teacher model's forward passes.
+  > [ ] Around $30,000, primarily driven by the HBM memory capacity needed to hold both models.
+
+  📖 **Deep Dive:** [Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Tale of Two Latencies</b> · <code>flashattention-speculative-decoding</code></summary>
+
+- **Interviewer:** "You are serving a 70B LLM on H100s. Users have two main complaints:
+1. 'When I submit a long document (8k tokens) for summarization, it takes many seconds before the first word appears.' (High prefill latency)
+2. 'When I use the chatbot for conversation, the time between each generated word is too long.' (High time-per-token)
+
+You have budget to implement ONE of two optimizations: FlashAttention or Speculative Decoding. Which optimization should you apply to which problem, and why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Confusing the domains of the two optimizations. A common error is to think FlashAttention, which makes attention faster, will significantly speed up per-token latency (it doesn't, because decoding is memory-bound). Another error is to think Speculative Decoding can help with the initial prompt processing (it can't, as it's an auto-regressive optimization).
+
+  **Realistic Solution:** The two problems map directly to the two main phases of LLM inference.
+1. **Prefill Latency:** Processing the initial long prompt is bottlenecked by the attention mechanism's $O(N^2)$ complexity with respect to sequence length. This involves reading and writing the massive attention matrix to/from slow HBM. FlashAttention is designed specifically for this; it's an I/O-aware algorithm that fuses attention calculations in fast on-chip SRAM, avoiding the HBM bottleneck. It directly addresses the long document summarization problem.
+2. **Time-per-token:** Generating subsequent tokens is an auto-regressive process where the bottleneck is memory bandwidth—reading the entire 140GB of model weights from HBM for every single token generated. Speculative Decoding addresses this by using a small, fast 'draft' model to generate several candidate tokens, and then using the large, slow model to verify them in a single forward pass. This amortizes the high cost of the large model's memory-bound pass over multiple tokens, increasing tokens/second and reducing perceived latency.
+
+  > **Napkin Math:** **Problem 1 (Prefill):** With a sequence length N=8192, the attention matrix has $N^2 \approx 67$ million elements. For one head, this is $67M \times 2 \text{ bytes/elem} \approx 134$ MB. A 70B model has many heads and layers (e.g., Llama 70B has 80 layers, 8 heads per group), so the intermediate state is many gigabytes. A standard attention implementation would repeatedly read and write this data to HBM (3.35 TB/s bandwidth, ~300ns latency). FlashAttention avoids this by keeping the operations in on-chip SRAM (~1.2 GB/s on a TinyML MCU, much higher on GPU, but the principle is avoiding off-chip), dramatically reducing the I/O bottleneck.
+
+**Problem 2 (Decoding):** Generating one token requires a forward pass. For a 70B model, this means reading all the weights. Memory required = $70 \times 10^9 \text{ params} \times 2 \text{ bytes/param} = 140$ GB. Time to read from HBM = $140 \text{ GB} / 3.35 \text{ TB/s} \approx 41.8$ ms. This is the theoretical floor for latency, set by memory bandwidth. Speculative decoding bypasses this by generating (e.g.) 4 tokens with a fast model and then using one 41.8ms+ verifier pass to accept them, achieving an effective latency of $\approx 10.5$ ms per token, a ~4x speedup.
+
+  > **Key Equation:** $\text{Latency} = \underbrace{T_{prefill}(N^2_{prompt})}_{\rightarrow \text{FlashAttention}} + \sum_{i=1}^{T} \underbrace{T_{decode}(\text{BW}_{mem})}_{\rightarrow \text{Speculative Dec.}}$.
+
+  > **Options:**
+  > [ ] Apply FlashAttention to the chatbot to reduce per-token time, and Speculative Decoding to the summarizer to handle the long context.
+  > [x] Apply FlashAttention to the summarizer to fix prefill latency, and Speculative Decoding to the chatbot to reduce per-token latency.
+  > [ ] Apply FlashAttention to both; it speeds up all attention calculations, which will fix both prefill and decoding latency.
+  > [ ] Neither. The issue is network latency for the chatbot and an insufficient batch size for the summarizer, not the model's architecture.
+
+  📖 **Deep Dive:** [Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Tensor Parallelism Choke Point</b> · <code>nvlink-vs-infiniband</code></summary>
+
+- **Interviewer:** "You are diagnosing a performance issue in a large-scale LLM training job using 8-way tensor parallelism. The job runs across two servers, each with four H100 GPUs. Profiling shows that an `All-Reduce` operation on a 4 GB tensor is a major bottleneck. Your servers use NVLink 4.0 for intra-node GPU communication and InfiniBand NDR for inter-node communication. Using your systems knowledge, diagnose the most likely performance bottleneck by calculating the transfer time for this operation under two conditions: a) when all GPUs are in one server, and b) when the GPUs are split across two servers."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the magnitude of the bandwidth gap between on-node (NVLink) and off-node (InfiniBand) interconnects. They might assume the difference is minor (2-3x) or incorrectly blame software overhead (e.g., NCCL) or PCIe bus contention, rather than the fundamental physics of the network topology.
+
+  **Realistic Solution:** The primary bottleneck is the dramatic drop in bandwidth when communication must leave the server and traverse the InfiniBand network. Intra-node communication happens over the ultra-high-bandwidth NVLink fabric, while inter-node communication is limited by the speed of the network interface cards and switches, which is an order of magnitude slower. The `All-Reduce` operation becomes bound by the slowest link in the chain, which is the inter-node InfiniBand connection.
+
+  > **Napkin Math:** Let's calculate the ideal transfer time for the 4 GB tensor.
+
+1.  **Intra-Node (NVLink 4.0):**
+    - Bandwidth: 900 GB/s
+    - Transfer Time = Data Size / Bandwidth = 4 GB / 900 GB/s ≈ 4.4 ms
+
+2.  **Inter-Node (InfiniBand NDR):**
+    - Bandwidth: 400 Gbps = 50 GB/s
+    - Transfer Time = Data Size / Bandwidth = 4 GB / 50 GB/s = 80 ms
+
+The calculation shows that moving the communication from inside a node to between nodes makes it ~18x slower (80ms / 4.4ms), clearly identifying the InfiniBand link as the bottleneck for this distributed operation.
+
+  > **Key Equation:** $\text{Transfer Time} = \frac{\text{Data Size}}{\text{Bandwidth}}$
+
+  > **Options:**
+  > [ ] The bottleneck is PCIe Gen5 bandwidth, as the data must cross the PCIe bus to reach the network card, adding ~20ms of latency.
+  > [ ] Software overhead in the NCCL communication library is the primary issue; the hardware difference between NVLink and InfiniBand is negligible for large transfers.
+  > [x] The bottleneck is the InfiniBand NDR link, which is ~18x slower (80ms transfer) than the intra-node NVLink (4.4ms transfer), making inter-node communication dominant.
+  > [ ] The bottleneck is HBM memory access latency; reading the 4 GB tensor from HBM on each GPU is slower than the network transfer itself.
+
+  📖 **Deep Dive:** [Distributed Systems](https://mlsysbook.ai/vol2/distributed.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Silent Failure Cascade</b> · <code>fault-tolerance-checkpointing</code></summary>
+
+- **Interviewer:** "You are training a 175B parameter LLM on a cluster of 4,096 H100 GPUs. The training job is expected to take 25 days. Three days into the run, the job crashes with no obvious error log, losing all progress. Team members suggest different checkpointing strategies. Given the known GPU Mean Time To Failure (MTTF), diagnose the most effective checkpointing interval to balance progress against overhead."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often choose arbitrary checkpoint intervals like 'every epoch' or 'every hour'. This ignores the statistical reality of large-scale hardware failure. Checkpointing too often introduces significant overhead, while checkpointing too infrequently risks catastrophic work loss.
+
+  **Realistic Solution:** The problem is to find the statistically optimal checkpoint interval that minimizes time lost to both checkpointing overhead and failure recovery. At this scale, individual component MTTF translates into a continuous cluster-level failure rate. The optimal interval is a function of the cluster's aggregate MTTF and the time it takes to save a checkpoint. We must first calculate the failure rate for the entire 4,096-GPU cluster and the time required to save the model's state.
+
+  > **Napkin Math:** 1. **Calculate Cluster MTTF:** A single GPU has an MTTF of ~50,000 hours. For a cluster of 4,096 GPUs, the effective MTTF is `50,000 hours / 4,096 GPUs ≈ 12.2 hours`. This means we can expect a hardware failure roughly every 12 hours.
+
+2. **Calculate Checkpoint Size:** A 175B model with Adam optimizer state requires approximately 16 bytes per parameter. `175B params * 16 bytes/param = 2.8 TB`.
+
+3. **Calculate Checkpoint Time (T_checkpoint):** Saving to a high-performance parallel file system over InfiniBand can achieve an aggregate write speed. Let's assume a conservative 200 GB/s. `T_checkpoint = 2,800 GB / 200 GB/s = 14 seconds`.
+
+4. **Apply the Optimal Interval Formula:** Using the formula `T_interval = sqrt(2 * T_checkpoint * T_MTTF)`:
+   - `T_MTTF = 12.2 hours * 3600 s/hr ≈ 43,920 seconds`.
+   - `T_interval = sqrt(2 * 14s * 43,920s) = sqrt(1,229,760) ≈ 1,109 seconds`.
+   - This is approximately **18.5 minutes**.
+
+  > **Key Equation:** T_{\text{interval}} = \sqrt{2 \times T_{\text{checkpoint}} \times T_{\text{MTTF}}}
+
+  > **Options:**
+  > [ ] Checkpoint every 5 minutes to be safe.
+  > [x] Checkpoint roughly every 18-20 minutes.
+  > [ ] Checkpoint once per day to minimize overhead.
+  > [ ] The job failed after 3 days, so checkpointing every 48 hours is sufficient.
+
+  📖 **Deep Dive:** [Volume 2: Fault Tolerance & Checkpointing](https://mlsysbook.ai/vol2/fault_tolerance.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Vision Transformer Resolution Trap</b> · <code>compute-analysis</code></summary>
+
+- **Interviewer:** "You are a Staff ML Systems Engineer at a cloud provider. A customer is migrating their image classification service from a standard CNN (ResNet-50) to a Vision Transformer (ViT-Base). Both models initially meet the 10ms latency budget on an H100 GPU using 224x224 resolution images. To improve accuracy, they increase the input resolution to 448x448. The ResNet-50 latency increases to ~3ms, still well within budget. However, the ViT's latency explodes to over 20ms. The data loading pipeline has been optimized and is not the bottleneck. Using your knowledge of model architecture, diagnose the most likely cause of this disproportionate latency increase for the Vision Transformer."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume that if two models have similar FLOPs at one resolution, they will scale similarly. They forget that the computational complexity function itself is different. They might blame memory bandwidth or other system factors, when the root cause is the algorithm's scaling law (e.g., linear vs. quadratic).
+
+  **Realistic Solution:** The root cause is the difference in computational scaling between CNNs and Transformers. A CNN's computation scales linearly with the number of pixels (O(H*W)). Doubling the image height and width results in a 4x increase in pixels, and thus a ~4x increase in FLOPs. A Vision Transformer's self-attention mechanism, however, scales quadratically with the number of input patches (O(N^2)). Doubling the image resolution quadruples the number of patches (N), leading to a 16x (4^2) increase in the FLOPs required for the attention layers. This quadratic explosion in compute is the reason for the severe latency degradation.
+
+  > **Napkin Math:** Let's analyze the scaling factor for the compute-dominant operations:
+1.  **CNN (Convolution)**: Compute is proportional to the number of pixels.
+    - `Area_1 = 224 * 224 = 50,176`
+    - `Area_2 = 448 * 448 = 200,704`
+    - `Scaling Factor = Area_2 / Area_1 = 4x`
+
+2.  **ViT (Self-Attention)**: Compute is proportional to the square of the number of patches. Assume 16x16 patches.
+    - `Num_Patches_1 (N1) = (224/16)^2 = 14^2 = 196`
+    - `Num_Patches_2 (N2) = (448/16)^2 = 28^2 = 784`
+    - `Sequence Scaling Factor = N2 / N1 = 4x`
+    - `Compute Scaling Factor = (Sequence Scaling Factor)^2 = 4^2 = 16x`
+
+The ViT's compute requirements increased by 16x, while the CNN's only increased by 4x, explaining the latency explosion.
+
+  > **Key Equation:** $C_{\text{attention}} \propto N^2 = \left(\frac{H \times W}{P_{\text{size}}^2}\right)^2$
+
+  > **Options:**
+  > [ ] The 448x448 feature maps created by the ViT overwhelmed the HBM3 memory bandwidth.
+  > [ ] The KV Cache required for the 4x longer sequence length exceeded the GPU's SRAM capacity, causing constant spills to HBM.
+  > [x] The ViT's self-attention compute scales quadratically with the number of patches, which quadrupled, leading to a ~16x increase in FLOPs.
+  > [ ] The GPU's kernel dispatch overhead became the bottleneck due to the larger number of smaller operations in the ViT architecture at high resolution.
+
+  📖 **Deep Dive:** [Network Architectures](https://mlsysbook.ai/vol1/dnn_architectures.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The GPU-Bound Inference Stall</b> · <code>operator-fusion</code></summary>
+
+- **Interviewer:** "You are tasked with optimizing a small but critical DLRM-style recommendation model for production inference. The model has hundreds of tiny, sequential layers (embeddings, MLPs). When you profile it on an H100 GPU, `nvidia-smi` shows less than 15% Tensor Core utilization, yet latency is much higher than expected for the model's low FLOP count. A deep profiler reveals thousands of tiny CUDA kernel launches, each taking only a few microseconds. What is the most likely cause of this poor performance?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming the model size ('it's too small to saturate the GPU') or data transfer ('PCIe is the bottleneck'). While the model is small, that doesn't explain why it's slow. The issue isn't the total compute, but how it's structured. Blaming PCIe is also common, but in this scenario, the issue persists even after data is on the GPU.
+
+  **Realistic Solution:** The model is 'dispatch-bound' or 'launch-bound'. The GPU spends more time launching the thousands of tiny kernels than it spends on actual computation. Each kernel launch has a fixed overhead (~5 µs), and each tiny kernel must read from and write back to slow HBM3 memory (~300 ns). The solution is to apply operator fusion, compiling sequences of small layers into a single, larger CUDA kernel. This pays the launch overhead only once and allows intermediate results to stay in fast on-chip SRAM/registers, avoiding round trips to HBM.
+
+  > **Napkin Math:** Assume the model has 100 small layers, each taking 2µs of compute.
+- **Unfused:** Each layer is a separate kernel. The total time is dominated by launch overhead and memory access.
+  - Time per kernel ≈ 5µs (launch overhead) + 0.3µs (HBM read) + 2µs (compute) + 0.3µs (HBM write) = 7.6µs
+  - Total time ≈ 100 kernels × 7.6µs/kernel = 760µs
+- **Fused:** All 100 layers are combined into one kernel.
+  - Total time ≈ 5µs (launch) + 0.3µs (initial read) + 100×2µs (compute) + 0.3µs (final write) = 205.6µs
+- The fused version is ~3.7x faster by amortizing launch overhead and keeping intermediate data on-chip.
+
+  > **Key Equation:** $\text{Time}_{unfused} = N_{kernels} \times (T_{launch} + T_{mem}) \gg \text{Time}_{fused}$
+
+  > **Options:**
+  > [ ] The model is too small to saturate the GPU's arithmetic units.
+  > [ ] The PCIe Gen5 bus is a bottleneck, preventing data from reaching the GPU quickly enough.
+  > [x] The system is dispatch-bound due to high kernel launch overhead from numerous small operations.
+  > [ ] The model is memory-bandwidth bound because it needs to read large embedding tables from HBM.
+
+  📖 **Deep Dive:** [ML Frameworks](https://mlsysbook.ai/vol1/frameworks.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Long-Context OOM Failure</b> · <code>flash-attention</code></summary>
+
+- **Interviewer:** "You are fine-tuning a 70B parameter LLM on an H100 GPU (80GB HBM3). The training runs fine with a sequence length of 2048. However, when you increase the sequence length to 8192 to handle longer documents, you immediately get a CUDA Out-of-Memory (OOM) error during the first forward pass. Given that the model parameters (140GB in FP16, distributed via Tensor Parallelism) and optimizer states fit in memory, what is the most likely cause of this sudden OOM error?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming the KV-cache. The KV-cache is a major memory consumer during *inference*, but it is not materialized during a training forward pass. Another common mistake is to simply say 'activations are too big' without identifying the specific activation that grows quadratically with sequence length.
+
+  **Realistic Solution:** The standard attention mechanism materializes the full (N, N) attention score matrix in HBM for each layer and head. The memory required for this matrix scales quadratically with the sequence length (N). While manageable at N=2048, at N=8192 this single matrix becomes enormous and causes the OOM. The solution is to use an optimized attention implementation like FlashAttention, which computes attention in tiles. It avoids materializing the full matrix in HBM by using fast on-chip SRAM for intermediate calculations, changing the memory complexity from O(N²) to O(N).
+
+  > **Napkin Math:** Let's calculate the size of the attention matrix for a single layer and head at N=8192.
+- **Size = Sequence Length × Sequence Length × bytes/element**
+- For a Llama-70B model, let's consider one attention head with a batch size of 1.
+- Matrix size = 8192 × 8192 × 2 bytes (FP16) = 67,108,864 × 2 bytes ≈ 134 MB.
+- A 70B model has 80 layers and 8 attention heads per tensor-parallel shard (assuming 8-way TP). Even for one shard, that's 80 * 8 * 134 MB, which is far too large. The key is that this O(N²) intermediate matrix is the culprit.
+- FlashAttention avoids this 134MB intermediate allocation, dramatically reducing peak memory usage.
+
+  > **Key Equation:** $\text{Memory}_{Attention} \propto O(N^2) \rightarrow \text{Memory}_{FlashAttention} \propto O(N)$
+
+  > **Options:**
+  > [ ] The Adam optimizer states have doubled in size due to the longer sequence.
+  > [x] The full (N, N) attention score matrix is being materialized in HBM, which scales quadratically.
+  > [ ] The KV-cache for the 8192-length context is too large to fit in memory.
+  > [ ] The gradient checkpointing buffer is overflowing with the larger activation sizes.
+
+  📖 **Deep Dive:** [Model Training](https://mlsysbook.ai/vol1/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Chatbot Latency Crisis</b> · <code>speculative-decoding</code></summary>
+
+- **Interviewer:** "You are leading an interactive chatbot service built on a 7B LLM running on H100 GPUs. The service is memory-bandwidth bound; each token generation is limited by the time it takes to read the 14GB of model weights from HBM. Autoregressive generation is too slow, and users are complaining about latency. You cannot change the model or hardware. How can you apply speculative decoding to decrease the perceived latency and increase the tokens/second for your users?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Suggesting larger batch sizes. While batching increases aggregate throughput (total tokens/sec across all users), it *increases* the latency for any single user's request, which is the opposite of what's needed for an interactive application. Another mistake is suggesting techniques that don't address the memory-bandwidth bottleneck, like simple model pruning.
+
+  **Realistic Solution:** Speculative decoding can significantly improve throughput in memory-bandwidth-bound scenarios. It works by using a much smaller, faster 'draft' model to generate a chunk of K candidate tokens. Then, the large, accurate 7B model validates all K tokens in a single, parallel forward pass. Since the time for this pass is dominated by reading the 14GB of weights (one time), and this cost is similar to generating just one token autoregressively, you effectively get multiple tokens for the price of one. If the draft model is coherent and an average of γ tokens are accepted per step, you can achieve a speedup of up to γ.
+
+  > **Napkin Math:** Let's calculate the theoretical speedup on an H100.
+- **Large Model (7B):** Time to read weights (14 GB) from HBM3 (3.35 TB/s) is the bottleneck.
+  - $T_L = 14 \text{ GB} / 3350 \text{ GB/s} \approx 4.2\text{ ms per token}$.
+- **Draft Model (100M):** Time to read weights (0.2 GB).
+  - $T_S = 0.2 \text{ GB} / 3350 \text{ GB/s} \approx 0.06\text{ ms per token}$.
+- **Speculation:** Generate K=5 draft tokens, then verify with one pass of the large model. Assume γ=4 tokens are accepted.
+  - Total Time = $(K \times T_S) + T_L = (5 \times 0.06\text{ ms}) + 4.2\text{ ms} = 4.5\text{ ms}$.
+  - You generated 4 correct tokens in 4.5 ms.
+  - Effective time per token = $4.5 \text{ ms} / 4 \approx 1.1\text{ ms}$.
+- **Speedup:** $4.2 \text{ ms} / 1.1 \text{ ms} \approx 3.8\times$.
+
+  > **Key Equation:** $\text{Speedup} \approx \frac{T_L \times \gamma}{K \times T_S + T_L}$
+
+  > **Options:**
+  > [ ] Increase the inference batch size to better saturate the GPU's compute units.
+  > [x] Use a small draft model to generate candidate tokens and a single large model pass to verify them.
+  > [ ] Implement FlashAttention to speed up the self-attention calculations.
+  > [ ] Switch from FP16 to INT8 quantization to reduce the memory footprint.
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Scaling Cliff</b> · <code>nvlink-vs-infiniband</code></summary>
+
+- **Interviewer:** "You are training a 175B LLM across multiple H100 nodes connected by InfiniBand NDR. You observe that scaling from a single node (8 GPUs) to 4 nodes (32 GPUs) gives you a 3x speedup, but scaling further to 8 nodes (64 GPUs) only provides a 3.5x total speedup over a single node. Your GPU utilization remains high (>90%) across all experiments. What is the most likely cause for these diminishing returns?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often assume that if GPU utilization is high, the bottleneck must be the computation itself or the model architecture. They fail to recognize that 'high utilization' can also mean 'busy waiting' for data from a slow interconnect, which is common in large-scale collective communication.
+
+  **Realistic Solution:** The bottleneck is the inter-node communication over InfiniBand. Within a node, the 8 H100s communicate over the ultra-fast 900 GB/s NVLink. When scaling across nodes, the gradients and activations must be synchronized using collective operations (like All-Reduce) over the much slower 50 GB/s InfiniBand network. As more nodes are added, the communication overhead from this network-bound All-Reduce operation starts to dominate the total step time, leading to a sharp drop in scaling efficiency, even though the GPUs are 'busy' participating in the communication.
+
+  > **Napkin Math:** Let's compare the bandwidth. NVLink 4.0 (intra-node) is 900 GB/s. InfiniBand NDR (inter-node) is 400 Gbps, which is 50 GB/s. The ratio is 900 / 50 = 18x. For a 175B model, the gradients (FP16) are 350 GB. An All-Reduce operation must communicate a significant fraction of this data. If 200GB must cross the network boundary, the time would be: Time = Data / Bandwidth.
+- Over NVLink (idealized): 200 GB / 900 GB/s ≈ 0.22 seconds.
+- Over InfiniBand: 200 GB / 50 GB/s = 4.0 seconds.
+As the node count increases, this 4-second communication cost becomes the dominant factor in every training step, dwarfing the few hundred milliseconds of actual computation. This explains why adding more compute (GPUs) yields minimal speedup.
+
+  > **Key Equation:** \text{Scaling Efficiency } (\eta) = \frac{\text{Speedup}}{N_{\text{nodes}}} = \frac{T_1}{T_N \times N}
+
+  > **Options:**
+  > [ ] The model is too large, causing PCIe bus saturation as data is swapped to system RAM.
+  > [x] The All-Reduce collective operation is saturating the inter-node InfiniBand network.
+  > [ ] The training workload is compute-bound, and we have hit the H100's maximum TFLOPS.
+  > [ ] NVLink bandwidth is insufficient for the amount of intra-node gradient sharing required.
+
+  📖 **Deep Dive:** [Volume 2: Distributed Systems](https://mlsysbook.ai/vol2/distributed.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Embedding Lookup Lag</b> · <code>nvlink-vs-pcie</code></summary>
+
+- **Interviewer:** "You are designing a recommendation model where a massive 600 GB embedding table is sharded across eight H100 GPUs within a single HGX server. For each inference request, the model must perform 20 independent embedding lookups, which are randomly distributed across the 8 GPUs. You need to diagnose the primary latency contributor for the user-facing P99 latency. Which bus protocol is the critical path and what is its approximate latency for a single lookup?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to focus on bandwidth (GB/s) when the problem is about the latency of many small, independent operations. Another is to confuse intra-node (within a server) and inter-node (across servers) protocols, incorrectly suggesting InfiniBand for a single-server problem.
+
+  **Realistic Solution:** The critical path is NVLink, as it's the dedicated high-speed interconnect for GPU-to-GPU communication within an HGX node. Each lookup involves one GPU requesting data from another GPU's HBM. The latency is the sum of the time to traverse NVLink and the time to access the remote GPU's HBM. PCIe is the alternative path but is significantly higher latency as it involves traversing up to the CPU and back down. Given the options, NVLink is the critical path. A single NVLink transfer takes ~500 ns, and the remote HBM access takes ~300 ns. Therefore, a single lookup's latency is dominated by these two factors.
+
+  > **Napkin Math:** An inference request requires fetching a small amount of data from another GPU. This is a latency-bound operation. Let's compare the latency of the two possible intra-node paths:
+1.  **NVLink Path:** The request goes from GPU 1 -> NVLink -> GPU 2 HBM. The latency from the 'ML Latency Hierarchy' table is ~500 ns for the NVLink transfer and ~300 ns for the HBM access. Total one-way latency is ~800 ns or 0.8 µs.
+2.  **PCIe Path:** The request would go GPU 1 -> PCIe -> CPU -> PCIe -> GPU 2. This involves two PCIe Gen5 transfers, each taking ~1,000 ns (1 µs). The total latency would be well over 2,000 ns (2 µs), plus CPU overhead.
+Clearly, NVLink is the lower-latency, critical path. The ~800ns latency of the NVLink + HBM access is the primary contributor for a single lookup.
+
+  > **Key Equation:** T_{\text{lookup}} \approx T_{\text{bus_traversal}} + T_{\text{remote_mem_access}}
+
+  > **Options:**
+  > [ ] InfiniBand RDMA, with a latency of ~5,000 ns per lookup.
+  > [ ] PCIe Gen5, with a latency of ~1,000 ns per lookup.
+  > [x] NVLink, with a combined bus and remote HBM access latency of ~800 ns per lookup.
+  > [ ] HBM3 memory bandwidth, as the 3.35 TB/s is insufficient for the embedding size.
+
+  📖 **Deep Dive:** [Volume 1: Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Silent GPU Killer</b> · <code>fault-tolerance</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer training a large language model on a 1,024-GPU H100 cluster. The training job, which is scheduled to run for 72 hours, keeps failing after about 4-5 hours. The cluster scheduler (e.g., Slurm) terminates the job with a 'watchdog timer expired' error. Your application logs show normal training steps right up until the termination, with no exceptions. However, digging into the kernel logs (`dmesg`) on one of the failed nodes reveals a GPU-related 'Xid' error message that occurred just before the job was killed. What is the most likely cause of this failure, and what should be your immediate action?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers from smaller-scale environments often assume software bugs (like an infinite loop) are the primary cause of hangs, underestimating the statistical certainty of hardware faults in large fleets. They incorrectly begin debugging the Python application code instead of treating the failure as an infrastructure-level, routine event and hardening the system's fault tolerance.
+
+  **Realistic Solution:** The `dmesg` log showing a GPU 'Xid' error is the smoking gun for a transient, non-recoverable GPU hardware or driver fault. At this scale, hardware failures are not exceptions; they are routine operational occurrences. The watchdog timer expired because the faulty GPU became unresponsive, which in turn froze the user-space training process and prevented it from signaling its liveness. The correct immediate action is to ensure the cluster's fault-tolerance system is working as designed: automatically detect the failed node, quarantine it for diagnostics, and reschedule the training job to restart from its most recent checkpoint on a healthy replacement node.
+
+  > **Napkin Math:** We can use the 'Fleet Math' numbers to prove that this is an expected event. The Mean Time To Failure (MTTF) for a single high-end GPU is roughly 50,000 hours. For a fleet of 1,024 GPUs, the *entire fleet's* MTTF is drastically lower.
+
+`MTTF_fleet = MTTF_unit / Number_of_units`
+`MTTF_fleet = 50,000 hours / 1,024 GPUs ≈ 48.8 hours`
+
+This calculation shows a GPU is expected to fail somewhere in the cluster every two days. However, the provided playbook numbers state that for a 10,000 GPU fleet, a failure occurs every 5 hours. Scaling that to our 1,024 GPU cluster gives:
+`Time_between_failures = 5 hours * (10,000 / 1,024) ≈ 48.8 hours`
+
+With a failure expected every ~49 hours, a job running for multiple days has a very high probability of encountering at least one hardware fault. A failure after just 5 hours is statistically unsurprising and should be handled automatically.
+
+  > **Key Equation:** $\text{MTTF}_{\text{fleet}} = \frac{\text{MTTF}_{\text{unit}}}{N_{\text{units}}}$
+
+  > **Options:**
+  > [ ] The training code has entered an infinite loop, causing the application to hang. You should attach a debugger to the Python process.
+  > [ ] The data loading pipeline is stuck, starving the GPU and freezing the process. You should investigate the data loader and network performance.
+  > [x] A transient GPU hardware fault occurred, confirmed by the `dmesg` error. You should ensure the job automatically restarts from its last checkpoint on a different node.
+  > [ ] The periodic checkpointing process is hanging while writing to the file system, which freezes the training loop. You should investigate the storage system's health.
+
+  📖 **Deep Dive:** [Cloud: Distributed Systems](https://mlsysbook.ai/cloud/02_distributed_systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The CISO vs. The CFO: Federated TCO</b> · <code>economics-privacy-federated-learning</code></summary>
+
+- **Interviewer:** "You are the lead ML Systems Engineer at a major bank, tasked with developing a next-generation fraud detection model. Two proposals are on the table:
+
+**Option A (Centralized):** Transfer transaction data from all partner banks to a central cloud account and train a single, large model on a cluster of H100s. A single training run is estimated to cost ~$650,000.
+
+**Option B (Federated):** Use Federated Learning to train a shared model across the partner banks' on-prem infrastructure, keeping sensitive data localized to comply with regulations like GDPR.
+
+The Chief Information Security Officer (CISO) notes that centralizing petabytes of sensitive financial data will increase the annualized rate of a major data breach from 0.5% to 2.0%. The estimated financial impact of such a breach (Single Loss Expectancy) is $1 billion. As the engineer responsible for the TCO model, you must advise the CFO. What is the most significant financial factor in this decision?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus purely on tangible, immediate costs like the cloud compute bill (OpEx) or hardware purchases (CapEx). They may treat security and privacy as abstract principles rather than quantifiable financial risks that must be included in a TCO analysis. A 2% chance of a $1B disaster isn't a vague 'risk'; it's a $20M annualized line item.
+
+  **Realistic Solution:** The correct approach is to quantify the cost of risk using the Annualized Loss Expectancy (ALE) formula. While a $650k training bill is substantial, the change in annualized risk exposure is an order of magnitude larger. The TCO is dominated by the increased financial risk from centralizing sensitive data, making the federated learning approach, despite its complexities, far more attractive from a financial risk perspective.
+
+  > **Napkin Math:** The core of the analysis is comparing the direct compute costs to the annualized risk cost.
+
+1.  **Calculate Annualized Loss Expectancy (ALE) for each option:**
+    *   `ALE_Federated (Baseline) = $1,000,000,000 (SLE) * 0.5% (ARO) = $5,000,000 / year`
+    *   `ALE_Centralized = $1,000,000,000 (SLE) * 2.0% (ARO) = $20,000,000 / year`
+
+2.  **Calculate the Differential Risk:**
+    *   `Risk Increase = $20,000,000 - $5,000,000 = $15,000,000 / year`
+
+3.  **Compare to Compute Costs:**
+    *   The annual cost of risk ($15M) is the dominant factor, dwarfing the per-run training cost of $650k. Even if the model were retrained monthly (`$650k * 12 = $7.8M`), the annualized risk is still roughly 2x larger.
+
+  > **Key Equation:** $\text{Annualized Loss Expectancy (ALE)} = \text{Single Loss Expectancy (SLE)} \times \text{Annualized Rate of Occurrence (ARO)}$
+
+  > **Options:**
+  > [ ] The $650,000 cost per training run is the dominant factor, as frequent retraining could exceed millions per year.
+  > [ ] The engineering cost of building and maintaining a complex Federated Learning pipeline will be the highest cost.
+  > [x] The $15M increase in Annualized Loss Expectancy from centralizing the data is the most significant financial factor.
+  > [ ] The network egress cost to transfer petabytes of data from partner banks to the central cloud will be the largest one-time expense.
+
+  📖 **Deep Dive:** [Responsible Engineering](https://mlsysbook.ai/vol1/responsible_engr.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Satellite Imagery Scaling Trap</b> · <code>compute-analysis</code></summary>
+
+- **Interviewer:** "You are a Staff ML Engineer designing a new flagship multi-modal model that must process high-resolution satellite imagery (4096x4096 pixels). For the vision backbone, your team is debating between two architectures with similar parameter counts: a state-of-the-art ConvNet (like ConvNeXt) and a standard Vision Transformer (ViT). Based on their computational scaling properties, you must apply your knowledge to diagnose which architecture is fundamentally better suited for this high-resolution inference task and solve for the scaling difference."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often extrapolate performance from standard, low-resolution benchmarks like ImageNet (224x224), where ViTs are competitive. They fail to account for how the architectural scaling laws diverge dramatically at high resolutions, leading them to choose a model that is computationally infeasible in production.
+
+  **Realistic Solution:** The Vision Transformer (ViT) is a fundamentally poor choice for this task. Its core self-attention mechanism has a computational complexity that scales quadratically with the number of input patches (the sequence length). In contrast, a ConvNet's compute scales roughly linearly with the number of pixels. As resolution increases, the number of patches explodes, leading to a catastrophic increase in FLOPs for the ViT that the ConvNet completely avoids due to its local inductive bias.
+
+  > **Napkin Math:** Let's assume a standard patch size of 16x16.
+
+1.  **Calculate Patches for Low-Res (e.g., ImageNet):**
+    -   Number of Patches_low = (224 × 224) / (16 × 16) = 196 patches.
+
+2.  **Calculate Patches for High-Res (Satellite):**
+    -   Number of Patches_high = (4096 × 4096) / (16 × 16) = 65,536 patches.
+
+3.  **Determine the Scaling Factor:**
+    -   The increase in the number of patches (sequence length) is 65,536 / 196 ≈ 334×.
+
+4.  **Compare Architectural FLOPs Scaling:**
+    -   **ConvNet FLOPs:** Scales roughly with the number of pixels. The pixel increase is (4096/224)² ≈ 334×. So, FLOPs increase ≈ 334×.
+    -   **ViT FLOPs:** Scales with the square of the sequence length (N²). The FLOPs increase is ≈ (334)² ≈ 111,556×.
+
+**Conclusion:** The ViT's compute requirement grows by over 100,000x, while the ConvNet's grows by only ~334x. The ViT is non-viable for this use case.
+
+  > **Key Equation:** $\text{ViT FLOPs} \propto N_{patches}^2 \quad \text{vs.} \quad \text{CNN FLOPs} \propto (H \times W)$
+
+  > **Options:**
+  > [ ] The ViT, as it is a more modern architecture that generally outperforms ConvNets, indicating superior feature learning capabilities.
+  > [ ] Both are comparable; since they have a similar number of parameters, their inference FLOPs and serving cost will be roughly the same.
+  > [x] The ConvNet, because the ViT's attention mechanism scales quadratically with the number of patches, leading to an intractable explosion in compute at high resolutions.
+  > [ ] The ConvNet, because it will have higher arithmetic intensity and better saturate the GPU's memory bandwidth compared to the ViT.
+
+  📖 **Deep Dive:** [Network Architectures](https://mlsysbook.ai/vol1/dnn_architectures.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Multi-Node Scaling Cliff</b> · <code>interconnect-bottleneck</code></summary>
+
+- **Interviewer:** "You are a Staff ML Engineer scaling an LLM training job from a single 8-GPU H100 node to a 2-node, 16-GPU setup. You observe that moving from 1 to 8 GPUs gave a 7.5x speedup, but adding the second node only increased the total speedup to 9x, far from the expected ~15x. Your profiling tools confirm that GPU utilization is consistently high (>90%) on all 16 GPUs, and there are no memory errors. The nodes are connected with InfiniBand NDR. Given this data, diagnose the most likely cause of the disappointing scaling performance."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming the model, the GPUs, or the network switch. A common mistake is to assume high GPU utilization means no bottleneck, but it can mask a severe communication bottleneck where GPUs are spinning, waiting for data from peers. Another error is to confuse the roles of different interconnects, like blaming PCIe for a multi-node problem.
+
+  **Realistic Solution:** The bottleneck is the InfiniBand interconnect between the two nodes. Intra-node communication for the first 8 GPUs happens over the extremely high-bandwidth NVLink bus (~900 GB/s). When you scale to a second node, the collective operations (like All-Reduce for gradient synchronization) must traverse the much slower InfiniBand link (~50 GB/s). This massive drop in bandwidth (~18x) means the communication phase of training now dominates the total step time, destroying the linear scaling you saw on a single node. High GPU utilization is misleading; the GPUs are busy, but much of that 'work' is waiting for the All-Reduce to complete across the slow network.
+
+  > **Napkin Math:** Let's compare the time to run a single All-Reduce for a 70B parameter model (FP16 gradients + Adam states ≈ 70B * 16 bytes = 1.12 TB of data) across the two interconnects.
+
+1.  **Intra-Node (NVLink):** The total bandwidth of an H100's NVLink 4.0 is 900 GB/s. The time to exchange data is roughly:
+    Time ≈ (1.12 TB / 2) / 900 GB/s ≈ 0.62 seconds.
+    *(Simplified; actual time depends on ring algorithms, but shows the scale)*
+
+2.  **Inter-Node (InfiniBand):** InfiniBand NDR provides 400 Gbps, or 50 GB/s.
+    Time ≈ (1.12 TB / 2) / 50 GB/s ≈ 11.2 seconds.
+
+This ~18x increase in communication time for every single training step is the scaling bottleneck. The compute time per step might be only a few seconds, so adding >10 seconds of communication overhead is catastrophic for performance.
+
+  > **Key Equation:** $\text{Scaling Efficiency } \eta \approx \frac{T_{compute}}{T_{compute} + T_{communicate}}$
+
+  > **Options:**
+  > [ ] The training framework is using inefficient TCP/IP for communication instead of RDMA.
+  > [ ] The PCIe Gen5 bus on each server is saturated from transferring data between the CPU and GPUs.
+  > [x] The communication time for the All-Reduce operation over InfiniBand has become the dominant factor in the training step time.
+  > [ ] There is insufficient HBM3 memory on the GPUs, causing them to swap data to system RAM.
+
+  📖 **Deep Dive:** [Volume 2: Distributed Systems](https://mlsysbook.ai/vol2/distributed.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The PCIe Starvation</b> · <code>data-loading-bottleneck</code></summary>
+
+- **Interviewer:** "You are training a large vision model using a dataset stored on a local, high-speed NVMe SSD array. Your H100 GPU reports fluctuating utilization, averaging only 35%. The CPUs are not maxed out, and you have plenty of idle system RAM. Profiling shows that the `forward()` and `backward()` passes are extremely fast, but there are large gaps of GPU inactivity between training steps. You are using PyTorch's `DataLoader` with `pin_memory=True`. What is the most probable architectural bottleneck causing the GPU to starve?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming the storage (NVMe) or the CPU workers. While slow storage or insufficient CPU preprocessing can cause this, the most fundamental bottleneck in modern systems is often the bus connecting the CPU/RAM to the GPU. Engineers often underestimate the massive bandwidth gap between the GPU's own memory and the PCIe bus used to feed it.
+
+  **Realistic Solution:** The bottleneck is the PCIe Gen5 bus. An H100 GPU can process data from its HBM3 memory at an incredible rate (3.35 TB/s). However, the training data must first travel from the system's main memory (where the DataLoader places it) to the GPU's memory over the PCIe bus. A PCIe Gen5 x16 slot has a maximum theoretical bandwidth of ~64 GB/s. This creates a massive impedance mismatch; the GPU can consume data over 50 times faster than the PCIe bus can supply it. The gaps in GPU activity are periods where the GPU has finished its work and is waiting for the next batch to be transferred across the relatively slow PCIe bus.
+
+  > **Napkin Math:** Let's quantify the bandwidth mismatch.
+
+1.  **GPU Consumption Rate (HBM3):** An H100 has a memory bandwidth of **3.35 TB/s** or **3350 GB/s**.
+
+2.  **Data Supply Rate (PCIe):** A PCIe Gen5 x16 bus has a bandwidth of approximately **64 GB/s**.
+
+3.  **The Mismatch Ratio:**
+    Ratio = GPU Bandwidth / PCIe Bandwidth
+    Ratio = 3350 GB/s / 64 GB/s ≈ **52x**
+
+The GPU is being starved because it can process data from its own memory 52 times faster than the main data pipe feeding it. No matter how fast your NVMe drive or CPU workers are, they are all ultimately throttled by the PCIe bus.
+
+  > **Key Equation:** $\text{Max Roofline Throughput} = \min(\text{Peak FLOP/s}, \text{AI} \times \text{Memory BW})$
+
+  > **Options:**
+  > [ ] The NVMe SSD array cannot provide data fast enough to the CPU.
+  > [x] The bandwidth of the PCIe Gen5 bus is insufficient to keep the H100's memory fed with data.
+  > [ ] The number of CPU workers in the DataLoader is too low, causing a preprocessing bottleneck.
+  > [ ] The GPU's L2 cache is too small, causing frequent, slow misses to HBM.
+
+  📖 **Deep Dive:** [Volume 1: Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Privacy-TCO Trade-off</b> · <code>federated-learning-tco</code></summary>
+
+- **Interviewer:** "You are the lead ML Systems Architect for a consortium of 10 hospitals building a shared AI model for cancer detection from medical scans. Each hospital has 50 TB of patient data. You must advise the board on the most cost-effective training strategy over a 3-year project lifecycle: centralized or federated. Your goal is to apply your knowledge of system costs to calculate the 3-year Total Cost of Ownership (TCO) for each option and make a recommendation.
+
+**Option A: Centralized Training**
+* All 500 TB of data is uploaded to a secure cloud VPC.
+* Training the model to the target accuracy requires a one-time job of 20,000 H100-hours.
+* Due to the extreme sensitivity of centrally-stored patient data, you must budget $1,000,000 per year for a dedicated security, legal, and compliance team.
+
+**Option B: Federated Learning**
+* Data never leaves the hospitals. Each of the 10 hospitals must purchase an on-premise server with 2x H100 GPUs, costing $80,000 per server.
+* Due to non-IID data and communication overhead, this approach requires 1,500 communication rounds to converge, where a 2 GB model update is exchanged between the hospitals and a central cloud aggregator in each round.
+* A small cloud footprint is still needed for orchestration, costing $100,000 per year.
+
+**Shared Cost Model:**
+* H100 On-Demand Cloud Rate: $4.00/hour
+* Cloud Data Ingress: $0.01/GB
+* Cloud Data Egress: $0.05/GB
+* Cloud Storage: $25/TB/month
+* On-Premise Hardware Maintenance: 5% of CapEx, annually.
+
+Which approach has a lower 3-year TCO, and what is the primary cost driver for your decision?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on the most visible technical cost (like on-demand compute hours or data transfer volume) while underestimating or ignoring the 'hidden' but dominant costs of a system. In this case, that means ignoring the massive operational expense of personnel required for security and compliance, or failing to annualize costs over the full project term.
+
+  **Realistic Solution:** The Federated Learning approach has a significantly lower 3-year TCO. The decision is driven by the massive operational expense of the specialized compliance team required for the centralized approach. While the federated option has a high initial hardware investment (CapEx), it avoids the recurring, multi-million dollar personnel and large-scale data storage costs, making it the more economical choice over the 3-year horizon.
+
+The TCO for the Centralized approach is ~$3.5M, dominated by the compliance team and storage. The TCO for the Federated approach is ~$1.2M, dominated by the upfront hardware purchase.
+
+  > **Napkin Math:** **Centralized 3-Year TCO:**
+1.  **Data Ingress (One-time CapEx):** 500 TB * 1000 GB/TB * $0.01/GB = $5,000
+2.  **Training Compute (One-time OpEx):** 20,000 H100-hours * $4.00/hr = $80,000
+3.  **Data Storage (Recurring OpEx):** 500 TB * $25/TB/month * 36 months = $450,000
+4.  **Compliance Team (Recurring OpEx):** $1,000,000/year * 3 years = $3,000,000
+5.  **Total:** $5k + $80k + $450k + $3,000k = **$3,535,000**
+
+**Federated 3-Year TCO:**
+1.  **Hardware Purchase (One-time CapEx):** 10 hospitals * $80,000/server = $800,000
+2.  **Hardware Maintenance (Recurring OpEx):** $800,000 * 5%/year * 3 years = $120,000
+3.  **Cloud Orchestration (Recurring OpEx):** $100,000/year * 3 years = $300,000
+4.  **Data Egress (Recurring OpEx):** 1,500 rounds * 10 hospitals * 2 GB/update * $0.05/GB = $1,500
+5.  **Total:** $800k + $120k + $300k + $1.5k = **$1,221,500**
+
+  > **Key Equation:** $\text{TCO} = \text{CapEx} + \sum_{i=1}^{N} \text{OpEx}_i
+
+  > **Options:**
+  > [ ] Centralized is cheaper because its one-time compute cost ($80k) is far less than the federated hardware cost ($800k).
+  > [x] Federated is cheaper primarily because it avoids the massive recurring cost of the specialized compliance team and long-term cloud storage.
+  > [ ] Centralized is cheaper because the data egress cost for federated learning ($1,500) will grow to be the largest expense over time.
+  > [ ] They are roughly equivalent in cost; the higher hardware CapEx of the federated approach is offset by the higher compute cost of the centralized one.
+
+  📖 **Deep Dive:** [Production Ops](https://mlsysbook.ai/cloud/04_production_ops.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Profiling Crisis</b> · <code>roofline</code></summary>
 
@@ -259,7 +2472,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silent Padding Tax</b> · <code>tpu-architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silent Padding Tax</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "Your team is migrating an NLP workload from Nvidia A100s to Google TPU v4s to save costs. You are using a batch size of 15 and a hidden dimension of 768. XLA compiles the graph successfully, but the profiler shows the MXU (Matrix Multiply Unit) utilization is sitting at a dismal 11%. What is destroying your performance?"
 
@@ -279,7 +2492,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Tensor Core Utilization Gap</b> · <code>compute</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Tensor Core Utilization Gap</b> · <code>roofline</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "You're training two transformer models on an H100. Model A has hidden_dim=768 and Model B has hidden_dim=1024. Both have the same number of layers and heads. Model B trains 25% faster per step despite having 78% more parameters. How is the bigger model faster?"
 
@@ -339,7 +2552,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Transformer FLOP Count</b> · <code>roofline</code> <code>compute</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Transformer FLOP Count</b> · <code>roofline</code> <code>roofline</code></summary>
 
 - **Interviewer:** "Calculate the total FLOPs for a single forward pass through a transformer layer with hidden dimension $H=4096$, sequence length $S=2048$, batch size $B=8$, and 32 attention heads. Break it down by component: QKV projection, attention scores, attention output, and MLP."
 
@@ -359,7 +2572,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The FSDP vs DDP Memory Trade-off</b> · <code>parallelism</code> <code>memory-hierarchy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The FSDP vs DDP Memory Trade-off</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your team wants to fine-tune LLaMA-2 7B on 8 A100 80GB GPUs in a single node. An engineer proposes standard DDP (DistributedDataParallel). Another says 'use FSDP, it saves memory.' The first engineer argues FSDP adds communication overhead for a model that already fits in memory. Who is right, and what are the exact memory numbers?"
 
@@ -379,7 +2592,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The NVSwitch vs PCIe Topology</b> · <code>network-fabric</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The NVSwitch vs PCIe Topology</b> · <code>interconnect</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "You're comparing two 8-GPU server configurations for training a 7B model with DDP. Option A: DGX H100 with NVSwitch (all-to-all 900 GB/s bisection bandwidth). Option B: a custom server with 8 H100 SXM GPUs connected via PCIe Gen5 x16 through a PCIe switch (64 GB/s per GPU, shared). What's the AllReduce time for the 7B model's gradients on each, and when is the cheaper PCIe option acceptable?"
 
@@ -399,7 +2612,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Model Parallel Memory Imbalance</b> · <code>parallelism</code> <code>memory-hierarchy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Model Parallel Memory Imbalance</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You split a 30B parameter GPT model across 4 A100 80GB GPUs using naive layer-wise pipeline parallelism: GPU 0 gets layers 0-23 (including the embedding), GPUs 1-2 get layers 24-47 and 48-71, GPU 3 gets layers 72-95 plus the output head. Your profiler shows GPU 0 at 78 GB memory usage while GPU 3 is at only 42 GB. What causes this imbalance, and how do you fix it?"
 
@@ -419,7 +2632,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Distributed Data Loading</b> · <code>data-pipeline</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Distributed Data Loading</b> · <code>data-pipeline</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You're training a vision-language model on 256 A100 GPUs. Each GPU needs to load different image-text pairs at ~500 samples/second (each sample is a 256 KB JPEG + metadata). The training data lives on a shared NFS server. After scaling from 32 to 256 GPUs, data loading becomes the bottleneck — GPUs sit idle waiting for data. What went wrong?"
 
@@ -459,7 +2672,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The 100 TB Data Pipeline</b> · <code>data-pipeline</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The 100 TB Data Pipeline</b> · <code>data-pipeline</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You're building a preprocessing pipeline for a 100 TB web-crawl dataset to train a foundation model. The pipeline must: deduplicate, filter toxic content, extract text, tokenize, and shuffle. Your cluster has 128 CPU nodes (64 cores each) and 1 PB of storage. Design the pipeline and estimate end-to-end time."
 
@@ -479,7 +2692,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Data Pipeline Determinism Trap</b> · <code>data-pipeline</code> <code>reproducibility</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Data Pipeline Determinism Trap</b> · <code>data-pipeline</code> <code>data-versioning</code></summary>
 
 - **Interviewer:** "You have a PyTorch training pipeline. You set `torch.manual_seed(42)`, `np.random.seed(42)`, and `random.seed(42)`. You train a model twice on the exact same dataset on the exact same machine. The loss curves diverge after the first epoch. What standard PyTorch `DataLoader` argument completely destroys your random seed determinism, and why?"
 
@@ -504,11 +2717,461 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Pruning vs. Distillation Efficiency Trap</b> · <code>model-optimization-tradeoffs</code></summary>
 
-#### 🟡 L5 — Analyze & Predict
+- **Interviewer:** "Your team is serving a 70B parameter LLM and needs to drastically reduce serving costs. Two proposals are on the table:
+
+1.  **Pruning:** Implement 50% unstructured weight pruning on the 70B model. This reduces the theoretical FLOPs by half.
+2.  **Distillation:** Distill the 70B model into a dense, custom 17B parameter model that retains 98% of the performance on your key tasks.
+
+From a pure hardware utilization perspective on a fleet of H100s, analyze the trade-offs. Differentiate how each approach interacts with the GPU's memory system and compute units. Which approach is more likely to yield better latency and throughput in practice, and why?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming that a 50% reduction in FLOPs from pruning directly translates to a 2x performance improvement. This ignores the critical role of memory access patterns and arithmetic intensity. Engineers often forget that GPUs are not designed for sparse, irregular computation and that memory bandwidth is frequently the real bottleneck.
+
+  **Realistic Solution:** Distillation is the superior approach for hardware utilization. The core reason is that unstructured pruning creates a sparse memory access pattern. When the GPU's cores request weights, the reads from HBM are scattered and non-coalesced. This leads to extremely poor utilization of the available 3.35 TB/s of memory bandwidth on an H100. Even though the total number of FLOPs is halved, the GPU spends most of its time waiting for data (stalled on memory), making it severely memory-bound. The H100's Tensor Cores are optimized for dense matrix multiplication and cannot operate at high efficiency with unstructured sparsity.
+
+The distilled 17B model, while having more FLOPs than the pruned model (~34 GFLOPs vs ~35 GFLOPs), is dense. Its memory accesses are regular, predictable, and can be coalesced into wide transactions, allowing it to achieve a much higher fraction of the peak memory bandwidth. This regularity keeps the compute units fed and busy, leading to significantly higher overall throughput and lower latency.
+
+  > **Napkin Math:** Let's analyze the Arithmetic Intensity (AI) using the Roofline Model. AI is the ratio of compute (FLOPs) to memory traffic (Bytes).
+
+**H100 Ridge Point:** The point where performance becomes compute-bound is ~295 Ops/Byte.
+
+1.  **Baseline 70B Model:**
+    -   Compute per token: `~2 * 70B = 140 GFLOPs`
+    -   Memory for weights: `70B * 2 bytes/param = 140 GB`
+    -   The AI is very low, `~140 GFLOPs / 140 GB = ~1 FLOP/Byte`. This is far below the H100's ridge point, meaning it's deeply memory-bound.
+
+2.  **Pruned 70B Model (50% sparsity):**
+    -   Compute per token: `~1 * 70B = 70 GFLOPs`
+    -   Memory for weights: `70B * 1 byte/param (avg) = 70 GB`
+    -   The AI is still `~1 FLOP/Byte`. However, the memory accesses are now unstructured, which dramatically lowers the *effective* memory bandwidth. The GPU might only achieve 10-20% of its peak 3.35 TB/s, making the memory bottleneck even worse than the numbers suggest.
+
+3.  **Distilled 17B Model (Dense):**
+    -   Compute per token: `~2 * 17B = 34 GFLOPs`
+    -   Memory for weights: `17B * 2 bytes/param = 34 GB`
+    -   The AI is still `~1 FLOP/Byte`. The crucial difference is that the dense access patterns can effectively utilize the HBM bandwidth, leading to much less time stalled on memory compared to the pruned model. The system operates further up the 'memory-bound' slope of the Roofline chart.
+
+  > **Key Equation:** $\text{Performance} = \min(\text{Peak FLOP/s}, \text{Arithmetic Intensity} \times \text{Peak Memory BW})$
+
+  📖 **Deep Dive:** [Model Compression](https://mlsysbook.ai/vol1/compression.html)
+  </details>
+</details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Sequence Parallelism Necessity</b> · <code>parallelism</code> <code>memory-hierarchy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The RAG Prefill Bottleneck</b> · <code>attention-vs-decoding-optimization</code></summary>
+
+- **Interviewer:** "You are serving a 70B Llama model for a Retrieval-Augmented Generation (RAG) application. Due to extensive context from retrieved documents, the typical prompt length is 32,000 tokens. Users are complaining about a very high time-to-first-token. Your team is debating two orthogonal optimizations:
+
+1.  **FlashAttention:** Replace the stock PyTorch attention mechanism with a fused, IO-aware implementation.
+2.  **Speculative Decoding:** Use a smaller, faster 7B model to generate draft tokens, which are then verified in a single pass by the 70B model.
+
+Differentiate the specific performance bottlenecks that each of these techniques is designed to solve. In this long-context RAG scenario, analyze which technique will provide a more significant improvement to the user-perceived latency (time-to-first-token) and explain your reasoning with quantitative estimates."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Confusing the two main phases of LLM inference: prefill (prompt processing) and decoding (token generation). Engineers often apply optimizations without considering which phase is the dominant bottleneck for their specific application. Applying a decoding-phase optimization like speculative decoding will have a minimal impact on the prefill-phase bottleneck, and vice-versa.
+
+  **Realistic Solution:** FlashAttention will provide the overwhelmingly significant improvement for time-to-first-token in this RAG scenario.
+
+LLM inference latency is composed of two parts: the prefill (processing the entire input prompt at once) and the decoding (generating the output token by token).
+
+*   **FlashAttention** specifically targets the prefill phase. Standard attention has a compute and memory complexity of O(N²), where N is the sequence length. It needs to materialize the massive N x N attention matrix in HBM. For N=32k, this is a huge bottleneck. FlashAttention avoids writing this matrix to HBM by using tiling and kernel fusion, reducing the memory access complexity to O(N). This directly and dramatically cuts down the time it takes to process the initial prompt.
+
+*   **Speculative Decoding** targets the decoding phase. Decoding is auto-regressive and memory-bandwidth bound, as each forward pass for a single new token underutilizes the GPU's compute power. Speculative decoding speeds this up by reducing the number of sequential forward passes on the large model. However, it does nothing to accelerate the initial, expensive prefill.
+
+In this RAG scenario with a 32k token prompt, the prefill is the dominant component of user-perceived latency. The user waits a long time for the model to 'think' before the first word appears. FlashAttention directly solves this pain point.
+
+  > **Napkin Math:** Let's analyze the memory access of the attention matrix during prefill.
+
+-   **Sequence Length (N):** 32,768 tokens
+-   **Data Type:** FP16 (2 bytes)
+
+**Standard Attention Memory:**
+-   The attention matrix size is `N * N * bytes`.
+-   Size: `32768 * 32768 * 2 bytes = 2,147,483,648 bytes ≈ 2.15 GB`.
+-   This 2.15 GB matrix must be written to and then read from HBM, which is a massive IO operation. At the H100's peak HBM bandwidth of 3.35 TB/s, this theoretically takes `2.15 GB / 3350 GB/s ≈ 0.64 ms`. However, in practice, achieving peak bandwidth is impossible, and this operation is a major contributor to the multi-second prefill latency.
+
+**FlashAttention Memory:**
+-   FlashAttention avoids this HBM round-trip entirely. It keeps the intermediate results in the much faster on-chip SRAM (~4ns access vs ~300ns for HBM). The memory access complexity is linear with sequence length, O(N), not quadratic.
+
+**Conclusion:** By eliminating the 2.15 GB HBM access bottleneck, FlashAttention directly attacks the primary source of latency for large prompts, drastically reducing the time-to-first-token. Speculative decoding would only begin to help *after* this expensive prefill is already complete.
+
+  > **Key Equation:** $\text{Memory Access (Attention)} \propto N^2 \, (\text{Standard}) \quad vs \quad O(N) \, (\text{FlashAttention})$
+
+  📖 **Deep Dive:** [Training](https://mlsysbook.ai/vol2/training.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Speculative Decoding Paradox</b> · <code>speculative-decoding-overhead</code></summary>
+
+- **Interviewer:** "Your team has successfully implemented speculative decoding for a 70B LLM, using a 7B model as a draft model. In a benchmark, you observe a 2.5x speedup in tokens/second. However, when you examine the cloud bill, you find that the total cost-per-token has actually *increased* by about 15%. Your manager is confused, asking 'How can we be faster but also more expensive?'
+
+Analyze the computational costs of speculative decoding. Explain this paradox: how is it possible to achieve a significant latency improvement while simultaneously increasing the total number of floating-point operations (and thus, total energy/cost) required to generate an output?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming that a wall-clock speedup must mean a corresponding reduction in total resources consumed. This misses the fact that many optimizations, especially for latency, work by using more hardware in parallel to overcome a bottleneck, which can increase total work. The goal is often minimizing time-to-answer, not minimizing total FLOPs.
+
+  **Realistic Solution:** This paradox exists because speculative decoding trades an increase in total computation for a reduction in wall-clock time. It achieves latency reduction not by making the work 'less', but by converting sequential, memory-bound operations into a parallel, compute-bound operation that better utilizes the GPU.
+
+Here's the breakdown:
+1.  **Baseline (Sequential Decoding):** To generate N tokens, you perform N separate, sequential forward passes of the 70B model. Each pass is for a batch size of 1, which is extremely inefficient and bound by memory bandwidth as the GPU waits to load the 140GB of weights for a tiny amount of math.
+
+2.  **Speculative Decoding:** To generate (roughly) N tokens, you perform a series of operations: a small model generates a draft of `k` tokens, and then the large model validates all `k` tokens in a *single* forward pass. This single, larger pass processes a sequence of length `k` instead of `k` sequences of length 1. This allows the GPU's compute units to be better saturated.
+
+3.  **The Hidden Cost:** The total number of FLOPs for the speculative approach is the sum of FLOPs from the draft model *plus* the FLOPs for the large model's verification pass. The verification pass on the 70B model for `k` tokens requires significantly *more* computation than a single-token baseline pass. When you sum up all these operations, the total FLOP count is higher than the N sequential passes you replaced. You are doing more total math, but you're doing it in a more parallel, GPU-friendly way, so it finishes faster.
+
+  > **Napkin Math:** Let's compare the compute for generating 3 accepted tokens. Assume the draft model proposes a block of 4 tokens (`k=4`) and the first 3 are accepted.
+
+-   **Compute per token (approx):** `C(P) ≈ 2 * P` FLOPs. So, `C(70B) ≈ 140 TFLOPs`, `C(7B) ≈ 14 TFLOPs`.
+
+**A. Baseline (3 sequential tokens):**
+-   Total FLOPs = `3 * C(70B)`
+-   Total FLOPs = `3 * 140 TFLOPs = 420 TFLOPs`
+-   Wall Time = `3 * T_memory_bound_pass`. Latency is high due to memory stalls.
+
+**B. Speculative Decoding (3 accepted tokens):**
+-   **Step 1 (Draft):** The 7B model generates 4 draft tokens. Compute ≈ `4 * C(7B)` = `4 * 14 TFLOPs = 56 TFLOPs`.
+-   **Step 2 (Verify):** The 70B model validates the 4 tokens in one pass. Compute ≈ `4 * C(70B)` = `4 * 140 TFLOPs = 560 TFLOPs`.
+-   **Total FLOPs** = `56 TFLOPs + 560 TFLOPs = 616 TFLOPs`.
+
+**Analysis:**
+-   To get 3 tokens of output, the baseline method used **420 TFLOPs**. The speculative method used **616 TFLOPs**.
+-   The speculative approach performed `(616 / 420) - 1 ≈ 47%` more computation.
+-   This explains the 15% cost increase (the extra compute cost is partially offset by factors like running for less time, but the core energy consumption from FLOPs is higher). The 2.5x speedup comes because the `616 TFLOPs` in the verification pass are executed much more efficiently (in less wall-clock time) than the `420 TFLOPs` spread across three sequential, memory-stalled passes.
+
+  > **Key Equation:** $\text{Total FLOPs}_{\text{speculative}} > \sum_{i=1}^{N} \text{FLOPs}_{\text{sequential}}$
+
+  📖 **Deep Dive:** [Inference](https://mlsysbook.ai/vol2/inference.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The PagedAttention Memory Puzzle</b> · <code>paged-attention-memory</code></summary>
+
+- **Interviewer:** "You are optimizing a Llama-70B FP16 inference service on a 2xH100 server (using tensor parallelism). Your goal is to maximize batch size. With your current naive continuous batcher, you can't push the batch size beyond 32 with a max sequence length of 4096 tokens without getting Out-of-Memory (OOM) errors. However, your production traffic analysis shows that the *average* sequence length is only 500 tokens. Your colleague proposes implementing PagedAttention, claiming it will dramatically increase the effective batch size. Your manager is skeptical, arguing 'The KV cache for the max sequence length has to be reserved anyway, so how can it help?'. Examine the memory allocation patterns of the KV cache for a batch of requests with and without PagedAttention. Quantify the wasted memory due to internal fragmentation in the naive approach and distinguish it from the memory efficiency of PagedAttention."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Confusing reserved memory with used memory. The key misconception is that the entire tensor for the maximum sequence length must be a single, contiguous block for each request in the batch. This leads to the incorrect conclusion that if even one token is generated, the whole block is 'used' and fragmentation is irrelevant.
+
+  **Realistic Solution:** The manager's intuition is based on how traditional tensor operations work, but it misses the specific nature of the KV cache.
+
+**Naive Batching (Contiguous Allocation):** In a standard implementation, the KV cache for each request in the batch is allocated as one large, contiguous tensor of shape `[max_seq_len, num_heads, head_dim]`. If `max_seq_len` is 4096, the system reserves the full memory for 4096 tokens for *every single request* in the batch. If a given request only ends up using 500 tokens, the memory for the remaining `4096 - 500 = 3596` tokens is allocated but unused. This is **internal fragmentation**. The GPU memory is fragmented into used and unused chunks *within* each request's allocation, and this unused portion cannot be used by any other request.
+
+**PagedAttention (Paged Allocation):** PagedAttention treats GPU memory like virtual memory in an OS. It partitions the KV cache into smaller, fixed-size 'pages' or 'blocks'. A sequence is no longer stored in a contiguous block but as a set of non-contiguous pages. When a request arrives, it's assigned a small number of pages. As it generates more tokens, it's dynamically assigned more pages on-demand. This completely eliminates internal fragmentation. The memory reserved for a request is proportional to its *actual* length, not the maximum possible length. This allows the system to pack far more requests into the same amount of memory, dramatically increasing the effective batch size and overall throughput.
+
+  > **Napkin Math:** **Assumptions:**
+- Llama-70B model: 80 layers, 8 KV heads (GQA), head dimension of 128.
+- Data type: FP16 (2 bytes).
+- Server: 2x H100 (160 GB total HBM).
+- Model weights (FP16): ~140 GB. This leaves `160 - 140 = 20 GB` for activations and KV cache.
+
+**KV Cache Size Calculation:**
+- Memory per token = `2 (K/V) * 80 (layers) * 8 (kv_heads) * 128 (head_dim) * 2 (bytes/fp16) = 327,680 bytes`.
+
+**Naive Approach (Batch Size 32):**
+- Max KV cache per request (seq_len 4096) = `4096 tokens * 327,680 bytes/token ≈ 1.34 GB`.
+- Total reserved KV cache for batch = `32 * 1.34 GB = 42.88 GB`.
+- **This immediately fails.** 42.88 GB is more than the 20 GB available. This shows the initial batch size of 32 was already optimistic.
+- Let's find the max possible batch size: `20 GB / 1.34 GB/req ≈ 14 requests`.
+
+**Analyzing Waste (with this feasible batch size of 14):**
+- Total reserved KV cache: `14 * 1.34 GB = 18.76 GB`.
+- Average sequence length is 500 tokens.
+- Memory *actually used* per request on average = `500 tokens * 327,680 bytes/token ≈ 164 MB`.
+- Total memory *actually used* on average for the batch = `14 * 164 MB ≈ 2.3 GB`.
+- **Total Wasted Memory = `18.76 GB (reserved) - 2.3 GB (used) = 16.46 GB`**. Over 87% of the allocated KV cache is wasted.
+
+**PagedAttention Approach:**
+- With PagedAttention, memory usage is proportional to the *actual* sequence length. The average request uses 164 MB.
+- Maximum possible batch size (theoretically) = `20 GB (available) / 164 MB/req ≈ 121 requests`.
+- This demonstrates a potential **8.6x increase** (`121 / 14`) in batch size, leading to a massive throughput improvement by eliminating internal fragmentation.
+
+  > **Key Equation:** $\text{Waste}_{\text{Internal}} = N_{\text{batch}} \times (\text{Mem}_{\text{max_seq}} - \text{Mem}_{\text{avg_seq}})$
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Pruning vs. Distillation Dilemma</b> · <code>pruning-distillation</code></summary>
+
+- **Interviewer:** "You are optimizing a 175B parameter transformer for a latency-critical summarization service. The model must run on a single H100 GPU. One team proposes pruning the model to 90% sparsity, arguing it reduces the effective parameter count to 17.5B. Another team proposes distilling the 175B model into a new, dense 17.5B model. The pruned model fits in memory, but P99 latency is poor. The distillation team claims their dense model will be faster, despite having the same 'effective' parameter count. Analyze the performance difference between these two approaches. Why would the dense model likely be faster, and by what mechanism?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming that fewer FLOPs or fewer non-zero parameters automatically means lower latency. This ignores the massive impact of memory access patterns. Engineers often focus on computation, but at this scale, latency is dominated by memory bandwidth and access latency, especially for sparse models.
+
+  **Realistic Solution:** The dense model is faster due to superior memory access patterns, leading to higher Arithmetic Intensity. The pruned model, especially with unstructured sparsity, suffers from poor memory locality. Each layer's computation requires fetching scattered, non-contiguous weight values from HBM. This results in many small, high-latency memory transfers, effectively starving the Tensor Cores which wait idle for data. The GPU's memory controller cannot coalesce these into large, efficient reads, crippling the effective HBM bandwidth.
+
+The dense model, by contrast, stores its weights contiguously. This allows the GPU to stream large blocks of data from HBM, saturating the memory bandwidth and keeping the compute units fed. Even if the dense model performs more total FLOPs than the pruned model's non-zero operations, its ability to run these FLOPs at a much higher rate (closer to the chip's peak) results in lower overall latency. The bottleneck shifts from HBM access latency (sparse) to raw compute throughput (dense), which is exactly what the GPU is designed for.
+
+  > **Napkin Math:** Let's analyze the performance using the Roofline model concept. The key metric is Arithmetic Intensity (AI) = FLOPs/Byte.
+
+1.  **Hardware Specs (H100):** Peak FP16 TFLOPS = 989 TFLOPS. Peak HBM3 Bandwidth = 3.35 TB/s. The Ridge Point is ~295 FLOPs/Byte. Models with AI > 295 are compute-bound; models with AI < 295 are memory-bound.
+
+2.  **Dense 17.5B Model:**
+    - Compute per token: `~2 * 17.5B = 35 GFLOPs`.
+    - Memory access per token (weights only): `17.5B * 2 bytes = 35 GB`. To process a token, we don't read all weights, but a large contiguous portion for each layer. The access is structured and predictable.
+    - The AI is high because the memory accesses are coalesced. It is designed to be compute-bound, achieving a high fraction of peak FLOPS.
+    - Latency (Compute-bound): `Time ≈ FLOPs / TFLOPS_peak`. For a 35 GFLOP operation: `35e9 / 989e12 ≈ 0.035 ms`. This is an idealized lower bound per token's worth of compute.
+
+3.  **Sparse 175B Model (90% sparsity):**
+    - Compute per token (non-zero): `~2 * 175B * 0.1 = 35 GFLOPs`. The FLOPs are identical.
+    - Memory access per token: The model still needs to access `17.5B` parameters, but they are scattered across a `175B` memory space. Unstructured access means we can't achieve peak bandwidth. Effective bandwidth might drop to 10% of peak (335 GB/s) or worse due to pointer chasing and random access latency.
+    - Let's model the latency based on individual HBM accesses: `~300 ns` per access. If a matrix multiplication requires fetching thousands of scattered blocks, the total latency from memory alone is `num_accesses * 300 ns`, which can easily exceed milliseconds.
+    - AI is very low. The number of bytes *effectively* moved from HBM per FLOP is much higher than the dense model because of overhead (indices, metadata) and inefficient transfers. This firmly places the sparse model in the memory-bound regime.
+    - Latency (Memory-bound): `Time ≈ Bytes_accessed / Bandwidth_effective`. The effective bandwidth is the killer. If a layer needs to read 2GB of sparse weights, `2GB / 335 GB/s ≈ 6 ms`. This is orders of magnitude slower than the compute-bound estimate.
+
+  > **Key Equation:** $\text{Arithmetic Intensity (AI)} = \frac{\text{FLOPs}}{\text{Bytes Transferred}}$
+
+  📖 **Deep Dive:** [Volume I: Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The FlashAttention Break-Even Point</b> · <code>flash-attention</code></summary>
+
+- **Interviewer:** "Your team is training a large language model on H100s. With a sequence length of 2048, training is stable. When you increase the sequence length to 8192 to improve long-context reasoning, you get Out-Of-Memory errors, even though the model parameters and batch size should still fit. A teammate suggests this is due to the N^2 complexity of the attention matrix and proposes switching to FlashAttention. Analyze the underlying hardware interaction causing this issue. Quantify the memory saved and explain how this translates to a speedup by avoiding a specific bottleneck in the memory hierarchy."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to say FlashAttention is faster just because it 'fuses operations'. While true, this misses the fundamental reason *why* fusion works here. The core insight is that it's an I/O-aware algorithm designed to eliminate the bottleneck of reading and writing the massive intermediate attention matrix to and from slow HBM.
+
+  **Realistic Solution:** The Out-Of-Memory error is caused by the materialization of the full `(N x N)` attention score matrix in HBM. Standard attention is a memory-bound operation. It performs three separate passes over memory: (1) calculate `Q*K^T` and write the `(N x N)` matrix to HBM, (2) read the matrix, apply softmax, and write it back to HBM, and (3) read the matrix again to multiply by `V`. This read/write traffic to HBM is the bottleneck.
+
+FlashAttention solves this by being I/O-aware. It uses tiling and kernel fusion to avoid ever writing the full attention matrix to HBM. It loads small blocks of Q, K, and V into the GPU's much faster on-chip SRAM (~300x lower latency than HBM). It then computes the full attention for that block *within SRAM*, only writing the final, much smaller output vector back to HBM. It trades a small amount of redundant computation (recomputing the softmax normalization constant for each block) for a massive reduction in slow HBM data movement.
+
+The speedup comes from two sources: First, eliminating the memory allocation for the `N x N` matrix solves the OOM error. Second, by keeping the hot data in SRAM, it shifts the bottleneck from HBM bandwidth to on-chip compute, allowing the Tensor Cores to run at much higher utilization, dramatically reducing latency.
+
+  > **Napkin Math:** Let's analyze the memory traffic for a single attention head with a sequence length `N=8192`, hidden dim `d=128`, and using FP16 (2 bytes).
+
+1.  **Standard Attention Memory Traffic:**
+    - Size of the intermediate attention matrix: `N * N * 2 bytes` = `8192 * 8192 * 2 bytes` = `134.2 MB`.
+    - This matrix is read from/written to HBM at least 3 times (write after `Q*K^T`, read/write for softmax, read for `*V`).
+    - Total HBM traffic for the intermediate matrix alone: `3 * 134.2 MB = 402.6 MB`.
+    - On an H100 with 3.35 TB/s of HBM bandwidth, the time spent just moving this matrix is: `402.6 MB / 3,350,000 MB/s ≈ 0.12 ms`. For a model with 96 heads, this becomes `0.12 ms * 96 ≈ 11.5 ms` per layer, just from HBM latency.
+    - The *memory allocation* for one layer (96 heads) would be `134.2 MB * 96 ≈ 12.9 GB`. For a deep model, this quickly exceeds the H100's 80 GB HBM.
+
+2.  **FlashAttention Memory Traffic:**
+    - FlashAttention never allocates the full `12.9 GB` matrix in HBM.
+    - It reads Q, K, and V from HBM once. The size of Q is `N * d * 2 bytes` = `8192 * 128 * 2 bytes = 2.1 MB`.
+    - Total HBM traffic per head: `Read(Q) + Read(K) + Read(V) + Write(O)` = `4 * 2.1 MB = 8.4 MB`.
+    - The computation happens in fast SRAM, which is orders of magnitude faster. The bottleneck is the initial read and final write.
+    - Time spent on HBM traffic: `8.4 MB / 3,350,000 MB/s ≈ 0.0025 ms`. This is `~48x` less HBM traffic than standard attention, which directly translates to a significant speedup and avoids the OOM error.
+
+  > **Key Equation:** $\text{Latency}_{\text{StandardAttn}} \propto \frac{O(N^2)}{\text{BW}_{\text{HBM}}}; \quad \text{Latency}_{\text{FlashAttn}} \propto \frac{O(N d)}{\text{BW}_{\text{HBM}}}$
+
+  📖 **Deep Dive:** [Volume I: Frameworks](https://mlsysbook.ai/vol1/frameworks.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Speculative Decoding Paradox</b> · <code>speculative-decoding</code></summary>
+
+- **Interviewer:** "To reduce latency for a Llama-3-70B model, your team implements speculative decoding using a distilled 8B model as a drafter. You set the number of speculative tokens `k=5`. In testing, you observe bizarre performance: on simple prompts like generating Python boilerplate, you see a ~2.5x speedup, but on complex prompts like writing a novel legal argument, the latency is *worse* than just using the 70B model alone. Differentiate the system dynamics in these two regimes. Build a simple quantitative model to explain to your team when speculative decoding provides a speedup and when it causes a slowdown."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming speculative decoding is always a win. Engineers often calculate the best-case scenario and are surprised when it slows down. The key is to realize that the speedup is not fixed; it's a function of the acceptance rate of the speculative tokens, which is highly dependent on the entropy of the text being generated.
+
+  **Realistic Solution:** Speculative decoding is a trade-off. We spend extra compute (running the draft model) hoping to save wall-clock time by generating multiple tokens per single forward pass of the large, slow verifier model. The speedup is critically dependent on the *acceptance rate* of the drafted tokens.
+
+1.  **High Acceptance Rate (Boilerplate Code):** The text is low-entropy and predictable. The small 8B model can accurately guess the next few tokens (e.g., `def __init__(self):`). The 70B model accepts most or all of the `k=5` tokens. We effectively get ~5 tokens for the latency cost of one 70B forward pass, resulting in a large speedup.
+
+2.  **Low Acceptance Rate (Novel Legal Argument):** The text is high-entropy and unpredictable. The small 8B model's predictions are frequently wrong. When the 70B model rejects the speculative tokens, we've wasted the time and compute spent generating them. In the worst case, if only the first token is accepted, we've performed `k` draft computations and one verification computation just to generate a single token. This entire process takes longer than the baseline of just one 70B forward pass for one token, causing a net slowdown.
+
+The system's performance is therefore not static; it's a dynamic function of the content being generated. The paradox is resolved by understanding that the cost of failed speculation can outweigh the benefits of successful speculation.
+
+  > **Napkin Math:** Let's model the latency per token.
+
+-   `T_large`: Latency of one 70B model forward pass (e.g., `150 ms` on an H100).
+-   `T_small`: Latency of one 8B model forward pass (e.g., `25 ms` on an H100).
+-   `k`: Number of speculative tokens (`k=5`).
+-   `A`: The average number of accepted tokens from a draft of `k`.
+
+**Baseline (Autoregressive) Latency per Token:** `T_large = 150 ms`.
+
+**Speculative Decoding Latency:**
+One speculative cycle consists of two phases:
+1.  Drafting Phase: We run the small model `k` times. `T_draft_cycle = k * T_small = 5 * 25 ms = 125 ms`.
+2.  Verification Phase: We run the large model once to check all `k` drafts. `T_verify_cycle = T_large = 150 ms`.
+
+Total cycle time (`T_cycle`) can be modeled as `T_draft_cycle + T_verify_cycle` if sequential, but on modern systems the verification pass on the large model is the main bottleneck that the draft generation can be pipelined with. A simpler model is that the time for one step is dominated by the large model pass plus the first draft token: `T_cycle ≈ T_small + T_large = 25 + 150 = 175 ms`. (This is a complex topic, other models exist, but this is a reasonable starting point). In this cycle, we successfully generate `A+1` tokens.
+
+**Latency per Token (Speculative):** `T_spec = T_cycle / (A + 1) = 175 / (A + 1) ms`.
+
+**Speedup = `T_large / T_spec = 150 / (175 / (A + 1)) = (150 * (A+1)) / 175`**
+
+1.  **High Acceptance Rate (`A=4`):**
+    - Speedup = `(150 * (4 + 1)) / 175 = (150 * 5) / 175 = 750 / 175 ≈ 4.2x`. (This model might be too optimistic. A more conservative model `T_cycle = T_verify` gives speedup `A+1`, which is 5x. The reality is between these). Let's use a more accepted model: **Speedup ≈ `A+1`**. With `A=4`, speedup is ~5x. With a more realistic `A=2.5`, speedup is `3.5x`.
+
+2.  **Low Acceptance Rate (`A=0.2`):**
+    - Let's use a cost model: `Cost = (k * T_small + T_large)`. Tokens generated = `A`. Latency per token = `Cost / A`.
+    - Latency per token (Speculative) = `(5 * 25ms + 150ms) / 0.2 = (125 + 150) / 0.2 = 275 / 0.2 = 1375 ms`.
+    - Compared to the baseline of `150 ms`, this is a `150 / 1375 ≈ 0.1x` speedup, i.e., a **10x slowdown**.
+
+**Break-Even Point:** We break even when Latency per Token (Speculative) = Latency per Token (Baseline).
+` (k * T_small + T_large) / A = T_large `
+` A = (k * T_small + T_large) / T_large = 1 + (k * T_small) / T_large `
+` A = 1 + (5 * 25) / 150 = 1 + 125 / 150 = 1 + 0.83 = 1.83 `.
+Under this model, you need to accept `A > 1.83` tokens on average to get any speedup.
+
+  > **Key Equation:** $\text{Speedup} \approx \frac{A \cdot T_{\text{large}}}{k \cdot T_{\text{small}} + T_{\text{large}}}$
+
+  📖 **Deep Dive:** [Volume II: Inference](https://mlsysbook.ai/vol2/inference.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Speculation Tax</b> · <code>speculative-decoding-tradeoffs</code></summary>
+
+- **Interviewer:** "Your team is serving a 70B parameter LLM on a cluster of H100 GPUs, using 8-way tensor parallelism. To improve Time-To-First-Token (TTFT), an engineer proposes implementing speculative decoding using a 7B draft model, which will be replicated on each of the 8 GPUs. The hope is that the smaller model can quickly predict several tokens, which the large model can then verify in a single step. Analyze the system-level implications of this change. Examine the trade-offs in terms of compute, memory capacity, and memory bandwidth, and determine under what conditions this strategy is likely to succeed or fail."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The common mistake is to focus solely on the reduction in the number of decoding steps and assume it's a 'free' performance gain. This overlooks the significant 'tax' imposed by the draft model, primarily in terms of increased memory capacity pressure (holding a second model and its KV cache) and increased memory bandwidth consumption, which can turn a compute-bound workload into a memory-bound one.
+
+  **Realistic Solution:** This strategy is a trade-off: it aims to reduce the number of expensive 70B model executions by doing more work with a cheap 7B model. The analysis must cover three areas:
+1.  **Memory Capacity:** The 80GB HBM on each GPU must now hold the weights for its shard of the 70B model, the *entire* 7B model, and KV caches for *both*. This increases memory pressure and may reduce the maximum batch size the system can handle.
+2.  **Memory Bandwidth:** Each decoding step now involves more memory traffic. Even if the 7B model's weights are cached, you're still moving data for two models. At low batch sizes, where inference is often memory-bandwidth bound, this extra traffic can negate the benefit of fewer decoding steps.
+3.  **Compute:** The strategy succeeds when the cost of running the 7B model `k` times and the 70B model once is less than running the 70B model `k` times. This is most effective when the 70B model is heavily compute-bound (i.e., at large batch sizes) and the acceptance rate of the speculative tokens is high. If the workload is already memory-bound, or the draft model is a poor predictor, the overhead will outweigh the benefits.
+
+  > **Napkin Math:** Let's analyze the memory footprint per H100 in an 8-way tensor parallel setup.
+
+- **Hardware:** H100 with 80 GB HBM and 3.35 TB/s bandwidth.
+- **Base Model (70B):**
+  - Weights (FP16): `70e9 * 2 bytes / 8 GPUs = 17.5 GB` per GPU.
+  - KV Cache (BS=32, SeqLen=4k): `(2 * 80 layers * 8192 hidden * 4096 seqlen * 2 bytes) * 32_batch / 8 GPUs ≈ 21.5 GB` per GPU.
+  - **Base Total: `17.5 + 21.5 = 39 GB` per GPU.**
+- **Draft Model (7B):**
+  - Weights (FP16, replicated): `7e9 * 2 bytes = 14 GB` per GPU.
+  - KV Cache (BS=32, SeqLen=4k): `(2 * 32 layers * 4096 hidden * 4096 seqlen * 2 bytes) * 32_batch / 8 GPUs (replicated) ≈ 8.6 GB` per GPU.
+  - **Draft Model Tax: `14 + 8.6 = 22.6 GB` per GPU.**
+- **Combined Total:** `39 GB + 22.6 GB = 61.6 GB` per GPU. This fits within the 80 GB HBM, but leaves less room for larger batch sizes or longer contexts. The key insight is that every speculative step now requires reading the 7B weights and KV cache, increasing pressure on the 3.35 TB/s memory bus. The system's arithmetic intensity drops, making it more likely to hit the memory wall.
+
+  > **Key Equation:** $\text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes Transferred}}$
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Preemption Penalty</b> · <code>preemption-qos-scheduling</code></summary>
+
+- **Interviewer:** "You're designing a multi-tenant GPU service on a single H100. It must serve two request queues: a high-priority queue with a strict 100ms P99 latency SLO, and a low-priority queue for large, non-interactive jobs. A proposal is made to use dynamic preemption: when a high-priority request arrives, the running low-priority job will be paused, its state (i.e., KV cache) will be swapped to system RAM over PCIe, the high-priority request will be serviced, and then the low-priority job's state will be swapped back in. Analyze the feasibility of this preemption strategy. Use a 13B parameter model as the basis for your calculations."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to assume that preemption is a software-level scheduling decision with minimal overhead. Engineers might underestimate the sheer size of an LLM's state (the KV cache) and the physical limitations of the interconnects used to move that state, failing to quantify the 'preemption penalty'.
+
+  **Realistic Solution:** The proposed preemption strategy is likely infeasible due to the prohibitive cost of swapping the KV cache over PCIe. The time taken to move gigabytes of data from GPU HBM to system RAM and back will almost certainly violate the high-priority SLO before the request is even processed. The candidate should demonstrate this with a calculation.
+
+A realistic solution would involve spatial, not temporal, partitioning. For instance:
+1.  **NVIDIA MIG (Multi-Instance GPU):** Physically partition the H100's SMs and memory controllers into smaller, isolated GPU instances. The high-priority queue gets a dedicated instance, guaranteeing isolation and predictable latency.
+2.  **Static Reservation:** Reserve a subset of the GPU's SMs for the high-priority queue without full MIG isolation. This is less robust but still prevents a low-priority job from completely monopolizing the machine.
+3.  **Cost-Based Rejection:** Conclude that swapping is too slow and that the only way to meet the SLO via preemption is if the low-priority job's state is small enough to be swapped within the latency budget. For large LLMs, this is not the case.
+
+  > **Napkin Math:** Let's quantify the preemption penalty for a 13B model with a modest 4k sequence length.
+
+- **Hardware:** H100 GPU connected via PCIe Gen5 to system RAM. PCIe Gen5 provides ~64 GB/s of effective bandwidth.
+- **State Size (KV Cache):** For a 13B model (e.g., Llama-13B: 40 layers, 5120 hidden dim) and a batch size of 16:
+  - `Size = 2 * num_layers * hidden_dim * seq_len * batch_size * 2 bytes`
+  - `Size = 2 * 40 * 5120 * 4096 * 16 * 2 bytes ≈ 53.7 GB`.
+- **Preemption Penalty Calculation:**
+  - Time to swap KV cache OUT to RAM: `T_out = 53.7 GB / 64 GB/s ≈ 839 ms`.
+  - Time to swap KV cache IN from RAM: `T_in = 53.7 GB / 64 GB/s ≈ 839 ms`.
+  - **Total Overhead:** `T_overhead = T_out + T_in ≈ 1678 ms`.
+- **Conclusion:** The preemption overhead of `~1.7 seconds` completely dwarfs the `100 ms` SLO. This strategy is non-viable. Even for a single request (batch size 1), the swap time is `839ms / 16 ≈ 52ms`, making the round trip `104ms`, which already violates the SLO.
+
+  > **Key Equation:** $T_{\text{preempt_overhead}} = T_{\text{swap_out}} + T_{\text{swap_in}} \gg \text{SLO}_{\text{latency}}$
+
+  📖 **Deep Dive:** [ML Operations](https://mlsysbook.ai/vol1/ops.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Diminishing Returns of Speculative Decoding</b> · <code>speculative-decoding</code></summary>
+
+- **Interviewer:** "You're optimizing a Llama-70B model for a real-time chatbot on an H100. To reduce first-token latency, you implement speculative decoding using a small 1.1B draft model with a speculation length of k=5. You observe the following performance:
+
+- **Short Context (e.g., 500 tokens):** The technique is a success, showing a 3.5x speedup over standard autoregressive decoding.
+- **Long Context (e.g., 32,000 tokens):** The speedup surprisingly diminishes to only 1.2x. Your junior colleague suggests the draft model is 'getting overwhelmed' by the long context.
+
+Analyze the interaction between the H100's memory system and the speculative decoding algorithm. Differentiate the performance characteristics at short vs. long context lengths and explain why the speedup diminishes so sharply."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Attributing the slowdown to the draft model's processing ability, or assuming the verifier model becomes compute-bound. Another common mistake is believing the raw FLOPs of verification is the issue, without connecting it back to the memory system and arithmetic intensity.
+
+  **Realistic Solution:** The core issue is the shifting bottleneck from compute to memory bandwidth as context length grows. Speculative decoding's primary benefit comes from amortizing the cost of loading the large model's weights from HBM over multiple tokens. It replaces 'k' memory-bound autoregressive steps with one, more compute-intensive, verification step.
+
+1.  **At Short Context:** Autoregressive decoding is compute-bound. The KV cache is small and fits in on-chip SRAM, so HBM is not the bottleneck. Each of the 'k' steps is fast. Speculative decoding adds overhead (drafting, more complex verification kernel) that provides minimal benefit, as there's no large HBM latency to amortize. The speedup is minimal or can even be a slowdown.
+
+2.  **At Long Context:** The KV cache for the large model no longer fits in SRAM and must be read from HBM for every single token. This makes each autoregressive step severely memory-bandwidth-bound. Speculative decoding shines here because it only pays this massive HBM-to-SRAM KV cache transfer cost *once* for the entire verification step, instead of 'k' times. It effectively trades 'k' memory-bound operations for one slightly larger memory-bound operation. The savings are `(k-1)` times the HBM read latency of the KV cache.
+
+**The Diminishing Return:** The premise in the question is deliberately inverted to test the candidate's core understanding. In a correctly implemented system, the speedup from speculative decoding should *increase*, not decrease, with longer context lengths precisely because the KV cache read becomes the dominant latency factor that the technique is designed to mitigate. A diminishing return would indicate a flaw in the implementation, such as a verification kernel that isn't properly fused and reads the KV cache 'k' times instead of once.
+
+  > **Napkin Math:** Let's analyze the latency for generating k=5 tokens at a long context of 32k tokens on an H100.
+
+**1. Calculate KV Cache Read Latency (The Bottleneck):**
+- Llama-70B KV cache per token (FP16) is `2 * n_layers * n_heads * head_dim * 2 bytes`. Using simplified figures for Llama-70B (80 layers, 64 heads, 128 dim): `2 * 80 * 64 * 128 * 2 = 2.62 MB/token`.
+- Total KV cache size at 32k tokens: `32768 tokens * 2.62 MB/token ≈ 86 GB`.
+- H100 HBM3 bandwidth: `3.35 TB/s`.
+- Time to read the KV cache from HBM: `86 GB / 3350 GB/s ≈ 25.7 ms`.
+
+**2. Autoregressive (AR) Latency:**
+- For each of the 5 tokens, the model must read the entire 86 GB KV cache. The latency is dominated by this read.
+- Total AR latency ≈ `5 tokens * 25.7 ms/token ≈ 128.5 ms`.
+
+**3. Speculative Decoding Latency:**
+- The verifier reads the 86 GB KV cache only ONCE.
+- Latency ≈ `T_draft + T_verify`
+- `T_draft` (5 tokens from a small model) is negligible, say `~5 ms`.
+- `T_verify` is dominated by the single KV cache read: `~25.7 ms`.
+- Total Speculative latency ≈ `5 ms + 25.7 ms = 30.7 ms`.
+
+**4. Analyze the Speedup:**
+- Speedup = `AR Latency / Speculative Latency` = `128.5 ms / 30.7 ms ≈ 4.18x`.
+
+This calculation proves that for long contexts, the speedup should be significant. A diminishing return points to a faulty kernel or a misunderstanding of the system's behavior.
+
+  > **Key Equation:** $\text{Speedup} \approx \frac{k \times T_{\text{read_kv}}}{T_{\text{draft}} + T_{\text{read_kv}}}$
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+
+
+#### 🟡 L5
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Sequence Parallelism Necessity</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're fine-tuning a 70B model with 128k context length using tensor parallelism across 8 H100 GPUs. The model weights fit comfortably — only 17.5 GB per GPU in FP16. But you OOM immediately. Your colleague says 'just add more tensor parallelism.' Why is tensor parallelism alone insufficient, and what additional technique do you need?"
 
@@ -528,7 +3191,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Memory Bandwidth Roofline Shift</b> · <code>roofline</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Memory Bandwidth Roofline Shift</b> · <code>roofline</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your company is planning GPU purchases for the next 3 years. You need to decide between A100 (2 TB/s, 312 TFLOPS), H100 (3.35 TB/s, 989 TFLOPS), and H200 (4.8 TB/s, 989 TFLOPS). Your workload mix is 60% LLM inference (decode-heavy), 30% training (large-batch GEMM), and 10% embedding lookups. Which GPU gives the best performance-per-dollar for this mix, and why does the roofline analysis change the answer from what you'd expect?"
 
@@ -548,7 +3211,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Pipeline Parallelism Micro-Batch</b> · <code>parallelism</code> <code>memory-hierarchy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Pipeline Parallelism Micro-Batch</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're using pipeline parallelism with 4 stages across 4 GPUs to train a 30B model. The global batch size is 32. How many micro-batches should you use to minimize the pipeline bubble, and what's the bubble overhead as a fraction of total compute time?"
 
@@ -568,7 +3231,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Megatron-LM Tensor Parallelism</b> · <code>parallelism</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Megatron-LM Tensor Parallelism</b> · <code>data-parallelism</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your colleague suggests using tensor parallelism with $T=16$ across two DGX H100 nodes to train a 70B model, arguing 'more parallelism is always better.' The model fits in 8 GPUs with $T=8$. Why is $T=16$ likely slower than $T=8$, and what is the exact communication cost per transformer layer?"
 
@@ -588,7 +3251,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The TCP/IP CPU Overhead</b> · <code>network-fabric</code> <code>cpu</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The TCP/IP CPU Overhead</b> · <code>interconnect</code> <code>cpu</code></summary>
 
 - **Interviewer:** "You are training a model across 64 GPUs on AWS using standard 100 Gbps Ethernet (TCP/IP). You notice the GPUs are only running at 60% utilization. You look at the host CPU, and all 48 CPU cores are pinned at 100% utilization during the AllReduce phase. The CPU is not doing any data loading. What is the CPU doing that is bottlenecking a 100 Gbps network?"
 
@@ -615,7 +3278,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The GPU Scheduling Dilemma</b> · <code>cluster-scheduling</code> <code>gpu</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The GPU Scheduling Dilemma</b> · <code>container-orchestration</code> <code>roofline</code></summary>
 
 - **Interviewer:** "You manage a shared GPU cluster: 256 A100 80GB GPUs across 32 nodes (8 GPUs per node, NVLink within node, InfiniBand between nodes). Three teams submit jobs simultaneously: Team A wants 64 GPUs for a 70B model training run (needs NVLink topology — all 8 GPUs per node), Team B wants 128 GPUs for a distributed data-parallel job (topology-flexible), Team C wants 32 GPUs for hyperparameter sweeps (many small 1-GPU jobs). How do you schedule these to maximize cluster utilization without starving any team?"
 
@@ -635,7 +3298,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Data Quality Pipeline</b> · <code>data-pipeline</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Data Quality Pipeline</b> · <code>data-pipeline</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You're building a continuous training pipeline that ingests 10 TB of new user interaction data daily. Last month, a silent data corruption (a logging schema change) poisoned 3 days of training data before anyone noticed, causing a 5% accuracy regression that took 2 weeks to diagnose. Design a data quality pipeline that catches this within 1 hour."
 
@@ -697,7 +3360,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The NUMA Node Cross-Talk</b> · <code>cpu-architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The NUMA Node Cross-Talk</b> · <code>heterogeneous-compute</code></summary>
 
 - **Interviewer:** "You are deploying a CPU-based embedding retrieval system on an 8-socket, 128-core enterprise server. When you run 1 instance of the app, throughput is 10,000 QPS. To scale up, you spawn 8 independent instances of the app using Docker. Instead of 80,000 QPS, total throughput is only 30,000 QPS. What physical motherboard bottleneck are you hitting?"
 
@@ -717,7 +3380,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The B200 Power Wall</b> · <code>power-thermal</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The B200 Power Wall</b> · <code>power</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "We're planning a datacenter refresh: replacing our A100 cluster with NVIDIA B200 GPUs. The B200 delivers 4.5× the FP8 TFLOPS of the A100, but its TDP is 1000W versus the A100's 400W. Our facilities team says the existing 40 kW racks and cooling can handle it. Should we trust them?"
 
@@ -736,8 +3399,99 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The PagedAttention Throughput Paradox</b> · <code>compute-analysis</code></summary>
 
-#### 🔴 L6+ — Synthesize & Derive
+- **Interviewer:** "Your team is serving a 70B parameter LLM on H100s. To increase concurrency and reduce memory waste from the KV cache, you implement PagedAttention. As expected, your maximum batch size increases from 32 to over 128, and overall throughput (tokens/sec) improves dramatically. However, you receive an alert that the P99 Time-To-First-Token (TTFT) has degraded from ~100ms to over 2 seconds during peak traffic. Your junior engineer suggests there must be a bug in the PagedAttention kernel. Justify why they are likely wrong. Why would a technique designed to improve system efficiency lead to a catastrophic increase in user-facing latency for new requests?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming the PagedAttention kernel itself, the network for new requests, or Python overhead. These are orders of magnitude too small to explain a multi-second degradation. The core misunderstanding is failing to see the system-level effect of batching on scheduling priorities.
+
+  **Realistic Solution:** The diagnosis is Prefill Starvation caused by extreme batching. PagedAttention isn't the direct cause; it's the *enabler* of the high concurrency that creates the problem. The GPU's work is now dominated by executing single-token decode steps for the massive, 128-user batch. The large, compute-intensive 'prefill' operation for a new, incoming request gets stuck in the CUDA stream queue behind dozens of these small, incremental 'decode' steps. The prefill for one user is computationally as expensive as the decode step for the *entire* batch. Without a sophisticated scheduler that can prioritize prefill operations (e.g., via pre-emption or separate priority streams), new requests are forced to wait for the current batch's decode step to complete, destroying their TTFT.
+
+  > **Napkin Math:** Let's analyze the compute for a 70B model on an H100 (989 TFLOPS). A new request has a 200-token prompt.
+
+1.  **Prefill Compute (New Request):** The FLOPs required are `2 * Params * SeqLen = 2 * 70e9 * 200 = 2.8e13` FLOPs, or 28 TFLOPs. On an H100, this takes `28 / 989 ≈ 28.3 ms`. This is the ideal TTFT if the GPU is free.
+
+2.  **Decode Compute (Existing Batch):** A single-token decode for a batch of 128 users requires `2 * Params * BatchSize = 2 * 70e9 * 128 = 1.79e13` FLOPs, or ~18 TFLOPs. This takes `18 / 989 ≈ 18.2 ms`.
+
+3.  **The Failure Mode:** When a new request arrives, the GPU is likely in the middle of an 18.2ms decode step for the existing 128 users. The new request's 28.3ms prefill must wait for that to finish. In a high-traffic scenario with a naive scheduler, the queue is constantly full of these decode steps. The new request's TTFT becomes `T_wait + T_prefill`. If it waits behind just one decode step, TTFT becomes `18.2ms + 28.3ms = 46.5ms`. If it's unlucky and gets queued behind many other requests or scheduler cycles, this wait time can easily grow to hundreds of milliseconds, leading to the multi-second P99 observation.
+
+  > **Key Equation:** $\text{TTFT} = T_{\text{wait}}(N_{\text{batch}}, \text{SchedulerPolicy}) + T_{\text{prefill}}$
+
+  📖 **Deep Dive:** [Model Serving](https://mlsysbook.ai/vol1/serving.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Speculative Decoding Backfire</b> · <code>compute-analysis</code></summary>
+
+- **Interviewer:** "To optimize Time-Per-Output-Token (TPOT) for your 70B model, your team implements speculative decoding. You use a 1.3B 'draft' model to generate 4 candidate tokens, which are then verified by the 70B 'target' model in a single pass. In local tests on an H100, TPOT improves by 2.5x. However, when you deploy to production, you discover that under high load, TPOT is now *worse* than not using speculative decoding at all. You also notice host CPU utilization is pegged at 100%. What is the most likely cause of this optimization backfiring so catastrophically at scale?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Attributing the slowdown to the extra compute of running a second 'draft' model. While true that more FLOPs are used, the draft model is tiny and the point of speculative decoding is to parallelize work to reduce wall time. The real issue is not compute, but a memory system collapse.
+
+  **Realistic Solution:** The system is experiencing a Memory Capacity Failure. An H100 has 80 GB of HBM. The 70B parameter target model already requires `70B * 2 bytes/param = 140 GB` for its weights. The 1.3B draft model requires another `1.3B * 2 = 2.6 GB`. It's impossible to fit both models in HBM. In your low-load local test, the system might have been able to cache the draft model weights effectively. In production under high load, the system is forced to constantly offload and stream the weights for *both* models from the host's main DRAM over the much slower PCIe bus. This is called 'thrashing'. The latency of PCIe is orders of magnitude worse than HBM, completely dominating any theoretical gains from the speculative algorithm. The 100% host CPU utilization is a symptom of the host system frantically managing this data transfer to and from the GPU.
+
+  > **Napkin Math:** Let's compare the memory access costs.
+
+1.  **HBM Bandwidth (H100):** 3.35 TB/s.
+2.  **PCIe Gen5 Bandwidth:** ~128 GB/s.
+3.  **The Bandwidth Cliff:** The speed ratio between HBM and PCIe is `3350 GB/s / 128 GB/s ≈ 26x`. By failing to fit the models into HBM, every single weight access is now ~26 times slower.
+
+4.  **TPOT Calculation:**
+    *   **Baseline (No Speculation, in HBM):** A single decode step loads 140 GB of weights (conceptually). The latency is dominated by compute, but let's say memory time is `140GB / 3350 GB/s = 42ms`. Total TPOT is, say, 60ms.
+    *   **Speculative (Failing, over PCIe):** To run the verification step, the 140GB target model weights must be loaded over PCIe. The time for this memory access alone is `140GB / 128 GB/s = 1.09 seconds`. This is before any compute even happens. The algorithmic gain of verifying 4 tokens at once is completely erased. The theoretical 2.5x speedup on a 60ms TPOT would yield 24ms. Instead, you get a TPOT of over 1 second, a `1000ms / 60ms ≈ 17x` slowdown.
+
+  > **Key Equation:** $\text{TPOT} \approx \frac{1}{k} (T_{\text{compute}} + N_{\text{models}} \times T_{\text{PCIe_load}})$
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Multi-Modal Prefill Stall</b> · <code>compute-analysis</code></summary>
+
+- **Interviewer:** "You are deploying a multi-modal model (ViT + LLM) that analyzes high-resolution images (1024x1024) and text. Users report that prompts with images have an abysmal Time-To-First-Token (TTFT) of nearly 4 seconds, while text-only prompts are fast. Your product manager suggests a quick fix: just downsample all images to 224x224. You argue this will unacceptably degrade accuracy for tasks requiring fine-grained detail. The PM challenges you to 'prove it's worth the engineering effort' to find another way. Justify your position by decomposing the TTFT and showing precisely where the latency is coming from. Why is the image so slow, and what is the fundamental trade-off the PM is missing?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Blaming the network transfer time for the high-resolution image, or assuming the entire slowdown happens inside the final LLM component. The key is to correctly identify that the Vision Transformer (ViT) pre-processor is itself a massive model whose compute scales non-linearly with input image resolution.
+
+  **Realistic Solution:** The catastrophic TTFT is caused by the quadratic complexity of the self-attention mechanism within the Vision Transformer. The TTFT is the sum of `T_vision_encoder + T_llm_prefill`. The `T_vision_encoder` term is not constant; it scales with the square of the number of patches from the image. A high-resolution image creates a massive 'sequence' for the ViT, leading to a compute explosion before the LLM even sees a single token.
+
+The PM's suggestion to downsample is a brute-force approach that trades accuracy for latency. It works because it dramatically reduces the number of patches. The correct engineering path is to explore more efficient vision encoder architectures that can process high-resolution inputs without quadratic compute cost, such as using local/windowed attention, pooling layers, or token pruning strategies (e.g., using a smaller model to find salient patches first). This preserves the high-fidelity information from the original image while managing the compute budget.
+
+  > **Napkin Math:** Let's assume a standard ViT with a 14x14 patch size.
+
+1.  **Patches from Image (Sequence Length for ViT):**
+    *   High-Res (1024x1024): `(1024/14) * (1024/14) ≈ 73 * 73 = 5329` patches.
+    *   Low-Res (224x224): `(224/14) * (224/14) = 16 * 16 = 256` patches.
+
+2.  **ViT Compute Scaling:** Self-attention compute is O(N²), where N is the number of patches.
+    *   The compute ratio between high-res and low-res is `(5329² / 256²) ≈ 28,400,000 / 65,536 ≈ 433x`. The vision encoder portion of the TTFT is over 400 times more expensive for the high-resolution image. If this step takes 10ms for the low-res image, it will take `10ms * 433 = 4.33 seconds` for the high-res one.
+
+3.  **LLM Prefill Scaling:** The LLM's prefill cost is linear with its input sequence length (`N_text + N_patches`).
+    *   The number of vision tokens passed to the LLM increases from 256 to 5329, a `5329 / 256 ≈ 21x` increase. While significant, this is dwarfed by the 433x quadratic explosion in the vision encoder itself.
+
+This proves the bottleneck is squarely in the ViT's quadratic attention cost, not just the final LLM stage.
+
+  > **Key Equation:** $\text{TTFT} = T_{\text{ViT}}(N^2_{\text{patches}}) + T_{\text{LLM}}(N_{\text{text}} + N_{\text{patches}})$
+
+  📖 **Deep Dive:** [Network Architectures](https://mlsysbook.ai/vol1/dnn_architectures.html)
+  </details>
+</details>
+
+
+
+
+
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Roofline Shift</b> · <code>roofline</code></summary>
@@ -762,7 +3516,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Amdahl Ceiling</b> · <code>parallelism</code> <code>roofline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Amdahl Ceiling</b> · <code>data-parallelism</code> <code>roofline</code></summary>
 
 - **Interviewer:** "We upgraded our CPUs to H100 GPUs, giving us a 500x speedup in raw matrix math. However, our end-to-end training throughput only increased by 20x. Where did the other 480x of our hardware investment go?"
 
@@ -782,7 +3536,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The Context Parallelism for Long Sequences</b> · <code>parallelism</code> <code>memory-hierarchy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The Context Parallelism for Long Sequences</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You need to train a model with a 1M token context window. Standard self-attention requires $O(n^2)$ memory for the attention matrix. With hidden dim 8192 and FP16, a single attention head's score matrix for 1M tokens is 1.86 TB — it doesn't fit on any single GPU. How do you distribute the sequence across GPUs, and what's the communication pattern?"
 
@@ -802,7 +3556,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Custom Collective</b> · <code>collective-design</code> <code>network-protocol</code> <code>custom-hardware</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Custom Collective</b> · <code>data-parallelism</code> <code>network-protocol</code> <code>custom-hardware</code></summary>
 
 - **Interviewer:** "Your team is developing a novel AI accelerator chip with a custom, high-bandwidth, low-latency 3D Torus interconnect. A new distributed attention mechanism for LLMs requires an 'All-to-All-Sparse' collective operation: each of N accelerators needs to send a small, specific, non-overlapping block of data to *every other* accelerator, but the blocks are sparse and vary in size. Design the core communication algorithm for this 'All-to-All-Sparse' on your 3D Torus, optimizing for throughput and minimizing latency."
 
@@ -873,7 +3627,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The InfiniBand Adaptive Routing Loop</b> · <code>network-fabric</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The InfiniBand Adaptive Routing Loop</b> · <code>interconnect</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "You are running a 1,000 GPU training job over a massive InfiniBand network. To maximize bandwidth, you enable Adaptive Routing (AR), allowing the network to dynamically send packets down the least congested paths. Throughput improves, but occasionally, NCCL crashes with an unrecoverable timeout error during a global AllReduce. The network cables and switches are perfectly healthy. What did Adaptive Routing do to the packets to break NCCL?"
 
@@ -899,7 +3653,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Quantization Bias Amplifier</b> · <code>fairness</code> <code>quantization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Quantization Bias Amplifier</b> · <code>adversarial</code> <code>quantization</code></summary>
 
 - **Interviewer:** "Your medical imaging model achieves 94% accuracy across all demographic groups in FP32. You quantize to INT8 for deployment on edge devices in rural clinics. Overall accuracy drops to 92% — acceptable. But a post-deployment audit reveals accuracy for dark-skinned patients dropped from 91% to 72%, while light-skinned patients only dropped from 96% to 94%. How did quantization amplify a bias that barely existed in the original model?"
 
@@ -921,7 +3675,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Privacy Throughput Cliff</b> · <code>privacy</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Privacy Throughput Cliff</b> · <code>privacy</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "A security audit reveals our medical LLM is vulnerable to membership inference attacks — an attacker can determine if a specific patient's records were in the training set. The privacy team mandates Differentially Private SGD (DP-SGD) with ε=1. Your training infrastructure team comes back and says: 'DP-SGD will increase training time by 10× and require 3× more GPU memory.' Why does adding privacy guarantees have such a devastating systems cost, and how do you bring it down to something feasible?"
 
@@ -942,15 +3696,102 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The New Hotness vs. The Incumbent</b> · <code>roofline-analysis-procurement</code></summary>
+
+- **Interviewer:** "You are the head of ML Platforms at a large AI research lab with a massive cluster of H100 GPUs. A startup pitches you their new accelerator, the 'Prometheus-1', claiming it achieves 5x the peak FP16 TFLOPS of an H100, but with only 2x the memory bandwidth. It comes at a 3x price premium over the H100. Your CFO and research leads are asking for your recommendation: should you invest in a new cluster of these chips?
+
+Design a series of benchmark experiments to rigorously evaluate the Prometheus-1. What specific model architectures and configurations would you test, why those, and what results do you expect for each? Formulate a data-driven proposal for your leadership team, using napkin math to justify when, if ever, this new chip is worth the investment."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is being seduced by the headline '5x TFLOPS' number. Engineers will often propose benchmarking only their main production model, failing to understand that a single workload can't reveal the chip's true performance profile. They may recommend a full purchase based on the peak compute number, ignoring that performance is dictated by the relationship between compute and memory bandwidth (the Roofline model).
+
+  **Realistic Solution:** The correct approach is to design a suite of benchmarks with varying arithmetic intensities to map out the chip's performance curve and identify its effective ridge point. The proposal must be nuanced, recommending the chip only for workloads where its strengths can be realized.
+
+1.  **Calculate the Ridge Points:** First, determine the theoretical crossover from memory-bound to compute-bound for both chips. This defines the required arithmetic intensity (Ops/Byte) to unlock the chip's compute power.
+2.  **Design Benchmark Suite:**
+    *   **Memory-Bound Test (Low AI):** Use a Llama-2-70B model for inference with a batch size of 1. This task is dominated by fetching the 140GB of weights, having very low operational intensity. The performance will be limited by memory bandwidth, not compute.
+    *   **Compute-Bound Test (High AI):** Use a large-batch CNN training workload, like an EfficientNet on 512x512 images with a batch size of 2048. The massive number of multiply-accumulate operations relative to weight size makes this highly compute-bound.
+    *   **Balanced Test (Medium AI):** Use a BERT-Large training workload. This will likely fall in the 'knee' of the performance curve for one or both chips, revealing how much headroom the new chip provides for moderately intensive tasks.
+3.  **Formulate Recommendation:** The proposal should state that the Prometheus-1 is not a general-purpose replacement. It's a specialized accelerator. It's a poor investment for memory-bound tasks like single-stream LLM inference (paying 3x the price for only a 2x speedup). However, for highly parallel, compute-dense workloads like vision model training, it may deliver close to the promised 5x speedup, making it a worthwhile investment for that specific domain. The recommendation would be to acquire a smaller, specialized cluster for the vision research team, rather than a fleet-wide replacement.
+
+  > **Napkin Math:** First, calculate the theoretical ridge points.
+- **H100 Ridge Point** = Peak FLOPS / Memory BW = 989 TFLOPS / 3.35 TB/s ≈ **295 FLOPs/Byte**.
+- **Prometheus-1 Ridge Point** = (989 * 5) TFLOPS / (3.35 * 2) TB/s = 4945 TFLOPS / 6.7 TB/s ≈ **738 FLOPs/Byte**.
+
+Now, analyze the expected performance on different workloads:
+- **Llama-70B Inference (Batch 1):** Arithmetic Intensity is very low, dominated by weight loading. Performance will be gated by memory bandwidth. Prometheus-1 will be ~2x faster than H100 (due to 2x BW), but you paid 3x the price. **Bad ROI.**
+- **CNN Training (Large Batch):** Arithmetic Intensity is extremely high (>> 1000 FLOPs/Byte). Both chips will be operating on the 'flat' part of their roofline. Prometheus-1 will be able to use its full compute advantage. Performance gain will approach ~5x. **Good ROI.**
+- **Conclusion for CFO:** For our LLM serving costs, this is a bad deal. We'd pay 3x for 2x performance. For our vision research, where we run large batch training, we can get nearly 5x performance for a 3x price, accelerating research significantly. I recommend a targeted buy for the vision cluster only.
+
+  > **Key Equation:** $\text{Attainable GFLOPS} = \min(\text{Peak GFLOPS}, \text{Memory BW} \times \text{Arithmetic Intensity})$
+
+  📖 **Deep Dive:** [Hardware Acceleration](https://mlsysbook.ai/vol1/hw_acceleration.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The Datacenter Power Budget</b> · <code>power-budget-architecture</code></summary>
+
+- **Interviewer:** "You are the founding ML Systems Architect for a new AI startup. You have secured funding to build a dedicated training cluster for your flagship 100B parameter model. Your primary constraint is a hard power budget of 500 kW from your datacenter provider, which uses liquid cooling with a PUE of 1.1. You must decide between two GPU architectures to maximize your cluster's total training throughput.
+
+- **Option A (H100):** 989 TFLOPS (FP16), 700W TDP, $30,000 unit cost.
+- **Option B (Hypothetical B200-class):** 2250 TFLOPS (FP16), 1200W TDP, $50,000 unit cost.
+
+Construct an architectural plan for the CEO. Which GPU do you choose and why? Your analysis must go beyond simple component-level TOPS/W and determine the maximum *fleet-level throughput* you can achieve within your power envelope. Justify your decision with a quantitative breakdown of power allocation, GPU count, and total cluster TFLOPS."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to perform a simple, component-level TOPS/W calculation and declare the winner without considering the fixed system-level power budget. Another frequent error is forgetting to account for the Power Usage Effectiveness (PUE), which reduces the power available to the actual IT equipment. A less experienced engineer might also get distracted by the CapEx, which is not the primary constraint given in the problem.
+
+  **Realistic Solution:** The correct approach is to work backwards from the total power budget, account for cooling overhead (PUE), and then calculate how many of each GPU type can be physically powered. Only then can you determine the total aggregate throughput of the potential clusters. The optimal choice is the one that yields the highest total TFLOPS for the entire fleet under the power cap.
+
+1.  **Calculate Usable Power:** The datacenter's 500 kW budget includes cooling. The power actually available to your racks and GPUs is 500 kW / 1.1 PUE = ~454.5 kW.
+2.  **Calculate Maximum GPU Count per Option:**
+    *   **Option A (H100):** 454,500 W / 700 W/GPU ≈ 649 GPUs.
+    *   **Option B (B200-class):** 454,500 W / 1200 W/GPU ≈ 378 GPUs.
+3.  **Calculate Total Fleet Throughput:**
+    *   **Fleet A (H100):** 649 GPUs × 989 TFLOPS/GPU ≈ 641.8 PFLOPS.
+    *   **Fleet B (B200-class):** 378 GPUs × 2250 TFLOPS/GPU ≈ 850.5 PFLOPS.
+4.  **Architectural Decision:** Even though you can fit fewer of the B200-class GPUs, their superior density and power efficiency result in a significantly higher total cluster throughput (~32% more). The proposal to the CEO should be to select Option B. The higher unit cost is justified because it maximizes the output of the most constrained resource: the power allocation.
+
+  > **Napkin Math:** 1.  **Power Available to IT:** Total Budget / PUE = 500 kW / 1.1 = **454.5 kW**.
+
+2.  **GPUs per Fleet:**
+    *   **H100 Fleet:** 454,500 Watts / 700 W/GPU = **649 GPUs**.
+    *   **B200-class Fleet:** 454,500 Watts / 1200 W/GPU = **378 GPUs**.
+
+3.  **Total Throughput per Fleet:**
+    *   **H100 Fleet:** 649 GPUs × 989 TFLOPS/GPU ≈ **642 PFLOPS**.
+    *   **B200-class Fleet:** 378 GPUs × 2250 TFLOPS/GPU ≈ **851 PFLOPS**.
+
+4.  **Component vs. Fleet Efficiency:**
+    *   **H100 TOPS/W (Component):** 989 / 700 ≈ 1.41 TFLOPS/W.
+    *   **B200-class TOPS/W (Component):** 2250 / 1200 ≈ 1.875 TFLOPS/W.
+
+**Conclusion:** The B200-class fleet provides ~209 PFLOPS more throughput (~32.5% uplift) within the same power envelope. Despite the higher CapEx ($18.9M vs $19.47M), we should choose Option B to maximize our training capacity, which is the primary driver of our business velocity.
+
+  > **Key Equation:** $\text{Fleet Throughput} = \lfloor \frac{\text{Power Budget} / \text{PUE}}{\text{GPU TDP}} \rfloor \times \text{TFLOPS per GPU}$
+
+  📖 **Deep Dive:** [ML Systems](https://mlsysbook.ai/vol1/ml_systems.html)
+  </details>
+</details>
+
+
+
 
 ---
 
 
-### 🧠 Memory Hierarchy & KV-Cache
+### Memory Hierarchy & KV-Cache
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The CPU-GPU Data Transfer Tax</b> · <code>memory-hierarchy</code></summary>
 
@@ -972,7 +3813,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Prefetch Buffer Sizing</b> · <code>memory-hierarchy</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Prefetch Buffer Sizing</b> · <code>memory-hierarchy</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You're training a vision model on ImageNet. Your GPU processes each batch in 50ms, but `nvidia-smi` shows utilization dropping to 0% every few seconds. You're using PyTorch DataLoader with `num_workers=2` and `prefetch_factor=2`. Your colleague says 'just set num_workers=32.' Why might that make things worse, and what's the right way to size the prefetch pipeline?"
 
@@ -992,7 +3833,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Adam Memory Multiplier</b> · <code>memory-hierarchy</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Adam Memory Multiplier</b> · <code>memory-hierarchy</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You want to fine-tune a 7B model using Adam optimizer with mixed-precision training (BF16 forward/backward, FP32 optimizer). Your GPU has 80 GB of VRAM. How much memory does the optimizer alone consume, and what fraction of VRAM does it take?"
 
@@ -1052,7 +3893,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Stuttering Training Loop</b> · <code>cache-hierarchy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Stuttering Training Loop</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're training a small neural network on a GPU, but you notice the GPU utilization is low (e.g., 30-40%), and the training progress seems to 'stutter' periodically, despite using a small dataset that easily fits into GPU memory. What's a common, non-obvious reason for this behavior?"
 
@@ -1074,7 +3915,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Beam Search Memory Explosion</b> · <code>algorithms</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Beam Search Memory Explosion</b> · <code>roofline</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You switch your generation algorithm from Greedy Search to Beam Search with a beam width of 4 to get better translation quality. Suddenly, your inference server can only handle 1/4th the number of concurrent users before OOMing. Why does Beam Search destroy your concurrency scaling?"
 
@@ -1166,7 +4007,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The VRAM Budget</b> · <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The VRAM Budget</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your PM asks: 'Can we run Llama-2-7B inference on a single A100 40 GB?' Give me the exact memory breakdown — don't just say 'it fits.'"
 
@@ -1188,10 +4029,9 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Sequence Length Trap</b> · <code>kv-cache</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Sequence Length Trap</b> · <code>kv-cache</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You need to increase your LLM's context window from 4k to 128k tokens. The model weights fit perfectly in your 80GB VRAM. What hidden memory cost will cause your node to OOM (Out of Memory) during generation?"
 
@@ -1254,7 +4094,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Activation Recomputation Trade-off</b> · <code>memory-hierarchy</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Activation Recomputation Trade-off</b> · <code>memory-hierarchy</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You're training a 30B model on 8× A100-80GB GPUs. With full activation storage, you OOM at batch size 2. Your colleague suggests gradient checkpointing, claiming it 'trades a little compute for a lot of memory.' After enabling it, you can fit batch size 8. But your training time per step increased by 40%, not the 33% your colleague promised. Why is the overhead higher than expected?"
 
@@ -1314,7 +4154,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Gradient Checkpoint Trade-off</b> · <code>memory-hierarchy</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Gradient Checkpoint Trade-off</b> · <code>memory-hierarchy</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You're training a 32-layer transformer and running out of memory. Your colleague suggests gradient checkpointing. How much memory does it save, and what's the compute cost? Calculate both for checkpointing every $k$ layers."
 
@@ -1334,7 +4174,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Striding Stumble</b> · <code>data-locality</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Striding Stumble</b> · <code>data-pipeline</code></summary>
 
 - **Interviewer:** "You're comparing two C++ implementations of a matrix multiplication kernel on a CPU. Both use standard nested loops and perform the exact same arithmetic operations. However, one is consistently 3-5x slower than the other. Upon inspection, you notice the inner loop access patterns are `matrix[i][j]` in the fast version and `matrix[j][i]` in the slow version. Explain the technical reason for this significant performance difference."
 
@@ -1382,7 +4222,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The KV-Cache Swap Thrashing</b> · <code>memory</code> <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The KV-Cache Swap Thrashing</b> · <code>memory-hierarchy</code> <code>serving</code></summary>
 
 - **Interviewer:** "To handle a massive spike in traffic, you configure vLLM to allow swapping inactive KV-cache blocks to the host CPU RAM via PCIe. This prevents OOM errors. However, you notice that while throughput remains okay, the latency (Time-Per-Output-Token) for individual users randomly spikes from 50ms to 900ms. Why does CPU swapping cause catastrophic latency spikes for active users?"
 
@@ -1409,7 +4249,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The AMD MI300X Memory Advantage</b> · <code>memory-hierarchy</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The AMD MI300X Memory Advantage</b> · <code>memory-hierarchy</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your team is serving Llama-2-70B. On NVIDIA H100 80 GB, you need 2-way tensor parallelism — the 140 GB of FP16 weights simply don't fit on one GPU. AMD just offered you MI300X nodes with 192 GB HBM3 per GPU. The sales rep says 'you can serve 70B on a single GPU now.' Is this true, and what's the real systems impact of going from 2 GPUs to 1?"
 
@@ -1429,7 +4269,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Leaking Inference Server</b> · <code>memory</code> <code>incident-response</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Leaking Inference Server</b> · <code>memory-hierarchy</code> <code>incident-response</code></summary>
 
 - **Interviewer:** "Your team runs a 13B model on A100 80 GB GPUs for long-running inference sessions. After ~6 hours of continuous serving, `nvidia-smi` shows VRAM usage has crept from 32 GB to 74 GB, and the next request triggers an OOM kill. Restarting the process fixes it for another 6 hours. The model weights haven't changed. What is leaking and how do you find it?"
 
@@ -1449,10 +4289,10 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Energy-Movement Invariant</b> · <code>memory</code> <code>energy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Energy-Movement Invariant</b> · <code>memory-hierarchy</code> <code>power</code></summary>
 
 - **Interviewer:** "We pruned 50% of the weights from our model, cutting the total MAC (Multiply-Accumulate) operations in half. However, the energy consumption of the node barely dropped. Why?"
 
@@ -1512,7 +4352,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The CXL Memory Tier</b> · <code>memory-hierarchy</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The CXL Memory Tier</b> · <code>memory-hierarchy</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your inference server has 80 GB of HBM (GPU VRAM) and 512 GB of CXL-attached memory at ~200 ns latency and ~64 GB/s bandwidth. You're serving a 70B model (140 GB FP16). Can you use CXL memory to avoid tensor parallelism? Calculate the performance impact."
 
@@ -1532,7 +4372,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The NUMA Nightmare</b> · <code>NUMA</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The NUMA Nightmare</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're scaling up a gradient boosting model training job on a powerful dual-socket CPU server (e.g., two Intel Xeon CPUs). When you move from utilizing a single CPU socket to attempting to use both sockets in parallel, you observe that the performance improvement is far less than 2x, sometimes even degrading. What technical architectural detail of modern multi-socket systems is most likely causing this, and how would you diagnose and mitigate it?"
 
@@ -1564,7 +4404,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Memory Dilemma</b> · <code>memory-technologies</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Memory Dilemma</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "Your team is designing a custom ML accelerator optimized for large Transformer models with exceptionally long context windows. You need to choose between integrating HBM (High Bandwidth Memory) or GDDR6 for the on-board memory. Discuss the technical trade-offs of each memory technology in the context of this specific workload, and justify your recommendation."
 
@@ -1618,7 +4458,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The KV-Cache Fragmentation</b> · <code>memory</code> <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The KV-Cache Fragmentation</b> · <code>memory-hierarchy</code> <code>serving</code></summary>
 
 - **Interviewer:** "You are serving a 13B model on a single 80GB GPU. You know the weights take 26GB, leaving 54GB for KV-cache. A single user request takes exactly 1GB of KV-cache. Therefore, you configure the server to accept 54 concurrent requests. However, after an hour of operation, the server OOMs and crashes when serving only 35 concurrent requests. Where did the missing 19GB of VRAM go?"
 
@@ -1646,7 +4486,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The PagedAttention Block Size Trap</b> · <code>memory</code> <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The PagedAttention Block Size Trap</b> · <code>memory-hierarchy</code> <code>serving</code></summary>
 
 - **Interviewer:** "You are using vLLM to serve an LLM. You configure the PagedAttention block size to 256 tokens per block to reduce the metadata overhead in the memory allocator. Your memory fragmentation drops to zero. However, your time-to-first-token (TTFT) latency suddenly spikes, and the GPU is sitting idle waiting for memory. Why did a large block size destroy your performance?"
 
@@ -1695,7 +4535,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Embedding Table Sharding Problem</b> · <code>memory-hierarchy</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Embedding Table Sharding Problem</b> · <code>memory-hierarchy</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "We run a recommendation model with a 1 TB embedding table (4 billion entries × 128 dimensions × FP16). The table is sharded across 64 GPUs, each holding ~16 GB. Training throughput is terrible — GPUs are 80% idle. The network isn't saturated. What's going on?"
 
@@ -1715,7 +4555,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Embedding Hotspot</b> · <code>memory</code> <code>incident-response</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Embedding Hotspot</b> · <code>memory-hierarchy</code> <code>incident-response</code></summary>
 
 - **Interviewer:** "Your recommendation system has a 500 GB embedding table sharded across 32 A100 80 GB GPUs. During a flash sale event, GPU 14 OOMs while all other GPUs sit at 40% memory utilization. The embedding table hasn't changed size. What happened on GPU 14?"
 
@@ -1735,7 +4575,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Bandwidth Wall</b> · <code>memory</code> <code>incident-response</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Bandwidth Wall</b> · <code>memory-hierarchy</code> <code>incident-response</code></summary>
 
 - **Interviewer:** "You're running two models concurrently on one H100 80 GB using MPS (Multi-Process Service): a 7B LLM for chat and a 3B vision encoder for image understanding. Each model alone achieves its expected throughput. But when both run simultaneously, the LLM's decode throughput drops by 60% and the vision model's latency doubles. GPU compute utilization shows only 45%. What shared resource are they fighting over?"
 
@@ -1755,10 +4595,10 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The Disaggregated Memory Architecture</b> · <code>memory-hierarchy</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> The Disaggregated Memory Architecture</b> · <code>memory-hierarchy</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Your company is evaluating CXL-attached memory pools for ML inference. The pitch: 'Expand GPU-accessible memory to terabytes at DRAM cost.' CXL 2.0 memory has ~200ns access latency vs HBM's ~50ns and local DDR5's ~100ns. For which ML workloads does CXL memory make sense, and for which is it a trap?"
 
@@ -1778,7 +4618,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Paging Paradox</b> · <code>virtual-memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Paging Paradox</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You're working on a large-scale recommendation system that uses a massive embedding table (e.g., 1TB in size) loaded into a server with 2TB of RAM. Despite having ample physical memory, you observe very high CPU utilization but surprisingly low throughput, and profiling tools like `perf` show a significant number of `dTLB-load-misses`. What is the underlying cause of this performance bottleneck, and what specific operating system feature would you leverage to mitigate it?"
 
@@ -1804,7 +4644,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Phantom Update</b> · <code>cache-coherence</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Phantom Update</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You are developing a high-performance, multi-threaded C++ training loop for a small MLP on a single server with multiple CPU cores. In your custom gradient aggregation step, each thread computes its local gradients and then writes them to distinct, non-overlapping sections of a shared global gradient array. Despite each thread writing to its own designated memory region, you observe inconsistent or incorrect gradient updates and significant performance degradation. There are no explicit race conditions using mutexes or atomics. What is the most likely underlying hardware-level issue, and how would you diagnose and mitigate it?"
 
@@ -1840,7 +4680,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Fragmentation Crisis</b> · <code>kv-cache</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Fragmentation Crisis</b> · <code>kv-cache</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "We are serving a chatbot. Even though we have 40GB of free VRAM, our inference server refuses to accept new concurrent requests, citing an 'Out of Memory' error. What is consuming our VRAM invisibly, and how do we fix it?"
 
@@ -1860,7 +4700,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Gradient Checkpointing Boundary</b> · <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Gradient Checkpointing Boundary</b> · <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "We need to train a 70B model on 8× H100 80 GB GPUs. The team enabled ZeRO-3 and claims it'll fit. Walk me through the actual per-GPU memory budget and tell me where it breaks."
 
@@ -1885,11 +4725,12 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 ---
 
 
-### 🔢 Numerical Precision & Quantization
+### Numerical Precision & Quantization
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The INT8 Throughput Advantage</b> · <code>quantization</code> <code>roofline</code></summary>
 
@@ -1937,7 +4778,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The FP16 vs BF16 Question</b> · <code>precision</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The FP16 vs BF16 Question</b> · <code>mixed-precision</code></summary>
 
 - **Interviewer:** "A new hire asks you: 'FP16 and BF16 are both 16 bits. Why does everyone use BF16 for training? Aren't they the same?' Give them the 2-minute explanation."
 
@@ -1959,10 +4800,9 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Underflow Crisis</b> · <code>precision</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Underflow Crisis</b> · <code>mixed-precision</code></summary>
 
 - **Interviewer:** "We switched our pre-training job from FP32 to FP16 to save memory, but the loss is returning NaNs within the first 100 steps. What numerical property is failing?"
 
@@ -2078,7 +4918,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Mixed-Precision Training Instability</b> · <code>quantization</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Mixed-Precision Training Instability</b> · <code>quantization</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "We're pre-training a 30B model. It trains fine in BF16 for 200k steps. Management asks us to switch to FP8 training to get 2× throughput on H100's FP8 Tensor Cores. After switching, we see loss spikes every ~5,000 steps that gradually get worse until training diverges at step 80k. What's happening, and how do we fix it without giving up FP8?"
 
@@ -2098,7 +4938,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CUDA Upgrade Regression</b> · <code>precision</code> <code>incident-response</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CUDA Upgrade Regression</b> · <code>mixed-precision</code> <code>incident-response</code></summary>
 
 - **Interviewer:** "After upgrading from CUDA 11.8 to CUDA 12.2, your 13B model's accuracy on your internal benchmark drops by 2.3 points. The model weights are identical — same checkpoint file. The training team swears nothing changed. How can the same weights produce different accuracy with a different CUDA version?"
 
@@ -2118,10 +4958,10 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The FP8 Underflow Crash</b> · <code>numerical-precision</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The FP8 Underflow Crash</b> · <code>mixed-precision</code></summary>
 
 - **Interviewer:** "You are migrating a large transformer model from FP16 to FP8 (specifically the E4M3 format) for training on H100 GPUs. The model runs twice as fast, but after 500 steps, the gradients vanish entirely, and the model's loss plateaus. You verify your learning rate is correct. What numerical physics destroyed your training?"
 
@@ -2141,7 +4981,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The FP8 Training Frontier</b> · <code>quantization</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The FP8 Training Frontier</b> · <code>quantization</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "Your team successfully trained a 13B parameter LLM in FP8 on H100s with no accuracy loss. Encouraged, you try FP8 training on a 125M parameter BERT model. The loss diverges within 200 steps. Both use the same FP8 recipe with per-tensor scaling. Why does FP8 work for the large model but fail for the small one?"
 
@@ -2181,7 +5021,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Model Compression Pipeline</b> · <code>quantization</code> <code>model-compression</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Model Compression Pipeline</b> · <code>quantization</code> <code>pruning</code></summary>
 
 - **Interviewer:** "You have a 70B FP16 model that costs \$1.20 per 1M tokens to serve on 4× H100 GPUs. Your target is \$0.40 per 1M tokens on a single H100. Design a compression pipeline that achieves this 3× cost reduction while keeping quality degradation under 2% on your evaluation suite."
 
@@ -2201,7 +5041,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The FP16 Divergence</b> · <code>precision</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The FP16 Divergence</b> · <code>mixed-precision</code></summary>
 
 - **Interviewer:** "We're pre-training a 13B model. It trains perfectly in BF16 for 100k steps. When we switch to FP16 with dynamic loss scaling, it diverges around step 50k with loss spikes and eventual NaNs. The hyperparameters are identical. What is happening at step 50k that wasn't happening at step 1k?"
 
@@ -2223,10 +5063,10 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Precision Trade-off</b> · <code>precision</code> <code>hardware</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Precision Trade-off</b> · <code>mixed-precision</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "We are quantizing our model from FP16 to INT8. The memory footprint drops by 2x, but the throughput doesn't improve at all. Assuming we are compute-bound, what hardware architectural detail did we forget?"
 
@@ -2249,13 +5089,14 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 ---
 
 
-### 🏗️ Hardware Architecture & Cost
+### Hardware Architecture & Cost
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Fine-Tuning Estimate</b> · <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Fine-Tuning Estimate</b> · <code>model-cost</code></summary>
 
 - **Interviewer:** "The PM just walked over and asked: 'How much will it cost to fine-tune Llama-2-13B on our 1M-example dataset?' They need a number by end of day. Walk me through how you'd estimate this on a napkin."
 
@@ -2277,8 +5118,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Inference Batch Size Sweet Spot</b> · <code>serving</code> <code>roofline</code></summary>
 
@@ -2300,7 +5140,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The NCCL NVLink Deadlock</b> · <code>hardware</code> <code>distributed</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The NCCL NVLink Deadlock</b> · <code>model-cost</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You are running Data Parallel training on a single 8-GPU DGX node. GPU 0 crashes due to a faulty memory bank. You rewrite the host script to exclude GPU 0 and launch the job on GPUs 1 through 7. The job starts, but the NCCL AllReduce immediately hangs indefinitely. Why does a 7-GPU topology fail on a DGX?"
 
@@ -2328,7 +5168,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The NVLink PCIe Bottleneck</b> · <code>hardware</code> <code>topology</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The NVLink PCIe Bottleneck</b> · <code>model-cost</code> <code>topology</code></summary>
 
 - **Interviewer:** "You are buying a custom 8-GPU server for training. Vendor A offers 8x RTX 4090s connected entirely via PCIe Gen4 switches. Vendor B offers 8x H100s connected via NVLink and NVSwitch. Vendor A's server is much cheaper, and they claim 'PCIe Gen4 x16 gives 64 GB/s, which is plenty for training.' Why will Vendor A's server fail catastrophically at 8-GPU Data Parallel training compared to Vendor B?"
 
@@ -2356,7 +5196,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The KV-Cache Swapping Cliff</b> · <code>serving</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The KV-Cache Swapping Cliff</b> · <code>serving</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "To handle a massive spike in concurrent users for your LLM service, you configure vLLM to enable CPU swapping. If the GPU VRAM gets full, it moves inactive KV-cache blocks to the host CPU RAM over PCIe. The system handles 10x more users without OOMing, but the Time-Per-Output-Token (TPOT) randomly spikes from 40ms to 800ms. Why does swapping cause such a catastrophic latency cliff?"
 
@@ -2413,7 +5253,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The FP32 Fallback Penalty</b> · <code>hardware</code> <code>precision</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The FP32 Fallback Penalty</b> · <code>model-cost</code> <code>mixed-precision</code></summary>
 
 - **Interviewer:** "You serve a PyTorch model on a T4 GPU. The model is cast to `torch.float16`. You use standard matrix multiplications. However, your profiler shows the GPU is only achieving 8 TFLOPS of throughput, which is the theoretical maximum for FP32 on a T4. The T4 is capable of 65 TFLOPS in FP16. Why is your FP16 model running at FP32 speeds?"
 
@@ -2443,7 +5283,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The GQA/MQA Memory Bottleneck</b> · <code>architecture</code> <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The GQA/MQA Memory Bottleneck</b> · <code>model-cost</code> <code>serving</code></summary>
 
 - **Interviewer:** "You are deploying Llama-3-70B. It uses Grouped Query Attention (GQA), which massively reduces the size of the KV-cache compared to standard Multi-Head Attention (MHA). Because the KV-cache is 8x smaller, your manager assumes the Time-Per-Output-Token (TPOT) during the decoding phase will be 8x faster. However, the TPOT only improves by about 10%. Why didn't an 8x reduction in KV-cache size yield an 8x reduction in latency?"
 
@@ -2477,7 +5317,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The MoE Memory Trap</b> · <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The MoE Memory Trap</b> · <code>model-cost</code></summary>
 
 - **Interviewer:** "The team is excited: they switched from a dense 7B model to a 47B Mixture-of-Experts model with 8 experts, 2 active per token. 'Same inference speed, 7× more knowledge!' they claim. Then they try to deploy it on a single A100 40 GB and it OOMs. What did they get wrong?"
 
@@ -2499,10 +5339,10 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The PCIe ACS Block</b> · <code>hardware</code> <code>distributed</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The PCIe ACS Block</b> · <code>model-cost</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "You rent a bare-metal server with 4x GPUs. They do not have NVLink; they communicate over the motherboard's PCIe bus. You run an NCCL test, and the GPU-to-GPU bandwidth is only 12 GB/s, instead of the expected 24 GB/s for PCIe Gen4 x16. You notice the host CPU utilization is spiking during the transfer. Why is the CPU getting involved in a direct GPU-to-GPU transfer?"
 
@@ -2611,7 +5451,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Attention Cost Explosion</b> · <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Attention Cost Explosion</b> · <code>model-cost</code></summary>
 
 - **Interviewer:** "We're deploying a model that supports 128k context. Users love it, but our serving costs are 10× higher than the 4k-context version, and P99 latency is through the roof. The model has the same number of parameters. Why does 32× more context cost 10× more to serve, and what are our architectural options?"
 
@@ -2633,7 +5473,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The TPU v5e vs H100 Trade-off</b> · <code>architecture</code> <code>economics</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The TPU v5e vs H100 Trade-off</b> · <code>model-cost</code> <code>economics</code></summary>
 
 - **Interviewer:** "Your company is choosing between a Google Cloud TPU v5e pod (256 chips) and an equivalent NVIDIA H100 cluster for serving a 7B parameter model at 50,000 requests per second. The TPU v5e costs $1.20/chip-hour and the H100 costs $3.50/GPU-hour. The PM says 'TPU is obviously cheaper.' Walk me through why this isn't a simple price comparison."
 
@@ -2653,10 +5493,10 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Sparsity Fallacy</b> · <code>hardware</code> <code>sparsity</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Sparsity Fallacy</b> · <code>model-cost</code> <code>sparsity</code></summary>
 
 - **Interviewer:** "You wrote a custom CUDA kernel that skips calculating zeros (90% sparse). But it runs slower than a dense PyTorch matrix multiply that does 10x more math. Why does doing 'less work' take more time?"
 
@@ -2676,7 +5516,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Tensor Parallelism Bandwidth Tax</b> · <code>architecture</code> <code>network</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Tensor Parallelism Bandwidth Tax</b> · <code>model-cost</code> <code>interconnect</code></summary>
 
 - **Interviewer:** "You are serving a 70B model. It fits perfectly on 2x A100 (80GB) GPUs using Tensor Parallelism (TP=2). To handle more traffic, you buy 2 more A100s. Your colleague says, 'Let's just increase to TP=4, that will double our throughput because the math is split 4 ways instead of 2.' You argue that TP=4 will actually be *slower* than running two separate TP=2 replicas. Why?"
 
@@ -2744,7 +5584,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Multi-Modal Token Starvation</b> · <code>serving</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Multi-Modal Token Starvation</b> · <code>serving</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "You are serving a multi-modal model (like LLaVA). A user uploads a 4K image and asks, 'What is this?' The image is encoded into 4,000 visual tokens by the Vision Encoder. The LLM then begins decoding text. During the text decode phase, the GPU utilization is at 4%. Your manager asks you to optimize the Vision Encoder to fix this. Why is the manager focusing on the wrong part of the stack?"
 
@@ -2775,7 +5615,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Router Bottleneck in MoE Serving</b> · <code>architecture</code> <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Router Bottleneck in MoE Serving</b> · <code>model-cost</code> <code>serving</code></summary>
 
 - **Interviewer:** "You deploy a Mixtral 8x7B (Mixture of Experts) model on a single 80GB GPU. Because it only uses ~13B active parameters per token, the math should be fast. However, your profiling shows that generating a token takes 2x longer than a standard dense 13B model. What architectural component of the MoE model is destroying your memory bandwidth?"
 
@@ -2806,7 +5646,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The PCIe Switch Starvation</b> · <code>hardware-topology</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6_Staff-red?style=flat-square" alt="Level 4" align="center"> The PCIe Switch Starvation</b> · <code>interconnect</code></summary>
 
 - **Interviewer:** "You are building an 8-GPU server for training. You buy 8x H100 GPUs and a dual-socket CPU motherboard. You plug 4 GPUs into the PCIe slots wired to CPU 0, and 4 GPUs into the slots wired to CPU 1. When you run NCCL AllReduce to sync gradients, the training is 3x slower than the same 8 GPUs running in an official Nvidia DGX system. `nvidia-smi` shows the GPUs are mostly idle. Where is the bottleneck?"
 
@@ -2826,7 +5666,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Prefill-Decode Disaggregation</b> · <code>serving</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Prefill-Decode Disaggregation</b> · <code>serving</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "We serve a 70B model on a fleet of 64 H100 GPUs. During peak traffic, our P99 latency spikes to 5× the P50 because long-prompt requests (8k+ tokens) block short-prompt requests in the same batch. An architect proposes splitting the fleet into separate 'prefill GPUs' and 'decode GPUs.' This sounds like it wastes resources. Why would dedicating GPUs to different phases actually improve both throughput and latency?"
 
@@ -2849,13 +5689,14 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 ---
 
 
-### ⚙️ Compilers & Frameworks
+### Compilers & Frameworks
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Compilation Overhead</b> · <code>frameworks</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Compilation Overhead</b> · <code>compilation</code></summary>
 
 - **Interviewer:** "You move a PyTorch training loop from a CPU to a GPU. The first few batches take 500ms each, but suddenly the latency drops to 10ms per batch. What happened inside the framework?"
 
@@ -2873,10 +5714,9 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Inference Compiler Optimization</b> · <code>compiler-runtime</code> <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Inference Compiler Optimization</b> · <code>compilation</code> <code>serving</code></summary>
 
 - **Interviewer:** "You compile your 7B LLM with TensorRT before deploying on an H100. The model has 1,200 individual operations in eager PyTorch. After TensorRT compilation, it's reduced to 80 fused kernels. Inference latency drops from 15ms to 6ms. Your colleague says 'operator fusion just reduces Python overhead.' What is the real hardware-level reason fusion is so effective?"
 
@@ -2896,7 +5736,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Gaudi 3 Compiler Bet</b> · <code>compiler-runtime</code> <code>architecture</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Gaudi 3 Compiler Bet</b> · <code>compilation</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "Intel is pitching us Gaudi 3 accelerators for our training cluster. Instead of hand-written CUDA kernels, Gaudi uses a graph compiler that automatically fuses and schedules operations. The sales team claims 'you get kernel-level performance without writing kernels.' Your CUDA team is skeptical. What are the real systems trade-offs?"
 
@@ -2916,10 +5756,10 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Automated Model Optimization Pipeline</b> · <code>compiler-runtime</code> <code>quantization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Automated Model Optimization Pipeline</b> · <code>compilation</code> <code>quantization</code></summary>
 
 - **Interviewer:** "Your platform team supports 200 ML teams deploying 1,000+ models per month. Each model currently requires manual optimization (quantization, graph compilation, kernel tuning) by a specialized ML systems engineer — a 2-week process per model. Design an automated model optimization pipeline that reduces this to <1 hour with <3% quality regression on 95% of models."
 
@@ -2942,13 +5782,14 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 ---
 
 
-### 📊 Data Pipelines
+### Data Pipelines
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Stalled Data Pipeline</b> · <code>data-loading</code> <code>network-io</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Stalled Data Pipeline</b> · <code>data-pipeline</code> <code>network-io</code></summary>
 
 - **Interviewer:** "You've set up a distributed training job with 16 GPUs across 4 nodes. You notice that GPU utilization is consistently low (e.g., 40-50%), even though your CPU is not maxed out, and local SSDs are very fast. The logs indicate `data_loader` is the bottleneck. What's the likely culprit, and how would you diagnose and mitigate it?"
 
@@ -2987,13 +5828,14 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 ---
 
 
-### 📎 Additional Topics
+### Additional Topics
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Gradient Accumulation Equivalence</b> · <code>training</code> <code>memory-hierarchy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Gradient Accumulation Equivalence</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You can't fit batch size 1024 on your single A100 — it OOMs. So you use batch size 64 with 16 gradient accumulation steps to simulate an effective batch of 1024. Your colleague claims this is 'mathematically identical' to true batch 1024. Name two cases where this equivalence breaks down."
 
@@ -3013,7 +5855,7 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Training Time Estimate</b> · <code>training</code> <code>data-pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Training Time Estimate</b> · <code>data-parallelism</code> <code>data-pipeline</code></summary>
 
 - **Interviewer:** "You have a 500 GB dataset of image-text pairs (100M samples). You're training a CLIP-style model on 8× A100 GPUs. Each GPU processes 256 samples/sec. How long will one epoch take? What if the data pipeline can only deliver 1,500 samples/sec?"
 
@@ -3033,10 +5875,9 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Distributed Training Data Bottleneck</b> · <code>distributed-training</code> <code>data-loading</code> <code>io-optimization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Distributed Training Data Bottleneck</b> · <code>data-parallelism</code> <code>data-pipeline</code> <code>io-optimization</code></summary>
 
 - **Interviewer:** "Your team is training a large vision model on 32 A100 GPUs distributed across 8 instances, using PyTorch DDP. You notice that while GPU utilization is high during the initial epochs, it frequently drops to 40-50% during later epochs, despite sufficient CPU and memory on each instance. `nvidia-smi` shows GPUs are often idle for short bursts. The data is stored in a shared S3 bucket and loaded via `torch.utils.data.DataLoader` with multiple worker processes. What is the most likely bottleneck, and how would you systematically diagnose and resolve it?"
 
@@ -3072,10 +5913,10 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The ZeRO-1 Memory Squeeze</b> · <code>training</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The ZeRO-1 Memory Squeeze</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You are trying to fit a 30B parameter model on a single 8-GPU node (80GB A100s) for fine-tuning. The weights in FP16 take 60GB. You enable DeepSpeed ZeRO Stage 1, which partitions the optimizer states across the 8 GPUs. However, the system still instantly OOMs on the first forward pass, even with a batch size of 1. Why didn't ZeRO-1 save you enough memory?"
 
@@ -3102,4 +5943,44 @@ Roofline analysis, memory hierarchies, numerical precision, hardware architectur
 
   </details>
 
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> What is DDP?</b> · <code>data-parallelism</code></summary>
+
+- **Interviewer:** "When training a model across multiple GPUs in the cloud using PyTorch, what does DDP stand for and what is its primary function?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Confusing it with Data Driven Programming or assuming it shards the model weights.
+
+  **Realistic Solution:** Distributed Data Parallel. It replicates the entire model across multiple GPUs, splits the input data batch across them, and synchronizes the gradients at the end of the backward pass using an All-Reduce operation.
+
+  > **Options:**
+  > [ ] Data Driven Processing; it automatically cleans the dataset.
+  > [x] Distributed Data Parallel; it copies the model to all GPUs and splits the data batch.
+  > [ ] Dynamic Device Partitioning; it splits the layers of a single model across GPUs.
+  > [ ] Deep Distributed Pipeline; it pipelines the forward pass across multiple nodes.
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Foundation-brightgreen?style=flat-square" alt="Level 2" align="center"> The All-Reduce Bottleneck</b> · <code>interconnect</code></summary>
+
+- **Interviewer:** "In a synchronous DDP setup, the training step cannot complete until all GPUs have exchanged their gradients. If one GPU is slightly slower (a straggler), what happens to the rest of the cluster?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Assuming the fast GPUs just move on to the next batch or that the slow GPU is automatically dropped.
+
+  **Realistic Solution:** The entire cluster stalls. The All-Reduce operation acts as a global barrier; the fastest GPU must wait completely idle for the slowest GPU to finish its backward pass before the gradients can be synchronized and the optimizer can step.
+
+  > **Options:**
+  > [ ] The fast GPUs proceed and calculate asynchronous gradients.
+  > [ ] The PyTorch dispatcher automatically re-assigns the batch to a faster node.
+  > [x] The entire cluster stalls at the synchronization barrier, wasting compute time.
+  > [ ] The cluster drops the straggler's gradients to maintain high throughput.
+  </details>
 </details>

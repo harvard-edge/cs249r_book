@@ -59,7 +59,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Optimizer Explosion</b> · <code>training</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Optimizer Explosion</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 ### The Optimizer State Explosion
 
@@ -103,7 +103,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Communication Wall</b> · <code>network</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Communication Wall</b> · <code>interconnect</code> <code>data-parallelism</code></summary>
 
 ### The Communication Wall (Amdahl's Law)
 
@@ -149,7 +149,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Pipeline Bubble</b> · <code>training</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Pipeline Bubble</b> · <code>data-parallelism</code> <code>data-parallelism</code></summary>
 
 ### The Pipeline Bubble
 
@@ -282,7 +282,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Memory Swiss Cheese</b> · <code>serving</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Memory Swiss Cheese</b> · <code>serving</code> <code>memory-hierarchy</code></summary>
 
 ### KV-Cache Memory Fragmentation
 
@@ -332,7 +332,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Checkpoint Traffic Jam</b> · <code>storage</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Checkpoint Traffic Jam</b> · <code>persistent-storage</code> <code>data-parallelism</code></summary>
 
 ### The Metadata and Bandwidth Choke
 
@@ -379,7 +379,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Expert Bottleneck</b> · <code>training</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Expert Bottleneck</b> · <code>data-parallelism</code> <code>data-parallelism</code></summary>
 
 ### The Expert Capacity Drop
 
@@ -423,7 +423,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The KV-Cache Network Wall</b> · <code>network</code> <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The KV-Cache Network Wall</b> · <code>interconnect</code> <code>serving</code></summary>
 
 ### The KV-Cache Network Transfer Wall
 
