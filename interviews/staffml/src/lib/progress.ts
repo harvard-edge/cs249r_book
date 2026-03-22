@@ -1,4 +1,4 @@
-// LocalStorage-based progress tracking for the Heat Map
+// LocalStorage-based progress tracking for the Heat Map + Spaced Repetition
 
 export interface AttemptRecord {
   questionId: string;
@@ -19,8 +19,19 @@ export interface GauntletResult {
   completedAt: number;
 }
 
+// SM-2 inspired spaced repetition card data
+export interface SRCard {
+  questionId: string;
+  easeFactor: number; // starts at 2.5, min 1.3
+  interval: number;   // days until next review
+  repetitions: number;
+  nextReview: number;  // timestamp
+  lastScore: number;
+}
+
 const STORAGE_KEY = 'staffml_progress';
 const GAUNTLET_KEY = 'staffml_gauntlets';
+const SR_KEY = 'staffml_sr';
 
 function getStorage<T>(key: string, fallback: T): T {
   try {
@@ -39,6 +50,8 @@ function setStorage<T>(key: string, value: T): void {
   }
 }
 
+// ─── Attempts ────────────────────────────────────
+
 export function getAttempts(): AttemptRecord[] {
   return getStorage<AttemptRecord[]>(STORAGE_KEY, []);
 }
@@ -49,12 +62,13 @@ const MAX_GAUNTLETS = 50;
 export function saveAttempt(attempt: AttemptRecord): void {
   const attempts = getAttempts();
   attempts.push(attempt);
-  // Cap to prevent localStorage overflow (~5-10 MB limit)
   if (attempts.length > MAX_ATTEMPTS) {
     attempts.splice(0, attempts.length - MAX_ATTEMPTS);
   }
   setStorage(STORAGE_KEY, attempts);
 }
+
+// ─── Gauntlet Results ────────────────────────────
 
 export function getGauntletResults(): GauntletResult[] {
   return getStorage<GauntletResult[]>(GAUNTLET_KEY, []);
@@ -69,7 +83,106 @@ export function saveGauntletResult(result: GauntletResult): void {
   setStorage(GAUNTLET_KEY, results);
 }
 
-// Heat map data: competency × track → { attempted, correct, total }
+// ─── Spaced Repetition (SM-2) ────────────────────
+
+function getSRCards(): Record<string, SRCard> {
+  return getStorage<Record<string, SRCard>>(SR_KEY, {});
+}
+
+function saveSRCards(cards: Record<string, SRCard>): void {
+  setStorage(SR_KEY, cards);
+}
+
+/**
+ * Update SM-2 card after a review.
+ * quality: 0=skip, 1=wrong, 2=partial, 3=nailed it
+ * Maps to SM-2 quality: 0→0, 1→1, 2→3, 3→5
+ */
+export function updateSRCard(questionId: string, quality: number): void {
+  const cards = getSRCards();
+  const card = cards[questionId] || {
+    questionId,
+    easeFactor: 2.5,
+    interval: 1,
+    repetitions: 0,
+    nextReview: 0,
+    lastScore: 0,
+  };
+
+  // Map 0-3 self-score to SM-2 quality (0-5)
+  const q = [0, 1, 3, 5][quality] ?? 0;
+
+  if (q < 3) {
+    // Failed: reset
+    card.repetitions = 0;
+    card.interval = 1;
+  } else {
+    if (card.repetitions === 0) {
+      card.interval = 1;
+    } else if (card.repetitions === 1) {
+      card.interval = 3;
+    } else {
+      card.interval = Math.round(card.interval * card.easeFactor);
+    }
+    card.repetitions++;
+  }
+
+  // Update ease factor: EF' = EF + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02))
+  card.easeFactor = Math.max(
+    1.3,
+    card.easeFactor + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02))
+  );
+
+  card.lastScore = quality;
+  card.nextReview = Date.now() + card.interval * 24 * 60 * 60 * 1000;
+
+  cards[questionId] = card;
+  saveSRCards(cards);
+}
+
+/**
+ * Get questions due for review, sorted by most overdue first.
+ */
+export function getDueQuestionIds(): string[] {
+  const cards = getSRCards();
+  const now = Date.now();
+  return Object.values(cards)
+    .filter(c => c.nextReview <= now)
+    .sort((a, b) => a.nextReview - b.nextReview)
+    .map(c => c.questionId);
+}
+
+/**
+ * Get count of questions due for review.
+ */
+export function getDueCount(): number {
+  const cards = getSRCards();
+  const now = Date.now();
+  return Object.values(cards).filter(c => c.nextReview <= now).length;
+}
+
+/**
+ * Get SR stats for display.
+ */
+export function getSRStats(): {
+  totalCards: number;
+  dueNow: number;
+  mastered: number; // interval > 7 days
+  learning: number; // interval <= 7 days
+} {
+  const cards = getSRCards();
+  const now = Date.now();
+  const all = Object.values(cards);
+  return {
+    totalCards: all.length,
+    dueNow: all.filter(c => c.nextReview <= now).length,
+    mastered: all.filter(c => c.interval > 7).length,
+    learning: all.filter(c => c.interval <= 7).length,
+  };
+}
+
+// ─── Heat Map ────────────────────────────────────
+
 export interface HeatCell {
   attempted: number;
   correct: number;
@@ -104,5 +217,6 @@ export function clearProgress(): void {
   try {
     window.localStorage.removeItem(STORAGE_KEY);
     window.localStorage.removeItem(GAUNTLET_KEY);
+    window.localStorage.removeItem(SR_KEY);
   } catch {}
 }

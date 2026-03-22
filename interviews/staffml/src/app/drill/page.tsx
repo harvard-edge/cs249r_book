@@ -13,7 +13,9 @@ import {
   Question, checkNapkinMath, extractFinalNumber, cleanScenario,
   NapkinResult
 } from "@/lib/corpus";
-import { saveAttempt, getAttempts } from "@/lib/progress";
+import { saveAttempt, getAttempts, updateSRCard, getDueQuestionIds, getDueCount } from "@/lib/progress";
+import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
+import { getQuestionById } from "@/lib/corpus";
 
 export default function DrillPageWrapper() {
   return (
@@ -41,6 +43,9 @@ function DrillPage() {
   const [napkinResult, setNapkinResult] = useState<(NapkinResult & { userNum: number; modelNum: number }) | null>(null);
   const [questionsAnswered, setQuestionsAnswered] = useState(0);
   const [weakestArea, setWeakestArea] = useState<{ area: string; pct: number } | null>(null);
+  const [dueCount, setDueCount] = useState(0);
+  const [reviewMode, setReviewMode] = useState(false); // true = SR review queue
+  const [rubricItems, setRubricItems] = useState<RubricItem[]>([]);
 
   const tracks = getTracks().filter(t => t !== "global");
   const levels = getLevels();
@@ -71,6 +76,9 @@ function DrillPage() {
         setWeakestArea(scored[0]);
       }
     }
+
+    // Check for spaced repetition due cards
+    setDueCount(getDueCount());
   }, []);
 
   // Update pool when filters change
@@ -122,6 +130,7 @@ function DrillPage() {
     setShowAnswer(false);
     setUserAnswer("");
     setNapkinResult(null);
+    setRubricItems([]);
   }, [pool]);
 
   const handleReveal = () => {
@@ -134,26 +143,65 @@ function DrillPage() {
         setNapkinResult({ ...result, userNum, modelNum });
       }
     }
+
+    // Generate rubric checkpoints from the answer
+    if (current) {
+      const items = extractRubric(
+        current.details.realistic_solution,
+        current.details.common_mistake,
+        current.details.napkin_math
+      );
+      setRubricItems(items);
+    }
+
     setShowAnswer(true);
   };
 
   // Constrain self-assessment: if napkin math was way off, cap the score
   const maxScore = napkinResult?.maxSelfScore ?? 3;
+  // Auto-compute score from rubric if items are checked
+  const rubricScore = rubricItems.length > 0 ? rubricToScore(rubricItems) : null;
+  const effectiveMaxScore = Math.min(maxScore, rubricScore !== null ? rubricScore : 3);
 
   const handleScore = (score: number) => {
     if (current) {
+      const finalScore = Math.min(score, maxScore);
       saveAttempt({
         questionId: current.id,
         competencyArea: current.competency_area,
         track: current.track,
         level: current.level,
-        selfScore: score,
+        selfScore: finalScore,
         timestamp: Date.now(),
       });
+      // Update spaced repetition card
+      updateSRCard(current.id, finalScore);
       setQuestionsAnswered(prev => prev + 1);
+      setDueCount(getDueCount());
+    }
+    pickNext();
+  };
+
+  // Pick next question: from SR due queue if in review mode, else random
+  const pickNext = useCallback(() => {
+    if (reviewMode) {
+      const dueIds = getDueQuestionIds();
+      if (dueIds.length > 0) {
+        const q = getQuestionById(dueIds[0]);
+        if (q) {
+          setCurrent(q);
+          setShowAnswer(false);
+          setUserAnswer("");
+          setNapkinResult(null);
+          setRubricItems([]);
+          return;
+        }
+      }
+      // No more due cards, exit review mode
+      setReviewMode(false);
     }
     pickRandom();
-  };
+  }, [reviewMode, pool]);
 
   if (!mounted) {
     return (
@@ -177,8 +225,45 @@ function DrillPage() {
           )}
         </div>
 
+        {/* Spaced repetition review queue */}
+        {dueCount > 0 && (
+          <button
+            onClick={() => {
+              setReviewMode(!reviewMode);
+              if (!reviewMode) {
+                // Start review: pick first due card
+                const dueIds = getDueQuestionIds();
+                if (dueIds.length > 0) {
+                  const q = getQuestionById(dueIds[0]);
+                  if (q) {
+                    setCurrent(q);
+                    setShowAnswer(false);
+                    setUserAnswer("");
+                    setNapkinResult(null);
+                    setRubricItems([]);
+                  }
+                }
+              }
+            }}
+            className={clsx(
+              "w-full text-left p-3 rounded-lg border transition-colors",
+              reviewMode
+                ? "bg-accentAmber/10 border-accentAmber/40"
+                : "bg-accentAmber/5 border-accentAmber/20 hover:border-accentAmber/40"
+            )}
+          >
+            <span className="text-[10px] font-mono text-accentAmber uppercase block mb-1">
+              {reviewMode ? "Review Mode Active" : "Due for Review"}
+            </span>
+            <span className="text-sm text-white font-medium">{dueCount} questions</span>
+            <span className="text-xs text-textTertiary ml-2">
+              {reviewMode ? "click to exit" : "spaced repetition"}
+            </span>
+          </button>
+        )}
+
         {/* Weakest area recommendation */}
-        {weakestArea && !selectedArea && (
+        {weakestArea && !selectedArea && !reviewMode && (
           <button
             onClick={() => setSelectedArea(weakestArea.area)}
             className="w-full text-left p-3 rounded-lg bg-accentRed/5 border border-accentRed/20 hover:border-accentRed/40 transition-colors"
@@ -418,9 +503,56 @@ function DrillPage() {
                       </div>
                     )}
 
+                    {/* Rubric checkboxes */}
+                    {rubricItems.length > 0 && (
+                      <div className="border-t border-border pt-5">
+                        <span className="text-[10px] font-mono text-textTertiary uppercase block mb-3">
+                          Did your answer cover? <span className="text-textTertiary/50 ml-1">{rubricItems.filter(i => i.checked).length}/{rubricItems.length}</span>
+                        </span>
+                        <div className="space-y-2">
+                          {rubricItems.map((item, idx) => (
+                            <label
+                              key={idx}
+                              className={clsx(
+                                "flex items-start gap-3 p-2.5 rounded-lg border cursor-pointer transition-all text-xs",
+                                item.checked
+                                  ? "border-accentGreen/30 bg-accentGreen/5"
+                                  : "border-border hover:border-borderHighlight"
+                              )}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={item.checked}
+                                onChange={() => {
+                                  const updated = [...rubricItems];
+                                  updated[idx] = { ...updated[idx], checked: !updated[idx].checked };
+                                  setRubricItems(updated);
+                                }}
+                                className="mt-0.5 accent-accentGreen"
+                              />
+                              <span className={clsx(
+                                "leading-relaxed",
+                                item.checked ? "text-textPrimary" : "text-textSecondary"
+                              )}>
+                                {item.text}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                        {rubricScore !== null && (
+                          <div className="mt-2 text-[10px] font-mono text-textTertiary">
+                            Rubric score: {rubricScore}/3 → {['Skip', 'Wrong', 'Partial', 'Nailed It'][rubricScore]}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Self-assessment */}
                     <div className="border-t border-border pt-5">
-                      <span className="text-[10px] font-mono text-textTertiary uppercase block mb-3">Rate yourself <span className="text-textTertiary/50 ml-2">Press 1-4</span></span>
+                      <span className="text-[10px] font-mono text-textTertiary uppercase block mb-3">
+                        {rubricItems.length > 0 ? 'Confirm or override' : 'Rate yourself'}
+                        <span className="text-textTertiary/50 ml-2">Press 1-4</span>
+                      </span>
                       <div className="grid grid-cols-4 gap-2">
                         {[
                           { score: 0, label: "Skip", color: "border-border text-textTertiary hover:border-borderHighlight" },
@@ -429,6 +561,7 @@ function DrillPage() {
                           { score: 3, label: "Nailed It", color: "border-accentGreen/30 text-accentGreen hover:bg-accentGreen/10" },
                         ].map(({ score, label, color }) => {
                           const disabled = score > maxScore;
+                          const isRubricSuggested = rubricScore !== null && score === rubricScore;
                           return (
                             <button
                               key={score}
@@ -436,7 +569,11 @@ function DrillPage() {
                               disabled={disabled}
                               className={clsx(
                                 "px-3 py-2.5 rounded-lg border text-xs font-medium transition-all",
-                                disabled ? "opacity-30 cursor-not-allowed border-border text-textTertiary" : color
+                                disabled
+                                  ? "opacity-30 cursor-not-allowed border-border text-textTertiary"
+                                  : isRubricSuggested
+                                  ? `${color} ring-1 ring-accentBlue/50`
+                                  : color
                               )}
                             >
                               {label}
