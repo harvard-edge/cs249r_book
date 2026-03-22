@@ -1091,21 +1091,21 @@ Failure is not an exception at scale -- it is the baseline operating condition.
     # TAB COMPOSITION
     # ─────────────────────────────────────────────────────────────────────
 
-    _part_d_result = build_part_d()
-    _part_d_content = _part_d_result[0]
-    _target_met = _part_d_result[1]
-    _effective_gain = _part_d_result[2]
-    _axes = _part_d_result[3]
+    part_d_result = build_part_d()
+    part_d_content = part_d_result[0]
+    fleet_target_met = part_d_result[1]
+    fleet_effective_gain = part_d_result[2]
+    fleet_axes = part_d_result[3]
 
     tabs = mo.ui.tabs({
         "Part A -- The Sensitivity Wall": build_part_a(),
         "Part B -- The Failure Budget": build_part_b(),
         "Part C -- The Principle Interaction Map": build_part_c(),
-        "Part D -- The Fleet Architecture Blueprint": _part_d_content,
+        "Part D -- The Fleet Architecture Blueprint": part_d_content,
         "Synthesis -- Graduation": build_synthesis(),
     })
     tabs
-    return (tabs, _target_met, _effective_gain, _axes,)
+    return (tabs, fleet_target_met, fleet_effective_gain, fleet_axes,)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1114,14 +1114,14 @@ Failure is not an exception at scale -- it is the baseline operating condition.
 
 
 @app.cell(hide_code=True)
-def _(mo, ledger, COLORS, _target_met, _effective_gain, _axes):
-    if _axes:
+def _(mo, ledger, COLORS, fleet_target_met, fleet_effective_gain, fleet_axes):
+    if fleet_axes:
         ledger.save(chapter=16, design={
             "chapter": "v2_16",
-            "fleet_deployed": _target_met,
-            "effective_gain": float(f"{_effective_gain:.1f}"),
-            "binding_constraint": min(_axes, key=_axes.get),
-            "principle_scores": {k: float(f"{v:.1f}") for k, v in _axes.items()},
+            "fleet_deployed": fleet_target_met,
+            "effective_gain": float(f"{fleet_effective_gain:.1f}"),
+            "binding_constraint": min(fleet_axes, key=fleet_axes.get),
+            "principle_scores": {k: float(f"{v:.1f}") for k, v in fleet_axes.items()},
         })
 
     mo.Html(f"""
@@ -1131,8 +1131,8 @@ def _(mo, ledger, COLORS, _target_met, _effective_gain, _axes):
         <span class="hud-label">LEDGER</span>
         <span class="hud-active">Saved (ch16)</span>
         <span class="hud-label">STATUS</span>
-        <span class="{'hud-active' if _target_met else 'hud-none'}">
-            {'FLEET DEPLOYED' if _target_met else 'FLEET NOT YET VIABLE'}</span>
+        <span class="{'hud-active' if fleet_target_met else 'hud-none'}">
+            {'FLEET DEPLOYED' if fleet_target_met else 'FLEET NOT YET VIABLE'}</span>
         <span class="hud-label">CURRICULUM</span>
         <span class="hud-active">COMPLETE</span>
     </div>

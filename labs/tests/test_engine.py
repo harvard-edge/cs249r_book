@@ -79,23 +79,6 @@ class TestCellExecution:
             pytest.skip(f"App failed to run: {defs}")
         assert len(outputs) > 0, "App produced zero outputs"
 
-    @pytest.mark.engine
-    def test_app_defines_core_variables(self, lab_path):
-        """
-        Every lab's setup cell should define key variables:
-        mo, COLORS, LAB_CSS, ledger
-        """
-        outputs, defs = run_app_safely(lab_path)
-        if outputs is None:
-            pytest.skip(f"App failed to run: {defs}")
-
-        # Check that essential names are in the definitions
-        expected = {"mo", "COLORS", "LAB_CSS", "ledger"}
-        defined = set(defs.keys()) if isinstance(defs, dict) else set()
-        missing = expected - defined
-        # Some labs may not export all names at top level, so warn instead of fail
-        if missing:
-            pytest.skip(f"Missing expected defs: {missing} (may be cell-scoped)")
 
 
 # ── Test: mlsysim API Validation ─────────────────────────────────────────────

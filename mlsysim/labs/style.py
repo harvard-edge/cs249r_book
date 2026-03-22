@@ -360,6 +360,34 @@ body, .lab-body {{
 .regime-mobile {{ border-color: {COLORS['OrangeL']}; }}
 .regime-tiny   {{ border-color: {COLORS['GreenL']}; }}
 
+/* ── VISCERAL ANIMATIONS ── */
+@keyframes shake-hard {{
+    0% {{ transform: translate(1px, 1px) rotate(0deg); }}
+    10% {{ transform: translate(-1px, -2px) rotate(-1deg); }}
+    20% {{ transform: translate(-3px, 0px) rotate(1deg); }}
+    30% {{ transform: translate(3px, 2px) rotate(0deg); }}
+    40% {{ transform: translate(1px, -1px) rotate(1deg); }}
+    50% {{ transform: translate(-1px, 2px) rotate(-1deg); }}
+    60% {{ transform: translate(-3px, 1px) rotate(0deg); }}
+    70% {{ transform: translate(3px, 1px) rotate(-1deg); }}
+    80% {{ transform: translate(-1px, -1px) rotate(1deg); }}
+    90% {{ transform: translate(1px, 2px) rotate(0deg); }}
+    100% {{ transform: translate(1px, -2px) rotate(-1deg); }}
+}}
+.shake-hard {{
+    animation: shake-hard 0.4s cubic-bezier(.36,.07,.19,.97) both;
+}}
+
+@keyframes pulse-danger {{
+    0% {{ box-shadow: 0 0 0 0 rgba(203, 32, 45, 0.7); }}
+    70% {{ box-shadow: 0 0 0 10px rgba(203, 32, 45, 0); }}
+    100% {{ box-shadow: 0 0 0 0 rgba(203, 32, 45, 0); }}
+}}
+.pulse-danger {{
+    animation: pulse-danger 1.5s infinite;
+    border: 2px solid var(--danger) !important;
+}}
+
 /* ── ORIENTATION COMPLETE BANNER ── */
 .orientation-complete {{
     background: var(--surface-0);

@@ -95,25 +95,59 @@ def RooflineVisualizer(system, profile):
     
     return apply_plotly_theme(fig)
 
-def LatencyWaterfall(profile):
+def LatencyWaterfall(profile, previous_profile=None):
     import plotly.graph_objects as go
     
     t_comp = profile.latency_compute.to('ms').magnitude
     t_mem = profile.latency_memory.to('ms').magnitude
     t_ovh = profile.latency_overhead.to('ms').magnitude
     
-    fig = go.Figure(go.Bar(
+    fig = go.Figure()
+    
+    if previous_profile:
+        pt_comp = previous_profile.latency_compute.to('ms').magnitude
+        pt_mem = previous_profile.latency_memory.to('ms').magnitude
+        pt_ovh = previous_profile.latency_overhead.to('ms').magnitude
+        
+        # Ghost trace
+        fig.add_trace(go.Bar(
+            x=['Compute', 'Memory', 'Overhead'],
+            y=[pt_comp, pt_mem, pt_ovh],
+            marker_color='rgba(148, 163, 184, 0.3)', # TextMuted with opacity
+            marker_line=dict(color='rgba(148, 163, 184, 0.8)', width=1, dash='dash'),
+            name='Previous',
+            width=0.6,
+            hoverinfo='skip'
+        ))
+        
+    fig.add_trace(go.Bar(
         x=['Compute', 'Memory', 'Overhead'],
         y=[t_comp, t_mem, t_ovh],
         marker_color=[COLORS['BlueLine'], COLORS['RedLine'], COLORS['OrangeLine']],
-        width=0.5
+        name='Current',
+        width=0.4
     ))
     
     fig.update_layout(
         height=300, yaxis=dict(title="Milliseconds (ms)"),
-        margin=dict(t=20)
+        margin=dict(t=20),
+        barmode='overlay',
+        showlegend=bool(previous_profile)
     )
     return apply_plotly_theme(fig)
+
+def FailureBanner(condition, message, animation_class="shake-hard"):
+    """Renders a visceral failure banner when a constraint is violated."""
+    if not condition:
+        return mo.md("")
+    return mo.Html(f"""
+    <div class="lab-card {animation_class}" style="background: {COLORS['RedLL']}; border-color: {COLORS['RedLine']}; margin-bottom: 16px;">
+        <div style="color: {COLORS['RedLine']}; font-weight: 800; display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 1.2rem;">⚠️</span>
+            <span>{message}</span>
+        </div>
+    </div>
+    """)
 
 def MathPeek(formula, variables):
     """A small toggle to reveal the underlying physics."""
