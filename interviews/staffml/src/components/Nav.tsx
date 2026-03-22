@@ -3,12 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Terminal, Crosshair, BarChart3, Target, BookOpen, Github, Menu, X } from "lucide-react";
+import { Terminal, Crosshair, BarChart3, Target, BookOpen, Github, Menu, X, Calendar } from "lucide-react";
 import clsx from "clsx";
 import StreakBadge from "@/components/StreakBadge";
 
 const links = [
   { href: "/", label: "Home", icon: Terminal },
+  { href: "/daily", label: "Daily", icon: Calendar },
   { href: "/gauntlet", label: "Gauntlet", icon: Crosshair },
   { href: "/heatmap", label: "Heat Map", icon: BarChart3 },
   { href: "/drill", label: "Drill", icon: Target },

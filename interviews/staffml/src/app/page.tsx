@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Crosshair, BarChart3, Target, Cpu, Network, HardDrive, Zap, ArrowRight, BookOpen, Github, Terminal, Star } from "lucide-react";
+import { Crosshair, BarChart3, Target, Cpu, Network, HardDrive, Zap, ArrowRight, BookOpen, Github, Terminal, Star, Calendar, Flame } from "lucide-react";
 import { getQuestions, getTracks, getCompetencyAreas } from "@/lib/corpus";
+import { getDueCount, getStreakData, getAttempts } from "@/lib/progress";
 
 const features = [
   {
@@ -46,6 +47,7 @@ const trackIcons: Record<string, typeof Cpu> = {
 export default function Home() {
   const [stats, setStats] = useState({ questions: 0, tracks: 0, areas: 0 });
   const [mounted, setMounted] = useState(false);
+  const [welcomeBack, setWelcomeBack] = useState<{ streak: number; dueCount: number; totalAttempts: number } | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -53,6 +55,14 @@ export default function Home() {
     const tracks = getTracks().filter(t => t !== "global");
     const areas = getCompetencyAreas();
     setStats({ questions: questions.length, tracks: tracks.length, areas: areas.length });
+
+    // Check if returning user
+    const attempts = getAttempts();
+    if (attempts.length > 0) {
+      const streakData = getStreakData();
+      const due = getDueCount();
+      setWelcomeBack({ streak: streakData.currentStreak, dueCount: due, totalAttempts: attempts.length });
+    }
   }, []);
 
   if (!mounted) {
@@ -108,6 +118,40 @@ export default function Home() {
                 <Target className="w-4 h-4" /> Quick Drill
               </Link>
             </div>
+
+            {/* Welcome back card for returning users */}
+            {welcomeBack && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+                className="mt-8 max-w-lg mx-auto p-4 rounded-xl border border-border bg-surface/80 backdrop-blur text-left"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-sm text-white font-medium">Welcome back</span>
+                  {welcomeBack.streak > 0 && (
+                    <span className="flex items-center gap-1 text-xs text-accentAmber font-mono">
+                      <Flame className="w-3.5 h-3.5" /> {welcomeBack.streak} day streak
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-textSecondary mb-3">
+                  {welcomeBack.dueCount > 0
+                    ? `You have ${welcomeBack.dueCount} questions due for review.`
+                    : `${welcomeBack.totalAttempts} questions practiced. Keep going!`}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Link href="/daily" className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-accentAmber/10 border border-accentAmber/30 text-accentAmber rounded-md text-xs font-medium hover:bg-accentAmber/20 transition-colors">
+                    <Calendar className="w-3 h-3" /> Daily Challenge
+                  </Link>
+                  {welcomeBack.dueCount > 0 && (
+                    <Link href="/drill" className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-surface border border-border text-textSecondary rounded-md text-xs font-medium hover:text-white transition-colors">
+                      Review {welcomeBack.dueCount} due
+                    </Link>
+                  )}
+                </div>
+              </motion.div>
+            )}
           </motion.div>
         </div>
       </section>
