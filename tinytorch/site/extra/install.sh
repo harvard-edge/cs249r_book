@@ -182,7 +182,7 @@ fetch_latest_version() {
     TINYTORCH_VERSION="latest"
 }
 
-# Check if Python version is 3.8+
+# Check if Python version is 3.9+
 check_python_version() {
     local python_cmd="$1"
     local version major minor
@@ -190,8 +190,8 @@ check_python_version() {
     major=$($python_cmd -c "import sys; print(sys.version_info.major)" 2>/dev/null)
     minor=$($python_cmd -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
 
-    # Check for Python 3.8+ (Required for TinyTorch)
-    if [ "$major" -eq 3 ] && [ "$minor" -ge 8 ]; then
+    # Check for Python 3.9+ (Required for TinyTorch)
+    if [ "$major" -eq 3 ] && [ "$minor" -ge 9 ]; then
         echo "$version"
         return 0
     elif [ "$major" -gt 3 ]; then
@@ -215,7 +215,7 @@ get_python_cmd() {
     if [ "$platform" = "windows" ]; then
         local candidates=("python")
     else
-        local candidates=("python3.13" "python3.12" "python3.11" "python3.10" "python3.9" "python3.8" "python3" "python")
+        local candidates=("python3.13" "python3.12" "python3.11" "python3.10" "python3.9" "python3" "python")
     fi
 
     for cmd in "${candidates[@]}"; do
@@ -274,13 +274,37 @@ check_internet() {
     print_success "GitHub reachable"
 }
 
+# Check if git version > 2.25.1
+check_git_version() {
+    local major minor rev
+    major="$(echo "$1" | cut -d '.' -f 1)" 2>/dev/null
+    minor="$(echo "$1" | cut -d '.' -f 2)" 2>/dev/null
+    rev="$(echo "$1" | cut -d '.' -f 3)" 2>/dev/null
+
+    # Check for git >= 2.25.2 (sparse url bug fixed)
+    if [ "$major" -eq 2 ] && [ "$minor" -ge 26 ]; then
+        return 0
+    elif [ "$major" -gt 3 ]; then
+        return 0
+    elif [ "$major" -eq 2 ] && [ "$minor" -eq 25 ] &&  [ "$rev" -ge 2 ] ; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 check_prerequisites() {
     local errors=0
 
     # Check for git
     if command_exists git; then
-        GIT_VERSION=$(git --version | cut -d' ' -f3)
-        print_success "Git $GIT_VERSION"
+        GIT_VERSION="$(git --version | cut -d ' ' -f3)"
+        if check_git_version "$GIT_VERSION"; then
+            print_success "Git $GIT_VERSION"
+        else
+            print_error "git version > 2.25.1 required. If you are using ubuntu LTS 20.04, please upgrade to ubuntu LTS 22.04 or clone project and extract tinytorch subdirectory manually."
+            errors=$((errors + 1))
+        fi
     else
         print_error "Git not found"
         echo "  Install: https://git-scm.com/downloads"
@@ -298,11 +322,11 @@ check_prerequisites() {
         # Diagnostic: Check if they have ANY python, just too old
         if command_exists python3; then
              CURRENT_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
-             print_error "Found Python $CURRENT_VER, but 3.8+ is required"
+             print_error "Found Python $CURRENT_VER, but 3.9+ is required"
         else
-             print_error "Python 3.8+ not found"
+             print_error "Python 3.9+ not found"
         fi
-        echo "  Install: https://python.org/downloads or 'brew install python'"
+        echo "  Install: https://python.org/downloads or 'brew install python' or 'apt install python3.9' or python 3.12"
         errors=$((errors + 1))
     fi
 
@@ -485,7 +509,7 @@ do_install() {
     # -------------------------------------------------------------------------
     echo -e "${BLUE}[2/4]${NC} Creating Python environment..."
     cd "$INSTALL_DIR"
-    
+
     # Use the detected 3.10+ command explicitly
     $PYTHON_CMD -m venv .venv
 
