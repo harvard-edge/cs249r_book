@@ -9,6 +9,7 @@ export interface Question {
   topic: string;
   scenario: string;
   competency_area: string;
+  company_archetype: string;
   details: {
     common_mistake: string;
     realistic_solution: string;
@@ -46,15 +47,22 @@ export function getCompetencyAreas(): string[] {
   return Array.from(areas).sort();
 }
 
+export function getArchetypes(): string[] {
+  const archetypes = new Set(questions.map((q) => q.company_archetype));
+  return Array.from(archetypes).sort();
+}
+
 export function getQuestionsByFilter(filters: {
   track?: string;
   level?: string;
   competency_area?: string;
+  company_archetype?: string;
 }): Question[] {
   return questions.filter((q) => {
     if (filters.track && q.track !== filters.track) return false;
     if (filters.level && q.level !== filters.level) return false;
     if (filters.competency_area && q.competency_area !== filters.competency_area) return false;
+    if (filters.company_archetype && q.company_archetype !== filters.company_archetype) return false;
     return true;
   });
 }

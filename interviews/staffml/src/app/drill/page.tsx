@@ -11,7 +11,7 @@ import clsx from "clsx";
 import HardwareRef from "@/components/HardwareRef";
 import { useToast } from "@/components/Toast";
 import {
-  getTracks, getLevels, getCompetencyAreas, getQuestionsByFilter,
+  getTracks, getLevels, getCompetencyAreas, getArchetypes, getQuestionsByFilter,
   Question, checkNapkinMath, extractFinalNumber, cleanScenario,
   NapkinResult
 } from "@/lib/corpus";
@@ -38,6 +38,7 @@ function DrillPage() {
   const [selectedTrack, setSelectedTrack] = useState("cloud");
   const [selectedLevel, setSelectedLevel] = useState("L4");
   const [selectedArea, setSelectedArea] = useState<string | null>(null);
+  const [selectedArchetype, setSelectedArchetype] = useState<string | null>(null);
 
   const [pool, setPool] = useState<Question[]>([]);
   const [current, setCurrent] = useState<Question | null>(null);
@@ -53,6 +54,7 @@ function DrillPage() {
   const tracks = getTracks().filter(t => t !== "global");
   const levels = getLevels();
   const areas = getCompetencyAreas();
+  const archetypes = getArchetypes();
 
   useEffect(() => {
     setMounted(true);
@@ -86,11 +88,12 @@ function DrillPage() {
 
   // Update pool when filters change
   useEffect(() => {
-    const filters: { track?: string; level?: string; competency_area?: string } = {
+    const filters: { track?: string; level?: string; competency_area?: string; company_archetype?: string } = {
       track: selectedTrack,
       level: selectedLevel,
     };
     if (selectedArea) filters.competency_area = selectedArea;
+    if (selectedArchetype) filters.company_archetype = selectedArchetype;
     const q = getQuestionsByFilter(filters);
     setPool(q);
     if (q.length > 0) {
@@ -101,7 +104,7 @@ function DrillPage() {
     setShowAnswer(false);
     setUserAnswer("");
     setNapkinResult(null);
-  }, [selectedTrack, selectedLevel, selectedArea]);
+  }, [selectedTrack, selectedLevel, selectedArea, selectedArchetype]);
 
   // Keyboard shortcuts: Enter to reveal, 1-4 for scoring, N to skip
   useEffect(() => {
@@ -349,6 +352,38 @@ function DrillPage() {
                 className={clsx(
                   "w-full text-left px-3 py-1.5 rounded text-xs font-medium capitalize transition-all",
                   selectedArea === a
+                    ? "bg-accentBlue/10 text-accentBlue"
+                    : "text-textSecondary hover:bg-surfaceHover"
+                )}
+              >
+                {a}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Company Archetype */}
+        <div>
+          <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Company Type</label>
+          <div className="space-y-1 max-h-40 overflow-y-auto">
+            <button
+              onClick={() => setSelectedArchetype(null)}
+              className={clsx(
+                "w-full text-left px-3 py-1.5 rounded text-xs font-medium transition-all",
+                !selectedArchetype
+                  ? "bg-accentBlue/10 text-accentBlue"
+                  : "text-textSecondary hover:bg-surfaceHover"
+              )}
+            >
+              All types
+            </button>
+            {archetypes.map(a => (
+              <button
+                key={a}
+                onClick={() => setSelectedArchetype(a)}
+                className={clsx(
+                  "w-full text-left px-3 py-1.5 rounded text-xs font-medium transition-all",
+                  selectedArchetype === a
                     ? "bg-accentBlue/10 text-accentBlue"
                     : "text-textSecondary hover:bg-surfaceHover"
                 )}
