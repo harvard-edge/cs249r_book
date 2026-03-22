@@ -182,7 +182,7 @@ fetch_latest_version() {
     TINYTORCH_VERSION="latest"
 }
 
-# Check if Python version is 3.8+
+# Check if Python version is 3.9+
 check_python_version() {
     local python_cmd="$1"
     local version major minor
@@ -190,7 +190,7 @@ check_python_version() {
     major=$($python_cmd -c "import sys; print(sys.version_info.major)" 2>/dev/null)
     minor=$($python_cmd -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
 
-    # Check for Python 3.8+ (Required for TinyTorch)
+    # Check for Python 3.9+ (Required for TinyTorch)
     if [ "$major" -eq 3 ] && [ "$minor" -ge 9 ]; then
         echo "$version"
         return 0
@@ -322,9 +322,9 @@ check_prerequisites() {
         # Diagnostic: Check if they have ANY python, just too old
         if command_exists python3; then
              CURRENT_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
-             print_error "Found Python $CURRENT_VER, but 3.8+ is required"
+             print_error "Found Python $CURRENT_VER, but 3.9+ is required"
         else
-             print_error "Python 3.8+ not found"
+             print_error "Python 3.9+ not found"
         fi
         echo "  Install: https://python.org/downloads or 'brew install python' or 'apt install python3.9' or python 3.12"
         errors=$((errors + 1))
