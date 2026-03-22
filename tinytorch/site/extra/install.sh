@@ -157,7 +157,7 @@ fetch_latest_version() {
             local tag_name
             tag_name=$(echo "$response" | grep -o "\"name\": *\"${TAG_PREFIX}[^\"]*\"" | head -1 | sed 's/.*"name": *"\([^"]*\)".*/\1/')
             if [ -n "$tag_name" ]; then
-                TINYTORCH_VERSION="${tag_name#"$TAG_PREFIX"}"
+                TINYTORCH_VERSION="${tag_name#$TAG_PREFIX}"
                 return 0
             fi
         fi
