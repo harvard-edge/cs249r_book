@@ -22,13 +22,13 @@ export default function Nav() {
       <div className="h-14 flex items-center px-4 sm:px-6 justify-between">
         <div className="flex items-center gap-4 sm:gap-8">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 group select-none" onClick={() => setMobileOpen(false)}>
-            <span
-              className="text-accentBlue font-mono font-black drop-shadow-[0_0_12px_rgba(59,130,246,0.6)]"
-              style={{ fontSize: "1.4rem", lineHeight: "1" }}
-            >
-              &gt;
-            </span>
+          <Link href="/" className="flex items-center gap-2.5 group select-none" onClick={() => setMobileOpen(false)}>
+            {/* Roofline logo mark */}
+            <svg viewBox="0 0 32 32" className="w-7 h-7 drop-shadow-[0_0_8px_rgba(59,130,246,0.4)]">
+              <path d="M5,25 L16,9 L27,9" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+              <circle cx="16" cy="9" r="2.5" fill="#3b82f6" />
+              <circle cx="16" cy="9" r="1" fill="black" />
+            </svg>
             <span className="text-white text-lg font-extrabold tracking-tight">Staff</span>
             <span className="text-white/70 text-lg font-medium tracking-tight">ML</span>
           </Link>

@@ -5,6 +5,20 @@ import Nav from "@/components/Nav";
 export const metadata: Metadata = {
   title: "StaffML — ML Systems Interview Prep",
   description: "Physics-grounded system design prep for Staff ML Engineers. 1,800+ questions across cloud, edge, mobile, and TinyML.",
+  icons: {
+    icon: "/favicon.svg",
+  },
+  openGraph: {
+    title: "StaffML — ML Systems Interview Prep",
+    description: "1,800+ physics-grounded system design questions with napkin math verification. Free, open source, backed by real hardware constants.",
+    type: "website",
+    siteName: "StaffML",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "StaffML — ML Systems Interview Prep",
+    description: "1,800+ physics-grounded questions with napkin math. Prep for Staff ML Systems interviews.",
+  },
 };
 
 export default function RootLayout({
