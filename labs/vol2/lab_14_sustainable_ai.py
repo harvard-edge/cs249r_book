@@ -264,6 +264,8 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(mo, partA_pred):
+    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_pred = mo.ui.radio(
         options={
             "A) ~2-3x -- not much variation": "2",
@@ -282,6 +284,8 @@ def _(mo, partA_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partB_pred):
+    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partC_pred = mo.ui.radio(
         options={
             "A) <5% -- hardware is a rounding error": "5",
@@ -301,6 +305,8 @@ def _(mo, partB_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partC_pred):
+    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_pred = mo.ui.number(
         start=-80, stop=200, value=-25, step=5,
         label="You double inference efficiency (cost per query halves). Demand increases 3x (elastic market). What % change in total energy? (negative = decrease)",
@@ -316,6 +322,8 @@ def _(mo, partC_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partD_pred):
+    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partE_geo = mo.ui.dropdown(
         options={"Poland (820 g/kWh)": 820, "US Average (429 g/kWh)": 429,
                  "France (56 g/kWh)": 56, "Quebec (20 g/kWh)": 20},

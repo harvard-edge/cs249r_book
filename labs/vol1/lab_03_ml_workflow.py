@@ -4,6 +4,11 @@ __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
 
+
+# ===========================================================================
+# ZONE A: OPENING
+# ===========================================================================
+
 @app.cell
 async def _():
     import marimo as mo
@@ -163,6 +168,11 @@ def _(COLORS, mo):
     return
 
 
+
+# ===========================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -197,6 +207,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, partA_prediction):
+    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partA_stage = mo.ui.slider(
         start=1, stop=6, value=5, step=1,
         label="Discovery stage (1=Problem Definition, 6=Monitoring)",
@@ -217,6 +229,8 @@ def _(mo, partA_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partB_prediction):
+    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_cycle_a = mo.ui.slider(
         start=1, stop=336, value=168, step=1,
         label="Team A cycle time (hours)",
@@ -241,6 +255,8 @@ def _(mo, partB_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partC_prediction):
+    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partC_sliders = {
         "data_collect": mo.ui.slider(start=0, stop=20, value=3, step=1,
                                       label="Data Collection (person-months)"),
@@ -269,6 +285,8 @@ def _(mo, partC_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partD_prediction):
+    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_months = mo.ui.slider(
         start=0, stop=24, value=0, step=1,
         label="Months since production launch",
@@ -934,9 +952,19 @@ where $C_0$ is the base cost at Stage 1 and $N$ is the discovery stage.
     return
 
 
+
+# ===========================================================================
+# ZONE D: LEDGER HUD
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     _track = ledger._state.track or "not set"
+    ledger.save(chapter=3, design={
+        "chapter": "v1_03",
+        "completed": True,
+    })
+
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>

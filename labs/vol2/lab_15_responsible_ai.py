@@ -239,6 +239,8 @@ def _(mo):
 # ─── CELL 5: Part B prediction + controls ─────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, partA_pred):
+    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_pred = mo.ui.number(
         start=60, stop=90, value=83, step=1,
         label="Baseline accuracy 85%. Groups: 60% vs 30% base rate. After enforcing Demographic Parity, accuracy = ?%",
@@ -250,6 +252,8 @@ def _(mo, partA_pred):
 # ─── CELL 6: Part C prediction + controls ─────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, partB_pred):
+    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partC_pred = mo.ui.radio(
         options={
             "A) ~8% -- modest growth": "8",
@@ -269,6 +273,8 @@ def _(mo, partB_pred):
 # ─── CELL 7: Part D prediction + controls ─────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, partC_pred):
+    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_pred = mo.ui.radio(
         options={
             "A) Yes -- 30+15+50 = 95ms, under budget": "yes_simple",
@@ -296,6 +302,8 @@ def _(mo, partC_pred):
 # ─── CELL 8: Part E controls ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, partD_pred):
+    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partE_sample = mo.ui.dropdown(
         options={"1% of traffic": 0.01, "5% of traffic": 0.05, "10% of traffic": 0.10},
         value="5% of traffic", label="Sampling rate:",

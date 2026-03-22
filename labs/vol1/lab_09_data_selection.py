@@ -7,6 +7,11 @@ app = marimo.App(width="full")
 # ═════════════════════════════════════════════════════════════════════════════
 # CELL 0: SETUP
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ===========================================================================
+# ZONE A: OPENING
+# ===========================================================================
+
 @app.cell
 async def _():
     import marimo as mo
@@ -179,6 +184,11 @@ def _(COLORS, mo):
 # ═════════════════════════════════════════════════════════════════════════════
 # CELL 3: READING
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ===========================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -219,6 +229,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, partA_pred):
+    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partA_frac = mo.ui.slider(
         start=5, stop=100, value=100, step=5,
         label="Dataset fraction (%)",
@@ -244,6 +256,8 @@ def _(mo, partA_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partB_pred):
+    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_coreset = mo.ui.slider(
         start=10, stop=90, value=50, step=5,
         label="Coreset fraction (%)",
@@ -280,6 +294,8 @@ def _(mo, partB_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partC_pred):
+    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partC_workers = mo.ui.slider(
         start=1, stop=16, value=8, step=1,
         label="CPU workers",
@@ -314,6 +330,8 @@ def _(mo, partC_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partD_pred):
+    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_params_b = mo.ui.slider(
         start=0.5, stop=50, value=10, step=0.5,
         label="Model size (B parameters)",
@@ -1065,6 +1083,11 @@ Regime:    {_regime} (D/20N = {_ratio:.2f})
 # ═════════════════════════════════════════════════════════════════════════════
 # CELL 5: LEDGER HUD
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ===========================================================================
+# ZONE D: LEDGER HUD
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     ledger.save(chapter=9, design={"lab": "data_selection", "completed": True})

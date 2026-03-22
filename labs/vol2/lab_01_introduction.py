@@ -4,6 +4,11 @@ __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
 
+
+# ===========================================================================
+# ZONE A: OPENING
+# ===========================================================================
+
 @app.cell
 async def _():
     import marimo as mo
@@ -200,6 +205,11 @@ def _(mo):
     return
 
 
+
+# ===========================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(
     COLORS,
@@ -235,6 +245,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, partA_prediction):
+    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partA_fleet_size = mo.ui.slider(
         start=100, stop=25000, value=1000, step=100,
         label="Fleet size (GPUs)",
@@ -259,6 +271,8 @@ def _(mo, partA_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partB_prediction):
+    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_gpu_count = mo.ui.slider(
         start=1, stop=1024, value=256, step=1, label="Number of GPUs",
     )
@@ -290,6 +304,8 @@ def _(mo, partB_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partC_prediction):
+    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partC_params = mo.ui.slider(start=1, stop=100, value=10, step=1, label="Model params (B)")
     partC_tokens = mo.ui.slider(start=10, stop=10000, value=200, step=10, label="Training tokens (B)")
 
@@ -308,6 +324,8 @@ def _(mo, partC_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partD_prediction):
+    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_comm_frac = mo.ui.slider(start=0.01, stop=0.50, value=0.20, step=0.01, label="Communication fraction (r)")
     partD_n_gpus = mo.ui.slider(start=1, stop=512, value=64, step=1, label="Number of GPUs")
     partD_overlap = mo.ui.slider(start=0, stop=80, value=0, step=10, label="Overlap (%)")
@@ -1036,9 +1054,19 @@ at fleet scale, the bandwidth staircase, and the hidden cost of ownership.
     return
 
 
+
+# ===========================================================================
+# ZONE D: LEDGER HUD
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     _track = ledger._state.track or "not set"
+    ledger.save(chapter=1, design={
+        "chapter": "v2_01",
+        "completed": True,
+    })
+
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>

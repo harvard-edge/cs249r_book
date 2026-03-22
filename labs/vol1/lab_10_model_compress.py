@@ -7,6 +7,11 @@ app = marimo.App(width="full")
 # ═════════════════════════════════════════════════════════════════════════════
 # CELL 0: SETUP
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ===========================================================================
+# ZONE A: OPENING
+# ===========================================================================
+
 @app.cell
 async def _():
     import marimo as mo
@@ -187,6 +192,11 @@ def _(COLORS, mo):
 # ═════════════════════════════════════════════════════════════════════════════
 # CELL 3: READING
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ===========================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -227,6 +237,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, pA_pred):
+    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pA_precision = mo.ui.dropdown(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8", "INT4": "int4", "INT2": "int2"},
         value="FP32",
@@ -252,6 +264,8 @@ def _(mo, pA_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pB_pred):
+    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pB_sparsity = mo.ui.slider(start=0, stop=95, value=0, step=5, label="Sparsity (%)")
     pB_type = mo.ui.dropdown(
         options={"Unstructured": "unstructured", "Structured": "structured", "2:4 Structured": "2_4"},
@@ -272,6 +286,8 @@ def _(mo, pB_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pC_pred):
+    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pD_pred = mo.ui.radio(
         options={
             "A) 50/50 -- balanced": "50_50",
@@ -285,6 +301,8 @@ def _(mo, pC_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pD_pred):
+    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pD_precision_e = mo.ui.dropdown(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8", "INT4": "int4"},
         value="FP32",
@@ -309,6 +327,8 @@ def _(mo, pD_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pE_pred):
+    mo.stop(pE_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pE_temp = mo.ui.slider(start=1.0, stop=20.0, value=4.0, step=0.5, label="Temperature")
 
     # ─────────────────────────────────────────────────────────────────────
@@ -997,6 +1017,11 @@ Size ratio:      {_teacher_size/_student_size:.0f}x smaller (INT8 student vs FP3
 # ═════════════════════════════════════════════════════════════════════════════
 # CELL 5: LEDGER HUD
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ===========================================================================
+# ZONE D: LEDGER HUD
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     ledger.save(chapter=10, design={"lab": "model_compress", "completed": True})

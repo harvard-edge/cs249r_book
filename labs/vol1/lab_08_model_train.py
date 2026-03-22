@@ -233,6 +233,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, partA_prediction):
+    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partA_model_size = mo.ui.slider(
         start=0.1, stop=70, value=7, step=0.1, label="Model size (billions of params)",
     )
@@ -261,6 +263,8 @@ def _(mo, partA_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partB_prediction):
+    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_data_ms = mo.ui.slider(
         start=1, stop=100, value=50, step=1, label="Data loading (ms)",
     )
@@ -289,6 +293,8 @@ def _(mo, partB_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partC_prediction):
+    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partC_model_c = mo.ui.slider(
         start=0.1, stop=13, value=1.5, step=0.1, label="Model size (billions)",
     )
@@ -312,6 +318,8 @@ def _(mo, partC_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partD_prediction):
+    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_gpus = mo.ui.slider(
         start=1, stop=256, value=8, step=1, label="Number of GPUs",
     )
@@ -1093,6 +1101,11 @@ You must train a 7B parameter model on H100 GPUs. Using numbers from this lab:
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     _track = ledger._state.track or "not set"
+    ledger.save(chapter=8, design={
+        "chapter": "v1_08",
+        "completed": True,
+    })
+
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>

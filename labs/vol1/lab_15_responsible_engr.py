@@ -4,6 +4,11 @@ __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
 
+
+# ===========================================================================
+# ZONE A: OPENING
+# ===========================================================================
+
 @app.cell
 async def _():
     import marimo as mo
@@ -142,6 +147,11 @@ def _(COLORS, mo):
     return
 
 
+
+# ===========================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -173,6 +183,8 @@ def _(COLORS, H100_TDP_W, apply_plotly_theme, go, math, mo, np):
 
 @app.cell(hide_code=True)
 def _(mo, partA_pred):
+    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partA_base_a = mo.ui.slider(start=5, stop=50, value=30, step=5,
                                  label="Group A base rate (%)")
     partA_base_b = mo.ui.slider(start=5, stop=50, value=10, step=5,
@@ -194,6 +206,8 @@ def _(mo, partA_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partB_pred):
+    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_target_gap = mo.ui.slider(start=0, stop=20, value=5, step=1,
                                      label="Target FPR gap (pp)")
     partB_method = mo.ui.dropdown(
@@ -215,6 +229,8 @@ def _(mo, partB_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partC_pred):
+    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partC_features = mo.ui.slider(start=10, stop=200, value=50, step=10,
                                    label="Number of features")
     partC_method = mo.ui.dropdown(
@@ -236,6 +252,8 @@ def _(mo, partC_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partD_pred):
+    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_retrain_freq = mo.ui.dropdown(
         options={"Weekly": 52, "Monthly": 12, "Quarterly": 4, "Once": 1},
         value="Weekly", label="Retraining frequency")
@@ -795,9 +813,19 @@ collapses into one deployment decision.
     return
 
 
+
+# ===========================================================================
+# ZONE D: LEDGER HUD
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     _track = ledger.get_track()
+    ledger.save(chapter=15, design={
+        "chapter": "v1_15",
+        "completed": True,
+    })
+
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span><span class="hud-value">15 &mdash; Responsible Engineering</span>

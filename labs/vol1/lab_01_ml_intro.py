@@ -278,6 +278,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, partA_prediction):
+    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partA_scenario = mo.ui.dropdown(
         options={
             "Rec System: stale training data": "stale_data",
@@ -312,6 +314,8 @@ def _(mo, partA_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partB_prediction):
+    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_batch = mo.ui.slider(
         start=1, stop=256, value=1, step=1, label="Batch size",
     )
@@ -331,6 +335,8 @@ def _(mo, partB_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partC_prediction):
+    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partC_target = mo.ui.radio(
         options={
             "H100 (Cloud)": "h100",
@@ -357,6 +363,8 @@ def _(mo, partC_prediction):
 
 @app.cell(hide_code=True)
 def _(DecisionLog, mo, partD_prediction):
+    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_scale = mo.ui.radio(
         options={"Linear scale": "linear", "Log scale": "log"},
         value="Linear scale",

@@ -7,6 +7,11 @@ app = marimo.App(width="full")
 # ═════════════════════════════════════════════════════════════════════════════
 # CELL 0: SETUP
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ===========================================================================
+# ZONE A: OPENING
+# ===========================================================================
+
 @app.cell
 async def _():
     import marimo as mo
@@ -178,6 +183,11 @@ def _(COLORS, mo):
 # ═════════════════════════════════════════════════════════════════════════════
 # CELL 3: READING
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ===========================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -215,6 +225,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, pA_pred):
+    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pA_speedup = mo.ui.slider(start=1, stop=100, value=10, step=1, label="Inference speedup (x)")
     pA_serial = mo.ui.slider(start=5, stop=80, value=45, step=5, label="Non-inference fraction (%)")
 
@@ -232,6 +244,8 @@ def _(mo, pA_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pB_pred):
+    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pB_time = mo.ui.slider(start=0, stop=600, value=0, step=10, label="Time (seconds)")
     pB_ambient = mo.ui.slider(start=20, stop=45, value=35, step=1, label="Ambient temp (C)")
     pB_cooling = mo.ui.dropdown(
@@ -253,6 +267,8 @@ def _(mo, pB_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pC_pred):
+    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pC_batch = mo.ui.slider(start=1, stop=64, value=1, step=1, label="Batch size")
     pC_precision = mo.ui.dropdown(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8"},
@@ -273,6 +289,8 @@ def _(mo, pC_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pD_pred):
+    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pD_sigma = mo.ui.slider(start=0.1, stop=1.5, value=0.8, step=0.05, label="Tail heaviness (sigma)")
     pD_slo = mo.ui.slider(start=50, stop=500, value=200, step=10, label="SLO threshold (ms)")
 
@@ -928,6 +946,11 @@ SLO ({_slo} ms): {"PASS" if _slo_ok else "FAIL"} ({_violation_pct:.1f}% violatio
 # ═════════════════════════════════════════════════════════════════════════════
 # CELL 5: LEDGER HUD
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ===========================================================================
+# ZONE D: LEDGER HUD
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     ledger.save(chapter=12, design={"lab": "perf_bench", "completed": True})

@@ -4,6 +4,11 @@ __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
 
+
+# ===========================================================================
+# ZONE A: OPENING
+# ===========================================================================
+
 @app.cell
 async def _():
     import marimo as mo
@@ -164,6 +169,11 @@ def _(COLORS, mo):
     return
 
 
+
+# ===========================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -199,6 +209,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, partA_prediction):
+    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partA_storage = mo.ui.dropdown(
         options={
             "HDD (100 MB/s)": 100, "SSD (250 MB/s)": 250,
@@ -226,6 +238,8 @@ def _(mo, partA_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partB_prediction):
+    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_dataset = mo.ui.slider(
         start=1, stop=500, value=50, step=1,
         label="Dataset size (TB)",
@@ -250,6 +264,8 @@ def _(mo, partB_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partC_prediction):
+    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partC_error_rate = mo.ui.slider(
         start=0.5, stop=10.0, value=2.0, step=0.5,
         label="Ingestion error rate (%)",
@@ -274,6 +290,8 @@ def _(mo, partC_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partD_prediction):
+    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_tolerance = mo.ui.slider(
         start=1, stop=50, value=1, step=1,
         label="False wake-ups per month (tolerance)",
@@ -914,9 +932,19 @@ def _(mo, partD_prediction):
     return
 
 
+
+# ===========================================================================
+# ZONE D: LEDGER HUD
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     _track = ledger._state.track or "not set"
+    ledger.save(chapter=4, design={
+        "chapter": "v1_04",
+        "completed": True,
+    })
+
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>

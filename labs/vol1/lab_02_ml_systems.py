@@ -287,6 +287,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, partA_prediction):
+    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partA_ai = mo.ui.slider(
         start=1, stop=400, value=5, step=1,
         label="Arithmetic Intensity (FLOPs/Byte)",
@@ -308,6 +310,8 @@ def _(mo, partA_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partB_prediction):
+    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_distance = mo.ui.slider(
         start=0, stop=5000, value=1500, step=50,
         label="Datacenter distance (km)",
@@ -333,6 +337,8 @@ def _(mo, partB_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partC_prediction):
+    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partC_target = mo.ui.dropdown(
         options={
             "Cloud (300W TDP)": "cloud",
@@ -368,6 +374,8 @@ def _(mo, partC_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partD_prediction):
+    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_data_size = mo.ui.slider(
         start=1, stop=1024, value=16, step=1,
         label="Data size (KB)",
@@ -1107,6 +1115,11 @@ $$t_{{\\text{{prop}}}} = \\frac{{2d}}{{c \\cdot n}} = \\frac{{2 \\times 1500}}{{
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     _track = ledger._state.track or "not set"
+    ledger.save(chapter=2, design={
+        "chapter": "v1_02",
+        "completed": True,
+    })
+
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>

@@ -215,6 +215,8 @@ def _(mo):
 # ─── CELL 5: Part B prediction + controls ────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, partA_prediction):
+    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_prediction = mo.ui.radio(
         options={
             "A) Yes -- a good scheduler can achieve all three simultaneously": "A",

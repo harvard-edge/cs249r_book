@@ -231,6 +231,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, partA_prediction):
+    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partA_arch = mo.ui.radio(
         options={"MLP (no structure)": "mlp", "CNN 3x3": "cnn3", "CNN 5x5": "cnn5"},
         value="MLP (no structure)", label="Architecture:", inline=True,
@@ -254,6 +256,8 @@ def _(mo, partA_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partB_prediction):
+    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_seq_len = mo.ui.slider(
         start=512, stop=131072, value=4096, step=512, label="Sequence length (tokens)",
     )
@@ -276,6 +280,8 @@ def _(mo, partB_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partC_prediction):
+    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partC_depth = mo.ui.slider(
         start=2, stop=128, value=64, step=2, label="Depth (layers)",
     )
@@ -298,6 +304,8 @@ def _(mo, partC_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partD_prediction):
+    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_batch_d = mo.ui.slider(
         start=1, stop=256, value=1, step=1, label="Batch size",
     )
@@ -1054,6 +1062,11 @@ Using the four analyses from this lab, justify:
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     _track = ledger._state.track or "not set"
+    ledger.save(chapter=6, design={
+        "chapter": "v1_06",
+        "completed": True,
+    })
+
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>

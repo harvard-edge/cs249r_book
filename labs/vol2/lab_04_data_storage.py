@@ -4,6 +4,11 @@ __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
 
+
+# ===========================================================================
+# ZONE A: OPENING
+# ===========================================================================
+
 @app.cell
 async def _():
     import marimo as mo
@@ -169,6 +174,11 @@ def _(COLORS, mo):
     return
 
 
+
+# ===========================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -204,6 +214,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, pA_pred):
+    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pA_gen = mo.ui.dropdown(
         options={"V100 (2017)": "v100", "A100 (2020)": "a100", "H100 (2022)": "h100", "B200 (2024)": "b200"},
         value="H100 (2022)", label="GPU generation",
@@ -222,6 +234,8 @@ def _(mo, pA_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pB_pred):
+    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pB_gpus = mo.ui.slider(start=8, stop=1024, value=128, step=8, label="GPU count")
     pB_target = mo.ui.slider(start=50, stop=95, value=80, step=5, label="Target utilization (%)")
 
@@ -238,6 +252,8 @@ def _(mo, pB_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pC_pred):
+    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pC_workers = mo.ui.slider(start=8, stop=256, value=256, step=8, label="GPU workers")
     pC_shards = mo.ui.slider(start=100, stop=10000, value=1000, step=100, label="Dataset shards")
 
@@ -254,6 +270,8 @@ def _(mo, pC_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pD_pred):
+    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pD_compute = mo.ui.slider(start=100, stop=500, value=200, step=10, label="Compute time (ms)")
     pD_io = mo.ui.slider(start=50, stop=1000, value=300, step=10, label="I/O time (ms)")
     pD_prefetch = mo.ui.slider(start=0, stop=8, value=0, step=1, label="Prefetch depth")
@@ -271,6 +289,8 @@ def _(mo, pD_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pE_pred):
+    mo.stop(pE_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pE_mtbf = mo.ui.slider(start=1, stop=24, value=5, step=1, label="Cluster MTBF (hours)")
     pE_write = mo.ui.slider(start=30, stop=300, value=120, step=10, label="Checkpoint write time (s)")
     pE_interval = mo.ui.slider(start=1, stop=120, value=30, step=1, label="Checkpoint interval (min)")
@@ -872,9 +892,19 @@ and 3D parallelism maps strategies to the bandwidth hierarchy.
     return
 
 
+
+# ===========================================================================
+# ZONE D: LEDGER HUD
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     _track = ledger._state.track or "not set"
+    ledger.save(chapter=4, design={
+        "chapter": "v2_04",
+        "completed": True,
+    })
+
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>

@@ -4,6 +4,11 @@ __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
 
+
+# ===========================================================================
+# ZONE A: OPENING
+# ===========================================================================
+
 @app.cell
 async def _():
     import marimo as mo
@@ -169,6 +174,11 @@ def _(COLORS, mo):
     return
 
 
+
+# ===========================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -205,6 +215,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, pA_pred):
+    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pA_model = mo.ui.dropdown(
         options={"1B": 1, "7B": 7, "13B": 13, "70B": 70, "175B": 175},
         value="70B", label="Model params (B)",
@@ -231,6 +243,8 @@ def _(mo, pA_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pB_pred):
+    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pB_msg_exp = mo.ui.slider(start=0, stop=10, value=0, step=1, label="Message size (10^x KB)")
     pB_n_gpus = mo.ui.dropdown(
         options={"64": 64, "256": 256, "1024": 1024},
@@ -250,6 +264,8 @@ def _(mo, pB_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pC_pred):
+    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pC_topo = mo.ui.dropdown(
         options={"Flat Ring": "flat", "Hierarchical 2-level": "hier2"},
         value="Flat Ring", label="Topology",
@@ -274,6 +290,8 @@ def _(mo, pC_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pD_pred):
+    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pD_comp = mo.ui.dropdown(
         options={"None": 1.0, "FP16 (2x)": 0.5, "INT8 (4x)": 0.25, "Top-K 1%": 0.01, "1-bit": 0.03125},
         value="None", label="Compression method",
@@ -294,6 +312,8 @@ def _(mo, pD_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pE_pred):
+    mo.stop(pE_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pE_hier = mo.ui.checkbox(label="Hierarchical AllReduce")
     pE_fp16 = mo.ui.checkbox(label="FP16 gradients")
     pE_bucket = mo.ui.checkbox(label="Bucket fusion")
@@ -902,9 +922,19 @@ shard contention, prefetching limits, and checkpoint economics.
     return
 
 
+
+# ===========================================================================
+# ZONE D: LEDGER HUD
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     _track = ledger._state.track or "not set"
+    ledger.save(chapter=3, design={
+        "chapter": "v2_03",
+        "completed": True,
+    })
+
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>

@@ -4,6 +4,11 @@ __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
 
+
+# ===========================================================================
+# ZONE A: OPENING
+# ===========================================================================
+
 @app.cell
 async def _():
     import marimo as mo
@@ -150,6 +155,11 @@ def _(COLORS, mo):
     return
 
 
+
+# ===========================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -182,6 +192,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, partA_pred):
+    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partA_model = mo.ui.dropdown(options={"7B": 7, "13B": 13, "70B": 70}, value="70B",
                                   label="Model size")
     partA_prec = mo.ui.dropdown(
@@ -203,6 +215,8 @@ def _(mo, partA_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partB_pred):
+    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_quant = mo.ui.dropdown(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8", "INT4": "int4"},
         value="INT8", label="Quantization level")
@@ -230,6 +244,8 @@ def _(mo, partB_pred):
 def _(mo, partC_pred):
 
     # ── Part D widgets ────────────────────────────────────────────────────────
+    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_pred = mo.ui.radio(
         options={
             "A) Preprocessing (largest non-inference)": "preprocess",
@@ -244,6 +260,8 @@ def _(mo, partC_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partD_pred):
+    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_preprocess = mo.ui.slider(start=5, stop=50, value=35, step=5,
                                      label="Preprocessing (%)")
     partD_inference = mo.ui.slider(start=5, stop=60, value=40, step=5,
@@ -273,6 +291,8 @@ def _(mo, partD_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partE_pred):
+    mo.stop(partE_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partE_int4 = mo.ui.checkbox(label="INT4 Quantization", value=False)
     partE_pruning = mo.ui.checkbox(label="Structured Pruning (50%)", value=False)
     partE_distill = mo.ui.checkbox(label="Knowledge Distillation", value=False)
@@ -894,9 +914,19 @@ are no longer enough, and you must reason about networks, fault tolerance, and c
     return
 
 
+
+# ===========================================================================
+# ZONE D: LEDGER HUD
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     _track = ledger.get_track()
+    ledger.save(chapter=16, design={
+        "chapter": "v1_16",
+        "completed": True,
+    })
+
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span><span class="hud-value">16 &mdash; Architect's Audit (Capstone)</span>

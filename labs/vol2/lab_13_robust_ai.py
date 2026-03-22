@@ -274,6 +274,8 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(mo, partA_pred):
+    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_pred = mo.ui.radio(
         options={
             "A) ~0.1% -- very rare": "0.1",
@@ -294,6 +296,8 @@ def _(mo, partA_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partB_pred):
+    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partC_pred = mo.ui.number(
         start=20, stop=95, value=85, step=1,
         label="A model deployed without monitoring degrades from 76% over 6 months. What accuracy (%) remains?",
@@ -319,6 +323,8 @@ def _(mo, partB_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partC_pred):
+    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_pred = mo.ui.radio(
         options={
             "A) Adversarial training -- direct defense is always cheapest": "adv_train",
@@ -342,6 +348,8 @@ def _(mo, partC_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partD_pred):
+    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partE_eps_slider = mo.ui.slider(
         start=0, stop=16, value=4, step=1,
         label="Adversarial perturbation (eps, in units of /255)",

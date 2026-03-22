@@ -4,6 +4,11 @@ __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
 
+
+# ===========================================================================
+# ZONE A: OPENING
+# ===========================================================================
+
 @app.cell
 async def _():
     import marimo as mo
@@ -161,6 +166,11 @@ def _(COLORS, mo):
     return
 
 
+
+# ===========================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -195,6 +205,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, partA_pred):
+    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partA_rho = mo.ui.slider(start=0.10, stop=0.95, value=0.80, step=0.05,
                               label="Server utilization (rho)")
     partA_svc = mo.ui.slider(start=1.0, stop=20.0, value=5.0, step=1.0,
@@ -216,6 +228,8 @@ def _(mo, partA_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partB_pred):
+    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partB_batch = mo.ui.slider(start=1, stop=64, value=1, step=1, label="Batch size")
     partB_arr = mo.ui.slider(start=100, stop=2000, value=500, step=50, label="Arrival rate (QPS)")
     partB_slo = mo.ui.slider(start=10, stop=100, value=50, step=5, label="SLO budget (ms)")
@@ -234,6 +248,8 @@ def _(mo, partB_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partC_pred):
+    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partC_model = mo.ui.dropdown(options={"7B": 7, "13B": 13, "70B": 70}, value="70B",
                                   label="Model size")
     partC_prec = mo.ui.dropdown(
@@ -259,6 +275,8 @@ def _(mo, partC_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partD_pred):
+    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partD_model = mo.ui.dropdown(options={"7B": 7, "13B": 13, "70B": 70}, value="70B",
                                   label="Model size")
     partD_stor = mo.ui.dropdown(
@@ -825,10 +843,20 @@ degrades while all infrastructure metrics stay green.
     return
 
 
+
+# ===========================================================================
+# ZONE D: LEDGER HUD
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     _ch = ledger._state.history.get(13, {})
     _track = ledger.get_track()
+    ledger.save(chapter=13, design={
+        "chapter": "v1_13",
+        "completed": True,
+    })
+
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span><span class="hud-value">13 &mdash; Model Serving</span>

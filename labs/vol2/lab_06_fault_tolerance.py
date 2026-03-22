@@ -207,6 +207,8 @@ def _(mo):
 # ─── CELL 5: PART A REFLECTION + PART B PREDICTION WIDGETS ──────────────────
 @app.cell(hide_code=True)
 def _(mo, partA_prediction):
+    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partA_reflection = mo.ui.radio(
         options={
             "A) Double the checkpoint frequency to protect against failures": "A",
@@ -232,6 +234,8 @@ def _(mo, partA_prediction):
 # ─── CELL 6: PART B CONTROLS + SYNTHESIS WIDGETS ────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, partB_prediction):
+    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     a2_model_b = mo.ui.slider(start=1, stop=175, value=175, step=1, label="Model size (B params)")
     a2_cluster_gpus = mo.ui.slider(start=100, stop=25000, value=1000, step=100, label="Cluster GPUs")
     a2_storage = mo.ui.dropdown(
@@ -899,6 +903,8 @@ def _(
 # ─── CELL 9: LEDGER_HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, partA_prediction, partB_prediction, mo):
+    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     _a1_ok = partA_prediction.value == "C"
     _a2_ok = partB_prediction.value == "C"
     _tier = "Optimal" if (_a1_ok and _a2_ok) else ("Partial" if (_a1_ok or _a2_ok) else "Developing")

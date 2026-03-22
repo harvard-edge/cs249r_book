@@ -4,6 +4,11 @@ __generated_with = "0.19.6"
 app = marimo.App(width="full")
 
 
+
+# ===========================================================================
+# ZONE A: OPENING
+# ===========================================================================
+
 @app.cell
 async def _():
     import marimo as mo
@@ -200,6 +205,11 @@ def _(COLORS, mo):
     return
 
 
+
+# ===========================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -239,6 +249,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo, pA_pred):
+    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pA_model = mo.ui.dropdown(
         options={"7B": 7, "70B": 70, "175B": 175},
         value="70B", label="Model size (B params)",
@@ -258,6 +270,8 @@ def _(mo, pA_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pB_pred):
+    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pB_hw = mo.ui.dropdown(
         options={"V100": "v100", "A100": "a100", "H100": "h100", "B200": "b200"},
         value="H100", label="Accelerator",
@@ -276,6 +290,8 @@ def _(mo, pB_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pC_pred):
+    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pC_size = mo.ui.slider(start=1, stop=10000, value=10000, step=100, label="Transfer size (MB)")
 
     pD_pred = mo.ui.radio(
@@ -292,6 +308,8 @@ def _(mo, pC_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pD_pred):
+    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pD_model_b = mo.ui.slider(start=1, stop=175, value=175, step=1, label="Model params (B)")
     pD_gpus = mo.ui.slider(start=1, stop=8, value=8, step=1, label="GPUs per node")
     pD_zero = mo.ui.dropdown(
@@ -312,6 +330,8 @@ def _(mo, pD_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pE_pred):
+    mo.stop(pE_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     pE_n_gpus = mo.ui.slider(start=100, stop=5000, value=1000, step=100, label="GPU count")
     pE_util = mo.ui.slider(start=30, stop=90, value=70, step=5, label="Utilization (%)")
     pE_pue = mo.ui.slider(start=1.06, stop=1.60, value=1.12, step=0.02, label="PUE")
@@ -919,9 +939,19 @@ AllReduce, hierarchical communication, and gradient compression.
     return
 
 
+
+# ===========================================================================
+# ZONE D: LEDGER HUD
+# ===========================================================================
+
 @app.cell(hide_code=True)
 def _(COLORS, ledger, mo):
     _track = ledger._state.track or "not set"
+    ledger.save(chapter=2, design={
+        "chapter": "v2_02",
+        "completed": True,
+    })
+
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>
