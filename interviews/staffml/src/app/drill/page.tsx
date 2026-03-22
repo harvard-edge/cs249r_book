@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import HardwareRef from "@/components/HardwareRef";
+import { useToast } from "@/components/Toast";
 import {
   getTracks, getLevels, getCompetencyAreas, getQuestionsByFilter,
   Question, checkNapkinMath, extractFinalNumber, cleanScenario,
@@ -32,6 +33,7 @@ export default function DrillPageWrapper() {
 
 function DrillPage() {
   const searchParams = useSearchParams();
+  const { show: showToast } = useToast();
   const [mounted, setMounted] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState("cloud");
   const [selectedLevel, setSelectedLevel] = useState("L4");
@@ -177,7 +179,14 @@ function DrillPage() {
       });
       // Update spaced repetition card + streak
       updateSRCard(current.id, finalScore);
-      recordActivity();
+      const activity = recordActivity();
+      if (activity.newMilestone) {
+        showToast({
+          type: 'badge',
+          title: activity.newMilestone,
+          description: `${activity.streak.currentStreak} day streak!`,
+        });
+      }
       setQuestionsAnswered(prev => prev + 1);
       setDueCount(getDueCount());
     }

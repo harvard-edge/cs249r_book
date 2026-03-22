@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Nav from "@/components/Nav";
+import Providers from "@/components/Providers";
 
 export const metadata: Metadata = {
   title: "StaffML — ML Systems Interview Prep",
@@ -34,8 +35,10 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
       </head>
       <body className="antialiased min-h-screen flex flex-col bg-black selection:bg-accentBlue/30 selection:text-white">
-        <Nav />
-        <main className="flex-1 flex flex-col">{children}</main>
+        <Providers>
+          <Nav />
+          <main className="flex-1 flex flex-col">{children}</main>
+        </Providers>
       </body>
     </html>
   );

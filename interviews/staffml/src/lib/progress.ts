@@ -243,13 +243,18 @@ export function getStreakData(): StreakData {
   });
 }
 
-export function recordActivity(): StreakData {
+export interface ActivityResult {
+  streak: StreakData;
+  newMilestone: string | null; // non-null if a new milestone was just reached
+}
+
+export function recordActivity(): ActivityResult {
   const data = getStreakData();
   const today = getToday();
   const yesterday = getYesterday();
 
   // Already recorded today
-  if (data.lastActiveDate === today) return data;
+  if (data.lastActiveDate === today) return { streak: data, newMilestone: null };
 
   // Extend streak if active yesterday or starting fresh today
   if (data.lastActiveDate === yesterday) {
@@ -271,7 +276,13 @@ export function recordActivity(): StreakData {
   }
 
   setStorage(STREAK_KEY, data);
-  return data;
+
+  // Check if a new milestone was just reached
+  const prevMilestone = getStreakMilestone(data.currentStreak - 1);
+  const currMilestone = getStreakMilestone(data.currentStreak);
+  const newMilestone = currMilestone !== prevMilestone ? currMilestone : null;
+
+  return { streak: data, newMilestone };
 }
 
 export function getStreakMilestone(streak: number): string | null {
