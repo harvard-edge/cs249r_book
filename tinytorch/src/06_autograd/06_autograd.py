@@ -2264,6 +2264,73 @@ class CrossEntropyBackward(Function):
         ### END SOLUTION
 
 
+# %% nbgrader={"grade": false, "grade_id": "no-grad-context", "solution": true}
+#| export
+# ===== Global Gradient Tracking Flag =====
+# Why this exists: During inference or parameter updates, we don't need to build
+# computation graphs. Skipping graph construction saves memory and time.
+# This matches PyTorch's torch.no_grad() behavior.
+_GRAD_TRACKING_ENABLED = True
+
+
+def is_grad_enabled():
+    """Check if gradient tracking is currently enabled.
+
+    Returns True when operations should build computation graphs,
+    False when inside a no_grad() context.
+    """
+    return _GRAD_TRACKING_ENABLED
+
+
+class no_grad:
+    """Context manager that disables gradient tracking.
+
+    When entering this context, all operations will skip computation graph
+    construction — tensors produced inside will have requires_grad=False
+    regardless of their inputs. This is essential for:
+
+    1. **Inference**: No need to track gradients when making predictions
+    2. **Parameter updates**: Optimizers modify weights without recording history
+    3. **Memory savings**: Skipping graph construction reduces memory usage
+
+    Matches PyTorch's torch.no_grad() API.
+
+    **Example:**
+    ```python
+    x = Tensor([2.0], requires_grad=True)
+
+    with no_grad():
+        y = x * 2  # No graph built, y.requires_grad = False
+
+    z = x * 3  # Graph IS built (outside no_grad)
+    z.backward()  # Works normally
+    ```
+
+    **Nesting is safe:**
+    ```python
+    with no_grad():
+        with no_grad():  # Inner context
+            y = x * 2    # Still no graph
+        z = x * 3        # Still no graph (outer context active)
+    w = x * 4  # Graph IS built (all contexts exited)
+    ```
+    """
+
+    def __enter__(self):
+        """Save previous state and disable gradient tracking."""
+        global _GRAD_TRACKING_ENABLED
+        # Save previous state so nested contexts restore correctly
+        self._prev_state = _GRAD_TRACKING_ENABLED
+        _GRAD_TRACKING_ENABLED = False
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Restore previous gradient tracking state."""
+        global _GRAD_TRACKING_ENABLED
+        _GRAD_TRACKING_ENABLED = self._prev_state
+        return False  # Don't suppress exceptions
+
+
 # %% nbgrader={"grade": false, "grade_id": "enable-autograd", "solution": true}
 #| export
 def enable_autograd(quiet=False):
@@ -2335,7 +2402,13 @@ def enable_autograd(quiet=False):
 
     # Helper to safely check requires_grad (handles tensors created before enable_autograd)
     def _get_requires_grad(tensor):
-        """Safely get requires_grad, defaulting to False for pre-autograd tensors."""
+        """Safely get requires_grad, defaulting to False for pre-autograd tensors.
+
+        Also returns False when inside a no_grad() context, since we should
+        not build computation graphs there.
+        """
+        if not _GRAD_TRACKING_ENABLED:
+            return False
         return getattr(tensor, 'requires_grad', False) if isinstance(tensor, Tensor) else False
 
     def _ensure_grad_attrs(tensor):
@@ -2550,7 +2623,7 @@ def enable_autograd(quiet=False):
 
         return result
 
-    def backward(self, gradient=None):
+    def backward(self, gradient=None, retain_graph=False):
         """
         Compute gradients via backpropagation.
 
@@ -2562,13 +2635,28 @@ def enable_autograd(quiet=False):
         2. Accumulate gradient in self.grad
         3. If this tensor has a _grad_fn, call it to propagate gradients
         4. Recursively call backward() on parent tensors
+        5. Release computation graph (unless retain_graph=True)
+
+        **Args:**
+            gradient: External gradient to seed backpropagation. If None, assumes
+                scalar output and uses ones_like as the seed.
+            retain_graph: If False (default), releases the computation graph after
+                backward to free memory. Set True if you need to call backward()
+                multiple times on the same graph (e.g., for higher-order gradients).
+                Matches PyTorch's retain_graph parameter.
 
         **Example:**
         ```python
         x = Tensor([2.0], requires_grad=True)
         y = x * 3
-        y.backward()  # Computes gradients for x
+        y.backward()  # Computes gradients for x, then releases graph
         print(x.grad)  # [3.0]
+        # y.backward()  # Would fail — graph already released!
+
+        # To backward twice, use retain_graph=True:
+        y2 = x * 3
+        y2.backward(retain_graph=True)  # Graph kept alive
+        y2.backward()  # Works! (releases graph this time)
         ```
         """
         # Ensure gradient attributes exist
@@ -2619,7 +2707,14 @@ def enable_autograd(quiet=False):
             # Recursively call backward on parent tensors
             for tensor, grad in zip(grad_fn.saved_tensors, grads):
                 if isinstance(tensor, Tensor) and tensor.requires_grad and grad is not None:
-                    tensor.backward(grad)
+                    tensor.backward(grad, retain_graph=retain_graph)
+
+            # Release computation graph to free memory (matches PyTorch's default)
+            # Why: The graph stores references to all intermediate tensors. Without
+            # cleanup, these references prevent garbage collection, causing memory
+            # to grow linearly with the number of training steps.
+            if not retain_graph:
+                self._grad_fn = None
 
     def zero_grad(self):
         """
@@ -2662,7 +2757,7 @@ def enable_autograd(quiet=False):
             result_data = 1.0 / (1.0 + np.exp(-x.data))
             result = Tensor(result_data)
 
-            if x.requires_grad:
+            if _GRAD_TRACKING_ENABLED and x.requires_grad:
                 result.requires_grad = True
                 result._grad_fn = SigmoidBackward(x, result)
 
@@ -2673,7 +2768,7 @@ def enable_autograd(quiet=False):
             result_data = np.maximum(0, x.data)
             result = Tensor(result_data)
 
-            if x.requires_grad:
+            if _GRAD_TRACKING_ENABLED and x.requires_grad:
                 result.requires_grad = True
                 result._grad_fn = ReLUBackward(x)
 
@@ -2685,7 +2780,7 @@ def enable_autograd(quiet=False):
             result = _original_softmax_forward(self, x, dim=dim)
 
             # Attach the correct gradient function
-            if x.requires_grad:
+            if _GRAD_TRACKING_ENABLED and x.requires_grad:
                 result.requires_grad = True
                 result._grad_fn = SoftmaxBackward(x, result, dim)
 
@@ -2697,7 +2792,7 @@ def enable_autograd(quiet=False):
             result = _original_gelu_forward(self, x)
 
             # Attach the correct gradient function
-            if x.requires_grad:
+            if _GRAD_TRACKING_ENABLED and x.requires_grad:
                 result.requires_grad = True
                 result._grad_fn = GELUBackward(x)
 
@@ -2715,7 +2810,7 @@ def enable_autograd(quiet=False):
 
             result = Tensor(bce_loss)
 
-            if predictions.requires_grad:
+            if _GRAD_TRACKING_ENABLED and predictions.requires_grad:
                 result.requires_grad = True
                 result._grad_fn = BCEBackward(predictions, targets)
 
@@ -2730,7 +2825,7 @@ def enable_autograd(quiet=False):
 
             result = Tensor(mse)
 
-            if predictions.requires_grad:
+            if _GRAD_TRACKING_ENABLED and predictions.requires_grad:
                 result.requires_grad = True
                 result._grad_fn = MSEBackward(predictions, targets)
 
@@ -2753,7 +2848,7 @@ def enable_autograd(quiet=False):
 
             result = Tensor(ce_loss)
 
-            if logits.requires_grad:
+            if _GRAD_TRACKING_ENABLED and logits.requires_grad:
                 result.requires_grad = True
                 result._grad_fn = CrossEntropyBackward(logits, targets)
 
@@ -2871,15 +2966,23 @@ If your gradients look wrong or you get mysterious errors:
 
 ### Why PyTorch Has torch.no_grad()
 
-PyTorch explicitly disables gradient tracking during parameter updates to allow safe in-place operations:
+PyTorch explicitly disables gradient tracking during parameter updates to allow safe in-place operations.
+TinyTorch now supports this via the `no_grad` context manager:
 
 ```python
-# PyTorch pattern (we'll implement this in Module 07: Optimizers)
+# PyTorch pattern
 with torch.no_grad():
     W -= 0.01 * W.grad  # Safe inside no_grad context
+
+# TinyTorch equivalent
+from tinytorch.core.autograd import no_grad
+with no_grad():
+    W -= 0.01 * W.grad  # No graph built, safe for parameter updates
 ```
 
-**For now in TinyTorch**: Always create new tensors when requires_grad=True.
+**How it works**: `no_grad()` sets a global flag that all tracked operations check.
+When the flag is off, operations skip graph construction entirely -- the result tensor
+will have `requires_grad=False` regardless of its inputs.
 
 ### Memory Impact
 
