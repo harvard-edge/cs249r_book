@@ -2289,9 +2289,11 @@ The total data transfer required is 7.5 Terabytes.
   5.  **Explainability (XAI) for Anomaly Detection:** Use XAI techniques (e.g., saliency maps) to understand *why* the model made a certain classification. If the model is focusing on an unusual part of the image (the sticker) to make a misclassification, it's an indicator.
 
   > **Napkin Math:**
-  > - Running two diverse models adds ~100% compute overhead.
-  > - Running one robust model with enhanced pre-processing adds ~20-50% overhead.
-  > - Cost of misclassification (e.g., toll evasion, security breach) can be orders of magnitude higher than the compute cost of defense.
+  > - Frame budget at 30 FPS = 33.3 ms. Single YOLOv5s on Orin: ~15 ms + 2 ms preprocess = 17 ms
+  > - Dual diverse models: 2 × 15 ms + 2 ms = 32 ms (barely fits 33.3 ms budget)
+  > - Power: single ~8 W, dual ~15 W on 60 W Orin budget (25% utilization)
+  > - Dual-model energy cost: 15 W × 8,760 hr × $0.12/kWh = $15.77/year
+  > - => Defense costs <$16/year in energy; one missed toll evasion (~$50) pays for 3 years of dual-model compute
 
   > **Key Equation:** $Robustness = f(Input\_Validation, Sensor\_Diversity, Model\_Diversity, Adversarial\_Training)$
 
@@ -2680,10 +2682,11 @@ The total data transfer required is 7.5 Terabytes.
       *   **Resource Forecasting:** Predict when storage will fill up, or when battery life will become critical, to schedule preemptive actions.
 
   > **Napkin Math:**
-  > - Mean Time Between Failures (MTBF) for a single edge device component: e.g., 50,000 hours (~5.7 years). With multiple components, system MTBF is lower.
-  > - Cost of a single truck roll to a remote site: $1,000 - $10,000+.
-  > - Cost of redundancy (e.g., dual SoC): ~50-100% hardware cost increase.
-  > - A system designed for 5-year unattended operation needs an effective MTBF > 43,800 hours. This is only achievable with self-healing, as component MTBFs will lead to failures within that period.
+  > - Component MTBF: 50,000 hr (5.7 yr). System with 5 key components: MTBF = 50,000 / 5 = 10,000 hr (1.1 yr)
+  > - Fleet of 1,000 devices: 1,000 × 8,760 / 10,000 = 876 failures/year
+  > - Manual truck roll: $5,000/visit × 876 = $4.38 M/year
+  > - Auto-failover (MTTR = 0.5 hr): availability = 99.999% vs 99.856% with 72-hr manual MTTR
+  > - => N+1 redundancy + auto-failover saves millions/year and is the only path to 5-year unattended operation
 
   > **Key Equation:** $Availability = MTBF / (MTBF + MTTR)$ (Maximize Mean Time Between Failures, Minimize Mean Time To Repair through self-healing and predictive maintenance).
 
@@ -2959,9 +2962,11 @@ The total data transfer required is 7.5 Terabytes.
   7.  **Watermarking/Fingerprinting:** Embed subtle, non-disruptive watermarks into the model weights or activations that can identify a stolen model, aiding in forensic analysis.
 
   > **Napkin Math:**
-  > - Cost of TEE integration: ~5-15% increased development time, ~1-5% runtime overhead (context switching, memory access).
-  > - Cost of IP theft: Potentially billions in lost revenue, competitive advantage, and R&D investment.
-  > The overhead of robust security measures is often a small fraction of the value protected.
+  > - Model: 25 MB INT8 on Orin. AES-256 HW decrypt: 25 MB / 2 GB/s = 12.5 ms (one-time at boot)
+  > - TEE overhead: ~5% → inference 15 ms → 15.75 ms per frame (<1 ms penalty)
+  > - Security cost: ~$5/device × 5,000 devices = $25,000. Model training cost: $2,000,000
+  > - Security investment = $25 K / $2 M = 1.25% of model value
+  > - => TEE + encrypted weights adds <1 ms/frame latency and costs 1.25% of the asset it protects
 
   > **Key Equation:** $Integrity = f(Hardware\_Security, Software\_Security, Isolation, Cryptography)$
 

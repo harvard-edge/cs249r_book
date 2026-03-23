@@ -162,6 +162,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** You failed to calculate the fundamental footprint of the model weights. 100M items * 128-dimensional vector * 4 bytes (FP32) = 51.2 GB. It is physically impossible to fit a 51.2 GB tensor into 16GB of VRAM, regardless of batch size.
 
+  > **Napkin Math:**
+  > - 100M items × 128 dims × 4 bytes (FP32) = 51.2 GB
+  > - T4 VRAM = 16 GB
+  > - => 3.2× oversubscribed — physically impossible to load
+
   > **Options:**
   > [ ] You forgot to set PyTorch's `max_split_size_mb` configuration.
   > [ ] The Adam optimizer's momentum states consume 3x the memory of the weights.
@@ -181,6 +186,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** "The fully connected classification head at the end."
 
   **Realistic Solution:** The dense spatial Convolutions. Standard Convolutions have massive arithmetic intensity and scale quadratically with input resolution. On an edge CPU without a dedicated vector engine (NPU), standard convolutions will choke the ALU. This is why edge models must switch to Depthwise Separable convolutions.
+
+  > **Napkin Math:**
+  > - Standard conv 3×3 on 224×224×64: ~870M FLOPs per layer
+  > - Depthwise separable equivalent: ~70M FLOPs (8-9× fewer)
+  > - => On a 1 GFLOP edge CPU, that is 0.87s vs 0.07s per layer
 
   > **Options:**
   > [ ] The Softmax activation layer.
@@ -202,6 +212,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** ~64 GB/s. If your preprocessing pipeline is generating tensors faster than 64 GB/s, or if you are doing tiny transfers with high overhead, the GPU will starve waiting for data.
 
+  > **Napkin Math:**
+  > - PCIe Gen4 x16: 16 lanes × 2 GB/s/lane = ~32 GB/s per direction (~64 GB/s bidirectional)
+  > - HBM2e bandwidth on T4: ~300 GB/s
+  > - => PCIe is ~5× slower than GPU memory — easy to become the bottleneck
+
   > **Options:**
   > [ ] ~1.5 TB/s
   > [x] ~64 GB/s
@@ -221,6 +236,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** "It uses too much RAM because it duplicates the dataset."
 
   **Realistic Solution:** Setting `num_workers=0` forces data loading to happen synchronously on the main Python process. The GPU will sit completely idle while Python blocks the main thread to read files from disk and decode JPEGs. It completely breaks the data-loading pipeline.
+
+  > **Napkin Math:**
+  > - GPU forward pass: ~5 ms. JPEG decode + disk read: ~20 ms per batch
+  > - num_workers=0: GPU idle 80% of the time (20 ms wait / 25 ms total)
+  > - => With 4 workers prefetching, GPU utilization jumps from ~20% to ~95%
 
   > **Options:**
   > [ ] It forces PyTorch to use FP64 instead of FP32.
@@ -243,6 +263,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** Reading from main memory costs orders of magnitude more energy. Moving data across the physical interconnect from DRAM to the compute core is the primary thermal and energetic bottleneck in modern systems.
 
+  > **Napkin Math:**
+  > - FP16 multiply-add: ~0.4 pJ
+  > - DRAM read (64 bits): ~200 pJ
+  > - => Data movement costs ~500× more energy than the compute itself
+
   > **Options:**
   > [ ] The FP16 multiply-add consumes about 10x more energy.
   > [ ] They consume roughly the same amount of energy.
@@ -262,6 +287,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** Confusing it with clock speed or raw TFLOPS throughput.
 
   **Realistic Solution:** Arithmetic Intensity is the ratio of operations performed to data moved. It dictates whether your model will be bottlenecked by the ALU (compute) or the memory bus (bandwidth).
+
+  > **Napkin Math:**
+  > - Matrix multiply (1024×1024): ~2B FLOPs, reads ~8 MB => ~250 FLOPs/byte (compute-bound)
+  > - Element-wise ReLU: 1 FLOP per 2 bytes read => 0.5 FLOPs/byte (memory-bound)
+  > - => High AI = compute-bound, low AI = memory-bound
 
   > **Options:**
   > [ ] The number of FLOPs the GPU can perform per second.
@@ -283,6 +313,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** 7 billion parameters * 2 bytes/parameter = 14 GB. You cannot physically fit this model onto an 8GB or 12GB GPU without quantization or layer offloading.
 
+  > **Napkin Math:**
+  > - 7B params × 2 bytes (FP16) = 14 GB
+  > - INT4 alternative: 7B × 0.5 bytes = 3.5 GB (fits on 4 GB edge GPU)
+  > - => Precision choice directly determines which hardware you need
+
   > **Options:**
   > [ ] ~3.5 GB
   > [ ] ~7 GB
@@ -302,6 +337,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** Blaming the network or the sheer size of the model weights.
 
   **Realistic Solution:** The KV-Cache (Key-Value Cache). As the sequence grows, the attention mechanism must store and repeatedly read the historical Keys and Values from memory for every single generated token. This turns generation into a heavily memory-bandwidth-bound operation.
+
+  > **Napkin Math:**
+  > - Llama-2-7B KV cache at 4K tokens: ~1 GB (32 layers × 32 heads × 128 dim × 4K × 2 bytes × 2)
+  > - Each new token must read the entire KV cache from HBM
+  > - => At 2 TB/s HBM bandwidth, that is 0.5 ms just for the KV read per token
 
   > **Options:**
   > [ ] The L1 Instruction Cache
@@ -323,6 +363,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** It reduces the memory footprint by 4x compared to FP32, which drastically reduces the memory bandwidth required to load weights. Furthermore, integer math requires significantly less silicon area and energy than floating-point math.
 
+  > **Napkin Math:**
+  > - FP32 model: 10M params × 4 bytes = 40 MB
+  > - INT8 model: 10M params × 1 byte = 10 MB (4× smaller)
+  > - => Fits in mobile cache, 4× less bandwidth to load weights
+
   > **Options:**
   > [x] It reduces memory bandwidth pressure and allows the use of highly energy-efficient integer ALUs.
   > [ ] It increases the mathematical precision of the final output layer.
@@ -342,6 +387,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** Thinking the left side means the system is slow because of the CPU.
 
   **Realistic Solution:** It means the workload is Memory-Bound. The arithmetic intensity is too low; the processor is starving for data and cannot reach its peak theoretical compute performance (the flat roof) because it hits the slanted "memory bandwidth wall" first.
+
+  > **Napkin Math:**
+  > - Ridge point = 500 FLOPs/byte. Your workload = 10 FLOPs/byte
+  > - Achievable perf = 10 × 2 TB/s = 20 TFLOPS (out of 1000 TFLOPS peak)
+  > - => Only 2% compute utilization — memory wall dominates
 
   > **Options:**
   > [ ] The workload is Compute-Bound (ALU constrained).
@@ -363,6 +413,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** A Fat-Tree provides full bisection bandwidth. This means any server can communicate with any other server at full line rate without creating a central choke point, which is critical for synchronous operations like AllReduce during training.
 
+  > **Napkin Math:**
+  > - Ring AllReduce on 256 GPUs: 2×(N-1)/N × data size. For 1 GB gradients: ~2 GB total traffic
+  > - Ring at 400 Gbps (50 GB/s): ~40 ms. Fat-Tree with full bisection: ~8 ms
+  > - => Fat-Tree cuts collective communication time by ~5×
+
   > **Options:**
   > [ ] It is the only topology supported by PCIe Gen5.
   > [x] It provides high, non-blocking bisection bandwidth across the entire cluster.
@@ -382,6 +437,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** Overcomplicating the setup with Pipeline or Tensor parallelism when it isn't strictly necessary.
 
   **Realistic Solution:** Data Parallelism (DDP). You replicate the exact same model across all 8 GPUs, split the batch of data across them, and average their gradients at the end of each step.
+
+  > **Napkin Math:**
+  > - Model fits on 1 GPU: 14 GB. 8 GPUs × 14 GB = 112 GB total (replicated)
+  > - Effective batch size: 8× single-GPU batch. Training time: ~8× faster (near-linear)
+  > - => Gradient sync overhead on NVLink: <5% of step time
 
   > **Options:**
   > [ ] Tensor Parallelism
@@ -403,6 +463,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** SRAM is much faster and requires less power per access than DRAM because it does not require periodic refresh cycles. This makes it ideal for high-bandwidth, low-latency on-chip memory buffers, even though it takes up more physical area per bit.
 
+  > **Napkin Math:**
+  > - SRAM access: ~1 ns, ~5 pJ/access
+  > - DRAM access: ~50-100 ns, ~200 pJ/access
+  > - => SRAM is 50-100× faster and 40× more energy-efficient per access
+
   > **Options:**
   > [ ] DRAM has higher latency but significantly higher bandwidth per pin than SRAM.
   > [ ] SRAM is denser and allows for larger on-chip memory capacity compared to DRAM.
@@ -422,6 +487,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** Thinking low arithmetic intensity means the compute units are fully utilized or that the operation itself is computationally expensive.
 
   **Realistic Solution:** Arithmetic intensity is the ratio of operations performed to bytes of data fetched. A low arithmetic intensity means there are very few operations per byte, indicating the layer's performance is bottlenecked by memory bandwidth rather than compute capacity.
+
+  > **Napkin Math:**
+  > - Batch norm: ~4 FLOPs per element, reads 2 bytes (FP16) => ~2 FLOPs/byte
+  > - Typical ridge point: 100-500 FLOPs/byte
+  > - => 2 FLOPs/byte << ridge point — deeply memory-bound
 
   > **Options:**
   > [ ] The operation will primarily be limited by the peak computational throughput of the processor.
@@ -443,6 +513,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** HBM uses a massively wide memory bus (e.g., 1024-bit per stack) compared to GDDR (e.g., 32-bit per chip). By vertically stacking DRAM dies and connecting them to the GPU via a silicon interposer, it allows for thousands of parallel connections, compensating for the lower clock speed.
 
+  > **Napkin Math:**
+  > - GDDR6: 32-bit bus × 16 Gbps = 64 GB/s per chip
+  > - HBM3: 1024-bit bus × 6.4 Gbps = ~820 GB/s per stack (6 stacks = ~5 TB/s)
+  > - => HBM trades clock speed for massive parallelism
+
   > **Options:**
   > [ ] HBM employs advanced real-time compression algorithms to effectively double the data rate on the bus.
   > [ ] HBM chips are soldered directly onto the GPU die, eliminating the need for a memory bus entirely.
@@ -462,6 +537,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** Just suggesting faster memory, assuming the matrices are inherently too small, or thinking the GPU cache is malfunctioning.
 
   **Realistic Solution:** The high miss rate is likely caused by cache thrashing due to poor spatial locality (e.g., strided accesses). This can be resolved by implementing loop tiling or blocking, which breaks the matrix into smaller sub-blocks that fit neatly inside the cache, maximizing data reuse before eviction.
+
+  > **Napkin Math:**
+  > - 4096×4096 FP32 matrix: 64 MB (does not fit in L2 cache ~6 MB)
+  > - 32×32 tile: 4 KB (fits in L1 cache ~128 KB)
+  > - => Tiling increases data reuse from 1× to ~32× per cache load
 
   > **Options:**
   > [ ] The matrices are small enough to fit exclusively in L1 cache, causing the L2 cache to be completely bypassed and register high miss rates.
@@ -483,6 +563,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** The memory hierarchy is strictly organized by speed and proximity to the processor core. Registers are the fastest, followed by L1 Cache (few cycles), L2 Cache (~10-20 cycles), Main Memory/DRAM (~100+ cycles), and finally local SSDs (microseconds).
 
+  > **Napkin Math:**
+  > - L1: ~1 ns. L2: ~5 ns. DRAM: ~100 ns. NVMe SSD: ~10,000 ns
+  > - Each level is roughly 5-100× slower than the one above
+  > - => Moving from L1 to SSD is a 10,000× latency penalty
+
   > **Options:**
   > [x] L1 Cache -> L2 Cache -> Main Memory (DRAM) -> Solid State Drive (NVMe)
   > [ ] L1 Cache -> Main Memory (DRAM) -> L2 Cache -> Solid State Drive (NVMe)
@@ -501,6 +586,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** Confusing the numerator and denominator, or thinking it relates to the total memory capacity of the GPU rather than memory bandwidth and accesses.
 
   **Realistic Solution:** Arithmetic intensity is defined as the number of floating-point operations (FLOPs) performed per byte of memory accessed (read/write). It is the primary metric used to determine if a workload is compute-bound or memory-bound.
+
+  > **Napkin Math:**
+  > - Dense matmul (M=N=K=1024, FP16): 2×1024^3 FLOPs / (3×1024^2×2 bytes) = ~341 FLOPs/byte
+  > - Vector add (1024 elements, FP16): 1024 FLOPs / (3×1024×2 bytes) = ~0.17 FLOPs/byte
+  > - => Matmul is ~2000× more compute-dense than vector add
 
   > **Options:**
   > [ ] Total FLOPS divided by the total memory capacity of the GPU.
@@ -522,6 +612,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** The hardware's ridge point is calculated as Peak Compute / Memory Bandwidth (100 TFLOPS / 1 TB/s = 100 FLOPs/byte). Since the layer's arithmetic intensity (50 FLOPs/byte) is lower than the hardware ridge point (100 FLOPs/byte), the layer is limited by memory bandwidth (memory-bound).
 
+  > **Napkin Math:**
+  > - Ridge point = 100 TFLOPS / 1 TB/s = 100 FLOPs/byte
+  > - Layer AI = 50 FLOPs/byte < 100 ridge point
+  > - => Achievable throughput = 50 × 1 TB/s = 50 TFLOPS (50% of peak, memory-bound)
+
   > **Options:**
   > [ ] Compute-bound, because 50 FLOPs/byte is considered high arithmetic intensity.
   > [x] Memory-bound, because the layer's arithmetic intensity (50) is less than the hardware's ridge point (100 FLOPs/byte).
@@ -541,6 +636,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** Believing that quantization automatically fixes all performance issues, without realizing that element-wise operations are heavily memory-bound and quantization might not alleviate the memory access overhead as effectively as fusion.
 
   **Realistic Solution:** Element-wise operations have inherently low arithmetic intensity. Performing kernel fusion combines these operations into a single GPU kernel, allowing data to be kept in SRAM/registers. This drastically reduces round-trips to global memory (HBM), increasing effective arithmetic intensity and overall performance.
+
+  > **Napkin Math:**
+  > - Unfused (bias + ReLU): 2 HBM round-trips × 1 MB tensor = 4 MB memory traffic
+  > - Fused: 1 HBM read + 1 HBM write = 2 MB memory traffic
+  > - => 2× less memory traffic, data stays in SRAM between ops
 
   > **Options:**
   > [ ] Quantize the model to INT8 to reduce the compute time of the element-wise operations.
@@ -562,6 +662,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** For a linear layer, increasing the batch size transitions the operation from a memory-bound matrix-vector multiplication (GEMV) to a more compute-bound matrix-matrix multiplication (GEMM). Weights are loaded once from memory and reused for each item in the batch, significantly increasing the FLOPs performed per byte of memory read.
 
+  > **Napkin Math:**
+  > - Batch=1 (GEMV): weight read = 14 GB, FLOPs = low => ~0.5 FLOPs/byte
+  > - Batch=32 (GEMM): same 14 GB weight read, 32× more FLOPs => ~16 FLOPs/byte
+  > - => Batch size is the simplest lever to move from memory-bound to compute-bound
+
   > **Options:**
   > [ ] It decreases arithmetic intensity because larger batches require proportionally more memory to store the activations.
   > [ ] It has no effect on arithmetic intensity since the model weights remain the exact same size regardless of batch.
@@ -582,6 +687,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** During decoding, the model processes one token at a time. It must read the entire parameter set and the accumulated KV cache from HBM for every single generated token. This results in a massive number of memory reads relative to the few FLOPs performed per token, causing severe memory-bandwidth boundedness (low arithmetic intensity).
 
+  > **Napkin Math:**
+  > - 7B model weights: 14 GB read per token. FLOPs per token: ~14 GFLOPs
+  > - Arithmetic intensity: 14 GFLOPs / 14 GB = 1 FLOP/byte
+  > - => At ridge point of 500, decode runs at 0.2% compute efficiency
+
   > **Options:**
   > [x] A single token is generated per step, requiring the model to load all weights and the entire KV cache from memory just to perform a small matrix-vector multiplication.
   > [ ] The self-attention mechanism requires complex non-linear operations (like Softmax) that natively have low arithmetic intensity.
@@ -600,6 +710,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** Thinking that the system can magically stay both highly available and strongly consistent during a network partition, or confusing active-active with active-passive failover requirements.
 
   **Realistic Solution:** The system must pause writes or refuse service in the minority partition to prevent conflicting updates (split brain), adhering to the CP side of the CAP theorem.
+
+  > **Napkin Math:**
+  > - 5-node cluster splits 3:2. Majority (3) needs quorum = ceil(5/2+1) = 3 nodes
+  > - Minority partition (2 nodes) cannot form quorum
+  > - => Minority must reject writes to guarantee zero data divergence
 
   > **Options:**
   > [ ] Both datacenters continue to accept writes and merge conflicts later.
@@ -621,6 +736,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** A Layer 7 load balancer (like an Application Load Balancer or NGINX operating at L7) is required because it can inspect HTTP headers and URI paths to make routing decisions.
 
+  > **Napkin Math:**
+  > - L4 LB: inspects TCP header (~20 bytes) — routes by IP:port only
+  > - L7 LB: parses HTTP header (~200-500 bytes) — routes by path, host, cookies
+  > - => L7 adds ~0.1-0.5 ms latency but enables content-aware routing
+
   > **Options:**
   > [ ] Layer 3 Load Balancer
   > [ ] Layer 4 Load Balancer
@@ -640,6 +760,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** Confusing it with a DDoS attack or cache penetration.
 
   **Realistic Solution:** This is the "Thundering Herd" (or cache stampede) problem. It can be mitigated by using a distributed lock (mutex) so only the first request queries the DB and repopulates the cache, or by adding slight jitter to cache TTLs.
+
+  > **Napkin Math:**
+  > - Celebrity post: 10K req/s. Cache TTL expires at t=0
+  > - Without lock: 10K simultaneous DB queries in 1 second
+  > - With lock + backfill: 1 DB query, 9,999 served from refreshed cache within ~5 ms
 
   > **Options:**
   > [ ] Cache Penetration; mitigated by using Bloom filters.
@@ -661,6 +786,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** The consumer must be idempotent. This means applying the same message multiple times has the same effect as applying it once, safely handling duplicate deliveries.
 
+  > **Napkin Math:**
+  > - At 100K msgs/s with 0.1% duplicate rate = 100 duplicate messages per second
+  > - Non-idempotent "increment balance by $10": duplicates cause $1,000/s in errors
+  > - Idempotent "set balance to $X with txn_id": duplicates are harmless no-ops
+
   > **Options:**
   > [ ] Eventual Consistency
   > [x] Idempotency
@@ -681,6 +811,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** DNS caching. The clients or their local ISP DNS resolvers have cached the old IP address because the Time-To-Live (TTL) on the old DNS record hasn't expired yet.
 
+  > **Napkin Math:**
+  > - Old TTL set to 3600s (1 hour). Migration at t=0
+  > - Worst case: clients cached at t=-1s will hold stale IP for 3599s
+  > - => Pre-migration fix: lower TTL to 60s 24 hours before cutover
+
   > **Options:**
   > [ ] The new server's firewall is blocking incoming BGP routes.
   > [ ] The TLS certificate on the new server is invalid for the domain name.
@@ -699,6 +834,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** Assuming quantization simply reduces precision uniformly without considering the distribution of activation values or outliers.
 
   **Realistic Solution:** The presence of significant outliers in the weights or activations can cause a large quantization error because the int8 range must stretch to cover the outliers, reducing the effective resolution for the majority of the values.
+
+  > **Napkin Math:**
+  > - INT8 range: 256 levels. If max activation = 100 but 99.9% of values are in [-1, 1]
+  > - Scale factor = 200/256 = 0.78 per step. Values in [-1,1] get only ~3 distinct levels
+  > - => One outlier wastes 99% of the quantization resolution
 
   > **Options:**
   > [ ] The microcontroller's clock speed is too low to process int8 operations efficiently.
@@ -720,6 +860,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** Model weights are read-only and can be stored in Flash memory, while intermediate activations (tensors) must be allocated in SRAM. Since weights (150KB) < Flash (512KB) and activations (100KB) < SRAM (128KB), it fits.
 
+  > **Napkin Math:**
+  > - Flash usage: 150 KB weights / 512 KB Flash = 29% utilized
+  > - SRAM usage: 100 KB activations / 128 KB SRAM = 78% utilized
+  > - => Fits, but SRAM is tight — only 28 KB left for stack and heap
+
   > **Options:**
   > [ ] Yes, everything can be stored in SRAM since 150KB + 100KB = 250KB, and Flash can act as virtual memory.
   > [x] Yes, the model weights should be stored in Flash memory, and the intermediate tensors allocated in SRAM.
@@ -739,6 +884,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** Assuming that unstructured sparsity automatically translates to faster execution without considering hardware architecture and memory access patterns.
 
   **Realistic Solution:** Most edge NPUs and hardware accelerators are optimized for dense matrix multiplications and lack the specialized hardware support required to efficiently process unstructured sparse matrices, often resulting in no speedup or even slowdowns due to irregular memory access.
+
+  > **Napkin Math:**
+  > - 70% unstructured sparsity: 70% of weights are zero, but scattered randomly
+  > - Dense GEMM on NPU: predictable memory access, full SIMD utilization
+  > - => Sparse indexing overhead can exceed the savings — net speedup: ~0× on standard NPUs
 
   > **Options:**
   > [ ] Unstructured pruning always degrades model accuracy beyond acceptable limits for object detection.
@@ -760,6 +910,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
 
   **Realistic Solution:** Wireless transmission (e.g., Wi-Fi, cellular) is extremely power-hungry compared to local computation. Running a lightweight TinyML model on the edge device to only transmit data when a bird is detected minimizes radio usage, dramatically saving power.
 
+  > **Napkin Math:**
+  > - Wi-Fi transmission: ~200 mW active. MCU inference: ~5 mW
+  > - Streaming 24/7: 200 mW × 24h = 4.8 Wh/day
+  > - Local detect + transmit 10 events/day: (5 mW × 24h) + (200 mW × 0.1h) = 0.14 Wh/day — 34× less
+
   > **Options:**
   > [x] Running a local TinyML model to detect birds and only powering on the Wi-Fi radio to transmit cropped images of detected birds.
   > [ ] Streaming a continuous 720p video feed to a cloud server to leverage highly optimized cloud GPUs for detection.
@@ -779,6 +934,11 @@ Memory ratios, hardware constants, and single-variable napkin math. If you don't
   **Common Mistake:** Assuming microcontrollers handle dynamic memory allocation just as safely and predictably as standard desktop or server operating systems.
 
   **Realistic Solution:** Dynamic memory allocation (`malloc`/`free`) in constrained environments can lead to memory fragmentation and unpredictable allocation failures during runtime. A pre-allocated Tensor Arena ensures deterministic memory usage and allows the framework to plan memory reuse ahead of time.
+
+  > **Napkin Math:**
+  > - 128 KB SRAM. After 1000 malloc/free cycles: fragmented into 50+ small blocks
+  > - Largest contiguous block: maybe 8 KB (even with 40 KB "free")
+  > - => Pre-allocated arena: guaranteed contiguous 100 KB — no fragmentation, no surprises
 
   > **Options:**
   > [ ] Dynamic allocation requires a constant connection to a cloud-based memory manager.

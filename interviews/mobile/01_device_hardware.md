@@ -21343,6 +21343,12 @@ The VLM's total time-to-first-token is now elongated by the interleaved navigati
 
   **Realistic Solution:** No. The raw PyTorch model must be converted into Apple's proprietary CoreML format (`.mlpackage` or `.mlmodel`) so that the iOS operating system can automatically route the operations to the Neural Engine, GPU, or CPU.
 
+  > **Napkin Math:**
+  > - A MobileNetV2 (3.4M params) in PyTorch FP32: 3.4M x 4 bytes = **13.6 MB**
+  > - CoreML auto-converts to FP16 during export: 3.4M x 2 bytes = **6.8 MB** (2x smaller)
+  > - CoreML compiler then fuses ops (Conv+BN+ReLU) and maps to Neural Engine instructions
+  > - => Same model goes from 13.6 MB generic weights to a 6.8 MB hardware-optimized package that runs on the A17 Pro's 35 TOPS Neural Engine instead of the CPU
+
   > **Options:**
   > [ ] Yes, iOS natively executes raw PyTorch files using the Swift Torch API.
   > [ ] Yes, but only if you use an iPhone 14 or newer.
@@ -21362,6 +21368,13 @@ The VLM's total time-to-first-token is now elongated by the interleaved navigati
   **Common Mistake:** Worrying about the network connection dropping or the UI freezing.
 
   **Realistic Solution:** The iOS Watchdog Timer. The operating system aggressively monitors background apps for memory and CPU usage to preserve battery. If your ML model consumes too much RAM or runs too hot, the OS will silently kill the app process entirely.
+
+  > **Napkin Math:**
+  > - On-device LLM inference draws ~3W sustained on an A17 Pro SoC
+  > - Battery capacity: 4,000 mAh x 3.7V = **14.8 Wh**
+  > - Drain rate at 3W: 811 mA = **20% of battery per minute**
+  > - iOS grants background tasks only ~30 seconds of execution time
+  > - => At 3W for 30s the model consumes 0.025 Wh per cycle, but the watchdog kills any process sustaining >80% CPU utilization beyond ~180s — the thermal and power budget makes continuous background LLM inference physically impossible
 
   > **Options:**
   > [ ] The model will automatically downgrade to 1-bit quantization.

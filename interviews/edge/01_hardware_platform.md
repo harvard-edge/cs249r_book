@@ -12593,6 +12593,11 @@ Diagnose which approach is more economically viable over a one-year period by so
 
 Federated Learning is over 39x cheaper because it obviates the need for manual labeling, which is the single largest expense in the centralized model. It's a classic example of shifting compute to the edge to save on massive data logistics and human-in-the-loop costs.
 
+  > **Napkin Math:**
+  > - Centralized: 10K vehicles × 5 clips/mo × 12 = 600K clips. Labeling: 600K × $5 = $3M. Upload: 180K GB × $0.02 = $3.6K. Total: **$3.0M/yr**.
+  > - Federated: 1K vehicles/wk × 52 = 52K updates. Data: 2,600 GB × $10 = $26K. Servers: $50K. Total: **$76K/yr**.
+  > - => FL is 39× cheaper. Labeling dominates centralized TCO at 99.9% of cost.
+
   > **Key Equation:** TCO = \sum(\text{DataVolume} \times \text{Cost}_{GB}) + \sum(\text{Ops}) + \sum(\text{HumanLabeling})
 
   > **Options:**
@@ -13022,7 +13027,7 @@ Using these numbers, diagnose the most cost-effective solution and solve for its
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Autonomous Driving FPS Mystery</b> · <code>edge-roofline-analysis</code></summary>
 
-- **Interviewer:** "You are a Staff ML Systems Engineer on an autonomous vehicle team. Your new LiDAR-based 3D object detection model runs on a Jetson AGX Orin (in its 60W power profile). The model must achieve a 20 FPS minimum to meet the real-time perception system's deadline. However, live profiling shows the pipeline only achieves 12 FPS, even though `nvprof` reports 95% GPU utilization. You've determined the model performs approximately 40 GFLOPs (FP16) and requires moving 300 MB of data (weights and activations from DRAM) for each inference. Using the Jetson AGX Orin's hardware specs, diagnose the primary performance bottleneck."
+- **Interviewer:** "You are a Staff ML Systems Engineer on an autonomous vehicle team. Your new LiDAR-based 3D object detection model runs on a Jetson AGX Orin (in its 60W power profile). The model must achieve a 20 FPS minimum to meet the real-time perception system's deadline. However, live profiling shows the pipeline only achieves 12 FPS, even though `nvprof` reports 95% GPU utilization. You've determined the model performs approximately 40 GFLOPs (FP16) and requires moving 16 GB of data (weights, activations, and large intermediate 3D voxel grids from DRAM) for each inference. Using the Jetson AGX Orin's hardware specs, diagnose the primary performance bottleneck."
 
   <details>
   <summary><b>🔍 Reveal Answer</b></summary>
@@ -13035,10 +13040,11 @@ Using these numbers, diagnose the most cost-effective solution and solve for its
 2. **Calculate Hardware Ridge Point:** The Ridge Point is the AI needed to become compute-bound. It's the ratio of peak compute to peak memory bandwidth.
    - Ridge Point = `(66 * 10^12 FLOPs/s) / (205 * 10^9 Bytes/s) ≈ 322 FLOPs/Byte`.
 3. **Calculate Model's Arithmetic Intensity (AI):** This is the ratio of the model's own operations to its data movement.
-   - Model AI = `(40 * 10^9 FLOPs) / (300 * 10^6 Bytes) ≈ 133 FLOPs/Byte`.
+   - Model AI = `(40 * 10^9 FLOPs) / (16 * 10^9 Bytes) = 2.5 FLOPs/Byte`.
 4. **Diagnose Bottleneck:** Compare the model's AI to the hardware's Ridge Point.
-   - `133 FLOPs/Byte` (Model AI) < `322 FLOPs/Byte` (Hardware Ridge Point).
-   - Since the model's AI is below the ridge point, it falls on the memory-bound slope of the roofline chart. It cannot supply data fast enough to keep the compute units fully productive.
+   - `2.5 FLOPs/Byte` (Model AI) << `322 FLOPs/Byte` (Hardware Ridge Point).
+   - Since the model's AI is far below the ridge point, it falls deep on the memory-bound slope of the roofline chart. The GPU is starved of data.
+5. **Verify against observed FPS:** Memory-bound throughput = AI × BW = `2.5 × 205 GB/s = 512.5 GFLOPS`. Time per frame = `40 GFLOPS / 512.5 GFLOPS ≈ 78 ms`, giving ~12.8 FPS — consistent with the observed 12 FPS.
 
   > **Key Equation:** $\text{Arithmetic Intensity (AI)} = \frac{\text{Total Operations (FLOPs)}}{\text{Total Data Moved (Bytes)}}$
 
@@ -16267,8 +16273,7 @@ This 120ms communication time alone is 3.6x the entire 33ms frame budget, provin
 The total time is approximately $T_{Ring} \approx 2(N-1) \times (\alpha + \frac{S}{(N-1)\beta})$. A simpler, more intuitive calculation is to consider the total data one node must pass through the ring. Each node sends and receives data in N-1 steps for both the scatter-reduce and all-gather phases.
 The total time is dominated by the serial dependency. For one full pass around the ring, data must traverse N links. The bandwidth component alone for the full algorithm is $T_{BW} = \frac{2(N-1)}{N} \times \frac{S}{\beta}$.
 $T_{BW} = \frac{2(100-1)}{100} \times \frac{100 \text{ MB}}{12.5 \text{ MB/s}} \approx 1.98 \times 8 \text{ seconds} \approx 15.84$ seconds per full pass.
-However, this is not a single pass. The total time for a naive ring is $2(N-1)$ sequential transfers. Time $\approx 2(100-1) \times (40ms + \frac{100\text{MB}/(100-1)}{12.5\text{MB/s}}) = 198 \times (0.04s + \frac{1.01\text{MB}}{12.5\text{MB/s}}) = 198 \times (0.04s + 0.08s) = 198 \times 0.12s \approx 23.76$ seconds.
-Wait, the common implementation sends the *full* tensor chunk by chunk. So the bandwidth part is $2(N-1) \times (S/\beta)$. This is $2(99) \times (100 / 12.5) = 198 \times 8s = 1584$ seconds, or **~26.4 minutes**. This matches the observation.
+However, this is not a single pass. The total time for a naive ring is $2(N-1)$ sequential transfers. Each transfer requires a latency payment plus a bandwidth payment for the chunk. Time $\approx 2(100-1) \times (\alpha + \frac{S}{\beta}) = 198 \times (0.04s + \frac{100\text{MB}}{12.5\text{MB/s}}) = 198 \times (0.04s + 8s) = 198 \times 8.04s \approx 1591.9$ seconds, or **~26.5 minutes**. This matches the observation.
 
 **Parameter Server Time Calculation:**
 1. **Upload:** All 100 robots upload in parallel. The time is set by one robot: $T_{up} = \alpha + S/\beta = 40\text{ms} + 100\text{MB} / 12.5\text{MB/s} = 0.04s + 8s = 8.04s$.
@@ -16487,13 +16492,13 @@ Total time = $8.04s + 8.04s = \textbf{16.08 seconds}$ (plus negligible server ag
 
   **Realistic Solution:** Resolution reduction affects compute quadratically for convolutional layers (FLOPs scale with H×W) but has fixed costs that don't scale:
 
-  **Compute savings:** YOLOv8-S at 640×640: ~28.4 GFLOPs. At 320×320: ~7.1 GFLOPs (4× reduction in conv FLOPs). But: model loading, TensorRT engine initialization, NMS, and pre/post-processing are resolution-independent. These fixed costs total ~3ms. At 640×640: 22ms inference = 19ms conv + 3ms fixed. At 320×320: 4.75ms conv + 3ms fixed = **7.75ms** → 2.84× speedup (not 4×). At 15W throttled: 640×640 takes ~33ms (19 FPS). 320×320 takes ~12ms → **83 FPS** — far exceeding the 25 FPS minimum.
+  **Compute savings:** YOLOv8-S at 640×640: ~28.4 GFLOPs. At 320×320: ~7.1 GFLOPs (4× reduction in conv FLOPs). But: model loading, TensorRT engine initialization, NMS, and pre/post-processing are resolution-independent. These fixed costs total ~6ms. At 640×640: 36ms total = 30ms conv + 6ms fixed (giving the observed 28 FPS). At 320×320: 7.5ms conv + 6ms fixed = **13.5ms** → 2.67× speedup (not 4×). At 15W throttled: the reduced power scales conv time by 22W/15W ≈ 1.47×. At 640×640: 30ms × 1.47 + 6ms = 50ms (20 FPS) — matching the ~19 FPS observation. At 320×320: 7.5ms × 1.47 + 6ms = 17ms → **59 FPS** — far exceeding the 25 FPS minimum.
 
   **Accuracy impact:** Halving resolution means objects appear at half the pixel size. A person at 50m occupying 32 pixels tall at 640×640 becomes 16 pixels at 320×320 — still detectable. But a person at 100m (16 pixels at 640) becomes 8 pixels at 320 — at the detection limit. Small objects (dropped items, animals) below 10 pixels are lost entirely.
 
-  **Adaptive system design:** (1) Read the Orin's thermal zone via `/sys/class/thermal/thermal_zone*/temp`. (2) Define three operating points: **Normal** (Tj < 85°C): 640×640, 28 FPS. **Warm** (85-95°C): 480×480, ~40 FPS at 15W. **Hot** (>95°C): 320×320, ~83 FPS at 15W. (3) Use hysteresis: step down at threshold, step up only after 5°C below threshold for 30 seconds (prevents oscillation). (4) At 320×320, increase the detection confidence threshold from 0.25 to 0.4 to reduce false positives from the noisier low-resolution features.
+  **Adaptive system design:** (1) Read the Orin's thermal zone via `/sys/class/thermal/thermal_zone*/temp`. (2) Define three operating points: **Normal** (Tj < 85°C): 640×640, 28 FPS. **Warm** (85-95°C): 480×480, ~35 FPS at 15W. **Hot** (>95°C): 320×320, ~59 FPS at 15W. (3) Use hysteresis: step down at threshold, step up only after 5°C below threshold for 30 seconds (prevents oscillation). (4) At 320×320, increase the detection confidence threshold from 0.25 to 0.4 to reduce false positives from the noisier low-resolution features.
 
-  > **Napkin Math:** 640→320: FLOPs 28.4G → 7.1G (4×). Inference: 22ms → 7.75ms (2.84×, fixed costs). At 15W throttled: 640 = 33ms (19 FPS ✗), 480 = 18ms (55 FPS ✓), 320 = 12ms (83 FPS ✓). Accuracy: 640 mAP = 44.9%, 480 mAP ≈ 40%, 320 mAP ≈ 33%. Detection range: 640 detects persons to ~100m, 320 to ~50m. For a patrol robot at 2 m/s with 5m stopping distance: 50m detection range gives 22.5s reaction time — sufficient.
+  > **Napkin Math:** 640→320: FLOPs 28.4G → 7.1G (4×). Total time: 36ms → 13.5ms (2.67×, fixed costs). At 15W throttled: 640 = 50ms (20 FPS ✗), 480 = 28ms (35 FPS ✓), 320 = 17ms (59 FPS ✓). Accuracy: 640 mAP = 44.9%, 480 mAP ≈ 40%, 320 mAP ≈ 33%. Detection range: 640 detects persons to ~100m, 320 to ~50m. For a patrol robot at 2 m/s with 5m stopping distance: 50m detection range gives 22.5s reaction time — sufficient.
 
   📖 **Deep Dive:** [Volume I: Benchmarking](https://harvard-edge.github.io/cs249r_book_dev/contents/benchmarking/benchmarking.html)
 
@@ -16517,7 +16522,7 @@ Total time = $8.04s + 8.04s = \textbf{16.08 seconds}$ (plus negligible server ag
 
   Fix: (1) Add ferrite chokes on all cables (power, CSI-2, Ethernet) — $0.50 each, attenuates conducted noise by 20-30dB above 1 MHz. (2) Replace the flat-flex CSI-2 cable with a shielded coaxial GMSL2 serializer/deserializer pair (e.g., Maxim MAX96717/MAX96714) — adds $15 but provides 40dB+ shielding. (3) Add a medical-grade EMI filter on the AC input (e.g., Schaffner FN2090, ~$12) — attenuates common-mode noise by 50dB. (4) Single-point grounding to eliminate the ground loop. (5) ECC memory if available on the host processor.
 
-  > **Napkin Math:** VFD EMI field at 3m: ~10 V/m (measured, typical for 500kW drive). CSI-2 cable as antenna (15cm, 2 GHz bandwidth): induced voltage = E × l = 10 × 0.15 = 1.5V common-mode. CSI-2 CMRR at 1 MHz: ~40dB → differential noise = 1.5V / 100 = 15mV. CSI-2 threshold: ~100mV differential → normally safe. But at VFD switching harmonics (150 kHz fundamental, harmonics to 30 MHz), CMRR degrades to ~20dB → 150mV differential noise → bit errors. Ferrite choke attenuation: 25dB at 10 MHz → reduces noise to 2.7mV. GMSL2 conversion cost: $30/camera (serializer + deserializer). Error rate without mitigation: ~1 corrupted frame per 30-90s matches the VFD's switching burst pattern.
+  > **Napkin Math:** VFD EMI field at 3m: ~10 V/m (measured, typical for 500kW drive). CSI-2 cable as antenna (15cm, 2 GHz bandwidth): induced voltage = E × l = 10 × 0.15 = 1.5V common-mode. CSI-2 CMRR at 1 MHz: ~40dB → differential noise = 1.5V / 100 = 15mV. CSI-2 threshold: ~100mV differential → normally safe. But at VFD switching harmonics (150 kHz fundamental, harmonics to 30 MHz), CMRR degrades to ~20dB → 150mV differential noise → bit errors. Ferrite choke attenuation: 25dB at 10 MHz → reduces noise to 8.4mV (150mV / 10^(25/20)). GMSL2 conversion cost: $30/camera (serializer + deserializer). Error rate without mitigation: ~1 corrupted frame per 30-90s matches the VFD's switching burst pattern.
 
   📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
 
@@ -16543,7 +16548,7 @@ Total time = $8.04s + 8.04s = \textbf{16.08 seconds}$ (plus negligible server ag
 
   Fix: (1) **Resample to a common timebase** — use the ADC's timestamp (not the system clock) to resample the signal to exactly 4000 Hz before windowing. Cost: a linear interpolation pass, ~0.1ms on the CV5's ARM core. (2) **PLL synchronization** — drive the ADC clock from the CV5's clock output, eliminating relative drift entirely. Requires a hardware modification (one wire). (3) **Frequency-invariant features** — use mel-frequency cepstral coefficients (MFCCs) instead of raw FFT bins. MFCCs are more robust to small frequency shifts because mel-scale binning is logarithmic. (4) **Periodic recalibration** — every hour, inject a known reference signal (e.g., a 1 kHz calibration tone from a DAC) and measure the actual sample rate. Adjust the resampling ratio accordingly.
 
-  > **Napkin Math:** Clock drift: 80 ppm relative. Per window (500ms): 40μs = 0.16 samples at 4 kHz. After 1 week: 0.16 × 2 × 3600 × 24 × 7 = 193K × 0.16 = ~30K μs = 30ms cumulative. Frequency shift: 80 ppm × 100 Hz fundamental = 0.008 Hz/window. After 3 weeks: FFT bin shift = 0.008 × 3.6M windows / ... More directly: 80 ppm drift means the effective sample rate is 4000 × (1 ± 80×10⁻⁶) = 4000.32 Hz. Over 500ms: 2000.16 samples instead of 2000. Frequency resolution: 1/0.5s = 2 Hz per bin. Shift per week: 80 ppm × 4000 Hz = 0.32 Hz → 0.16 bins/week. After 3 weeks: 0.48 bins — enough to push features across decision boundaries. False alarm rate proportional to bins shifted: linear.
+  > **Napkin Math:** Clock drift: 80 ppm relative. Per window (500ms): 40μs = 0.16 samples at 4 kHz. After 1 week: cumulative drift = 80 ppm × 7 × 86,400s = 48.4s. Frequency shift: 80 ppm × 100 Hz fundamental = 0.008 Hz/window. After 3 weeks: FFT bin shift = 0.008 × 3.6M windows / ... More directly: 80 ppm drift means the effective sample rate is 4000 × (1 ± 80×10⁻⁶) = 4000.32 Hz. Over 500ms: 2000.16 samples instead of 2000. Frequency resolution: 1/0.5s = 2 Hz per bin. Shift per week: 80 ppm × 4000 Hz = 0.32 Hz → 0.16 bins/week. After 3 weeks: 0.48 bins — enough to push features across decision boundaries. False alarm rate proportional to bins shifted: linear.
 
   📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
 
@@ -18646,7 +18651,7 @@ As the architect, formulate your response. Which model do you propose shipping w
 4.  **Wait, both seem to meet the deadline? Let's add the sensor data!**
     *   8K Frame Size (e.g., 7680x4320) in YUV420 (1.5 bytes/pixel) = `7680 * 4320 * 1.5 ≈ 50 MB`
     *   Required Sensor BW for 30 FPS = `50 MB/frame * 30 frames/s = 1.5 GB/s`.
-    *   This is the *minimum* memory traffic *before* the model even runs. The model's *own* memory accesses (weights + activations) must be added. The total memory traffic for DenseViT (`1.5 GB/s` sensor + `2GB / 33ms` activations) would vastly exceed the 204.8 GB/s limit, while the CNN is much more manageable. The napkin math shows the *relative* performance difference and proves DenseViT is 3x more memory-bound than the CNN, making it the riskier choice under a tight power and latency budget.
+    *   This is the *minimum* memory traffic *before* the model even runs. The model's *own* memory accesses (weights + activations) must be added. The DenseViT's activation traffic alone is `2 GB / 33ms ≈ 60.6 GB/s`, plus the sensor's `1.5 GB/s`, totaling ~62.1 GB/s — about 30% of the Orin's 204.8 GB/s budget. While this doesn't exceed the raw bandwidth limit, it leaves far less headroom for the CNN backbone's own weight reads, OS traffic, and other system consumers of the memory bus. In practice, sustained utilization above ~70% of peak bandwidth causes significant queuing delays. By contrast, the CNN's activation traffic is only `300 MB / 33ms ≈ 9.1 GB/s`, consuming under 5% of available bandwidth. The napkin math shows DenseViT is 3x more memory-bound than the CNN, making it the far riskier choice under a tight power and latency budget.
 
   > **Key Equation:** P_{effective} = \min(P_{peak}, I \times \beta)
 
@@ -18691,9 +18696,10 @@ Total operations budget per frame: `220 T-Ops/sec * 0.033 sec/frame = 7.26 T-Ops
 2.  **Naive ViT Cost (Single Camera):** Let's analyze a medium-sized ViT-Base model (~86M parameters) on a single high-resolution camera feed (e.g., 1280x960 pixels).
 Number of tokens (16x16 patches): `(1280/16) * (960/16) = 80 * 60 = 4800` tokens.
 Inference FLOPs for a transformer: `~2 * Parameters * Num_Tokens`.
-Compute for one camera: `2 * 86,000,000 * 4800 ≈ 825 T-Ops`.
+Compute for one camera: `2 * 86,000,000 * 4800 ≈ 0.826 T-Ops`.
+For all 8 cameras: `0.826 T-Ops × 8 ≈ 6.6 T-Ops`.
 
-3.  **Conclusion:** The cost for a *single camera* (`825 T-Ops`) is over **113 times** the *entire system budget* for all 8 cameras (`7.26 T-Ops`). This quantitatively proves that a dense, off-the-shelf ViT architecture is fundamentally unworkable. This calculation forces the conversation towards the proposed solutions: architectural hybrids, sparsity (MoE), and aggressive hardware-aware co-design (NAS).
+3.  **Conclusion:** The cost for all 8 cameras (`6.6 T-Ops`) is close to the entire system budget (`7.26 T-Ops`), leaving virtually zero headroom for pre/post-processing, sensor fusion, path planning, and system overhead. And this estimate only accounts for the forward pass FLOPs — it ignores the attention mechanism's quadratic memory traffic, which makes the model severely memory-bound on the Orin and pushes real-world latency far beyond what the FLOPs-only calculation suggests. This quantitatively proves that a dense, off-the-shelf ViT architecture is fundamentally unworkable at this scale, forcing the conversation towards the proposed solutions: architectural hybrids, sparsity (MoE), and aggressive hardware-aware co-design (NAS).
 
   > **Key Equation:** C_{\text{infer}} \approx 2 \times P \times T
 
@@ -19703,19 +19709,19 @@ My 3-step plan would be:
 
   > **Napkin Math:** Hardware: Jetson AGX Orin (Peak: 275 INT8 TOPS, Power Budget: 40W, Memory BW: 204.8 GB/s).
 
-1.  **Baseline (Broken State):** The large ViT requires ~220 T-Ops per frame. Due to the standard attention mechanism, it's severely memory-bound, achieving only ~5% of the Orin's peak performance (~14 TOPS).
-    *   *Latency:* 220 T-Ops / 14 TOPS = ~15.7 seconds per frame. This is far worse than 2 FPS, but illustrates the crippling effect of being memory-bound. A more realistic scenario for 2 FPS (500ms) means the model is achieving an effective ~440 GFLOPS on a multi-trillion FLOP device. The 100W power draw is due to constant, inefficient DRAM traffic.
+1.  **Baseline (Broken State):** The large ViT requires ~7 T-Ops per frame. Due to the standard attention mechanism, it's severely memory-bound, achieving only ~5% of the Orin's peak performance (~14 TOPS).
+    *   *Latency:* 7 T-Ops / 14 TOPS = ~500ms per frame (2 FPS). The 100W power draw is due to constant, inefficient DRAM traffic — the compute units are mostly stalled waiting for data, but the memory subsystem draws full power.
 
-2.  **After Stage 1 (Distillation/Pruning):** The student model is 10x smaller, requiring only 22 T-Ops. However, it's still memory-bound by attention.
-    *   *Latency:* 22 T-Ops / 14 TOPS = 1.57s/frame. Still too slow.
+2.  **After Stage 1 (Distillation/Pruning):** The student model is 5x smaller, requiring only 1.4 T-Ops. However, it's still memory-bound by attention.
+    *   *Latency:* 1.4 T-Ops / 14 TOPS = 100ms/frame (10 FPS). Still too slow.
 
 3.  **After Stage 2 (FlashAttention):** The bottleneck shifts from memory to compute. The Orin can now achieve ~70% of its peak performance (~192 TOPS).
-    *   *Latency:* 22 T-Ops / 192 TOPS = ~115ms (8.7 FPS). Power drops to ~70W as DRAM traffic is slashed.
+    *   *Latency:* 1.4 T-Ops / 192 TOPS = ~7.3ms. Power drops significantly as DRAM traffic is slashed.
 
-4.  **After Stage 3 (Fusion/INT8):** Fusion saves ~15ms in overhead. INT8 quantization allows using the full 275 TOPS peak.
-    *   *Latency:* (22 T-Ops / 275 TOPS) - 15ms = 80ms - 15ms = 65ms (15 FPS). Not quite there.
+4.  **After Stage 3 (Fusion/INT8):** Fusion saves ~2ms in overhead. INT8 quantization allows using the full 275 TOPS peak.
+    *   *Latency:* 1.4 T-Ops / 275 TOPS = ~5.1ms. With fusion savings, ~3ms for the vision encoder alone. This now has ample headroom for the text-generation head.
 
-5.  **Re-evaluation (The L6+ insight):** The 10x distillation wasn't aggressive enough. To hit 30 FPS (33ms), we need to be under ~30ms. Let's work backwards: at 275 TOPS, the total Ops must be `275 TOPS * 0.030s = 8.25 T-Ops`. This requires a `220 / 8.25 = ~26x` reduction in Ops from the original model, not 10x. This is the key design constraint you must derive. The plan is sound, but the *magnitude* of the initial distillation must be far more aggressive, which has implications for accuracy that must be managed.
+5.  **Re-evaluation (The L6+ insight):** The real challenge isn't the vision encoder — after FlashAttention, it's fast. The bottleneck shifts to the auto-regressive text-generation head, which is memory-bound (loading model weights for each token). This is where speculative decoding from Stage 4 becomes critical. Working backwards: at 275 TOPS with a 33ms total budget, the entire pipeline (vision + text) must fit within `275 TOPS * 0.033s = 9.08 T-Ops`. The vision encoder at 1.4 T-Ops leaves ~7.7 T-Ops for text generation — sufficient for a short rationale with speculative decoding.
 
   > **Key Equation:** $$ T_{\text{total}} = \frac{\text{Ops}_{\text{model}} \times R_{\text{prune}}}{ \eta_{\text{arch}} \times \text{TOPS}_{\text{peak}}} + T_{\text{overhead}} \times R_{\text{fusion}} $$
 
@@ -20528,7 +20534,7 @@ Your Director asks you to formulate a multi-stage plan to make this VLM viable o
   3.  **Intermediate Activations:** While weights are quantized, intermediate activations might still be stored in a wider format (e.g., FP16 or FP32 for accumulation) or require larger buffers. The movement of these activations can dominate memory traffic.
   4.  **Unstructured Data Access:** Sparse or highly optimized INT8 kernels might introduce irregular memory access patterns, leading to more cache misses and inefficient prefetching, effectively reducing memory bandwidth.
 
-  > **Napkin Math:** An NPU rated at 100 TOPS INT8 with 32 GB/s LPDDR4x memory has a theoretical peak arithmetic intensity of 100 TOPS / 32 GB/s = 3.125 Ops/Byte. If the model's actual arithmetic intensity is, say, 0.5 Ops/Byte (very memory-bound), even a 4x reduction in weight data size (from FP32 to INT8) might only reduce memory traffic by 25% if activations still dominate, or if the memory system can't deliver data 4x faster due to alignment issues. A 100MB FP32 model needs 100MB of weights. An INT8 model needs 25MB. But if intermediate activations are 500MB, the total memory footprint for data movement isn't reduced by 4x.
+  > **Napkin Math:** An NPU rated at 100 TOPS INT8 with 32 GB/s LPDDR4x memory has a theoretical peak arithmetic intensity (ridge point) of 100 × 10¹² / 32 × 10⁹ = 3,125 Ops/Byte. This very high ridge point means most real-world models will fall on the memory-bound slope. If the model's actual arithmetic intensity is, say, 50 Ops/Byte (moderately memory-bound), even a 4x reduction in weight data size (from FP32 to INT8) might only reduce memory traffic by 25% if activations still dominate, or if the memory system can't deliver data 4x faster due to alignment issues. A 100 MB FP32 model needs 100 MB of weights. An INT8 model needs 25 MB. But if intermediate activations are 500 MB, the total memory footprint for data movement isn't reduced by 4x.
 
   > **Key Equation:** $\text{Execution Time} = \max(\text{Compute Time}, \text{Memory Access Time})$
 
@@ -20744,7 +20750,7 @@ Your Director asks you to formulate a multi-stage plan to make this VLM viable o
 
   (2) **Update bandwidth:** Each LiDAR scan produces ~100,000 points. Each point updates 1-5 cells (beam width at distance). At 10 Hz: up to 500,000 cell updates per second. Each update requires a read-modify-write: read 9 bytes + write 9 bytes = 18 bytes per cell update. Bandwidth: 500K × 18 = **9 MB/s** for cell updates alone. But the Bayesian occupancy update requires reading neighboring cells for spatial smoothing: 8 neighbors × 9 bytes × 500K = **36 MB/s** additional reads. Total map bandwidth: **45 MB/s** — only 0.02% of the Orin's 204.8 GB/s. Seems fine.
 
-  (3) **The real bottleneck — random access pattern:** The 45 MB/s is scattered across a 36 MB grid in a pattern determined by LiDAR scan geometry (radial, not raster). This defeats the DRAM controller's row buffer optimization. Effective bandwidth for random 9-byte accesses: each access opens a new DRAM row (64 bytes minimum read), wasting 55/64 = 86% of bandwidth. Effective bandwidth consumed: 45 MB/s × (64/9) = **320 MB/s** of actual DRAM traffic. At 10 Hz with spatial smoothing: **3.2 GB/s** — now 1.6% of total bandwidth, competing with neural network inference.
+  (3) **The real bottleneck — random access pattern:** The 45 MB/s is scattered across a 36 MB grid in a pattern determined by LiDAR scan geometry (radial, not raster). This defeats the DRAM controller's row buffer optimization. Effective bandwidth for random 9-byte accesses: each access opens a new DRAM row (64 bytes minimum read), wasting 55/64 = 86% of bandwidth. Effective bandwidth consumed: 45 MB/s × (64/9) = **320 MB/s** (0.32 GB/s) of actual DRAM traffic — now 0.16% of the Orin's 204.8 GB/s total bandwidth. While this sounds small, it is scattered random access that competes with the neural network's streaming memory patterns, causing cache thrashing and DRAM controller contention.
 
   (4) **Cache thrashing:** The 36 MB map doesn't fit in the Orin's 4 MB L2 cache. Every map access is a cache miss → DRAM round trip (~100ns). At 500K updates/s: 500K × 100ns = **50ms** of memory stall time per second — 50% of one CPU core's time spent waiting for DRAM.
 
@@ -21234,7 +21240,7 @@ Your Director asks you to formulate a multi-stage plan to make this VLM viable o
 
   **(4) Per-layer sensitivity.** Not all layers are equally sensitive to quantization. The first and last layers (which interface with raw pixels and output logits) are most sensitive. TensorRT allows mixed precision: keep the first conv and final detection head in FP16, quantize the backbone to INT8. This recovers 0.5–1% mAP at <5% latency cost.
 
-  > **Napkin Math:** Calibration set size vs mAP (YOLOv8s, COCO val): 100 images → 42.1 mAP (−2.5). 500 → 44.0 (−0.6). 1,000 → 44.2 (−0.4). 5,000 → 44.3 (−0.3). FP32 baseline: 44.6. Sweet spot: 500–1,000 images. Calibration time: 500 images × 15ms + 30s overhead = 38s. Time per 0.1% mAP improvement: going from 500→5,000 images buys 0.3% mAP in 75 extra seconds = 250s per 0.1% mAP. Going from 100→500 buys 1.9% in 6 seconds = 3.2s per 0.1% mAP. The first 500 images are 78× more valuable per second than the next 4,500.
+  > **Napkin Math:** Calibration set size vs mAP (YOLOv8s, COCO val): 100 images → 42.1 mAP (−2.5). 500 → 44.0 (−0.6). 1,000 → 44.2 (−0.4). 5,000 → 44.3 (−0.3). FP32 baseline: 44.6. Sweet spot: 500–1,000 images. Calibration time: 500 images × 15ms + 30s overhead = 38s. Time per 0.1% mAP improvement: going from 500→5,000 images buys 0.3% mAP in 75 extra seconds = 25s per 0.1% mAP. Going from 100→500 buys 1.9% in 6 seconds = 3.2s per 0.1% mAP. The first 500 images are ~8× more valuable per second than the next 4,500.
 
   📖 **Deep Dive:** [Volume I: Model Optimizations](https://harvard-edge.github.io/cs249r_book_dev/contents/optimizations/model_compression.html)
 
@@ -21789,6 +21795,11 @@ Your Director asks you to formulate a multi-stage plan to make this VLM viable o
 
   **Realistic Solution:** Neural Processing Unit. It is highly optimized for massively parallel, low-precision Multiply-Accumulate (MAC) operations, which form the backbone of matrix multiplications in neural networks.
 
+  > **Napkin Math:**
+  > - Orin NPU (DLA): 275 TOPS INT8. CPU (Cortex-A78): ~50 GOPS INT8. NPU is ~5,500× more efficient for MAC ops.
+  > - One Conv2D layer (3×3, 256 channels, 56×56): ~462M MACs. NPU: 462M / 275T = 1.7μs. CPU: 462M / 50G = 9.2ms.
+  > - => NPU completes in microseconds what takes the CPU milliseconds — purpose-built silicon for the dominant operation.
+
   > **Options:**
   > [ ] Network Processing Unit; optimized for fast Wi-Fi routing.
   > [x] Neural Processing Unit; optimized for dense Multiply-Accumulate (MAC) operations.
@@ -21808,6 +21819,11 @@ Your Director asks you to formulate a multi-stage plan to make this VLM viable o
   **Common Mistake:** Blaming a memory leak or a garbage collection pause.
 
   **Realistic Solution:** Thermal Throttling. Edge devices often lack active cooling (fans). Running intensive matrix math heats up the silicon quickly. To prevent physical damage, the OS automatically drops the clock frequency of the processor, drastically reducing FPS.
+
+  > **Napkin Math:**
+  > - Orin NX TDP: 25W. Passively cooled enclosure dissipates ~15W. After ~60s, junction temp hits 100°C throttle point.
+  > - Clock drops from 1.1 GHz to ~450 MHz (41% of peak). Throughput: 30 FPS × 0.41 = ~12.3 FPS.
+  > - => Sustained performance = thermal dissipation / power-per-frame, not peak silicon speed.
 
   > **Options:**
   > [ ] The model's weights have drifted due to prolonged inference.

@@ -22815,6 +22815,11 @@ The correct approach is to architect a mixed-precision solution:
 
   **Realistic Solution:** Flash (read-only, persistent) and SRAM (volatile, temporary). Model weights and code are stored in Flash. Intermediate activations and the heap/stack reside in the much smaller SRAM.
 
+  > **Napkin Math:**
+  > - Cortex-M4 (STM32F4): 1 MB Flash, 256 KB SRAM. Model weights (INT8) must fit in Flash; activations must fit in SRAM.
+  > - A 250K-param keyword spotting model: 250K × 1B = 250 KB Flash. Peak activation: ~50 KB SRAM.
+  > - => Flash:SRAM ratio is typically 4:1 to 8:1 — the SRAM ceiling is the binding constraint for model complexity.
+
   > **Options:**
   > [ ] HBM for weights and NVMe for activations.
   > [x] Flash memory for read-only model weights, and SRAM for intermediate activations.
@@ -22834,6 +22839,11 @@ The correct approach is to architect a mixed-precision solution:
   **Common Mistake:** Thinking INT8 is required because the flash storage is too small to hold the dataset.
 
   **Realistic Solution:** Many ultra-low-power microcontrollers lack a Floating Point Unit (FPU) in hardware. If you run FP32 math on a chip without an FPU, the compiler has to emulate the float math in software, which is excruciatingly slow and burns massive amounts of battery.
+
+  > **Napkin Math:**
+  > - Cortex-M0+ at 48 MHz: INT8 multiply = 1 cycle. Software FP32 multiply = ~30-50 cycles (emulated).
+  > - 250K-param model, 1 inference: ~500K MACs. INT8: 500K/48M = 10.4ms. FP32 emulated: 500K×40/48M = 417ms.
+  > - => INT8 is 40× faster and uses proportionally less energy (10mW vs 400mW at same clock).
 
   > **Options:**
   > [ ] Because microcontrollers cannot physically read 32-bit words from memory.

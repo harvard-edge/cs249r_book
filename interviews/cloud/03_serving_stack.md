@@ -1052,11 +1052,11 @@ Total TTFT = 200 ms + 200 ms = 400 ms
 
   **Common Mistake:** Engineers often anchor on the model's parameter count (e.g., 'a 7B model is small') as the main driver of memory usage. They forget or underestimate that the KV cache size scales linearly with sequence length and can dwarf the memory required for the model weights, especially with modern long-context windows.
 
-  **Realistic Solution:** The KV Cache is the largest memory consumer. While the model weights are fixed, the KV cache must store the key and value vectors for every token in the input sequence. For a 7B model, the weights are ~14 GB, but the KV cache for a 128k token sequence is nearly 70 GB. Combined, they exceed the GPU's capacity.
+  **Realistic Solution:** The KV Cache is the largest memory consumer. While the model weights are fixed, the KV cache must store the key and value vectors for every token in the input sequence. For a 7B model, the weights are ~14 GB, but the KV cache for a 128k token sequence is ~62.5 GB. Combined, they approach the GPU's capacity limit.
 
   > **Napkin Math:** 1. **Model Weights Memory:** 7B params × 2 bytes/param (for FP16) = **14 GB**.
-2. **KV Cache Memory:** The cache for a single token in a 7B model (like Llama-7B with 32 layers, 32 heads, 128 head_dim) is `2 × 32 × 32 × 128 × 2 bytes` ≈ 0.5 MB. For a 128k sequence: 128,000 tokens × 0.5 MB/token ≈ **~68.7 GB**.
-3. **Total Memory:** 14 GB (weights) + 68.7 GB (KV Cache) = **82.7 GB**. This exceeds the H100's 80 GB memory limit, causing an OOM error driven primarily by the KV cache.
+2. **KV Cache Memory:** The cache for a single token in a 7B model (like Llama-7B with 32 layers, 32 heads, 128 head_dim) is `2 × 32 × 32 × 128 × 2 bytes` = 524,288 bytes ≈ 0.5 MB. For a 128k sequence: 128,000 tokens × 0.5 MB/token = 64,000 MB ≈ **~62.5 GB**.
+3. **Total Memory:** 14 GB (weights) + 62.5 GB (KV Cache) = **76.5 GB**. This leaves only ~3.5 GB for CUDA context overhead, activation buffers, and any batching, making the system extremely memory-constrained and prone to OOM under realistic serving conditions.
 
   > **Key Equation:** $\text{Memory}_{\text{KV Cache}} = 2 \times N_{\text{layers}} \times L_{\text{sequence}} \times d_{\text{model}}$
 
@@ -3222,7 +3222,7 @@ However, under load, the queue isn't empty. Little's Law tells us the number of 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Throughput Trap</b> · <code>ttft-vs-tpot</code></summary>
 
-- **Interviewer:** "Your team has optimized an LLM inference server for maximum throughput, achieving 5,000 tokens/sec on a single H100. The deployment uses large static batches to maximize GPU utilization. However, user feedback is poor, with complaints that the chatbot feels 'laggy' and 'unresponsive' on the first response. You profile the system and find that while Time Per Output Token (TPOT) is extremely low (~5ms), the Time To First Token (TTFT) can be very high. Apply your knowledge of serving latency to explain this phenomenon."
+- **Interviewer:** "Your team has optimized an LLM inference server for maximum throughput, achieving 5,000 tokens/sec aggregate on a single H100. The deployment uses large static batches to maximize GPU utilization. However, user feedback is poor, with complaints that the chatbot feels 'laggy' and 'unresponsive' on the first response. You profile the system and find that while the per-user Time Per Output Token (TPOT) is reasonable (~12ms at batch=64, since 64 tokens are generated in parallel each step), the Time To First Token (TTFT) can be very high due to queuing. Apply your knowledge of serving latency to explain this phenomenon."
 
   <details>
   <summary><b>🔍 Reveal Answer</b></summary>
@@ -4826,8 +4826,8 @@ This is a full second, likely violating a typical <500ms SLO. Meanwhile, the TPO
   **Realistic Solution:** Continuous batching brilliantly solves the problem of memory fragmentation by allowing requests of different lengths to be packed together efficiently. This is why KV cache utilization is high. However, it does not eliminate the fundamental costs of inference. The modest throughput gain and sub-100% GPU utilization suggest the system is now bottlenecked by the *prefill phase* for new, incoming requests. While the GPU is efficiently decoding tokens for the existing batch (a memory-bandwidth bound task), it must periodically switch to the compute-heavy prefill operation for new requests. If new requests arrive frequently, the system spends a significant fraction of its time in this compute-bound prefill state, which has a lower arithmetic intensity than the decode phase and can't always saturate the H100's massive compute resources. The 'plateau' occurs because they have traded a memory capacity/fragmentation bottleneck for a prefill compute bottleneck.
 
   > **Napkin Math:** 1. **Decode (Memory-Bound):** To generate one token for the batch, the GPU must stream the 70B model weights from HBM. Time is `Weight Size / BW`. `(70B params * 2 bytes/param) / 3.35 TB/s` = `140 GB / 3350 GB/s` ≈ 42ms. This is the theoretical time per token for the *entire batch*.
-2. **Prefill (Compute-Bound):** A new request with 1024 prompt tokens arrives. Compute is `2 * Params * Tokens`. `2 * 70B * 1024` ≈ 1.4x10¹⁷ FLOPs. On an H100 with ~989 TFLOPS, this takes `140 PFLOPs / 989 TFLOPS` ≈ 141ms.
-3. **Analysis:** The system juggles these two states. If a new request arrives every 200ms, the system spends `141ms / 200ms` = ~70% of its time in the prefill state. The massive throughput gains of continuous batching are primarily in the decode phase, where many users' token generations are parallelized. If the system is constantly bogged down with expensive prefills, it can't spend enough time in the highly efficient decode state, thus limiting the overall throughput gain.
+2. **Prefill (Compute-Bound):** A new request with 1024 prompt tokens arrives. Compute is `2 * Params * Tokens`. `2 * 70e9 * 1024` ≈ 1.4×10¹⁴ FLOPs ≈ 143 TFLOPs. On an H100 with ~989 TFLOPS, this takes `143 TFLOPs / 989 TFLOPS` ≈ 145ms.
+3. **Analysis:** The system juggles these two states. If a new request arrives every 200ms, the system spends `145ms / 200ms` = ~73% of its time in the prefill state. The massive throughput gains of continuous batching are primarily in the decode phase, where many users' token generations are parallelized. If the system is constantly bogged down with expensive prefills, it can't spend enough time in the highly efficient decode state, thus limiting the overall throughput gain.
 
   > **Key Equation:** $T_\text{total} = \alpha \cdot T_\text{prefill} + (1-\alpha) \cdot T_\text{decode}$
 
@@ -5627,8 +5627,8 @@ Analyze the fundamental systems conflict at play here. Differentiate the perform
 
   **The Fix:** Chunked prefill is a memory-saving compromise, not a speedup. To fix the speed, you must use Tensor Parallelism across multiple GPUs to keep the sequence contiguous, or interleave the chunks of different users (continuous batching) to restore the arithmetic intensity.
 
-  > **Napkin Math:** Single 100k pass: Read 140 GB weights once. Compute 140 TFLOPs. Time = 140T / 900TFLOPS = 0.15s.
-  > Chunked 25 passes: Read 140 GB weights 25 times = 3,500 GB of memory traffic. At 3.3 TB/s bandwidth, just *loading* the weights takes 1.06 seconds. TTFT increases by nearly 7x.
+  > **Napkin Math:** Single 100k pass: Total compute = `2 × 70e9 × 100,000` = 14 PFLOPs. At ~989 TFLOPS (peak, because 100k-token matmuls have astronomical arithmetic intensity), time ≈ 14.15s. Weights (140 GB) are streamed from HBM once per layer.
+  > Chunked 25 passes: Same 14 PFLOPs total, but split into 25 chunks of 560 TFLOPs each. Each chunk must reload all 140 GB of model weights from HBM — 25 reloads × 140 GB = 3,500 GB of memory traffic. At 3.35 TB/s, that's 1.04s of pure weight streaming overhead (vs. 0.042s for one pass). Worse, the smaller 4k-token matmuls achieve lower effective TFLOPS (~600 vs ~989) due to reduced arithmetic intensity, stretching each chunk to ~0.93s. Total ≈ 25 × 0.93s ≈ 23s vs. 14.15s — a ~1.6× TTFT regression. The GPU shifts from a fully compute-saturated regime to a partially memory-bandwidth-limited one.
 
   📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
 
@@ -6327,8 +6327,8 @@ The correct solution is to replace the request-level batching with **Continuous 
 **Static Batching Failure (Head-of-Line Blocking):**
 The batch processing time is dictated by the slowest request.
 1.  **Prefill:** The whole batch is padded to the longest prompt (1000 tokens). The compute time is thus determined by the 1000-token prompt.
-    -   Prefill FLOPs: `2 * 70B params * 1000 tokens ≈ 1.4e17 FLOPs`
-    -   Prefill Time: `1.4e17 FLOPs / 989e12 FLOPS/s ≈ 141 ms`
+    -   Prefill FLOPs: `2 * 70e9 params * 1000 tokens = 1.4e14 FLOPs ≈ 140 TFLOPs`
+    -   Prefill Time: `140 TFLOPs / 989 TFLOPS ≈ 141 ms`
 2.  **Decode:** The entire batch must wait as the server generates 512 tokens for the long request. The decode step is memory-bound.
     -   Time per token (for the whole batch): `140GB weights / 3.35 TB/s ≈ 41.8 ms`
     -   Total Decode Time for Long Request: `512 tokens * 41.8 ms/token ≈ 21.4 seconds`
@@ -6855,9 +6855,10 @@ The primary constraint for continuous batching is total available HBM for the KV
     2.  **KV Cache Compression:** Techniques like quantization or pruning applied to the KV cache itself.
     3.  **Offloading:** Moving less frequently accessed parts of the KV cache to CPU memory, though this introduces latency.
 
-  > **Napkin Math:** For a 7B LLM (e.g., Llama-2 with 32 layers, 32 heads, 128 head dim, FP16), the KV cache size per token is `32 layers * 2 (K+V) * 32 heads * 128 dim * 2 bytes/FP16 = 524 KB`.
-  > If each request has an average sequence length of 1024 tokens, one request consumes `524 KB/token * 1024 tokens ≈ 0.5 GB`.
-  > With 16 concurrent requests, this is `16 * 0.5 GB = 8 GB` of KV cache, quickly saturating a 16GB GPU *on top of model weights*. PagedAttention can reduce this by 2-4x for typical workloads.
+  > **Napkin Math:** For a 7B LLM (e.g., Llama-2-7B with 32 layers, 32 KV heads, 128 head dim, FP16), the KV cache size per token is `32 layers × 2 (K+V) × 32 heads × 128 dim × 2 bytes/FP16 = 524 KB/token`.
+  > If each request has an average sequence length of 1024 tokens, one request consumes `524 KB/token × 1024 tokens ≈ 0.5 GB`.
+  > With 16 concurrent requests, this is `16 × 0.5 GB = 8 GB` of KV cache, quickly saturating a 16 GB GPU *on top of model weights*. PagedAttention can reduce this by 2-4× for typical workloads.
+  > **Note on GQA:** Larger models like Llama-2-70B use Grouped Query Attention (GQA) with only 8 KV heads instead of the full 64 attention heads, reducing KV cache by 8× compared to standard multi-head attention. This is critical for making 70B-class models servable — without GQA, the KV cache alone would consume ~4 GB/request at 4k context in FP16.
 
   > **Key Equation:** `KV_Cache_Memory_Per_Request = SequenceLength * NumLayers * 2 * NumHeads * HeadDim * BytesPerFloat`
 
@@ -7176,9 +7177,9 @@ The primary constraint for continuous batching is total available HBM for the KV
 
   > **Napkin Math:**
   > - **Memory Asymmetry:** 13B FP16 = 26GB weights. Fits on 1× A100 (40GB) with 14GB for KV-cache. 70B FP16 = 140GB weights. Requires 2× H100 (80GB) or 4× A100 (40GB). The 70B model requires 4× the GPUs per replica.
-  > - **Traffic Mirroring Cost:** If production is 1,000 QPS running on 50× A100s, mirroring 100% to 70B would require ~200-300 GPUs due to lower throughput and higher memory footprint. Cost: ~$500k/week.
+  > - **Traffic Mirroring Cost:** If production is 1,000 QPS running on 50× A100s, mirroring 100% to 70B would require ~200-300 H100 GPUs due to lower throughput and higher memory footprint. At ~$4/hr per H100, 250 GPUs × $4/hr × 168 hrs/week ≈ **$168k/week**.
   > - **Statistical Reality:** To detect a 3% quality improvement with 80% power, you need ~3,200 samples per arm. At 1,000 QPS, you collect 3,200 samples in 3.2 seconds.
-  > - **Optimized Architecture:** Route 99.9% of traffic to 13B, and 0.1% (1 QPS) to a single minimal 70B deployment (2× H100s). You gather the required 3,200 samples in under an hour, costing ~$10 in GPU compute instead of $500k.
+  > - **Optimized Architecture:** Route 99.9% of traffic to 13B, and 0.1% (1 QPS) to a single minimal 70B deployment (2× H100s). You gather the required 3,200 samples in under an hour, costing ~$10 in GPU compute instead of $168k.
 
   📖 **Deep Dive:** [Benchmarking](https://harvard-edge.github.io/cs249r_book_dev/contents/benchmarking/benchmarking.html)
 
@@ -7565,7 +7566,7 @@ The primary constraint for continuous batching is total available HBM for the KV
 
   **Realistic Solution:** A multi-model platform needs three architectural layers: (1) **Model tiering** — group models by size and latency SLA. Tier 1 (1B–7B, <100ms): always resident in VRAM, share GPUs via MPS or time-slicing. Tier 2 (13B–30B, <500ms): resident on dedicated GPUs with overflow to CPU offload. Tier 3 (70B, <2s): tensor-parallel across multi-GPU, dedicated but right-sized. (2) **Predictive autoscaling** — use traffic forecasting (not reactive scaling) to pre-warm models 10 minutes before demand spikes. (3) **KV-cache sharing** — for models serving similar prompts (e.g., system prompts), cache the KV-state of common prefixes across requests.
 
-  > **Napkin Math:** Current: 12 models × dedicated pools. Typical utilization: 30% (peak-provisioned). Monthly cost: \$2M. Optimized: Tier 1 (8 small models): consolidate from 40 GPUs to 15 (shared, 80% util). Savings: 25 GPUs × \$2/hr × 720 = \$36k/mo. Tier 2 (3 mid models): right-size from 60 GPUs to 35 with autoscaling. Savings: \$36k/mo. Tier 3 (1 large model): reduce from 80 GPUs to 50 with continuous batching + PagedAttention. Savings: \$43k/mo. Prefix caching saves ~20% of KV-cache memory across all tiers → another 15% GPU reduction: \$60k/mo. **Total savings: \$175k/mo (8.75%)** — wait, that's not 40%. The real lever: **spot instances for Tier 1** (stateless, fast restart) saves 65% on those GPUs: \$200k/mo. Plus **quantizing Tier 2 to INT8** halves their GPU count: \$180k/mo. **Revised total: \$850k/mo savings (42.5%).**
+  > **Napkin Math:** Current: 12 models × dedicated pools. Typical utilization: 30% (peak-provisioned). Monthly cost: \$2M across ~700 GPUs at ~\$4/hr average (mix of A100 and H100 instances). Optimized: Tier 1 (8 small models, 1B–7B): consolidate from 200 GPUs to 75 (shared via MPS, 80% util). Savings: 125 GPUs × \$4/hr × 720 = \$360k/mo. Tier 2 (3 mid models, 13B–30B): right-size from 200 GPUs to 120 with predictive autoscaling. Savings: 80 GPUs × \$4/hr × 720 = \$230k/mo. Tier 3 (1 large model, 70B): reduce from 300 GPUs to 200 with continuous batching + PagedAttention. Savings: 100 GPUs × \$4/hr × 720 = \$288k/mo. **Total savings: \$878k/mo (43.9%)** — exceeds the 40% target. The additional levers (spot instances for stateless Tier 1, INT8 quantization for Tier 2, prefix caching across all tiers) provide further headroom and redundancy against traffic spikes.
 
   📖 **Deep Dive:** [ML Operations](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_ops/ml_ops.html)
 
@@ -7583,9 +7584,9 @@ The primary constraint for continuous batching is total available HBM for the KV
 
   **Common Mistake:** "The draft model is 70× smaller, so it generates tokens 70× faster, and we just verify them in parallel — easy 5-10× speedup." This ignores the acceptance rate, the memory overhead of running two models, and the verification cost.
 
-  **Realistic Solution:** Speculative decoding works in three steps: (1) the draft model generates $K$ candidate tokens autoregressively (cheap, ~1 ms/token for a 1B model); (2) the target 70B model verifies all $K$ tokens in a single forward pass (parallel verification — same cost as generating 1 token, since decode is memory-bandwidth-bound and the extra compute for $K$ tokens is negligible); (3) the target accepts the first $n \leq K$ tokens where the draft model's distribution matches, and resamples the $(n+1)$-th token. The speedup depends critically on the **acceptance rate** $\alpha$ — the probability the draft model's token matches the target's. If $\alpha = 0.8$ and $K = 5$, the expected accepted tokens per verification step is $\sum_{i=0}^{K} \alpha^i \approx 1/(1-\alpha) = 5$ tokens per target forward pass (in the limit). But you also pay for the draft model's memory and compute. If the draft model's memory displaces KV-cache space, your maximum batch size drops, reducing throughput even as per-request latency improves.
+  **Realistic Solution:** Speculative decoding works in three steps: (1) the draft model generates $K$ candidate tokens autoregressively (cheap, ~1 ms/token for a 1B model); (2) the target 70B model verifies all $K$ tokens in a single forward pass (parallel verification — same cost as generating 1 token, since decode is memory-bandwidth-bound and the extra compute for $K$ tokens is negligible); (3) the target accepts the first $n \leq K$ tokens where the draft model's distribution matches, and resamples the $(n+1)$-th token. The speedup depends critically on the **acceptance rate** $\alpha$ — the probability the draft model's token matches the target's. If $\alpha = 0.8$ and $K = 5$, the expected accepted tokens per verification step is $(1 - \alpha^{K+1})/(1-\alpha) = (1 - 0.8^6)/0.2 \approx 3.69$ tokens per target forward pass (the $1/(1-\alpha) = 5$ formula only applies in the limit as $K \to \infty$). But you also pay for the draft model's memory and compute. If the draft model's memory displaces KV-cache space, your maximum batch size drops, reducing throughput even as per-request latency improves.
 
-  > **Napkin Math:** **Without speculation:** 70B decode = 45 ms/token (bandwidth-bound: 140 GB weights / 3.35 TB/s ≈ 42 ms + overhead). **With speculation (K=5, α=0.8):** Draft generates 5 tokens: 5 × 1 ms = **5 ms**. Target verifies: **45 ms** (one forward pass). Expected accepted tokens: $1/(1-0.8) = 5$ tokens. Effective per-token latency: $(5 + 45) / 5 = $ **10 ms/token** — a **4.5× speedup**. Memory cost: 1B draft model = 2 GB + its KV-cache ≈ 2.5 GB. On 80 GB H100 with 70B model (140 GB sharded TP=2 → 70 GB/GPU), free memory drops from 10 GB to 7.5 GB — **max batch drops from ~9 to ~7 requests**. **When it backfires:** If $\alpha$ drops to 0.4 (e.g., code generation where the draft model is weak), expected accepted = $1/0.6 \approx 1.67$ tokens per step. Effective latency: $(5 + 45) / 1.67 = $ **30 ms/token** — only 1.5× speedup, and you've lost 25% of your batch capacity for it.
+  > **Napkin Math:** **Without speculation:** 70B decode = 45 ms/token (bandwidth-bound: 140 GB weights / 3.35 TB/s ≈ 42 ms + overhead). **With speculation (K=5, α=0.8):** Draft generates 5 tokens: 5 × 1 ms = **5 ms**. Target verifies: **45 ms** (one forward pass). Expected accepted tokens: $(1 - 0.8^6)/0.2 \approx 3.69$ tokens. Effective per-token latency: $(5 + 45) / 3.69 = $ **13.6 ms/token** — a **3.3× speedup**. Memory cost: 1B draft model = 2 GB + its KV-cache ≈ 2.5 GB. On 80 GB H100 with 70B model (140 GB sharded TP=2 → 70 GB/GPU), free memory drops from 10 GB to 7.5 GB — **max batch drops from ~9 to ~7 requests**. **When it backfires:** If $\alpha$ drops to 0.4 (e.g., code generation where the draft model is weak), expected accepted = $(1 - 0.4^6)/0.6 \approx 1.66$ tokens per step. Effective latency: $(5 + 45) / 1.66 = $ **30 ms/token** — only 1.5× speedup, and you've lost 25% of your batch capacity for it.
 
   📖 **Deep Dive:** [Volume I: Model Compression](https://harvard-edge.github.io/cs249r_book_dev/contents/model_compression/model_compression.html)
 
@@ -7713,7 +7714,7 @@ The primary constraint for continuous batching is total available HBM for the KV
 
   **Realistic Solution:** Fair cost attribution must reflect actual GPU resource consumption, which has two distinct phases: (1) **Prefill cost** — proportional to input tokens (compute-bound, scales as O(n²) for attention), and (2) **Decode cost** — proportional to output tokens (memory-bandwidth-bound, scales linearly but occupies KV-cache memory for the entire generation duration). The correct model charges: `cost = α × input_tokens + β × output_tokens + γ × generation_time_ms`. The α term captures prefill compute, β captures decode compute, and γ captures KV-cache memory occupancy (a long-running generation blocks memory that could serve other requests). Calibrate α, β, γ by profiling each model: measure GPU-seconds consumed per input token (prefill) and per output token (decode) at representative batch sizes. For continuous batching, the γ term is critical — a request generating 2,000 tokens at 40ms/token occupies KV-cache for 80 seconds, blocking ~2 GB of GPU memory that could serve 20 short requests.
 
-  > **Napkin Math:** 64 A100s at $2/hr = $128/hr total. Search team: 10,000 req/hr × 500 input + 50 output tokens. Content team: 1,000 req/hr × 2,000 input + 2,000 output tokens. Per-request billing: search pays 10/11 × $128 = $116/hr, content pays $12/hr. Per-token billing: search = 5.5M tokens, content = 4M tokens → search pays $74, content pays $54. Per-GPU-second billing (actual resource use): search prefill ≈ 0.5s/req × 10k = 5,000 GPU-sec, content prefill ≈ 4s/req × 1k = 4,000 GPU-sec, content decode ≈ 80s/req × 1k = 80,000 GPU-sec. Content uses 94% of decode resources → fair charge ≈ $108/hr. The naive per-request model undercharges content by 9×.
+  > **Napkin Math:** 64 A100s at $2/hr = $128/hr total. Search team: 10,000 req/hr × 500 input + 50 output tokens. Content team: 1,000 req/hr × 2,000 input + 2,000 output tokens. Per-request billing: search pays 10/11 × $128 = $116/hr, content pays $12/hr. Per-token billing: search = 5.5M tokens, content = 4M tokens → search pays $74, content pays $54. **Per-GPU-second billing (actual resource use):** search prefill ≈ 0.5s/req × 10k = 5,000 GPU-sec; search decode ≈ 2s/req × 10k = 20,000 GPU-sec; content prefill ≈ 4s/req × 1k = 4,000 GPU-sec; content decode ≈ 80s/req × 1k = 80,000 GPU-sec. Total = 109,000 GPU-sec. Content share = 84,000/109,000 = **77%** → fair charge ≈ $98/hr. Search share = 25,000/109,000 = 23% → $30/hr. The naive per-request model undercharges content by ~8× ($12 vs $98).
 
   📖 **Deep Dive:** [ML Operations](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_ops/ml_ops.html)
 
@@ -7796,6 +7797,11 @@ The primary constraint for continuous batching is total available HBM for the KV
   **Common Mistake:** Thinking that PagedAttention compresses the KV cache to save memory rather than managing fragmentation.
   **Realistic Solution:** PagedAttention partitions the KV cache into fixed-size blocks (pages) that can be non-contiguous in memory, similar to virtual memory in OS, virtually eliminating external fragmentation.
 
+  > **Napkin Math:**
+  > - 13B model, 40 layers, 40 heads, head_dim=128, FP16. KV cache per token = `num_layers × 2 (K+V) × num_kv_heads × head_dim × bytes_per_element` = `40 × 2 × 40 × 128 × 2B` = 819 KB/token.
+  > - Without paging: pre-allocate max_seq_len=2048 per request = 819 KB × 2048 = 1.6 GB. 50 concurrent requests = 80 GB (saturates an H100).
+  > - With PagedAttention at avg 512 tokens/request: only allocate pages for actual tokens used. 819 KB × 512 = 0.4 GB/request × 50 = 20 GB. Memory waste drops from ~60% to <5%, freeing 60 GB for additional concurrent requests.
+
   > **Options:**
   > [ ] It compresses the key and value tensors using quantization before storing them in the cache.
   > [x] It partitions the KV cache into non-contiguous fixed-size blocks, eliminating external fragmentation and allowing dynamic memory allocation per token.
@@ -7814,6 +7820,11 @@ The primary constraint for continuous batching is total available HBM for the KV
 
   **Common Mistake:** Assuming continuous batching increases the generation speed of individual tokens rather than the overall system throughput.
   **Realistic Solution:** Continuous batching inserts new requests into the batch as soon as a sequence finishes, instead of waiting for the longest sequence in the batch to complete, thereby reducing idle compute resources.
+
+  > **Napkin Math:**
+  > - Static batch of 8 requests: lengths [50, 100, 200, 500, 50, 80, 120, 500] tokens. All wait for longest (500 tokens).
+  > - GPU idle time for shortest request: (500−50)/500 = 90% wasted. Average waste across batch: ~55%.
+  > - => Continuous batching fills vacated slots immediately. Throughput improvement: typically 2-3× over static batching.
 
   > **Options:**
   > [ ] It increases the clock speed of the GPU dynamically to generate tokens faster for shorter sequences.
@@ -7834,6 +7845,11 @@ The primary constraint for continuous batching is total available HBM for the KV
   **Common Mistake:** Believing that the target model is only used when the draft model is uncertain, rather than verifying every token in parallel.
   **Realistic Solution:** The smaller draft model sequentially generates multiple candidate tokens quickly. The larger target model then verifies all these candidate tokens in a single parallel forward pass, accepting the valid ones and correcting the first mistake.
 
+  > **Napkin Math:**
+  > - Draft model (1B) generates 5 tokens: 5 × 2ms = 10ms. Target model (70B) verifies all 5 in one forward pass: 30ms.
+  > - Total for 5 tokens: 40ms. Without speculation: 5 × 30ms = 150ms.
+  > - => Speedup: 150/40 = 3.75× (assuming ~80% acceptance rate, effective speedup ≈ 2.5-3×).
+
   > **Options:**
   > [ ] The target model is used only for the first few tokens, and the draft model completes the rest of the sequence to save time.
   > [x] The draft model generates multiple tokens sequentially, which the target model then verifies in a single parallel forward pass, accepting correct tokens and correcting the first divergence.
@@ -7852,6 +7868,11 @@ The primary constraint for continuous batching is total available HBM for the KV
 
   **Common Mistake:** Confusing the arrival rate with throughput or thinking the server only needs to handle the arrival rate concurrently.
   **Realistic Solution:** Little's Law states that the average number of items in the system ($L$) equals the arrival rate multiplied by the average time spent in the system. $10 	ext{ req/s} 	imes 5 	ext{ s} = 50$ concurrent requests.
+
+  > **Napkin Math:**
+  > - L = λ × W = 10 req/s × 5s = 50 concurrent requests.
+  > - If each request needs ~1.5 GB KV cache memory: 50 × 1.5 GB = 75 GB. Requires at least one 80 GB H100.
+  > - => Under-provisioning (e.g., max 30 concurrent) causes queue buildup: queue length grows at 10 − 30/5 = 4 req/s.
 
   > **Options:**
   > [ ] The server needs to support 5 concurrent requests at any given time.

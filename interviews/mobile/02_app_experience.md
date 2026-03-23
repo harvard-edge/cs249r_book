@@ -1755,8 +1755,11 @@ Result: The ANR condition is met. After 5 seconds of the UI thread being blocked
   **The Fix:** Use OS-level performance APIs (like Android's `PerformanceHintManager` or iOS's Quality of Service classes) to explicitly request a temporary CPU boost *before* you invoke the heavy ML model.
 
   > **Napkin Math:**
-  > Idle Start: 200ms @ 500 MHz + 200ms @ 1.5 GHz + 400ms @ 2.8 GHz = 800ms total.
-  > Scrolling Start: Chip is already at 2.8 GHz. All math executes instantly. Total = 400ms.
+  > - Idle start: CPU at 300 MHz. Governor ramps 300 → 800 → 1.5 → 2.8 GHz over ~200–400 ms
+  > - Inference on cold chip: ~200 ms @ 500 MHz avg + 200 ms @ 1.5 GHz + 400 ms @ 2.8 GHz = 800 ms wall clock
+  > - Scrolling keeps chip at 2.8 GHz for 60 FPS UI → same inference runs entirely at max clock = 400 ms
+  > - DVFS penalty: 400 ms wasted = 50% overhead. PerformanceHintManager pre-boost: <1 ms API call
+  > - => A 1 ms API call eliminates a 400 ms latency penalty — the highest-ROI optimization in mobile ML
 
   📖 **Deep Dive:** [Volume I: Benchmarking](https://harvard-edge.github.io/cs249r_book_dev/contents/benchmarking/benchmarking.html)
 
@@ -1959,9 +1962,11 @@ Result: The ANR condition is met. After 5 seconds of the UI thread being blocked
       *   **Input Resolution/Batch Size Adjustment:** Dynamically reduce input resolution or batch size if thermal limits are approached, trading off a slight accuracy/throughput for sustained operation.
 
   > **Napkin Math:**
-  > A typical flagship mobile SoC might have a peak power consumption of 8-10W for short bursts, but a sustained thermal design power (TDP) of only 3-4W for the entire chip.
-  > If your ML workload consumes 5W continuously, it will quickly exceed the sustained TDP, leading to throttling.
-  > A 20ms inference at 5W means 100mJ per inference. If throttled to 60ms, the power might drop to 1.5W, meaning 90mJ per inference. The system sacrifices speed for thermal stability.
+  > - Snapdragon 8 Gen 3: peak ~10 W burst (73 TOPS), sustained TDP ~3–4 W
+  > - Phone thermal resistance (no fan): ~18 °C/W. Sustainable power = (95 − 25) / 18 = 3.9 W
+  > - At 10 W burst: 20 ms/frame. At 3.9 W sustained: TOPS drops to ~29 → latency rises to 50–60 ms/frame
+  > - INT8 quantization: 4× fewer ops/byte → same model at ~2.5 W sustained → runs within thermal envelope
+  > - => Sustained TDP is 3–4× below peak; design for the thermal wall, not the spec sheet
 
   > **Key Equation:** $P_{avg} = \frac{1}{T} \int_0^T P(t) dt \le TDP_{sustained}$
 

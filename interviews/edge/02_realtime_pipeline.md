@@ -337,7 +337,7 @@ This total (`~3.0 GB/s`) exceeds the MIPI interface's physical limit of ~2.5 GB/
 
   **Common Mistake:** "The neural network inference is draining the battery." If inference runs 5 times/day at 50ms each, that's 250ms of compute per day — negligible.
 
-  **Realistic Solution:** The power drain is the **polling loop**, not the inference. The STM32H7 at 480 MHz draws ~300 mW in active mode. Polling the PIR sensor every 10ms keeps the CPU in active mode 24/7: 300 mW × 24 hrs = 7.2 Wh/day. A typical 18650 LiPo battery holds ~10 Wh → 1.4 days (matches the observed 2-day life with overhead). The fix is **interrupt-driven wake**: configure the PIR sensor output as an EXTI interrupt source, put the STM32H7 into Stop2 mode (draws ~3 µW — 100,000× less than active mode). When the PIR triggers, the interrupt wakes the CPU in ~5 µs, the CPU runs inference, then returns to Stop2. Power budget: Stop2 standby = 3 µW × 24 hrs = 0.072 mWh/day. 5 inference wake-ups × 50ms × 300 mW = 0.075 mWh/day. Total: ~0.15 mWh/day. Battery life: 10 Wh / 0.15 mWh = **66,667 hours ≈ 7.6 years** (limited by battery self-discharge, not compute).
+  **Realistic Solution:** The power drain is the **polling loop**, not the inference. The STM32H7 at 480 MHz draws ~300 mW in active mode. Polling the PIR sensor every 10ms keeps the CPU in active mode 24/7: 300 mW × 24 hrs = 7.2 Wh/day. A typical 18650 LiPo battery holds ~10 Wh → 1.4 days (matches the observed 2-day life with overhead). The fix is **interrupt-driven wake**: configure the PIR sensor output as an EXTI interrupt source, put the STM32H7 into Stop2 mode (draws ~3 µW — 100,000× less than active mode). When the PIR triggers, the interrupt wakes the CPU in ~5 µs, the CPU runs inference, then returns to Stop2. Power budget: Stop2 standby = 3 µW × 24 hrs = 0.072 mWh/day. 5 inference wake-ups × 50ms × 300 mW = 0.075 mWh/day. Total: ~0.15 mWh/day. Battery life: 10 Wh / 0.00015 Wh/day = **~66,667 days ≈ 183 years** — the battery's self-discharge rate (~2-3%/month) becomes the real limit, giving a practical life of ~2-3 years.
 
   > **Napkin Math:** Polling: 300 mW continuous = 7.2 Wh/day → 10 Wh battery / 7.2 = 1.4 days. Interrupt-driven: 0.003 mW standby + 5 × 0.05s × 300 mW wake = 0.072 + 0.075 = 0.147 mWh/day → 10 Wh / 0.000147 Wh = 68,000 days (battery self-discharge is the real limit at ~2-3%/month → practical life ~2-3 years). The polling loop wastes 49,000× more energy than the actual useful compute.
 
@@ -950,7 +950,7 @@ This total (`~3.0 GB/s`) exceeds the MIPI interface's physical limit of ~2.5 GB/
 
   Fix: (1) **Use the ADC's clock as the time base**: derive the 1-second window from counting exactly 4,000 ADC samples, not from the system clock. This makes the window timing immune to system clock drift. (2) **Add a GPS disciplined oscillator (GPSDO)** or IEEE 1588 PTP time sync if the network supports it — keeps the system clock accurate to <1μs. (3) **Make the model phase-invariant**: train with random phase offsets in the vibration windows, so the model doesn't learn phase-dependent features. Use circular convolutions or add a phase-normalization preprocessing step.
 
-  > **Napkin Math:** Clock drift: 20 ppm = 1.728 seconds/day. After 180 days: 311 seconds. Motor frequency: 30 Hz. Phase drift per day: 30 Hz × 1.728s = 51.84 full rotations — the phase within a window shifts by 0.84 × 360° = 302° per day. After 12 days, the phase has rotated through all 360°. The false alarm rate increases as the model encounters phase angles it wasn't trained on. The 2%/month increase matches the gradual exposure to unfamiliar phase alignments. GPS module cost: $15. PTP switch cost: $200 for the network. ADC-based windowing: $0 (software fix). The software fix is the clear winner.
+  > **Napkin Math:** Clock drift: 20 ppm = 1.728 seconds/day. After 180 days: 311 seconds. Motor frequency: 30 Hz. Phase drift per day: 30 Hz × 1.728s = 51.84 full rotations — the phase within a window shifts by 0.84 × 360° = 302° per day. After ~1.2 days, the phase has rotated through all 360°. The false alarm rate increases as the model encounters phase angles it wasn't trained on. The 2%/month increase matches the gradual exposure to unfamiliar phase alignments. GPS module cost: $15. PTP switch cost: $200 for the network. ADC-based windowing: $0 (software fix). The software fix is the clear winner.
 
   📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
 
@@ -1655,9 +1655,10 @@ This total (`~3.0 GB/s`) exceeds the MIPI interface's physical limit of ~2.5 GB/
   6.  **Data Consistency Checks:** Monitor the consistency of fused outputs. If the localization system reports high uncertainty or large jumps, it could indicate a sensor issue. Trigger a re-evaluation or switch to a more robust, albeit less accurate, mode.
 
   > **Napkin Math:**
-  > - IMU gyroscope bias drift: 0.1 deg/hr. Over 1000 hours, this accumulates to 100 degrees of orientation error if uncorrected.
-  > - LiDAR range error: 1cm/m. A 10m range measurement could be off by 10cm. If this error drifts by 0.1% per month, after 6 months, a 10m measurement could be off by 16cm.
-  > These small drifts compound rapidly, necessitating active compensation.
+  > - IMU gyroscope bias: 0.1 deg/hr × 1,000 hr = 100° uncorrected orientation error
+  > - LiDAR range drift: base 1 cm/m + ~1 cm/m/month degradation → 10 m reading off by 16 cm after 6 months
+  > - Cross-sensor validation catches drift when camera-vs-LiDAR pose disagrees by >2 cm at 10 m
+  > - => Small per-hour biases compound to safety-critical errors within months without online recalibration
 
   > **Key Equation:** $\hat{x}_{k|k} = \hat{x}_{k|k-1} + K_k (z_k - H_k \hat{x}_{k|k-1})$ (Kalman Filter update equation, where $K_k$ is the Kalman gain, $z_k$ is the measurement, and $H_k \hat{x}_{k|k-1}$ is the predicted measurement. Drift affects $H_k$ and the noise covariance).
 
@@ -1673,7 +1674,7 @@ This total (`~3.0 GB/s`) exceeds the MIPI interface's physical limit of ~2.5 GB/
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Sensor Calibration Drift</b> · <code>sensor-pipeline</code></summary>
 
-- **Interviewer:** "Your autonomous vehicle's camera-LiDAR fusion system was calibrated in the factory. After 6 months of operation (vibration, temperature cycles, minor impacts), the extrinsic calibration between the camera and LiDAR has drifted by 0.3°. Your 3D bounding boxes are now offset by 0.5m at 10m range. The safety team wants recalibration every month, which requires taking the vehicle offline for 2 hours. Design an online calibration system that maintains accuracy without downtime."
+- **Interviewer:** "Your autonomous vehicle's camera-LiDAR fusion system was calibrated in the factory. After 6 months of operation (vibration, temperature cycles, minor impacts), the extrinsic calibration between the camera and LiDAR has drifted by 0.3°. Your 3D bounding boxes are now offset by ~5 cm at 10m range and ~52 cm at 100m range — well outside the safety envelope for long-range detection. The safety team wants recalibration every month, which requires taking the vehicle offline for 2 hours. Design an online calibration system that maintains accuracy without downtime."
 
   <details>
   <summary><b>🔍 Reveal Answer</b></summary>
@@ -1692,7 +1693,7 @@ This total (`~3.0 GB/s`) exceeds the MIPI interface's physical limit of ~2.5 GB/
 
   **(5) Drift monitoring:** Track the magnitude of calibration corrections over time. If corrections exceed 1° in any axis over a week, flag the vehicle for physical inspection — the sensor mount may be loose.
 
-  > **Napkin Math:** 0.3° rotation drift at 10m range: offset = 10m × tan(0.3°) = 0.052m per 0.1° ≈ 0.16m at 0.3°. At 50m: 0.26m. At 100m: 0.52m. Online calibration accuracy: ±0.05° (reduces offset to <0.1m at 100m). Compute cost: 50ms CPU every 33 seconds = 0.15% CPU utilization. Downtime saved: 2 hours/month × 12 months × $200/hour (vehicle opportunity cost) = $4,800/year per vehicle.
+  > **Napkin Math:** 0.3° rotation drift: offset = range × tan(0.3°). At 10m: 10 × 0.00524 = 0.052m (~5 cm). At 50m: 50 × 0.00524 = 0.26m. At 100m: 100 × 0.00524 = 0.52m. The small angular error becomes safety-critical at highway detection ranges. Online calibration accuracy: ±0.05° (reduces offset to 100m × tan(0.05°) = 0.087m < 0.1m at 100m). Compute cost: 50ms CPU every 33 seconds = 0.15% CPU utilization. Downtime saved: 2 hours/month × 12 months × $200/hour (vehicle opportunity cost) = $4,800/year per vehicle.
 
   📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
 
@@ -2041,10 +2042,10 @@ This total (`~3.0 GB/s`) exceeds the MIPI interface's physical limit of ~2.5 GB/
   3.  **Design Constraints:** Engineers must design systems for *sustained* performance, not just peak. This might mean choosing a less complex model, implementing dynamic workload management, or investing in more robust active cooling solutions, which adds cost, size, and power consumption.
 
   > **Napkin Math:**
-  > *   **Jetson Orin Nano TDP:** Configurable for 7W or 10W sustained power.
-  > *   **Peak Power:** During bursts, the SoC can draw significantly more (e.g., 15-20W) to achieve peak FPS.
-  > *   **Cooling Capacity:** If the passive heatsink is designed for 10W, sustained operation above this will cause temperature to rise.
-  > *   **Performance Drop:** A 50% drop in FPS (50 -> 25 FPS) roughly corresponds to a 50% reduction in effective compute power (FLOPS/TOPS) due to frequency scaling. This implies the system was likely operating at ~20W peak and throttled down to ~10W sustained.
+  > - Passive heatsink R_thermal ≈ 4.5 °C/W. At 35 °C ambient: max sustained power = (95 − 35) / 4.5 = 13.3 W
+  > - Orin Nano peak burst: ~15 W → 50 FPS. Sustained 7 W mode → 50 × (7/15) ≈ 23 FPS
+  > - 50 FPS × 20 ms/frame = 1.0 s compute/s (GPU saturated). After throttle: 25 FPS × 40 ms = same utilization, half throughput
+  > - => Design for the sustained 7 W thermal envelope, not the 15 W burst spec
 
   > **Key Equation:** $P_{dissipated} = (T_{junction} - T_{ambient}) / R_{thermal}$ (where $P_{dissipated}$ is the power dissipated, $T_{junction}$ is the chip temperature, $T_{ambient}$ is the ambient temperature, and $R_{thermal}$ is the thermal resistance of the cooling solution).
 
@@ -2188,10 +2189,10 @@ This total (`~3.0 GB/s`) exceeds the MIPI interface's physical limit of ~2.5 GB/
   7.  **Thermal Feedback Loop:** Design a control loop where thermal sensors feed back into the ML inference manager to trigger performance adjustments proactively.
 
   > **Napkin Math:**
-  > - High-accuracy model: 5W, 30 FPS.
-  > - Medium-accuracy model: 2W, 60 FPS.
-  > - Low-accuracy model: 1W, 100 FPS.
-  > If thermal budget is 3W: The high-accuracy model will throttle, potentially dropping to 10-15 FPS. Switching to the medium-accuracy model allows sustained 60 FPS within budget, maintaining better *effective* performance than a throttled high-accuracy model. A 2W model is likely to run at 60 FPS, whereas a 5W model might drop to 12-15 FPS under a 3W thermal limit.
+  > - High-accuracy model: 5 W, 30 FPS. Medium model: 2 W, 60 FPS. Thermal budget: 3 W
+  > - High model under 3 W cap: throttled to 30 × (3/5) = 18 FPS
+  > - Effective detections/min: throttled-high = 18 × 60 = 1,080. Medium = 60 × 60 = 3,600 (3.3× more)
+  > - => Switching to a lighter model under thermal pressure yields 3.3× higher effective throughput
 
   > **Key Equation:** $P_{total} = P_{static} + C \cdot V^2 \cdot f$ (Power consumption is proportional to capacitance, voltage squared, and frequency). Reducing V or f reduces power.
 
@@ -2377,7 +2378,7 @@ This total (`~3.0 GB/s`) exceeds the MIPI interface's physical limit of ~2.5 GB/
 
   Fix: (1) **Immediate**: schedule a field maintenance rotation to replace TIM on the oldest 500 devices. Use phase-change TIM (Honeywell PTM7950) instead of paste — it doesn't pump out and maintains thermal performance for 10+ years. Cost: $2/pad + $30 labor = $32/device. (2) **Monitoring**: add a thermal headroom metric: `thermal_headroom = TJ_MAX - T_junction_at_full_load`. Track this weekly. When headroom drops below 10°C, schedule preventive TIM replacement. (3) **Long-term**: for new deployments, specify phase-change TIM in the hardware BOM from day one.
 
-  > **Napkin Math:** Original thermal resistance: 0.5°C/W. Orin NX TDP: 25W. Junction temp at 55°C ambient: 55 + (25 × 0.5) = 67.5°C. Headroom: 97 - 67.5 = 29.5°C. After 2 years: TIM resistance = 1.8°C/W. Junction temp: 55 + (25 × 1.8) = 100°C → throttles to 97°C by reducing clock 18%. TIM replacement for 500 devices: 500 × $32 = $16,000. Revenue impact of 18% slower inference (missed detections at traffic intersections): if 5% of frames miss deadline → potential liability. Phase-change TIM from day one: $2 × 2,000 = $4,000 — prevents the entire problem.
+  > **Napkin Math:** Original thermal resistance: 0.5°C/W. Orin NX TDP: 25W. Junction temp at 55°C ambient: 55 + (25 × 0.5) = 67.5°C. Headroom: 97 - 67.5 = 29.5°C. After 2 years: TIM resistance = 2.0°C/W. Unthrottled junction: 55 + (25 × 2.0) = 105°C — exceeds the 97°C throttle threshold. DVFS reduces clock by 18% (power drops to ~20.5W): junction = 55 + (20.5 × 2.0) = 96°C, just below the 97°C limit. TIM replacement for 500 devices: 500 × $32 = $16,000. Revenue impact of 18% slower inference (missed detections at traffic intersections): if 5% of frames miss deadline → potential liability. Phase-change TIM from day one: $2 × 2,000 = $4,000 — prevents the entire problem.
 
   📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
 
@@ -2601,7 +2602,7 @@ This total (`~3.0 GB/s`) exceeds the MIPI interface's physical limit of ~2.5 GB/
 
   **Realistic Solution:** Start from the energy budget. Solar input: 20W × 5h × 0.8 (panel efficiency loss from angle, clouds, dirt) = **80Wh/day**. System consumers: (1) Coral TPU during inference: 2W, (2) camera module: 0.5W, (3) Raspberry Pi host: 3W idle / 5W active, (4) cellular modem (burst uploads): 3W for 10 min/day = 0.5Wh, (5) system overhead (voltage regulator, watchdog): 0.5W constant = 12Wh/day. Fixed daily cost: 12Wh (overhead) + 0.5Wh (modem) = 12.5Wh. Remaining for compute: 80 - 12.5 = **67.5Wh**. Active power (camera + Pi + Coral): 0.5 + 5 + 2 = 7.5W. Idle power (Pi sleep + watchdog): 0.5 + 0.5 = 1W. Maximum active hours: solve $7.5 \times t_{active} + 1 \times (24 - t_{active}) = 67.5$. $6.5 \times t_{active} = 43.5$. $t_{active} = 6.7$ hours/day. At 10 inferences/second during active hours: 6.7h × 3600s × 10 = **241,200 inferences/day**. But birds are most active at dawn and dusk (~4 hours). Schedule active periods to match: 4h active (dawn/dusk) + 2.7h active (midday sampling) = 6.7h. Reserve 20% battery for cloudy days: effective active time = 5.4h → **194,000 inferences/day**.
 
-  > **Napkin Math:** Solar: 80Wh/day. Fixed overhead: 12.5Wh. Compute budget: 67.5Wh. Active power: 7.5W. Max active time: 6.7h. At 10 inf/s: 241K inferences/day. With 20% reserve: 194K/day. Battery can sustain ~13h of active operation without sun (100Wh / 7.5W), providing 1.5 cloudy days of buffer.
+  > **Napkin Math:** Solar: 80Wh/day. Fixed overhead: 12.5Wh. Compute budget: 67.5Wh. Active power: 7.5W. Max active time: 6.7h. At 10 inf/s: 241K inferences/day. With 20% reserve: 194K/day. Battery can sustain ~13h of active operation without sun (100Wh / 7.5W), providing ~1.25 cloudy days of buffer (100Wh / 80Wh per day).
 
   📖 **Deep Dive:** [Volume II: Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
 

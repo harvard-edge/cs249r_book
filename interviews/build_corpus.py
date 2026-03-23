@@ -107,7 +107,26 @@ def parse_md_to_questions(file_path, track, scope):
                     details['realistic_solution'] = sol_part
 
             if '**Napkin Math:**' in full_block:
-                details['napkin_math'] = full_block.split('**Napkin Math:**')[1].split('\n')[0].strip()
+                nm_raw = full_block.split('**Napkin Math:**')[1]
+                # Handle both single-line and multi-line formats
+                first_line = nm_raw.split('\n')[0].strip()
+                if first_line:
+                    details['napkin_math'] = first_line
+                else:
+                    # Multi-line: collect blockquote lines until empty line or non-blockquote
+                    nm_lines = []
+                    for line in nm_raw.split('\n')[1:]:
+                        stripped = line.strip()
+                        if stripped.startswith('> ') or stripped.startswith('>-'):
+                            nm_lines.append(stripped.lstrip('> ').strip())
+                        elif stripped == '>' or stripped == '':
+                            if nm_lines:
+                                break
+                        elif stripped.startswith('-'):
+                            nm_lines.append(stripped.lstrip('- ').strip())
+                        else:
+                            break
+                    details['napkin_math'] = ' | '.join(nm_lines) if nm_lines else ''
 
             if '📖 **Deep Dive:**' in full_block:
                 link_part = full_block.split('📖 **Deep Dive:**')[1].split('\n')[0]

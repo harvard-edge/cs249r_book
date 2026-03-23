@@ -61,8 +61,8 @@ Monitoring, drift detection, deployment strategies, security, power management, 
     5.  **Layer Optimization:** Order Dockerfile instructions to leverage caching, placing less frequently changing layers (base image, system dependencies) earlier.
 
   > **Napkin Math:** Reducing a 5GB image to 500MB on a 100Mbps network:
-  > Initial download time: `5 GB * 8 bits/byte / 100 Mbps = 40 seconds`
-  > Optimized download time: `0.5 GB * 8 bits/byte / 100 Mbps = 4 seconds`
+  > Initial download time: `5 GB * 8 bits/byte / 100 Mbps = 400 seconds`
+  > Optimized download time: `0.5 GB * 8 bits/byte / 100 Mbps = 40 seconds`
   > This significantly reduces cold start time from image pull alone, not accounting for container initialization and model loading.
 
   > **Key Equation:** `ContainerSize = BaseImageSize + DependenciesSize + ModelArtifactSize`
@@ -296,7 +296,7 @@ graph LR
 
   **Realistic Solution:** You hit the **Graph Compilation Wall**. Unlike NVIDIA GPUs which execute eagerly, accelerators like Trainium/TPU rely on compilers (XLA/Neuron) to map code into static graphs for systolic arrays. The "48 hours" was the initial compilation. Because your sequence lengths vary, the compiler triggers a **Re-compile (JIT Thrashing)** on every batch, destroying throughput. The fix is to use **Static Padding**: pad all sequences to a fixed power-of-two length to reuse the same compiled graph.
 
-  > **Napkin Math:** If an XLA compile takes 30s and a training step takes 0.5s, a single re-compile adds 60x overhead to that step. Even a 5% re-compile rate will cut your overall tokens/sec by half.
+  > **Napkin Math:** If an XLA compile takes 30s and a training step takes 0.5s, a single re-compile adds 60x overhead to that step. Even a 5% re-compile rate will cut your overall tokens/sec by 75% (average step time: 0.95 × 0.5s + 0.05 × 30.5s = 2.0s, vs. the original 0.5s).
 
   📖 **Deep Dive:** [Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
 
@@ -902,7 +902,7 @@ graph LR
 
   **Realistic Solution:** You forgot the OpEx (Operating Expenses), specifically power and cooling. Over a 3-year lifespan, the electricity required to run a massive cluster at high utilization — plus the power to cool it — frequently matches or exceeds the initial CapEx (hardware cost). System efficiency ($\eta$) isn't just about training speed; it's the primary lever for financial viability.
 
-  > **Napkin Math:** 10,000 H100s × 700W TDP = 7 MW compute. With PUE of 1.3 (cooling overhead): 9.1 MW total. At $0.10/kWh: $9,100/hour = $79.7M/year = **$239M over 3 years** in electricity alone. That's 2.4× the hardware cost. True TCO ≈ $100M (CapEx) + $239M (power) + networking/staff = **$350M+**.
+  > **Napkin Math:** 10,000 H100s × 700W TDP = 7 MW compute. With PUE of 1.3 (cooling overhead): 9.1 MW total. At $0.10/kWh: 9,100 kW × $0.10 = $910/hour = $7.97M/year = **$23.9M over 3 years** in electricity alone. That's ~24% of the hardware cost, but still a massive ongoing expense. True TCO ≈ $100M (CapEx) + $23.9M (power) + networking/staff = **$150M+**.
 
   > **Key Equation:** $\text{TCO} = \text{CapEx} + (\text{Power} \times \text{PUE} \times \text{Rate} \times \text{Hours}) + \text{Staff} + \text{Network}$
 
@@ -924,7 +924,7 @@ graph LR
 
   **Realistic Solution:** A carbon-aware scheduler must optimize across three dimensions: (1) **spatial shifting** — route jobs to the lowest-carbon region with available capacity, (2) **temporal shifting** — delay non-urgent jobs to times when the grid is cleanest (midday solar peaks, windy nights), (3) **workload shaping** — run compute-intensive phases (forward/backward pass) during clean periods and I/O-intensive phases (checkpointing, data loading) during dirty periods. The scheduler ingests real-time grid carbon intensity from APIs (WattTime, ElectricityMaps), maintains a job priority queue, and makes placement decisions every 15 minutes. For the 70B training run: use Oregon as primary (80 gCO₂/kWh), with temporal shifting to avoid the 6-9 PM peak (when gas peakers fire up, pushing intensity to 200 gCO₂/kWh). Cross-region data transfer for training is expensive (100TB dataset over 10 Gbps = 22 hours), so the scheduler must factor in the carbon cost of data movement.
 
-  > **Napkin Math:** 1,000 A100-hours × 700W = 700 kWh. Virginia: 700 × 380 = 266 kgCO₂. Oregon: 700 × 80 = 56 kgCO₂. Iceland: 700 × 28 = 19.6 kgCO₂. Carbon offset cost: $50-100/tonne → Virginia offset = 0.266t × $75 = $20. Oregon compute premium over Virginia: ~$0.30/GPU-hr × 1,000 = $300. Iceland premium: ~$0.80/GPU-hr × 1,000 = $800. The CFO is right that offsets ($20) are cheaper than relocation ($300-800) — *if you trust offsets*. But regulatory trend (EU CSRD, SEC climate rules) is toward Scope 2 *market-based* accounting where offsets don't count. Under those rules, Virginia training is a 266 kgCO₂ liability regardless of offsets. Temporal shifting in Oregon (avoiding peak hours) reduces effective intensity from 80 to ~50 gCO₂/kWh at zero additional cost — 700 × 50 = 35 kgCO₂, a 37% reduction for free.
+  > **Napkin Math:** 1,000 A100-hours × 400W (A100 SXM4 TDP) = 400 kWh. Virginia: 400 × 380 = 152 kgCO₂. Oregon: 400 × 80 = 32 kgCO₂. Iceland: 400 × 28 = 11.2 kgCO₂. Carbon offset cost: $50-100/tonne → Virginia offset = 0.152t × $75 = $11. Oregon compute premium over Virginia: ~$0.30/GPU-hr × 1,000 = $300. Iceland premium: ~$0.80/GPU-hr × 1,000 = $800. The CFO is right that offsets ($11) are cheaper than relocation ($300-800) — *if you trust offsets*. But regulatory trend (EU CSRD, SEC climate rules) is toward Scope 2 *market-based* accounting where offsets don't count. Under those rules, Virginia training is a 152 kgCO₂ liability regardless of offsets. Temporal shifting in Oregon (avoiding peak hours) reduces effective intensity from 80 to ~50 gCO₂/kWh at zero additional cost — 400 × 50 = 20 kgCO₂, a 37% reduction for free.
 
   📖 **Deep Dive:** [Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
 
@@ -1007,7 +1007,7 @@ graph LR
   **Realistic Solution:** Distillation is a capital investment with a payback period. You must compute: (1) the one-time distillation cost, (2) the monthly serving cost delta, (3) the quality gap and its business impact, and (4) the maintenance cost of re-distilling when the teacher is updated. The math usually works for stable, high-volume workloads but fails for rapidly iterating models.
 
   > **Napkin Math:**
-  > - **Distillation cost:** 32× A100 × $2.20/hr × 24 hr × 14 days = **$23,654** one-time.
+  > - **Distillation cost:** 32× A100 × $2.20/hr × 24 hr × 14 days = **$23,654.40** one-time.
   > - **Current serving (70B on 8× H100):** 8 × $3.50/hr × 730 hr/month = **$20,440/month** (the $180K includes multi-region redundancy; let's use single-region for comparison).
   > - **Student serving (7B on 1× A10G):** Need ~4 A10Gs for equivalent throughput (7B is 10× smaller but A10G is 5× slower than H100). 4 × $0.75/hr × 730 = **$2,190/month**.
   > - **Monthly savings:** $20,440 − $2,190 = **$18,250/month**.

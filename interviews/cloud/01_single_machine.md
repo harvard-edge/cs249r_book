@@ -6823,7 +6823,7 @@ Clearly, NVLink is the lower-latency, critical path. The ~800ns latency of the N
 This calculation shows a GPU is expected to fail somewhere in the cluster every two days. However, the provided playbook numbers state that for a 10,000 GPU fleet, a failure occurs every 5 hours. Scaling that to our 1,024 GPU cluster gives:
 `Time_between_failures = 5 hours * (10,000 / 1,024) ≈ 48.8 hours`
 
-With a failure expected every ~49 hours, a job running for multiple days has a very high probability of encountering at least one hardware fault. A failure after just 5 hours is statistically unsurprising and should be handled automatically.
+With a failure expected every ~49 hours, a 72-hour job has a probability of $1 - e^{-72/48.8} \approx 77\%$ of encountering at least one hardware fault. While a failure after just 4-5 hours (probability ~10%) is on the early side, it is well within normal statistical variance and should be handled automatically. The key takeaway is that long-running jobs on large clusters *will* see hardware faults; the system must checkpoint frequently and restart gracefully.
 
   > **Key Equation:** $\text{MTTF}_{\text{fleet}} = \frac{\text{MTTF}_{\text{unit}}}{N_{\text{units}}}$
 
@@ -9371,6 +9371,11 @@ $\text{TCO} = (\text{Upfront Eng. Cost}) + (\text{Annual Business Impact} \times
 
   **Realistic Solution:** The tech lead hasn't checked the Arithmetic Intensity ($Ops/Bytes$). If the model is memory-bound (intensity is lower than the ridge point of the roofline), a GPU with faster ALUs will do nothing. You must buy a GPU with higher *Memory Bandwidth (HBM)*, or optimize the model to move fewer bytes (e.g., quantization).
 
+  > **Napkin Math:**
+  > - H100 ridge point: 989 TFLOPS / 3.35 TB/s = 295 Ops/Byte. Achieving 120/300 TFLOPS (40%) suggests memory-bound regime.
+  > - If arithmetic intensity = 2 Ops/Byte: attainable = 3.35 TB/s × 2 = 6.7 TFLOPS — but you see 120 TFLOPS, so intensity ≈ 120 / 3.35 = 36 Ops/Byte, still well below ridge point (295).
+  > - => A faster GPU with 1,500 TFLOPS peak but same 3.35 TB/s bandwidth still caps at 120 TFLOPS. Need higher bandwidth, not more ALUs.
+
   > **Key Equation:** $\text{Attainable FLOPS} = \min(\text{Peak FLOPS},\ \text{Bandwidth} \times \text{Arithmetic Intensity})$
 
   📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
@@ -10038,10 +10043,10 @@ Analyze the interaction between the H100's memory system and the speculative dec
   > **Napkin Math:** Let's analyze the latency for generating k=5 tokens at a long context of 32k tokens on an H100.
 
 **1. Calculate KV Cache Read Latency (The Bottleneck):**
-- Llama-70B KV cache per token (FP16) is `2 * n_layers * n_heads * head_dim * 2 bytes`. Using simplified figures for Llama-70B (80 layers, 64 heads, 128 dim): `2 * 80 * 64 * 128 * 2 = 2.62 MB/token`.
-- Total KV cache size at 32k tokens: `32768 tokens * 2.62 MB/token ≈ 86 GB`.
+- Llama-70B KV cache per token (FP16) is `2 * n_layers * n_kv_heads * head_dim * 2 bytes`. Using Llama-70B's GQA architecture (80 layers, 8 KV-heads, 128 dim): `2 * 80 * 8 * 128 * 2 = 320 KB/token`.
+- Total KV cache size at 32k tokens: `32768 tokens * 320 KB/token ≈ 10.7 GB`.
 - H100 HBM3 bandwidth: `3.35 TB/s`.
-- Time to read the KV cache from HBM: `86 GB / 3350 GB/s ≈ 25.7 ms`.
+- Time to read the KV cache from HBM: `10.7 GB / 3350 GB/s ≈ 3.2 ms`.
 
 **2. Autoregressive (AR) Latency:**
 - For each of the 5 tokens, the model must read the entire 86 GB KV cache. The latency is dominated by this read.
@@ -10084,20 +10089,20 @@ The **Orca-style chunking** proposal is a misapplication of the concept. Chunkin
 **PagedAttention** solves external fragmentation directly. It works like virtual memory in an OS. The KV cache for all requests is stored in a shared pool of small, fixed-size 'pages' (e.g., 16KB blocks). A request's KV cache can now be scattered across many non-contiguous physical pages. A central manager tracks which pages belong to which request. When a new request needs memory, the system simply allocates free pages from the pool. This eliminates the need for large contiguous blocks, allowing the system to use the 80GB of HBM almost to its full capacity, preventing OOMs and maximizing the number of concurrent users.
 
   > **Napkin Math:** Let's model the H100's 80 GB HBM.
-- Model Weights (34B, FP16): $34 \times 2 = 68$ GB. This is wrong, a 34B model is smaller. Llama-34B weights are ~68GB. Let's use a 13B model instead. Model Weights (13B, FP16): $13 \times 2 = 26$ GB.
-- Remaining Memory for KV Caches: $80 - 26 = 54$ GB.
+- Model Weights (34B, FP16): $34 \times 2 = 68$ GB.
+- Remaining Memory for KV Caches: $80 - 68 = 12$ GB.
 
 **Fragmentation Scenario:**
-1.  **User A** starts a large request, allocating a 30 GB KV cache. Free memory: $54 - 30 = 24$ GB.
-2.  **User B** starts a medium request, allocating a 20 GB KV cache. Free memory: $24 - 20 = 4$ GB.
-3.  **User A finishes.** The 30 GB block is freed. Total free memory is now $4 + 30 = 34$ GB. However, this memory is fragmented into a 4 GB block and a 30 GB block.
-4.  **New User C** arrives with a request needing 32 GB. Although there is 34 GB free in total, the largest *contiguous* block is only 30 GB. The allocation fails. **OOM!**
+1.  **User A** starts a request, allocating a 5 GB KV cache. Free memory: $12 - 5 = 7$ GB.
+2.  **User B** starts a request, allocating a 4 GB KV cache. Free memory: $7 - 4 = 3$ GB.
+3.  **User A finishes.** The 5 GB block is freed. Total free memory is now $3 + 5 = 8$ GB. However, this memory is fragmented into a 3 GB block and a 5 GB block.
+4.  **New User C** arrives with a request needing 7 GB. Although there is 8 GB free in total, the largest *contiguous* block is only 5 GB. The allocation fails. **OOM!**
 
 **PagedAttention Scenario:**
-1.  The 54 GB of KV cache space is divided into 3,538,944 pages of 16KB each.
-2.  User A's 30 GB request is allocated ~1,966,080 pages from the pool. User B's 20 GB is allocated ~1,310,720 pages.
-3.  User A finishes. Its 1.9M pages are returned to the free pool.
-4.  New User C arrives needing 32 GB (~2,097,152 pages). Since the free pages are all interchangeable, the system simply assigns 2.1M pages from the pool. The allocation succeeds. No OOM.
+1.  The 12 GB of KV cache space is divided into 786,432 pages of 16KB each.
+2.  User A's 5 GB request is allocated ~327,680 pages from the pool. User B's 4 GB is allocated ~262,144 pages.
+3.  User A finishes. Its ~328K pages are returned to the free pool.
+4.  New User C arrives needing 7 GB (~458,752 pages). Since the free pages are all interchangeable, the system simply assigns ~459K pages from the pool. The allocation succeeds. No OOM.
 
   > **Key Equation:** $\text{Memory Utilization} = \frac{\sum \text{KV Cache Sizes}}{\text{Total HBM} - \text{Weight Size}}
 
@@ -10804,7 +10809,7 @@ Therefore, the architect's proposal is incorrect given the primary goal. The L5 
 2.  **Calculate Hardware Ridge Points (Peak FLOPs / Memory BW):**
     -   H100 (FP16): 989 TFLOPS / 3.35 TB/s ≈ **295 Ops/Byte**
     -   B200 (FP16): 2,250 TFLOPS / 8.0 TB/s ≈ **281 Ops/Byte**
-    -   Hailo-8 (INT8): 26 TOPS / 2.5 TB/s ≈ **10.4 Ops/Byte**
+    -   Hailo-8 (INT8): 26 TOPS / 200 GB/s ≈ **130 Ops/Byte**
 
 3.  **Roofline Analysis:**
     -   The workload's AI (2000) is significantly higher than the ridge point of all three accelerators. The workload is **compute-bound**.
@@ -10818,7 +10823,7 @@ Therefore, the architect's proposal is incorrect given the primary goal. The L5 
         -   Latency: 200 GFLOPs / 2,250 TFLOPS ≈ 0.089 ms
         -   Efficiency: 2,250 TOPS / 1000W = **2.25 TOPS/W**
     -   **Hailo-8:**
-        -   Latency: 200 GFLOPs / 26 TOPS ≈ 7.7 ms
+        -   Latency: 200 GFLOPs / 26 TOPS ≈ 7.69 ms
         -   Efficiency: 26 TOPS / 2.5W = **10.4 TOPS/W**
 
 5.  **Conclusion:** The Hailo-8 is ~4.6x more power-efficient than the B200 and ~7.4x more efficient than the H100 for this specific compute-bound task. The architect's proposal is wrong.
@@ -10876,6 +10881,11 @@ Therefore, the architect's proposal is incorrect given the primary goal. The L5 
   **Common Mistake:** "The PCIe bus is bottlenecking the data transfer." PCIe can be a factor, but the issue is more fundamental.
 
   **Realistic Solution:** The Acceleration Wall (Amdahl's Law). Hardware acceleration only speeds up the parallelizable fraction ($p$) of the workload. If data loading, KV-cache updates, or Python overhead take even 5% of the step time ($p=0.95$), your maximum theoretical speedup is capped at $1/(1-0.95) = 20\times$. The serial bottlenecks will always cap the parallel gains.
+
+  > **Napkin Math:**
+  > - Observed speedup = 20×. With S = 500× for the parallel fraction: 20 = 1 / ((1−p) + p/500).
+  > - Solving: (1−p) + p/500 = 0.05 → 1 − p(1 − 1/500) = 0.05 → p = 0.95/0.998 ≈ 0.9519. Serial fraction = 4.8%.
+  > - => Just 5% serial overhead (data loading, gradient sync, Python dispatch) caps total speedup at 20× regardless of GPU speed.
 
   > **Key Equation:** $\text{Speedup}_{\max} = \frac{1}{(1 - p) + \frac{p}{S}}$ where $p$ = parallelizable fraction, $S$ = speedup of parallel part
 
@@ -11456,8 +11466,8 @@ Formulate a recommendation. Which model do you choose for deployment? Develop a 
   > **Napkin Math:** The justification for a multi-strategy system lies in the physics of different models.
 
 **Case 1: 70B RAG Model (Memory-Bound)**
-- **Problem:** The KV cache for a 128k sequence is enormous. Using the formula: `KV-cache = 2 × layers × heads × head_dim × seq_len × 2 bytes`. For a Llama-70B like architecture (80 layers, 64 heads, 128 head_dim), this is `2 × 80 × 64 × 128 × 128,000 × 2 ≈ 335 GB`.
-- **Bottleneck:** This 335 GB cache must be read from HBM3 memory. An H100 has 3.35 TB/s of HBM bandwidth. Just reading the KV cache (ignoring weights and compute) takes `335 GB / 3.35 TB/s ≈ 100 ms`. This is the dominant factor in latency.
+- **Problem:** The KV cache for a 128k sequence is enormous. Using the formula: `KV-cache = 2 × layers × kv_heads × head_dim × seq_len × 2 bytes`. For Llama-70B with GQA (80 layers, 8 KV-heads, 128 head_dim), this is `2 × 80 × 8 × 128 × 128,000 × 2 ≈ 41.9 GB`.
+- **Bottleneck:** This 41.9 GB cache must be read from HBM3 memory for every decode step. An H100 has 3.35 TB/s of HBM bandwidth. Just reading the KV cache (ignoring the 140 GB of weights) takes `41.9 GB / 3.35 TB/s ≈ 12.5 ms`. Combined with the weight read, each decode step takes over 50 ms — the KV-cache adds significant overhead even with GQA's 8× reduction.
 - **Optimal Strategy:** Pruning the model's weights won't significantly help this HBM bottleneck. The winning strategy is to change the attention algorithm itself. FlashAttention avoids writing the full attention matrix to HBM, drastically reducing memory traffic. The Auto-Optimize system MUST identify this memory-bound pattern and prioritize FlashAttention.
 
 **Case 2: 7B Code-Gen Model (Latency-Bound)**
@@ -12968,7 +12978,7 @@ An automated system must be able to perform this reasoning: fitting on fewer GPU
 
   **Realistic Solution:** The KV-Cache. While weights are static, the KV-cache grows linearly with sequence length and batch size. At 128k context, the memory required to store the attention keys and values for a single request will massively exceed the size of the model weights themselves.
 
-  > **Napkin Math:** For Llama 70B (80 layers, 64 heads, head_dim=128) at 128k tokens in FP16: KV-cache = $2 \times 80 \times 64 \times 128 \times 128000 \times 2$ bytes ≈ **335 GB** for a single request. The weights are only ~140 GB. The cache is 2.4× larger than the model.
+  > **Napkin Math:** For Llama 70B (80 layers, 8 KV-heads via GQA, head_dim=128) at 128k tokens in FP16: KV-cache = $2 \times 80 \times 8 \times 128 \times 128{,}000 \times 2$ bytes ≈ **41.9 GB** for a single request. Combined with the 140 GB of weights, the total memory for a single 128k-context request is ~182 GB — requiring at least 3 H100 GPUs. Even though GQA reduces the KV-cache by 8× compared to full multi-head attention, the cache is still nearly a third the size of the model weights at this context length.
 
   > **Key Equation:** $\text{KV-cache} = 2 \times L \times H \times d_h \times S \times b \times \text{bytes}$
   > where $L$ = layers, $H$ = heads, $d_h$ = head dim, $S$ = sequence length, $b$ = batch size
@@ -13031,7 +13041,7 @@ An automated system must be able to perform this reasoning: fitting on fewer GPU
 
   **Realistic Solution:** The theoretical 33% overhead assumes the recomputed forward pass runs at the same speed as the original. In practice, the recomputed activations must be regenerated from the checkpoint boundaries, and these recomputations compete with the backward pass for GPU resources — HBM bandwidth, L2 cache, and Tensor Core scheduling. The larger batch size (8 vs 2) also increases the memory pressure: the KV-cache and optimizer states for batch=8 consume more HBM, reducing the effective bandwidth available for activation recomputation. Additionally, each checkpoint segment must reload its input activations from HBM, adding memory traffic that didn't exist in the non-checkpointed version.
 
-  > **Napkin Math:** Without checkpointing: activation memory for 30B model ≈ $2 \times S \times B \times H \times L \times \text{bytes}$. For sequence=2048, batch=2, hidden=7168, 60 layers in FP16: $2 \times 2048 \times 2 \times 7168 \times 60 \times 2 \approx 7\text{ GB}$. With checkpointing (every 5 layers): store only 12 checkpoints instead of 60 layers of activations. Memory drops to $\approx 7 \times 12/60 = 1.4\text{ GB}$ for activations, freeing ~5.6 GB. This allows batch=8 ($4\times$ more), but recomputation adds 48 extra layer forward passes. Theoretical overhead: $48/60 \times 50\% = 40\%$ of total step time (forward is ~50% of forward+backward). The 40% matches — the "33% rule" only applies when checkpointing every single layer.
+  > **Napkin Math:** Without checkpointing: activation memory for 30B model ≈ $S \times B \times H \times L \times \text{bytes\_per\_elem}$. For sequence=2048, batch=2, hidden=7168, 60 layers in FP16 (2 bytes): $2048 \times 2 \times 7168 \times 60 \times 2 \approx 3.5\text{ GB}$ for the main hidden-state activations. Including attention scores and FFN intermediates roughly doubles this to ~7 GB. With checkpointing (every 5 layers): store only 12 checkpoints instead of 60 layers of activations. Memory drops to $\approx 7 \times 12/60 = 1.4\text{ GB}$ for activations, freeing ~5.6 GB. This allows batch=8 ($4\times$ more), but recomputation adds 48 extra layer forward passes. Theoretical overhead: $48/60 \times 50\% = 40\%$ of total step time (forward is ~50% of forward+backward). The 40% matches — the "33% rule" only applies when checkpointing every single layer.
 
   📖 **Deep Dive:** [Volume I: Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
 
@@ -13139,7 +13149,7 @@ An automated system must be able to perform this reasoning: fitting on fewer GPU
   > - **Prefill compute per request:** 2 × 70B × 2,000 = 280 TFLOPs. On H100 (990 TFLOPS FP16): 280/990 = **283ms per request** just for the system prompt.
   > - **At 1,000 req/min:** 1,000 × 283ms = 283 seconds of GPU-seconds/minute = **4.7 GPU-minutes/minute** spent re-computing the same system prompt. That's almost 5 GPUs doing nothing but redundant prefill.
   > - **With caching:** Prefill the system prompt once, reuse the KV-cache. Compute savings = 283ms × 1,000 = **283 GPU-seconds/minute saved**.
-  > - **Memory savings:** KV-cache for 2,000 tokens on 70B model ≈ 2,000 × 640 KB/token (80 layers × 8 KV heads × 128 dim × 2 bytes × 2 K&V) = **1.28 GB**. Without caching, 50 concurrent requests = 50 × 1.28 GB = 64 GB of duplicated KV-cache. With caching: 1.28 GB shared. **Saves ~63 GB of VRAM.**
+  > - **Memory savings:** KV-cache for 2,000 tokens on 70B model ≈ 2,000 × 320 KB/token (80 layers × 8 KV heads × 128 dim × 2 bytes × 2 K&V) = **0.64 GB**. Without caching, 50 concurrent requests = 50 × 0.64 GB = 32 GB of duplicated KV-cache. With caching: 0.64 GB shared. **Saves ~31 GB of VRAM.**
 
   📖 **Deep Dive:** [Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
 
@@ -13186,7 +13196,7 @@ An automated system must be able to perform this reasoning: fitting on fewer GPU
 
   **Realistic Solution:** On H100, Llama-2-70B in FP16 requires 140 GB for weights alone. With KV-cache for even a modest batch, you exceed 80 GB and must shard across 2 GPUs using tensor parallelism (TP=2). TP introduces two costs: (1) an AllReduce after every attention and FFN block — 160 AllReduces per forward pass for an 80-layer model, each paying NVLink latency (~5 μs) plus transfer time; (2) you halve the effective memory bandwidth because each GPU only holds half the weights but must synchronize at every layer. On MI300X with 192 GB HBM3, the 140 GB of weights fit on a single GPU with 52 GB remaining for KV-cache and activations. Eliminating TP removes all inter-GPU communication, reduces tail latency variance (no synchronization jitter), and the MI300X's 5.3 TB/s HBM3 bandwidth (vs H100's 3.35 TB/s) directly accelerates the memory-bound decode phase.
 
-  > **Napkin Math:** **H100 TP=2:** Weights = 140 GB sharded to 70 GB/GPU. KV-cache per request (4096 tokens, 80 layers, 64 heads, d=128, FP16) = $2 \times 80 \times 64 \times 128 \times 4096 \times 2$ ≈ **10.7 GB**. Max batch on 80 GB: $(80 - 70) / 10.7 \approx$ **0.9** — barely 1 request per GPU before OOM. Communication overhead: 160 AllReduces × ~10 μs each = **1.6 ms** added latency per token. **MI300X TP=1:** Weights = 140 GB on 1 GPU. Free memory = 192 - 140 = **52 GB**. Max batch = $52 / 10.7 \approx$ **4 concurrent requests** with no communication overhead. Decode bandwidth: MI300X at 5.3 TB/s reads 140 GB of weights in **26.4 ms**; H100 at 3.35 TB/s reads 70 GB (sharded) in 20.9 ms + sync overhead ≈ **22.5 ms**. Single-GPU MI300X is only 17% slower per token but serves 4× the batch — **throughput per dollar shifts dramatically**.
+  > **Napkin Math:** **H100 TP=2:** Weights = 140 GB sharded to 70 GB/GPU. KV-cache per request (4096 tokens, 80 layers, 8 KV-heads via GQA, d=128, FP16) = $2 \times 80 \times 8 \times 128 \times 4096 \times 2$ ≈ **1.34 GB**. Max batch on 80 GB: $(80 - 70) / 1.34 \approx$ **7 requests** per GPU. Communication overhead: 160 AllReduces × ~10 μs each = **1.6 ms** added latency per token. **MI300X TP=1:** Weights = 140 GB on 1 GPU. Free memory = 192 - 140 = **52 GB**. Max batch = $52 / 1.34 \approx$ **38 concurrent requests** with no communication overhead. Decode bandwidth: MI300X at 5.3 TB/s reads 140 GB of weights in **26.4 ms**; H100 at 3.35 TB/s reads 70 GB (sharded) in 20.9 ms + sync overhead ≈ **22.5 ms**. Single-GPU MI300X is only 17% slower per token but serves 5× the batch — **throughput per dollar shifts dramatically**.
 
   📖 **Deep Dive:** [Volume I: Hardware Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
 
@@ -13229,7 +13239,7 @@ An automated system must be able to perform this reasoning: fitting on fewer GPU
 
   **Realistic Solution:** You forgot the Energy-Movement Invariant. Fetching a bit of data from off-chip DRAM costs roughly 100-200x more energy than the math operation (MAC) itself. If your pruning was unstructured, you still have to load the same dense matrices from memory before applying a sparse mask, yielding zero energy savings.
 
-  > **Napkin Math:** A MAC operation costs ~1 pJ. A DRAM access costs ~200 pJ. If your model does 1 TFLOP of math but moves 100 GB of data, the energy split is: compute = 1 mJ, data movement = 20 J. Data movement dominates by 20,000×. Cutting compute in half saves almost nothing.
+  > **Napkin Math:** A MAC operation costs ~1 pJ. A DRAM access costs ~200 pJ. If your model does 1 TFLOP of math but moves 100 GB of data, the energy split is: compute = 1 J, data movement = 20 J. Data movement dominates by 20×. Cutting compute in half saves almost nothing.
 
   📖 **Deep Dive:** [Volume I: Neural Computation](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
 
@@ -13853,7 +13863,7 @@ An automated system must be able to perform this reasoning: fitting on fewer GPU
 
   **Common Mistake:** "FP8 is just too low precision for training — we need to go back to BF16." This gives up the 2× throughput gain without understanding which specific operations are precision-sensitive.
 
-  **Realistic Solution:** FP8 has two formats: E4M3 (4 exponent, 3 mantissa bits — range of ±448, ~1.5 decimal digits precision) and E5M2 (5 exponent, 2 mantissa bits — range of ±57344, ~1 decimal digit). The key insight is that not all operations tolerate the same precision. Matrix multiplications (GEMMs) in the forward pass are robust to FP8 E4M3 because the accumulation happens in FP32 inside the Tensor Core — the low precision only affects inputs. But certain operations are precision-critical: (1) **Softmax** — involves exponentiation where small input differences create large output differences; FP8's coarse mantissa causes attention weights to "snap" to nearby values, creating systematic bias. (2) **LayerNorm** — the variance computation in FP8 loses small deviations, causing normalization to over-correct. (3) **Residual connections** — adding a small update to a large residual in FP8 causes the update to round to zero (catastrophic cancellation). The fix is **mixed FP8/BF16**: run GEMMs in FP8 (where 90%+ of FLOPs live) but keep softmax, LayerNorm, residual additions, and the loss computation in BF16. This captures ~80% of the FP8 throughput gain while maintaining BF16 stability.
+  **Realistic Solution:** FP8 has two formats: E4M3 (4 exponent, 3 mantissa bits — range of ±240, ~1.5 decimal digits precision) and E5M2 (5 exponent, 2 mantissa bits — range of ±57344, ~1 decimal digit). The key insight is that not all operations tolerate the same precision. Matrix multiplications (GEMMs) in the forward pass are robust to FP8 E4M3 because the accumulation happens in FP32 inside the Tensor Core — the low precision only affects inputs. But certain operations are precision-critical: (1) **Softmax** — involves exponentiation where small input differences create large output differences; FP8's coarse mantissa causes attention weights to "snap" to nearby values, creating systematic bias. (2) **LayerNorm** — the variance computation in FP8 loses small deviations, causing normalization to over-correct. (3) **Residual connections** — adding a small update to a large residual in FP8 causes the update to round to zero (catastrophic cancellation). The fix is **mixed FP8/BF16**: run GEMMs in FP8 (where 90%+ of FLOPs live) but keep softmax, LayerNorm, residual additions, and the loss computation in BF16. This captures ~80% of the FP8 throughput gain while maintaining BF16 stability.
 
   > **Napkin Math:** **FP8 E4M3 precision:** 3 mantissa bits → values are quantized to 1 of 8 levels between consecutive powers of 2. For attention logits around 1.0, the representable values are {1.0, 1.125, 1.25, 1.375, 1.5, 1.625, 1.75, 1.875}. Two logits of 1.31 and 1.37 both round to 1.375 — the softmax treats them identically, losing the model's learned distinction. **Throughput breakdown:** In a Transformer forward pass, GEMMs account for ~85% of FLOPs (QKV projections, attention matmul, FFN). Running GEMMs in FP8 at 1979 TFLOPS vs BF16 at 989 TFLOPS: GEMM speedup = 2×. Non-GEMM operations (15% of FLOPs) stay at BF16 speed. Amdahl's Law: overall speedup = $1 / (0.15 + 0.85/2) = $ **1.74×** — still a major win over pure BF16.
 
@@ -14583,7 +14593,7 @@ An automated system must be able to perform this reasoning: fitting on fewer GPU
 
   **Realistic Solution:** You forced GPU-to-GPU traffic over the slow CPU interconnect. In a dual-socket system, the PCIe lanes are split between the two CPUs. GPU 0 (on CPU 0) can talk to GPU 3 (on CPU 0) directly via a PCIe switch at high speed. However, for GPU 0 to send a gradient to GPU 4 (on CPU 1), the data must physically travel from GPU 0, into CPU 0, across the QPI/UPI (Ultra Path Interconnect) bridge to CPU 1, and then down to GPU 4. The UPI bridge is drastically slower than PCIe/NVLink and becomes an extreme choke point for ring or tree AllReduce topologies.
 
-  > **Napkin Math:** A standard PCIe Gen 5 x16 slot provides `~64 GB/s` of bidirectional bandwidth. An Nvidia NVLink switch (like in a DGX) provides `900 GB/s` of GPU-to-GPU bandwidth. The Intel UPI link connecting two CPUs might only provide `~20-40 GB/s` of practical throughput, and it is shared with all other system traffic. Your communication bottleneck is the physical wire between the two CPU sockets.
+  > **Napkin Math:** A standard PCIe Gen 5 x16 slot provides `~128 GB/s` of bidirectional bandwidth (`~64 GB/s` in each direction). An Nvidia NVLink switch (like in a DGX) provides `900 GB/s` of GPU-to-GPU bandwidth. The Intel UPI link connecting two CPUs might only provide `~20-40 GB/s` of practical throughput, and it is shared with all other system traffic. Your communication bottleneck is the physical wire between the two CPU sockets.
 
   📖 **Deep Dive:** [Volume I: Hardware Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
 
@@ -14603,7 +14613,7 @@ An automated system must be able to perform this reasoning: fitting on fewer GPU
 
   **Realistic Solution:** Prefill and decode have opposite computational profiles, and mixing them on the same GPU creates destructive interference. **Prefill** (processing the input prompt) is **compute-bound**: it processes all prompt tokens in parallel through matrix multiplications. Optimal batch size is small (1-4 requests) because each request consumes massive FLOPs. **Decode** (generating output tokens) is **memory-bandwidth-bound**: it reads the entire model weights to produce one token per request. Optimal batch size is large (64-256 requests) to amortize the weight-reading cost. When both phases share a GPU, you can't optimize for either: large decode batches starve prefill of compute, while prefill's heavy compute blocks decode tokens from being emitted, causing latency spikes. Disaggregation lets each pool run at its optimal operating point. Prefill GPUs run small batches at high compute utilization; decode GPUs run large batches at high bandwidth utilization. A lightweight scheduler routes requests: new requests go to prefill GPUs, and once the KV-cache is computed, it's transferred to a decode GPU (KV-cache transfer is a one-time cost per request).
 
-  > **Napkin Math:** **70B model, H100 (989 TFLOPS, 3.35 TB/s).** **Prefill (2048-token prompt):** FLOPs = $2 \times 70\text{B} \times 2048 = 287$ TFLOPS. Time at 60% MFU: $287 / (989 \times 0.6) = $ **0.48 s**. Arithmetic intensity = $287 \times 10^{12} / (140 \times 10^9) = 2050$ Ops/Byte — deeply compute-bound. Optimal batch: 1-2 requests. **Decode (1 token):** FLOPs = $2 \times 70\text{B} = 140$ GFLOPs. Weight read = 140 GB. Time (bandwidth-bound): $140 / 3350 = $ **41.8 ms**. Arithmetic intensity = $140 \times 10^9 / (140 \times 10^9) = 1$ Ops/Byte — deeply memory-bound. Optimal batch: at batch=128, you do 128× more compute with the same weight read, pushing utilization from 0.04% to ~5%. **Mixed fleet (64 GPUs):** Prefill requests with 8k tokens take ~1.9 s, blocking decode for all co-located requests → P99 spikes. **Disaggregated (20 prefill + 44 decode):** Prefill GPUs: 20 GPUs handle ~42 prefill requests/s. Decode GPUs: 44 GPUs at batch=128 each handle ~3,072 tokens/s decode. KV-cache transfer (2048 tokens × 10.7 GB): ~3.2 ms over NVLink — negligible. P99 decode latency drops from ~200 ms to ~50 ms because decode GPUs never stall on prefill compute.
+  > **Napkin Math:** **70B model, H100 (989 TFLOPS, 3.35 TB/s).** **Prefill (2048-token prompt):** FLOPs = $2 \times 70\text{B} \times 2048 = 287$ TFLOPS. Time at 60% MFU: $287 / (989 \times 0.6) = $ **0.48 s**. Arithmetic intensity = $287 \times 10^{12} / (140 \times 10^9) = 2050$ Ops/Byte — deeply compute-bound. Optimal batch: 1-2 requests. **Decode (1 token):** FLOPs = $2 \times 70\text{B} = 140$ GFLOPs. Weight read = 140 GB. Time (bandwidth-bound): $140 / 3350 = $ **41.8 ms**. Arithmetic intensity = $140 \times 10^9 / (140 \times 10^9) = 1$ Ops/Byte — deeply memory-bound. Optimal batch: at batch=128, you do 128× more compute with the same weight read, pushing utilization from 0.34% to ~43%. **Mixed fleet (64 GPUs):** Prefill requests with 8k tokens take ~1.9 s, blocking decode for all co-located requests → P99 spikes. **Disaggregated (20 prefill + 44 decode):** Prefill GPUs: 20 GPUs handle ~42 prefill requests/s. Decode GPUs: 44 GPUs at batch=128 each handle ~3,072 tokens/s decode. KV-cache transfer (2048 tokens, 8 KV-heads GQA ≈ 0.67 GB): ~0.7 ms over NVLink — negligible. P99 decode latency drops from ~200 ms to ~50 ms because decode GPUs never stall on prefill compute.
 
   📖 **Deep Dive:** [Volume I: Model Compression](https://harvard-edge.github.io/cs249r_book_dev/contents/model_compression/model_compression.html)
 
@@ -14632,6 +14642,11 @@ An automated system must be able to perform this reasoning: fitting on fewer GPU
   **Common Mistake:** "The GPU was warming up" or "caches were cold." GPUs don't have a warm-up period in the CPU sense.
 
   **Realistic Solution:** Just-In-Time (JIT) compilation overhead. The framework spends the first few iterations tracing the computation graph and compiling optimized CUDA kernels for the specific tensor shapes you provided. Once cached, the dispatch overhead disappears.
+
+  > **Napkin Math:**
+  > - torch.compile tracing + Triton kernel generation: ~2-5 seconds for a typical model graph.
+  > - Amortized over 3 warm-up batches: 500ms × 3 = 1.5s visible overhead (rest overlaps with first forward passes).
+  > - => After compilation, kernel dispatch drops from ~50μs (eager) to ~5μs (cached), giving 10ms/batch steady state vs 500ms during tracing.
 
   📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
 
@@ -14883,6 +14898,11 @@ An automated system must be able to perform this reasoning: fitting on fewer GPU
 
   **Realistic Solution:** Distributed Data Parallel. It replicates the entire model across multiple GPUs, splits the input data batch across them, and synchronizes the gradients at the end of the backward pass using an All-Reduce operation.
 
+  > **Napkin Math:**
+  > - 7B model in FP16 = 14 GB weights replicated on each of 8 GPUs = 112 GB total weight memory.
+  > - Global batch of 64 split 8 ways = 8 samples/GPU. Each GPU computes local gradients (14 GB), then All-Reduce syncs them.
+  > - => Near-linear throughput scaling: 8× GPUs ≈ 7.5× throughput (communication overhead ~5-8%).
+
   > **Options:**
   > [ ] Data Driven Processing; it automatically cleans the dataset.
   > [x] Distributed Data Parallel; it copies the model to all GPUs and splits the data batch.
@@ -14902,6 +14922,11 @@ An automated system must be able to perform this reasoning: fitting on fewer GPU
   **Common Mistake:** Assuming the fast GPUs just move on to the next batch or that the slow GPU is automatically dropped.
 
   **Realistic Solution:** The entire cluster stalls. The All-Reduce operation acts as a global barrier; the fastest GPU must wait completely idle for the slowest GPU to finish its backward pass before the gradients can be synchronized and the optimizer can step.
+
+  > **Napkin Math:**
+  > - 8 GPUs, step time = 100ms. If 1 straggler takes 150ms, all 7 fast GPUs idle for 50ms each.
+  > - Wasted compute: 7 × 50ms = 350ms of GPU-time per step. Over 1M steps: 350s × 1M = 97 GPU-hours wasted.
+  > - => A single 50% straggler reduces cluster throughput by 33% (100/150).
 
   > **Options:**
   > [ ] The fast GPUs proceed and calculate asynchronous gradients.
