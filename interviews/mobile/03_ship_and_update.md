@@ -175,6 +175,171 @@ This is not a trivial amount of a monthly data allocation for many users.
   </details>
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Update Budget Shock</b> · <code>ota-update-cost</code></summary>
+
+- **Interviewer:** "You're an ML Systems Engineer on the mobile team for 'AutoDash,' a popular dashcam application. The app uses a 350 MB computer vision model on-device. Your team has trained an improved model and needs to roll it out via an Over-the-Air (OTA) update to 5 million active users. The product manager wants to know the potential network data bill for this rollout. Assuming an average carrier data cost of $2.00 per GB, calculate the estimated total cost to update the entire user base."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the aggregate cost of 'small' updates at scale. A common mistake is a simple unit conversion error, for example, treating the model size in MB as if it were an insignificant fraction of a GB, or miscalculating the total data volume by a factor of 100 or 1000 when converting from Megabytes to Gigabytes for millions of users.
+
+  **Realistic Solution:** The correct approach is to first calculate the total data volume required for the entire fleet, and then multiply that by the cost per unit of data. Careful unit conversion from Megabytes (MB) to Gigabytes (GB) is critical.
+
+1.  **Total Data Volume:** 5,000,000 users × 350 MB/user = 1,750,000,000 MB
+2.  **Unit Conversion:** 1,750,000,000 MB / 1,000 MB/GB = 1,750,000 GB
+3.  **Total Cost:** 1,750,000 GB × $2.00/GB = $3,500,000
+
+This high cost is a major reason why mobile teams invest heavily in model compression and delta updates.
+
+  > **Napkin Math:** 5M users * 350 MB/user = 1,750,000,000 MB
+1,750,000,000 MB / 1000 (MB/GB) = 1,750,000 GB
+1,750,000 GB * $2/GB = $3,500,000
+
+  > **Key Equation:** $\text{Total Cost} = (\text{Number of Users} \times \text{Model Size}_{\text{GB}}) \times \text{Cost per GB}$
+
+  > **Options:**
+  > [ ] $35,000
+  > [ ] $350,000
+  > [x] $3,500,000
+  > [ ] $1,750,000
+
+  📖 **Deep Dive:** [Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The OTA Bandwidth Bottleneck</b> · <code>ota-updates</code></summary>
+
+- **Interviewer:** "You're a Staff Engineer on an automotive OS team. You need to design the Over-the-Air (OTA) update strategy for a new 500 MB perception model being deployed to the vehicle fleet. Which of the following is the most critical *physical constraint* to consider for the update delivery mechanism?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the 'last mile' problem in mobile and automotive deployments. They might focus on server-side scalability or on-device compute for installation, but for large models, the bottleneck is almost always the physical transmission of bits over unreliable, low-bandwidth wireless networks. A 500 MB download can easily fail or take an impractically long time on a typical cellular connection.
+
+  **Realistic Solution:** The primary constraint is the unreliable and often low-bandwidth cellular connection. While storage space and CPU are factors, the sheer time and potential for failure during the download of a large file over a mobile network is the most pressing issue. A stable, multi-minute download is not guaranteed in a moving vehicle, making robust delta-updating, compression, and pause/resume logic absolutely critical.
+
+  > **Napkin Math:** Let's quantify the best-case download time.
+- **Model Size:** 500 MB
+- **Convert to Megabits (Mb):** 500 MB × 8 bits/byte = 4000 Mb
+- **Assumed cellular speed:** 10 Mbps (a reasonable but not guaranteed average)
+- **Time = Total Data / Speed** = 4000 Mb / 10 Mbps = 400 seconds.
+
+400 seconds is nearly 7 minutes. On a poor 1 Mbps connection, this would be 4000 seconds, or ~67 minutes. This long duration makes the connection's reliability the dominant factor.
+
+  > **Options:**
+  > [ ] On-device flash storage capacity
+  > [ ] CPU cycles required for model decompression
+  > [x] Unreliable, low-bandwidth cellular connectivity
+  > [ ] Power consumption during the download
+
+  📖 **Deep Dive:** [Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Data Budget</b> · <code>ota-update-cost</code></summary>
+
+- **Interviewer:** "You are an ML engineer for a popular AI Keyboard app. Your team has developed a new transformer-based suggestion model that improves accuracy significantly. The current production model has 10 million parameters and uses FP16 precision. The new model has 15 million parameters and also uses FP16. Your product manager is concerned about the data cost for users on cellular plans when you ship this as an Over-the-Air (OTA) update. Calculate the *additional* download size for a user receiving this update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often report the total size of the new model instead of the incremental increase. Another common error is using the wrong number of bytes for a given precision, such as assuming 4 bytes for FP16 (confusing it with FP32) or 1 byte (confusing it with INT8 quantization).
+
+  **Realistic Solution:** The correct approach is to calculate the storage size for both the old and new models and then find the difference. Since both models use FP16 precision, each parameter requires 16 bits, or 2 bytes, of storage. The additional download size is the difference in the total storage required for the parameters of the two models.
+
+  > **Napkin Math:** 1. **Old Model Size:** 10,000,000 parameters × 2 bytes/parameter = 20,000,000 bytes (20 MB)
+2. **New Model Size:** 15,000,000 parameters × 2 bytes/parameter = 30,000,000 bytes (30 MB)
+3. **Additional Download:** 30 MB (New) - 20 MB (Old) = 10 MB
+
+  > **Key Equation:** $\text{Update Size} = (P_{\text{new}} - P_{\text{old}}) \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] 5 MB
+  > [x] 10 MB
+  > [ ] 20 MB
+  > [ ] 30 MB
+
+  📖 **Deep Dive:** [Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Budget Constraint</b> · <code>mobile-ota-updates</code></summary>
+
+- **Interviewer:** "You're a mobile ML engineer. The product manager has mandated that any over-the-air (OTA) model update must be under 150 MB to avoid angering users on cellular data plans. Your team wants to ship a new 70 million parameter model. To preserve quality, you plan to deploy it using FP16 precision. Can you explain whether the model update will fit within the OTA budget?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistakes are confusing the data types and their sizes, or errors in unit conversion. For instance, using the size of FP32 (4 bytes) or INT8 (1 byte) instead of FP16 (2 bytes), or incorrectly converting from parameters to megabytes.
+
+  **Realistic Solution:** Yes, the model will fit. A model using FP16 precision requires 2 bytes of storage for every parameter. With 70 million parameters, the total size is 140 million bytes. In the context of file sizes, one megabyte is commonly treated as one million bytes. Therefore, the model's size is 140 MB, which is just under the 150 MB limit set by the product manager.
+
+  > **Napkin Math:** 70,000,000 parameters × 2 bytes/parameter = 140,000,000 bytes
+140,000,000 bytes / 1,000,000 bytes/MB = 140 MB
+140 MB < 150 MB (Requirement Met)
+
+  > **Key Equation:** $\text{Model Size (Bytes)} = \text{Parameters} \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] 280 MB, so it fails the requirement.
+  > [ ] 70 MB, so it easily meets the requirement.
+  > [x] 140 MB, so it meets the requirement.
+  > [ ] 17.5 MB, so it easily meets the requirement.
+
+  📖 **Deep Dive:** [Mobile: Ship & Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Update Budget</b> · <code>ota-update-cost</code></summary>
+
+- **Interviewer:** "You're a mobile ML engineer for an automotive app that includes a 'Driver Focus' feature running on-device. The current v1 model has 5 million parameters and is quantized to FP16. The research team has delivered a v2 model that is 7 million parameters, also in FP16, with significantly better performance.
+
+Your product manager is concerned about data usage for your 10 million users. They ask you to calculate the *minimum additional data* a user would need to download to get this new model via an Over-the-Air (OTA) update, assuming your infrastructure can ship *only* the change in model weights."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate the total size of the new model, forgetting that efficient OTA updates only ship the delta. Another common error is using the wrong number of bytes for the given precision (e.g., using 4 for FP32 or 1 for INT8, instead of 2 for FP16).
+
+  **Realistic Solution:** The correct approach is to calculate the size of the *difference* in parameters between the two models, and then multiply that by the number of bytes required for FP16 precision.
+
+1.  **Find the parameter delta:** The new model has 7M parameters and the old one has 5M, so the difference is 2M parameters.
+2.  **Determine bytes per parameter:** FP16 (half-precision floating point) uses 2 bytes per parameter.
+3.  **Calculate total size:** Multiplying the 2 million new parameters by 2 bytes/parameter gives a total download size of 4,000,000 bytes, or 4 MB.
+
+  > **Napkin Math:** 1. **Parameter Delta** = `New Parameters` - `Old Parameters`
+   `2,000,000 = 7,000,000 - 5,000,000`
+
+2. **Bytes per Parameter** = 2 (for FP16)
+
+3. **Download Size (Bytes)** = `Parameter Delta` × `Bytes per Parameter`
+   `4,000,000 bytes = 2,000,000 × 2`
+
+4. **Convert to MB** = `4,000,000 bytes / 1,000,000 bytes/MB = 4 MB`
+
+  > **Key Equation:** $\text{Download Size} = (P_{\text{new}} - P_{\text{old}}) \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] 14 MB
+  > [ ] 8 MB
+  > [x] 4 MB
+  > [ ] 2 MB
+
+  📖 **Deep Dive:** [Mobile: Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+
+
+
+
+
 
 
 

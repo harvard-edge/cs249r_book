@@ -153,7 +153,7 @@ export default function Home() {
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-textSecondary mb-3">
+                <p className="text-sm text-textSecondary mb-3">
                   {welcomeBack.dueCount > 0
                     ? `You have ${welcomeBack.dueCount} questions due for review.`
                     : `${welcomeBack.totalAttempts} questions practiced. Keep going!`}

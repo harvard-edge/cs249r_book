@@ -723,6 +723,885 @@ Therefore, the chip can be active for a maximum of 30% of the time.
   </details>
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The 'Forever' Sensor's Battery Life</b> · <code>duty-cycling-battery-drain</code></summary>
+
+- **Interviewer:** "You're designing a battery-powered wildlife tracking sensor using a Cortex-M4 MCU. The device wakes up to perform a 1-second inference, then goes back to deep sleep. This cycle repeats every 10 minutes (600 seconds). The MCU consumes 50 mW while active and 10 µW while in deep sleep. The device is powered by a 600 mAh, 3V coin cell battery. Calculate the approximate operational lifetime of the device in days."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often miscalculate battery life by either ignoring the energy consumed during the long sleep periods or by ignoring the duty cycle altogether and calculating based on the active power draw, leading to wildly inaccurate estimates. Another common error is mixing units (e.g., Wh and mW) without conversion.
+
+  **Realistic Solution:** The correct approach is to calculate the *average* power consumption over a full cycle, then use that to determine the battery lifetime. The key is to account for both the high-power active state and the low-power sleep state, weighted by their duration.
+
+1.  **Calculate Energy per Cycle:**
+    -   Active Energy: 50 mW × 1 s = 50 mJ
+    -   Sleep Energy: 10 µW × 599 s = 0.01 mW × 599 s ≈ 5.99 mJ
+    -   Total Energy per Cycle: 50 mJ + 5.99 mJ = 55.99 mJ
+2.  **Calculate Average Power:**
+    -   `P_avg = Total Energy / Total Time = 55.99 mJ / 600 s ≈ 0.0933 mW`
+3.  **Calculate Battery Capacity in Watt-hours (Wh):**
+    -   `Capacity (Wh) = (600 mAh × 3 V) / 1000 = 1.8 Wh`
+4.  **Calculate Lifetime:**
+    -   First, convert `P_avg` to Watts: `0.0933 mW = 0.0000933 W`
+    -   `Lifetime (hours) = 1.8 Wh / 0.0000933 W ≈ 19,292 hours`
+    -   `Lifetime (days) = 19,292 hours / 24 hours/day ≈ 803 days`
+
+  > **Napkin Math:** P_avg = (P_active * t_active + P_sleep * t_sleep) / t_period
+P_avg = (50mW * 1s + 0.01mW * 599s) / 600s ≈ 0.0933 mW
+
+Battery Energy = 600mAh * 3V = 1800 mWh
+Lifetime = 1800 mWh / 0.0933 mW ≈ 19,292 hours
+Lifetime_days = 19,292 / 24 ≈ 803 days
+
+  > **Key Equation:** P_{\text{avg}} = \frac{P_{\text{active}} t_{\text{active}} + P_{\text{sleep}} t_{\text{sleep}}}{t_{\text{period}}}
+
+  > **Options:**
+  > [ ] ~36 hours
+  > [x] ~803 days
+  > [ ] ~900 days
+  > [ ] ~19 hours
+
+  📖 **Deep Dive:** [TinyML](https://mlsysbook.ai/tinyml/README.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Duty-Cycling Wildlife Monitor</b> · <code>duty-cycling-energy</code></summary>
+
+- **Interviewer:** "You are designing a wildlife monitoring device that uses a Cortex-M4. It wakes up for 1 second to run an image classification model, then goes into deep sleep for 59 seconds to conserve battery. According to the `NUMBERS.md` table, the M4 consumes about 10 mW while active and 10 µW in deep sleep. To select the right battery and estimate field longevity, you need to calculate the device's average power consumption. What is it?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to ignore the power consumed during the sleep state, assuming it's zero. While sleep power is tiny, the device spends the vast majority of its time (~98% in this case) in this state, so its contribution to the total energy budget is not negligible. Another critical error is failing to convert microwatts (µW) to milliwatts (mW) correctly, leading to an answer that's off by orders of magnitude.
+
+  **Realistic Solution:** The average power is the total energy consumed during one full cycle (active + sleep) divided by the cycle's duration. First, ensure all units are consistent (e.g., milliwatts). The sleep power is 10 µW, which is 0.01 mW. Then, calculate the energy for each phase and divide by the total period to find the average power, which dictates battery life.
+
+  > **Napkin Math:** P_active = 10 mW
+t_active = 1 s
+P_sleep = 10 µW = 0.01 mW  (Key unit conversion!)
+t_sleep = 59 s
+t_period = 1s + 59s = 60 s
+
+Energy_active = 10 mW * 1 s = 10.0 mJ
+Energy_sleep = 0.01 mW * 59 s = 0.59 mJ
+Energy_total = 10.0 mJ + 0.59 mJ = 10.59 mJ
+
+Power_avg = Energy_total / t_period = 10.59 mJ / 60 s ≈ 0.177 mW
+
+  > **Key Equation:** $\overline{P} = \frac{(P_{\text{active}} \times t_{\text{active}}) + (P_{\text{sleep}} \times t_{\text{sleep}})}{t_{\text{period}}}$
+
+  > **Options:**
+  > [ ] 0.167 mW
+  > [ ] 10 mW
+  > [x] 0.177 mW
+  > [ ] 10.59 mW
+
+  📖 **Deep Dive:** [TinyML: The Microcontroller](tinyml/01_microcontroller.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Duty Cycle Power Drain</b> · <code>tinyml-duty-cycle</code></summary>
+
+- **Interviewer:** "You're designing a wildlife camera powered by a small battery. It uses a Cortex-M4 microcontroller. The device stays in a deep sleep state, consuming 10 µW. A motion sensor wakes it up for 1 second to run an image classification inference, during which it consumes 50 mW. This cycle repeats every 10 seconds (1 second active, 9 seconds sleep). What is the average power consumption of the device? Explain the formula you used."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A frequent mistake is to incorrectly average the power values (e.g., (50mW + 10µW)/2), forgetting that they must be weighted by time. Another error is unit confusion, mixing up milliwatts (mW) and microwatts (µW), which differ by a factor of 1000. Finally, engineers sometimes calculate the active-phase energy but forget to average it over the entire period, giving an answer of 50mJ instead of an average power in mW.
+
+  **Realistic Solution:** The correct way to calculate the average power is to find the total energy consumed in one full cycle and then divide by the cycle's duration. The total energy is the sum of the energy used during the active phase and the energy used during the sleep phase.
+
+1.  **Energy_active** = 50 mW × 1 s = 50 mJ
+2.  **Energy_sleep** = 10 µW × 9 s = 90 µJ = 0.09 mJ
+3.  **Energy_total** = 50 mJ + 0.09 mJ = 50.09 mJ
+4.  **Power_average** = 50.09 mJ / 10 s = 5.009 mW
+
+Notice that the energy consumed during sleep is three orders of magnitude smaller than the active energy, making its contribution almost negligible in this specific case. However, it is critical to account for it, as in systems with very long sleep times, the sleep power can dominate the energy budget.
+
+  > **Napkin Math:** P_avg = (P_active * t_active + P_sleep * t_sleep) / t_period
+P_avg = ((50 mW * 1 s) + (10 µW * 9 s)) / 10 s
+P_avg = (50 mJ + 90 µJ) / 10 s
+P_avg = (50.09 mJ) / 10 s
+P_avg ≈ 5.0 mW
+
+  > **Key Equation:** $\text{P}_{\text{avg}} = \frac{\text{P}_{\text{active}} \times t_{\text{active}} + \text{P}_{\text{sleep}} \times t_{\text{sleep}}}{t_{\text{period}}}$
+
+  > **Options:**
+  > [ ] 25.0 mW
+  > [ ] 5.9 mW
+  > [x] ~5.0 mW
+  > [ ] 50.0 mW
+
+  📖 **Deep Dive:** [TinyML Hardware](tinyml/01_microcontroller.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Wildlife Camera's Energy Budget</b> · <code>duty-cycling-power</code></summary>
+
+- **Interviewer:** "You're designing a battery-powered wildlife camera using a Cortex-M4 microcontroller. The device wakes up for 1 second to perform inference, then goes into deep sleep for the remaining 9 seconds of its 10-second cycle. From the playbook, you know the Cortex-M4 consumes about 10 mW while active and 10 µW while in deep sleep. Explain how you would calculate the average power consumption for this device."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to only consider the active power (10 mW), completely ignoring the massive power savings from the long deep sleep period. Another error is to do a simple average of the active and sleep power numbers, ignoring that the device spends 90% of its time in the low-power state.
+
+  **Realistic Solution:** The correct approach is to calculate the time-weighted average of the power consumption. The device is active for 10% of the time and sleeping for 90%. Therefore, the average power is the sum of the energy consumed in each state, divided by the total time period. The sleep power is so low that it's almost negligible in the final calculation, demonstrating the effectiveness of duty cycling.
+
+  > **Napkin Math:** 1. **Define Parameters:**
+   - Active Power (P_active): 10 mW
+   - Sleep Power (P_sleep): 10 µW = 0.01 mW
+   - Active Time (t_active): 1 s
+   - Sleep Time (t_sleep): 9 s
+   - Total Period (t_period): 10 s
+
+2. **Calculate Energy per Phase:**
+   - Active Energy = 10 mW * 1 s = 10 mJ
+   - Sleep Energy = 0.01 mW * 9 s = 0.09 mJ
+
+3. **Calculate Average Power:**
+   - Total Energy = 10 mJ + 0.09 mJ = 10.09 mJ
+   - Average Power = Total Energy / Total Period = 10.09 mJ / 10 s = 1.009 mW
+
+  > **Key Equation:** $$P_{\text{avg}} = \frac{(P_{\text{active}} \times t_{\text{active}}) + (P_{\text{sleep}} \times t_{\text{sleep}})}{t_{\text{period}}}$$
+
+  > **Options:**
+  > [ ] 10 mW (Misconception: Ignores the power savings from the sleep cycle).
+  > [ ] 5.005 mW (Misconception: Simple average of active and sleep power, ignoring time weighting).
+  > [x] ~1.01 mW
+  > [ ] 0.1 mW (Misconception: Arithmetical error, likely dividing by 100 instead of 10).
+
+  📖 **Deep Dive:** [TinyML](https://mlsysbook.ai/tinyml/README.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Birdwatcher's Battery Budget</b> · <code>tinyml-duty-cycle-battery</code></summary>
+
+- **Interviewer:** "You're designing a battery-powered acoustic sensor to detect a rare bird species. The device uses a Cortex-M4 microcontroller that wakes for 0.5 seconds every minute to run an inference, then goes into deep sleep. The MCU consumes 50 mW while active and 10 µW in deep sleep. If the device is powered by a 150 mAh, 3.7V battery, explain how you would calculate its approximate battery life in days."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to ignore the power consumed during deep sleep. While small, over long periods (millions of sleep cycles), this energy consumption becomes significant and can lead to an overestimation of battery life. A second common error is unit mismatch—failing to convert µW to mW, or treating battery capacity in mAh as a direct measure of energy without accounting for voltage.
+
+  **Realistic Solution:** The correct approach is to first calculate the battery's total energy capacity in milli-Watt-hours (mWh). Then, calculate the *average* power consumption across a full active/sleep cycle. Finally, divide the total energy capacity by the average power consumption to determine the total device lifetime.
+
+  > **Napkin Math:** 1. **Calculate Battery Energy:** `Energy (mWh) = Capacity (mAh) × Voltage (V)`
+   `150 mAh × 3.7V = 555 mWh`
+
+2. **Calculate Average Power:** The cycle is 60s (0.5s active, 59.5s sleep). Note: `10 µW = 0.010 mW`
+   `P_avg = (P_active × t_active + P_sleep × t_sleep) / t_period`
+   `P_avg = (50 mW × 0.5s + 0.010 mW × 59.5s) / 60s`
+   `P_avg = (25 mWs + 0.595 mWs) / 60s ≈ 0.427 mW`
+
+3. **Calculate Lifetime (Hours):** `Lifetime = Total Energy / Average Power`
+   `555 mWh / 0.427 mW ≈ 1300 hours`
+
+4. **Calculate Lifetime (Days):** `1300 hours / 24 hours/day ≈ 54 days`
+
+  > **Key Equation:** $$P_{\text{avg}} = \frac{P_{\text{active}} \cdot t_{\text{active}} + P_{\text{sleep}} \cdot t_{\text{sleep}}}{t_{\text{period}}}$$
+
+  > **Options:**
+  > [ ] ~11 hours
+  > [ ] ~2.2 days
+  > [x] ~54 days
+  > [ ] ~55.5 days
+
+  📖 **Deep Dive:** [TinyML](tinyml/README.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Wildlife Camera's Battery Budget</b> · <code>duty-cycling-and-power</code></summary>
+
+- **Interviewer:** "You're designing a remote wildlife camera using a Cortex-M4 MCU. To conserve power, the device operates on a duty cycle: it wakes up for 1 second to capture and classify an image, consuming 50 mW. It then enters a deep sleep state for 59 seconds, consuming only 10 µW. The entire system is powered by a 400 mAh, 3.7V LiPo battery. Explain how you would calculate the operational lifetime of the device and what that lifetime is."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistakes are: 1) Forgetting to convert the battery's mAh capacity into Watt-hours (or milliWatt-hours) by multiplying by the voltage, leading to unit mismatch. 2) Only considering the active power consumption and ignoring the duty cycle, which dramatically underestimates the device's lifetime. 3) Incorrectly averaging the active and sleep power values without weighting by the time spent in each state.
+
+  **Realistic Solution:** First, calculate the average power consumption over one full cycle (60 seconds) by time-weighting the active and sleep power states. Second, calculate the total energy stored in the battery by multiplying its capacity in Amp-hours by its voltage to get Watt-hours. Finally, divide the battery's total energy by the system's average power consumption to find the operational lifetime. The device can operate for approximately 73 days.
+
+  > **Napkin Math:** 1. **Calculate Average Power (P_avg):**
+   - Energy per active period: `E_active = 50 mW * 1 s = 50 mJ`
+   - Energy per sleep period: `E_sleep = 10 µW * 59 s = 0.01 mW * 59 s = 0.59 mJ`
+   - Total energy per 60s cycle: `E_total = 50 mJ + 0.59 mJ = 50.59 mJ`
+   - Average power: `P_avg = E_total / 60 s = 50.59 mJ / 60 s ≈ 0.843 mW`
+
+2. **Calculate Battery Energy (E_batt):**
+   - Energy (mWh): `E_batt = 400 mAh * 3.7 V = 1480 mWh`
+
+3. **Calculate Lifetime:**
+   - Lifetime (hours): `Time = E_batt / P_avg = 1480 mWh / 0.843 mW ≈ 1756 hours`
+   - Lifetime (days): `1756 hours / 24 hours/day ≈ 73.1 days`
+
+  > **Key Equation:** $P_{\text{avg}} = \frac{P_{\text{active}} \cdot t_{\text{active}} + P_{\text{sleep}} \cdot t_{\text{sleep}}}{t_{\text{period}}}$
+
+  > **Options:**
+  > [ ] About 1.2 days
+  > [ ] About 20 days
+  > [x] About 73 days
+  > [ ] About 2.5 days
+
+  📖 **Deep Dive:** [Numbers Every ML Systems Engineer Should Know](https://github.com/ml-sys/foundation-models-book/blob/main/playbook/NUMBERS.md#tinyml)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Keyword Spotter's Battery Budget</b> · <code>duty-cycling-energy</code></summary>
+
+- **Interviewer:** "You are designing a battery-powered keyword-spotting device using a Cortex-M4 microcontroller. The device wakes up to analyze a 0.5-second audio clip for a keyword, a process that consumes 40 mW. This check happens once every 5 seconds. When not active, the device is in a deep sleep mode, consuming just 5 µW.
+
+Given this duty cycle, explain how you would calculate the average power consumption. If the device is powered by a standard 240 mAh, 3V coin cell battery, how long can you expect it to last?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to calculate battery life based only on the active power consumption, completely ignoring the long periods of deep sleep. This leads to a wildly pessimistic estimate. Another error is to incorrectly average the power values without weighting them by time, or to confuse power (mW) with energy (mWh) and battery capacity (mAh).
+
+  **Realistic Solution:** The correct approach is to calculate the time-weighted average power across one full cycle. The device is active for 0.5s and sleeps for the remaining 4.5s of its 5-second period. The average power is dominated by the active phase but amortized over the full period.
+
+Once the average power is known, we calculate the total energy stored in the battery (Voltage × Amp-hours) and divide that by the average power to find the operational lifetime.
+
+  > **Napkin Math:** 1. **Calculate time durations for one period:**
+   - `t_period` = 5 s
+   - `t_active` = 0.5 s
+   - `t_sleep` = `t_period` - `t_active` = 5s - 0.5s = 4.5 s
+
+2. **Calculate average power consumption:**
+   - `P_sleep` = 5 µW = 0.005 mW
+   - `Energy_active` = 40 mW × 0.5 s = 20 mJ
+   - `Energy_sleep` = 0.005 mW × 4.5 s = 0.0225 mJ
+   - `P_avg` = (`Energy_active` + `Energy_sleep`) / `t_period` = (20 + 0.0225) mJ / 5 s ≈ 4.005 mW
+
+3. **Calculate total battery energy:**
+   - `Battery_Energy` = 3 V × 240 mAh = 720 mWh
+
+4. **Calculate device lifetime:**
+   - `Lifetime` = `Battery_Energy` / `P_avg` = 720 mWh / 4.005 mW ≈ 180 hours
+   - `Lifetime_days` = 180 hours / 24 hours/day = 7.5 days
+
+  > **Key Equation:** $P_{\text{avg}} = \frac{P_{\text{active}} \cdot t_{\text{active}} + P_{\text{sleep}} \cdot t_{\text{sleep}}}{t_{\text{period}}}$
+
+  > **Options:**
+  > [ ] ~18 hours
+  > [ ] ~36 hours
+  > [x] ~7.5 days
+  > [ ] ~2.5 days
+
+  📖 **Deep Dive:** [TinyML Deployment & Power](https://mlsysbook.ai/tinyml/03_deployed_device)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Battery-Sipping Wearable</b> · <code>duty-cycling</code></summary>
+
+- **Interviewer:** "You're designing a wearable activity tracker powered by a Cortex-M4. To maximize battery life, it operates on a duty cycle: it's active for 2 seconds while processing sensor data, then enters a deep sleep mode for 8 seconds. This 10-second cycle repeats continuously.
+
+Given the hardware specs, the active power consumption is 50 mW and the deep sleep power consumption is 100 µW.
+
+Interpret this scenario and calculate the device's average power consumption."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to ignore the power consumed during the sleep state because it's so small compared to the active state. This leads to an underestimation of the total energy drain. Another error is to take a simple, unweighted average of the active and sleep power, which ignores that the device spends significantly more time sleeping than active.
+
+  **Realistic Solution:** The correct way to calculate the average power consumption is to find the time-weighted average over one full cycle. You calculate the total energy consumed during the cycle (active energy + sleep energy) and then divide by the total duration of the cycle.
+
+- Active Energy: 50 mW × 2 s = 100 mJ
+- Sleep Energy: 100 µW (or 0.1 mW) × 8 s = 0.8 mJ
+- Total Energy: 100 mJ + 0.8 mJ = 100.8 mJ
+- Average Power: 100.8 mJ / 10 s = 10.08 mW
+
+The average power consumption is approximately 10.1 mW.
+
+  > **Napkin Math:** P_avg = ( (P_active × t_active) + (P_sleep × t_sleep) ) / t_period
+P_avg = ( (50mW × 2s) + (0.1mW × 8s) ) / 10s
+P_avg = ( 100mJ + 0.8mJ ) / 10s
+P_avg = 100.8mJ / 10s
+P_avg = 10.08mW
+
+  > **Key Equation:** $$P_{\text{avg}} = \frac{P_{\text{active}} \cdot t_{\text{active}} + P_{\text{sleep}} \cdot t_{\text{sleep}}}{t_{\text{period}}}$$
+
+  > **Options:**
+  > [ ] 10.0 mW
+  > [ ] 25.05 mW
+  > [x] 10.08 mW
+  > [ ] 50.0 mW
+
+  📖 **Deep Dive:** [TinyML Systems](tinyml/README.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Birdwatcher's Power Budget</b> · <code>duty-cycle-energy</code></summary>
+
+- **Interviewer:** "You're designing a remote acoustic sensor to detect an endangered bird species. It uses a Cortex-M4 microcontroller that wakes up for 1 second to run an audio classification model, then sleeps for the remaining 59 seconds of a 1-minute cycle.
+
+Using the hardware constants from the playbook, calculate the *average* power consumption of the device. Explain your reasoning."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to confuse peak power with average power. Engineers often state the active power (10 mW) as the answer, forgetting that for battery life calculations, it's the average power consumption over a full cycle that matters. Another error is to ignore the sleep power contribution, which, while small, is necessary for a precise calculation.
+
+  **Realistic Solution:** To find the average power, you must calculate the total energy consumed during one full cycle (active + sleep) and then divide that by the total cycle time. This correctly weights the high-power active state and the low-power sleep state.
+
+First, make the units consistent: Active power is 10 mW, and Sleep power is 10 µW, which is 0.01 mW.
+
+The average power is the time-weighted average of the active and sleep power states.
+
+  > **Napkin Math:** 1. **Parameters**:
+   - `P_active`: 10 mW (Cortex-M4 Active Power)
+   - `P_sleep`: 10 µW = 0.01 mW (Deep Sleep Power)
+   - `t_active`: 1 second
+   - `t_sleep`: 59 seconds
+   - `t_period`: 60 seconds
+
+2. **Calculate Total Energy per Cycle**:
+   - `Energy_active` = `P_active` × `t_active` = 10 mW × 1 s = 10 mJ
+   - `Energy_sleep` = `P_sleep` × `t_sleep` = 0.01 mW × 59 s = 0.59 mJ
+   - `Energy_total` = 10 mJ + 0.59 mJ = 10.59 mJ
+
+3. **Calculate Average Power**:
+   - `P_average` = `Energy_total` / `t_period` = 10.59 mJ / 60 s ≈ **0.177 mW**
+
+  > **Key Equation:** $$ P_{\text{avg}} = \frac{P_{\text{active}} \cdot t_{\text{active}} + P_{\text{sleep}} \cdot t_{\text{sleep}}}{t_{\text{period}}} $$
+
+  > **Options:**
+  > [ ] 10 mW
+  > [ ] 5.0 mW
+  > [x] ~0.18 mW
+  > [ ] ~0.17 mW
+
+  📖 **Deep Dive:** [TinyML Microcontrollers](tinyml/01_microcontroller.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Solar-Powered Wildlife Cam</b> · <code>duty-cycling-energy-consumption</code></summary>
+
+- **Interviewer:** "You're designing a remote wildlife camera using a Cortex-M4 microcontroller. The device stays in deep sleep and wakes up once every minute to capture an image and run an inference, which takes 200ms. Given the specs from our cheat sheet, calculate the average power consumption of the device. The Cortex-M4 consumes 50 mW during active inference and 10 µW during deep sleep."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to simply average the active and sleep power ratings, or to ignore the sleep power entirely because it seems negligible. Both approaches fail to account for the fact that the device spends the vast majority of its time in the low-power state, which dominates the total energy budget over time.
+
+  **Realistic Solution:** The correct way to solve this is to calculate the total energy consumed over one full cycle (active + sleep) and then divide by the cycle's duration to find the average power. The device is active for 0.2 seconds and sleeps for 59.8 seconds in each 60-second period. This weighted average is the only accurate method to determine if a small solar panel can sustain the device.
+
+  > **Napkin Math:** 1.  **Parameters:**
+    -   `P_active = 50 mW`
+    -   `P_sleep = 10 µW = 0.01 mW`
+    -   `t_active = 200 ms = 0.2 s`
+    -   `t_period = 1 minute = 60 s`
+2.  **Calculate sleep time:**
+    -   `t_sleep = t_period - t_active = 60 s - 0.2 s = 59.8 s`
+3.  **Calculate energy per cycle:**
+    -   `E_cycle = (P_active × t_active) + (P_sleep × t_sleep)`
+    -   `E_cycle = (50 mW × 0.2 s) + (0.01 mW × 59.8 s) = 10 mJ + 0.598 mJ = 10.598 mJ`
+4.  **Calculate average power:**
+    -   `P_avg = E_cycle / t_period = 10.598 mJ / 60 s ≈ 0.177 mW`
+
+  > **Key Equation:** $\bar{P} = \frac{ (P_{\text{active}} \cdot t_{\text{active}}) + (P_{\text{sleep}} \cdot t_{\text{sleep}}) }{ t_{\text{period}} }$
+
+  > **Options:**
+  > [ ] ~10.13 mW (Misinterprets µW as mW)
+  > [ ] ~25.0 mW (Averages power without time weighting)
+  > [ ] ~0.167 mW (Ignores sleep power in calculation)
+  > [x] ~0.177 mW
+
+  📖 **Deep Dive:** [Numbers Every ML Systems Engineer Should Know](NUMBERS.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Duty-Cycled Bird Watcher</b> · <code>tinyml-duty-cycling</code></summary>
+
+- **Interviewer:** "You're designing a remote bird-song detector using a Cortex-M4 based microcontroller. It needs to operate for months on a small battery. To save energy, you use a duty cycle: the device listens for 1 second (active) and then enters deep sleep for the next 9 seconds. Based on the *Numbers Every ML Systems Engineer Should Know*, a Cortex-M4 consumes about 10 mW when active and 10 µW in deep sleep. What is the average power consumption of the device?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate the average power by simply taking the arithmetic mean of the active and sleep power values, completely ignoring the *time* spent in each state. This leads to a massive overestimation of the power budget because the device spends the vast majority of its time (90% in this case) in the ultra-low-power sleep state.
+
+  **Realistic Solution:** The correct way to calculate average power for a duty-cycled system is to find the total energy consumed over one full cycle (active energy + sleep energy) and then divide by the total cycle duration. The active phase dominates the energy budget per second, but the long sleep phase dramatically reduces the *average* power consumption over time, which is the critical metric for battery life estimation.
+
+  > **Napkin Math:** 1. **Identify parameters:**
+   - `P_active` = 10 mW
+   - `P_sleep` = 10 µW = 0.01 mW
+   - `t_active` = 1 s
+   - `t_sleep` = 9 s
+   - `t_period` = 1 s + 9 s = 10 s
+
+2. **Calculate total energy per cycle:**
+   - `Energy_cycle` = (`P_active` × `t_active`) + (`P_sleep` × `t_sleep`)
+   - `Energy_cycle` = (10 mW × 1 s) + (0.01 mW × 9 s)
+   - `Energy_cycle` = 10 mJ + 0.09 mJ = 10.09 mJ
+
+3. **Calculate average power:**
+   - `P_avg` = `Energy_cycle` / `t_period`
+   - `P_avg` = 10.09 mJ / 10 s = 1.009 mW
+
+4. **Result:** The average power is approximately **1.01 mW**.
+
+  > **Key Equation:** $$P_{\text{avg}} = \frac{ (P_{\text{active}} \cdot t_{\text{active}}) + (P_{\text{sleep}} \cdot t_{\text{sleep}}) }{ t_{\text{period}} }$$
+
+  > **Options:**
+  > [ ] 5.005 mW
+  > [ ] 1.0 mW
+  > [x] 1.009 mW
+  > [ ] 10.01 mW
+
+  📖 **Deep Dive:** [TinyML](https://mlsysbook.ai/tinyml/01_microcontroller.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Silent Power Drain</b> · <code>duty-cycle-power</code></summary>
+
+- **Interviewer:** "You're designing a battery-powered acoustic sensor to detect anomalies in factory machinery. The device uses a Cortex-M4 microcontroller. It wakes up for 1 second every minute to run an inference, then goes into deep sleep. The MCU consumes 50 mW while active and 10 µW in deep sleep. Explain how you would calculate the average power consumption and what the final value is."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to ignore the power consumed during deep sleep, assuming it's zero. While small, sleep current is a dominant factor in the energy budget for devices that sleep most of the time. Another error is to simply average the active and sleep power values, ignoring the time spent in each state.
+
+  **Realistic Solution:** The correct way to calculate average power is to determine the total energy consumed over a single cycle (active + sleep) and then divide by the total cycle duration. The energy is the sum of (power × time) for each state.
+
+First, convert all power units to be the same (milliwatts): 10 µW = 0.01 mW.
+The cycle period is 60 seconds (1 minute). The active time is 1 second, and the sleep time is 59 seconds.
+
+Energy = (P_active × t_active) + (P_sleep × t_sleep)
+Energy = (50 mW × 1 s) + (0.01 mW × 59 s) = 50 mJ + 0.59 mJ = 50.59 mJ
+
+Average Power = Total Energy / Total Time
+Average Power = 50.59 mJ / 60 s ≈ 0.843 mW.
+
+  > **Napkin Math:** 1. **Active Energy:** 50 mW × 1 s = 50 mJ
+2. **Sleep Energy:** 10 µW × 59 s = 0.01 mW × 59 s = 0.59 mJ
+3. **Total Energy per Cycle:** 50 mJ + 0.59 mJ = 50.59 mJ
+4. **Average Power:** 50.59 mJ / 60 s ≈ 0.843 mW
+
+  > **Key Equation:** $$P_{\text{avg}} = \frac{(P_{\text{active}} \times t_{\text{active}}) + (P_{\text{sleep}} \times t_{\text{sleep}})}{t_{\text{period}}}$$
+
+  > **Options:**
+  > [ ] ~0.833 mW (Mistake: Ignored sleep power)
+  > [ ] ~10.67 mW (Mistake: Unit confusion, treated 10µW as 10mW)
+  > [x] ~0.843 mW
+  > [ ] ~25.0 mW (Mistake: Averaged power values directly)
+
+  📖 **Deep Dive:** [TinyML](tinyml/README.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Battery-Powered Birdwatcher</b> · <code>duty-cycle-energy</code></summary>
+
+- **Interviewer:** "You're designing a battery-powered wildlife camera using a Cortex-M4 microcontroller. In its active state (running a 1-second inference), it consumes 50 mW. In deep sleep, it consumes 10 µW. The device is expected to wake up on average 6 times per hour. Your power source is an 888 mWh battery. Calculate the device's approximate battery life in days."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to either ignore the sleep power, assuming it's negligible, or to miscalculate the average power by mixing units (mW vs µW). Ignoring sleep power overestimates the battery life, while the unit error drastically underestimates it by orders of magnitude.
+
+  **Realistic Solution:** The solution requires calculating the weighted average power consumption based on the duty cycle. The device is active for 6 seconds per hour and in sleep for the remaining 3594 seconds. This average power is then used to determine how long the 888 mWh battery will last.
+
+  > **Napkin Math:** # 1. Calculate time in each state per hour (3600s)
+t_active = 6 triggers/hr * 1 s/trigger = 6 s
+t_sleep = 3600 s - 6 s = 3594 s
+
+# 2. Convert all power to mW
+P_active = 50 mW
+P_sleep = 10 µW = 0.01 mW
+
+# 3. Calculate average power (P_avg) using the duty cycle formula
+P_avg = ((P_active * t_active) + (P_sleep * t_sleep)) / 3600 s
+P_avg = ((50 mW * 6s) + (0.01 mW * 3594s)) / 3600s
+P_avg = (300 mJ + 35.94 mJ) / 3600s = 335.94 mJ / 3600s ≈ 0.0933 mW
+
+# 4. Calculate battery life
+Battery_Energy = 888 mWh
+Life_hours = Battery_Energy / P_avg = 888 mWh / 0.0933 mW ≈ 9517 hours
+Life_days = 9517 hours / 24 hours/day ≈ 397 days
+
+  > **Key Equation:** $\text{P}_{\text{avg}} = \frac{(\text{P}_{\text{active}} \times \text{t}_{\text{active}}) + (\text{P}_{\text{sleep}} \times \text{t}_{\text{sleep}})}{\text{t}_{\text{period}}}$
+
+  > **Options:**
+  > [ ] ~18 hours
+  > [ ] ~4 days
+  > [x] ~397 days
+  > [ ] ~444 days
+
+  📖 **Deep Dive:** [TinyML Systems](tinyml/01_microcontroller.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Duty-Cycled Wildlife Sensor</b> · <code>tinyml-duty-cycle-power</code></summary>
+
+- **Interviewer:** "You're designing a battery-powered wildlife sensor that uses a Cortex-M4 to listen for a specific animal call. It spends most of its time in a deep sleep mode consuming 10 µW (micro-watts). When it detects a potential sound, it wakes up and runs a keyword spotting model for 1 second, consuming 10 mW (milli-watts), before going back to sleep. Assuming this cycle repeats every 10 seconds (1 second active, 9 seconds sleep), how do you calculate the *average* power consumption, and what is the result?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to ignore the sleep power, assuming it's effectively zero. While small, it can dominate the total energy budget over long deployments. Another frequent error is to incorrectly average the power ratings directly (e.g., (10mW + 10µW)/2) without weighting them by the time spent in each state. A third error is to simply report the active power, ignoring the averaging effect of the duty cycle.
+
+  **Realistic Solution:** To find the average power, you must calculate the total energy consumed over one full period and then divide by the period's duration. The total energy is the sum of the energy used during the active phase and the energy used during the sleep phase. The device is active for 10% of the time and asleep for 90% of the time.
+
+  > **Napkin Math:** 1. **Calculate Active Energy per cycle:**
+   E_active = P_active × t_active
+   E_active = 10 mW × 1 s = 10 mJ (milli-Joules)
+
+2. **Calculate Sleep Energy per cycle:**
+   E_sleep = P_sleep × t_sleep
+   E_sleep = 10 µW × 9 s = 90 µJ (micro-Joules) = 0.09 mJ
+
+3. **Calculate Total Energy per cycle:**
+   E_total = E_active + E_sleep
+   E_total = 10 mJ + 0.09 mJ = 10.09 mJ
+
+4. **Calculate Average Power:**
+   P_avg = E_total / t_period
+   P_avg = 10.09 mJ / 10 s = 1.009 mW
+
+The average power consumption is ~1.01 mW.
+
+  > **Key Equation:** P_{\text{avg}} = \frac{(P_{\text{active}} \cdot t_{\text{active}}) + (P_{\text{sleep}} \cdot t_{\text{sleep}})}{t_{\text{period}}}
+
+  > **Options:**
+  > [ ] 10 mW (Mistake: Ignores the averaging effect of the duty cycle)
+  > [ ] 10 µW (Mistake: Unit confusion, treating the 10mW active power as 10µW)
+  > [x] ~1.01 mW
+  > [ ] ~5 mW (Mistake: Incorrectly averaging the power ratings without weighting by time)
+
+  📖 **Deep Dive:** [TinyML](https://mlsysbook.ai/tinyml/README.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Energy-Neutral Wildlife Camera</b> · <code>duty-cycling</code></summary>
+
+- **Interviewer:** "You're designing a remote wildlife camera using a Cortex-M4. It's powered by a small solar panel that provides an average of 1 mW of power. The device has two states: 'active' (running inference, consuming 50 mW) and 'deep sleep' (consuming 10 µW). To remain energy-neutral, the device's average power consumption over its duty cycle must not exceed the 1 mW provided by the panel. For a 60-second cycle period, calculate the maximum time the camera can be in the 'active' state."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to ignore the power consumed during deep sleep. While it's very small (10µW is 1/5000th of the active power), it is not zero. In a tight power budget over millions of cycles, this small, constant drain matters. Ignoring it leads to a slight overestimation of the available active time, which can cause battery drain over the long term.
+
+  **Realistic Solution:** The correct way to solve this is to use the average power equation for a duty cycle, including both active and sleep states. The average power is the weighted sum of the power in each state, divided by the total period. We set this equal to the 1 mW provided by the solar panel and solve for the active time.
+
+The sleep power (10 µW) must be converted to mW (0.01 mW) to keep units consistent. The calculation shows that the device can only be active for about 1.19 seconds out of every minute to stay within its power budget.
+
+  > **Napkin Math:** 1. **Define the average power equation:**
+   P_avg = (P_active * t_active + P_sleep * t_sleep) / t_period
+
+2. **Substitute known values and relationships:**
+   - P_avg = 1 mW
+   - P_active = 50 mW
+   - P_sleep = 10 µW = 0.01 mW
+   - t_period = 60 s
+   - t_sleep = t_period - t_active = 60 - t_active
+
+3. **Set up the equation to solve for t_active:**
+   1 mW = (50 * t_active + 0.01 * (60 - t_active)) / 60
+
+4. **Solve for t_active:**
+   - Multiply by 60:  60 = 50 * t_active + 0.01 * (60 - t_active)
+   - Distribute:     60 = 50 * t_active + 0.6 - 0.01 * t_active
+   - Combine terms:    60 - 0.6 = (50 - 0.01) * t_active
+   - Simplify:         59.4 = 49.99 * t_active
+   - Isolate t_active: t_active = 59.4 / 49.99
+   - Result:           t_active ≈ 1.188 seconds
+
+  > **Key Equation:** $\text{P}_{\text{avg}} = \frac{\text{P}_{\text{active}} \cdot \text{t}_{\text{active}} + \text{P}_{\text{sleep}} \cdot (\text{t}_{\text{period}} - \text{t}_{\text{active}})}{\text{t}_{\text{period}}}$
+
+  > **Options:**
+  > [ ] 1.20 seconds
+  > [ ] ~58.81 seconds
+  > [x] ~1.19 seconds
+  > [ ] 0.012 seconds
+
+  📖 **Deep Dive:** [Microcontrollers](https://mlsysbook.ai/tinyml/01_microcontroller.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Wildlife Camera's Power Budget</b> · <code>duty-cycling-power</code></summary>
+
+- **Interviewer:** "You're designing a remote wildlife camera using a Cortex-M4 based microcontroller. The system stays in a deep sleep mode, wakes up once every minute to capture an image and run a 2-second inference workload, and then goes back to sleep. Using the hardware constants, explain the average power consumption of the device. This is the single most critical number for sizing the battery and determining deployment lifetime."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often make two mistakes here: 1) They completely ignore the energy consumed during the sleep state, assuming it's zero. While small, it becomes significant over days or weeks. 2) They mismanage units, mixing up milliwatts (mW) and microwatts (µW), leading to an answer that's off by orders of magnitude.
+
+  **Realistic Solution:** The correct way to calculate average power is to create a weighted average of the power consumed in each state (active and sleep) over one full operational period. You must convert all power figures to the same unit (e.g., mW) before calculating.
+
+- Active State: The device is active for 2 seconds.
+- Sleep State: The device sleeps for the rest of the minute (60s - 2s = 58s).
+- Total Period: 60 seconds.
+
+  > **Napkin Math:** 1.  **Define States & Power:**
+    -   `P_active` = 50 mW (from constants, upper bound for Cortex-M4)
+    -   `P_sleep` = 10 µW = 0.01 mW (from constants, upper bound for deep sleep)
+    -   `t_active` = 2 s
+    -   `t_sleep` = 58 s
+    -   `t_period` = 60 s
+
+2.  **Calculate Energy per State (Power × Time):**
+    -   `E_active` = 50 mW × 2 s = 100 mJ
+    -   `E_sleep` = 0.01 mW × 58 s = 0.58 mJ
+
+3.  **Calculate Total Energy and Average Power:**
+    -   `E_total` = 100 mJ + 0.58 mJ = 100.58 mJ
+    -   `P_avg` = `E_total` / `t_period` = 100.58 mJ / 60 s ≈ 1.68 mW
+
+  > **Key Equation:** $P_{\text{avg}} = \frac{(P_{\text{active}} \times t_{\text{active}}) + (P_{\text{sleep}} \times t_{\text{sleep}})}{t_{\text{period}}}$
+
+  > **Options:**
+  > [ ] ~1.67 mW
+  > [ ] ~9.7 mW
+  > [x] ~1.68 mW
+  > [ ] ~25 mW
+
+  📖 **Deep Dive:** [TinyML Microcontrollers](tinyml/01_microcontroller.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Wildlife Sensor's Power Budget</b> · <code>tinyml-duty-cycle-power</code></summary>
+
+- **Interviewer:** "You're designing a battery-powered sensor for a remote wildlife monitoring system. It uses a Cortex-M4 microcontroller to run a simple motion detection model. The device wakes up once every 20 seconds to perform a 2-second inference.
+
+Given the following specs from our hardware sheet:
+- **Active Power** (during inference): 50 mW
+- **Deep Sleep Power**: 10 µW
+
+Calculate the average power consumption of the device over one cycle. This is the number you'd use to size the battery and estimate device lifetime."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is either completely ignoring the energy consumed during sleep or making a unit conversion error between milliwatts (mW) and microwatts (µW). While the sleep power is tiny, it dominates the energy budget over long periods in ultra-low-power applications. A second mistake is incorrectly averaging the power figures directly without weighting them by the time spent in each state.
+
+  **Realistic Solution:** The correct approach is to calculate the total energy consumed in one full cycle (active + sleep) and then divide by the total cycle time to find the average power. It's critical to convert all power units to be the same (e.g., milliwatts) before calculating.
+
+The cycle consists of 2 seconds active and 18 seconds sleeping, for a total period of 20 seconds. The sleep power of 10 µW is equal to 0.01 mW. By calculating the time-weighted energy for each state, we get the true average power.
+
+  > **Napkin Math:** 1.  **Convert Units:** Ensure all power values are in the same unit.
+    - `P_sleep = 10 µW = 0.01 mW`
+
+2.  **Calculate Energy per State:** Energy (in millijoules) = Power (in milliwatts) × Time (in seconds).
+    - `E_active = 50 mW × 2 s = 100 mJ`
+    - `E_sleep = 0.01 mW × 18 s = 0.18 mJ`
+
+3.  **Calculate Total Energy per Cycle:**
+    - `E_total = E_active + E_sleep = 100 mJ + 0.18 mJ = 100.18 mJ`
+
+4.  **Calculate Average Power:** Average Power = Total Energy / Total Time.
+    - `P_avg = 100.18 mJ / 20 s = 5.009 mW`
+
+  > **Key Equation:** $$ P_{\text{avg}} = \frac{P_{\text{active}} \cdot t_{\text{active}} + P_{\text{sleep}} \cdot t_{\text{sleep}}}{t_{\text{period}}} $$
+
+  > **Options:**
+  > [ ] ~14.0 mW
+  > [ ] ~25.0 mW
+  > [ ] ~5.00 mW
+  > [x] ~5.01 mW
+
+  📖 **Deep Dive:** [TinyML Systems](tinyml/README.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Wildlife Sensor's Energy Budget</b> · <code>duty-cycling</code></summary>
+
+- **Interviewer:** "You are designing a battery-powered audio sensor to detect rare bird calls in a remote rainforest. The device uses a Cortex-M4 microcontroller. It remains in a deep sleep state most of the time, waking up for 1 second every minute to run an inference. From the datasheet, you know:
+
+- Active power (inference): **40 mW**
+- Deep sleep power: **10 µW**
+
+To select the right battery and solar harvesting setup, you first need a baseline. Explain how you would calculate the device's average power consumption, and then calculate it."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to ignore the power consumed during the sleep state, assuming it's zero. This underestimates the total energy drain, especially over long periods. Another error is to incorrectly average the power values without weighting them by the time spent in each state, leading to a wildly inaccurate estimate.
+
+  **Realistic Solution:** The correct way to calculate the average power is to find the total energy consumed over one full cycle (active + sleep) and then divide by the cycle's total time period. The energy for each state is its power multiplied by the time spent in that state. The sleep power, though tiny, is consumed for a much longer duration than the active power and must be included.
+
+First, ensure all units are consistent (e.g., convert everything to microwatts). Then, apply the duty cycle formula to find the time-weighted average power.
+
+  > **Napkin Math:** 1.  **Standardize Units:**
+    -   `P_active` = 40 mW = 40,000 µW
+    -   `P_sleep` = 10 µW
+2.  **Define Time Periods:**
+    -   `t_active` = 1 second
+    -   `t_sleep` = 60 seconds - 1 second = 59 seconds
+    -   `t_period` = 60 seconds
+3.  **Calculate Total Energy per Cycle:**
+    -   `E_cycle` = (`P_active` × `t_active`) + (`P_sleep` × `t_sleep`)
+    -   `E_cycle` = (40,000 µW × 1 s) + (10 µW × 59 s) = 40,000 µJ + 590 µJ = 40,590 µJ
+4.  **Calculate Average Power:**
+    -   `P_avg` = `E_cycle` / `t_period`
+    -   `P_avg` = 40,590 µJ / 60 s ≈ 676.5 µW
+
+  > **Key Equation:** $\text{P}_{\text{avg}} = \frac{(\text{P}_{\text{active}} \times \text{t}_{\text{active}}) + (\text{P}_{\text{sleep}} \times \text{t}_{\text{sleep}})}{\text{t}_{\text{period}}}$
+
+  > **Options:**
+  > [ ] ~667 µW
+  > [ ] ~20,005 µW
+  > [x] ~677 µW
+  > [ ] ~40,590 µW
+
+  📖 **Deep Dive:** [TinyML Readme](tinyml/README.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Duty Cycle Constraint</b> · <code>real-time-duty-cycle</code></summary>
+
+- **Interviewer:** "You are designing a battery-powered keyword spotting device using a Cortex-M4 microcontroller. It must process a continuous stream of 1-second audio windows to detect a wake word. What is the correct term for the percentage of time the CPU is in an active state processing audio versus in a low-power sleep state?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the duty cycle with related metrics like latency or throughput. Latency is the duration of the active period (`t_active`), and throughput is the rate of processing. Duty cycle, however, is the specific *ratio* of active time to the total time period, which is the critical factor for calculating energy consumption in battery-powered devices.
+
+  **Realistic Solution:** The correct term is **Duty Cycle**. It is the fraction of one period in which a system is active. For a real-time system that must process data arriving every `t_period` (e.g., 1 second), the processing time (`t_active`) must be less than this period. The resulting duty cycle directly determines the average power consumption and thus the device's battery life.
+
+  > **Napkin Math:** Given a 1-second period and a 150ms inference time:
+
+1.  **Calculate Duty Cycle:**
+    `t_active / t_period = 150ms / 1000ms = 15%`
+
+2.  **Calculate Average Power (using TinyML constants):**
+    `P_active ≈ 50 mW`
+    `P_sleep ≈ 10 µW`
+    `Avg Power = (P_active × 0.15) + (P_sleep × 0.85)`
+    `Avg Power = (50 mW × 0.15) + (10 µW × 0.85) ≈ 7.5 mW + 0.0085 mW ≈ 7.51 mW`
+
+This shows that average power is dominated by the active power multiplied by the duty cycle.
+
+  > **Key Equation:** $\text{Duty Cycle} = \frac{t_{\text{active}}}{t_{\text{period}}}$
+
+  > **Options:**
+  > [ ] Latency
+  > [ ] Throughput
+  > [x] Duty Cycle
+  > [ ] Power Draw
+
+  📖 **Deep Dive:** [Microcontrollers & Real-Time Constraints](tinyml/01_microcontroller.md)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Wildlife Sensor's Energy Budget</b> · <code>duty-cycle-power</code></summary>
+
+- **Interviewer:** "You're designing a battery-powered wildlife monitoring sensor using a Cortex-M4 microcontroller. The device wakes up once every minute (the 'period') to perform a 1-second audio classification task, then returns to deep sleep.
+
+Based on the datasheet, the MCU consumes 40 mW while active and 10 µW (micro-watts) in deep sleep. Calculate the average power consumption of the device over a full one-minute cycle. This average power is what determines your battery life."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers new to embedded systems often either (a) forget that the long sleep duration still contributes to the total energy budget, even if the power is tiny, or (b) incorrectly average the power values (e.g., (40mW + 10µW)/2) without weighting them by the time spent in each state.
+
+  **Realistic Solution:** The correct way to calculate average power for a duty-cycled system is to find the total energy consumed over one full period and then divide by the duration of that period. The total energy is the sum of the energy consumed in the active state and the energy consumed in the sleep state.
+
+1.  **Active State:** 1 second at 40 mW
+2.  **Sleep State:** 59 seconds at 10 µW (or 0.010 mW)
+3.  **Total Period:** 60 seconds
+
+  > **Napkin Math:** 1. **Calculate Active Energy:**
+   $E_{\text{active}} = P_{\text{active}} \times t_{\text{active}} = 40\text{ mW} \times 1\text{ s} = 40\text{ mJ}$
+
+2. **Calculate Sleep Energy:**
+   $E_{\text{sleep}} = P_{\text{sleep}} \times t_{\text{sleep}} = 10\text{ µW} \times 59\text{ s} = 0.01\text{ mW} \times 59\text{ s} = 0.59\text{ mJ}$
+
+3. **Calculate Total Energy:**
+   $E_{\text{total}} = E_{\text{active}} + E_{\text{sleep}} = 40\text{ mJ} + 0.59\text{ mJ} = 40.59\text{ mJ}$
+
+4. **Calculate Average Power:**
+   $P_{\text{avg}} = E_{\text{total}} / t_{\text{period}} = 40.59\text{ mJ} / 60\text{ s} \approx 0.6765\text{ mW}$
+
+  > **Key Equation:** $$P_{\text{avg}} = \frac{(P_{\text{active}} \times t_{\text{active}}) + (P_{\text{sleep}} \times t_{\text{sleep}})}{t_{\text{period}}}$$
+
+  > **Options:**
+  > [ ] ~0.667 mW
+  > [ ] ~20 mW
+  > [x] ~0.677 mW
+  > [ ] 40 mW
+
+  📖 **Deep Dive:** [Deployed Device](https://mlsysbook.ai/tinyml/03_deployed_device.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Bird-Call Battery Drain</b> · <code>battery-duty-cycle</code></summary>
+
+- **Interviewer:** "You're designing a battery-powered acoustic sensor to detect a rare bird call in a remote forest. Your device uses a Cortex-M4 microcontroller. It wakes up for 2 seconds every minute (60 seconds) to listen and run an inference model. From the playbook, we know the Cortex-M4 consumes about 50 mW while active and 10 µW while in deep sleep. Calculate the average power consumption of the device."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate the duty-cycled active power but forget to include the power consumed during the much longer sleep period. While sleep power is tiny, it dominates the energy budget over long deployments and is a critical factor in battery life calculations.
+
+  **Realistic Solution:** The correct way to calculate average power is to find the total energy consumed over one full cycle (active + sleep) and then divide by the cycle's time period.
+
+1.  **Active Energy:** 50 mW × 2 s = 100 mJ
+2.  **Sleep Power Conversion:** 10 µW = 0.01 mW
+3.  **Sleep Energy:** 0.01 mW × (60 s - 2 s) = 0.01 mW × 58 s = 0.58 mJ
+4.  **Total Energy:** 100 mJ + 0.58 mJ = 100.58 mJ
+5.  **Average Power:** 100.58 mJ / 60 s ≈ 1.68 mW
+
+  > **Napkin Math:** P_avg = (P_active * t_active) + (P_sleep * t_sleep) / t_period
+P_avg = (50mW * 2s + 0.01mW * 58s) / 60s
+P_avg = (100mJ + 0.58mJ) / 60s
+P_avg = 100.58mJ / 60s
+P_avg ≈ 1.68 mW
+
+  > **Key Equation:** $$ P_{\text{avg}} = \frac{P_{\text{active}} \cdot t_{\text{active}} + P_{\text{sleep}} \cdot t_{\text{sleep}}}{t_{\text{period}}} $$
+
+  > **Options:**
+  > [ ] ~1.67 mW (Incorrect: This result comes from completely ignoring the sleep power contribution, a common oversight.)
+  > [ ] ~11.33 mW (Incorrect: This result comes from misinterpreting 10µW as 10mW, a 1000x unit error.)
+  > [x] ~1.68 mW (Correct: This accurately accounts for the energy consumed during both the active and sleep states over the full period.)
+  > [ ] ~100.6 mW (Incorrect: This fails to divide the total energy (mJ) by the time period (s), confusing energy with average power.)
+
+  📖 **Deep Dive:** [TinyML Systems](https://mlsysbook.ai/tinyml/)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

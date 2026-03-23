@@ -444,6 +444,810 @@ Convert seconds to hours:
   </details>
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Download Fallacy</b> · <code>edge-ota-bandwidth</code></summary>
+
+- **Interviewer:** "You are an engineer on an autonomous vehicle team responsible for Over-the-Air (OTA) updates. You need to calculate the time required to download a new 8 GB perception model update to a vehicle over its 1 Gbps cellular connection. Ignoring protocol overhead, calculate the approximate download time."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to confuse Gigabits (Gb) with Gigabytes (GB). Engineers often incorrectly divide the 8 GB package size by the 1 Gbps network speed and arrive at an answer of 8 seconds. This is wrong by a factor of 8, because network speeds are measured in bits while storage is measured in Bytes.
+
+  **Realistic Solution:** The correct way to solve this is to first make the units consistent. You must convert the network speed from Gigabits per second (Gbps) to Gigabytes per second (GB/s) by dividing by 8. Then, you can divide the total package size by the network speed in the correct units.
+
+1 Gbps is equal to 1,000,000,000 bits per second. There are 8 bits in a Byte, so the speed in GB/s is 1/8 = 0.125 GB/s.
+
+The download will take 8 GB / 0.125 GB/s = 64 seconds.
+
+  > **Napkin Math:** 1. **Convert Units**: Network speed is in bits, file size is in Bytes. Convert speed to Bytes.
+   `1 Gbps / 8 bits per Byte = 0.125 GB/s`
+2. **Calculate Time**: Divide the total data size by the speed.
+   `Time = 8 GB / 0.125 GB/s = 64 seconds`
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{Data Size (GB)} \times 8}{\text{Network Speed (Gbps)}}$
+
+  > **Options:**
+  > [ ] 8 seconds
+  > [ ] 4 seconds
+  > [x] 64 seconds
+  > [ ] 32 seconds
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Overnight OTA Update</b> · <code>edge-ota-bandwidth</code></summary>
+
+- **Interviewer:** "A new 8 GB perception model is ready for fleet-wide rollout to your company's autonomous vehicles. The only reliable window for updates is an 8-hour overnight period when cars are parked and connected to a 4G LTE network. You can assume a sustained, best-case download speed of 10 Mbps for each vehicle. Explain the minimum time required to download this update. Is the 8-hour window sufficient?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing bits (b) and bytes (B). Network speeds are measured in megabits per second (Mbps), while file sizes are measured in gigabytes (GB). This leads to an 8× error in calculation. Engineers either forget to multiply the file size by 8 to convert from bytes to bits, or they incorrectly assume 10 Mbps is 10 MB/s, leading to a result that is 8x too fast.
+
+  **Realistic Solution:** The correct approach is to standardize the units to bits. First, convert the model size from Gigabytes (GB) to Gigabits (Gb). Then, calculate the download time based on the available network bandwidth.
+
+The calculation shows the download takes approximately 1.8 hours. While this is technically well within the 8-hour window, a Staff+ engineer would recognize this still presents a risk. It leaves little buffer for real-world issues like network instability, failed downloads requiring retries, or the need to perform a staged rollout to mitigate risk, all of which could easily push the total time beyond the 8-hour limit for some vehicles.
+
+  > **Napkin Math:** 1. **Convert model size to bits:** 8 GB × 8 bits/byte = 64 Gbits.
+2. **Standardize units:** The network speed is 10 Mbps. We need to divide Giga-bits by Mega-bits.
+3. **Calculate time in seconds:** Time = Total Data / Bandwidth = 64,000 Mbits / 10 Mbits/s = 6,400 seconds.
+4. **Convert seconds to hours:** 6,400 seconds / 3,600 seconds/hour ≈ 1.78 hours.
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{File Size (bits)}}{\text{Bandwidth (bits/s)}}$
+
+  > **Options:**
+  > [ ] ~13.3 minutes
+  > [x] ~1.8 hours
+  > [ ] ~2.4 hours
+  > [ ] ~14.2 hours
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Automotive OTA Data Bill</b> · <code>ota-data-cost</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer at a leading automotive company. Your team needs to deploy a new 250 MB perception model to a fleet of 50,000 vehicles via an Over-the-Air (OTA) update. The vehicles use a cellular connection, and your enterprise data plan costs $8 per Gigabyte.
+
+Calculate the total data cost to update the entire fleet."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often make unit conversion errors, either by confusing MegaBytes (MB) with GigaBytes (GB) or by misinterpreting the cost basis (e.g., per gigabit instead of gigabyte). Another common mistake is to overcomplicate the problem by assuming the model size given is a parameter count, leading to an unnecessary and incorrect size calculation.
+
+  **Realistic Solution:** The correct approach is a straightforward calculation involving the total data volume and the cost per unit of data. First, calculate the total data required for the entire fleet by multiplying the model's size by the number of vehicles. Second, convert the total data from Megabytes to Gigabytes to match the pricing unit. Finally, multiply the result by the cost per Gigabyte.
+
+  > **Napkin Math:** 1. **Calculate Total Data in MB:** 250 MB/vehicle × 50,000 vehicles = 12,500,000 MB
+2. **Convert MB to GB:** 12,500,000 MB / 1,000 MB/GB = 12,500 GB
+3. **Calculate Total Cost:** 12,500 GB × $8/GB = $100,000
+
+  > **Key Equation:** $\text{Total Cost} = (\frac{\text{Model Size}_{\text{MB}} \times \text{Fleet Size}}{1000}) \times \text{Cost per GB}$
+
+  > **Options:**
+  > [ ] $12,500
+  > [ ] $200,000
+  > [x] $100,000
+  > [ ] $100,000,000
+
+  📖 **Deep Dive:** [Deployed Edge Systems](https://mlsysbook.ai/edge/deployed-systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Autonomous Fleet OTA Update</b> · <code>edge-ota-update</code></summary>
+
+- **Interviewer:** "You're an engineer for an autonomous vehicle company. A critical update to the main perception model, which has 500 million parameters and is deployed in INT8 precision, needs to be rolled out to a fleet of vehicles. The vehicles connect via a 4G LTE modem with an average real-world download speed of 25 Mbps. Calculate the approximate time required to download this update to a single vehicle."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing bits and bytes. Network speeds are marketed in megabits per second (Mbps), while file sizes are measured in megabytes (MB). Forgetting the 8x conversion factor leads to underestimating the download time by an order of magnitude.
+
+  **Realistic Solution:** First, calculate the model's size in bytes. With 500 million parameters and INT8 precision (1 byte/parameter), the size is 500 million bytes, which is approximately 477 MB. For napkin math, we can round this to 500 MB.
+
+Next, convert the network speed from megabits per second (Mbps) to megabytes per second (MB/s). 25 Mbps divided by 8 bits per byte equals 3.125 MB/s.
+
+Finally, divide the model size by the network speed: 500 MB / 3.125 MB/s = 160 seconds. It will take approximately 2 minutes and 40 seconds to download the update to a single vehicle.
+
+  > **Napkin Math:** 1. **Model Size:** 500M params × 1 byte/param (INT8) = 500,000,000 bytes ≈ 500 MB
+2. **Network Speed Conversion:** 25 Mbps / 8 bits/byte = 3.125 MB/s
+3. **Download Time:** 500 MB / 3.125 MB/s = 160 seconds
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{Model Size (Bytes)}}{\text{Network Speed (Bytes/s)}}$
+
+  > **Options:**
+  > [ ] ~20 seconds
+  > [ ] ~320 seconds
+  > [x] ~160 seconds
+  > [ ] ~640 seconds
+
+  📖 **Deep Dive:** [Edge AI: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Update Budget</b> · <code>ota-update-bandwidth</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer on an autonomous vehicle team. Your current perception model is 2.5 GB. You have a new, more accurate FP16 model that is 3.5 GB. The fleet connects via a standard LTE cellular connection, which provides a realistic average download speed of 25 Mbps (megabits per second). To manage data costs and ensure a good user experience, a full model update must complete in under 20 minutes while the vehicle is parked and charging. Explain if you can safely deploy the new 3.5 GB model. Calculate the best-case download time."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing bits and bytes. Network speeds are measured in megabits per second (Mbps), while file sizes on disk are measured in gigabytes (GB). Engineers often forget to multiply the file size in bytes by 8 to convert it to bits, leading to an 8x underestimate of the required download time and a failed deployment plan.
+
+  **Realistic Solution:** No, the update is too slow to fit safely within the 20-minute budget. The download alone would take approximately 18.7 minutes in ideal conditions, leaving almost no margin for network variability, download interruptions, or the time needed for on-device installation and verification. A production system requires a significant safety buffer (e.g., aiming for the process to take <50% of the allotted time). The correct engineering decision would be to reject this model for OTA deployment and work with the modeling team to quantize it or develop a delta patching strategy.
+
+  > **Napkin Math:** 1. **Convert File Size to bits**: Network bandwidth is in bits, so first convert the 3.5 GB model size to bits.
+   $3.5 \text{ GB} \times 8 \frac{\text{bits}}{\text{byte}} = 28 \text{ Gigabits (Gb)}$
+
+2. **Standardize Units**: The network speed is in Megabits per second (Mbps), so convert the file size to Megabits (Mb).
+   $28 \text{ Gb} \times 1000 \frac{\text{Mb}}{\text{Gb}} = 28,000 \text{ Mb}$
+
+3. **Calculate Time**: Divide the total data size by the network speed.
+   $\frac{28,000 \text{ Mb}}{25 \text{ Mbps}} = 1,120 \text{ seconds}$
+
+4. **Convert to Minutes**: Convert the total seconds into a more human-readable format.
+   $\frac{1,120 \text{ seconds}}{60 \frac{\text{s}}{\text{min}}} \approx 18.7 \text{ minutes}$
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{File Size (bits)}}{\text{Bandwidth (bits/s)}}$
+
+  > **Options:**
+  > [ ] ~2.3 minutes
+  > [ ] ~1.1 seconds
+  > [x] ~18.7 minutes
+  > [ ] ~149 minutes
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Fleet Update Dilemma</b> · <code>edge-ota-update</code></summary>
+
+- **Interviewer:** "You are an ML systems engineer for an autonomous vehicle company. A critical OTA (Over-the-Air) update for the main perception model is ready for deployment. The total update package size is 120 MB. The vehicles in the fleet are connected via a stable 4G cellular link with an average download speed of 80 Mbps (megabits per second). Ignoring any protocol overhead, calculate the time it will take for a single vehicle to download this update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing megabits per second (Mbps) with megabytes per second (MB/s). Network bandwidth is specified in bits, while file sizes are measured in bytes. Forgetting to divide the network speed by 8 results in an answer that is 8 times too fast.
+
+  **Realistic Solution:** First, convert the network speed from bits to bytes. Since there are 8 bits in a byte, a speed of 80 Mbps is equivalent to 10 MB/s. Then, divide the total file size by the download speed in the correct units. 120 MB divided by 10 MB/s equals 12 seconds.
+
+  > **Napkin Math:** 1. **Convert Bandwidth:** Network speed is given in bits, file size in bytes. You must normalize them.
+   `80 Mbps / 8 bits per byte = 10 MB/s`
+2. **Calculate Time:** Divide the total size by the download rate.
+   `120 MB / 10 MB/s = 12 seconds`
+
+  > **Key Equation:** $\text{Download Time (s)} = \frac{\text{File Size (Bytes)}}{\text{Bandwidth (bits/s)} / 8}$
+
+  > **Options:**
+  > [ ] 1.5 seconds
+  > [x] 12 seconds
+  > [ ] 15 seconds
+  > [ ] 120 seconds
+
+  📖 **Deep Dive:** [Edge: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Bandwidth Trap</b> · <code>ota-update-bandwidth</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer for an automotive company managing a fleet of vehicles. You need to push a critical over-the-air (OTA) update to fix a flaw in the pedestrian detection model. The binary patch for the model is **12 MegaBytes (MB)**. The vehicle's cellular modem has a stable connection averaging **10 Megabits per second (Mbps)**.
+
+Calculate the minimum time required for a single vehicle to download this patch. Ignore protocol overhead for this calculation."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing MegaBytes (MB) and Megabits (Mb). Network speeds are almost always measured in bits per second, while file sizes are measured in bytes. Forgetting to multiply the file size in bytes by 8 to get its size in bits leads to underestimating the download time by a factor of 8.
+
+  **Realistic Solution:** To solve this, you must first align the units. The data size is in MegaBytes (MB) and the bandwidth is in Megabits per second (Mbps). Since 1 Byte = 8 bits, you convert the patch size to bits and then divide by the bandwidth.
+
+The correct calculation is converting the 12 MB patch to Megabits, which is 12 MB × 8 = 96 Mb. Then, you divide by the 10 Mbps connection speed: 96 Mb / 10 Mbps = 9.6 seconds.
+
+  > **Napkin Math:** 1. **Convert Data Size to bits:** The patch is 12 MegaBytes (MB).
+   - 12 MB * 8 bits/Byte = 96 Megabits (Mb)
+2. **Identify Bandwidth:** The connection is 10 Megabits per second (Mbps).
+3. **Calculate Time:** Time = Total Data / Bandwidth
+   - Time = 96 Mb / 10 Mbps = **9.6 seconds**
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{Data Size (Bytes)} \times 8}{\text{Bandwidth (bits/s)}}$
+
+  > **Options:**
+  > [ ] 1.2 seconds
+  > [x] 9.6 seconds
+  > [ ] 12.0 seconds
+  > [ ] 96.0 seconds
+
+  📖 **Deep Dive:** [Edge: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Emergency OTA Rollout</b> · <code>ota-update-bandwidth</code></summary>
+
+- **Interviewer:** "You are an ML systems engineer for an autonomous vehicle company. A critical bug has been discovered in the perception model that requires an immediate Over-the-Air (OTA) update for the entire fleet. The compressed update package for the new model is 512 MB.
+
+Your vehicles maintain a stable cellular connection with a sustained download speed of 100 Megabits per second (Mbps).
+
+**Interviewer:** Ignoring protocol overhead and any delays from orchestration, calculate the minimum time required to download this update to a single vehicle. Explain your reasoning."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing Megabits (Mb) with MegaBytes (MB). Network bandwidth is almost always specified in bits per second (e.g., Mbps), while file sizes are given in bytes (e.g., MB). Forgetting to convert units leads to an 8x error in the final calculation, drastically underestimating the required time.
+
+  **Realistic Solution:** The correct approach is to harmonize the units before performing the division. Since there are 8 bits in a byte, we must convert the file size from MegaBytes to Megabits to match the bandwidth unit.
+
+1.  **Convert File Size to bits:** 512 MB * 8 bits/byte = 4096 Megabits (Mb).
+2.  **Calculate Download Time:** Divide the total data in bits by the download speed in bits per second.
+    Time = 4096 Mb / 100 Mbps = 40.96 seconds.
+
+Therefore, the minimum time to download the update is just under 41 seconds.
+
+  > **Napkin Math:** 1. **File Size:** 512 MB
+2. **Bandwidth:** 100 Mbps
+3. **Unit Conversion:** The units don't match (Bytes vs. bits). Convert size to bits:
+   `512 MB * 8 bits/byte = 4096 Mb`
+4. **Calculate Time:**
+   `Time = Total Data / Rate`
+   `Time = 4096 Mb / 100 Mbps = 40.96 seconds`
+5. **Sanity Check:** The answer is approximately 40 seconds.
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{File Size (MB)} \times 8}{\text{Bandwidth (Mbps)}}$
+
+  > **Options:**
+  > [ ] 5.1 seconds
+  > [x] 41.0 seconds
+  > [ ] 328 seconds
+  > [ ] 0.6 seconds
+
+  📖 **Deep Dive:** [Deployed Edge Systems](https://mlsysbook.ai/vol2/edge/deployed_system)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The OTA Update Tax</b> · <code>fleet-economics-tco</code></summary>
+
+- **Interviewer:** "An automotive company spends $2M on R&D for a new driver-assist model. They plan to deploy it to a fleet of 100,000 vehicles. The model is 200MB and will be updated over-the-air (OTA) quarterly over a 5-year vehicle lifespan. The cellular data cost is $5/GB. For the entire fleet over its lifetime, identify the relationship between the one-time R&D cost and the total recurring data transmission cost."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus heavily on the upfront non-recurring engineering (NRE) cost of model R&D, assuming it's the dominant expense. They underestimate how small, recurring operational expenses (OpEx), like data transmission for OTA updates, can accumulate to a massive scale across a large fleet's lifetime, potentially matching or exceeding the initial development investment.
+
+  **Realistic Solution:** The costs are surprisingly similar, demonstrating a critical TCO principle in large-scale edge deployments. The one-time R&D is a sunk cost of $2M. The lifetime data cost for the entire fleet also accumulates to $2M, meaning the operational cost of simply *delivering* the updates is as significant as the cost of creating the model in the first place. At scale, logistics often rival innovation in cost.
+
+  > **Napkin Math:** 1. **Calculate total updates per vehicle:**
+   - 4 updates/year × 5 years = 20 updates
+
+2. **Calculate total data transmitted per vehicle:**
+   - 20 updates × 200 MB/update = 4,000 MB = 4 GB
+
+3. **Calculate total data for the entire fleet:**
+   - 4 GB/vehicle × 100,000 vehicles = 400,000 GB
+
+4. **Calculate total data transmission cost:**
+   - 400,000 GB × $5/GB = $2,000,000
+
+5. **Compare costs:**
+   - R&D Cost ($2,000,000) is approximately equal to the Total Data Cost ($2,000,000).
+
+  > **Key Equation:** $\text{TCO} = \text{NRE} + \sum (\text{Recurring Costs})$
+
+  > **Options:**
+  > [ ] The R&D cost is significantly larger (>10x) than the data cost.
+  > [ ] The data cost is significantly larger (>10x) than the R&D cost.
+  > [x] The R&D cost and the total data cost are roughly equal.
+  > [ ] The costs are negligible compared to on-device inference power consumption.
+
+  📖 **Deep Dive:** [Deployed Edge Systems](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The 5 Terabyte Patch</b> · <code>ota-fleet-update</code></summary>
+
+- **Interviewer:** "You are an ML systems engineer for an autonomous taxi company with a fleet of 10,000 vehicles. A critical bug is discovered in the perception model, and you need to deploy a patch. The update is delivered as a 500 MB container image. Calculate the total data that needs to be transferred across the entire fleet for this single OTA update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to miscalculate the units or underestimate the scale. Engineers often think in terms of megabytes or gigabytes for a single device, but they fail to multiply by the fleet size and convert to the correct order of magnitude (terabytes). Another frequent error is confusing bytes and bits (a 1-byte vs 1-bit difference), which leads to an 8x miscalculation when cellular data plans are measured in bits.
+
+  **Realistic Solution:** The solution requires multiplying the size of the update by the number of vehicles in the fleet and then converting the units correctly. At 10,000 vehicles, the total data transfer is substantial, highlighting the significant operational costs and infrastructure requirements for managing a large-scale edge deployment. This is a foundational calculation for any fleet management strategy.
+
+  > **Napkin Math:** 10,000 vehicles × 500 MB/vehicle = 5,000,000 MB
+5,000,000 MB / 1,000 (MB/GB) = 5,000 GB
+5,000 GB / 1,000 (GB/TB) = 5 TB
+This single, routine patch consumes 5 terabytes of cellular data, which has major cost implications.
+
+  > **Key Equation:** $\text{Total Data} = \text{Fleet Size} \times \text{Update Size}$
+
+  > **Options:**
+  > [ ] 500 MB
+  > [ ] 5 GB
+  > [x] 5 TB
+  > [ ] 40 Tb
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Overnight OTA Update</b> · <code>ota-update-bandwidth</code></summary>
+
+- **Interviewer:** "You're an engineer on an autonomous vehicle team. A critical perception model update needs to be pushed to the fleet overnight. The full container image for the update is 800 MB. For safety, the update only occurs when the vehicle is parked in a garage with a stable cellular connection of at least 40 Mbps. Calculate the minimum time required for a vehicle to download this update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing Megabits (Mb) and MegaBytes (MB). Network bandwidth is specified in bits per second (Mbps), while file sizes are given in Bytes (MB). Engineers often forget the 8x conversion factor and divide the file size directly by the network speed, resulting in a wildly optimistic download time that is 8 times too small.
+
+  **Realistic Solution:** The correct approach requires standardizing the units. Since network bandwidth is in Megabits per second (Mbps), you must first convert the 800 MegaByte (MB) update size into Megabits (Mb). After that, it's a simple division to find the total time in seconds.
+
+  > **Napkin Math:** 1. Convert update size to Megabits: 800 MB * 8 bits/byte = 6400 Mb
+2. Calculate download time: 6400 Mb / 40 Mbps = 160 seconds
+3. Convert for intuition: 160 seconds is 2 minutes and 40 seconds, a reasonable time for a background download.
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{File Size (MB)} \times 8}{\text{Bandwidth (Mbps)}}$
+
+  > **Options:**
+  > [ ] 20 seconds
+  > [ ] 2.5 seconds
+  > [x] 160 seconds
+  > [ ] 1280 seconds
+
+  📖 **Deep Dive:** [Edge: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Downtime Tax</b> · <code>ota-update-storage-bottleneck</code></summary>
+
+- **Interviewer:** "You are an engineer on an autonomous vehicle team responsible for deploying model updates. Your fleet uses compute modules with UFS 4.0 flash storage. A critical OTA update is pending, which includes a 4 GB perception model and a 32 GB high-definition map file for the RAG system. During the final installation phase, the vehicle must be non-operational as these files are written to the primary flash partition. Calculate the approximate *minimum* downtime required for the vehicle to complete this file write operation."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Using the advertised 'read' speed for a 'write' operation. Flash storage, including UFS 4.0, has asymmetric performance; write speeds are almost always significantly lower than read speeds. A candidate might also forget to sum all components of the update payload, calculating the time for only the model or the map data.
+
+  **Realistic Solution:** The correct approach is to first sum the total data payload, then divide by a realistic write speed. The total size is 4 GB (model) + 32 GB (map data) = 36 GB. The `NUMBERS.md` table lists UFS 4.0 'Read' speed at ~4.2 GB/s. A reasonable engineering assumption for high-performance flash is that write speed is about 50% of read speed. Therefore, we estimate the write speed to be ~2.1 GB/s. The total downtime is the total size divided by this estimated write speed.
+
+  > **Napkin Math:** 1. **Total Update Size**: 4 GB (model) + 32 GB (map data) = 36 GB
+2. **Find Storage Speed**: From the spec sheet, UFS 4.0 *Read* Speed is ~4.2 GB/s.
+3. **Estimate Write Speed**: Assume Write Speed ≈ 50% of Read Speed → 0.5 * 4.2 GB/s = 2.1 GB/s.
+4. **Calculate Downtime**: Downtime = Total Size / Write Speed = 36 GB / 2.1 GB/s ≈ 17.1 seconds.
+
+  > **Key Equation:** $\text{Downtime} = \frac{\text{Total Update Size}}{\text{Storage Write Speed}}$
+
+  > **Options:**
+  > [ ] ~8.6 seconds
+  > [x] ~17.1 seconds
+  > [ ] ~1.9 seconds
+  > [ ] ~7.6 seconds
+
+  📖 **Deep Dive:** [Edge: Deployed Systems](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Bandwidth Budget</b> · <code>edge-ota-orchestration</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer for an autonomous vehicle company rolling out an updated perception model. The complete OTA update package, containerized for reliable deployment, is 400 MB. Your fleet of vehicles has a stable cellular connection that provides 80 Mbps (megabits per second) of download bandwidth. Explain how you would calculate the minimum time required for a single vehicle to download this update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to confuse megabits (Mb) and megabytes (MB). Network speeds are almost always advertised in bits per second, while file sizes are measured in bytes. Forgetting to convert the file size from megabytes to megabits by multiplying by 8 will result in an answer that is 8x too fast.
+
+  **Realistic Solution:** The correct way to solve this is to first make the units consistent. We must convert the package size from Megabytes (MB) to Megabits (Mb) to match the bandwidth unit.
+
+1. Convert Package Size to bits: 400 MB * 8 bits/byte = 3200 Mb.
+2. Divide by Bandwidth: 3200 Mb / 80 Mbps = 40 seconds.
+
+This calculation shows that under ideal conditions, the update would take 40 seconds to download. In a real-world rollout, you would also need to account for network variability, fleet-wide scheduling to avoid network congestion, and device power states.
+
+  > **Napkin Math:** Package Size in Megabits = 400 MB * 8 bits/byte = 3200 Mb
+Download Time = Total Size / Bandwidth = 3200 Mb / 80 Mbps = 40 seconds
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{File Size (MB)} \times 8}{\text{Bandwidth (Mbps)}}$
+
+  > **Options:**
+  > [ ] 5 seconds
+  > [ ] 50 seconds
+  > [x] 40 seconds
+  > [ ] 3200 seconds
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/vol2/edge/deployed-system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Fleet Update Data Bill</b> · <code>edge-ota-rollout</code></summary>
+
+- **Interviewer:** "You're an ML Systems Engineer at an autonomous vehicle company. A critical safety patch requires you to push a new 150 MB model container to the entire fleet of 10,000 vehicles over their cellular connections. Explain how you would calculate the total data bandwidth required for this Over-the-Air (OTA) rollout and what the final number is."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often miscalculate by an order of magnitude or confuse bits and bytes. A common error is misplacing a decimal in the fleet size (e.g., calculating for 1,000 cars instead of 10,000) or confusing Megabytes (MB) with Megabits (Mb), which differ by a factor of 8. This leads to drastic under- or over-estimation of data costs and network impact during the rollout.
+
+  **Realistic Solution:** The calculation is a direct multiplication of the update size by the number of devices in the fleet. This total data figure is a crucial input for budgeting cellular data costs with carriers and for designing a rollout strategy. For example, knowing the total data load might lead to a decision to perform a staged rollout (e.g., 10% of the fleet per day) to avoid network congestion and manage costs.
+
+  > **Napkin Math:** Total Data = Image Size per Vehicle × Number of Vehicles
+Total Data = 150 MB/vehicle × 10,000 vehicles
+Total Data = 1,500,000 MB
+
+To make this number easier to interpret, we convert it to larger units:
+1,500,000 MB / 1,000 MB/GB = 1,500 GB
+1,500 GB / 1,000 GB/TB = 1.5 Terabytes (TB)
+
+  > **Key Equation:** $\text{Total Data} = \text{Image Size} \times \text{Number of Devices}$
+
+  > **Options:**
+  > [ ] 150 GB
+  > [x] 1.5 TB
+  > [ ] 15 TB
+  > [ ] 12 TB
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Bandwidth Budget</b> · <code>edge-ota-bandwidth</code></summary>
+
+- **Interviewer:** "You're an engineer on an autonomous vehicle team. A critical patch is required for the perception model running on the vehicle's edge compute unit. The full model is packaged in a 550 MB container image. However, by leveraging container layering, the differential OTA (Over-the-Air) update is only 40 MB. Calculate the minimum time required to download this critical patch to a single vehicle assuming a stable 20 Mbps cellular connection."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse Megabits per second (Mbps) for network bandwidth with MegaBytes (MB) for file sizes. This leads to an 8x error, drastically underestimating the required download time. Another common pitfall is calculating the time for the full container, not the differential update.
+
+  **Realistic Solution:** The key is to harmonize the units before performing the division. Network speeds are universally measured in bits per second, while file sizes are measured in bytes. First, convert the network bandwidth from Mbps to MB/s by dividing by 8. Then, divide the size of the differential update by the bandwidth in MB/s to find the time in seconds.
+
+  > **Napkin Math:** 1. **Harmonize Units:** A 20 Mbps connection is `20 Megabits/sec / 8 bits/Byte = 2.5 MegaBytes/sec` (MB/s).
+2. **Calculate Time:** The update is 40 MB. So, `40 MB / 2.5 MB/s = 16 seconds`.
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{Update Size (MB)}}{\text{Bandwidth (Mbps)} / 8}$
+
+  > **Options:**
+  > [ ] 2 seconds
+  > [x] 16 seconds
+  > [ ] 220 seconds
+  > [ ] 27.5 seconds
+
+  📖 **Deep Dive:** [Deployed Systems](https://mlsysbook.ai/vol2/edge/deployment.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Automotive OTA Update</b> · <code>ota-update-rollout</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer on the autonomous vehicle team. A critical bug requires you to roll out a new perception model to the entire fleet. The full update package, including the model, dependencies, and container image, is 2 GB. For a single vehicle connected to a stable cellular network with an average download speed of 40 Mbps, explain how long the download portion of the update will take."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing bits with Bytes. Network speeds are almost always advertised in megabits per second (Mbps), while file sizes are measured in megabytes (MB) or gigabytes (GB). Engineers often forget to multiply the file size in Bytes by 8 to get the size in bits, leading to an answer that is 8x too fast.
+
+  **Realistic Solution:** The correct way to solve this is to first make the units consistent (convert the file size from gigabytes to megabits) and then divide by the network speed.
+
+1.  **Convert Gigabytes to Megabits:** A 2 GB file needs to be converted into bits. There are 1024 megabytes in a gigabyte and 8 bits in a byte.
+2.  **Calculate Total Time:** Divide the total number of bits by the network's bits-per-second speed.
+
+  > **Napkin Math:** 1. **File Size in Megabytes (MB):**
+   2 GB * 1024 MB/GB = 2,048 MB
+
+2. **File Size in Megabits (Mbits):**
+   2,048 MB * 8 bits/Byte = 16,384 Mbits
+
+3. **Network Speed:**
+   40 Mbps (megabits per second)
+
+4. **Download Time:**
+   Time = Total Size (Mbits) / Speed (Mbps)
+   Time = 16,384 / 40 = 409.6 seconds
+
+5. **Convert to Minutes:**
+   409.6 seconds / 60 seconds/minute ≈ 6.8 minutes
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{File Size (Bytes)} \times 8}{\text{Network Speed (bits per second)}}$
+
+  > **Options:**
+  > [ ] ~51 seconds
+  > [ ] ~16 seconds
+  > [x] ~6.8 minutes
+  > [ ] ~2.7 minutes
+
+  📖 **Deep Dive:** [Edge AI: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Flash Budget Crunch</b> · <code>edge-ota-storage</code></summary>
+
+- **Interviewer:** "You're scoping the storage for an automotive ECU running a driver-assist feature. The ECU has a 512 MB flash memory chip. The bootloader and real-time operating system (RTOS) consume 48 MB. For safety, the system architecture requires a dedicated 150 MB partition for the OTA (Over-the-Air) update agent to download and stage new packages before installation. The current application, including its vision model, uses 200 MB. A pending update contains a new, larger vision model that is 120 MB. Explain if the new model update can be safely deployed. Calculate the remaining free space."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to ignore the reserved OTA partition. Engineers calculate the free space by only subtracting the OS and current application from the total (512 - 48 - 200 = 264 MB) and incorrectly conclude there is plenty of room. They forget that for a safe OTA update, the system needs a dedicated space to download the package, which is unavailable to the application, effectively reducing the usable flash.
+
+  **Realistic Solution:** No, the update cannot be safely deployed. We must account for all reserved space on the flash memory. The space available to the application is not the total flash size, but what remains after the OS and the critical OTA partition are reserved.
+
+  > **Napkin Math:** 1. **Total Storage:** 512 MB
+2. **Reserved System Space:** 48 MB (OS + Bootloader)
+3. **Reserved OTA Partition:** 150 MB
+4. **Current Application Size:** 200 MB
+5. **Total Committed Space:** 48 MB + 150 MB + 200 MB = 398 MB
+6. **Effective Free Space:** 512 MB (Total) - 398 MB (Committed) = 114 MB
+7. **New Model Size:** 120 MB
+8. **Conclusion:** The required 120 MB is greater than the available 114 MB. The update will fail.
+
+  > **Key Equation:** $\text{Effective Free Space} = \text{Total Flash} - (\text{System} + \text{Application} + \text{OTA Partition})$
+
+  > **Options:**
+  > [ ] Yes, it fits. The OS and app use 248 MB, leaving 264 MB of free space.
+  > [ ] Yes, it fits. The 120 MB model can be downloaded directly into the 150 MB OTA partition.
+  > [x] No, it does not fit. After reserving space for the OS and the OTA partition, only 114 MB of flash remains, which is less than the 120 MB required for the new model.
+  > [ ] Yes, it fits. After the OS (48 MB) and OTA partition (150 MB) are reserved, there is 314 MB of space for the application.
+
+  📖 **Deep Dive:** [Deployed Edge Systems](https://mlsysbook.ai/edge/deployed-systems)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Overnight OTA Update</b> · <code>ota-bandwidth-constraint</code></summary>
+
+- **Interviewer:** "You're an engineer on the autonomous driving team. A critical bug requires you to push an emergency OTA (Over-the-Air) update to a fleet of vehicles. The update package, containing a new perception model and system patches, is 300 MB. The vehicles connect via a cellular link with an average download speed of 10 Mbps. Explain how you would calculate the minimum time required to download this update to a single vehicle."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing megabits per second (Mbps) with megabytes per second (MB/s). Network speeds are measured in bits, while file sizes are measured in bytes. Forgetting the 8x conversion factor between bytes and bits is a classic, fundamental error that leads to drastically underestimating download times.
+
+  **Realistic Solution:** The correct approach is to make the units consistent before dividing. First, convert the payload size from MegaBytes (MB) to Megabits (Mb). Then, divide by the network bandwidth in Megabits per second (Mbps) to find the total time in seconds.
+
+  > **Napkin Math:** 1. **Convert Payload to Bits:** The payload is 300 MegaBytes (MB). Since 1 Byte = 8 bits, we convert the size to Megabits (Mb).
+   `300 MB * 8 bits/byte = 2400 Mb`
+2. **Calculate Download Time:** Divide the total data in bits by the network speed in bits per second.
+   `2400 Mb / 10 Mbps = 240 seconds`
+3. **Convert to Minutes:** Convert the total seconds into a more human-readable format.
+   `240 seconds / 60 seconds/minute = 4 minutes`
+
+  > **Key Equation:** $\text{Time} = \frac{\text{Payload Size (bits)}}{\text{Bandwidth (bits/sec)}}$
+
+  > **Options:**
+  > [ ] 30 seconds
+  > [x] 4 minutes
+  > [ ] 3.3 minutes
+  > [ ] 40 minutes
+
+  📖 **Deep Dive:** [Edge AI: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Bandwidth Trap</b> · <code>ota-update-bandwidth</code></summary>
+
+- **Interviewer:** "You're an engineer on the autonomous vehicle (AV) team responsible for fleet updates. A new perception model, packaged as an 8 Gigabyte (GB) container, needs to be deployed via an Over-the-Air (OTA) update. The vehicles in the fleet have a stable cellular connection with a real-world sustained download speed of 100 Megabits per second (Mbps). Explain roughly how long it will take for a single vehicle to download this update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing Megabits (Mb) with MegaBytes (MB). Network speeds are almost always advertised in bits per second, while file sizes are measured in bytes. Forgetting to multiply the file size in bytes by 8 to convert it to bits will result in an answer that is 8 times too small.
+
+  **Realistic Solution:** The correct approach is to make the units consistent before dividing. The file size must be converted from Gigabytes to Megabits.
+
+1. **Convert Gigabytes to Megabits**: An 8 GB file is equal to `8 GB * 8 bits/Byte = 64` Gigabits (Gb).
+2. **Convert Gigabits to Megabits**: 64 Gb is `64 Gb * 1000 Mb/Gb = 64,000` Megabits (Mb).
+3. **Calculate Download Time**: Divide the file size in Megabits by the bandwidth in Megabits per second: `64,000 Mb / 100 Mbps = 640 seconds`.
+4. **Convert to Minutes**: `640 seconds / 60 s/min ≈ 10.7 minutes`.
+
+This calculation shows that even with a decent connection, a large model update is a significant time event, which has implications for fleet rollout strategy (e.g., scheduling updates for overnight when the vehicle is idle and has Wi-Fi access).
+
+  > **Napkin Math:** File Size = 8 GB
+Bandwidth = 100 Mbps
+
+1. Convert file size to bits:
+   8 GB * 8 bits/Byte = 64 Gb
+
+2. Make units consistent:
+   64 Gb * 1000 Mb/Gb = 64,000 Mb
+
+3. Calculate time:
+   Time = 64,000 Mb / 100 Mbps = 640 seconds
+
+4. Convert to human-readable format:
+   640 s / 60 s/min ≈ 11 minutes
+
+  > **Key Equation:** $$\text{Time} = \frac{\text{File Size (bits)}}{\text{Bandwidth (bits/sec)}}$$
+
+  > **Options:**
+  > [ ] ~80 seconds (~1.3 minutes)
+  > [x] ~11 minutes (~640 seconds)
+  > [ ] ~1 minute
+  > [ ] ~1 hour
+
+  📖 **Deep Dive:** [Edge: Deployed System](https://mlsysbook.ai/edge/deployed-system)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Update Bottleneck</b> · <code>ota-update-bandwidth</code></summary>
+
+- **Interviewer:** "You are an engineer for a fleet of autonomous delivery robots. A critical safety update for the perception model needs to be rolled out. The full model package is 120 MB. The robots' cellular modem provides a sustained download speed equivalent to a standard 4-wire SPI bus. Calculate the minimum time it will take for a single robot to download this update over the air (OTA)."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is failing to convert between MegaBytes (MB) and Megabits (Mb). Since network bandwidth is measured in bits per second, the model size in bytes must be converted to bits (by multiplying by 8) before the division. Forgetting this step leads to an answer that is 8x too fast.
+
+  **Realistic Solution:** The correct approach is to align the units. First, convert the model package size from MegaBytes (MB) to Megabits (Mb). Then, divide the total number of bits by the network bandwidth in bits per second.
+
+1.  **Find the bandwidth:** From the constants, a standard SPI bus has a bandwidth of 10 Mbps.
+2.  **Convert model size to bits:** 120 MB * 8 bits/byte = 960 Mb.
+3.  **Calculate time:** Divide the total bits by the bandwidth: 960 Mb / 10 Mbps = 96 seconds.
+
+  > **Napkin Math:** Total Data = 120 MB
+Bandwidth (SPI) = 10 Mbps
+
+# Convert Data to bits
+Total Data (bits) = 120 MegaBytes * 8 bits/Byte = 960 Megabits (Mb)
+
+# Calculate Time
+Time = Total Data (bits) / Bandwidth (bits/sec)
+Time = 960 Mb / 10 Mbps = 96 seconds
+
+  > **Key Equation:** $\text{Time} = \frac{\text{Total Data Size (bits)}}{\text{Bandwidth (bits per second)}}$
+
+  > **Options:**
+  > [ ] 12 seconds
+  > [x] 96 seconds
+  > [ ] 2400 seconds (40 minutes)
+  > [ ] 9.6 seconds
+
+  📖 **Deep Dive:** [Deployed Systems](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The 'Overnight Update' Bandwidth Bill</b> · <code>ota-fleet-bandwidth</code></summary>
+
+- **Interviewer:** "You're an ML Systems Engineer at an autonomous vehicle company. A critical perception model update is ready for rollout. The compressed model package is 500 MB. You need to push this Over-The-Air (OTA) update overnight to a fleet of 10,000 active vehicles. Explain how you would calculate the total data payload your cloud servers must serve for this single update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus only on the single-device update size (e.g., 500 MB) and fail to multiply by the total number of devices in the fleet. This leads to a 10,000x underestimation of the required bandwidth, infrastructure, and data egress costs for the rollout. They might also make unit conversion errors between MB, GB, and TB.
+
+  **Realistic Solution:** The total data payload is the size of the update package multiplied by the number of vehicles in the fleet. This calculation is the first step in capacity planning for the cloud storage and Content Delivery Network (CDN) that will serve the update. A 5 TB payload is a significant amount of data to serve in a short time window (e.g., 8 hours overnight), and correctly scoping this highlights that fleet operations are a major systems and cost challenge.
+
+  > **Napkin Math:** Update Size per Vehicle: 500 MB
+Fleet Size: 10,000 vehicles
+
+Total Data (in MB) = 500 MB/vehicle × 10,000 vehicles = 5,000,000 MB
+
+Convert to GB: 5,000,000 MB / 1,000 (MB/GB) = 5,000 GB
+
+Convert to TB: 5,000 GB / 1,000 (GB/TB) = 5 TB
+
+  > **Key Equation:** $\text{Total Payload} = \text{Update Size} \times \text{Fleet Size}$
+
+  > **Options:**
+  > [ ] 500 Megabytes (MB)
+  > [ ] 5 Gigabytes (GB)
+  > [x] 5 Terabytes (TB)
+  > [ ] 0.05 Megabytes (MB)
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Midnight Update</b> · <code>ota-update-fleet</code></summary>
+
+- **Interviewer:** "You are a systems engineer for an autonomous trucking company. A critical update to the perception model is required for your entire fleet. The full Over-the-Air (OTA) update package, which includes the new model, container dependencies, and updated calibration data, is 2 GB. The trucks in your fleet, when parked at a depot, have a stable cellular connection that reliably averages 50 Mbps (megabits per second).
+
+Explain how you would calculate the time required for a single truck to download this update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing Megabits per second (Mbps) with Megabytes per second (MB/s). Network bandwidth is almost always advertised in bits, while file sizes are measured in bytes. Forgetting to apply the 8x conversion factor (1 Byte = 8 bits) leads to underestimating the download time by a factor of 8.
+
+  **Realistic Solution:** The correct way to solve this is to make the units consistent. We must convert the file size from Gigabytes (GB) to Megabits (Mb) to match the network speed unit.
+
+1.  **Convert Gigabytes to Megabytes:** The file is 2 GB. There are 1,000 MB in a GB, so the size is `2,000 MB`.
+2.  **Convert Megabytes to Megabits:** Each Byte is 8 bits. So, we multiply the size in MB by 8: `2,000 MB * 8 bits/byte = 16,000 Mb`.
+3.  **Calculate Download Time:** Now we can divide the total size in Megabits by the network speed in Megabits per second: `16,000 Mb / 50 Mbps = 320 seconds`.
+4.  **Convert to Minutes:** To make the number easier to interpret, we convert seconds to minutes: `320 seconds / 60 seconds/minute ≈ 5.33 minutes`.
+
+This calculation shows the baseline time, which is critical for planning fleet-wide rollout schedules and understanding network load at depots.
+
+  > **Napkin Math:** $\text{File Size (GB)} \times \frac{1000 \text{ MB}}{1 \text{ GB}} \times \frac{8 \text{ bits}}{1 \text{ Byte}} = \text{File Size (Mb)}$
+
+$2 \text{ GB} \times 1000 \times 8 = 16,000 \text{ Mb}$
+
+$\frac{\text{File Size (Mb)}}{\text{Bandwidth (Mbps)}} = \text{Time (s)}$
+
+$\frac{16,000 \text{ Mb}}{50 \text{ Mbps}} = 320 \text{ seconds} \approx 5.3 \text{ minutes}$
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{File Size (Bytes)} \times 8}{\text{Bandwidth (bits/s)}}$
+
+  > **Options:**
+  > [ ] ~40 seconds
+  > [ ] ~5.3 hours
+  > [x] ~5.3 minutes
+  > [ ] ~5 seconds
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Fleet Update Bandwidth Bill</b> · <code>ota-bandwidth-planning</code></summary>
+
+- **Interviewer:** "You are an engineer on the autonomous vehicle team. A critical perception model update is ready for deployment. The containerized update package is 750 MB. Your fleet consists of 10,000 vehicles that will download this update over a cellular network. Calculate the total data volume required for the full fleet rollout and explain the primary challenge this presents."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on the size of a single package (750 MB) and vastly underestimate the multiplicative effect of the fleet size. This leads them to ignore the massive data transfer costs and network infrastructure strain associated with large-scale OTA updates.
+
+  **Realistic Solution:** The total data volume is the package size multiplied by the number of vehicles in the fleet. This simple calculation reveals that even a moderately sized update becomes a multi-terabyte operation at scale, making data transfer costs and network logistics the primary challenge, not the single-device download time.
+
+  > **Napkin Math:** 1. **Total Data Volume** = `Package Size` × `Fleet Size`
+2. **Calculation** = 750 MB/vehicle × 10,000 vehicles
+3. **Result in MB** = 7,500,000 MB
+4. **Convert to GB** = 7,500,000 MB / 1,000 (MB/GB) = 7,500 GB
+5. **Convert to TB** = 7,500 GB / 1,000 (GB/TB) = 7.5 TB
+
+The total data transfer required is 7.5 Terabytes.
+
+  > **Key Equation:** $\text{Total Data Volume} = \text{Package Size} \times \text{Number of Devices}$
+
+  > **Options:**
+  > [ ] 7.5 GB. The challenge is ensuring each car has a stable connection.
+  > [ ] 750 GB. The challenge is scheduling the downloads to avoid network congestion.
+  > [x] 7.5 TB. The primary challenge is the immense data transfer cost and logistics over cellular networks.
+  > [ ] 75 TB. The challenge is having enough storage on the central server.
+
+  📖 **Deep Dive:** [Deployed Edge Systems](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

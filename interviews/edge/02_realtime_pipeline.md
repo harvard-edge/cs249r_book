@@ -244,6 +244,60 @@ The on-chip memory system is over 80 times faster than the camera input interfac
   </details>
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Camera Bandwidth Bottleneck</b> · <code>sensor-pipeline-bottleneck</code></summary>
+
+- **Interviewer:** "You're designing the sensor suite for a new autonomous vehicle. The perception team wants to use multiple high-resolution cameras. Before analyzing the compute requirements for the perception models, you need to validate the data ingress pathway from the physical sensors to the SoC. What is the approximate maximum data transfer rate of a standard 4-lane MIPI CSI-2 camera interface, the most common interconnect for automotive cameras?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the camera sensor's dedicated I/O bandwidth with the system's main DRAM bandwidth. They might see '204.8 GB/s' on the Jetson AGX Orin's spec sheet and assume there are no data input bottlenecks, ignoring the much slower peripheral interfaces like MIPI which actually connect to the camera sensor.
+
+  **Realistic Solution:** A standard 4-lane MIPI CSI-2 interface has a maximum data rate of approximately 2.5 GB/s. This is a fundamental physical constraint that dictates the total volume of raw pixel data that can be ingested by the SoC per second, regardless of how powerful the downstream processor is. Exceeding this limit means frames will be dropped before they can ever be processed.
+
+  > **Napkin Math:** Let's check if a suite of 8 cameras would saturate this link. A 4K camera (3840x2160) using a 12-bit RAW format (1.5 bytes/pixel) at 30 FPS requires:
+`3840 pixels * 2160 pixels * 1.5 bytes/pixel ≈ 12.4 MB/frame`
+`12.4 MB/frame * 30 FPS ≈ 373 MB/s`
+For a suite of 8 cameras, the total required bandwidth is `8 * 373 MB/s = 2,984 MB/s ≈ 2.98 GB/s`.
+This total (`~3.0 GB/s`) exceeds the MIPI interface's physical limit of ~2.5 GB/s, creating a data bottleneck before any processing even begins. This forces a design choice: use fewer cameras, lower the resolution/framerate, or add another SoC.
+
+  > **Options:**
+  > [ ] ~200 GB/s
+  > [ ] ~32 GB/s
+  > [x] ~2.5 GB/s
+  > [ ] ~480 MB/s
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Sensor Bandwidth Bottleneck</b> · <code>sensor-pipeline-skew</code></summary>
+
+- **Interviewer:** "An autonomous vehicle perception team is debugging training-serving skew. Their training data consists of pristine, uncompressed 4K images. In the vehicle, the model gets its input directly from a high-resolution camera connected via a standard 4-lane MIPI CSI-2 interface. To diagnose a potential data quality bottleneck, what is the approximate maximum data rate this camera interface can sustain?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the bandwidth of modern sensor interfaces or confuse them with other system buses. They might recall slower peripheral speeds (like USB or SPI, ~100s of MB/s) or faster system memory speeds (~100s of GB/s), failing to recognize that MIPI CSI-2 has its own distinct multi-GB/s sweet spot. This knowledge gap prevents them from correctly identifying the physical layer as a potential source of training-serving skew.
+
+  **Realistic Solution:** A standard 4-lane MIPI CSI-2 interface, common in automotive and edge applications, can sustain a data rate of approximately 2.5 GB/s. Knowing this physical limit is the first step in diagnosing data quality issues. If a high-resolution, high-framerate camera produces data exceeding this rate, the interface itself becomes a bottleneck, forcing either lossy compression or frame drops before the data even reaches system memory. This creates a fundamental difference between the 'perfect' training data and the 'real' serving data.
+
+  > **Napkin Math:** From the 'Edge Hardware Snapshot', the MIPI CSI-2 (4-lane) interconnect is rated for ~2.5 GB/s. A single uncompressed 4K RAW12 frame (3840x2160) is ~12.4 MB. At 60 FPS, this requires ~746 MB/s, which is well within the bus's capacity. However, a higher resolution 8K camera or a multi-camera setup could easily saturate this link, making it a critical number to know when diagnosing data quality degradation between training and serving.
+
+  > **Options:**
+  > [ ] ~25 MB/s
+  > [ ] ~250 MB/s
+  > [x] ~2.5 GB/s
+  > [ ] ~25 GB/s
+
+  📖 **Deep Dive:** [Edge Hardware Platform](https://mlsysbook.ai/edge/01_hardware_platform.html)
+  </details>
+</details>
+
+
+
 
 
 
@@ -437,6 +491,38 @@ The on-chip memory system is over 80 times faster than the camera input interfac
   📖 **Deep Dive:** [Edge: Real-Time Pipelines](https://mlsysbook.ai/edge/02_realtime_pipeline.html)
   </details>
 </details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The AV Perception Pipeline Stall</b> · <code>pipeline-parallelism</code></summary>
+
+- **Interviewer:** "You are an ML systems engineer on an autonomous vehicle team. Your perception system uses a single Jetson AGX Orin to process feeds from 6 identical 1080p cameras. The object detection model takes exactly 25ms to run on a single camera frame. Your end-to-end latency budget for processing all 6 camera frames is a hard real-time deadline of 100ms. However, you observe the total processing time is consistently around 150ms. `tegrastats` shows the GPU is active, but its utilization is saw-toothed, not pegged at 100%. Given this data, how would you diagnose and solve this pipeline stall?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often immediately blame the model's performance or the hardware's peak throughput (TOPS). They suggest optimizing the model (pruning/quantization) or upgrading the hardware, without first analyzing the execution *schedule*. They fail to see that the bottleneck is not the task duration, but the serial queuing of independent tasks.
+
+  **Realistic Solution:** The most likely cause is a serial execution bottleneck. The system is processing the 6 camera frames one after another, leading to a total time that is the sum of the individual parts. The solution is to implement pipeline parallelism. Since the processing for each camera is independent, you should use a mechanism like NVIDIA CUDA Streams to launch all 6 frame-processing tasks concurrently. This allows the GPU's streaming multiprocessors (SMs) to execute the tasks in parallel, bringing the total latency down to roughly the time of a single frame's processing plus a small overhead for launch and synchronization.
+
+  > **Napkin Math:** The diagnosis is based on simple latency arithmetic:
+
+1.  **Current (Serial) Latency:** 6 cameras × 25 ms/camera = 150 ms.
+2.  **Observed vs. Budget:** 150 ms > 100 ms deadline (a 50% miss).
+3.  **Potential (Parallel) Latency:** With pipeline parallelism, the total time is approximately the time of the longest stage, as the tasks overlap. Latency ≈ max(25ms, 25ms, ...) + overhead ≈ 25 ms.
+4.  **Conclusion:** A parallel approach would meet the 100ms budget with significant headroom, proving the bottleneck is the execution flow, not the model's speed or the hardware's capability.
+
+  > **Key Equation:** $\text{Latency}_{\text{serial}} = \sum_{i=1}^{N} T_i \quad \gg \quad \text{Latency}_{\text{parallel}} \approx \max(T_1, T_2, ..., T_N)$
+
+  > **Options:**
+  > [ ] The model is too slow. It must be quantized from FP16 to INT8 to reduce its runtime below 16ms per frame.
+  > [ ] The Jetson AGX Orin is memory bandwidth-bound. The 6 video streams are saturating the 204.8 GB/s LPDDR5 bus.
+  > [x] The system is executing the 6 camera streams serially. The tasks should be parallelized using CUDA streams to run concurrently.
+  > [ ] The Jetson AGX Orin lacks sufficient compute. 275 TOPS isn't enough for 6 cameras and must be upgraded.
+
+  📖 **Deep Dive:** [Real-Time Pipelines on the Edge](https://mlsysbook.ai/edge/02_realtime_pipeline.html)
+  </details>
+</details>
+
 
 
 

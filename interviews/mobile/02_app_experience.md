@@ -501,6 +501,38 @@ Result: The ANR condition is met. After 5 seconds of the UI thread being blocked
 
 </details>
 
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Stuttering AI Assistant</b> · <code>on-device-llm-jank</code></summary>
+
+- **Interviewer:** "You are a Mobile ML Engineer optimizing an on-device generative AI assistant. User reports are coming in: the assistant's first word appears almost instantly (good TTFT), but the rest of the sentence stutters out, and the app's animations become choppy during generation. You profile the device and find that TTFT is consistently under 200ms, but UI frame rates drop below 15 FPS during the token generation phase. Your current implementation uses a 3B parameter model running on the Apple A17 Pro's NPU in a simple synchronous loop. Given the hardware specs, diagnose the most likely cause of the UI jank."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often blame the model size or raw NPU performance. They might suggest aggressive quantization or pruning. While these can help, they miss the core architectural problem: the synchronous, high-priority computation is starving the real-time UI thread. The problem isn't just the *average* Time Per Output Token (TPOT), but the *scheduling* of the compute workload.
+
+  **Realistic Solution:** The root cause is a scheduling conflict between the blocking, single-threaded inference task and the high-priority, real-time UI thread. A single token generation pass is a 'chunky' operation that takes longer than the 16.7ms budget for a 60 FPS frame, causing jank. The excellent TTFT shows the prefill is fast, but the subsequent token-by-token decoding loop is the culprit. The correct solution is to decouple inference from the main thread. The generation loop should run on a background thread or queue (e.g., a `DispatchQueue` in Swift with a `.userInitiated` QoS). As each token is generated, it should be passed back to the main thread for UI updates. This allows the OS to schedule the UI rendering and inference work concurrently, preventing the UI from freezing while waiting for the next token.
+
+  > **Napkin Math:** The key is to determine if a single token generation can fit within a single UI frame budget.
+1. **UI Frame Budget:** A smooth 60 FPS UI requires each frame to be rendered in under `1000ms / 60fps = 16.7ms`.
+2. **Inference Workload (Memory Bound):** For an autoregressive model, every generated token requires reading the entire model's weights. A 3B parameter model (at INT8) requires reading `3 GB` of weights from memory for each token.
+3. **Hardware Bandwidth:** The Apple A17 Pro has a memory bandwidth of `51.2 GB/s`.
+4. **Time Per Output Token (TPOT):** The time to read the weights is `3 GB / 51.2 GB/s ≈ 0.0586s`, or **58.6ms**.
+5. **Conclusion:** Since the `58.6ms` token generation time is over 3.5 times the `16.7ms` frame budget (`58.6ms / 16.7ms ≈ 3.5`), the synchronous inference loop will cause approximately 3-4 dropped frames for *every single token generated*. This explains the severe UI stuttering.
+
+  > **Key Equation:** $$ t_{\text{token}} = \frac{\text{Model Size (Bytes)}}{\text{Memory BW (Bytes/s)}} > \frac{1000\text{ms}}{\text{Target FPS}} $$
+
+  > **Options:**
+  > [ ] The 3B model is too large. It needs to be quantized to INT4 to halve the memory footprint and get the TPOT under the frame budget.
+  > [x] The synchronous inference loop takes longer than the 16.7ms UI frame budget, blocking the main thread. Inference must be moved to a background queue.
+  > [ ] The initial prompt processing (prefill) is causing a cache flush, which slows down all subsequent token generation.
+  > [ ] The A17 Pro's 35 TOPS is insufficient for real-time generation, making it compute-bound. A future chip is needed.
+
+  📖 **Deep Dive:** [Mobile: App Experience](https://mlsysbook.ai/mobile/02_app_experience.html)
+  </details>
+</details>
+
+
 
 #### 🔵 L4
 <details>
