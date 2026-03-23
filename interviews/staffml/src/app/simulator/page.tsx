@@ -27,8 +27,9 @@ interface SimConfig {
 interface SimResult {
   // Memory
   modelMemoryGb: number;
-  memoryPerGpu: number;
+  memoryPerGpu: number; // total: params + optimizer + activations
   fitsInMemory: boolean;
+  tpCrossesNodes: boolean;
   // Compute
   flopsPerIter: number;
   computeTimeMs: number;
@@ -53,13 +54,20 @@ interface SimResult {
 
 function simulate(config: SimConfig): SimResult {
   const { model, hardware, numGpus, gpusPerNode, batchSize, seqLen, precision, mfu, tpDegree, ppDegree, intraConnect, interConnect } = config;
-  const dpDegree = numGpus / (tpDegree * ppDegree);
-  const numNodes = Math.ceil(numGpus / gpusPerNode);
 
-  // Memory
+  // Constraint validation
+  const dpDegree = Math.max(1, Math.floor(numGpus / (tpDegree * ppDegree)));
+  const numNodes = Math.ceil(numGpus / gpusPerNode);
+  const tpCrossesNodes = tpDegree > gpusPerNode;
+
+  // Memory: model params + optimizer states (14 bytes/param for mixed-precision Adam)
+  // + activation memory (approximate: 2 * layers * hidden^2 * batch * seq * bytes / TP)
   const modelMemoryGb = FORMULAS.model_memory_gb(model.params_b, precision);
-  const memoryPerGpu = modelMemoryGb / tpDegree; // tensor parallel shards
-  const fitsInMemory = memoryPerGpu < hardware.memory_gb * 0.7; // 70% usable
+  const optimizerMemoryGb = FORMULAS.model_memory_gb(model.params_b, 12); // 12 bytes for Adam states (fp32 master + momentum + variance)
+  const activationMemoryGb = (2 * model.layers * model.hidden_dim * model.hidden_dim * (batchSize / dpDegree) * precision) / (tpDegree * 1e9);
+  const totalMemoryPerGpu = (modelMemoryGb + optimizerMemoryGb) / (tpDegree * ppDegree) + activationMemoryGb;
+  const memoryPerGpu = totalMemoryPerGpu;
+  const fitsInMemory = memoryPerGpu < hardware.memory_gb * 0.8; // 80% usable
 
   // Compute (forward + backward = 3x forward)
   const tokensPerIter = batchSize * seqLen;
@@ -68,21 +76,29 @@ function simulate(config: SimConfig): SimResult {
 
   // Communication — AllReduce for data parallelism
   const gradientSizeGb = FORMULAS.model_memory_gb(model.params_b, precision) / tpDegree;
-  // Use inter-node bandwidth if multi-node, intra-node if single
-  const effectiveBandwidth = numNodes > 1 ? interConnect.bandwidth_gbs : intraConnect.bandwidth_gbs;
+  // Hierarchical AllReduce: bottleneck is inter-node link, but intra-node reduce
+  // shrinks the message by gpusPerNode before crossing the network
+  const effectiveBandwidth = numNodes > 1
+    ? interConnect.bandwidth_gbs * Math.min(gpusPerNode, tpDegree > 1 ? 1 : gpusPerNode)
+    : intraConnect.bandwidth_gbs;
+  // If TP crosses nodes, add TP communication overhead via inter-node link
+  const tpCommPenalty = tpCrossesNodes ? 1.5 : 1.0;
   const allreduceTimeMs = dpDegree > 1
-    ? FORMULAS.allreduce_time_ms(gradientSizeGb, effectiveBandwidth, dpDegree)
+    ? FORMULAS.allreduce_time_ms(gradientSizeGb, effectiveBandwidth, dpDegree) * tpCommPenalty
     : 0;
 
-  // Pipeline bubble
-  const numMicrobatches = Math.max(1, Math.floor(batchSize / (tpDegree * ppDegree)));
+  // Pipeline bubble — microbatches = global_batch / (DP * micro_batch_size)
+  // Approximate micro_batch_size as batch / (DP * PP) to fill pipeline
+  const microBatchSize = Math.max(1, Math.floor(batchSize / (dpDegree * ppDegree)));
+  const numMicrobatches = Math.max(1, Math.floor(batchSize / (dpDegree * microBatchSize)));
   const pipelineBubblePct = ppDegree > 1
     ? FORMULAS.pipeline_bubble_pct(ppDegree, numMicrobatches)
     : 0;
 
-  // Total iteration time
+  // Total iteration time (with partial compute-comm overlap: ~30% overlap for well-optimized systems)
+  const overlapFactor = 0.7; // 30% of AllReduce overlaps with backward compute
   const bubbleOverhead = computeTimeMs * (pipelineBubblePct / 100);
-  const iterTimeMs = computeTimeMs + allreduceTimeMs + bubbleOverhead;
+  const iterTimeMs = computeTimeMs + allreduceTimeMs * overlapFactor + bubbleOverhead;
   const commOverheadPct = iterTimeMs > 0 ? (allreduceTimeMs / iterTimeMs) * 100 : 0;
 
   // Throughput
@@ -105,7 +121,7 @@ function simulate(config: SimConfig): SimResult {
   const trainingTimeDays = totalFlops / (actualFlops * 86400);
 
   return {
-    modelMemoryGb, memoryPerGpu, fitsInMemory,
+    modelMemoryGb, memoryPerGpu, fitsInMemory, tpCrossesNodes,
     flopsPerIter, computeTimeMs,
     dpDegree, gradientSizeGb, allreduceTimeMs, commOverheadPct,
     pipelineBubblePct,
@@ -386,6 +402,21 @@ export default function SimulatorPage() {
             <div className="p-4 rounded-xl border border-border bg-surface/50">
               <h3 className="text-xs font-mono text-textTertiary uppercase mb-3">Diagnosis</h3>
               <div className="space-y-2 text-sm text-textSecondary">
+                {/* Constraint violations */}
+                {result.tpCrossesNodes && (
+                  <p className="flex items-start gap-2">
+                    <span className="text-accentRed font-bold shrink-0">!!</span>
+                    TP={config.tpDegree} exceeds GPUs/node={config.gpusPerNode}. Tensor parallelism across nodes
+                    requires inter-node AllReduce for every matmul — expect severe performance degradation. Keep TP within one node.
+                  </p>
+                )}
+                {config.numGpus % (config.tpDegree * config.ppDegree) !== 0 && (
+                  <p className="flex items-start gap-2">
+                    <span className="text-accentRed font-bold shrink-0">!!</span>
+                    Invalid config: {config.numGpus} GPUs is not divisible by TP={config.tpDegree} × PP={config.ppDegree} = {config.tpDegree * config.ppDegree}.
+                    DP degree would be fractional.
+                  </p>
+                )}
                 {result.commOverheadPct > 30 && (
                   <p className="flex items-start gap-2">
                     <span className="text-accentRed font-bold shrink-0">!</span>
