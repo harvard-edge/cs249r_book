@@ -1,0 +1,563 @@
+\documentclass[10pt,twocolumn]{article}
+
+% Line spacing
+\renewcommand{\baselinestretch}{1.05}
+\widowpenalty=10000
+\clubpenalty=10000
+\hyphenpenalty=300
+\tolerance=1000
+
+% Packages
+\usepackage[T1]{fontenc}
+\usepackage{mathpazo}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{listings}
+\PassOptionsToPackage{hyphens,spaces,obeyspaces}{url}
+\usepackage[round,authoryear]{natbib}
+\bibliographystyle{plainnat}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{subcaption}
+
+% Caption styling
+\usepackage{caption}
+\captionsetup{font=small, labelfont=bf, labelsep=period, justification=justified, singlelinecheck=false, skip=8pt}
+\captionsetup[table]{position=top}
+
+% Section spacing
+\titlespacing*{\section}{0pt}{0.8\baselineskip}{0.5\baselineskip}
+\titlespacing*{\subsection}{0pt}{0.6\baselineskip}{0.4\baselineskip}
+\titlespacing*{\subsubsection}{0pt}{0.5\baselineskip}{0.3\baselineskip}
+
+% Page geometry
+\usepackage[letterpaper, top=0.75in, bottom=1in, left=0.65in, right=0.65in]{geometry}
+
+% Colors
+\definecolor{harvardcrimson}{HTML}{A31F34}
+\definecolor{codegreen}{HTML}{2D7A2D}
+\definecolor{codegray}{HTML}{555555}
+\definecolor{lightgray}{HTML}{F5F5F5}
+
+% Hyperref setup
+\hypersetup{
+  colorlinks=true,
+  linkcolor=harvardcrimson,
+  citecolor=harvardcrimson,
+  urlcolor=harvardcrimson
+}
+
+% Code listing style
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{lightgray},
+  frame=single,
+  rulecolor=\color{codegray},
+  breaklines=true,
+  showstringspaces=false
+}
+
+% Custom commands
+\newcommand{\staffml}{\textsc{StaffML}}
+\newcommand{\numquestions}{3{,}180}
+\newcommand{\numtracks}{4}
+\newcommand{\numlevels}{6}
+\newcommand{\numareas}{13}
+\newcommand{\numchains}{97}
+
+% ============================================================================
+\begin{document}
+
+\title{
+  \textbf{StaffML: A Physics-Grounded Interview Question Bank\\
+  for Machine Learning Systems Engineers}\\[0.3em]
+  {\large Design Methodology, Taxonomy, and Quality Assurance}
+}
+
+\author{
+  Vijay Janapa Reddi\\
+  Harvard University\\
+  \texttt{vj@eecs.harvard.edu}
+}
+
+\date{Working Draft --- \today}
+
+\maketitle
+
+% ============================================================================
+\begin{abstract}
+We present \staffml{}, a curated bank of \numquestions{} interview questions for ML systems engineers spanning \numtracks{} deployment tracks (cloud, edge, mobile, TinyML), \numlevels{} mastery levels mapped to Bloom's revised taxonomy, and \numareas{} competency areas. Unlike existing interview preparation resources that focus on algorithmic coding, \staffml{} tests \emph{mechanical sympathy}---the ability to reason quantitatively about the physical constraints of ML infrastructure. Every question requires napkin math grounded in real hardware specifications.
+
+This document describes the methodology behind the question bank: how questions are generated (Automatic Item Generation with LLM-based multi-agent review), how the taxonomy is organized (SKOS-inspired concept hierarchy with embedding-based clustering), how quality is assured (multi-stage deduplication, multi-model math verification, schema validation), and how cognitive progression is verified (depth chains that test Bloom's level monotonicity within topics). The methodology is designed to be reproducible and scalable, following established practices from educational measurement, knowledge organization, and psychometric validation.
+\end{abstract}
+
+% ============================================================================
+\section{Introduction}
+\label{sec:intro}
+
+The role of the ML systems engineer has emerged as one of the most sought-after positions in the technology industry. Unlike ML researchers who design models or software engineers who write application code, ML systems engineers must reason about the \emph{physical constraints} of deploying machine learning at scale: memory bandwidth limits, thermal envelopes, network congestion, and the economics of accelerator fleets.
+
+Yet interview preparation resources for this role are remarkably thin. LeetCode \citep{leetcode2024} offers 2,800+ algorithmic coding problems but nothing on GPU memory hierarchies or KV-cache sizing. Chip Huyen's \emph{Designing Machine Learning Systems} \citep{huyen2022designing} provides excellent conceptual coverage but no interactive practice. Mock interview platforms like Interviewing.io focus on behavioral and coding rounds, not system design with napkin math.
+
+\staffml{} fills this gap with \numquestions{} questions that test \emph{mechanical sympathy}---the term originally coined by Martin Thompson for software that works with the hardware rather than against it. Every question has:
+
+\begin{itemize}[nosep]
+  \item A realistic interview \textbf{scenario} from industry practice
+  \item A \textbf{common mistake} that candidates typically make
+  \item A \textbf{realistic solution} with quantitative reasoning
+  \item \textbf{Napkin math} grounded in real hardware specifications
+  \item Classification by \textbf{track}, \textbf{mastery level}, and \textbf{competency area}
+\end{itemize}
+
+\staffml{} is the companion assessment tool for the \emph{Machine Learning Systems} textbook \citep{reddi2026mlsys}, developed alongside the Harvard CS249r course \citep{cs249r}. The textbook teaches quantitative reasoning about ML infrastructure---memory hierarchies, parallelism strategies, serving architectures---and \staffml{} provides interactive practice that reinforces that reasoning. Questions reference the same hardware constants, use the same ``constraints drive architecture'' philosophy, and map to the same deployment tracks (cloud, edge, mobile, TinyML) covered in the two-volume curriculum.
+
+This document is a living methodology reference. It describes not just what the question bank contains, but \emph{how} it was built, \emph{why} each design decision was made, and \emph{what literature} grounds each choice. We intend it to serve both as internal documentation and as a contribution to the educational assessment community.
+
+\begin{table}[t]
+\centering
+\small
+\caption{\staffml{} vault summary statistics.}
+\label{tab:summary}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Total questions & \numquestions{} \\
+Deployment tracks & \numtracks{} \\
+Mastery levels (Bloom's) & \numlevels{} \\
+Competency areas & \numareas{} \\
+Depth chains ($\geq 3$ levels) & \numchains{} \\
+Coverage cube cells filled & 100\% \\
+Napkin math coverage & 100\% \\
+Hardware constants engine & \texttt{mlsysim} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================================
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Technical Interview Preparation Platforms}
+
+The dominant paradigm for technical interview preparation is algorithmic problem-solving. LeetCode maintains approximately 2,869 validated problems \citep{leetcode2024} with community-driven difficulty calibration. Neetcode curates a subset of 150 problems organized by pattern \citep{neetcode2024}, while Grind 75 provides a dynamically ranked set based on frequency and coverage \citep{grind75}. These platforms excel at testing data structures and algorithms but do not address systems-level reasoning.
+
+For ML-specific preparation, Chip Huyen's textbook \citep{huyen2022designing} and the ML Systems Design course at Stanford provide conceptual frameworks but lack interactive, quantitative practice. Educative.io offers guided courses on system design but without the hardware-grounded napkin math that distinguishes systems engineering from software engineering.
+
+\subsection{ML Systems Research}
+
+The questions in \staffml{} are grounded in the systems research that defines modern ML infrastructure. Megatron-LM \citep{shoeybi2019megatron} established tensor parallelism as the dominant strategy for training large models across GPUs. GPipe \citep{huang2019gpipe} introduced pipeline parallelism for models exceeding single-device memory. ZeRO \citep{rajbhandari2020zero} eliminated memory redundancy in data-parallel training, enabling trillion-parameter models. On the inference side, FlashAttention \citep{dao2022flashattention} demonstrated IO-aware algorithm design for attention computation, and vLLM's PagedAttention \citep{kwon2023vllm} applied virtual memory paging to KV-cache management. These systems papers provide the quantitative foundations that \staffml{} questions test---candidates must reason about the same bandwidth, memory, and parallelism tradeoffs that motivated these designs.
+
+\subsection{Automatic Item Generation (AIG)}
+
+Automatic Item Generation uses cognitive models and templates to produce assessment items at scale \citep{gierl2013aig}. Recent work has demonstrated that LLM-generated items can achieve psychometric properties comparable to expert-authored items when paired with multi-agent review pipelines \citep{aig_llm_2024}. Evidence-Centered Design \citep{mislevy2003ecd} provides the theoretical framework: every item begins with a claim about what competency it measures, the evidence needed to evaluate that claim, and the task features that elicit that evidence.
+
+\staffml{} follows ECD by requiring every question to specify its target (track, level, competency area) before generation, ensuring coverage is intentional rather than emergent.
+
+\subsection{Knowledge Organization and Taxonomies}
+
+The Simple Knowledge Organization System (SKOS) \citep{skos2009} provides a standard vocabulary for expressing concept hierarchies with broader/narrower/related relationships. For educational content, Bloom's revised taxonomy \citep{anderson2001taxonomy} maps cognitive demand into six levels: Remember, Understand, Apply, Analyze, Evaluate, Create.
+
+Stack Overflow manages 60,000+ tags through synonym rings and hierarchical merging \citep{stackoverflow_tags}. Wikipedia's category system forms a directed acyclic graph (DAG) with 13 top-level categories \citep{wikipedia_categories}. TaxoGen \citep{shang2018taxogen} demonstrates that embedding-based clustering can construct topic taxonomies automatically from text corpora.
+
+\subsection{Psychometric Validation}
+
+Item Response Theory (IRT) \citep{lord1980irt} provides the gold standard for measuring item difficulty and discrimination. The Rasch model estimates a difficulty parameter $b$ (the ability level at which 50\% of test-takers answer correctly) that is invariant across populations---unlike Classical Test Theory's $p$-value, which depends on the specific cohort tested. IRT calibration requires approximately 30+ responses per item to stabilize \citep{hambleton1991irt}.
+
+For initial deployment, \staffml{} uses editorial difficulty assignment mapped to Bloom's levels, with IRT-ready fields in the schema for future empirical calibration.
+
+% ============================================================================
+\section{Taxonomy Design}
+\label{sec:taxonomy}
+
+The \staffml{} taxonomy organizes questions along three orthogonal dimensions: \textbf{deployment track}, \textbf{mastery level}, and \textbf{competency area}. This creates a 3D coverage cube that ensures breadth across all testable combinations.
+
+\subsection{Deployment Tracks}
+
+Four tracks correspond to distinct deployment regimes with fundamentally different physical constraints:
+
+\begin{table}[h]
+\centering
+\small
+\caption{Deployment tracks and their primary physical constraints.}
+\label{tab:tracks}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Track} & \textbf{Focus} & \textbf{Primary Constraint} & \textbf{Scale} \\
+\midrule
+Cloud & Datacenter & Memory BW / network & PFLOPS \\
+Edge & AV / robotics & Thermal / real-time & TOPS \\
+Mobile & On-device & Battery / shared resources & TOPS \\
+TinyML & MCU & SRAM / hard real-time & MFLOPS \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Each track defines a ``physics regime'' where different constraints dominate. A question about KV-cache sizing on an H100 (cloud) tests different reasoning than KV-cache sizing on a Cortex-M4 with 256\,KB SRAM (TinyML).
+
+\subsection{Mastery Levels and Bloom's Mapping}
+
+Six mastery levels map directly to Bloom's revised taxonomy \citep{anderson2001taxonomy} and industry engineering ladders:
+
+\begin{table}[h]
+\centering
+\small
+\caption{Mastery levels mapped to Bloom's taxonomy and industry ladders.}
+\label{tab:levels}
+\begin{tabular}{@{}lllll@{}}
+\toprule
+\textbf{Level} & \textbf{Bloom's} & \textbf{Scope} & \textbf{Industry} \\
+\midrule
+L1 & Remember & Own a task & Intern \\
+L2 & Understand & Own a task & Intern \\
+L3 & Apply & Own a task & New Grad \\
+L4 & Analyze & Own a component & Mid (L4) \\
+L5 & Evaluate & Own a system & Senior (L5) \\
+L6+ & Create & Own architecture & Staff+ (L6) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Each level tests a qualitatively different cognitive operation. L1 requires memorization of physical constants (``HBM3 bandwidth is 3.35\,TB/s''). L6+ requires deriving novel architectures from first principles (``Design a PagedAttention allocator that minimizes fragmentation under variable-length sequences'').
+
+\subsection{Competency Areas}
+
+Thirteen competency areas partition the ML systems knowledge space:
+
+\begin{table}[h]
+\centering
+\small
+\caption{Competency areas with question counts (as of \today).}
+\label{tab:areas}
+\begin{tabular}{@{}lr@{\hskip 1.5em}lr@{}}
+\toprule
+\textbf{Competency Area} & \textbf{Count} & \textbf{Competency Area} & \textbf{Count} \\
+\midrule
+Compute & 397 & Power & 250 \\
+Deployment & 360 & Networking & 171 \\
+Cross-cutting & 358 & Optimization & 133 \\
+Memory & 318 & Reliability & 121 \\
+Latency & 305 & Data & 119 \\
+Architecture & 289 & Parallelism & 96 \\
+Precision & 263 & & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Topic Normalization}
+
+The raw corpus contains 931 unique topic strings generated by the LLM pipeline. Many are compound variants of the same concept (e.g., \texttt{kv-cache}, \texttt{kv-cache-fragmentation}, \texttt{kv-cache-paging}). We collapse these to approximately 100 canonical concepts (\cref{fig:taxonomy-structure}) using:
+
+\begin{enumerate}[nosep]
+  \item \textbf{Text normalization}: Lowercase, strip hyphens, deduplicate trivial variants (931 $\to$ $\sim$600)
+  \item \textbf{Embedding-based clustering}: Sentence-BERT embeddings + agglomerative clustering with cosine distance. Cluster count validated by silhouette score $> 0.5$, following the TaxoGen approach \citep{shang2018taxogen} (600 $\to$ $\sim$100)
+  \item \textbf{SKOS-lite structure}: Each canonical concept has a preferred label, alternative labels (synonyms), broader/narrower/related links, and a competency area assignment, following W3C SKOS \citep{skos2009}
+\end{enumerate}
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.95\columnwidth}{\centering\vspace{2em}[Figure: taxonomy-structure.svg]\vspace{2em}}}
+\caption{SKOS-lite taxonomy structure. Raw topic strings (931 unique) are normalized through text deduplication and embedding-based clustering into approximately 100 canonical concepts, each with preferred labels, synonyms, and broader/narrower/related links.}
+\label{fig:taxonomy-structure}
+\end{figure}
+
+% ============================================================================
+\section{Item Generation Pipeline}
+\label{sec:generation}
+
+Questions are generated using an Automatic Item Generation (AIG) pipeline \citep{gierl2013aig} powered by large language models with multi-agent review. \Cref{fig:generation-pipeline} illustrates the end-to-end flow from gap analysis through corpus integration.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.95\columnwidth}{\centering\vspace{2em}[Figure: generation-pipeline.svg]\vspace{2em}}}
+\caption{The Automatic Item Generation pipeline. Gap analysis identifies underfilled cells in the 3D coverage cube. Prompts are constructed with hardware constants from \texttt{mlsysim}, Bloom's descriptors, and track constraints. LLM-generated candidates pass through schema validation, multi-stage deduplication, and multi-model math verification before corpus integration.}
+\label{fig:generation-pipeline}
+\end{figure}
+
+\subsection{Evidence-Centered Design}
+
+Following \citet{mislevy2003ecd}, every question begins with a specification of:
+
+\begin{itemize}[nosep]
+  \item \textbf{Claim}: What competency does this question measure? (track $\times$ level $\times$ area)
+  \item \textbf{Evidence}: What would a correct answer demonstrate? (Bloom's cognitive operation)
+  \item \textbf{Task features}: What scenario elicits this evidence? (hardware specs, failure mode, scale)
+\end{itemize}
+
+The generation prompt includes real hardware constants from the \texttt{mlsysim} physics engine (H100: 80\,GB HBM3, 3.35\,TB/s, 989\,TFLOPS FP16; Orin: 275\,TOPS INT8, 204.8\,GB/s; Cortex-M4: $\sim$100\,MFLOPS, 256\,KB SRAM), Bloom's level descriptors for the target cognitive demand, and track-specific constraints.
+
+\subsection{Generation and Validation Flow}
+
+\begin{enumerate}[nosep]
+  \item \textbf{Gap analysis}: Identify underfilled cells in the 3D coverage cube
+  \item \textbf{Prompt construction}: Template with target (track, level, area), hardware specs, Bloom's descriptor
+  \item \textbf{LLM generation}: Gemini Pro or Claude Opus produces candidate questions in structured JSON
+  \item \textbf{Schema validation}: Pydantic model enforces required fields, types, minimum lengths
+  \item \textbf{Multi-stage deduplication}: Exact $\to$ fuzzy $\to$ semantic (see \cref{sec:dedup})
+  \item \textbf{Math review}: Multi-model cross-verification (see \cref{sec:math-review})
+  \item \textbf{Tag normalization}: Map raw topic to canonical concept via NORMALIZE\_MAP
+  \item \textbf{Corpus integration}: Append to \texttt{corpus.json}, regenerate markdown
+\end{enumerate}
+
+% ============================================================================
+\section{Quality Assurance}
+\label{sec:qa}
+
+Quality assurance operates at multiple stages, as shown in \cref{fig:quality-pipeline}. Every question must pass schema validation, deduplication, and math verification before entering the corpus.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.95\columnwidth}{\centering\vspace{2em}[Figure: quality-pipeline.svg]\vspace{2em}}}
+\caption{Multi-stage quality assurance pipeline. Candidate questions pass through schema validation (Pydantic), three-stage deduplication (exact, fuzzy, semantic), and multi-model math verification (Gemini Flash broad review + Claude Opus deep review). Confirmed errors are corrected; duplicates are archived, never deleted.}
+\label{fig:quality-pipeline}
+\end{figure}
+
+\subsection{Schema Validation}
+
+Every question is validated against a strict Pydantic schema with both field-level and cross-question rules:
+
+\begin{itemize}[nosep]
+  \item \textbf{Field constraints}: minimum character lengths (scenario $\geq 50$, napkin\_math $\geq 10$ and must contain a digit), MCQ must have exactly 4 options with correct\_index in $[0,3]$
+  \item \textbf{Taxonomy constraints}: competency\_area $\in$ \{13 canonical areas\}, topic must normalize to a known tag
+  \item \textbf{Uniqueness constraints}: no duplicate IDs, no duplicate (track, title) pairs among published questions
+  \item \textbf{Linguistic checks}: no trailing quotes, no markdown formatting artifacts, no placeholder text
+\end{itemize}
+
+\subsection{Multi-Stage Deduplication}
+\label{sec:dedup}
+
+Following best practices from web-scale deduplication \citep{broder1997minhash} and educational assessment, we employ a three-stage pipeline:
+
+\begin{enumerate}[nosep]
+  \item \textbf{Exact match}: Lowercased, whitespace-stripped scenario comparison. Catches copy-paste duplicates.
+  \item \textbf{Fuzzy match}: \texttt{difflib.SequenceMatcher} $> 0.90$ within same (track, topic) groups. Catches minor rewordings.
+  \item \textbf{Semantic match}: Sentence-BERT cosine similarity $> 0.85$ via ChromaDB. Catches same-concept-different-words duplicates.
+\end{enumerate}
+
+Confirmed duplicates are \emph{archived} (status set to ``archived''), never deleted, preserving the audit trail---a practice adopted from Anki's large shared deck management \citep{anking2024}.
+
+\subsection{Multi-Model Math Verification}
+\label{sec:math-review}
+
+Napkin math is verified through multi-model cross-review:
+
+\begin{enumerate}[nosep]
+  \item \textbf{Round 1} (broad): Gemini Flash reviews all questions in 50-question chunks, checking arithmetic, hardware specs, unit consistency, and logical coherence. 63 parallel review jobs complete in $\sim$12 minutes.
+  \item \textbf{Round 2} (deep): Claude Opus reviews the same questions independently, catching subtle logical errors that Flash misses.
+  \item \textbf{Discrepancy analysis}: Errors found by one model but not the other are flagged for manual review. False positives are tracked to calibrate reviewer accuracy.
+\end{enumerate}
+
+In our initial deployment, Round 1 (Flash) found 58 candidate errors. Opus agents verified 48 as genuine errors and correctly rejected 10 as false positives (4.3\% raw error rate $\to$ 1.5\% confirmed error rate after correction).
+
+\subsection{Depth Chain Coherence}
+\label{sec:chains}
+
+Depth chains verify that questions on the same topic form a coherent cognitive progression through Bloom's levels. A chain is a sequence of 3--5 questions on the same canonical topic with strictly increasing cognitive demand:
+
+\begin{quote}
+\small
+L1: ``What is a KV-cache?'' (Remember) \\
+$\to$ L3: ``Calculate KV-cache size for Llama-70B'' (Apply) \\
+$\to$ L5: ``Server OOM'd at 128K context---diagnose'' (Evaluate) \\
+$\to$ L6+: ``Design a PagedAttention allocator'' (Create)
+\end{quote}
+
+A chain is \textbf{broken} if a higher-level question does not build on knowledge tested at lower levels. A topic has a \textbf{missing foundation} if L5/L6+ questions exist but no L1/L2 on-ramp. A topic has \textbf{missing depth} if L1/L2 exists but no L4+ extension.
+
+The corpus currently contains \numchains{} topic clusters spanning 3+ levels, with 1,327 questions (42\% of the corpus) participating in chainable clusters.
+
+% ============================================================================
+\section{Coverage Analysis}
+\label{sec:coverage}
+
+\subsection{3D Coverage Cube}
+
+The primary coverage metric is the 3D cube: track ($\numtracks{}$) $\times$ level ($\numlevels{}$) $\times$ competency area ($\numareas{}$). Following test blueprint methodology \citep{millman1989}, we target a minimum of 3 questions per cell to ensure reliability.
+
+Current state:
+\begin{itemize}[nosep]
+  \item \textbf{Empty cells}: 0 (every testable combination has at least one question)
+  \item \textbf{Underfilled} ($< 3$): 37 cells (need 56 additional questions)
+  \item \textbf{Healthy} ($\geq 3$): 258 cells
+\end{itemize}
+
+\subsection{Level Distribution}
+
+The target distribution follows a Bloom's pyramid---more foundation questions, fewer advanced:
+
+\begin{table}[h]
+\centering
+\small
+\caption{Level distribution across tracks (actual vs.\ target).}
+\label{tab:level-dist}
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& \textbf{L1} & \textbf{L2} & \textbf{L3} & \textbf{L4} & \textbf{L5} & \textbf{L6+} \\
+\midrule
+Cloud & 15\% & 20\% & 21\% & 17\% & 14\% & 13\% \\
+Edge & 18\% & 24\% & 20\% & 14\% & 13\% & 10\% \\
+Mobile & 14\% & 23\% & 29\% & 15\% & 11\% & 8\% \\
+TinyML & 19\% & 23\% & 23\% & 14\% & 12\% & 9\% \\
+\midrule
+\textit{Target} & \textit{17\%} & \textit{23\%} & \textit{23\%} & \textit{15\%} & \textit{12\%} & \textit{10\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All tracks are within 3 percentage points of the target across all levels.
+
+\subsection{Question Format Balance}
+
+Questions are classified by cognitive style to ensure variety within each cell:
+
+\begin{itemize}[nosep]
+  \item \textbf{Calculation} (36\%): ``Estimate tokens/sec for batch=1 on H100''
+  \item \textbf{Design} (28\%): ``Architect a KV-cache paging system''
+  \item \textbf{Conceptual} (27\%): ``Explain why this workload is memory-bound''
+  \item \textbf{Optimization} (18\%): ``Reduce TTFT from 500ms to 100ms''
+  \item \textbf{Diagnosis} (14\%): ``GPU util is 4\%---what went wrong?''
+  \item \textbf{Tradeoff} (6\%): ``Compare pipeline parallelism vs.\ tensor parallelism''
+\end{itemize}
+
+L1--L2 questions are predominantly calculation and conceptual (testing recall and understanding). L4--L6+ questions shift toward diagnosis, design, and tradeoff analysis (testing higher-order reasoning).
+
+% ============================================================================
+\section{Difficulty Calibration}
+\label{sec:difficulty}
+
+\subsection{Editorial Assignment}
+
+Each question receives an editorial difficulty level (L1--L6+) based on the target Bloom's cognitive operation and the scope of reasoning required. This assignment is made at generation time, informed by the prompt template.
+
+\subsection{IRT-Ready Schema}
+
+The question schema includes fields for future empirical calibration:
+
+\begin{itemize}[nosep]
+  \item \texttt{difficulty\_empirical}: IRT $b$-parameter (null until $\geq 30$ user responses)
+  \item \texttt{discrimination}: IRT $a$-parameter (how well the item separates high- and low-ability respondents)
+  \item \texttt{attempt\_count}: Total user attempts (for IRT sample size tracking)
+\end{itemize}
+
+Following \citet{lord1980irt}, we plan to calibrate these parameters once the StaffML platform collects sufficient user interaction data. Until then, editorial levels serve as the primary difficulty indicator.
+
+% ============================================================================
+\section{Tooling: \texttt{vault.py}}
+\label{sec:tooling}
+
+All vault operations are consolidated into a single CLI tool, \texttt{vault.py}, which enforces the methodology described above:
+
+\begin{table}[h]
+\centering
+\small
+\caption{vault.py commands and their methodological role.}
+\label{tab:vault-commands}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Command} & \textbf{Role} & \textbf{Method} \\
+\midrule
+\texttt{validate} & Schema enforcement & Pydantic (M7) \\
+\texttt{stats} & Coverage analysis & 3D cube (M8) \\
+\texttt{gaps} & Gap identification & Test blueprint \\
+\texttt{dedup} & Duplicate detection & 3-stage (M4) \\
+\texttt{search} & Semantic search & ChromaDB \\
+\texttt{chains} & Progression check & Bloom's (M6) \\
+\texttt{add} & Validated insertion & AIG pipeline \\
+\texttt{review} & Math verification & Multi-model (M5) \\
+\texttt{export} & Markdown generation & JSON $\to$ .md \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================================
+\section{Current Status and Future Work}
+\label{sec:status}
+
+As of \today, the \staffml{} vault contains \numquestions{} questions with 100\% coverage on all required fields (competency\_area, napkin\_math, common\_mistake, realistic\_solution). The 3D coverage cube has zero empty cells and 37 underfilled cells requiring 56 additional questions.
+
+\textbf{Immediate next steps}:
+\begin{enumerate}[nosep]
+  \item Complete taxonomy normalization (931 $\to$ $\sim$100 canonical concepts)
+  \item Build and deploy \texttt{vault.py} with all commands operational
+  \item Fill remaining 37 underfilled cells
+  \item Complete math review Round 2 with Claude Opus
+  \item Build and verify 50+ depth chains
+\end{enumerate}
+
+\textbf{Future work}:
+\begin{itemize}[nosep]
+  \item IRT calibration from user interaction data
+  \item Community contribution pipeline with automated validation
+  \item Adaptive question selection based on user performance
+  \item QTI export for LMS integration \citep{qti2020}
+\end{itemize}
+
+% ============================================================================
+% NOTES SECTION — Working notes, decisions, observations
+% Keep this section for active development. Remove before publication.
+% ============================================================================
+\section*{Working Notes}
+\label{sec:notes}
+
+\textit{This section contains in-progress notes, design decisions, and observations. It will be removed before publication.}
+
+\subsection*{Architecture Decision: JSON as Source of Truth}
+
+The vault uses \texttt{corpus.json} as the single source of truth, not markdown files or a SQLite database. This decision was driven by three factors: (1)~90\%+ of content is machine-generated, and JSON is the natural output format for LLM pipelines; (2)~parser bugs in the markdown-to-JSON path caused three major data corruption incidents during early development; (3)~the StaffML web application consumes JSON natively, eliminating a serialization layer. Markdown files (\texttt{*.md}) are generated views for GitHub browsing and human review---they are never edited directly.
+
+ChromaDB serves as a vector sidecar for semantic deduplication and search. It is gitignored and rebuilt from \texttt{corpus.json} on demand, adding no new dependencies beyond what the generation pipeline already requires.
+
+\subsection*{Session Log}
+
+\subsubsection*{2026-03-23: Session 1 --- Data Hygiene}
+
+\begin{itemize}[nosep]
+  \item Discovered 60\% of questions (1,936/3,192) had unmapped topics due to narrow NORMALIZE\_MAP (265 entries). Expanded to 1,098 entries $\to$ 100\% mapping.
+  \item Fixed 9 corrupted L6+ level strings (HTML badge markup in level field --- parser bug).
+  \item Fixed 2,578 trailing quote characters in scenario text.
+  \item Removed 12 exact-duplicate pairs (consecutive IDs from generation pipeline double-write).
+  \item Fixed build\_corpus.py parser: robust L6+ extraction, quote stripping, multi-line napkin math.
+\end{itemize}
+
+\subsubsection*{2026-03-23: Session 2 --- Math Review Round 1}
+
+\begin{itemize}[nosep]
+  \item Gemini Flash reviewed all 3,180 questions in 63 chunks (50 questions each), 8 parallel workers, $\sim$12 minutes wall time.
+  \item Found 58 candidate errors (4.3\% raw rate).
+  \item Opus agents verified: 48 genuine errors, 10 false positives rejected.
+  \item Key error types: KV-head count confusion (64 vs.\ 8 for GQA models), order-of-magnitude errors (1000$\times$ in FLOPs), hardware spec errors (A100 TDP 400W not 700W), unit errors (GB vs.\ TB).
+  \item Notable: Gemini Flash itself made a unit error in one review (flagged 11\,TB/yr as wrong when it was correct --- 10,000 $\times$ 3\,MB $\times$ 365 = 10.95\,TB).
+\end{itemize}
+
+\subsubsection*{2026-03-23: Session 3 --- Napkin Math Backfill}
+
+\begin{itemize}[nosep]
+  \item 86 questions had no napkin\_math field. All 86 backfilled by parallel Opus agents.
+  \item 32 were global/foundation L1--L2 questions (simple calculations added).
+  \item 54 were across all tracks (hardware-specific calculations).
+  \item Fixed parser to handle multi-line blockquote napkin math format.
+  \item Result: 100\% napkin\_math coverage (was 97.3\%).
+\end{itemize}
+
+\subsection*{Other Design Decisions}
+
+\begin{description}[nosep]
+  \item[Multi-model review] (not single model). Flash is fast but misses subtle errors; Opus is rigorous but expensive. Using both catches more issues than either alone. Discrepancy analysis between models is itself informative.
+  \item[Archive, never delete]. Duplicates may be useful later (e.g., as distractor variants in MCQ generation). Deletion loses audit trail. Adopted from Anki/LeetCode practice.
+  \item[Editorial difficulty + IRT-ready fields]. IRT requires 30+ user responses to calibrate. We launch with editorial Bloom's mapping and add empirical calibration as data accumulates.
+  \item[MCQ only at L1--L3]. Interview questions at L4+ should be open-ended (diagnose, design, derive). MCQ at those levels would reduce cognitive demand. L1--L2 at 99\% MCQ, L4+ at 0\% MCQ is intentional.
+\end{description}
+
+% ============================================================================
+\bibliography{references}
+
+\end{document}
