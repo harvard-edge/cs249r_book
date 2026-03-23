@@ -882,6 +882,20 @@ normalized = (batch_data - mean) / std
 ```
 
 **Performance Note**: Element-wise operations are highly optimized in NumPy and run efficiently on modern CPUs with vectorization (SIMD instructions).
+
+**⚠️ Broadcasting Pitfall**: Broadcasting is powerful but dangerous. When shapes are
+*accidentally* mismatched, NumPy silently broadcasts instead of raising an error:
+
+```
+predictions shape: (32, 4)   ← 32 samples, 4 outputs each
+targets shape:     (4,)      ← oops, forgot the batch dimension!
+
+NumPy broadcasts (4,) → (32, 4) by repeating the same row for all 32 samples.
+No error. No warning. Just wrong results.
+```
+
+This is the #1 source of silent bugs in ML code. Always verify shapes match
+before element-wise operations like loss computation.
 """
 
 
@@ -917,6 +931,18 @@ def test_unit_arithmetic_operations():
     result = matrix + vector
     expected = np.array([[11, 22], [13, 24]], dtype=np.float32)
     assert np.array_equal(result.data, expected)
+
+    # ⚠️ Broadcasting pitfall: verify shapes match before element-wise ops
+    # In ML, predictions (batch, features) minus targets (features,) broadcasts
+    # silently — the same target row repeats for every sample. Always check!
+    predictions = Tensor(np.ones((4, 3)))   # 4 samples, 3 features
+    targets_good = Tensor(np.zeros((4, 3)))  # correct: same shape
+    targets_bad = Tensor(np.zeros((3,)))     # dangerous: missing batch dim
+    assert predictions.shape == targets_good.shape, "Matching shapes — safe"
+    assert predictions.shape != targets_bad.shape, (
+        f"Shape mismatch: {predictions.shape} vs {targets_bad.shape}. "
+        f"NumPy broadcasts silently — this is almost always a bug in ML code."
+    )
 
     # Test subtraction (data centering)
     result = b - a
