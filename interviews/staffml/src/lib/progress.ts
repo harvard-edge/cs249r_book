@@ -296,6 +296,40 @@ export function getStreakMilestone(streak: number): string | null {
 
 // ─── Clear All ───────────────────────────────────
 
+// ─── Export / Import ─────────────────────────────
+
+export function exportProgress(): string {
+  const data = {
+    attempts: getStorage(STORAGE_KEY, []),
+    gauntlets: getStorage(GAUNTLET_KEY, []),
+    sr: getStorage(SR_KEY, {}),
+    streak: getStorage(STREAK_KEY, {}),
+    daily: getStorage('staffml_daily', {}),
+    planProgress: getStorage('staffml_plan_progress', {}),
+    exportedAt: new Date().toISOString(),
+    version: 1,
+  };
+  return JSON.stringify(data, null, 2);
+}
+
+export function importProgress(json: string): boolean {
+  try {
+    const data = JSON.parse(json);
+    if (!data.version) return false;
+    if (data.attempts) setStorage(STORAGE_KEY, data.attempts);
+    if (data.gauntlets) setStorage(GAUNTLET_KEY, data.gauntlets);
+    if (data.sr) setStorage(SR_KEY, data.sr);
+    if (data.streak) setStorage(STREAK_KEY, data.streak);
+    if (data.daily) setStorage('staffml_daily', data.daily);
+    if (data.planProgress) setStorage('staffml_plan_progress', data.planProgress);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ─── Clear All ───────────────────────────────────
+
 export function clearProgress(): void {
   try {
     window.localStorage.removeItem(STORAGE_KEY);

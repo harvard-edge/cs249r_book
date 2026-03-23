@@ -2,11 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { BarChart3, Trash2, Terminal, Crosshair } from "lucide-react";
+import { BarChart3, Trash2, Terminal, Crosshair, Download, Upload } from "lucide-react";
 import clsx from "clsx";
 import Link from "next/link";
 import { getCompetencyAreas, getTracks, getQuestionsByFilter } from "@/lib/corpus";
-import { getAttempts, getGauntletResults, clearProgress } from "@/lib/progress";
+import { getAttempts, getGauntletResults, clearProgress, exportProgress, importProgress } from "@/lib/progress";
 
 export default function HeatMapPage() {
   const [mounted, setMounted] = useState(false);
@@ -329,12 +329,47 @@ export default function HeatMapPage() {
                   <span className="text-[10px] text-textTertiary">&gt; 70%</span>
                 </div>
               </div>
-              <button
-                onClick={() => setShowClearConfirm(true)}
-                className="text-xs text-textTertiary hover:text-accentRed transition-colors flex items-center gap-1"
-              >
-                <Trash2 className="w-3 h-3" /> Clear progress
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    const json = exportProgress();
+                    const blob = new Blob([json], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `staffml-progress-${new Date().toISOString().slice(0, 10)}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="text-xs text-textTertiary hover:text-accentBlue transition-colors flex items-center gap-1"
+                >
+                  <Download className="w-3 h-3" /> Export
+                </button>
+                <label className="text-xs text-textTertiary hover:text-accentGreen transition-colors flex items-center gap-1 cursor-pointer">
+                  <Upload className="w-3 h-3" /> Import
+                  <input
+                    type="file"
+                    accept=".json"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        const ok = importProgress(reader.result as string);
+                        if (ok) { loadData(); }
+                      };
+                      reader.readAsText(file);
+                    }}
+                  />
+                </label>
+                <button
+                  onClick={() => setShowClearConfirm(true)}
+                  className="text-xs text-textTertiary hover:text-accentRed transition-colors flex items-center gap-1"
+                >
+                  <Trash2 className="w-3 h-3" /> Clear
+                </button>
+              </div>
             </div>
 
             {/* Clear confirmation */}
