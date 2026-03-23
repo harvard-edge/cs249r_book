@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Crosshair, BarChart3, Target, Cpu, Network, HardDrive, Zap, ArrowRight, BookOpen, Github, Terminal, Star, Calendar, Flame } from "lucide-react";
+import { Crosshair, BarChart3, Target, Cpu, Network, HardDrive, Zap, ArrowRight, BookOpen, Github, Terminal, Star, Calendar, Flame, Map } from "lucide-react";
 import { getQuestions, getTracks, getCompetencyAreas } from "@/lib/corpus";
 import { getDueCount, getStreakData, getAttempts } from "@/lib/progress";
 
@@ -34,6 +34,24 @@ const features = [
     color: "text-accentBlue",
     bgColor: "bg-accentBlue/10",
     borderColor: "border-accentBlue/30",
+  },
+  {
+    icon: Map,
+    title: "Study Plans",
+    description: "Curated question sequences. 72-Hour Blitz, 2-Week MLE Sprint, or Staff Deep Dive.",
+    href: "/plans",
+    color: "text-purple-400",
+    bgColor: "bg-purple-400/10",
+    borderColor: "border-purple-400/30",
+  },
+  {
+    icon: Cpu,
+    title: "Interactive Roofline",
+    description: "Visualize compute vs. bandwidth bottlenecks on real H100, B200, and TPU hardware.",
+    href: "/roofline",
+    color: "text-accentAmber",
+    bgColor: "bg-accentAmber/10",
+    borderColor: "border-accentAmber/30",
   },
 ];
 
@@ -158,7 +176,7 @@ export default function Home() {
 
       {/* Features */}
       <section className="max-w-5xl mx-auto px-6 pb-16 w-full">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {features.map((feature, i) => (
             <motion.div
               key={feature.href}
