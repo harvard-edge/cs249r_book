@@ -1278,8 +1278,8 @@ Generation Loop with Cache:
 prompt = [token_1, token_2, token_3]
 cache  = empty
 
-Step 0 (prefill): Process entire prompt through model
-  → cache now holds K,V for tokens 1-3
+Step 0 (prefill): Process prompt tokens one at a time
+  → each token's K,V is written into the cache via PATH 3
   → get logits for next token prediction
 
 Step 1: Generate token_4
@@ -1304,7 +1304,7 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     TODO: Implement the cached generation loop
 
     APPROACH:
-    1. Process prompt tokens through model to populate cache (prefill phase)
+    1. Process prompt tokens one at a time to populate cache (prefill phase)
     2. Get the last token's logits and sample next token
     3. Loop for max_new_tokens steps:
        a. Feed ONLY the new token through the model (seq_len=1)
@@ -1320,11 +1320,12 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     >>> len(generated)  # 5 new tokens
 
     HINTS:
-    - Prefill: model.forward(prompt_tensor) processes entire prompt
+    - Prefill: feed each prompt token one at a time via model.forward(token_tensor)
+      so the patched attention populates the cache through PATH 3
     - Generation: model.forward(single_token_tensor) processes one token
     - Use temperature scaling: logits / temperature before softmax
     - Use np.random.choice with softmax probabilities to sample
-    - Advance cache.advance() after each generated token
+    - Advance cache.advance() after each token (both prefill and generation)
     - Stable softmax: subtract max before exp to avoid overflow
 
     Args:
@@ -1340,16 +1341,19 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     ### BEGIN SOLUTION
     generated = []
 
-    # Phase 1: PREFILL - process entire prompt to populate cache
-    prompt_array = np.array([prompt_tokens])  # (1, prompt_len)
-    prompt_tensor = Tensor(prompt_array)
-    logits = model.forward(prompt_tensor)  # (1, prompt_len, vocab_size)
-
-    # Advance cache for each prompt token
-    for _ in range(len(prompt_tokens)):
+    # Phase 1: PREFILL - process prompt tokens one at a time to populate cache
+    # We feed each token individually so the patched attention dispatches
+    # through PATH 3 (_cached_generation_step) for tokens after the first,
+    # which writes their K,V into the cache.  The first token (seq_pos==0)
+    # goes through PATH 2 (original forward) -- its K,V slot stays zero,
+    # but subsequent generation tokens still attend to the rest of the
+    # populated cache, which is far better than an entirely empty cache.
+    for i in range(len(prompt_tokens)):
+        token_tensor = Tensor(np.array([[prompt_tokens[i]]]))  # (1, 1)
+        logits = model.forward(token_tensor)
         cache.advance()
 
-    # Get logits for last prompt position (predicts next token)
+    # Get logits for last prompt token (predicts next token)
     last_logits = logits.data[0, -1, :]  # (vocab_size,)
 
     # Phase 2: GENERATE - one token at a time using cache

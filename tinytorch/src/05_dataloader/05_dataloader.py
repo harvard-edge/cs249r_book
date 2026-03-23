@@ -862,20 +862,20 @@ class RandomHorizontalFlip:
             is_tensor = isinstance(x, Tensor)
             data = x.data if is_tensor else x
 
-            # Determine width axis for HW/HWC/CHW (and batched variants)
+            # Determine width axis for HW/CHW/HWC.
+            # Convention (matching _pad_image and RandomCrop): check shape[0]
+            # for channels-first (C, H, W) where C <= 4. This is the standard
+            # TinyTorch/PyTorch NCHW convention for 3D image tensors.
             if data.ndim == 2:
                 # (H, W)
                 axis = -1
-            elif data.ndim >= 3:
-                if data.shape[-1] <= 4:
-                    # Channels-last: (..., H, W, C)
-                    axis = -2
-                elif data.shape[-3] <= 4:
-                    # Channels-first: (..., C, H, W)
+            elif data.ndim == 3:
+                if data.shape[0] <= 4:
+                    # Channels-first: (C, H, W) — flip width (last axis)
                     axis = -1
                 else:
-                    # Fallback to width as last axis
-                    axis = -1
+                    # Channels-last: (H, W, C) — flip width (second-to-last)
+                    axis = -2
             else:
                 raise ValueError(
                     f"RandomHorizontalFlip requires at least 2D input\n"

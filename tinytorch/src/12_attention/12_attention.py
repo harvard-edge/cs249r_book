@@ -441,8 +441,8 @@ def _apply_mask(scores: Tensor, mask: Tensor) -> Tensor:
     HINT: mask=0 means "block this position", mask=1 means "allow"
     """
     ### BEGIN SOLUTION
-    adder = (1.0 - mask.data) * MASK_VALUE
-    return scores + Tensor(adder)
+    adder = (Tensor(np.ones_like(mask.data)) - mask) * MASK_VALUE
+    return scores + adder
     ### END SOLUTION
 
 # %% [markdown]
@@ -847,8 +847,7 @@ class MultiHeadAttention:
         mask_reshaped = mask
         if mask is not None and len(mask.shape) == 3:
             batch_size_mask, seq_len_mask, _ = mask.shape
-            mask_data = mask.data.reshape(batch_size_mask, 1, seq_len_mask, seq_len_mask)
-            mask_reshaped = Tensor(mask_data)
+            mask_reshaped = mask.reshape(batch_size_mask, 1, seq_len_mask, seq_len_mask)
 
         attended, _ = scaled_dot_product_attention(Q, K, V, mask=mask_reshaped)
 
