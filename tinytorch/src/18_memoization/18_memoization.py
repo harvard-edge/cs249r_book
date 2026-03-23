@@ -865,9 +865,9 @@ Why? Longer sequences = more redundant computation without cache.
 ### Production Considerations
 
 **Memory Management:**
-- Cache memory = `batch_size × num_layers × num_heads × max_seq_len × head_dim × 4 bytes`
-- For GPT-2 (12 layers, 12 heads, seq_len=1024, head_dim=64): ~37 MB per sequence
-- For GPT-3 (96 layers, 96 heads, seq_len=2048, head_dim=128): ~4.7 GB per sequence
+- Cache memory = `2 × batch_size × num_layers × num_heads × max_seq_len × head_dim × 4 bytes`
+- For GPT-2 (12 layers, 12 heads, seq_len=1024, head_dim=64): ~72 MB per sequence
+- For GPT-3 (96 layers, 96 heads, seq_len=2048, head_dim=128): ~18 GB per sequence
 
 **Trade-off Analysis:**
 - **10x+ speedup** for typical generation lengths (50-200 tokens)
@@ -1731,7 +1731,7 @@ def analyze_kvcache_speedup():
         - Naive approach: O(n²) operations per token
         - Cached approach: O(n) operations per token
         - Speedup increases with generation length
-        - 100-token generation: 170× fewer operations
+        - 100-token generation: ~50× fewer operations
 
     Key Insight:
         Speedup is SUPER-LINEAR with generation length because:
@@ -1759,7 +1759,7 @@ def analyze_kvcache_speedup():
     for gen_length in [10, 25, 50, 100]:
         # Simulate without cache: O(n²) for each new token
         # Each token processes entire context
-        ops_without = sum(i**2 for i in range(1, gen_length + 1))
+        ops_without = sum(i for i in range(1, gen_length + 1))
 
         # Simulate with cache: O(n) for each new token
         # Each token only processes itself
@@ -1775,7 +1775,7 @@ def analyze_kvcache_speedup():
     print()
     print("💡 Key Insights:")
     print("   • Speedup increases with generation length (longer = better ROI)")
-    print("   • 100-token generation: ~170× fewer operations!")
+    print("   • 100-token generation: ~50× fewer operations!")
     print("   • Cache eliminates O(n²) recomputation per token")
     print()
     print("🚀 Production Reality:")
@@ -2018,7 +2018,7 @@ Congratulations! You've built the optimization that makes production language mo
 ### Systems Insights Gained
 - **Recomputation Elimination**: Caching K/V eliminates O(n²) redundant work per token
 - **Memory-Speed Trade-off**: Doubling memory enables order-of-magnitude speedup
-- **Scaling Benefits**: Longer generation = better cache return on investment (170× at 100 tokens)
+- **Scaling Benefits**: Longer generation = better cache return on investment (~50× at 100 tokens)
 - **Production Critical**: This single optimization makes ChatGPT-scale inference possible
 - **Non-Invasive Design**: Add capabilities forward without breaking existing modules
 
@@ -2029,7 +2029,7 @@ Without KV caching:
 - User experience: unacceptably slow
 
 With KV caching:
-- 100-token generation: ~0.1 seconds (170× faster!)
+- 100-token generation: ~0.1 seconds (~50× faster!)
 - Conversational AI: production-ready at scale
 - User experience: real-time interaction
 

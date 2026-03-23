@@ -1577,7 +1577,7 @@ def analyze_memory_layout():
     print("\n🚀 REAL-WORLD IMPLICATIONS:")
     print("   • Image processing libraries use specific memory formats for cache efficiency")
     print("   • Matrix multiplication optimized with blocking (tile into cache-sized chunks)")
-    print(f"   • Transpose is expensive ({slowdown:.1f}×) because it changes memory layout")
+    print(f"   • Transpose is expensive ({slowdown:.1f}×) because it creates a non-contiguous view with poor cache locality")
     print("   • Hardware-optimized libraries leverage memory layout for better performance")
 
     print("\n" + "=" * 60)

@@ -1339,6 +1339,11 @@ class SumBackward(Function):
     anywhere tensor reduction occurs.
     """
 
+    def __init__(self, tensor, axis=None, keepdims=False):
+        super().__init__(tensor)
+        self.axis = axis
+        self.keepdims = keepdims
+
     def apply(self, grad_output):
         """
         Compute gradients for sum operation.
@@ -1378,7 +1383,10 @@ class SumBackward(Function):
         tensor, = self.saved_tensors
 
         if isinstance(tensor, Tensor) and tensor.requires_grad:
-            # Gradient is 1 for all elements, scaled by grad_output
+            # For axis-reduced sums, expand grad_output back along the summed
+            # axis before broadcasting, so each row/column gets its own gradient.
+            if self.axis is not None and not self.keepdims:
+                grad_output = np.expand_dims(grad_output, axis=self.axis)
             return np.ones_like(tensor.data) * grad_output,
         return None,
         ### END SOLUTION
@@ -2534,7 +2542,7 @@ def enable_autograd(quiet=False):
 
         if _get_requires_grad(self):
             result.requires_grad = True
-            result._grad_fn = SumBackward(self)
+            result._grad_fn = SumBackward(self, axis=axis, keepdims=keepdims)
 
         return result
 

@@ -49,8 +49,8 @@ class TestTransformerCore:
             num_heads = 8
             ff_dim = 256
             
-            block = TransformerBlock(embed_dim, num_heads, ff_dim)
-            
+            block = TransformerBlock(embed_dim, num_heads, ff_dim=ff_dim)
+
             assert hasattr(block, 'forward'), "Block missing forward"
             
         except ImportError:
@@ -70,8 +70,8 @@ class TestTransformerCore:
             batch_size = 2
             seq_len = 10
             
-            block = TransformerBlock(embed_dim, num_heads, ff_dim)
-            
+            block = TransformerBlock(embed_dim, num_heads, ff_dim=ff_dim)
+
             x = Tensor(np.random.randn(batch_size, seq_len, embed_dim))
             
             output = block(x)
@@ -166,8 +166,8 @@ class TestTransformerWithAttention:
             from tinytorch.core.transformers import TransformerBlock
             from tinytorch.core.attention import MultiHeadAttention
             
-            block = TransformerBlock(64, 8, 256)
-            
+            block = TransformerBlock(64, 8, ff_dim=256)
+
             # Block should have attention component
             has_attention = (
                 hasattr(block, 'attention') or 
@@ -199,7 +199,7 @@ class TestTransformerWithTraining:
             
             embed_dim = 32
             
-            block = TransformerBlock(embed_dim, 4, 128)
+            block = TransformerBlock(embed_dim, 4, ff_dim=128)
             fc = Linear(embed_dim, 1)
             loss_fn = MSELoss()
             
@@ -378,7 +378,7 @@ class TestModule13Completion:
             capabilities["TransformerBlock exists"] = True
             
             # Test 2: Forward
-            block = TransformerBlock(32, 4, 128)
+            block = TransformerBlock(32, 4, ff_dim=128)
             x = Tensor(np.random.randn(1, 5, 32))
             out = block(x)
             if out.shape == x.shape:

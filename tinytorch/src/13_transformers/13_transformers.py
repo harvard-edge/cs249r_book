@@ -1932,8 +1932,8 @@ Your GPT model combines embeddings, transformer blocks, and output projection.
 
 **Calculate** (for embed_dim=512, vocab_size=10000, num_layers=6):
 - Token embedding parameters: vocab_size x embed_dim = 5.12M
-- Parameters per transformer block: approximately 4 x embed_dim^2 = 1.05M
-- Total model parameters: approximately 11.4M
+- Parameters per transformer block: approximately 12 x embed_dim^2 = 3.15M
+- Total model parameters: approximately 29.7M
 
 **Key Insight**: Most parameters in large language models come from the embedding layers (for large vocabularies) and the MLP layers (which use 4x expansion). Attention parameters are relatively small.
 

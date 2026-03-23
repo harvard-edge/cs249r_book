@@ -163,7 +163,7 @@ class TestProfilingWithModels:
             from tinytorch.core.transformers import TransformerBlock
             from tinytorch.core.tensor import Tensor
             
-            block = TransformerBlock(64, 8, 256)
+            block = TransformerBlock(64, 8, ff_dim=256)
             profiler = Profiler()
             
             x = Tensor(np.random.randn(2, 10, 64))
@@ -301,7 +301,7 @@ class TestRegressionPrevention:
         try:
             from tinytorch.core.transformers import TransformerBlock
             from tinytorch.core.tensor import Tensor
-            block = TransformerBlock(32, 4, 128)
+            block = TransformerBlock(32, 4, ff_dim=128)
             x = Tensor(np.random.randn(1, 5, 32))
             out = block(x)
             assert out.shape == x.shape
