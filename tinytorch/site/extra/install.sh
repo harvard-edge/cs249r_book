@@ -182,7 +182,7 @@ fetch_latest_version() {
     TINYTORCH_VERSION="latest"
 }
 
-# Check if Python version is 3.9+
+# Check if Python version is 3.10+
 check_python_version() {
     local python_cmd="$1"
     local version major minor
@@ -190,8 +190,8 @@ check_python_version() {
     major=$($python_cmd -c "import sys; print(sys.version_info.major)" 2>/dev/null)
     minor=$($python_cmd -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
 
-    # Check for Python 3.9+ (Required for TinyTorch)
-    if [ "$major" -eq 3 ] && [ "$minor" -ge 9 ]; then
+    # Check for Python 3.10+ (Required for TinyTorch)
+    if [ "$major" -eq 3 ] && [ "$minor" -ge 10 ]; then
         echo "$version"
         return 0
     elif [ "$major" -gt 3 ]; then

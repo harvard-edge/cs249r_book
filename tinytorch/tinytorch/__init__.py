@@ -45,9 +45,9 @@ except ImportError:
 
 # Module 03: Layers
 try:
-    from .core.layers import Layer, Linear, Dropout
+    from .core.layers import Layer, Linear, Dropout, Sequential
 except ImportError:
-    Layer = Linear = Dropout = None
+    Layer = Linear = Dropout = Sequential = None
 
 # Module 04: Losses
 try:
@@ -106,12 +106,6 @@ try:
 except ImportError:
     MultiHeadAttention = scaled_dot_product_attention = None
 
-# Module 11: Embeddings
-try:
-    from .core.embeddings import Embedding, PositionalEncoding
-except ImportError:
-    Embedding = PositionalEncoding = None
-
 # Module 13: Transformers
 try:
     from .core.transformers import LayerNorm, MLP, TransformerBlock, GPT, TinyGPT, create_causal_mask
@@ -130,11 +124,23 @@ try:
 except ImportError:
     Quantizer = quantize_int8 = dequantize_int8 = None
 
+# Module 16: Compression
+try:
+    from .perf.compression import magnitude_prune, structured_prune, low_rank_approximate, Compressor
+except ImportError:
+    magnitude_prune = structured_prune = low_rank_approximate = Compressor = None
+
 # Module 17: Acceleration
 try:
     from .perf.acceleration import vectorized_matmul, fused_gelu, tiled_matmul
 except ImportError:
     vectorized_matmul = fused_gelu = tiled_matmul = None
+
+# Module 18: Memoization
+try:
+    from .perf.memoization import KVCache, enable_kv_cache, disable_kv_cache
+except ImportError:
+    KVCache = enable_kv_cache = disable_kv_cache = None
 
 # Module 19: Benchmarking
 try:
@@ -156,7 +162,7 @@ __all__ = [
     # Core
     'Tensor',
     'Sigmoid', 'ReLU', 'Tanh', 'GELU', 'Softmax',
-    'Layer', 'Linear', 'Dropout',
+    'Layer', 'Linear', 'Dropout', 'Sequential',
     'MSELoss', 'CrossEntropyLoss', 'BinaryCrossEntropyLoss',
     'SGD', 'Adam', 'AdamW',
     'Trainer', 'CosineSchedule', 'clip_grad_norm',
@@ -171,7 +177,10 @@ __all__ = [
     # Attention & Transformers
     'MultiHeadAttention', 'scaled_dot_product_attention',
     'LayerNorm', 'MLP', 'TransformerBlock', 'GPT', 'create_causal_mask',
-    # Performance & Competition
+    # Performance
+    'magnitude_prune', 'structured_prune', 'low_rank_approximate', 'Compressor',
+    'vectorized_matmul', 'fused_gelu', 'tiled_matmul',
+    'KVCache', 'enable_kv_cache', 'disable_kv_cache',
     'benchmarking',
     'olympics',
 ]
