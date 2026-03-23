@@ -32,7 +32,7 @@ class TestProfilingCore:
         ✅ TEST: Profiler class exists
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             
             assert Profiler is not None
             
@@ -44,7 +44,7 @@ class TestProfilingCore:
         ✅ TEST: Profiler works as context manager
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.tensor import Tensor
             
             profiler = Profiler()
@@ -66,7 +66,7 @@ class TestProfilingCore:
         ✅ TEST: Memory profiling capability
         """
         try:
-            from tinytorch.core.profiler import profile_memory, MemoryProfiler
+            from tinytorch.perf.profiling import profile_memory, MemoryProfiler
             from tinytorch.core.tensor import Tensor
             
             # Profile memory usage
@@ -84,7 +84,7 @@ class TestProfilingCore:
         ✅ TEST: Execution timing works
         """
         try:
-            from tinytorch.core.profiler import Timer
+            from tinytorch.perf.profiling import Timer
             from tinytorch.core.tensor import Tensor
             
             timer = Timer()
@@ -112,7 +112,7 @@ class TestProfilingWithModels:
         ✅ TEST: Profile Linear layer execution
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.layers import Linear
             from tinytorch.core.tensor import Tensor
             
@@ -137,7 +137,7 @@ class TestProfilingWithModels:
         ✅ TEST: Profile Conv2d layer execution
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.spatial import Conv2d
             from tinytorch.core.tensor import Tensor
             
@@ -159,7 +159,7 @@ class TestProfilingWithModels:
         ✅ TEST: Profile TransformerBlock execution
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.transformers import TransformerBlock
             from tinytorch.core.tensor import Tensor
             
@@ -187,7 +187,7 @@ class TestProfilingWithTraining:
         ✅ TEST: Profile training step
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.layers import Linear
             from tinytorch.core.losses import MSELoss
             from tinytorch.core.optimizers import SGD
@@ -326,7 +326,7 @@ class TestModule14Completion:
         }
         
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             
             # Test 1: Profiler exists
             capabilities["Profiler exists"] = True

@@ -843,6 +843,12 @@ def trainer_train_epoch(self, dataloader, accumulation_steps=1):
     self.model.training = True
     self.training_mode = True
 
+    # Update scheduler at the start of each epoch so LR is set before training begins
+    if self.scheduler is not None:
+        current_lr = self.scheduler.get_lr(self.epoch)
+        self.optimizer.lr = current_lr
+        self.history['learning_rates'].append(current_lr)
+
     total_loss = 0.0
     num_batches = 0
     accumulated_loss = 0.0
@@ -866,12 +872,6 @@ def trainer_train_epoch(self, dataloader, accumulation_steps=1):
 
     avg_loss = total_loss / max(num_batches, 1)
     self.history['train_loss'].append(avg_loss)
-
-    # Update scheduler
-    if self.scheduler is not None:
-        current_lr = self.scheduler.get_lr(self.epoch)
-        self.optimizer.lr = current_lr
-        self.history['learning_rates'].append(current_lr)
 
     self.epoch += 1
     return avg_loss

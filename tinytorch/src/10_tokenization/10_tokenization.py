@@ -331,7 +331,7 @@ class Tokenizer:
         EXAMPLE:
         >>> tokenizer = CharTokenizer(['a', 'b', 'c'])
         >>> tokenizer.encode("abc")
-        [0, 1, 2]
+        [1, 2, 3]
         """
         ### BEGIN SOLUTION
         raise NotImplementedError(
@@ -354,7 +354,7 @@ class Tokenizer:
 
         EXAMPLE:
         >>> tokenizer = CharTokenizer(['a', 'b', 'c'])
-        >>> tokenizer.decode([0, 1, 2])
+        >>> tokenizer.decode([1, 2, 3])
         "abc"
         """
         ### BEGIN SOLUTION

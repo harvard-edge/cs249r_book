@@ -241,7 +241,7 @@ Input: [[1, 2, 3], [4, 5, 6]]
          ↓
 NumPy allocates: [1][2][3][4][5][6] in contiguous memory
          ↓
-Tensor wraps with: shape=(2,3), size=6, dtype=int64
+Tensor wraps with: shape=(2,3), size=6, dtype=float32
 ```
 
 **Key Design Principle**: Our Tensor is a wrapper around NumPy arrays that adds ML-specific functionality. We leverage NumPy's battle-tested memory management and computation kernels while adding the operation chaining needed for machine learning.
@@ -1248,9 +1248,9 @@ Result:  [[1, 4],        (shape: (3, 2))
 
 Memory Layout (rearranged):
 Before: [1][2][3][4][5][6]
-After:  [1][4][2][5][3][6]  ← Data actually moves in memory
+After:  [1][4][2][5][3][6]  ← Same data, different stride interpretation — cache-unfriendly access pattern
 
-Key Insight: Transpose involves data movement - more expensive than reshape.
+Key Insight: Transpose is a non-contiguous view (no copy, but poor cache locality) - more expensive to access than reshape.
 
 Common Linear Algebra Usage:
 ┌─────────────────────┬─────────────────────┬─────────────────────┐
@@ -1270,12 +1270,12 @@ Operation Performance (for 1000×1000 matrix):
 │ Operation       │ Time         │ Memory Access   │ Cache Behavior  │
 ├─────────────────┼──────────────┼─────────────────┼─────────────────┤
 │ reshape()       │ ~0.001 ms    │ No data copy    │ No cache impact │
-│ transpose()     │ ~10 ms       │ Full data copy  │ Poor locality   │
+│ transpose()     │ ~10 ms       │ Non-contiguous view │ Poor locality   │
 │ view() (future) │ ~0.001 ms    │ No data copy    │ No cache impact │
 └─────────────────┴──────────────┴─────────────────┴─────────────────┘
 
 Why transpose() is slower:
-- Must rearrange data in memory
+- Non-contiguous view: same data, different stride interpretation
 - Poor cache locality (accessing columns)
 - Can't be parallelized easily
 ```

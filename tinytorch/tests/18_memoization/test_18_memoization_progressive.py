@@ -31,7 +31,7 @@ class TestMemoizationCore:
         ✅ TEST: KVCache class exists
         """
         try:
-            from tinytorch.core.memoization import KVCache
+            from tinytorch.perf.memoization import KVCache
             
             assert KVCache is not None
             
@@ -43,7 +43,7 @@ class TestMemoizationCore:
         ✅ TEST: KVCache can be initialized
         """
         try:
-            from tinytorch.core.memoization import KVCache
+            from tinytorch.perf.memoization import KVCache
             
             max_seq_len = 512
             embed_dim = 64
@@ -62,7 +62,7 @@ class TestMemoizationCore:
         ✅ TEST: KVCache can store and retrieve key-value pairs
         """
         try:
-            from tinytorch.core.memoization import KVCache
+            from tinytorch.perf.memoization import KVCache
             from tinytorch.core.tensor import Tensor
             
             cache = KVCache(max_seq_len=100, embed_dim=32, num_heads=4)
@@ -93,7 +93,7 @@ class TestMemoizationCore:
         ✅ TEST: Memoization decorator exists
         """
         try:
-            from tinytorch.core.memoization import memoize
+            from tinytorch.perf.memoization import memoize
             
             @memoize
             def expensive_computation(x):
@@ -118,7 +118,7 @@ class TestMemoizationWithTransformers:
         ✅ TEST: KVCache works with MultiHeadAttention
         """
         try:
-            from tinytorch.core.memoization import KVCache
+            from tinytorch.perf.memoization import KVCache
             from tinytorch.core.attention import MultiHeadAttention
             from tinytorch.core.tensor import Tensor
             
@@ -148,7 +148,7 @@ class TestMemoizationWithTransformers:
         ✅ TEST: Incremental generation with caching
         """
         try:
-            from tinytorch.core.memoization import KVCache
+            from tinytorch.perf.memoization import KVCache
             from tinytorch.core.transformers import TinyGPT
             from tinytorch.core.tensor import Tensor
             
@@ -329,7 +329,7 @@ class TestModule18Completion:
         }
         
         try:
-            from tinytorch.core.memoization import KVCache
+            from tinytorch.perf.memoization import KVCache
             
             capabilities["KVCache exists"] = True
             

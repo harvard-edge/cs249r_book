@@ -432,7 +432,7 @@ class MSELoss:
         >>> targets = Tensor([1.5, 2.5, 2.8])
         >>> loss = loss_fn(predictions, targets)
         >>> print(f"MSE Loss: {loss.data:.4f}")
-        MSE Loss: 0.1467
+        MSE Loss: 0.1800
 
         HINTS:
         - Use (predictions.data - targets.data) for element-wise difference

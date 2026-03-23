@@ -1,5 +1,5 @@
 """
-Integration Tests for Module 14: KV Caching
+Integration Tests for Module 18: KV Caching
 Tests integration with transformer components and generation
 """
 
@@ -16,7 +16,7 @@ from tinytorch.core.attention import MultiHeadAttention
 
 # Optional import - KV cache may not be implemented yet
 try:
-    from tinytorch.generation.kv_cache import KVCache, enable_kv_cache
+    from tinytorch.perf.memoization import KVCache, enable_kv_cache
     HAS_KV_CACHE = True
 except ImportError:
     HAS_KV_CACHE = False
@@ -336,7 +336,7 @@ def test_kv_cache_integration_with_attention():
 
 if __name__ == "__main__":
     print("\n" + "="*70)
-    print("🔬 Module 14: KV Caching Integration Tests")
+    print("🔬 Module 18: KV Caching Integration Tests")
     print("="*70)
 
     # Run all tests

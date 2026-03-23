@@ -4073,10 +4073,10 @@ def demo_benchmarking():
     print(f"Model: Linear(512 → 256)")
     print(f"Batch: 32 samples")
     print(f"\nBenchmark Results (10 iterations):")
-    print(f"  Mean latency: {result.mean*1000:.2f} ms")
-    print(f"  Std dev:      {result.std*1000:.2f} ms")
-    print(f"  Min:          {result.min_val*1000:.2f} ms")
-    print(f"  Max:          {result.max_val*1000:.2f} ms")
+    print(f"  Mean latency: {result.mean:.2f} ms")
+    print(f"  Std dev:      {result.std:.2f} ms")
+    print(f"  Min:          {result.min_val:.2f} ms")
+    print(f"  Max:          {result.max_val:.2f} ms")
 
     print("\n✨ Reliable measurements guide optimization decisions!")
 

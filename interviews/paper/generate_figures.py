@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Generate publication-quality data figures from corpus.json.
+"""Generate publication-quality data figures for the StaffML paper.
 
-Produces PDF figures for the StaffML methodology paper.
-Run from the paper/ directory: python3 generate_figures.py
+Pipeline: corpus.json → analyze_corpus.py → corpus_stats.json → THIS → PDFs
 
-Reads: ../corpus.json, ../chains.json
-Writes: fig-corpus-distribution.pdf, fig-format-balance.pdf, fig-depth-chain.pdf
+Run: python3 generate_figures.py
+  (or: make figures)
+
+Reads: corpus_stats.json (structured stats from analyze_corpus.py)
+       ../corpus.json (only for depth chain example — needs full question text)
+Writes: fig-corpus-distribution.pdf, fig-format-balance.pdf,
+        fig-depth-chain.pdf, fig-quality-summary.pdf
 """
 
 import json
@@ -20,8 +24,8 @@ import seaborn as sns
 
 # ── Config ──────────────────────────────────────────────────────
 PAPER_DIR = Path(__file__).parent
-CORPUS_PATH = PAPER_DIR.parent / "corpus.json"
-CHAINS_PATH = PAPER_DIR.parent / "chains.json"
+STATS_PATH = PAPER_DIR / "corpus_stats.json"
+CORPUS_PATH = PAPER_DIR.parent / "corpus.json"  # for depth chain text only
 
 TRACKS = ["cloud", "edge", "mobile", "tinyml"]
 LEVELS = ["L1", "L2", "L3", "L4", "L5", "L6+"]
@@ -79,11 +83,18 @@ plt.rcParams.update({
 })
 
 
-def load_data():
+def load_stats():
+    """Load pre-computed stats from analyze_corpus.py."""
+    if not STATS_PATH.exists():
+        print("Error: corpus_stats.json not found. Run: python3 analyze_corpus.py")
+        sys.exit(1)
+    return json.loads(STATS_PATH.read_text())
+
+
+def load_corpus_for_chains():
+    """Load full corpus (only needed for depth chain question text)."""
     corpus = json.loads(CORPUS_PATH.read_text())
-    pub = [q for q in corpus if q.get("status", "published") == "published"]
-    chains = json.loads(CHAINS_PATH.read_text()) if CHAINS_PATH.exists() else []
-    return pub, chains
+    return [q for q in corpus if q.get("status", "published") == "published"]
 
 
 def classify_format(scenario: str) -> list[str]:
@@ -105,19 +116,18 @@ def classify_format(scenario: str) -> list[str]:
 
 
 # ── Figure 1: Track × Level Heatmap + Competency Bars ───────────
-def fig_corpus_distribution(pub):
+def fig_corpus_distribution(stats):
     fig, (ax_heat, ax_bar) = plt.subplots(
         1, 2, figsize=(7.0, 3.0), width_ratios=[1.2, 1],
         gridspec_kw={"wspace": 0.35},
     )
 
-    # Heatmap
+    # Heatmap from stats
+    tlm = stats["track_level_matrix"]
     matrix = np.zeros((len(TRACKS), len(LEVELS)), dtype=int)
-    for q in pub:
-        if q["track"] in TRACKS:
-            i = TRACKS.index(q["track"])
-            j = LEVELS.index(q["level"])
-            matrix[i, j] += 1
+    for i, t in enumerate(TRACKS):
+        for j, l in enumerate(LEVELS):
+            matrix[i, j] = tlm["data"][t][l]
 
     sns.heatmap(
         matrix, ax=ax_heat, annot=True, fmt="d",
@@ -133,9 +143,8 @@ def fig_corpus_distribution(pub):
         ax_heat.text(len(LEVELS) + 0.15, i + 0.5, f"= {total}",
                      va="center", fontsize=8, color="#555")
 
-    # Competency bar chart
-    areas = Counter(q["competency_area"] for q in pub)
-    sorted_areas = areas.most_common()
+    # Competency bar chart from stats
+    sorted_areas = list(stats["competency_areas"].items())
     labels = [a for a, _ in sorted_areas]
     counts = [c for _, c in sorted_areas]
 
@@ -166,7 +175,7 @@ def fig_corpus_distribution(pub):
                     str(count), va="center", fontsize=7, color="#555")
 
     fig.suptitle(
-        f"Corpus Distribution ({sum(counts):,} Published Questions)",
+        f"Corpus Distribution ({stats['summary']['published']:,} Published Questions)",
         fontsize=11, fontweight="bold", y=1.02,
     )
 
@@ -176,21 +185,16 @@ def fig_corpus_distribution(pub):
 
 
 # ── Figure 2: Question Format by Level (Stacked Bar) ────────────
-def fig_format_balance(pub):
+def fig_format_balance(stats):
     fig, ax = plt.subplots(figsize=(4.5, 3.2))
 
     formats = ["calculation", "design", "conceptual", "optimization", "diagnosis", "tradeoff"]
     data = {fmt: [] for fmt in formats}
 
+    fbl = stats["format_by_level"]
     for level in LEVELS:
-        lqs = [q for q in pub if q["level"] == level]
-        fmt_counts = Counter()
-        for q in lqs:
-            for fmt in classify_format(q["scenario"]):
-                fmt_counts[fmt] += 1
-        total = sum(fmt_counts.values()) or 1
         for fmt in formats:
-            data[fmt].append(100 * fmt_counts.get(fmt, 0) / total)
+            data[fmt].append(fbl[level]["format_pct"].get(fmt, 0))
 
     x = np.arange(len(LEVELS))
     width = 0.65
@@ -236,13 +240,13 @@ def fig_format_balance(pub):
 
 
 # ── Figure 3: Depth Chain Example (KV-Cache) ────────────────────
-def fig_depth_chain(pub, chains):
-    # Find KV-cache chain
-    kv_chain = next((ch for ch in chains if "kv-cache" in ch.get("topic", "")), None)
-    if not kv_chain:
-        print("  ⚠️ No kv-cache chain found, skipping fig-depth-chain")
+def fig_depth_chain(stats, pub):
+    # Use pre-computed example chain from stats
+    if "example_chain" not in stats:
+        print("  ⚠️ No example_chain in stats, skipping fig-depth-chain")
         return
 
+    kv_chain = stats["example_chain"]
     by_id = {q["id"]: q for q in pub}
 
     fig, ax = plt.subplots(figsize=(5.5, 3.5))
@@ -263,9 +267,10 @@ def fig_depth_chain(pub, chains):
     for i, cq in enumerate(kv_chain["questions"]):
         level = cq["level"]
         title = cq["title"]
-        bloom = BLOOM_LABELS.get(level, "")
-        q = by_id.get(cq["id"], {})
-        scenario = q.get("scenario", "")[:80] + "..." if q.get("scenario") else ""
+        bloom = cq.get("bloom", BLOOM_LABELS.get(level, ""))
+        scenario = cq.get("scenario_preview", "")[:80]
+        if scenario and not scenario.endswith("..."):
+            scenario += "..."
 
         # Level badge
         badge = plt.Rectangle((0.2, i - 0.35), 1.0, 0.7, linewidth=1,
@@ -292,7 +297,7 @@ def fig_depth_chain(pub, chains):
                         arrowprops=dict(arrowstyle="->", color="#555", lw=1))
 
     ax.set_title(
-        f"Depth Chain: {kv_chain['topic']} ({kv_chain.get('competency_area', 'memory')})",
+        f"Depth Chain: {kv_chain.get('topic', 'kv-cache')} ({kv_chain.get('competency_area', 'memory')})",
         fontsize=10, fontweight="bold", pad=10,
     )
 
@@ -302,21 +307,21 @@ def fig_depth_chain(pub, chains):
 
 
 # ── Figure 4: Dedup / Quality Pipeline Summary ──────────────────
-def fig_quality_summary(pub):
+def fig_quality_summary(stats):
     fig, axes = plt.subplots(1, 3, figsize=(7.0, 2.2))
 
-    # Panel 1: Field coverage
+    # Panel 1: Field coverage from stats
     ax = axes[0]
+    fc = stats["field_coverage"]
     fields = {
-        "competency_area": sum(1 for q in pub if q.get("competency_area", "").strip()),
-        "napkin_math": sum(1 for q in pub if q.get("details", {}).get("napkin_math", "").strip()),
-        "common_mistake": sum(1 for q in pub if q.get("details", {}).get("common_mistake", "").strip()),
-        "deep_dive_url": sum(1 for q in pub if q.get("details", {}).get("deep_dive_url", "").strip()),
-        "bloom_level": sum(1 for q in pub if q.get("bloom_level", "").strip()),
+        "competency_area": fc["competency_area"],
+        "napkin_math": fc["napkin_math"],
+        "common_mistake": fc["common_mistake"],
+        "deep_dive_url": fc["deep_dive_url"],
+        "bloom_level": fc["bloom_level"],
     }
-    total = len(pub)
     labels = list(fields.keys())
-    pcts = [100 * v / total for v in fields.values()]
+    pcts = [100 * v for v in fields.values()]
     colors = [GREEN if p >= 99 else ORANGE if p >= 80 else RED for p in pcts]
 
     bars = ax.barh(range(len(labels)), pcts, color=colors, alpha=0.85, height=0.6)
@@ -330,10 +335,11 @@ def fig_quality_summary(pub):
         ax.text(bar.get_width() - 0.3, bar.get_y() + bar.get_height() / 2,
                 f"{pct:.1f}%", va="center", ha="right", fontsize=6.5, color="white", fontweight="bold")
 
-    # Panel 2: Error rates across rounds
+    # Panel 2: Error rates from stats
     ax = axes[1]
+    er = stats["error_rates"]
     rounds = ["Before\nR1", "After\nR1", "After\nR2"]
-    rates = [4.3, 1.5, 0.22]
+    rates = [er["round1_raw"], er["round1_confirmed"], er["round2_confirmed"]]
     bar_colors = [RED, ORANGE, GREEN]
     bars = ax.bar(rounds, rates, color=bar_colors, alpha=0.85, width=0.5)
     ax.set_ylabel("Error Rate (%)")
@@ -343,11 +349,12 @@ def fig_quality_summary(pub):
                 f"{rate}%", ha="center", fontsize=7, fontweight="bold")
     ax.set_ylim(0, 5.5)
 
-    # Panel 3: Dedup stages
+    # Panel 3: Dedup stages from stats
     ax = axes[2]
+    dd = stats["dedup"]
     stages = ["Exact", "Fuzzy\n(>0.90)", "Semantic\n(>0.85)"]
-    found = [0, 0, 502]
-    archived = [0, 0, 87]
+    found = [dd["exact_dupes"], dd["fuzzy_dupes"], dd["semantic_flagged"]]
+    archived = [0, 0, dd["archived"]]
     x = np.arange(len(stages))
     w = 0.35
     ax.bar(x - w / 2, found, w, label="Flagged", color=ORANGE, alpha=0.85)
@@ -367,15 +374,19 @@ def fig_quality_summary(pub):
 
 # ── Main ────────────────────────────────────────────────────────
 def main():
-    print("Generating paper figures from corpus.json...\n")
-    pub, chains = load_data()
-    print(f"  Corpus: {len(pub)} published questions")
-    print(f"  Chains: {len(chains)} depth chains\n")
+    print("Generating paper figures from corpus_stats.json...\n")
+    stats = load_stats()
+    print(f"  Published: {stats['summary']['published']}")
+    print(f"  Chains: {stats['summary']['chains_total']}\n")
 
-    fig_corpus_distribution(pub)
-    fig_format_balance(pub)
-    fig_depth_chain(pub, chains)
-    fig_quality_summary(pub)
+    fig_corpus_distribution(stats)
+    fig_format_balance(stats)
+
+    # Depth chain needs full corpus for question text
+    pub = load_corpus_for_chains()
+    fig_depth_chain(stats, pub)
+
+    fig_quality_summary(stats)
 
     print(f"\nDone. All figures saved to {PAPER_DIR}/")
 
