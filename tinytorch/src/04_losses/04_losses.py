@@ -1050,14 +1050,16 @@ def analyze_loss_sensitivity():
     min_mse_idx = np.argmin(mse_losses)
     min_bce_idx = np.argmin(bce_losses)
 
+    idx_05 = np.argmin(np.abs(predictions - 0.5))
+
     print(f"MSE Loss:")
     print(f"  Minimum at prediction = {predictions[min_mse_idx]:.2f}, loss = {mse_losses[min_mse_idx]:.4f}")
-    print(f"  At prediction = 0.5: loss = {mse_losses[24]:.4f}")  # Middle of range
+    print(f"  At prediction = 0.5: loss = {mse_losses[idx_05]:.4f}")
     print(f"  At prediction = 0.1: loss = {mse_losses[0]:.4f}")
 
     print(f"\nBinary Cross-Entropy Loss:")
     print(f"  Minimum at prediction = {predictions[min_bce_idx]:.2f}, loss = {bce_losses[min_bce_idx]:.4f}")
-    print(f"  At prediction = 0.5: loss = {bce_losses[24]:.4f}")
+    print(f"  At prediction = 0.5: loss = {bce_losses[idx_05]:.4f}")
     print(f"  At prediction = 0.1: loss = {bce_losses[0]:.4f}")
 
     print(f"\n💡 Sensitivity Insights:")

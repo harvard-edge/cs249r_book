@@ -470,8 +470,9 @@ def fused_gelu(x: Tensor) -> Tensor:
     sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
 
     # Fused GELU computation - all operations in single expression
-    # This minimizes memory bandwidth by avoiding intermediate arrays
-    # NumPy's expression evaluator will optimize this into efficient machine code
+    # By computing the full expression in a single line, we avoid creating intermediate
+    # Tensor objects. Note: NumPy still allocates temporary arrays internally —
+    # real kernel fusion requires compiled frameworks like XLA or torch.compile.
     result_data = 0.5 * x.data * (
         1.0 + np.tanh(sqrt_2_over_pi * (x.data + 0.044715 * x.data**3))
     )

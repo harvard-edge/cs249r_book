@@ -997,9 +997,6 @@ Matrix Multiplication Process:
    │ 1 2 3 │    │ 7 8 │       │ 1×7+2×9+3×1 1×8+2×1+3×2 │   ┌       ┐
    │       │ ×  │ 9 1 │  =    │                         │ = │ 28 16 │
    │ 4 5 6 │    │ 1 2 │       │ 4×7+5×9+6×1 4×8+5×1+6×2 │   │ 79 49 │
-   │ 1 2 3 │    │ 7 8 │       │ 1×7+2×9+3×1 1×8+2×1+3×2 │   ┌       ┐
-   │       │ ×  │ 9 1 │  =    │                         │ = │ 28 16 │
-   │ 4 5 6 │    │ 1 2 │       │ 4×7+5×9+6×1 4×8+5×1+6×2 │   │ 79 49 │
    └       ┘    └     ┘       └                         ┘   └       ┘
 
 Computation Breakdown:
@@ -1238,7 +1235,7 @@ Common ML Reshapes:
 ### Transpose: Swapping Dimensions
 
 ```
-Transposing (swapping dimensions - data rearrangement):
+Transposing (swapping dimensions - stride reinterpretation):
 Original: [[1, 2, 3],    (shape: (2, 3))
            [4, 5, 6]]
          ↓ transpose()
@@ -1270,7 +1267,7 @@ Operation Performance (for 1000×1000 matrix):
 │ Operation       │ Time         │ Memory Access   │ Cache Behavior  │
 ├─────────────────┼──────────────┼─────────────────┼─────────────────┤
 │ reshape()       │ ~0.001 ms    │ No data copy    │ No cache impact │
-│ transpose()     │ ~10 ms       │ Non-contiguous view │ Poor locality   │
+│ transpose()     │ ~0.001 ms    │ Non-contiguous view │ Poor locality   │
 │ view() (future) │ ~0.001 ms    │ No data copy    │ No cache impact │
 └─────────────────┴──────────────┴─────────────────┴─────────────────┘
 
@@ -1356,7 +1353,7 @@ if __name__ == "__main__":
 """
 ## 🏗️ Reduction Operations: Aggregating Information
 
-Reduction operations collapse dimensions by aggregating data, which is essential for computing statistics, statistics, and preparing data for further processing.
+Reduction operations collapse dimensions by aggregating data, which is essential for computing statistics and preparing data for further processing.
 
 ### Why Reductions are Crucial in ML
 

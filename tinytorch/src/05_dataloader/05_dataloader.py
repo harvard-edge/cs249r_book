@@ -50,7 +50,8 @@ Let's transform scattered data into organized learning batches!
 ```python
 # How to use this module:
 from tinytorch.core.dataloader import Dataset, DataLoader, TensorDataset
-from tinytorch.core.dataloader import download_mnist, download_cifar10
+# Note: Dataset download utilities (download_mnist, download_cifar10) will be
+# available in a future release.
 ```
 
 **Why this matters:**

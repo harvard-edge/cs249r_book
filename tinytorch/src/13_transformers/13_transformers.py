@@ -1277,7 +1277,8 @@ class GPT:
         HINTS:
         - Positional embeddings are learned, not fixed sinusoidal
         - Final layer norm stabilizes training
-        - Language modeling head shares weights with token embedding (tie_weights)
+        - Language modeling head is a separate Linear(embed_dim, vocab_size) layer
+          (weight tying with the token embedding is a production optimization not implemented here)
         """
         ### BEGIN SOLUTION
         self.vocab_size = vocab_size

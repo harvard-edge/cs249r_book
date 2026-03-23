@@ -1609,7 +1609,8 @@ Checkpoint Memory:
 │ Training Meta   │ ← Epoch, history, scheduler
 └─────────────────┘
 
-Total Training Memory ≈ 5-6× Model Parameters
+Total Training Memory ≈ 4-6× Model Parameters
+  (4× covers params + grads + Adam moments; 5-6× when activation memory is included)
 ```
 
 ### Key Systems Insights
