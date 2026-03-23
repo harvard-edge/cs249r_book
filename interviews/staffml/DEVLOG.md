@@ -1,82 +1,57 @@
 # StaffML Development Log
 
-## 2026-03-22 — Build Cycle 1: Full App Rebuild (3 feedback rounds)
+## 2026-03-22 — Full Build Session (18 commits)
 
-### What was built
-Restructured the monolithic 872-line `page.tsx` into a proper Next.js route-based architecture with 4 pages, shared infrastructure, and 3 rounds of expert feedback applied.
-
-**Architecture:**
+### Architecture
 ```
-src/app/
-  layout.tsx          — Shared layout with Nav
-  page.tsx            — Landing page (hero, features, stats, CTA)
-  gauntlet/page.tsx   — The Gauntlet (timed mock interview)
-  heatmap/page.tsx    — Readiness Heat Map (progress dashboard)
-  drill/page.tsx      — Drill Mode (focused practice + napkin math)
-
-src/components/
-  Nav.tsx             — Responsive nav with mobile hamburger menu
-
-src/lib/
-  corpus.ts           — Question data + napkin math (gradient scoring, answer markers)
-  progress.ts         — LocalStorage progress with caps (500 attempts, 50 gauntlets)
-  hooks.ts            — useMounted() utility hook
+src/app/           — 7 routes (Home, Daily, Gauntlet, Heat Map, Drill, Plans, Roofline)
+src/components/    — 6 components (Nav, HardwareRef, HardwareConfigurator, StreakBadge, Toast, Providers)
+src/lib/           — 6 modules (corpus, hardware, plans, progress, rubric, hooks)
+public/            — favicon.svg, 5 logo concepts (10 SVGs)
 ```
 
-### Features
-1. **Landing page** — Hero with live question count, feature cards, stats bar, moat section, footer CTA
-2. **The Gauntlet** — Track/level/duration → timed quiz → self-assessment → results with competency breakdown + elapsed time. Auto-finishes when timer expires.
-3. **Heat Map** — Competency × Track grid, color-coded, clickable cells → drill, clear progress
-4. **Drill Mode** — Filter sidebar with "weakest area" recommendation, napkin math verification with gradient scoring, constrained self-assessment, URL params from heat map
-5. **Napkin Math v2** — 5-tier grades (exact/close/ballpark/off/way_off), answer markers (`=>`), caps self-assessment to prevent overconfidence
-6. **Progress tracking** — LocalStorage with caps, feeds heat map and weakest area recommendations
-7. **Gauntlet algorithm** — Round-robin across competency areas for breadth
-8. **Keyboard shortcuts** — ⌘Enter to reveal, 1-4 for scoring, N to skip
+### Features Built
+1. Route architecture — rebuilt from 872-line monolith to 7 clean routes
+2. The Gauntlet — timed mock with competency breadth, timer expiry, elapsed time
+3. Drill Mode — filters (track/level/competency/interview style), napkin math v2 (5-tier gradient), rubric checkboxes, spaced repetition review queue, weakest area recommendation, hardware reference card
+4. Heat Map — competency x track grid, clickable cells, readiness verdict, per-track bars, export/import
+5. Daily Challenge — deterministic 3 questions/day, completion tracking, summary card
+6. Study Plans — 5 curated paths (72hr Blitz, MLE Sprint, Staff Deep Dive, Edge, Mobile)
+7. Interactive Roofline — SVG chart with real mlsysim specs, 6 workload dots, custom OI input
+8. Streak system — daily tracking, flame badge, milestone toasts
+9. Welcome Back card — personalized landing for returning users
+10. Company archetypes renamed to interview styles per Jordan feedback
+11. Progress export/import for data portability
+12. Toast notification system for badge milestones
+13. Roofline logo (5 concepts), favicon, OG/Twitter meta
+14. Dead deps removed (-3,607 lines), unused components cleaned
+15. Static export configured (next.config.mjs)
 
----
+### Feedback Rounds (5 reviewers, 3 rounds)
 
-### Round 1: UX Designer Feedback
-**19 issues found. 13 applied, 4 deferred.**
-- ✅ Timer expiry handling (auto-finish, score unanswered as 0)
-- ✅ Mobile hamburger nav
-- ✅ Responsive grids (2→4 cols on mobile)
-- ✅ Panel width consistency (460px everywhere)
-- ✅ Self-assessment label consistency
-- ✅ `cleanScenario()` utility
-- ✅ Dead CSS cleanup
-- ✅ Clickable heat map cells → drill
-- ✅ Elapsed time in results
+**Round 1 — UX Designer + Frontend Dev + Jordan (ML Engineer):**
+- 43 issues found, 24 fixed immediately
+- Timer expiry, mobile nav, responsive grids, self-assessment consistency
+- Napkin math gradient, answer markers, constrained scoring
 
-### Round 2: Frontend Developer Feedback
-**18 issues found. 6 applied, rest deferred or already fixed.**
-- ✅ Timer zero-state (already fixed in Round 1)
-- ✅ Dead imports removed (ReactMarkdown, AnimatePresence, ChevronRight)
-- ✅ localStorage capped (500 attempts, 50 gauntlets)
-- ✅ `useMounted()` hook created
-- ✅ Aria progressbar on gauntlet
-- Deferred: corpus lazy loading, server components, error boundaries
+**Round 2 — Jordan revisit:**
+- "Round 1 prototype. Round 2 daily habit tool."
+- Archetype rename applied, readiness verdict built
 
-### Round 3: Jordan (ML Engineer) Product Review
-**7 areas covered. 5 changes applied.**
-- ✅ Napkin math gradient (5 grades instead of binary pass/fail)
-- ✅ Answer markers (`=>` prefix for final answer)
-- ✅ Constrained self-assessment (napkin math caps max score)
-- ✅ "Weakest area" recommendation in drill sidebar
-- ✅ Level labels clarified (Bloom's → difficulty mapping explained)
-- Deferred: spaced repetition, shareable heat map, rubric-based scoring
+**Round 3 — Emma (beginner) + David (industry) + Sophia (distributed):**
+- Emma: "Locked door for beginners" — too much jargon, no learning path. Valid but wrong target audience.
+- David: "Strong 0.8" — export/import needed (done), rubric heuristic fragile, missing ML monitoring category
+- Sophia: "Useful but thin on distributed" — wants cluster simulator, multi-GPU roofline, collective ops coverage
 
-**Jordan's verdict:** "Would use it for napkin math practice. The physics-grounded angle is the exact differentiation that matters for Staff-level. Core thesis is right."
+### What's Saturating
+App features are getting positive feedback. Remaining asks are:
+- **Content depth** (authored rubrics, distributed systems concepts, follow-up questions)
+- **Simulation** (cluster-level training simulator using mlsysim formulas)
+- **Social** (shareable results, user count, testimonials)
 
-### Build status
-- ✅ `npm run build` passes — 7 routes, 0 errors
-- ✅ TypeScript strict — no `any` types
-- ✅ All 3 feedback rounds applied
-
-### Deferred to next session
-- [ ] Spaced repetition (SM-2 or Leitner scheduler)
-- [ ] Shareable heat map export
-- [ ] Rubric-based scoring checkboxes
-- [ ] Error boundaries
-- [ ] Server components for static content
-- [ ] Favicon + og:image meta tags
-- [ ] Continue vault fills to push 3D coverage
+### Next Session Priorities
+1. Distributed training simulator (Sophia's killer feature request)
+2. Authored rubric items in corpus (all reviewers asked for this)
+3. Deploy to Vercel
+4. README rewrite with hero screenshots
+5. Continue vault fills toward 85% 3D coverage
