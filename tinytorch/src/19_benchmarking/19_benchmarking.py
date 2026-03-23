@@ -4010,7 +4010,8 @@ For a model that takes 1ms to execute:
 - At what model latency does timer overhead become negligible (<1%)? _____ ms
 
 ### 3. Benchmark Configuration Trade-offs
-Your optimize_benchmark_configuration() function tested different warmup/measurement combinations.
+The BenchmarkSuite class uses configurable warmup_runs and measurement_runs parameters
+(with DEFAULT_WARMUP_RUNS=5 and DEFAULT_MEASUREMENT_RUNS=100 as defaults).
 For a CI/CD pipeline that runs 100 benchmarks per day:
 - Fast config (3s each): _____ minutes total daily
 - Accurate config (15s each): _____ minutes total daily

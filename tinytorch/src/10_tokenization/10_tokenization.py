@@ -362,7 +362,7 @@ class Tokenizer:
             f"decode() not implemented in base Tokenizer class\n"
             f"  ❌ Called decode() on abstract base class {self.__class__.__name__}\n"
             f"  💡 Tokenizer is an interface - use a concrete implementation like CharTokenizer or BPETokenizer\n"
-            f"  🔧 Example: tokenizer = CharTokenizer(['a', 'b', 'c']); tokenizer.decode([0, 1, 2])"
+            f"  🔧 Example: tokenizer = CharTokenizer(['a', 'b', 'c']); tokenizer.decode([1, 2, 3])"
         )
         ### END SOLUTION
 

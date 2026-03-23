@@ -2488,7 +2488,7 @@ def analyze_convolution_complexity():
     for config in configs:
         # Create convolution layer
         in_ch = config["input"][1]
-        out_ch, k_size = config["conv"][0], config["conv"][1]
+        out_ch, k_size = config["conv"][0], config["conv"][2]
         conv = Conv2d(in_ch, out_ch, kernel_size=k_size, padding=k_size//2)
 
         # Create input tensor
@@ -2496,7 +2496,7 @@ def analyze_convolution_complexity():
 
         # Calculate theoretical FLOPs
         batch, in_channels, h, w = config["input"]
-        out_channels, kernel_size = config["conv"][0], config["conv"][1]
+        out_channels, kernel_size = config["conv"][0], config["conv"][2]
 
         # Each output element requires in_channels * kernel_size² multiply-adds
         flops_per_output = in_channels * kernel_size * kernel_size * 2  # 2 for MAC
@@ -2768,8 +2768,8 @@ class SimpleCNN:
         4. Pool layer 2: 2×2 max pooling
         5. Calculate flattened size and add final linear layer
 
-        HINT: For 32×32 input → 32→16→8→4 spatial reduction
-        Final feature size: 32 channels × 4×4 = 512 features
+        HINT: For 32×32 input → 32→16→8 spatial reduction
+        Final feature size: 32 channels × 8×8 = 2048 features
         """
         super().__init__()
 

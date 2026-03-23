@@ -1525,9 +1525,8 @@ def analyze_compression_techniques():
         # Create fresh layers for magnitude pruning test
         mag_layers = [Linear(l.weight.shape[0], l.weight.shape[1]) for l in layers]
         for i, layer in enumerate(mag_layers):
-            layer.weight = layers[i].weight
-            # Linear layers always have bias (may be None)
-            layer.bias = layers[i].bias
+            layer.weight = Tensor(layers[i].weight.data.copy())
+            layer.bias = Tensor(layers[i].bias.data.copy()) if hasattr(layers[i], 'bias') and layers[i].bias is not None else None
         mag_model = Sequential(*mag_layers)
         magnitude_prune(mag_model, sparsity=0.8)
         mag_sparsity = measure_sparsity(mag_model)
@@ -1539,9 +1538,8 @@ def analyze_compression_techniques():
         # Create fresh layers for structured pruning test
         struct_layers = [Linear(l.weight.shape[0], l.weight.shape[1]) for l in layers]
         for i, layer in enumerate(struct_layers):
-            layer.weight = layers[i].weight
-            # Linear layers always have bias (may be None)
-            layer.bias = layers[i].bias
+            layer.weight = Tensor(layers[i].weight.data.copy())
+            layer.bias = Tensor(layers[i].bias.data.copy()) if hasattr(layers[i], 'bias') and layers[i].bias is not None else None
         struct_model = Sequential(*struct_layers)
         structured_prune(struct_model, prune_ratio=0.5)
         struct_sparsity = measure_sparsity(struct_model)

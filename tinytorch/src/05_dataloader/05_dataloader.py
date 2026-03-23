@@ -2334,7 +2334,7 @@ Export with: `tito module complete 05`
 - Milestone 03: Train MLP on real MNIST digits
 - Milestone 04: Train CNN on CIFAR-10 images
 
-**Then continue with:** Module 09 (Convolutions) for Conv2d layers!
+**Then continue with:** Module 06 (Autograd) for automatic differentiation!
 
 ### Real-World Connection
 You've implemented the same patterns used in:
