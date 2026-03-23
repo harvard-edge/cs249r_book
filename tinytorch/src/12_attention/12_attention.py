@@ -528,7 +528,7 @@ def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Optional
         Q: Query tensor of shape (batch_size, seq_len, d_model)
         K: Key tensor of shape (batch_size, seq_len, d_model)
         V: Value tensor of shape (batch_size, seq_len, d_model)
-        mask: Optional causal mask, True=allow, False=mask (batch_size, seq_len, seq_len)
+        mask: Optional causal mask, 1=allow, 0=mask (batch_size, seq_len, seq_len)
 
     Returns:
         output: Attended values (batch_size, seq_len, d_model)
@@ -1165,18 +1165,18 @@ def analyze_attention_memory_overhead():
         # Forward pass memory (attention matrix)
         attention_matrix_mb = (seq_len * seq_len * 4) / (1024 * 1024)
 
-        # Backward pass adds gradient storage (2× forward)
-        backward_memory_mb = 2 * attention_matrix_mb
+        # Backward pass adds gradient storage (1× forward: one gradient tensor)
+        backward_memory_mb = attention_matrix_mb
 
-        # Optimizer state (Adam: +2× for momentum and velocity)
-        optimizer_memory_mb = backward_memory_mb + 2 * attention_matrix_mb
+        # Optimizer state (Adam: +2× for momentum and velocity, incremental)
+        optimizer_memory_mb = 2 * attention_matrix_mb
 
         # Total = forward + gradients + optimizer state
         total_memory_mb = attention_matrix_mb + backward_memory_mb + optimizer_memory_mb
 
         print(f"{seq_len:7d} | {attention_matrix_mb:6.2f}MB | {backward_memory_mb:10.2f}MB | {optimizer_memory_mb:10.2f}MB | {total_memory_mb:11.2f}MB")
 
-    print(f"\n💡 KEY INSIGHT: Training requires ~7x memory of inference (1x forward + 2x gradients + 4x optimizer state)")
+    print(f"\n💡 KEY INSIGHT: Training requires ~4x memory of inference (1x forward + 1x gradients + 2x optimizer state)")
     print(f"🚀 For GPT-3 (96 layers, 2048 context): ~6GB just for attention gradients!")
 
 # Run the analysis

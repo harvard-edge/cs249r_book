@@ -282,7 +282,7 @@ Every quantization system uses this fundamental relationship:
 ```
 Quantization (FP32 → INT8):
 ┌─────────────────────────────────────────────────────────┐
-│  quantized = round((float_value - zero_point) / scale)  │
+│  quantized = round(float_value / scale + zero_point)     │
 └─────────────────────────────────────────────────────────┘
 
 Dequantization (INT8 → FP32):
@@ -434,11 +434,11 @@ Step 1: Analyze Range              Step 2: Calculate Parameters       Step 3: Ap
 - **Dynamic Range:** Each tensor has different min/max values
 - **Precision Loss:** Map 4 billion FP32 values to just 256 INT8 values
 - **Zero Preservation:** Ensure FP32 zero maps exactly to an INT8 value
-- **Symmetric Mapping:** Distribute quantization levels efficiently
+- **Asymmetric Mapping:** Distribute quantization levels efficiently
 
 **Why This Algorithm:**
 - **Linear mapping** preserves relative relationships between values
-- **Symmetric quantization** works well for most neural network weights
+- **Affine (asymmetric) quantization** works well for most neural network weights
 - **Clipping to [-128, 127]** ensures valid INT8 range
 - **Round-to-nearest** minimizes quantization error
 """
@@ -447,7 +447,7 @@ Step 1: Analyze Range              Step 2: Calculate Parameters       Step 3: Ap
 #| export
 def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     """
-    Quantize FP32 tensor to INT8 using symmetric quantization.
+    Quantize FP32 tensor to INT8 using asymmetric (min-max) quantization.
 
     TODO: Implement INT8 quantization with scale and zero_point calculation
 
@@ -455,7 +455,7 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     1. Find min/max values in tensor data
     2. Calculate scale: (max_val - min_val) / 255 (INT8 range: -128 to 127)
     3. Calculate zero_point: offset that maps min_val to INT8_MIN (-128)
-       Formula: zero_point = round(INT8_MIN - min_val / scale)
+       Formula: zero_point = round(INT8_MIN - (min_val / scale))
     4. Apply quantization formula: round(value / scale + zero_point)
     5. Clamp to INT8 range [-128, 127]
 

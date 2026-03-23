@@ -907,15 +907,26 @@ class Sequential:
         else:
             self.layers = list(layers)
 
-    def forward(self, x):
-        """Forward pass through all layers sequentially."""
+    def forward(self, x, training=True):
+        """Forward pass through all layers sequentially.
+
+        Passes training=True/False to layers that support it (e.g. Dropout),
+        and falls back to a plain forward(x) call for layers that don't.
+        This lets you switch between training and eval mode with one flag:
+
+            output = model.forward(x, training=False)   # eval: Dropout disabled
+            output = model.forward(x, training=True)    # train: Dropout active
+        """
         for layer in self.layers:
-            x = layer.forward(x)
+            try:
+                x = layer.forward(x, training=training)
+            except TypeError:
+                x = layer.forward(x)
         return x
 
-    def __call__(self, x):
+    def __call__(self, x, training=True):
         """Allow model to be called like a function."""
-        return self.forward(x)
+        return self.forward(x, training=training)
 
     def parameters(self):
         """Collect all parameters from all layers."""
