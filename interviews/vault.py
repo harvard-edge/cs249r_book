@@ -17,18 +17,71 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from collections import Counter, defaultdict
+from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 
 BASE = Path(__file__).parent
-CORPUS_PATH = BASE / "corpus.json"
-TAXONOMY_PATH = BASE / "taxonomy_v2.json"
-STAFFML_DATA = BASE / "staffml" / "src" / "data" / "corpus.json"
-
 LEVELS_ORDER = ["L1", "L2", "L3", "L4", "L5", "L6+"]
 TRACKS = ["cloud", "edge", "mobile", "tinyml"]
+
+
+def load_config() -> dict:
+    """Load vault.yaml, falling back to defaults."""
+    config_path = BASE / "vault.yaml"
+    defaults = {
+        "paths": {
+            "corpus": "corpus.json",
+            "chains": "chains.json",
+            "taxonomy": "taxonomy_v2.json",
+            "chroma_dir": "_chroma",
+            "reviews_dir": "_reviews",
+            "paper_dir": "paper",
+            "staffml_export": "staffml/src/data/corpus.json",
+        },
+        "models": {
+            "reviewer": "gemini-2.5-flash",
+            "reviewer_deep": "claude-opus-4-6",
+        },
+        "review": {
+            "chunk_size": 50,
+            "max_parallel": 8,
+            "auto_fix": False,
+            "error_rate_threshold": 0.02,
+        },
+        "validation": {"dedup_threshold": 0.85, "fuzzy_threshold": 0.90},
+        "chains": {"min_levels": 3, "backpopulate": True},
+        "coverage": {"min_per_cell": 3},
+        "release": {
+            "steps": ["validate", "dedup", "chains", "stats", "figures", "export"],
+            "require_zero_errors": True,
+        },
+    }
+    if config_path.exists():
+        try:
+            import yaml
+
+            with open(config_path) as f:
+                user = yaml.safe_load(f) or {}
+            # Shallow merge per section
+            for k, v in user.items():
+                if isinstance(v, dict) and k in defaults:
+                    defaults[k].update(v)
+                else:
+                    defaults[k] = v
+        except ImportError:
+            pass  # yaml not installed, use defaults
+    return defaults
+
+
+CONFIG = load_config()
+CORPUS_PATH = BASE / CONFIG["paths"]["corpus"]
+CHAINS_PATH = BASE / CONFIG["paths"]["chains"]
+TAXONOMY_PATH = BASE / CONFIG["paths"]["taxonomy"]
+STAFFML_DATA = BASE / CONFIG["paths"]["staffml_export"]
 
 
 def load_corpus() -> list[dict]:
@@ -488,6 +541,254 @@ def cmd_export(args):
     print(f"  TOTAL: {len(corpus)}")
 
 
+# ─── REVIEW ─────────────────────────────────────────────────────
+def cmd_review(args):
+    """Automated math review via LLM."""
+    corpus = load_corpus()
+    pub = [q for q in corpus if q.get("status", "published") == "published"]
+
+    # Determine scope
+    if hasattr(args, "scope") and args.scope:
+        if args.scope.startswith("track:"):
+            track = args.scope.split(":")[1]
+            questions = [q for q in pub if q["track"] == track]
+        else:
+            questions = pub
+    else:
+        questions = pub
+
+    print(f"═══ Math Review ({len(questions)} questions) ═══\n")
+
+    model = CONFIG["models"]["reviewer"]
+    chunk_size = CONFIG["review"]["chunk_size"]
+
+    # Chunk questions
+    chunks = []
+    for i in range(0, len(questions), chunk_size):
+        chunks.append(questions[i : i + chunk_size])
+
+    print(f"  Model: {model}")
+    print(f"  Chunks: {len(chunks)} × {chunk_size}")
+
+    reviews_dir = BASE / CONFIG["paths"]["reviews_dir"]
+    reviews_dir.mkdir(exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    all_errors = []
+    all_ok = 0
+
+    for ci, chunk in enumerate(chunks):
+        # Build review text
+        review_text = ""
+        for q in chunk:
+            nm = q.get("details", {}).get("napkin_math", "")[:200]
+            sol = q.get("details", {}).get("realistic_solution", "")[:200]
+            review_text += f"### {q['title']} [{q['track']}/{q['level']}]\n"
+            review_text += f"Scenario: {q['scenario'][:300]}\n"
+            review_text += f"Napkin Math: {nm}\n\n"
+
+        prompt = (
+            "Review these ML interview questions for math errors. "
+            "For each output ONE line: "
+            'ERROR | title | error-type | description | fix, or OK | title. '
+            "Check arithmetic, hardware specs, units, logical coherence.\n\n"
+            + review_text
+        )
+
+        report_path = reviews_dir / f"review-{timestamp}-{ci:03d}.txt"
+
+        try:
+            result = subprocess.run(
+                ["gemini", "-m", model, "-p", prompt, "-o", "text"],
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            report_path.write_text(result.stdout)
+
+            for line in result.stdout.strip().split("\n"):
+                if line.startswith("ERROR"):
+                    all_errors.append(line)
+                elif line.startswith("OK"):
+                    all_ok += 1
+
+            errors_in_chunk = sum(1 for l in result.stdout.split("\n") if l.startswith("ERROR"))
+            oks_in_chunk = sum(1 for l in result.stdout.split("\n") if l.startswith("OK"))
+            print(f"  [{ci+1}/{len(chunks)}] {errors_in_chunk}E {oks_in_chunk}OK")
+        except Exception as e:
+            print(f"  [{ci+1}/{len(chunks)}] FAILED: {e}")
+
+    # Summary
+    error_rate = len(all_errors) / len(questions) * 100 if questions else 0
+    print(f"\n═══ Review Complete ═══")
+    print(f"  Reviewed: {len(questions)}")
+    print(f"  OK: {all_ok}")
+    print(f"  Errors: {len(all_errors)} ({error_rate:.2f}%)")
+
+    # Write structured report
+    report = {
+        "timestamp": timestamp,
+        "model": model,
+        "total_reviewed": len(questions),
+        "errors": len(all_errors),
+        "ok": all_ok,
+        "error_rate_pct": round(error_rate, 2),
+        "error_details": all_errors,
+    }
+    report_path = reviews_dir / f"review-{timestamp}-summary.json"
+    report_path.write_text(json.dumps(report, indent=2))
+    print(f"  Report: {report_path}")
+
+    threshold = CONFIG["review"]["error_rate_threshold"] * 100
+    if error_rate > threshold:
+        print(f"\n  ⚠️ Error rate {error_rate:.2f}% exceeds threshold {threshold}%")
+    else:
+        print(f"\n  ✅ Error rate {error_rate:.2f}% within threshold {threshold}%")
+
+
+# ─── FIGURES ────────────────────────────────────────────────────
+def cmd_figures(args):
+    """Regenerate paper figures from corpus data."""
+    paper_dir = BASE / CONFIG["paths"]["paper_dir"]
+
+    print("═══ Generating Figures ═══\n")
+
+    # Step 1: Analyze
+    print("  [1/2] Analyzing corpus...")
+    result = subprocess.run(
+        ["python3", "analyze_corpus.py"],
+        cwd=paper_dir,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"  ❌ analyze_corpus.py failed:\n{result.stderr[:300]}")
+        return
+    print(f"  {result.stdout.strip()}")
+
+    # Step 2: Generate figures
+    print("\n  [2/2] Generating figures...")
+    result = subprocess.run(
+        ["python3", "generate_figures.py"],
+        cwd=paper_dir,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"  ❌ generate_figures.py failed:\n{result.stderr[:300]}")
+        return
+    print(f"  {result.stdout.strip()}")
+
+    print("\n✅ Figures regenerated.")
+
+
+# ─── RELEASE ────────────────────────────────────────────────────
+def cmd_release(args):
+    """Full pipeline: validate → dedup → chains → stats → figures → export."""
+    steps = CONFIG["release"]["steps"]
+
+    if hasattr(args, "skip") and args.skip:
+        skip_set = set(args.skip.split(","))
+        steps = [s for s in steps if s not in skip_set]
+
+    print("═══ StaffML Release Pipeline ═══")
+    print(f"  Steps: {' → '.join(steps)}\n")
+
+    results = {}
+
+    for step in steps:
+        print(f"{'─'*50}")
+        print(f"  STEP: {step}")
+        print(f"{'─'*50}")
+
+        if step == "validate":
+            from schema import validate_corpus
+
+            corpus = load_corpus()
+            valid, errors, warnings = validate_corpus(corpus)
+            results["validate"] = {"errors": len(errors), "warnings": len(warnings)}
+            if errors and CONFIG["release"]["require_zero_errors"]:
+                print(f"  ❌ BLOCKED: {len(errors)} validation errors")
+                for e in errors[:5]:
+                    print(f"    • {e}")
+                return
+            print(f"  ✅ {len(valid)} questions pass ({len(warnings)} warnings)")
+
+        elif step == "dedup":
+            # Run dedup inline
+            corpus = load_corpus()
+            scenarios = defaultdict(list)
+            for q in corpus:
+                if q.get("status", "published") == "published":
+                    key = q["scenario"].lower().strip()
+                    scenarios[key].append(q["id"])
+            exact = {k: v for k, v in scenarios.items() if len(v) > 1}
+            results["dedup"] = {"exact_dupes": len(exact)}
+            print(f"  Exact duplicates: {len(exact)}")
+            if exact:
+                for ids in list(exact.values())[:3]:
+                    print(f"    {ids}")
+
+        elif step == "chains":
+            # Build chains + backpopulate
+            import types
+
+            chain_args = types.SimpleNamespace(min_levels=CONFIG["chains"]["min_levels"])
+            cmd_chains(chain_args)
+
+            if CONFIG["chains"]["backpopulate"]:
+                # Backpopulate chain_ids
+                corpus = load_corpus()
+                chains = json.loads(CHAINS_PATH.read_text()) if CHAINS_PATH.exists() else []
+                id_to_chains = defaultdict(list)
+                for chain in chains:
+                    for pos, cq in enumerate(chain["questions"]):
+                        id_to_chains[cq["id"]].append((chain["chain_id"], pos))
+                linked = 0
+                for q in corpus:
+                    if q["id"] in id_to_chains:
+                        q["chain_ids"] = [cid for cid, _ in id_to_chains[q["id"]]]
+                        q["chain_positions"] = {
+                            cid: pos for cid, pos in id_to_chains[q["id"]]
+                        }
+                        linked += 1
+                    else:
+                        q["chain_ids"] = None
+                        q["chain_positions"] = None
+                save_corpus(corpus)
+                print(f"  Backpopulated chain_ids for {linked} questions")
+            results["chains"] = {"total": len(chains) if "chains" in dir() else 0}
+
+        elif step == "stats":
+            import types
+
+            stats_args = types.SimpleNamespace()
+            cmd_stats(stats_args)
+            results["stats"] = {"done": True}
+
+        elif step == "figures":
+            import types
+
+            fig_args = types.SimpleNamespace()
+            cmd_figures(fig_args)
+            results["figures"] = {"done": True}
+
+        elif step == "export":
+            import types
+
+            export_args = types.SimpleNamespace()
+            cmd_export(export_args)
+            results["export"] = {"done": True}
+
+        print()
+
+    # Final summary
+    print("═══ Release Summary ═══")
+    for step, result in results.items():
+        print(f"  {step}: {result}")
+    print("\n✅ Release pipeline complete.")
+
+
 # ─── CLI ────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(
@@ -516,6 +817,20 @@ def main():
 
     sub.add_parser("export", help="Generate markdown + sync to app")
 
+    review_p = sub.add_parser("review", help="Automated math review")
+    review_p.add_argument(
+        "--scope",
+        default="all",
+        help="Scope: all, track:cloud, track:edge, etc.",
+    )
+
+    sub.add_parser("figures", help="Regenerate paper figures")
+
+    release_p = sub.add_parser("release", help="Full release pipeline")
+    release_p.add_argument(
+        "--skip", default="", help="Comma-separated steps to skip"
+    )
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -530,6 +845,9 @@ def main():
         "chains": cmd_chains,
         "add": cmd_add,
         "export": cmd_export,
+        "review": cmd_review,
+        "figures": cmd_figures,
+        "release": cmd_release,
     }
     cmds[args.command](args)
 
