@@ -67,7 +67,7 @@ export function getQuestionsByFilter(filters: {
   });
 }
 
-// Gauntlet: select N questions ensuring competency breadth
+// Gauntlet: select N questions ensuring competency breadth, with warm-up
 export function selectGauntletQuestions(
   track: string,
   level: string,
@@ -75,6 +75,17 @@ export function selectGauntletQuestions(
 ): Question[] {
   const pool = questions.filter(q => q.track === track && q.level === level);
   if (pool.length === 0) return [];
+
+  // Add warm-up: pick one easier question if target level is L4+
+  const warmUpLevels: Record<string, string> = { 'L4': 'L2', 'L5': 'L3', 'L6+': 'L3' };
+  const warmUpLevel = warmUpLevels[level];
+  let warmUp: Question | null = null;
+  if (warmUpLevel) {
+    const warmUpPool = questions.filter(q => q.track === track && q.level === warmUpLevel);
+    if (warmUpPool.length > 0) {
+      warmUp = warmUpPool[Math.floor(Math.random() * warmUpPool.length)];
+    }
+  }
 
   // Group by competency area
   const byArea: Record<string, Question[]> = {};
@@ -103,10 +114,17 @@ export function selectGauntletQuestions(
     if (areaIdx > areas.length * count) break;
   }
 
-  // Shuffle the final selection
+  // Shuffle the main selection
   for (let i = selected.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [selected[i], selected[j]] = [selected[j], selected[i]];
+  }
+
+  // Prepend warm-up question (easier level) at position 0
+  if (warmUp && !usedIds.has(warmUp.id)) {
+    selected.unshift(warmUp);
+    // Trim to maintain requested count
+    if (selected.length > count) selected.pop();
   }
 
   return selected;

@@ -102,6 +102,11 @@ export function getPlanQuestions(plan: StudyPlan): Question[] {
       }).filter(q => !usedIds.has(q.id));
 
       const take = Math.min(pool.length, perArea - result.filter(q => q.competency_area === area).length);
+      // Shuffle pool to avoid always picking same questions
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
       const selected = pool.slice(0, take);
       selected.forEach(q => {
         result.push(q);

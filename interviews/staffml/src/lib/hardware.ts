@@ -82,4 +82,38 @@ export const FORMULAS = {
 
   allreduce_time_ms: (message_gb: number, bandwidth_gbs: number, num_gpus: number) =>
     (2 * (num_gpus - 1) / num_gpus) * (message_gb / bandwidth_gbs) * 1000,
+
+  // Distributed training simulation
+  pipeline_bubble_pct: (num_stages: number, num_microbatches: number) =>
+    (num_stages - 1) / (num_microbatches + num_stages - 1) * 100,
+
+  checkpoint_size_gb: (params_b: number) =>
+    params_b * 1e9 * 14 / 1e9, // 14 bytes/param for mixed-precision Adam (fp16 param + fp32 master + fp32 momentum + fp32 variance)
+
+  compute_time_ms: (flops_per_iter: number, gpu_tflops: number, num_gpus: number, mfu: number) =>
+    flops_per_iter / (gpu_tflops * 1e12 * num_gpus * mfu) * 1000,
+
+  cluster_mtbf_hours: (num_gpus: number, gpu_mtbf_hours: number) =>
+    gpu_mtbf_hours / num_gpus,
+
+  young_daly_checkpoint_interval_min: (checkpoint_time_min: number, mtbf_min: number) =>
+    Math.sqrt(2 * checkpoint_time_min * mtbf_min),
 };
+
+// Well-known model configs for the simulator
+export interface ModelConfig {
+  name: string;
+  params_b: number;
+  layers: number;
+  hidden_dim: number;
+  heads: number;
+  flops_per_token: number; // approximate FLOPs per token (forward)
+}
+
+export const MODEL_CONFIGS: ModelConfig[] = [
+  { name: 'GPT-2 (1.5B)', params_b: 1.5, layers: 48, hidden_dim: 1600, heads: 25, flops_per_token: 9e9 },
+  { name: 'Llama-2-7B', params_b: 7, layers: 32, hidden_dim: 4096, heads: 32, flops_per_token: 42e9 },
+  { name: 'Llama-2-70B', params_b: 70, layers: 80, hidden_dim: 8192, heads: 64, flops_per_token: 420e9 },
+  { name: 'Llama-3.1-405B', params_b: 405, layers: 126, hidden_dim: 16384, heads: 128, flops_per_token: 2430e9 },
+  { name: 'BERT-Large (340M)', params_b: 0.34, layers: 24, hidden_dim: 1024, heads: 16, flops_per_token: 2e9 },
+];
