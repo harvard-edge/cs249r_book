@@ -364,7 +364,7 @@ function DrillPage() {
 
         {/* Company Archetype */}
         <div>
-          <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Company Type</label>
+          <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Interview Style</label>
           <div className="space-y-1 max-h-40 overflow-y-auto">
             <button
               onClick={() => setSelectedArchetype(null)}

@@ -152,6 +152,51 @@ export default function HeatMapPage() {
           </div>
         )}
 
+        {/* Readiness verdict */}
+        {totalAttempted >= 10 && (() => {
+          // Find strongest and weakest areas
+          const areaScores = areas.map(area => {
+            let attempted = 0, correct = 0;
+            tracks.forEach(t => {
+              const cell = heatData[area]?.[t];
+              if (cell) { attempted += cell.attempted; correct += cell.correct; }
+            });
+            return { area, attempted, pct: attempted >= 2 ? Math.round((correct / attempted) * 100) : -1 };
+          }).filter(a => a.pct >= 0).sort((a, b) => a.pct - b.pct);
+
+          const weakest = areaScores[0];
+          const strongest = areaScores[areaScores.length - 1];
+          const overallPct = Math.round(areaScores.reduce((s, a) => s + a.pct, 0) / areaScores.length);
+          const readyAreas = areaScores.filter(a => a.pct >= 70).length;
+          const totalAreas = areaScores.length;
+
+          const verdict = overallPct >= 70
+            ? `You're looking strong — ${readyAreas}/${totalAreas} competencies above 70%.`
+            : overallPct >= 40
+            ? `Making progress — ${readyAreas}/${totalAreas} competencies ready. Focus on ${weakest?.area}.`
+            : `Early stages — keep drilling. Your weakest area is ${weakest?.area} (${weakest?.pct}%).`;
+
+          return (
+            <div className="mb-6 p-5 rounded-xl border border-border bg-surface/80">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-bold text-white">Readiness Verdict</span>
+                <span className={clsx(
+                  "text-lg font-bold font-mono",
+                  overallPct >= 70 ? "text-accentGreen" : overallPct >= 40 ? "text-accentAmber" : "text-accentRed"
+                )}>
+                  {overallPct}%
+                </span>
+              </div>
+              <p className="text-sm text-textSecondary mb-3">{verdict}</p>
+              <div className="flex items-center gap-4 text-[10px] font-mono text-textTertiary">
+                {strongest && <span>Strongest: <span className="text-accentGreen capitalize">{strongest.area}</span> ({strongest.pct}%)</span>}
+                {weakest && <span>Weakest: <span className="text-accentRed capitalize">{weakest.area}</span> ({weakest.pct}%)</span>}
+                <span>{totalAttempted} total answers</span>
+              </div>
+            </div>
+          );
+        })()}
+
         {totalAttempted === 0 ? (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
