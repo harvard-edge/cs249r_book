@@ -748,38 +748,6 @@ A 16 kHz sample rate means 16,000 samples are collected per second. Each sample 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The BLE Connection Event Starvation</b> · <code>interconnect</code> <code>latency</code></summary>
-
-- **Interviewer:** "Your wearable device runs a gesture recognition model on a single-core Cortex-M4. It streams the classification results (4 bytes) over Bluetooth Low Energy (BLE) to a phone. The model takes 30ms to run. You configure the BLE connection interval to 15ms to ensure low latency. The system works, but the model's inference time randomly spikes to 45ms or 60ms. What protocol conflict is causing the ML latency spikes?"
-
-  <details>
-  <summary><b>🔍 Reveal Answer</b></summary>
-
-  **Common Mistake:** "The BLE transmission takes too long." Sending 4 bytes over BLE takes microseconds. The issue is the radio's scheduling priority.
-
-  **Realistic Solution:** You caused a **Radio Interrupt Preemption**.
-
-  On a single-core MCU handling both ML and BLE (like an nRF52), the BLE SoftDevice (the radio protocol stack) runs at the absolute highest hardware interrupt priority. It *must* wake up and service the radio during every negotiated "Connection Event" to maintain synchronization with the phone, even if it has no data to send.
-
-  You set the Connection Interval to 15ms. Your ML inference takes 30ms.
-  This guarantees that the BLE radio will interrupt your neural network **at least twice** during every single forward pass.
-
-  When the BLE interrupt fires, it halts the ML math, powers up the radio, listens for the phone, transmits empty packets (or your 4 bytes), and powers down. This OS-level preemption steals CPU cycles. If the radio environment is noisy, the BLE stack may stay awake longer to handle retries, adding 5-15ms of pure delay to your 30ms inference.
-
-  **The Fix:**
-  1. Increase the BLE Connection Interval to be strictly larger than your maximum inference time (e.g., 50ms) so the ML model can finish uninterrupted between radio events.
-  2. Use a dual-core MCU (like the nRF5340) where Core 0 handles the ML math and Core 1 is dedicated entirely to the BLE radio.
-
-  > **Napkin Math:** Inference = 30ms. BLE Interval = 15ms. BLE Event Overhead = 3ms.
-  > During 30ms, the BLE stack fires twice. 30ms + (2 * 3ms) = 36ms minimum latency. If the phone requests a parameter update or there are dropped packets, the radio might hold the CPU for 10ms, pushing the inference to 40ms+.
-
-  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
-
-  </details>
-
-</details>
-
-<details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The ADC Multiplexer Race Condition</b> · <code>sensor-pipeline</code> <code>data-pipeline</code></summary>
 
 - **Interviewer:** "Your MCU has one physical ADC but reads from 4 analog sensors sequentially using an internal multiplexer (MUX). You switch the MUX to Channel 1, read, switch to Channel 2, read, etc. However, the data from Channel 1 seems to 'bleed' into Channel 2. If Sensor 1 is at 3.3V, Sensor 2 (which should be 0V) reads as 1.2V. What electrical property did you ignore?"

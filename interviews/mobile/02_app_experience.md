@@ -1452,36 +1452,6 @@ Result: The ANR condition is met. After 5 seconds of the UI thread being blocked
 
 </details>
 
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Double FPU Context Save</b> · <code>deployment</code> <code>latency</code></summary>
-
-- **Interviewer:** "Your mobile app does complex ML preprocessing in C++ (heavy floating-point math). It then passes the data to an ML model running on the same CPU core, handled by an RTOS-like microkernel on a dedicated wearable companion chip. You notice that every time the OS context-switches between your preprocessing thread and the ML inference thread, the context switch takes 3x longer than normal. What is the OS doing differently because of your math?"
-
-  <details>
-  <summary><b>🔍 Reveal Answer</b></summary>
-
-  **Common Mistake:** "Floating point math is slow." The math speed doesn't explain the context switch speed.
-
-  **Realistic Solution:** You triggered the **FPU Register Bank Context Save**.
-
-  In a standard RTOS context switch, the OS only saves the core integer registers (e.g., R0-R15 on ARM). This is fast.
-
-  However, modern CPUs have a massive separate bank of Floating Point Unit (FPU) and SIMD (NEON) registers (e.g., 32 x 128-bit registers). Saving these takes a huge amount of memory bandwidth and time.
-
-  To optimize this, most OSs use "Lazy FPU Context Switching". If a thread never executes an FPU instruction, the OS doesn't bother saving the FPU registers when switching away from it.
-  But because your preprocessing thread *and* the ML thread both use heavy floating-point math, you dirtied the FPU state in both threads. The OS is forced to save and restore the massive FPU register bank on every single context switch, tripling the latency.
-
-  **The Fix:** If possible, confine all floating-point math to a single thread, or convert the preprocessing math to fixed-point integer math. This allows the OS to use Lazy FPU saving, drastically speeding up the context switches.
-
-  > **Napkin Math:** Standard integer context save: 16 registers * 4 bytes = 64 bytes. FPU context save: + 32 SIMD registers * 16 bytes = 512 bytes. You increased the memory traffic of the OS scheduler by 800% on every single thread swap.
-
-  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
-
-  </details>
-
-</details>
-
-
 ---
 
 
@@ -2369,36 +2339,6 @@ Result: The ANR condition is met. After 5 seconds of the UI thread being blocked
 
 
 #### 🔵 L4
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Camera Defocus</b> · <code>sensor-pipeline</code> <code>deployment</code></summary>
-
-- **Interviewer:** "You deploy an edge ML model on a thermal security camera. It detects humans perfectly in the winter. In the summer, the camera enclosure heats up significantly. The model's accuracy drops to near zero. The camera isn't thermal throttling, and the ambient temperature isn't higher than a human body. You look at the raw thermal images, and they are completely blurry. What physical property of the hardware failed?"
-
-  <details>
-  <summary><b>🔍 Reveal Answer</b></summary>
-
-  **Common Mistake:** "Thermal cameras can't see humans when it's hot." They can, if the background isn't exactly 98.6F. The prompt says the images are blurry, not washed out.
-
-  **Realistic Solution:** You experienced **Thermal Expansion of the Lens Assembly (Focus Shift)**.
-
-  Thermal cameras use specialized lenses (often made of Germanium, not glass). Germanium has a very high coefficient of thermal expansion.
-
-  When the camera enclosure heats up in the summer, the physical lens material expands, and the mechanical barrel holding the lens expands. This physically moves the lens further away from the microbolometer sensor array.
-
-  Because the focal point shifted, the optical image hitting the sensor is completely out of focus. Your neural network was trained on sharp edges and clear silhouettes; it cannot process a completely blurred blob of heat.
-
-  **The Fix:**
-  1. Use **Athermalized Lenses** (mechanically designed to counteract expansion using varying materials).
-  2. Implement an active motorized autofocus system that recalibrates based on an internal temperature sensor.
-
-  > **Napkin Math:** A Germanium lens might expand by 50 micrometers over a 30°C temperature swing. If the depth of field is only 10 micrometers, a 50um shift completely destroys the optical focus, turning a sharp 10x10 pixel human face into a blurry 30x30 gradient.
-
-  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
-
-  </details>
-
-</details>
-
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Thermal Camera Defocus</b> · <code>sensor-pipeline</code> <code>deployment</code></summary>
 

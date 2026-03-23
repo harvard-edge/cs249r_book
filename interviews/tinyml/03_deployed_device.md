@@ -1724,36 +1724,6 @@ P_avg ≈ 1.68 mW
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Model Checksum Paradox</b> · <code>deployment</code> <code>security</code></summary>
-
-- **Interviewer:** "You deploy a `.tflite` model to an MCU via an OTA update. To ensure the file isn't corrupted, you calculate a CRC32 checksum of the file on your server, send it to the device, and the device calculates the CRC32 of the downloaded file. They match. The device reboots. The model fails to load, crashing the device. How can a file have a perfect checksum but still be completely invalid?"
-
-  <details>
-  <summary><b>🔍 Reveal Answer</b></summary>
-
-  **Common Mistake:** "CRC32 has collisions." While CRC32 isn't cryptographically secure, random collisions on OTA updates are vanishingly rare. The problem is what happened *after* the download.
-
-  **Realistic Solution:** You checked the data in transit, but ignored **Flash Write Errors**.
-
-  Your OTA architecture likely did this:
-  1. Download chunk from network into RAM.
-  2. Update running CRC32 calculation using the RAM buffer.
-  3. Write the RAM buffer to Flash memory.
-  4. Compare final CRC32. Match!
-
-  The flaw is that you verified the bytes *before* they were written to the physical storage medium. If the Flash memory was worn out, if there was a voltage droop during the write, or if you forgot to erase the Flash sector before writing (Flash can only turn 1s into 0s without an erase), the physical bits on the silicon will be corrupted. Your RAM buffer was perfect, but the persistent storage is garbage.
-
-  **The Fix:** Always calculate the checksum by reading the data **back out of the Flash memory** after the write is complete. This verifies the entire pipeline: network -> RAM -> Flash Controller -> Physical Silicon.
-
-  > **Napkin Math:** Flash memory must be erased to `0xFF` before writing. If you write `0xAA` (10101010) over unerased data like `0x0F` (00001111), the result is the bitwise AND: `0x0A` (00001010). The file on disk is destroyed, even though the byte in RAM you checksummed was a perfect `0xAA`.
-
-  📖 **Deep Dive:** [Volume I: Optimizing AI](https://harvard-edge.github.io/cs249r_book_dev/contents/optimizing_ai/optimizing_ai.html)
-
-  </details>
-
-</details>
-
-<details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> BLE Throughput for Model Update</b> · <code>deployment</code> <code>monitoring</code></summary>
 
 - **Interviewer:** "Your TinyML wearable needs an over-the-air model update via BLE 5.0. The new model is 150 KB (INT8 quantized, stored in external flash). BLE 5.0 supports 2 Mbps PHY with a maximum data throughput of ~1.4 Mbps after protocol overhead. The device has a 100 mAh battery at 3.7V. The BLE radio draws 8 mA during active transmission/reception. Estimate the update time and the battery cost of the update."
@@ -2305,37 +2275,6 @@ P_avg ≈ 1.68 mW
 
 </details>
 
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The OTA Bandwidth Congestion</b> · <code>interconnect</code> <code>deployment</code></summary>
-
-- **Interviewer:** "You have a fleet of 5,000 smart factory sensors connected via a shared LoRaWAN gateway. You push a 100 KB model update to the fleet simultaneously. The OTA update process stalls, taking days to complete, and normal sensor telemetry stops functioning entirely. What network characteristic of LoRaWAN did you violate?"
-
-  <details>
-  <summary><b>🔍 Reveal Answer</b></summary>
-
-  **Common Mistake:** "100 KB is too large for the gateway." While true, it's not just the size; it's the collision domain and the protocol duty cycle.
-
-  **Realistic Solution:** You violated the **Duty Cycle Limits and the ALOHA MAC protocol**.
-
-  LoRaWAN operates in unlicensed sub-GHz bands (like 868 MHz or 915 MHz). By law in many regions, a device can only transmit for 1% of the time (the duty cycle limit).
-
-  Furthermore, LoRa uses a modified ALOHA protocol. Devices just "shout" their data into the air. If 5,000 devices are all trying to send acknowledgment packets (ACKs) for the OTA chunks they are receiving at the exact same time, the radio waves collide in the air. The gateway receives garbage. The devices wait, timeout, and retry... causing even more collisions. This is a **Broadcast Storm**.
-
-  Your OTA update effectively DDOS'd your own factory network.
-
-  **The Fix:**
-  1. Use **Multicast OTA (FUOTA - Firmware Update Over The Air)**. The gateway broadcasts the firmware chunks once, and all 5,000 devices listen simultaneously without sending individual ACKs for every packet. They only request missing packets at the very end.
-  2. If Multicast isn't available, you must strictly stagger the updates (e.g., updating only 10 devices an hour) to prevent airwave congestion.
-
-  > **Napkin Math:** In LoRa SF12, a 51-byte payload takes ~2.5 seconds of airtime. A 1% duty cycle means the device must remain completely silent for the next 247 seconds before it can send an ACK. Sending 100 KB point-to-point to 5,000 devices is mathematically impossible under these physics.
-
-  📖 **Deep Dive:** [Volume I: Optimizing AI](https://harvard-edge.github.io/cs249r_book_dev/contents/optimizing_ai/optimizing_ai.html)
-
-  </details>
-
-</details>
-
-
 ---
 
 
@@ -2499,34 +2438,6 @@ P_avg ≈ 1.68 mW
   </details>
 
 </details>
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Flash Wear-Leveling Blindspot</b> · <code>persistent-storage</code> <code>deployment</code></summary>
-
-- **Interviewer:** "Your edge sensors log anomaly data to internal Flash. To prevent wearing out the Flash (which has a 10,000 cycle limit), you write a script to always save logs starting at memory address 0x08000000, and sequentially move forward to 0x08040000 before looping back. After a year, the system crashes because the flash sector at 0x08000000 is physically destroyed. Why didn't your sequential logging work as wear-leveling?"
-
-  <details>
-  <summary><b>🔍 Reveal Answer</b></summary>
-
-  **Common Mistake:** "You didn't make the loop big enough." The size of the loop isn't the primary failure mode; it's how Flash physics requires data to be updated.
-
-  **Realistic Solution:** You ignored **Flash Page Erase Granularity**.
-
-  You can write (program) bits in Flash from 1 to 0 sequentially. But you cannot flip a 0 back to a 1 without **erasing an entire sector/page** at once.
-  If your microcontroller's flash sector size is 16 KB, and you write 100 bytes of logs sequentially into that sector, you eventually fill the 16 KB. To write the 16,001st byte, you must erase the *entire* 16 KB sector.
-
-  Your script looped through the memory, but every time it looped back to 0x08000000, it had to issue an Erase command on Sector 0. If you log frequently, Sector 0 absorbs massive amounts of Erase cycles (which is what physically destroys the silicon) while the rest of the memory space might remain lightly used.
-
-  **The Fix:** Never write raw Flash management code yourself. Use a proper **Flash Translation Layer (FTL)** or an embedded filesystem designed for flash (like LittleFS or SPIFFS). These libraries abstract the physical addresses and automatically map logical writes to different physical sectors to ensure perfect, even wear-leveling across the entire chip.
-
-  > **Napkin Math:** If you log 64 bytes a minute, a 16 KB sector fills in 256 minutes (~4.2 hours). You are erasing that sector 5.6 times a day. 5.6 erases * 365 days = 2,044 erase cycles per year. The flash will die in roughly 4.8 years.
-
-  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
-
-  </details>
-
-</details>
-
 
 #### 🟡 L5
 

@@ -15882,34 +15882,6 @@ Let's re-read the prompt. `30 seconds of raw audio`. Let's re-verify the math. 3
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Context Switch Cost</b> · <code>real-time</code> <code>model-cost</code></summary>
-
-- **Interviewer:** "You are running inference on a Cortex-M4 using an RTOS. Your model takes 20ms to run. To prevent starring other tasks, you split the inference into 20 chunks of 1ms, calling `taskYIELD()` between each chunk. Now, your inference takes 35ms total. What RTOS mechanism is costing you 15ms?"
-
-  <details>
-  <summary><b>🔍 Reveal Answer</b></summary>
-
-  **Common Mistake:** "The OS is just slow at executing the yield function." It's not the function call; it's the physical movement of data required to change tasks.
-
-  **Realistic Solution:** You are experiencing the hidden cost of **Context Switching**.
-
-  Every time you call `taskYIELD()`, the RTOS must halt your ML thread. To do this safely, it must take all the values currently sitting in the CPU's registers (R0-R15, Program Counter, Status Registers) and push them onto the thread's Stack in SRAM. Then, it loads the registers of the next task from its stack, and resumes execution.
-
-  When that task yields back to your ML model, the RTOS does the reverse: saving the other task's state and restoring your ML task's 16+ registers from SRAM back into the CPU core.
-
-  On a Cortex-M4, a full RTOS context switch can take hundreds of clock cycles. Doing this 20 times (or 40, counting the return trips) introduces massive overhead.
-
-  **The Fix:** You must balance responsiveness with throughput. Yielding every 1ms is too aggressive. Yielding every 5ms or 10ms (at natural layer boundaries in the neural network) drastically reduces context switching overhead while still keeping the system responsive.
-
-  > **Napkin Math:** If a context switch takes 10 microseconds, and you yield to 5 other tasks 20 times, you perform 100 context switches. That's 1ms of pure OS overhead. If those tasks also do work or trigger other interrupts, cache/pipeline disruption inflates this further, easily reaching the 15ms penalty observed.
-
-  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
-
-  </details>
-
-</details>
-
-<details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Branch Prediction Penalty</b> · <code>roofline</code> <code>model-cost</code></summary>
 
 - **Interviewer:** "You are implementing a custom Leaky ReLU activation function in C. You write it like this: `for(i=0; i<N; i++) { if (x[i] > 0) y[i] = x[i]; else y[i] = x[i] * 0.1f; }`. You test it on an array of 10,000 values, and it takes 30,000 cycles. Why is a simple `if` statement so incredibly slow on an ARM Cortex-M7?"
@@ -17267,66 +17239,6 @@ Analyze the interaction between the adaptive normalization, the Flash checkpoint
   > **Napkin Math:** Software double-precision multiply: ~50-100 cycles. Hardware single-precision multiply: 1 cycle. Missing one `f` in your source code made that specific operation 100x slower.
 
   📖 **Deep Dive:** [Volume I: Neural Computation](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
-
-  </details>
-
-</details>
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Double-Precision FPU Trap</b> · <code>roofline</code> <code>mixed-precision</code></summary>
-
-- **Interviewer:** "You are porting a Python model to C for a Cortex-M7. In Python, you have the line `y = x * 0.5`. In your C code, you write exactly that: `float y = x * 0.5;`. Your profiling shows this one line is incredibly slow. The M7 has a hardware FPU. Why is this math operation stalling the pipeline?"
-
-  <details>
-  <summary><b>🔍 Reveal Answer</b></summary>
-
-  **Common Mistake:** "Floating point math is just naturally slow on microcontrollers." While true historically, an M7 with an FPU should execute this in one cycle. The problem is a specific C language default.
-
-  **Realistic Solution:** You fell into the **Double-Precision Promotion Trap**.
-
-  In the C language, the literal `0.5` is treated as a `double` (64-bit float) by default, not a `float` (32-bit).
-  If your Cortex-M7 only has a single-precision FPU (FPv5-SP), it physically cannot execute 64-bit math in hardware.
-
-  When the compiler sees `x * 0.5`, it implicitly promotes `x` to a `double`, and then calls a software library function (like `__aeabi_dmul`) to perform the 64-bit multiplication using integer registers. This software emulation takes dozens or hundreds of cycles.
-
-  **The Fix:** You must append an `f` to floating-point literals in C/C++ to force single-precision: `float y = x * 0.5f;`. This allows the compiler to map the operation directly to a single-cycle hardware `VMUL.F32` instruction.
-
-  > **Napkin Math:** Software double-precision multiply: ~50-100 cycles. Hardware single-precision multiply: 1 cycle. Missing one `f` in your source code made that specific operation 100x slower.
-
-  📖 **Deep Dive:** [Volume I: Neural Computation](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
-
-  </details>
-
-</details>
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The LDO Regulator Brownout</b> · <code>power</code> <code>model-cost</code></summary>
-
-- **Interviewer:** "Your TinyML acoustic sensor runs on a small LiPo battery. The MCU operates at 3.3V, powered by an LDO (Low Dropout) voltage regulator connected to the battery. The system works perfectly when the battery is fully charged (4.2V). However, when the battery reaches 3.5V (still holding 30% of its capacity), the MCU randomly resets during ML inference. Why is a 3.5V battery failing to power a 3.3V system?"
-
-  <details>
-  <summary><b>🔍 Reveal Answer</b></summary>
-
-  **Common Mistake:** "The battery is dead." A LiPo at 3.5V has plenty of energy left. The issue is the power delivery circuitry.
-
-  **Realistic Solution:** You hit the **LDO Dropout Voltage combined with Inference Current Spikes**.
-
-  An LDO regulator needs a certain amount of "headroom" (the Dropout Voltage) above the target output voltage to maintain regulation. A cheap LDO might have a dropout voltage of 300mV (0.3V).
-  If you want 3.3V out, you *must* provide at least 3.6V in.
-
-  When the battery is at 3.5V, the LDO is already struggling.
-  When the MCU wakes up and executes a heavy CMSIS-NN convolution, the CPU core draws a sudden spike of current (e.g., jumping from 1mA to 40mA in a microsecond).
-
-  This sudden current draw causes a temporary voltage sag on the battery (due to internal resistance). The battery voltage dips to 3.3V. The LDO, needing 0.3V of headroom, can only output 3.0V. The MCU's internal Brown-Out Detector (BOD) sees the voltage drop below its safety threshold (e.g., 3.1V) and immediately triggers a hardware reset to prevent memory corruption.
-
-  **The Fix:**
-  1. Replace the LDO with an ultra-low dropout regulator (e.g., 50mV dropout).
-  2. Add a large bypass capacitor (e.g., 100uF) as close to the MCU's VDD pins as possible to supply the instantaneous current spikes, shielding the battery and LDO from the sudden demand.
-  3. Switch to a Buck-Boost switching regulator.
-
-  > **Napkin Math:** Battery = 3.5V. Internal Resistance = 5 Ohms. Inference Spike = 40mA (0.04A). Voltage Sag = V = I*R = 0.04 * 5 = 0.2V. Battery instantly drops to 3.3V under load. LDO Dropout = 0.3V. Final MCU Voltage = 3.0V. BOD trips at 3.1V. System crashes.
-
-  📖 **Deep Dive:** [Volume II: Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
 
   </details>
 
@@ -22471,34 +22383,6 @@ The correct approach is to architect a mixed-precision solution:
   > **Napkin Math:** Naive C: 1 MAC per cycle (load, multiply, accumulate = ~3 cycles with pipeline, but ~1 effective with optimization). CMSIS-NN with `SMLAD`: 2 MACs per cycle. With loop unrolling (4 iterations): pipeline stalls eliminated, achieving ~1.8 MACs/cycle effective. For a 256×256 matrix multiply: $256 \times 256 = 65,536$ MACs. Naive: ~200K cycles. CMSIS-NN: ~36K cycles. At 100 MHz: 2 ms vs 0.36 ms per matmul.
 
   📖 **Deep Dive:** [Volume I: Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
-
-  </details>
-
-</details>
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CMSIS-NN Transpose Overhead</b> · <code>compilation</code> <code>memory-hierarchy</code></summary>
-
-- **Interviewer:** "You are running a CNN on a Cortex-M4. The model was trained in PyTorch (which defaults to NCHW memory layout). You convert it to TFLite Micro and use the CMSIS-NN kernels. The model runs, but the profiler shows that between every single convolution layer, the CPU spends 30% of the total inference time executing a `Transpose` operation. Why is the framework transposing the data, and how do you eliminate it?"
-
-  <details>
-  <summary><b>🔍 Reveal Answer</b></summary>
-
-  **Common Mistake:** "TFLite is unoptimized, you need to write custom C code." The framework is doing exactly what it has to do based on the input graph.
-
-  **Realistic Solution:** You are hitting the **Memory Layout Mismatch (NCHW vs NHWC)**.
-
-  PyTorch natively trains in `NCHW` (Channels-First) format. CMSIS-NN (and ARM NEON/DSP instructions in general) are strictly optimized for `NHWC` (Channels-Last) format. In `NHWC`, the channels for a single pixel are contiguous in memory, allowing a single 32-bit `LDR` instruction to fetch 4 INT8 channels at once.
-
-  Because you exported an `NCHW` graph to TFLite without explicitly converting the layout, TFLite Micro realizes that the CMSIS-NN `arm_convolve_s8` function physically *cannot* accept NCHW data. To prevent a crash, the TFLite compiler automatically inserts a `Transpose` node (converting NCHW to NHWC) before the convolution, and another `Transpose` (NHWC back to NCHW) after it.
-
-  Transposing a tensor on a microcontroller requires strided memory accesses, which destroys cache locality and takes millions of clock cycles.
-
-  **The Fix:** You must convert the graph layout *before* or *during* export. Use tools like `tf.lite.TFLiteConverter` with optimization flags that force the entire graph into NHWC format statically. The TFLite compiler will fuse/eliminate the transposes, allowing the CMSIS-NN kernels to pass data directly to each other.
-
-  > **Napkin Math:** Transposing a 32x32x64 INT8 tensor requires moving 65,536 bytes via strided reads. On an M4 without a data cache, this can take ~500,000 cycles. Doing this before and after 10 layers wastes 10 million CPU cycles (60ms at 168 MHz) purely on rearranging data.
-
-  📖 **Deep Dive:** [Volume I: HW Acceleration](https://harvard-edge.github.io/cs249r_book_dev/contents/hw_acceleration/hw_acceleration.html)
 
   </details>
 

@@ -16585,41 +16585,6 @@ Proposal B is cheaper by $2,000 per year.
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CPU-GPU Asynchronous Desync</b> · <code>data-pipeline</code> <code>roofline</code></summary>
-
-- **Interviewer:** "Your mobile app applies an ML filter to a live video feed. The camera produces frames at 30 FPS. The GPU runs the ML filter in 20ms. The CPU submits the job to the GPU, waits for it to finish using `glFinish()`, and then renders it to the screen. You notice the framerate is only 22 FPS, even though 20ms is well under the 33ms deadline. What pipeline rule did you break?"
-
-  <details>
-  <summary><b>🔍 Reveal Answer</b></summary>
-
-  **Common Mistake:** "The GPU is slower than 20ms in reality." The GPU is fast; the CPU is blocking it.
-
-  **Realistic Solution:** You broke the pipeline by forcing **Synchronous Execution (`glFinish`)**.
-
-  The CPU and GPU are designed to run asynchronously. The CPU is supposed to queue up work (draw calls, compute shaders) and immediately move on to preparing the next frame. The GPU pulls from that queue and executes.
-
-  By calling `glFinish()`, you force the CPU to physically halt and wait until the GPU is completely finished with the current frame.
-  1. CPU prepares Frame 1 (5ms).
-  2. CPU tells GPU to execute.
-  3. CPU goes to sleep (`glFinish`).
-  4. GPU wakes up, executes Frame 1 (20ms).
-  5. GPU finishes, wakes CPU.
-  6. CPU renders Frame 1 (5ms), *then* starts preparing Frame 2.
-
-  The total latency is 5 + 20 + 5 = 30ms. But because you serialized them, the *throughput* is also 1 frame / 30ms = 33 FPS. Add in OS jitter, and you drop to 22 FPS.
-
-  **The Fix:** You must pipeline the system. The CPU should submit Frame 1, and *instantly* start preparing Frame 2 while the GPU is processing Frame 1. You synchronize using Fences/Semaphores (`glFenceSync`), not blocking waits, allowing the CPU and GPU to work in parallel.
-
-  > **Napkin Math:** Serialized: CPU (5) -> GPU (20) -> CPU (5). Total time = 30ms. Max FPS = 33.
-  > Pipelined: CPU prepares F2 while GPU processes F1. The bottleneck is the GPU (20ms). Max FPS = 1 / 20ms = 50 FPS.
-
-  📖 **Deep Dive:** [Volume I: ML Systems](https://harvard-edge.github.io/cs249r_book_dev/contents/ml_systems/ml_systems.html)
-
-  </details>
-
-</details>
-
-<details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Native Bridge Array Copy</b> · <code>model-cost</code> <code>memory-hierarchy</code></summary>
 
 - **Interviewer:** "You build a React Native app that runs an image classification model. The ML model takes 10ms. You pass the base64 encoded image string from JavaScript to the native iOS/Android module over the React Native bridge. The total frame processing time spikes to 60ms. Why is the bridge so slow, and how do you bypass it for high-frequency video?"
@@ -17406,32 +17371,6 @@ Analyze their assumption. Differentiate the practical physics of this data trans
   > **Napkin Math:** Available: 2.5 GB. Naive budget: 2.77 GB (over by 270 MB → app killed). Optimized budget: 517 MB (under by 2 GB → safe). Decode latency: 30.3ms/token → 33 tok/s. Prefill 512 tokens at 35 TOPS INT4: 512 × 6 GFLOPs / 70 TOPS = 44ms. Time-to-first-token: 44ms. Battery per 100-token response: 3s × 5W = 15J = 0.03%. Battery for 30-min conversation: 17%.
 
   📖 **Deep Dive:** [Volume I: Model Serving](https://harvard-edge.github.io/cs249r_book_dev/contents/model_serving/model_serving.html)
-
-  </details>
-
-</details>
-
-<details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The JNI Boundary Crossing</b> · <code>model-cost</code> <code>latency</code></summary>
-
-- **Interviewer:** "You write a highly optimized C++ inference engine using XNNPACK for Android. Your Java app calls `runInference(float[] image)` natively via JNI. The C++ code executes in 5ms. However, the app measures 18ms per frame. What is JNI doing that consumes 13ms of overhead?"
-
-  <details>
-  <summary><b>🔍 Reveal Answer</b></summary>
-
-  **Common Mistake:** "JNI function calls are just slow." The function call itself takes microseconds. The massive overhead comes from data marshaling.
-
-  **Realistic Solution:** You are suffering from **JNI Data Copying and Array Marshaling**.
-
-  When you pass a standard Java `float[]` array (which lives in the managed JVM heap and can be moved by the Garbage Collector) to a C++ JNI function, the JVM must ensure the memory is safe for native C++ to access.
-
-  To do this, JNI typically allocates a new C++ array and copies every single byte of the image data from the Java heap to the Native heap before the C++ code can even start. After inference, it copies the output tensor back. For a 1080p image, this `memcpy` operation across the managed/unmanaged boundary completely dominates the execution time.
-
-  **The Fix:** You must use **NIO Direct ByteBuffers** (`ByteBuffer.allocateDirect()`). A Direct ByteBuffer allocates memory directly on the native C++ heap. When you pass a Direct ByteBuffer via JNI, the JVM simply passes the raw memory pointer (zero-copy), reducing the 13ms overhead to less than 0.1ms.
-
-  > **Napkin Math:** 1080p Image = 1920 x 1080 x 3 bytes = 6.2 MB. Copying 6.2 MB of memory twice per frame (in and out) on a mobile CPU takes roughly 10-15 milliseconds.
-
-  📖 **Deep Dive:** [Volume I: Data Engineering](https://harvard-edge.github.io/cs249r_book_dev/contents/data_engineering/data_engineering.html)
 
   </details>
 

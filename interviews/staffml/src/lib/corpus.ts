@@ -9,7 +9,7 @@ export interface Question {
   topic: string;
   scenario: string;
   competency_area: string;
-  company_archetype: string;
+  company_archetype?: string;
   details: {
     common_mistake: string;
     realistic_solution: string;
@@ -48,7 +48,7 @@ export function getCompetencyAreas(): string[] {
 }
 
 export function getArchetypes(): string[] {
-  const archetypes = new Set(questions.map((q) => q.company_archetype));
+  const archetypes = new Set(questions.map((q) => q.company_archetype).filter((a): a is string => !!a));
   return Array.from(archetypes).sort();
 }
 

@@ -2134,7 +2134,7 @@ When training on a single node (8 GPUs), you observe a steady training throughpu
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> Multi-modal Candidate Generation at Billion-Scale</b> · <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6%2B_Staff-red?style=flat-square" alt="Level 6+" align="center"> Multi-modal Candidate Generation at Billion-Scale</b> · <code>serving</code></summary>
 
 - **Interviewer:** "Design the candidate generation layer for Instagram Reels. We have a corpus of 10s of billions of videos, each with distinct video, audio, and text features. The retrieval system needs to fetch the top 1000 relevant candidates for a user in under 50ms at a peak load of 100,000 QPS. How do you design the embedding architecture, index, and serving infrastructure to support multi-modal retrieval at this scale?"
 
@@ -2150,7 +2150,7 @@ When training on a single node (8 GPUs), you observe a steady training throughpu
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> Real-Time Click Prediction with Continual Learning</b> · <code>data-pipeline</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6%2B_Staff-red?style=flat-square" alt="Level 6+" align="center"> Real-Time Click Prediction with Continual Learning</b> · <code>data-pipeline</code></summary>
 
 - **Interviewer:** "We need to update our ad click-through rate (CTR) prediction models in real-time. We receive over 10 million ad events (impressions, clicks, conversions) per second globally. How do you design the streaming ingestion and distributed training pipeline to update the model weights within 5 minutes of a user interacting with an ad, while rigorously handling delayed feedback (late clicks)?"
 
@@ -2166,7 +2166,7 @@ When training on a single node (8 GPUs), you observe a steady training throughpu
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> Scaling Foundation Models on Trillions of Tokens</b> · <code>data-parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6%2B_Staff-red?style=flat-square" alt="Level 6+" align="center"> Scaling Foundation Models on Trillions of Tokens</b> · <code>data-parallelism</code></summary>
 
 - **Interviewer:** "We are training a massive dense Transformer model (100B+ parameters) on a multimodal dataset of 5 trillion tokens. Training is taking too long on our 10,000 GPU cluster. How would you architect the distributed training strategy (3D parallelism) and specifically optimize the DDP communication overhead to maximize Model Flops Utilization (MFU)?"
 
@@ -2182,7 +2182,7 @@ When training on a single node (8 GPUs), you observe a steady training throughpu
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> Global Scale Real-Time Two-Tower Recommendation</b> · <code>serving</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6%2B_Staff-red?style=flat-square" alt="Level 6+" align="center"> Global Scale Real-Time Two-Tower Recommendation</b> · <code>serving</code></summary>
 
 - **Interviewer:** "We are re-architecting the YouTube short-video recommendation retrieval system to support 50 billion candidates globally, served from 12+ datacenters. We want to use a massive 500B parameter two-tower model to improve relevance. How do you design the embedding table distribution and serving infrastructure on TPU v5e pods to ensure sub-50ms p99 latency while maximizing TPU High-Bandwidth Memory (HBM) utilization across global regions?"
 
@@ -2205,7 +2205,7 @@ When training on a single node (8 GPUs), you observe a steady training throughpu
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> Multi-Turn Gemini LLM Serving with PagedAttention</b> · <code>kv-cache</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6%2B_Staff-red?style=flat-square" alt="Level 6+" align="center"> Multi-Turn Gemini LLM Serving with PagedAttention</b> · <code>kv-cache</code></summary>
 
 - **Interviewer:** "We are scaling the backend for Gemini Advanced, specifically focusing on multi-turn, long-context conversations (up to 1M tokens). Our current inference clusters are bottlenecked by HBM capacity, not compute, due to severe KV cache fragmentation. Design an inference serving architecture that optimizes KV cache allocation and request routing across a TPU v5p pod to maximize batch size and throughput without violating our 2-second time-to-first-token (TTFT) SLA."
 
@@ -2228,7 +2228,7 @@ When training on a single node (8 GPUs), you observe a steady training throughpu
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+-red?style=flat-square" alt="Level 6+" align="center"> Trillion-Parameter MoE Training on TPU Torus Topology</b> · <code>data-parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6%2B_Staff-red?style=flat-square" alt="Level 6+" align="center"> Trillion-Parameter MoE Training on TPU Torus Topology</b> · <code>data-parallelism</code></summary>
 
 - **Interviewer:** "We are training a 2-Trillion parameter Mixture-of-Experts (MoE) foundational model from scratch on a massive TPU v5p multi-slice cluster (10,000+ chips). Communication overhead over the Optical Circuit Switches (OCS) between slices is severely bottlenecking our Model Flops Utilization (MFU). Design a 3D + Expert parallelism strategy that maps optimally to the physical TPU 3D torus topology to hit at least 45% MFU."
 
