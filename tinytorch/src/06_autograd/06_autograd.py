@@ -404,32 +404,25 @@ This ensures gradients flow correctly regardless of broadcasting patterns!
 def _reduce_broadcast_grad(grad, original_shape):
     """
     Reduce gradient to match original tensor shape after broadcasting.
-    
-    This is a critical operation for correct gradient computation when
-    tensors of different shapes are combined via broadcasting.
-    
-    Args:
-        grad: Gradient array (may be larger due to broadcasting)
-        original_shape: Target shape (original tensor's shape)
-    
-    Returns:
-        Reduced gradient matching original_shape
-    
-    Algorithm:
-    1. Remove leading dimensions that were broadcast
-    2. Sum over dimensions where original had size 1
-    3. Maintain shape consistency with keepdims
-    
-    Examples:
-        >>> # Bias case: (32, 128) → (128,)
-        >>> grad = np.ones((32, 128))
-        >>> reduced = _reduce_broadcast_grad(grad, (128,))
-        >>> reduced.shape  # (128,)
-        
-        >>> # Singleton case: (32, 10, 5) → (10, 1)
-        >>> grad = np.ones((32, 10, 5))
-        >>> reduced = _reduce_broadcast_grad(grad, (10, 1))
-        >>> reduced.shape  # (10, 1)
+
+    TODO: Implement gradient shape reduction for broadcast operations.
+
+    APPROACH:
+    1. Remove leading dimensions: while grad has more dims than original, sum axis=0
+    2. Collapse singleton dimensions: where original had size 1, sum with keepdims=True
+
+    EXAMPLE:
+    >>> # Bias case: (32, 128) → (128,)
+    >>> grad = np.ones((32, 128))
+    >>> reduced = _reduce_broadcast_grad(grad, (128,))
+    >>> reduced.shape  # (128,)
+
+    >>> # Singleton case: (32, 10, 5) → (10, 1)
+    >>> grad = np.ones((32, 10, 5))
+    >>> reduced = _reduce_broadcast_grad(grad, (10, 1))
+    >>> reduced.shape  # (10, 1)
+
+    HINT: Two separate loops — one for leading dims, one for singleton dims.
     """
     ### BEGIN SOLUTION
     # Step 1: Remove leading dimensions that weren't in original tensor
@@ -445,6 +438,17 @@ def _reduce_broadcast_grad(grad, original_shape):
     
     return grad
     ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🔬 Unit Test: Broadcast Gradient Reduction
+
+This test validates our gradient reduction helper handles all broadcasting scenarios.
+
+**What we're testing**: Correct shape reduction for gradients after broadcasting
+**Why it matters**: Wrong gradient shapes cause crashes or silent bugs in training
+**Expected**: Reduced gradients match original tensor shapes for all broadcasting patterns
+"""
 
 # %% nbgrader={"grade": true, "grade_id": "test-reduce-broadcast-grad", "locked": true, "points": 5}
 def test_unit_reduce_broadcast_grad():
