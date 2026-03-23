@@ -1,8 +1,8 @@
 """
 Module 01: Progressive Integration Tests
-Tests that Module 02 (Tensor) works correctly AND that all previous modules still work.
+Tests that Module 01 (Tensor) works correctly.
 
-DEPENDENCY CHAIN: 01_setup → 02_tensor
+DEPENDENCY CHAIN: 01_tensor
 This ensures students can trace back exactly where issues originate.
 """
 
@@ -41,8 +41,8 @@ class TestModule01Prerequisites:
                 assert False, f"Setup failed: {package} not available"
 
 
-class TestModule02TensorCore:
-    """Test that Module 02 (Tensor) core functionality works."""
+class TestModule01TensorCore:
+    """Test that Module 01 (Tensor) core functionality works."""
 
     def test_tensor_creation_and_basics(self):
         """Test tensor creation works correctly."""
@@ -80,29 +80,27 @@ class TestModule02TensorCore:
 
 
 class TestProgressiveStack:
-    """Test that the progressive stack (01→02) works together."""
+    """Test that the progressive stack (01) works correctly."""
 
-    def test_setup_enables_tensor(self):
-        """Test that proper setup enables tensor functionality."""
-        # Verify setup created the foundation for tensors
-
-        # 1. Environment should support numpy (from setup)
+    def test_environment_enables_tensor(self):
+        """Test that the environment supports tensor functionality."""
+        # 1. Environment should support numpy
         import numpy as np
         assert np.__version__ is not None, "Numpy not properly set up"
 
         # 2. Project structure should support tensor module (in src/ for students)
         tensor_module_path = Path(__file__).parent.parent.parent / "src" / "01_tensor"
-        assert tensor_module_path.exists(), "Setup didn't create proper module structure"
+        assert tensor_module_path.exists(), "Module structure missing: src/01_tensor"
 
     def test_end_to_end_capability(self):
-        """Test end-to-end capability through Module 02."""
+        """Test end-to-end capability through Module 01."""
         try:
-            # This should work if both setup and tensor are implemented
+            # This should work if tensor is implemented
             from tinytorch.core.tensor import Tensor
 
-            # Create tensors using environment from Module 01
-            data = np.random.randn(5, 10)  # Uses numpy from setup
-            t = Tensor(data)  # Uses tensor from Module 02
+            # Create tensors using Module 01
+            data = np.random.randn(5, 10)
+            t = Tensor(data)  # Uses tensor from Module 01
 
             # Basic functionality should work
             assert t.shape == (5, 10), "End-to-end stack broken"
@@ -110,48 +108,47 @@ class TestProgressiveStack:
 
         except ImportError:
             # If tensor not implemented, that's expected
-            # But setup should still work
-            assert sys.version_info >= (3, 8), "Setup module broken"
+            assert sys.version_info >= (3, 8), "Python environment broken"
 
 
 class TestDependencyValidation:
-    """Validate that dependencies are working correctly."""
+    """Validate that Module 01 dependencies are working correctly."""
 
     def test_module_01_exports(self):
-        """Test Module 01 exports are available."""
+        """Test Module 01 (Tensor) exports are available."""
         try:
-            # Try to import setup functionality
-            from tinytorch.setup import get_system_info
-            info = get_system_info()
-            assert 'platform' in info, "Module 01 exports broken"
+            from tinytorch.core.tensor import Tensor
+            t = Tensor([1, 2, 3])
+            assert t.shape == (3,), "Module 01 Tensor export broken"
         except ImportError:
-            # If not implemented, verify basic setup works
+            # If not implemented, verify basic environment works
             import platform
-            assert platform.system() in ['Darwin', 'Linux', 'Windows'], "Basic setup broken"
+            assert platform.system() in ['Darwin', 'Linux', 'Windows'], "Basic environment broken"
 
-    def test_module_02_builds_on_01(self):
-        """Test Module 02 correctly uses Module 01 foundation."""
+    def test_module_01_tensor_uses_numpy(self):
+        """Test Module 01 Tensor correctly uses NumPy foundation."""
         try:
             from tinytorch.core.tensor import Tensor
 
-            # Tensor should use numpy (set up by Module 01)
+            # Tensor should store data as numpy array
             t = Tensor(np.array([1, 2, 3]))
+            assert isinstance(t.data, np.ndarray), "Tensor should use numpy internally"
 
-            # Should use system info for optimization hints
+            # Should support optional features
             if hasattr(t, 'device') or hasattr(t, 'dtype'):
-                # Advanced tensor features building on setup
-                assert True, "Module 02 successfully builds on Module 01"
+                # Advanced tensor features
+                assert True, "Module 01 advanced features present"
 
         except ImportError:
-            assert True, "Module 02 not implemented yet"
+            assert True, "Module 01 not implemented yet"
 
 
 class TestRegressionPrevention:
-    """Prevent regressions in previously working modules."""
+    """Prevent regressions in Module 01."""
 
     def test_module_01_not_broken(self):
-        """Ensure Module 02 development didn't break Module 01."""
-        # These should ALWAYS work regardless of Module 02 status
+        """Ensure Module 01 core functionality is intact."""
+        # These should ALWAYS work
 
         # Environment detection
         assert sys.version_info.major >= 3, "Python environment broken"
@@ -165,15 +162,13 @@ class TestRegressionPrevention:
         assert np is not None, "Package management broken"
 
     def test_progressive_compatibility(self):
-        """Test that progress doesn't break backwards compatibility."""
-        # Module 02 should not change Module 01 behavior
-
+        """Test that Module 01 maintains backwards compatibility."""
         # Basic imports should still work
         import sys
         import os
         from pathlib import Path
 
-        # These are Module 01 capabilities that should never break
+        # These capabilities should never break
         assert callable(Path), "Path functionality broken"
         assert hasattr(sys, 'version_info'), "System info broken"
         assert hasattr(os, 'environ'), "Environment access broken"

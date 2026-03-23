@@ -1,8 +1,8 @@
 """
 Module 02: Progressive Integration Tests
-Tests that Module 03 (Activations) works correctly AND that all previous modules still work.
+Tests that Module 02 (Activations) works correctly AND that all previous modules still work.
 
-DEPENDENCY CHAIN: 01_setup → 02_tensor → 03_activations
+DEPENDENCY CHAIN: 01_tensor → 02_activations
 Students can trace back exactly where issues originate.
 """
 
@@ -15,21 +15,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
 class TestModule01StillWorking:
-    """Verify Module 01 (Setup) functionality is still intact."""
+    """Verify Module 01 (Tensor) functionality is still intact."""
 
-    def test_setup_environment_stable(self):
-        """Ensure setup environment wasn't broken by activations development."""
+    def test_tensor_environment_stable(self):
+        """Ensure tensor environment wasn't broken by activations development."""
         # Core environment should be stable
-        assert sys.version_info >= (3, 8), "Setup: Python version check broken"
+        assert sys.version_info >= (3, 8), "Module 01: Python version check broken"
 
         # Project structure should remain intact
         project_root = Path(__file__).parent.parent.parent
-        assert (project_root / "modules").exists(), "Setup: Module structure broken"
-        assert (project_root / "tinytorch").exists(), "Setup: Package structure broken"
-
-
-class TestModule02StillWorking:
-    """Verify Module 02 (Tensor) functionality is still intact."""
+        assert (project_root / "modules").exists(), "Module 01: Module structure broken"
+        assert (project_root / "tinytorch").exists(), "Module 01: Package structure broken"
 
     def test_tensor_functionality_stable(self):
         """Ensure tensor functionality wasn't broken by activations development."""
@@ -38,19 +34,19 @@ class TestModule02StillWorking:
 
             # Basic tensor operations should still work
             t = Tensor([1, 2, 3])
-            assert t.shape == (3,), "Module 02: Tensor creation broken"
+            assert t.shape == (3,), "Module 01: Tensor creation broken"
 
             # Numpy integration should still work
             arr = np.array([[1, 2], [3, 4]])
             t2 = Tensor(arr)
-            assert t2.shape == (2, 2), "Module 02: Numpy integration broken"
+            assert t2.shape == (2, 2), "Module 01: Numpy integration broken"
 
         except ImportError:
-            assert True, "Module 02: Tensor not implemented yet"
+            assert True, "Module 01: Tensor not implemented yet"
 
 
-class TestModule03ActivationsCore:
-    """Test Module 03 (Activations) core functionality."""
+class TestModule02ActivationsCore:
+    """Test Module 02 (Activations) core functionality."""
 
     def test_relu_activation(self):
         """Test ReLU activation function."""
@@ -89,7 +85,7 @@ class TestModule03ActivationsCore:
 
 
 class TestProgressiveStackIntegration:
-    """Test that the full stack (01→02→03) works together."""
+    """Test that the full stack (01→02) works together."""
 
     def test_tensor_activation_pipeline(self):
         """Test tensors work correctly with activations."""
@@ -226,39 +222,39 @@ class TestXORProblemReadiness:
 
 
 class TestRegressionPrevention:
-    """Ensure previous modules still work after Module 03 development."""
+    """Ensure previous modules still work after Module 02 development."""
 
     def test_no_module_01_regression(self):
-        """Verify Module 01 functionality unchanged."""
+        """Verify Module 01 (Tensor) functionality unchanged."""
         # These should ALWAYS work
         assert sys.version_info.major >= 3, "Module 01: Python detection broken"
 
         project_root = Path(__file__).parent.parent.parent
         assert project_root.exists(), "Module 01: Project structure broken"
 
-    def test_no_module_02_regression(self):
-        """Verify Module 02 functionality unchanged."""
+    def test_no_module_01_tensor_regression(self):
+        """Verify Module 01 Tensor functionality unchanged."""
         try:
             from tinytorch.core.tensor import Tensor
 
             # Basic tensor creation should still work
             t = Tensor([1, 2, 3])
-            assert t.shape == (3,), "Module 02: Basic tensor broken"
+            assert t.shape == (3,), "Module 01: Basic tensor broken"
 
         except ImportError:
             # If not implemented, that's fine
-            # But numpy should still work (from Module 01)
+            # But numpy should still work
             import numpy as np
             arr = np.array([1, 2, 3])
-            assert arr.shape == (3,), "Module 02: Numpy foundation broken"
+            assert arr.shape == (3,), "Module 01: Numpy foundation broken"
 
     def test_progressive_stability(self):
         """Test the progressive stack is stable."""
-        # Stack should be stable through: Setup -> Tensor -> Activations
+        # Stack should be stable through: Tensor -> Activations
 
-        # Setup level
+        # NumPy level
         import numpy as np
-        assert np is not None, "Setup level broken"
+        assert np is not None, "NumPy broken"
 
         # Tensor level (if available)
         try:

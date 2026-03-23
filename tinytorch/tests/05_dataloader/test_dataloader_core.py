@@ -23,7 +23,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tinytorch.core.dataloader import DataLoader
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.dataloader import TensorDataset, DataLoader
 
 
 class TestDataLoaderBasics:
@@ -40,9 +41,9 @@ class TestDataLoaderBasics:
         """
         # Simple dataset
         X = np.random.randn(100, 10)
-        y = np.random.randint(0, 2, 100)
+        y = np.random.randint(0, 2, 100).astype(np.float32)
 
-        dataset = list(zip(X, y))
+        dataset = TensorDataset(Tensor(X), Tensor(y))
         loader = DataLoader(dataset, batch_size=16)
 
         batches = list(loader)
@@ -61,9 +62,9 @@ class TestDataLoaderBasics:
         Start small if memory is limited.
         """
         X = np.random.randn(100, 10)
-        y = np.random.randint(0, 2, 100)
+        y = np.random.randint(0, 2, 100).astype(np.float32)
 
-        dataset = list(zip(X, y))
+        dataset = TensorDataset(Tensor(X), Tensor(y))
         loader = DataLoader(dataset, batch_size=32)
 
         first_batch = next(iter(loader))
@@ -86,21 +87,32 @@ class TestDataLoaderBasics:
         shuffle=False for evaluation (reproducibility).
         """
         # Data with clear order
-        X = np.arange(100).reshape(100, 1)
-        y = np.arange(100)
+        X = np.arange(100).reshape(100, 1).astype(np.float32)
+        y = np.arange(100).astype(np.float32)
 
         # Two loaders with shuffle
-        dataset1 = list(zip(X, y))
-        dataset2 = list(zip(X, y))
+        dataset1 = TensorDataset(Tensor(X), Tensor(y))
+        dataset2 = TensorDataset(Tensor(X), Tensor(y))
         loader1 = DataLoader(dataset1, batch_size=10, shuffle=True)
         loader2 = DataLoader(dataset2, batch_size=10, shuffle=True)
 
-        # Get first batches
+        # Get first batches (features tensor)
         batch1 = next(iter(loader1))[0]
         batch2 = next(iter(loader2))[0]
 
-        # With shuffling, batches should differ
-        # (Note: there's a small chance they're the same by luck)
+        # Both batches must be non-empty and the correct size
+        assert len(batch1.data) > 0, "Shuffled loader should produce non-empty batches"
+        assert len(batch2.data) > 0, "Shuffled loader should produce non-empty batches"
+        assert batch1.data.shape == (10, 1), f"Expected shape (10, 1), got {batch1.data.shape}"
+
+        # Two independently-shuffled loaders should almost certainly produce different
+        # orderings. The probability of an identical first batch by chance is 1/C(100,10),
+        # which is negligible, so this is a reliable signal that shuffling is working.
+        # (Note: there is a vanishingly small chance this assertion fails by coincidence.)
+        assert not np.array_equal(batch1.data, batch2.data), (
+            "Two independently-shuffled loaders produced identical first batches — "
+            "shuffle may not be working"
+        )
 
 
 if __name__ == "__main__":
