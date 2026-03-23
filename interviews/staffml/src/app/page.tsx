@@ -112,12 +112,12 @@ export default function Home() {
               {stats.questions.toLocaleString()} questions across {stats.areas} competency areas
             </div>
 
-            <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight text-white mb-6 leading-[1.1]">
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white mb-6 leading-[1.15]">
               Prep for your<br />
               <span className="text-accentBlue">Staff ML Systems</span> interview
             </h1>
 
-            <p className="text-lg text-textSecondary max-w-2xl mx-auto mb-10 leading-relaxed">
+            <p className="text-base sm:text-lg text-textSecondary max-w-2xl mx-auto mb-10 leading-relaxed">
               Physics-grounded system design questions backed by real hardware constants.
               Not trivia — napkin math, bottleneck analysis, and architecture trade-offs.
             </p>
