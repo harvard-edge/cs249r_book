@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Terminal, Crosshair, BarChart3, Target, BookOpen, Github, Menu, X, Calendar } from "lucide-react";
+import { Terminal, Crosshair, BarChart3, Target, BookOpen, Github, Menu, X, Calendar, Map, Cpu } from "lucide-react";
 import clsx from "clsx";
 import StreakBadge from "@/components/StreakBadge";
 
@@ -13,6 +13,8 @@ const links = [
   { href: "/gauntlet", label: "Gauntlet", icon: Crosshair },
   { href: "/heatmap", label: "Heat Map", icon: BarChart3 },
   { href: "/drill", label: "Drill", icon: Target },
+  { href: "/plans", label: "Plans", icon: Map },
+  { href: "/roofline", label: "Roofline", icon: Cpu },
 ];
 
 export default function Nav() {
