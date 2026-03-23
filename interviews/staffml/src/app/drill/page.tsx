@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import HardwareRef from "@/components/HardwareRef";
+import NapkinCalc from "@/components/NapkinCalc";
 import { useToast } from "@/components/Toast";
 import {
   getTracks, getLevels, getCompetencyAreas, getArchetypes, getQuestionsByFilter,
@@ -461,6 +462,7 @@ function DrillPage() {
               </div>
 
               <HardwareRef />
+              <NapkinCalc />
               <div className="flex-1 p-5 flex flex-col overflow-y-auto">
                 {!showAnswer ? (
                   <>
