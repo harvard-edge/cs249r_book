@@ -52,7 +52,7 @@ class TestProfilingCore:
             with profiler:
                 # Some computation
                 x = Tensor(np.random.randn(100, 100))
-                y = x @ x.T
+                y = x @ x.transpose()
             
             # Should have recorded timing
             assert hasattr(profiler, 'elapsed') or hasattr(profiler, 'duration'), \
@@ -93,7 +93,7 @@ class TestProfilingCore:
             # Some computation
             for _ in range(100):
                 x = Tensor(np.random.randn(50, 50))
-                y = x @ x.T
+                y = x @ x.transpose()
             elapsed = timer.stop()
             
             assert elapsed > 0, "Timer should measure positive time"
