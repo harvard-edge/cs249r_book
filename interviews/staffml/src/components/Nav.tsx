@@ -12,7 +12,7 @@ import StreakBadge from "@/components/StreakBadge";
 import { useTheme } from "@/components/ThemeProvider";
 
 const primaryLinks = [
-  { href: "/", label: "Browse", icon: Library },
+  { href: "/", label: "Vault", icon: Library },
   { href: "/practice", label: "Practice", icon: Target },
   { href: "/gauntlet", label: "Mock Interview", icon: Crosshair },
   { href: "/progress", label: "Progress", icon: BarChart3 },

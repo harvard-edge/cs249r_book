@@ -22,8 +22,10 @@ import {
 import { saveAttempt, getAttempts, updateSRCard, getDueQuestionIds, getDueCount, recordActivity } from "@/lib/progress";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { getQuestionById } from "@/lib/corpus";
+import { getTopicById } from "@/lib/taxonomy";
 import { getDailyQuestions, isDailyCompleted, markDailyCompleted } from "@/lib/daily";
-import { Calendar } from "lucide-react";
+import { Calendar, ArrowLeft } from "lucide-react";
+import Link from "next/link";
 
 export default function PracticePageWrapper() {
   return (
@@ -58,6 +60,7 @@ function PracticePage() {
   const [reviewMode, setReviewMode] = useState(false); // true = SR review queue
   const [rubricItems, setRubricItems] = useState<RubricItem[]>([]);
   const [dailyDone, setDailyDone] = useState(false);
+  const [sourceTopic, setSourceTopic] = useState<{ id: string; name: string } | null>(null);
 
   const tracks = getTracks().filter(t => t !== "global");
   const levels = getLevels();
@@ -83,6 +86,11 @@ function PracticePage() {
           ? getQuestions().filter(q => q.taxonomy_concept === directQ.taxonomy_concept)
           : [directQ];
         setPool(topicPool);
+        // Track source topic for back-navigation
+        if (directQ.taxonomy_concept) {
+          const t = getTopicById(directQ.taxonomy_concept);
+          if (t) setSourceTopic({ id: t.id, name: t.name });
+        }
         return; // Skip other param handling
       }
     }
@@ -101,6 +109,9 @@ function PracticePage() {
         setPool(topicPool);
         setSelectedTrack(topicPool[0].track);
         if (levelParam) setSelectedLevel(levelParam);
+        // Track source topic for back-navigation
+        const t = getTopicById(topicParam);
+        if (t) setSourceTopic({ id: t.id, name: t.name });
         pickRandom(topicPool);
         return; // Skip other param handling
       }
@@ -282,6 +293,17 @@ function PracticePage() {
     <div className="flex-1 flex flex-col lg:flex-row">
       {/* Sidebar filters */}
       <aside className="w-full lg:w-64 border-b lg:border-b-0 lg:border-r border-border bg-surface/50 p-5 flex flex-col gap-6 lg:overflow-y-auto">
+        {/* Back to vault link */}
+        {sourceTopic && (
+          <Link
+            href="/"
+            className="flex items-center gap-1.5 text-[12px] text-textTertiary hover:text-textSecondary transition-colors -mt-1 mb-2"
+          >
+            <ArrowLeft className="w-3 h-3" />
+            Back to {sourceTopic.name}
+          </Link>
+        )}
+
         <div className="flex items-center gap-2">
           <Target className="w-5 h-5 text-accentBlue" />
           <h2 className="text-lg font-bold text-textPrimary">Practice</h2>
