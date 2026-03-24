@@ -92,7 +92,7 @@ export default function VaultPage() {
       </div>
 
       {/* ─── Main ─── */}
-      <div className="flex-1 flex">
+      <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 overflow-auto px-6 py-6">
           <div className="max-w-5xl mx-auto">
             {searchResults ? (
@@ -207,16 +207,26 @@ function AreaOverview({ areas, onExpand, onSelectTopic, selectedId }: {
                   <span className="font-mono">{area.topicCount}</span> topics
                 </p>
               </div>
-              {/* Preview top topics */}
-              <div className="hidden md:flex items-center gap-2">
-                {area.topics.slice(0, 3).map((t) => (
-                  <span key={t.id} className="text-[12px] text-textTertiary bg-surface px-2.5 py-1 rounded-md border border-borderSubtle">
-                    {t.name.length > 20 ? t.name.slice(0, 18) + "..." : t.name}
-                  </span>
-                ))}
-                {area.topics.length > 3 && (
-                  <span className="text-[12px] text-textMuted">+{area.topics.length - 3}</span>
-                )}
+              {/* Level histogram */}
+              <div className="hidden md:flex items-end gap-[3px] h-8 mr-2">
+                {LEVELS.map((level) => {
+                  const count = area.levels[level] || 0;
+                  const maxCount = Math.max(...LEVELS.map(l => area.levels[l] || 0), 1);
+                  const height = count > 0 ? Math.max(6, (count / maxCount) * 32) : 4;
+                  return (
+                    <div key={level} className="flex flex-col items-center gap-0.5">
+                      <div className="w-[6px] rounded-sm"
+                        style={{
+                          height,
+                          backgroundColor: count > 0 ? style.primary : "rgba(255,255,255,0.06)",
+                          opacity: count > 0 ? 0.8 : 1,
+                        }}
+                        title={`${level}: ${count}`}
+                      />
+                      <span className="text-[9px] text-textMuted font-mono">{level.replace("L","").replace("+","")}</span>
+                    </div>
+                  );
+                })}
               </div>
               <ChevronRight className="w-5 h-5 text-textMuted group-hover:text-textSecondary shrink-0 transition-colors" />
             </button>

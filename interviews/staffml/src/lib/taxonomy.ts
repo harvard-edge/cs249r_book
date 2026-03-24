@@ -36,6 +36,8 @@ export interface CompetencyArea {
   questionCount: number;
   topicCount: number;
   topics: Topic[];
+  /** Aggregate level distribution across all topics */
+  levels: Record<string, number>;
 }
 
 export interface AreaStyle {
@@ -124,13 +126,22 @@ const _areas: CompetencyArea[] = Object.entries(areaTopicQs)
       })
       .sort((a, b) => b.questionCount - a.questionCount);
 
-    return {
-      id: areaId,
-      name: areaId.charAt(0).toUpperCase() + areaId.slice(1).replace(/-/g, " "),
-      questionCount: topics.reduce((s, t) => s + t.questionCount, 0),
-      topicCount: topics.length,
-      topics,
-    };
+      // Aggregate level distribution
+      const areaLevels: Record<string, number> = {};
+      for (const t of topics) {
+        for (const [lv, cnt] of Object.entries(t.levels)) {
+          areaLevels[lv] = (areaLevels[lv] || 0) + Number(cnt);
+        }
+      }
+
+      return {
+        id: areaId,
+        name: areaId.charAt(0).toUpperCase() + areaId.slice(1).replace(/-/g, " "),
+        questionCount: topics.reduce((s, t) => s + t.questionCount, 0),
+        topicCount: topics.length,
+        topics,
+        levels: areaLevels,
+      };
   })
   .sort((a, b) => b.questionCount - a.questionCount);
 
