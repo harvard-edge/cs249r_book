@@ -44,7 +44,7 @@ function DrillPage() {
 
   const [pool, setPool] = useState<Question[]>([]);
   const [current, setCurrent] = useState<Question | null>(null);
-  const directModeRef = useRef(false); // true when loaded via ?q= or ?topic= — skip first filter cycle
+  const skipFilterCount = useRef(0);
   const [showAnswer, setShowAnswer] = useState(false);
   const [userAnswer, setUserAnswer] = useState("");
   const [napkinResult, setNapkinResult] = useState<(NapkinResult & { userNum: number; modelNum: number }) | null>(null);
@@ -67,7 +67,7 @@ function DrillPage() {
     if (qParam) {
       const directQ = getQuestionById(qParam);
       if (directQ) {
-        directModeRef.current = true;
+        skipFilterCount.current = 3; // skip filter triggers from track/level/area state changes
         setCurrent(directQ);
         setSelectedTrack(directQ.track);
         setSelectedLevel(directQ.level);
@@ -91,7 +91,7 @@ function DrillPage() {
         return true;
       });
       if (topicPool.length > 0) {
-        directModeRef.current = true;
+        skipFilterCount.current = 3;
         setPool(topicPool);
         setSelectedTrack(topicPool[0].track);
         if (levelParam) setSelectedLevel(levelParam);
@@ -128,10 +128,11 @@ function DrillPage() {
     setDueCount(getDueCount());
   }, []);
 
-  // Update pool when filters change — skip if loaded via direct link
+  // Update pool when filters change — skip until mounted + direct link consumed
   useEffect(() => {
-    if (directModeRef.current) {
-      directModeRef.current = false; // Allow future filter changes to work normally
+    if (!mounted) return;
+    if (skipFilterCount.current > 0) {
+      skipFilterCount.current--;
       return;
     }
     const filters: { track?: string; level?: string; competency_area?: string; company_archetype?: string } = {
@@ -150,7 +151,7 @@ function DrillPage() {
     setShowAnswer(false);
     setUserAnswer("");
     setNapkinResult(null);
-  }, [selectedTrack, selectedLevel, selectedArea, selectedArchetype]);
+  }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedArchetype]);
 
   // Keyboard shortcuts: Enter to reveal, 1-4 for scoring, N to skip
   useEffect(() => {
