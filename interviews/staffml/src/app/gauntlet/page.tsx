@@ -527,7 +527,7 @@ export default function GauntletPage() {
               <RotateCcw className="w-4 h-4" /> Try Again
             </button>
             <Link
-              href="/heatmap"
+              href="/progress"
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-white text-black font-bold rounded-lg hover:bg-gray-100 transition-all text-sm"
             >
               <BarChart3 className="w-4 h-4" /> View Heat Map

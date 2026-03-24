@@ -22,25 +22,27 @@ import {
 import { saveAttempt, getAttempts, updateSRCard, getDueQuestionIds, getDueCount, recordActivity } from "@/lib/progress";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { getQuestionById } from "@/lib/corpus";
+import { getDailyQuestions, isDailyCompleted, markDailyCompleted } from "@/lib/daily";
+import { Calendar } from "lucide-react";
 
-export default function DrillPageWrapper() {
+export default function PracticePageWrapper() {
   return (
     <Suspense fallback={
       <div className="flex-1 flex items-center justify-center">
         <Terminal className="w-6 h-6 text-textTertiary animate-pulse" />
       </div>
     }>
-      <DrillPage />
+      <PracticePage />
     </Suspense>
   );
 }
 
-function DrillPage() {
+function PracticePage() {
   const searchParams = useSearchParams();
   const { show: showToast } = useToast();
   const [mounted, setMounted] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState("cloud");
-  const [selectedLevel, setSelectedLevel] = useState("L4");
+  const [selectedLevel, setSelectedLevel] = useState("L3");  // Default to L3 (Apply) — friendlier starting point
   const [selectedArea, setSelectedArea] = useState<string | null>(null);
   const [selectedArchetype, setSelectedArchetype] = useState<string | null>(null);
 
@@ -55,6 +57,7 @@ function DrillPage() {
   const [dueCount, setDueCount] = useState(0);
   const [reviewMode, setReviewMode] = useState(false); // true = SR review queue
   const [rubricItems, setRubricItems] = useState<RubricItem[]>([]);
+  const [dailyDone, setDailyDone] = useState(false);
 
   const tracks = getTracks().filter(t => t !== "global");
   const levels = getLevels();
@@ -63,6 +66,7 @@ function DrillPage() {
 
   useEffect(() => {
     setMounted(true);
+    setDailyDone(isDailyCompleted());
 
     // Direct question link: ?q=<id> — load that specific question
     const qParam = searchParams.get('q');
@@ -280,13 +284,45 @@ function DrillPage() {
       <aside className="w-full lg:w-64 border-b lg:border-b-0 lg:border-r border-border bg-surface/50 p-5 flex flex-col gap-6 lg:overflow-y-auto">
         <div className="flex items-center gap-2">
           <Target className="w-5 h-5 text-accentBlue" />
-          <h2 className="text-lg font-bold text-textPrimary">Drill</h2>
+          <h2 className="text-lg font-bold text-textPrimary">Practice</h2>
           {questionsAnswered > 0 && (
             <span className="ml-auto text-[10px] font-mono text-textTertiary bg-surface px-2 py-0.5 rounded border border-border">
               {questionsAnswered} done
             </span>
           )}
         </div>
+
+        {/* Daily Challenge banner */}
+        {!dailyDone && (
+          <button
+            onClick={() => {
+              const dailyQs = getDailyQuestions();
+              if (dailyQs.length > 0) {
+                skipFilterCount.current = 3;
+                setPool(dailyQs);
+                setCurrent(dailyQs[0]);
+                setShowAnswer(false);
+                setUserAnswer("");
+                setNapkinResult(null);
+                setRubricItems([]);
+              }
+            }}
+            className="w-full text-left p-3 rounded-lg bg-accentAmber/5 border border-accentAmber/20 hover:border-accentAmber/40 transition-colors"
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Calendar className="w-3.5 h-3.5 text-accentAmber" />
+              <span className="text-[10px] font-mono text-accentAmber uppercase">Today&apos;s Challenge</span>
+            </div>
+            <span className="text-sm text-textPrimary font-medium">3 questions</span>
+            <span className="text-xs text-textTertiary ml-2">same for everyone</span>
+          </button>
+        )}
+        {dailyDone && (
+          <div className="p-2.5 rounded-lg bg-accentGreen/5 border border-accentGreen/20 flex items-center gap-2">
+            <CheckCircle2 className="w-3.5 h-3.5 text-accentGreen" />
+            <span className="text-[12px] text-accentGreen font-medium">Daily complete</span>
+          </div>
+        )}
 
         {/* Spaced repetition review queue */}
         {dueCount > 0 && (

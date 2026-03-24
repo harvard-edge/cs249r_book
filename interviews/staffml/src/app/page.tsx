@@ -1,260 +1,203 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { Search, X, Target, Crosshair, Flame } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { motion } from "framer-motion";
-import { Crosshair, BarChart3, Target, Cpu, Network, HardDrive, Zap, ArrowRight, BookOpen, Github, Terminal, Star, Calendar, Flame, Map } from "lucide-react";
-import { getQuestions, getTracks, getCompetencyAreas } from "@/lib/corpus";
-import { getDueCount, getStreakData, getAttempts } from "@/lib/progress";
+import {
+  getAreas, getVaultStats, getAreaStyle, getAreaForTopic, searchTopics,
+  type Topic,
+} from "@/lib/taxonomy";
+import { getAttempts, getStreakData } from "@/lib/progress";
+import { FilterPill, AreaOverview, ExpandedArea, SearchResults, TopicDetail } from "@/components/vault";
+import LevelExplainer from "@/components/LevelExplainer";
 
-const features = [
-  {
-    icon: Crosshair,
-    title: "The Gauntlet",
-    description: "Timed mock interviews. Pick your track, level, and duration. Questions span all competency areas.",
-    href: "/gauntlet",
-    color: "text-accentRed",
-    bgColor: "bg-accentRed/10",
-    borderColor: "border-accentRed/30",
-  },
-  {
-    icon: BarChart3,
-    title: "Heat Map",
-    description: "See your readiness by competency area. Green means ready, red means drill more.",
-    href: "/heatmap",
-    color: "text-accentGreen",
-    bgColor: "bg-accentGreen/10",
-    borderColor: "border-accentGreen/30",
-  },
-  {
-    icon: Target,
-    title: "Drill Mode",
-    description: "Focused practice on one competency. Napkin math verification checks your estimates.",
-    href: "/drill",
-    color: "text-accentBlue",
-    bgColor: "bg-accentBlue/10",
-    borderColor: "border-accentBlue/30",
-  },
-  {
-    icon: Map,
-    title: "Study Plans",
-    description: "Curated question sequences. 72-Hour Blitz, 2-Week MLE Sprint, or Staff Deep Dive.",
-    href: "/plans",
-    color: "text-purple-400",
-    bgColor: "bg-purple-400/10",
-    borderColor: "border-purple-400/30",
-  },
-  {
-    icon: Cpu,
-    title: "Interactive Roofline",
-    description: "Visualize compute vs. bandwidth bottlenecks on real H100, B200, and TPU hardware.",
-    href: "/roofline",
-    color: "text-accentAmber",
-    bgColor: "bg-accentAmber/10",
-    borderColor: "border-accentAmber/30",
-  },
-];
-
-const trackIcons: Record<string, typeof Cpu> = {
-  cloud: Network,
-  edge: Cpu,
-  mobile: HardDrive,
-  tinyml: Zap,
-};
-
-export default function Home() {
-  const [stats, setStats] = useState({ questions: 0, tracks: 0, areas: 0 });
+export default function HomePage() {
   const [mounted, setMounted] = useState(false);
-  const [welcomeBack, setWelcomeBack] = useState<{ streak: number; dueCount: number; totalAttempts: number } | null>(null);
+  const [query, setQuery] = useState("");
+  const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
+  const [expandedArea, setExpandedArea] = useState<string | null>(null);
+  const [isReturning, setIsReturning] = useState(false);
+  const [streakCount, setStreakCount] = useState(0);
+  const [attemptCount, setAttemptCount] = useState(0);
+
+  const stats = getVaultStats();
+  const areas = getAreas();
 
   useEffect(() => {
     setMounted(true);
-    const questions = getQuestions();
-    const tracks = getTracks().filter(t => t !== "global");
-    const areas = getCompetencyAreas();
-    setStats({ questions: questions.length, tracks: tracks.length, areas: areas.length });
-
-    // Check if returning user
     const attempts = getAttempts();
-    if (attempts.length > 0) {
-      const streakData = getStreakData();
-      const due = getDueCount();
-      setWelcomeBack({ streak: streakData.currentStreak, dueCount: due, totalAttempts: attempts.length });
-    }
+    const streak = getStreakData();
+    setAttemptCount(attempts.length);
+    setStreakCount(streak.currentStreak);
+    setIsReturning(attempts.length > 0);
   }, []);
 
+  const searchResults = useMemo(() => {
+    if (!query.trim()) return null;
+    return searchTopics(query);
+  }, [query]);
+
+  const selectedArea = selectedTopic ? getAreaForTopic(selectedTopic.id) : null;
+  const selectedStyle = selectedArea ? getAreaStyle(selectedArea.id) : null;
+
   if (!mounted) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <Terminal className="w-6 h-6 text-textTertiary animate-pulse" />
-      </div>
-    );
+    return <div className="flex-1" />;
   }
 
   return (
-    <div className="flex-1 flex flex-col">
-      {/* Hero */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-dot-grid opacity-30" />
-        <div className="absolute inset-0 bg-gradient-to-b from-accentBlue/5 via-transparent to-transparent" />
-
-        <div className="relative max-w-5xl mx-auto px-6 pt-20 pb-16 text-center">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-          >
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface border border-border text-xs text-textSecondary mb-8">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accentGreen opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-accentGreen" />
-              </span>
-              {stats.questions.toLocaleString()} questions across {stats.areas} competency areas
-            </div>
-
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-textPrimary mb-6 leading-[1.15]">
-              Prep for your<br />
-              <span className="text-accentBlue">Staff ML Systems</span> interview
-            </h1>
-
-            <p className="text-base sm:text-lg text-textSecondary max-w-2xl mx-auto mb-10 leading-relaxed">
-              Physics-grounded system design questions backed by real hardware constants.
-              Not trivia — napkin math, bottleneck analysis, and architecture trade-offs.
-            </p>
-
-            <div className="flex items-center justify-center gap-4">
-              <Link
-                href="/gauntlet"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-white text-black font-bold rounded-lg hover:bg-gray-100 transition-all shadow-[0_0_20px_rgba(255,255,255,0.1)] hover:shadow-[0_0_30px_rgba(255,255,255,0.2)] text-sm"
-              >
-                Start The Gauntlet <ArrowRight className="w-4 h-4" />
-              </Link>
-              <Link
-                href="/drill"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-surface border border-border text-textSecondary hover:text-textPrimary font-medium rounded-lg transition-colors text-sm"
-              >
-                <Target className="w-4 h-4" /> Quick Drill
-              </Link>
-            </div>
-
-            {/* Welcome back card for returning users */}
-            {welcomeBack && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4 }}
-                className="mt-8 max-w-lg mx-auto p-4 rounded-xl border border-border bg-surface/80 backdrop-blur text-left"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-textPrimary font-medium">Welcome back</span>
-                  {welcomeBack.streak > 0 && (
-                    <span className="flex items-center gap-1 text-xs text-accentAmber font-mono">
-                      <Flame className="w-3.5 h-3.5" /> {welcomeBack.streak} day streak
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm text-textSecondary mb-3">
-                  {welcomeBack.dueCount > 0
-                    ? `You have ${welcomeBack.dueCount} questions due for review.`
-                    : `${welcomeBack.totalAttempts} questions practiced. Keep going!`}
-                </p>
-                <div className="flex items-center gap-2">
-                  <Link href="/daily" className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-accentAmber/10 border border-accentAmber/30 text-accentAmber rounded-md text-xs font-medium hover:bg-accentAmber/20 transition-colors">
-                    <Calendar className="w-3 h-3" /> Daily Challenge
-                  </Link>
-                  {welcomeBack.dueCount > 0 && (
-                    <Link href="/drill" className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-surface border border-border text-textSecondary rounded-md text-xs font-medium hover:text-textPrimary transition-colors">
-                      Review {welcomeBack.dueCount} due
-                    </Link>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </motion.div>
-        </div>
-      </section>
-
-      {/* Features */}
-      <section className="max-w-5xl mx-auto px-6 pb-16 w-full">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {features.map((feature, i) => (
-            <motion.div
-              key={feature.href}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 + i * 0.1 }}
-            >
-              <Link href={feature.href} className="block group">
-                <div className={`p-6 rounded-xl border ${feature.borderColor} ${feature.bgColor} hover:bg-opacity-20 transition-all`}>
-                  <feature.icon className={`w-8 h-8 ${feature.color} mb-4`} />
-                  <h3 className="text-lg font-bold text-textPrimary mb-2">{feature.title}</h3>
-                  <p className="text-sm text-textSecondary leading-relaxed">{feature.description}</p>
-                  <div className="mt-4 flex items-center gap-1 text-xs text-textTertiary group-hover:text-textSecondary transition-colors">
-                    Try it <ArrowRight className="w-3 h-3" />
+    <div className="flex-1 flex flex-col min-h-screen">
+      {/* ─── Hero ─── */}
+      <div className="px-6 pt-8 pb-6 border-b border-border">
+        <div className="max-w-5xl mx-auto">
+          {isReturning ? (
+            /* Returning user — compact row */
+            <div className="flex items-center justify-between gap-4 mb-5">
+              <div className="flex items-center gap-4">
+                {streakCount > 0 && (
+                  <div className="flex items-center gap-1.5 text-accentAmber">
+                    <Flame className="w-4 h-4" />
+                    <span className="text-sm font-bold font-mono">{streakCount}</span>
+                    <span className="text-xs text-textTertiary">day streak</span>
                   </div>
-                </div>
-              </Link>
-            </motion.div>
-          ))}
-        </div>
-      </section>
-
-      {/* Stats bar */}
-      <section className="border-t border-border bg-surface/50">
-        <div className="max-w-5xl mx-auto px-6 py-8">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            {[
-              { label: "Questions", value: stats.questions.toLocaleString() },
-              { label: "Tracks", value: `${stats.tracks} domains` },
-              { label: "Competencies", value: `${stats.areas} areas` },
-              { label: "Levels", value: "L1 → L6+" },
-            ].map((stat, i) => (
-              <div key={i} className="text-center">
-                <div className="text-2xl font-bold text-textPrimary font-mono">{stat.value}</div>
-                <div className="text-xs text-textTertiary uppercase tracking-wider mt-1">{stat.label}</div>
+                )}
+                <span className="text-sm text-textSecondary">
+                  {attemptCount} questions answered
+                </span>
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Moat section */}
-      <section className="max-w-5xl mx-auto px-6 py-16 w-full">
-        <h2 className="text-2xl font-bold text-textPrimary mb-8 text-center">Not another quiz app</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {[
-            { title: "Hardware Constants", desc: "Every question uses real specs: H100 bandwidth, A100 FLOPS, DDR5 latency. No made-up numbers." },
-            { title: "Napkin Math", desc: "Type your calculation chain. We check if your final estimate is within tolerance — not exact match." },
-            { title: "Textbook Backed", desc: "Each question links to the relevant MLSysBook chapter. Study the theory, then test it." },
-            { title: "Bloom's Taxonomy", desc: "L1 = recall, L6+ = design novel systems. Questions are calibrated to real job levels." },
-          ].map((item, i) => (
-            <div key={i} className="p-5 rounded-xl border border-border bg-surface/50">
-              <h3 className="text-sm font-bold text-textPrimary mb-2">{item.title}</h3>
-              <p className="text-sm text-textSecondary leading-relaxed">{item.desc}</p>
+              <Link
+                href="/practice"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-accentBlue text-white font-bold rounded-lg text-sm hover:opacity-90 transition-opacity"
+              >
+                <Target className="w-4 h-4" /> Continue Practicing
+              </Link>
             </div>
-          ))}
-        </div>
-      </section>
+          ) : (
+            /* New user — full hero */
+            <div className="mb-6">
+              <h1 className="text-3xl sm:text-4xl font-extrabold text-textPrimary tracking-tight mb-2">
+                StaffML
+              </h1>
+              <p className="text-[15px] text-textSecondary mb-3">
+                {stats.totalQuestions.toLocaleString()} physics-grounded ML systems interview questions.
+                100% client-side. No accounts. No tracking.
+              </p>
+              <div className="flex items-center gap-3 mb-4">
+                <Link
+                  href="/practice"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-accentBlue text-white font-bold rounded-lg text-sm hover:opacity-90 transition-opacity"
+                >
+                  <Target className="w-4 h-4" /> Start Practicing
+                </Link>
+                <Link
+                  href="/gauntlet"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-surface border border-border text-textSecondary font-medium rounded-lg text-sm hover:text-textPrimary transition-colors"
+                >
+                  <Crosshair className="w-4 h-4" /> Mock Interview
+                </Link>
+              </div>
+              <LevelExplainer defaultOpen />
+            </div>
+          )}
 
-      {/* Footer CTA */}
-      <section className="border-t border-border bg-surface/30 mt-auto">
-        <div className="max-w-5xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <BookOpen className="w-5 h-5 text-textTertiary" />
-            <span className="text-sm text-textSecondary">
-              Built from the <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">ML Systems textbook</a> at Harvard
-            </span>
+          {/* Area filter pills */}
+          <div className="flex items-center gap-1.5 flex-wrap mb-5">
+            <FilterPill
+              label="All"
+              isActive={!expandedArea}
+              onClick={() => setExpandedArea(null)}
+            />
+            {areas.map((area) => {
+              const style = getAreaStyle(area.id);
+              const Icon = style.icon;
+              return (
+                <FilterPill
+                  key={area.id}
+                  label={area.name}
+                  count={area.questionCount}
+                  isActive={expandedArea === area.id}
+                  color={style.primary}
+                  icon={<Icon className="w-3 h-3" />}
+                  onClick={() => setExpandedArea(expandedArea === area.id ? null : area.id)}
+                />
+              );
+            })}
           </div>
-          <a
-            href="https://github.com/harvard-edge/cs249r_book"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-border rounded-lg text-sm text-textSecondary hover:text-textPrimary transition-colors"
-          >
-            <Star className="w-4 h-4" /> Star on GitHub
-          </a>
+
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-textMuted" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search topics — KV cache, roofline, quantization..."
+              className="w-full pl-12 pr-12 py-3 bg-surface border border-border rounded-xl text-[15px] font-medium text-textPrimary placeholder:text-textTertiary focus:outline-none focus:border-borderHighlight transition-colors"
+            />
+            {query && (
+              <button onClick={() => setQuery("")}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-textTertiary hover:text-textPrimary">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
-      </section>
+      </div>
+
+      {/* ─── Main ─── */}
+      <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 overflow-auto px-6 py-6">
+          <div className="max-w-5xl mx-auto">
+            {searchResults ? (
+              <SearchResults results={searchResults} query={query}
+                selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
+            ) : expandedArea ? (
+              <ExpandedArea area={areas.find(a => a.id === expandedArea)!}
+                selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
+            ) : (
+              <AreaOverview areas={areas} onExpand={setExpandedArea} onSelectTopic={setSelectedTopic}
+                selectedId={selectedTopic?.id ?? null} />
+            )}
+          </div>
+        </div>
+
+        {/* Detail panel */}
+        <AnimatePresence>
+          {selectedTopic && selectedStyle && (
+            <motion.div
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 420, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="shrink-0 overflow-hidden border-l border-border hidden lg:block"
+            >
+              <TopicDetail topic={selectedTopic}
+                areaName={selectedArea?.name || ""} style={selectedStyle}
+                onClose={() => setSelectedTopic(null)} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Mobile detail sheet */}
+      <AnimatePresence>
+        {selectedTopic && selectedStyle && (
+          <motion.div
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ type: "spring", damping: 30, stiffness: 300 }}
+            className="fixed inset-x-0 bottom-0 z-50 border-t border-border rounded-t-2xl max-h-[85vh] overflow-auto bg-background lg:hidden"
+          >
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="w-10 h-1 rounded-full bg-borderHighlight" />
+            </div>
+            <TopicDetail topic={selectedTopic}
+              areaName={selectedArea?.name || ""} style={selectedStyle}
+              onClose={() => setSelectedTopic(null)} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

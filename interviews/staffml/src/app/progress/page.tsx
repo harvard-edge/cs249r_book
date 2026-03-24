@@ -8,7 +8,7 @@ import Link from "next/link";
 import { getCompetencyAreas, getTracks, getQuestionsByFilter } from "@/lib/corpus";
 import { getAttempts, getGauntletResults, clearProgress, exportProgress, importProgress } from "@/lib/progress";
 
-export default function HeatMapPage() {
+export default function ProgressPage() {
   const [mounted, setMounted] = useState(false);
   const [heatData, setHeatData] = useState<Record<string, Record<string, { attempted: number; correct: number }>>>({});
   const [gauntletCount, setGauntletCount] = useState(0);
@@ -80,12 +80,19 @@ export default function HeatMapPage() {
   return (
     <div className="flex-1 flex flex-col px-6 py-10">
       <div className="max-w-5xl mx-auto w-full">
+        {/* Trust banner */}
+        <div className="flex items-center gap-3 mb-6 px-4 py-3 bg-surface border border-borderSubtle rounded-lg">
+          <span className="text-[12px] text-textSecondary">
+            All your data stays in your browser. No accounts. No tracking. Export anytime.
+          </span>
+        </div>
+
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
             <BarChart3 className="w-8 h-8 text-accentGreen" />
             <div>
-              <h1 className="text-3xl font-extrabold text-textPrimary tracking-tight">Readiness Heat Map</h1>
+              <h1 className="text-3xl font-extrabold text-textPrimary tracking-tight">Progress</h1>
               <p className="text-sm text-textSecondary">Track × Competency — your interview readiness at a glance</p>
             </div>
           </div>
@@ -268,7 +275,7 @@ export default function HeatMapPage() {
                           return (
                             <td key={t} className="p-1.5">
                               <Link
-                                href={`/drill?track=${t}&area=${area}`}
+                                href={`/practice?track=${t}&area=${area}`}
                                 className={clsx(
                                   "w-full h-12 rounded-lg border flex flex-col items-center justify-center transition-all cursor-pointer hover:ring-1 hover:ring-accentBlue/40",
                                   getCellColor(cell.attempted, cell.correct)

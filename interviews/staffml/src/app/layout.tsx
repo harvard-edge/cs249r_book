@@ -5,20 +5,20 @@ import Providers from "@/components/Providers";
 
 export const metadata: Metadata = {
   title: "StaffML — ML Systems Interview Prep",
-  description: "Physics-grounded system design prep for Staff ML Engineers. 3,180+ questions across cloud, edge, mobile, and TinyML.",
+  description: "Physics-grounded system design prep for ML Engineers. 5,000+ questions across cloud, edge, mobile, and TinyML. 100% client-side.",
   icons: {
     icon: "/favicon.svg",
   },
   openGraph: {
     title: "StaffML — ML Systems Interview Prep",
-    description: "3,180+ physics-grounded system design questions with napkin math verification. Free, open source, backed by real hardware constants.",
+    description: "5,000+ physics-grounded ML systems questions with napkin math verification. Free, open source, no accounts, runs entirely in your browser.",
     type: "website",
     siteName: "StaffML",
   },
   twitter: {
     card: "summary_large_image",
     title: "StaffML — ML Systems Interview Prep",
-    description: "3,180+ physics-grounded questions with napkin math. Prep for Staff ML Systems interviews.",
+    description: "5,000+ physics-grounded ML systems questions with napkin math. Free, open source, no accounts.",
   },
 };
 
