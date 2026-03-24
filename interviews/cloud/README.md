@@ -33,13 +33,15 @@ Each file represents a **system scope** — the system you're reasoning about. W
   <thead>
     <tr>
       <th width="5%">#</th>
-      <th width="30%">Scope</th>
-      <th width="35%">What you're studying</th>
-      <th width="10%">L3</th>
-      <th width="10%">L4</th>
-      <th width="10%">L5</th>
-      <th width="10%">L6+</th>
-      <th width="10%">Total</th>
+      <th width="25%">Scope</th>
+      <th width="25%">What you're studying</th>
+      <th width="7%">L1</th>
+      <th width="7%">L2</th>
+      <th width="7%">L3</th>
+      <th width="7%">L4</th>
+      <th width="7%">L5</th>
+      <th width="7%">L6+</th>
+      <th width="8%">Total</th>
     </tr>
   </thead>
   <tbody>
@@ -47,46 +49,56 @@ Each file represents a **system scope** — the system you're reasoning about. W
       <td><b>01</b></td>
       <td><b><a href="01_single_machine.md">The Single Machine</a></b></td>
       <td><i>What happens inside one server</i></td>
-      <td>29</td>
-      <td>43</td>
-      <td>36</td>
-      <td>22</td>
-      <td><b>130</b></td>
+      <td>86</td>
+      <td>100</td>
+      <td>101</td>
+      <td>56</td>
+      <td>47</td>
+      <td>57</td>
+      <td><b>447</b></td>
     </tr>
     <tr>
       <td><b>02</b></td>
       <td><b><a href="02_distributed_systems.md">The Distributed System</a></b></td>
       <td><i>What happens when you exceed one node</i></td>
-      <td>8</td>
+      <td>1</td>
+      <td>4</td>
+      <td>13</td>
       <td>21</td>
       <td>24</td>
-      <td>18</td>
-      <td><b>71</b></td>
+      <td>24</td>
+      <td><b>87</b></td>
     </tr>
     <tr>
       <td><b>03</b></td>
       <td><b><a href="03_serving_stack.md">The Serving Stack</a></b></td>
       <td><i>How you serve models to real users</i></td>
-      <td>8</td>
-      <td>21</td>
-      <td>15</td>
-      <td>4</td>
-      <td><b>48</b></td>
+      <td>39</td>
+      <td>58</td>
+      <td>51</td>
+      <td>43</td>
+      <td>29</td>
+      <td>19</td>
+      <td><b>239</b></td>
     </tr>
     <tr>
       <td><b>04</b></td>
       <td><b><a href="04_production_ops.md">The Production System</a></b></td>
       <td><i>How you keep it running and healthy</i></td>
-      <td>7</td>
+      <td>—</td>
+      <td>—</td>
+      <td>8</td>
       <td>13</td>
       <td>8</td>
-      <td>9</td>
-      <td><b>37</b></td>
+      <td>7</td>
+      <td><b>36</b></td>
     </tr>
     <tr>
       <td><b>05</b></td>
       <td><b><a href="05_visual_debugging.md">Visual Architecture Debugging</a></b></td>
       <td><i>Can you spot the bottleneck in a diagram?</i></td>
+      <td>—</td>
+      <td>—</td>
       <td>2</td>
       <td>3</td>
       <td>4</td>
@@ -94,7 +106,7 @@ Each file represents a **system scope** — the system you're reasoning about. W
       <td><b>10</b></td>
     </tr>
     <tr>
-      <td></td><td><b>Total</b></td><td></td><td></td><td></td><td></td><td></td><td><b>296</b></td>
+      <td></td><td><b>Total</b></td><td></td><td><b>126</b></td><td><b>162</b></td><td><b>175</b></td><td><b>136</b></td><td><b>112</b></td><td><b>108</b></td><td><b>819</b></td>
     </tr>
   </tbody>
 </table>

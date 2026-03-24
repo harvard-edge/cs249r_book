@@ -272,7 +272,7 @@ def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
     PERFORMANCE CHARACTERISTICS:
     - Time Complexity: O(N³) but highly optimized
     - Space Complexity: O(N²) for result
-    - Arithmetic Intensity: 2N³ FLOPs / 3N² bytes = 2N/3 (good for large N)
+    - Arithmetic Intensity: 2N³ FLOPs / (3N² × 4) bytes = N/6 (good for large N)
 
     HINTS:
     - Check a.shape[-1] == b.shape[-2] for inner dimension match
@@ -452,7 +452,7 @@ def fused_gelu(x: Tensor) -> Tensor:
     >>> x = Tensor([-2, -1, 0, 1, 2])
     >>> result = fused_gelu(x)
     >>> print(result.data)
-    [-0.04550026 -0.15865526  0.          0.8413447   1.9544997 ]
+    [-0.04540231 -0.15880801  0.          0.84119199  1.95459769]
     # Notice: smooth transition through 0, positive bias
 
     MEMORY EFFICIENCY:
@@ -470,8 +470,9 @@ def fused_gelu(x: Tensor) -> Tensor:
     sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
 
     # Fused GELU computation - all operations in single expression
-    # This minimizes memory bandwidth by avoiding intermediate arrays
-    # NumPy's expression evaluator will optimize this into efficient machine code
+    # By computing the full expression in a single line, we avoid creating intermediate
+    # Tensor objects. Note: NumPy still allocates temporary arrays internally —
+    # real kernel fusion requires compiled frameworks like XLA or torch.compile.
     result_data = 0.5 * x.data * (
         1.0 + np.tanh(sqrt_2_over_pi * (x.data + 0.044715 * x.data**3))
     )
@@ -1070,9 +1071,9 @@ def analyze_acceleration_decision_framework():
     }
 
     print("\n🎯 Acceleration Technique Recommendations:")
-    print("┌─────────────────────┬─────────────┬─────────────┬─────────────┬─────────────┐")
-    print("│ Workload            │ Vectorize   │ Fuse Kernels│ Mixed Prec  │ Graph Opt   │")
-    print("├─────────────────────┼─────────────┼─────────────┼─────────────┼─────────────┤")
+    print("┌─────────────────────┬─────────────┬─────────────┬─────────────┐")
+    print("│ Workload            │ Vectorize   │ Fuse Kernels│ Graph Opt   │")
+    print("├─────────────────────┼─────────────┼─────────────┼─────────────┤")
 
     for workload_name, workload_chars in workloads:
         recommendations = []
@@ -1413,7 +1414,7 @@ Answer these to deepen your understanding of acceleration techniques and their s
 You implemented vectorized matrix multiplication and fused GELU.
 - Matrix multiplication (1024×1024): Performs ~2.1 billion FLOPs, reads ~12 MB data
 - Arithmetic intensity: _____ FLOPs/byte
-- Compared to element-wise addition (0.33 FLOPs/byte): _____× higher intensity
+- Compared to element-wise addition (0.083 FLOPs/byte): _____× higher intensity
 - Why does this make matrix multiplication ideal for GPUs? _____
 
 ---

@@ -32,7 +32,7 @@ class TestProfilingCore:
         ✅ TEST: Profiler class exists
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             
             assert Profiler is not None
             
@@ -44,7 +44,7 @@ class TestProfilingCore:
         ✅ TEST: Profiler works as context manager
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.tensor import Tensor
             
             profiler = Profiler()
@@ -52,7 +52,7 @@ class TestProfilingCore:
             with profiler:
                 # Some computation
                 x = Tensor(np.random.randn(100, 100))
-                y = x @ x.T
+                y = x @ x.transpose()
             
             # Should have recorded timing
             assert hasattr(profiler, 'elapsed') or hasattr(profiler, 'duration'), \
@@ -66,7 +66,7 @@ class TestProfilingCore:
         ✅ TEST: Memory profiling capability
         """
         try:
-            from tinytorch.core.profiler import profile_memory, MemoryProfiler
+            from tinytorch.perf.profiling import profile_memory, MemoryProfiler
             from tinytorch.core.tensor import Tensor
             
             # Profile memory usage
@@ -84,7 +84,7 @@ class TestProfilingCore:
         ✅ TEST: Execution timing works
         """
         try:
-            from tinytorch.core.profiler import Timer
+            from tinytorch.perf.profiling import Timer
             from tinytorch.core.tensor import Tensor
             
             timer = Timer()
@@ -93,7 +93,7 @@ class TestProfilingCore:
             # Some computation
             for _ in range(100):
                 x = Tensor(np.random.randn(50, 50))
-                y = x @ x.T
+                y = x @ x.transpose()
             elapsed = timer.stop()
             
             assert elapsed > 0, "Timer should measure positive time"
@@ -112,7 +112,7 @@ class TestProfilingWithModels:
         ✅ TEST: Profile Linear layer execution
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.layers import Linear
             from tinytorch.core.tensor import Tensor
             
@@ -137,7 +137,7 @@ class TestProfilingWithModels:
         ✅ TEST: Profile Conv2d layer execution
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.spatial import Conv2d
             from tinytorch.core.tensor import Tensor
             
@@ -159,11 +159,11 @@ class TestProfilingWithModels:
         ✅ TEST: Profile TransformerBlock execution
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.transformers import TransformerBlock
             from tinytorch.core.tensor import Tensor
             
-            block = TransformerBlock(64, 8, 256)
+            block = TransformerBlock(64, 8, ff_dim=256)
             profiler = Profiler()
             
             x = Tensor(np.random.randn(2, 10, 64))
@@ -187,7 +187,7 @@ class TestProfilingWithTraining:
         ✅ TEST: Profile training step
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.layers import Linear
             from tinytorch.core.losses import MSELoss
             from tinytorch.core.optimizers import SGD
@@ -301,7 +301,7 @@ class TestRegressionPrevention:
         try:
             from tinytorch.core.transformers import TransformerBlock
             from tinytorch.core.tensor import Tensor
-            block = TransformerBlock(32, 4, 128)
+            block = TransformerBlock(32, 4, ff_dim=128)
             x = Tensor(np.random.randn(1, 5, 32))
             out = block(x)
             assert out.shape == x.shape
@@ -326,7 +326,7 @@ class TestModule14Completion:
         }
         
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             
             # Test 1: Profiler exists
             capabilities["Profiler exists"] = True

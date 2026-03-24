@@ -17,7 +17,7 @@ Edge system architecture diagrams with hidden bottlenecks.
 ---
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Update Blind Spot</b> · <code>ml-ops</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Update Blind Spot</b> · <code>deployment</code> <code>fault-tolerance</code></summary>
 
 ### Blind Spot + No Rollback
 
@@ -61,7 +61,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory Copy Ceiling</b> · <code>frameworks</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory Copy Ceiling</b> · <code>compilation</code> <code>latency</code></summary>
 
 ### The Host-Device Memory Bounce
 
@@ -104,7 +104,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Model Cloning Waste</b> · <code>serving</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Model Cloning Waste</b> · <code>serving</code> <code>memory-hierarchy</code></summary>
 
 ### Quadruplicated Weights
 
@@ -149,7 +149,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Bandwidth Bankruptcy</b> · <code>ml-ops</code> <code>economics</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Bandwidth Bankruptcy</b> · <code>deployment</code> <code>economics</code></summary>
 
 ### Streaming Raw Results Over Cellular
 
@@ -198,7 +198,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Sealed Oven Trap</b> · <code>hardware</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Sealed Oven Trap</b> · <code>model-cost</code> <code>power</code></summary>
 
 ### Thermal Design for Lab, Not Field
 
@@ -242,7 +242,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Rolling Shutter Tear</b> · <code>sensor-physics</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Rolling Shutter Tear</b> · <code>sensor-pipeline</code></summary>
 
 ### The Rolling Shutter Effect
 
@@ -284,7 +284,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory Pressure Leak</b> · <code>latency</code> <code>benchmarking</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory Pressure Leak</b> · <code>latency</code> <code>roofline</code></summary>
 
 ### The Unbounded Producer-Consumer Queue
 
@@ -327,7 +327,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory Copy Choke</b> · <code>data-engineering</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory Copy Choke</b> · <code>data-pipeline</code></summary>
 
 ### The CPU Memory Copy Wall
 
@@ -373,7 +373,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Slow Sensor Stall</b> · <code>data-engineering</code> <code>sensor-fusion</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Slow Sensor Stall</b> · <code>data-pipeline</code> <code>sensor-pipeline</code></summary>
 
 ### The Synchronization Barrier Stalls the Fast Sensor
 
@@ -414,7 +414,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Sequential Serializer</b> · <code>frameworks</code> <code>parallelism</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Sequential Serializer</b> · <code>compilation</code> <code>data-parallelism</code></summary>
 
 ### Wasted GPU Parallelism
 
@@ -461,7 +461,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Bus Priority Trap</b> · <code>hardware</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Bus Priority Trap</b> · <code>model-cost</code> <code>memory-hierarchy</code></summary>
 
 ### Shared Memory Bus Contention
 

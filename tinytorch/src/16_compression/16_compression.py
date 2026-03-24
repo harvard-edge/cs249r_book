@@ -105,34 +105,13 @@ that integrate with profiling and quantization for complete model optimization.
 
 # %% [markdown]
 """
-### Why No Sequential Container in TinyTorch
+### Note on Sequential Usage in This Module
 
-TinyTorch teaches ATOMIC COMPONENTS, not compositions!
-
-**FORBIDDEN Pattern:**
-```python
-model = Sequential([Linear(10, 20), ReLU(), Linear(20, 10)])
-y = model(x)  # Student can't see what's happening!
-```
-
-**CORRECT Pattern:**
-```python
-# Explicit composition - students see every step
-layer1 = Linear(10, 20)
-activation = ReLU()
-layer2 = Linear(20, 10)
-
-# Forward pass - nothing hidden
-x = layer1.forward(input)
-x = activation.forward(x)
-output = layer2.forward(x)
-```
-
-**Why This Matters:**
-- Students MUST see explicit forward passes to understand data flow
-- Hidden abstractions prevent learning
-- Sequential belongs in helper utilities, NOT core modules
-- Educational value comes from seeing layer interactions explicitly
+This module uses `Sequential` as a parameter container for compression operations.
+`Sequential` is familiar from Module 03 and is used here as a convenience — it gives
+compression wrappers a clean way to hold the original model's layers and expose them
+for inspection, pruning, and quantization. The compression logic itself remains explicit
+and visible throughout the module.
 """
 
 # %% [markdown]
@@ -1155,6 +1134,8 @@ class KnowledgeDistillation:
         hard_loss = self._cross_entropy(student_hard, true_labels)
 
         # Combined loss
+        # Note: Standard knowledge distillation (Hinton 2015) scales soft loss by T².
+        # This simplified version omits T² scaling for educational clarity.
         total_loss = self.alpha * soft_loss + (1 - self.alpha) * hard_loss
 
         return total_loss
@@ -1525,9 +1506,8 @@ def analyze_compression_techniques():
         # Create fresh layers for magnitude pruning test
         mag_layers = [Linear(l.weight.shape[0], l.weight.shape[1]) for l in layers]
         for i, layer in enumerate(mag_layers):
-            layer.weight = layers[i].weight
-            # Linear layers always have bias (may be None)
-            layer.bias = layers[i].bias
+            layer.weight = Tensor(layers[i].weight.data.copy())
+            layer.bias = Tensor(layers[i].bias.data.copy()) if hasattr(layers[i], 'bias') and layers[i].bias is not None else None
         mag_model = Sequential(*mag_layers)
         magnitude_prune(mag_model, sparsity=0.8)
         mag_sparsity = measure_sparsity(mag_model)
@@ -1539,9 +1519,8 @@ def analyze_compression_techniques():
         # Create fresh layers for structured pruning test
         struct_layers = [Linear(l.weight.shape[0], l.weight.shape[1]) for l in layers]
         for i, layer in enumerate(struct_layers):
-            layer.weight = layers[i].weight
-            # Linear layers always have bias (may be None)
-            layer.bias = layers[i].bias
+            layer.weight = Tensor(layers[i].weight.data.copy())
+            layer.bias = Tensor(layers[i].bias.data.copy()) if hasattr(layers[i], 'bias') and layers[i].bias is not None else None
         struct_model = Sequential(*struct_layers)
         structured_prune(struct_model, prune_ratio=0.5)
         struct_sparsity = measure_sparsity(struct_model)

@@ -199,9 +199,9 @@ Matrix Multiplication (M,K) @ (K,N):
         Rows Cols Inner Multiply+Add
 
 Linear Layer Forward:
-   FLOPs = batch_size x input_features x output_features x 2
-                      ↑                  ↑                 ↑
-                  Matmul cost        Bias add        Operations
+   FLOPs = input_features x output_features x 2  (per sample, batch-independent)
+                ↑                  ↑              ↑
+           Input dimension   Output dimension  Multiply+Add
 
 Convolution (simplified):
    FLOPs = output_H x output_W x kernel_H x kernel_W x in_channels x out_channels x 2
@@ -311,6 +311,15 @@ class Profiler:
         self.operation_counts = defaultdict(int)
         self.memory_tracker = None
         ### END SOLUTION
+
+    def __enter__(self):
+        """Start timing for use as a context manager."""
+        self._context_start = time.perf_counter()
+        return self
+
+    def __exit__(self, *args):
+        """Stop timing and store elapsed time in milliseconds."""
+        self.elapsed = (time.perf_counter() - self._context_start) * 1000
 
     def _count_layer_parameters(self, layer) -> int:
         """

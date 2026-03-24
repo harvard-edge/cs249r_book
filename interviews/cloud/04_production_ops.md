@@ -17,13 +17,14 @@ Monitoring, drift detection, deployment strategies, security, power management, 
 ---
 
 
-### 📉 Monitoring & Observability
+### Monitoring & Observability
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The GPU Power Budget</b> · <code>power-thermal</code> <code>economics</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The GPU Power Budget</b> · <code>power</code> <code>economics</code></summary>
 
 - **Interviewer:** "You're running a 72-hour training job on 8× H100 GPUs (700W TDP each). Your data center charges \$0.12/kWh for electricity. Estimate the energy cost of this single training run. How does this compare to the cloud compute cost at \$3.50/GPU-hour?"
 
@@ -43,7 +44,7 @@ Monitoring, drift detection, deployment strategies, security, power management, 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Container Bloat</b> · <code>containerization</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Container Bloat</b> · <code>container-orchestration</code></summary>
 
 - **Interviewer:** "Our team is deploying a new image classification model as a microservice. The initial container image size is 5GB, and we're seeing unacceptable cold start latencies, especially when scaling up. What are the primary culprits for such a large image and how would you systematically reduce it?"
 
@@ -60,8 +61,8 @@ Monitoring, drift detection, deployment strategies, security, power management, 
     5.  **Layer Optimization:** Order Dockerfile instructions to leverage caching, placing less frequently changing layers (base image, system dependencies) earlier.
 
   > **Napkin Math:** Reducing a 5GB image to 500MB on a 100Mbps network:
-  > Initial download time: `5 GB * 8 bits/byte / 100 Mbps = 40 seconds`
-  > Optimized download time: `0.5 GB * 8 bits/byte / 100 Mbps = 4 seconds`
+  > Initial download time: `5 GB * 8 bits/byte / 100 Mbps = 400 seconds`
+  > Optimized download time: `0.5 GB * 8 bits/byte / 100 Mbps = 40 seconds`
   > This significantly reduces cold start time from image pull alone, not accounting for container initialization and model loading.
 
   > **Key Equation:** `ContainerSize = BaseImageSize + DependenciesSize + ModelArtifactSize`
@@ -73,7 +74,7 @@ Monitoring, drift detection, deployment strategies, security, power management, 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Unresponsive Replica</b> · <code>health-checks</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Unresponsive Replica</b> · <code>monitoring</code></summary>
 
 - **Interviewer:** "Our auto-scaling group for an inference service is occasionally failing to replace unhealthy instances. We've confirmed the infrastructure is fine, but the service becomes unresponsive even though the instance itself is still running. What's likely going wrong with our health check strategy and how would you fix it?"
 
@@ -101,7 +102,7 @@ Monitoring, drift detection, deployment strategies, security, power management, 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Silent Model Decay</b> · <code>model-monitoring</code> <code>data-drift</code> <code>concept-drift</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Silent Model Decay</b> · <code>monitoring</code> <code>data-drift</code> <code>concept-drift</code></summary>
 
 - **Interviewer:** "Your ML team maintains a critical production model that predicts user engagement. For the past two months, the model's business impact has been steadily declining, but no alarms have fired from your standard model monitoring dashboards (e.g., accuracy, precision, recall). What are the common reasons for this 'silent decay,' and what additional monitoring would you implement to detect it proactively?"
 
@@ -142,7 +143,42 @@ Monitoring, drift detection, deployment strategies, security, power management, 
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Thermal Memory Wall</b> · <code>hardware</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Drifting Recommender</b> · <code>monitoring-data-drift</code></summary>
+
+- **Interviewer:** "You are responsible for a large-scale recommendation model that suggests products to users. Over the last quarter, the model's click-through rate (CTR) has degraded by 15%. A dashboard shows that the mean age of users has shifted from 38.5 to 31.2. Your PM wants to immediately trigger a full retraining run. Use your monitoring data and system knowledge to diagnose whether this is the correct first step."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to immediately jump to retraining without quantifying the problem. Retraining is expensive and may not even solve the issue if the drift is transient, seasonal, or caused by an upstream data bug. A systems engineer must first prove the statistical significance of the drift and estimate the cost of the proposed solution.
+
+  **Realistic Solution:** The correct approach is to treat this as a hypothesis to be validated with data before committing expensive resources. First, use a statistical test (like the two-sample K-S test) to confirm that the change in the user age distribution is statistically significant and not just random noise. Second, calculate the cost of a full retraining run to provide a concrete cost/benefit trade-off to the product manager. This turns a vague 'let's retrain' into a data-driven decision: 'We have 99.9% confidence the user base has changed, and we estimate a cost of X to adapt the model.'
+
+  > **Napkin Math:** 1. **Quantify the Drift (Conceptual):** A two-sample Kolmogorov-Smirnov (K-S) test compares the cumulative distribution functions (CDFs) of the 'before' and 'after' age data. A low p-value (e.g., < 0.01) would confirm the distributions are statistically different.
+
+2. **Estimate Retraining Cost:** Assume the model is a 10B parameter DLRM, trained on 500B interaction events (tokens).
+   - **Training FLOPs:** Use the `C ≈ 6 * P * D` rule of thumb. `C ≈ 6 * 10e9 * 500e9 = 3e22` FLOPs.
+   - **Time on H100s:** An H100 provides ~1e15 FP16 TFLOPS. A training run on a pod of 256 H100s would have a total throughput of `256 * 1e15 = 2.56e17` FLOPS. Let's assume 40% scaling efficiency (`η`).
+   - **Wall Time:** `Time = C / (FLOPS * η) = 3e22 / (2.56e17 * 0.40) ≈ 292,968 seconds`.
+   - **Total Time:** `292,968 seconds / 3600 ≈ 81.4 hours` (or ~3.4 days).
+
+This provides the PM with a concrete trade-off: is fixing the 15% CTR degradation worth a ~3.5 day, 256-GPU training run?
+
+  > **Key Equation:** C_{\text{FLOPs}} \approx 6 \times P \times D
+
+  > **Options:**
+  > [ ] The CTR drop is significant, so immediately start the retraining job.
+  > [ ] The model architecture is probably wrong; propose a new architecture.
+  > [x] The change in mean age is the likely cause. First, run a statistical test to confirm the distribution has shifted, then estimate the retraining cost before proceeding.
+  > [ ] This is likely a transient issue; wait for another quarter to see if the metrics return to baseline before taking any action.
+
+  📖 **Deep Dive:** [Volume 1: ML Operations](https://mlsysbook.ai/vol1/ops.html)
+  </details>
+</details>
+
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Thermal Memory Wall</b> · <code>model-cost</code> <code>fault-tolerance</code></summary>
 
 ### HBM Junction Overheating
 
@@ -182,10 +218,9 @@ graph TD
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Attention Skew</b> · <code>parallelism</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Attention Skew</b> · <code>data-parallelism</code> <code>memory-hierarchy</code></summary>
 
 ### The Causal Mask Asymmetry
 
@@ -227,7 +262,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Compilation Wall</b> · <code>frameworks</code> <code>compiler</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Compilation Wall</b> · <code>compilation</code> <code>compilation</code></summary>
 
 ### The Graph Compilation Wall
 
@@ -261,7 +296,7 @@ graph LR
 
   **Realistic Solution:** You hit the **Graph Compilation Wall**. Unlike NVIDIA GPUs which execute eagerly, accelerators like Trainium/TPU rely on compilers (XLA/Neuron) to map code into static graphs for systolic arrays. The "48 hours" was the initial compilation. Because your sequence lengths vary, the compiler triggers a **Re-compile (JIT Thrashing)** on every batch, destroying throughput. The fix is to use **Static Padding**: pad all sequences to a fixed power-of-two length to reuse the same compiled graph.
 
-  > **Napkin Math:** If an XLA compile takes 30s and a training step takes 0.5s, a single re-compile adds 60x overhead to that step. Even a 5% re-compile rate will cut your overall tokens/sec by half.
+  > **Napkin Math:** If an XLA compile takes 30s and a training step takes 0.5s, a single re-compile adds 60x overhead to that step. Even a 5% re-compile rate will cut your overall tokens/sec by 75% (average step time: 0.95 × 0.5s + 0.05 × 30.5s = 2.0s, vs. the original 0.5s).
 
   📖 **Deep Dive:** [Frameworks](https://harvard-edge.github.io/cs249r_book_dev/contents/frameworks/frameworks.html)
 
@@ -270,10 +305,10 @@ graph LR
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Root Complex Choke</b> · <code>hardware</code> <code>storage</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Root Complex Choke</b> · <code>model-cost</code> <code>persistent-storage</code></summary>
 
 ### The PCIe Root Complex Saturation
 
@@ -317,7 +352,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Memory Illusion</b> · <code>hardware</code> <code>memory-hierarchy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Memory Illusion</b> · <code>model-cost</code> <code>memory-hierarchy</code></summary>
 
 ### The C2C Bandwidth Choke
 
@@ -358,13 +393,12 @@ graph LR
 ---
 
 
-### 🚀 Deployment & MLOps
+### Deployment & MLOps
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Ephemeral Storage I/O Cliff</b> · <code>mlops</code> <code>storage</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Ephemeral Storage I/O Cliff</b> · <code>deployment</code> <code>persistent-storage</code></summary>
 
 - **Interviewer:** "You are training a model on a massive cloud VM with 8x GPUs. You download your 1 TB dataset from S3 to the VM's attached local NVMe drive (ephemeral storage). Training speeds are phenomenal. However, 12 hours into the 48-hour training run, the VM is preempted (Spot Instance). When the orchestration system brings the VM back up and resumes from the checkpoint, training crashes because the dataset file is missing. Why?"
 
@@ -392,7 +426,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silent Regression</b> · <code>canary-deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silent Regression</b> · <code>rollout</code></summary>
 
 - **Interviewer:** "We've deployed a new version of our recommendation model using a rolling update, and while all technical metrics (latency, error rate) look good, our key business metrics (e.g., click-through rate, user engagement) have silently dropped by 5%. How would you have prevented this 'silent regression' and what deployment strategy would you advocate for future model updates?"
 
@@ -420,7 +454,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silent Failure</b> · <code>mlops</code> <code>monitoring</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silent Failure</b> · <code>deployment</code> <code>monitoring</code></summary>
 
 - **Interviewer:** "Our DevOps dashboard shows 99.99% uptime, 50ms latency, and 95% GPU utilization on our recommendation cluster. The HTTP error rate is zero. But the business team is furious because our recommendations are completely wrong. Why does the high GPU utilization mask the failure, and how can the hardware be perfectly healthy while the ML output is perfectly wrong?"
 
@@ -440,7 +474,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Training-Serving Skew</b> · <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Training-Serving Skew</b> · <code>deployment</code></summary>
 
 - **Interviewer:** "Our model achieves 95% accuracy when evaluated offline on an A100 cluster, but drops to 70% when deployed to production on T4 GPUs. The model weights and the Python feature code are identical. How do the different hardware paths cause this numerical divergence?"
 
@@ -460,7 +494,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Model Deprecation Cliff</b> · <code>model-lifecycle</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Model Deprecation Cliff</b> · <code>deployment</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your platform has 23 models in production, some dating back 3 years. You discover that 8 older models collectively serve only 2% of total traffic but consume 30% of your GPU fleet. Your PM asks why these old models can't just be co-located on the same GPUs as the newer models to save money. Why does maintaining multiple model generations simultaneously fragment your serving cluster and destroy GPU utilization?"
 
@@ -480,7 +514,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The LLM Evaluation Trap</b> · <code>mlops</code> <code>monitoring</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The LLM Evaluation Trap</b> · <code>deployment</code> <code>monitoring</code></summary>
 
 - **Interviewer:** "You're responsible for evaluating a new LLM before production deployment. Your team proposes running it on 5 standard benchmarks (MMLU, HumanEval, etc.). The new model scores 5% higher than your current production model. Why might this evaluation be dangerously misleading from an infrastructure perspective, and how could deploying the 'better' model actually destroy your serving economics?"
 
@@ -500,10 +534,10 @@ graph LR
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Retraining Math</b> · <code>mlops</code> <code>economics</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Retraining Math</b> · <code>deployment</code> <code>economics</code></summary>
 
 - **Interviewer:** "Our model degrades by 1% accuracy every week. Retraining the model costs us $50,000 in GPU time. A 1% accuracy drop costs the business $100,000 a week. Exactly how often should we trigger a retraining pipeline?"
 
@@ -526,11 +560,10 @@ graph LR
 ---
 
 
-### 📊 Data Quality & Pipelines
+### Data Quality & Pipelines
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Stale Feature Store</b> · <code>feature-store</code> <code>data-consistency</code> <code>real-time-ml</code></summary>
 
@@ -560,7 +593,7 @@ graph LR
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Deduplication Economics</b> · <code>data-quality</code> <code>economics</code></summary>
@@ -611,7 +644,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The PII-Sensitive Training Dilemma</b> · <code>data-privacy</code> <code>synthetic-data</code> <code>federated-learning</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The PII-Sensitive Training Dilemma</b> · <code>privacy</code> <code>synthetic-data</code> <code>federated-learning</code></summary>
 
 - **Interviewer:** "Your company operates in a highly regulated industry (e.g., healthcare, finance) and needs to train a powerful new ML model using customer data that contains sensitive Personally Identifiable Information (PII). Direct use of this PII for training is prohibited due to privacy regulations (GDPR, CCPA, HIPAA) and corporate policy. Propose and compare at least three distinct, highly technical approaches to enable model training while strictly preserving user privacy and complying with regulations. Discuss their trade-offs in terms of model utility, implementation complexity, and computational cost."
 
@@ -661,10 +694,10 @@ graph LR
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Exploding Data Lake Bill</b> · <code>cost-optimization</code> <code>data-tiering</code> <code>data-lifecycle</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Exploding Data Lake Bill</b> · <code>economics</code> <code>data-tiering</code> <code>data-lifecycle</code></summary>
 
 - **Interviewer:** "Your organization's data lake, primarily on S3, has grown to 500 PB of raw and processed data. The monthly storage bill is astronomical and constantly increasing. Much of this data is historical, accessed infrequently (e.g., for compliance audits, long-tail research, or rare model re-trainings). As a Principal ML Systems Engineer, you're tasked with drastically reducing this cost without compromising data availability for critical ML workloads or compliance. Detail your strategy, including specific AWS services and architectural considerations."
 
@@ -709,11 +742,12 @@ graph LR
 ---
 
 
-### ⚡ Power, Thermal & Sustainability
+### Power, Thermal & Sustainability
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Rack Power Budget</b> · <code>power</code></summary>
 
@@ -737,8 +771,7 @@ graph LR
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The PUE Dollar Cost</b> · <code>power</code></summary>
 
@@ -782,7 +815,7 @@ graph LR
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 2" align="center"> The Thermal Throttling Mystery</b> · <code>power</code></summary>
@@ -810,13 +843,12 @@ graph LR
 ---
 
 
-### 💰 Economics & Infrastructure
+### Economics & Infrastructure
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Spot Instance Gamble</b> · <code>spot-instances</code> <code>economics</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Spot Instance Gamble</b> · <code>economics</code> <code>economics</code></summary>
 
 - **Interviewer:** "Your team trains a 7B parameter model that takes 72 hours on 8 A100 GPUs. On-demand pricing is $2.00/GPU-hour. Spot instances are $0.60/GPU-hour — a 70% discount. Your manager says 'use spot instances and save $806.' Midway through a 72-hour run, your spot instances get preempted. What is the true expected cost of spot training, and when does on-demand actually become cheaper?"
 
@@ -836,7 +868,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Energy Bill</b> · <code>economics</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Energy Bill</b> · <code>economics</code> <code>power</code></summary>
 
 - **Interviewer:** "Your team just completed a 30-day training run on 256 H100 GPUs. The cloud bill shows \$650,000 in compute charges. Your sustainability team asks: 'What was the energy consumption and carbon footprint of this training run?' Calculate it for a US data center."
 
@@ -856,7 +888,7 @@ graph LR
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 3" align="center"> The Energy Economics</b> · <code>economics</code> <code>sustainability</code></summary>
@@ -870,7 +902,7 @@ graph LR
 
   **Realistic Solution:** You forgot the OpEx (Operating Expenses), specifically power and cooling. Over a 3-year lifespan, the electricity required to run a massive cluster at high utilization — plus the power to cool it — frequently matches or exceeds the initial CapEx (hardware cost). System efficiency ($\eta$) isn't just about training speed; it's the primary lever for financial viability.
 
-  > **Napkin Math:** 10,000 H100s × 700W TDP = 7 MW compute. With PUE of 1.3 (cooling overhead): 9.1 MW total. At $0.10/kWh: $9,100/hour = $79.7M/year = **$239M over 3 years** in electricity alone. That's 2.4× the hardware cost. True TCO ≈ $100M (CapEx) + $239M (power) + networking/staff = **$350M+**.
+  > **Napkin Math:** 10,000 H100s × 700W TDP = 7 MW compute. With PUE of 1.3 (cooling overhead): 9.1 MW total. At $0.10/kWh: 9,100 kW × $0.10 = $910/hour = $7.97M/year = **$23.9M over 3 years** in electricity alone. That's ~24% of the hardware cost, but still a massive ongoing expense. True TCO ≈ $100M (CapEx) + $23.9M (power) + networking/staff = **$150M+**.
 
   > **Key Equation:** $\text{TCO} = \text{CapEx} + (\text{Power} \times \text{PUE} \times \text{Rate} \times \text{Hours}) + \text{Staff} + \text{Network}$
 
@@ -881,7 +913,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Carbon-Aware Scheduler</b> · <code>carbon-aware</code> <code>sustainability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Carbon-Aware Scheduler</b> · <code>sustainable-ai</code> <code>sustainability</code></summary>
 
 - **Interviewer:** "Your company pledges net-zero AI training by 2027. You operate GPU clusters in three regions: Virginia (avg 380 gCO₂/kWh, coal-heavy grid), Oregon (avg 80 gCO₂/kWh, hydro-heavy), and Iceland (avg 28 gCO₂/kWh, geothermal). A 70B model training run requires 1,000 A100-hours regardless of location. Your CFO says 'just buy carbon offsets — it's cheaper than moving workloads.' Design a carbon-aware training scheduler and prove the CFO wrong (or right) with numbers."
 
@@ -892,7 +924,7 @@ graph LR
 
   **Realistic Solution:** A carbon-aware scheduler must optimize across three dimensions: (1) **spatial shifting** — route jobs to the lowest-carbon region with available capacity, (2) **temporal shifting** — delay non-urgent jobs to times when the grid is cleanest (midday solar peaks, windy nights), (3) **workload shaping** — run compute-intensive phases (forward/backward pass) during clean periods and I/O-intensive phases (checkpointing, data loading) during dirty periods. The scheduler ingests real-time grid carbon intensity from APIs (WattTime, ElectricityMaps), maintains a job priority queue, and makes placement decisions every 15 minutes. For the 70B training run: use Oregon as primary (80 gCO₂/kWh), with temporal shifting to avoid the 6-9 PM peak (when gas peakers fire up, pushing intensity to 200 gCO₂/kWh). Cross-region data transfer for training is expensive (100TB dataset over 10 Gbps = 22 hours), so the scheduler must factor in the carbon cost of data movement.
 
-  > **Napkin Math:** 1,000 A100-hours × 700W = 700 kWh. Virginia: 700 × 380 = 266 kgCO₂. Oregon: 700 × 80 = 56 kgCO₂. Iceland: 700 × 28 = 19.6 kgCO₂. Carbon offset cost: $50-100/tonne → Virginia offset = 0.266t × $75 = $20. Oregon compute premium over Virginia: ~$0.30/GPU-hr × 1,000 = $300. Iceland premium: ~$0.80/GPU-hr × 1,000 = $800. The CFO is right that offsets ($20) are cheaper than relocation ($300-800) — *if you trust offsets*. But regulatory trend (EU CSRD, SEC climate rules) is toward Scope 2 *market-based* accounting where offsets don't count. Under those rules, Virginia training is a 266 kgCO₂ liability regardless of offsets. Temporal shifting in Oregon (avoiding peak hours) reduces effective intensity from 80 to ~50 gCO₂/kWh at zero additional cost — 700 × 50 = 35 kgCO₂, a 37% reduction for free.
+  > **Napkin Math:** 1,000 A100-hours × 400W (A100 SXM4 TDP) = 400 kWh. Virginia: 400 × 380 = 152 kgCO₂. Oregon: 400 × 80 = 32 kgCO₂. Iceland: 400 × 28 = 11.2 kgCO₂. Carbon offset cost: $50-100/tonne → Virginia offset = 0.152t × $75 = $11. Oregon compute premium over Virginia: ~$0.30/GPU-hr × 1,000 = $300. Iceland premium: ~$0.80/GPU-hr × 1,000 = $800. The CFO is right that offsets ($11) are cheaper than relocation ($300-800) — *if you trust offsets*. But regulatory trend (EU CSRD, SEC climate rules) is toward Scope 2 *market-based* accounting where offsets don't count. Under those rules, Virginia training is a 152 kgCO₂ liability regardless of offsets. Temporal shifting in Oregon (avoiding peak hours) reduces effective intensity from 80 to ~50 gCO₂/kWh at zero additional cost — 400 × 50 = 20 kgCO₂, a 37% reduction for free.
 
   📖 **Deep Dive:** [Sustainable AI](https://harvard-edge.github.io/cs249r_book_dev/contents/sustainable_ai/sustainable_ai.html)
 
@@ -924,13 +956,14 @@ graph LR
 ---
 
 
-### 📎 Additional Topics
+### Additional Topics
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Floating Point 32 Checkpoint Tax</b> · <code>storage</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Floating Point 32 Checkpoint Tax</b> · <code>persistent-storage</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your model weights are loaded and served in FP16 (2 bytes per parameter). The model is 70 billion parameters, so you allocate 140 GB of disk space for the checkpoint file. But the training team sends over a `.pt` file that is 420 GB. What is taking up the extra 280 GB, and can you delete it before deploying?"
 
@@ -959,10 +992,10 @@ graph LR
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Model Distillation Economics</b> · <code>model-compression</code> <code>economics</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Model Distillation Economics</b> · <code>pruning</code> <code>economics</code></summary>
 
 - **Interviewer:** "We're spending $180,000/month serving a 70B model on 8× H100 GPUs. An engineer proposes distilling it into a 7B student model that can run on a single A10G ($0.75/hr). The distillation job itself will require 2 weeks on 32× A100 GPUs. Should we do it? Show me the math."
 
@@ -974,7 +1007,7 @@ graph LR
   **Realistic Solution:** Distillation is a capital investment with a payback period. You must compute: (1) the one-time distillation cost, (2) the monthly serving cost delta, (3) the quality gap and its business impact, and (4) the maintenance cost of re-distilling when the teacher is updated. The math usually works for stable, high-volume workloads but fails for rapidly iterating models.
 
   > **Napkin Math:**
-  > - **Distillation cost:** 32× A100 × $2.20/hr × 24 hr × 14 days = **$23,654** one-time.
+  > - **Distillation cost:** 32× A100 × $2.20/hr × 24 hr × 14 days = **$23,654.40** one-time.
   > - **Current serving (70B on 8× H100):** 8 × $3.50/hr × 730 hr/month = **$20,440/month** (the $180K includes multi-region redundancy; let's use single-region for comparison).
   > - **Student serving (7B on 1× A10G):** Need ~4 A10Gs for equivalent throughput (7B is 10× smaller but A10G is 5× slower than H100). 4 × $0.75/hr × 730 = **$2,190/month**.
   > - **Monthly savings:** $20,440 − $2,190 = **$18,250/month**.
@@ -988,7 +1021,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The S3 Data Wall</b> · <code>storage-io</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The S3 Data Wall</b> · <code>persistent-storage</code></summary>
 
 - **Interviewer:** "You rent an 8x A100 node on AWS to train a ResNet on a 50TB dataset of high-resolution medical images. To save money, you leave the dataset in a standard S3 bucket and use PyTorch's `IterableDataset` to stream the images directly to the GPUs during training. Your GPUs sit at 5% utilization. Why did streaming from object storage starve your compute?"
 
@@ -1008,7 +1041,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Parquet Row Group Chunking</b> · <code>storage</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Parquet Row Group Chunking</b> · <code>persistent-storage</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your data engineering team provides a 5 TB dataset stored in Parquet format in AWS S3. Your PyTorch dataloader only needs to read a single column (the text feature) to train an NLP model. Because Parquet is columnar, this should be incredibly fast and save bandwidth. However, your dataloader is downloading data at 10 GB/s, saturating the network, and reading almost the entire 5 TB. Why didn't the columnar format save you bandwidth?"
 
@@ -1034,10 +1067,10 @@ graph LR
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Data Gravity Gravity Well</b> · <code>storage</code> <code>economics</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Data Gravity Gravity Well</b> · <code>persistent-storage</code> <code>economics</code></summary>
 
 - **Interviewer:** "Your company has 10 Petabytes of multimodal training data sitting in AWS S3 in `us-east-1`. Due to a massive GPU shortage, you secured 2,000 H100s in a specialized cloud provider (like CoreWeave or Lambda Labs) located in Texas. How do you engineer the training pipeline to connect the data to the GPUs, and what is the hidden economic catastrophe?"
 

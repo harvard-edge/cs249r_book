@@ -17,11 +17,1250 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 ---
 
 
-### 🚀 Deployment & Fleet Management
+### Deployment & Fleet Management
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The A/B Partitioning Storage Tax</b> · <code>ota-firmware-updates</code></summary>
+
+- **Interviewer:** "You are designing an edge device with a 1 MB application firmware image (model + code). To ensure safe and reliable over-the-air (OTA) updates with rollback capabilities, you're using an A/B partitioning scheme. Identify the approximate minimum flash storage required for the device, accounting for the two application partitions and a typical 100 KB overhead for the bootloader and operating system."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often forget that A/B partitioning for OTA updates requires provisioning space for *two* complete copies of the application image. They calculate storage based on just one copy, failing to account for the inactive partition that holds the old version for rollback or receives the new version during an update.
+
+  **Realistic Solution:** The correct approach is to sum the storage for the operating system/bootloader overhead and two full application partitions. One partition (A) runs the active firmware, while the other (B) is used to download the new firmware. Once validated, the bootloader switches to boot from partition B. Partition A is kept as a fallback until the next update cycle. Therefore, the minimum required storage is the OS overhead plus twice the application image size.
+
+  > **Napkin Math:** Total Flash = (OS + Bootloader) + (App Image Size × 2)
+Total Flash ≈ 100 KB + (1 MB × 2)
+Total Flash ≈ 100 KB + 2 MB = 2.1 MB
+
+  > **Key Equation:** $\text{Flash}_{\text{total}} = \text{Overhead} + (\text{ImageSize} \times 2)$
+
+  > **Options:**
+  > [ ] ~1.1 MB
+  > [x] ~2.1 MB
+  > [ ] ~2.0 MB
+  > [ ] Slightly more than 1 MB, for a delta update
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Hard Real-Time Heartbeat</b> · <code>watchdog-timers</code></summary>
+
+- **Interviewer:** "You are designing a safety-critical perception system for an industrial robot. The main processing loop, which runs inference on a camera stream, must complete every 33 milliseconds to meet its hard real-time deadline. To prevent the system from freezing due to a software fault, you use a hardware watchdog timer. What is a reasonable timeout to set for this watchdog?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistakes are setting the timeout either too short or too long. A timeout shorter than the task deadline (e.g., 10ms) will cause constant, spurious resets during normal operation. A timeout that is orders of magnitude too long (e.g., 1 second) defeats the purpose of a *real-time* safeguard, as it allows the system to be non-responsive for a catastrophically long period before recovering.
+
+  **Realistic Solution:** A reasonable timeout should be slightly longer than the deadline to provide a buffer for normal system jitter, but not so long that it compromises the real-time guarantee. A value of around 100ms is a good choice. It's roughly 3 times the deadline, ensuring the system resets only after several consecutive missed deadlines, indicating a true fault rather than a transient hiccup. This watchdog is the lowest and most critical rung on a 'degradation ladder'; its failure signals an unrecoverable software state, necessitating a hard reset to return to a known-good state.
+
+  > **Napkin Math:** A hard real-time deadline of 33ms implies a processing rate of 30 frames per second (1000ms / 33ms ≈ 30 FPS). Setting a watchdog for 100ms means the system will be reset if it fails to process approximately 3 consecutive frames (100ms / 33ms ≈ 3). This is a fast failure detection. In contrast, a 1-second timeout would mean waiting for ~30 frames to be missed before a reset, which is far too slow for a safety-critical system.
+
+  > **Key Equation:** $$ T_{\text{watchdog}} > T_{\text{deadline}} $$
+
+  > **Options:**
+  > [ ] 10 ms
+  > [x] 100 ms
+  > [ ] 1 second
+  > [ ] 40 ms, the round-trip-time for US cross-country fiber
+
+  📖 **Deep Dive:** [Monitoring and Reliability](https://mlsysbook.ai/edge/09_monitoring_reliability.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Storage Tax</b> · <code>ota-firmware-updates-ab-partitioning</code></summary>
+
+- **Interviewer:** "You're designing the firmware for a fleet of smart environmental sensors. Each device has a microcontroller with 1MB of total Flash memory. To ensure you can deploy updates reliably, the system must use an A/B partitioning scheme for Over-the-Air (OTA) updates. The bootloader is allocated 32KB of flash, and the real-time operating system (RTOS) requires another 64KB. Explain the storage layout and calculate the maximum possible size for your application binary (which includes the model weights and inference code)."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to calculate the available space after subtracting system overhead, but forgetting that an A/B scheme requires *two* identical application slots, effectively halving the remaining space. Another error is to only divide the total flash by two, ignoring the fixed space consumed by the bootloader and RTOS.
+
+  **Realistic Solution:** The correct approach is to first account for the fixed storage costs that are outside the updatable application partitions. The bootloader and RTOS are essential and static. After subtracting their footprint from the total flash, the remaining space is what's available for the A/B partitions. Because one partition must be active while the other is receiving the update, this available space must be divided by two.
+
+Total Flash: 1 MB = 1024 KB
+Fixed Overhead: 32 KB (Bootloader) + 64 KB (RTOS) = 96 KB
+Space available for partitions: 1024 KB - 96 KB = 928 KB
+Maximum app size (per partition): 928 KB / 2 = 464 KB.
+
+  > **Napkin Math:** 1. Total Flash: 1024 KB
+2. Subtract Bootloader: 1024 KB - 32 KB = 992 KB
+3. Subtract RTOS: 992 KB - 64 KB = 928 KB
+4. Divide by 2 for A/B partitions: 928 KB / 2 = 464 KB
+
+  > **Key Equation:** $\text{Max App Size} = \frac{\text{Total Flash} - (\text{Bootloader Size} + \text{RTOS Size})}{2}$
+
+  > **Options:**
+  > [ ] 928 KB
+  > [ ] 512 KB
+  > [x] 464 KB
+  > [ ] 416 KB
+
+  📖 **Deep Dive:** [TinyML: Deployed Device](https://mlsysbook.ai/tinyml/03_deployed_device.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Degradation Ladder</b> · <code>degradation-ladder-watchdog</code></summary>
+
+- **Interviewer:** "You're designing the reliability system for a fleet of Jetson AGX Orin devices performing real-time object detection for a security application. The system must never be down for more than a few minutes. You design a three-stage degradation ladder triggered by a watchdog process.
+
+- **Stage 1:** A user-space watchdog monitors the inference application. If the app is unresponsive for 10 seconds, it triggers a software restart of the service.
+- **Stage 2:** If the service doesn't respond within 15 seconds *after* the restart is issued, the watchdog escalates and triggers a full OS reboot.
+- **Stage 3:** If the OS fails to boot and re-establish the watchdog process within 90 seconds of the reboot command, a hardware watchdog (which hasn't been 'pet' during this time) performs a hard power cycle of the entire device.
+
+Explain the maximum possible time from the moment the application first becomes unresponsive to a guaranteed hard power cycle."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the Maximum Time to Recovery by only considering the longest single timeout (the 90-second hardware watchdog) instead of summing the timeouts of the sequential stages. They forget that the system must fail through each preceding stage before the next one is triggered, making the total time cumulative.
+
+  **Realistic Solution:** The maximum time to recovery is the sum of the timeouts for each sequential stage in the degradation ladder. The clock starts when the application hangs, and each stage must fail for its full timeout period before the next one begins.
+
+1.  **Detection:** The user-space watchdog waits 10 seconds to detect the initial unresponsiveness.
+2.  **Service Restart:** It then attempts a restart, which is allowed to fail for 15 seconds.
+3.  **OS Reboot:** It then attempts an OS reboot, which is allowed to fail for 90 seconds.
+
+The total time is the sum of these sequential timeouts.
+
+  > **Napkin Math:** Total Time = (Initial Detection Timeout) + (Service Restart Timeout) + (OS Reboot Timeout)
+Total Time = 10s + 15s + 90s
+Total Time = 115 seconds (or 1 minute, 55 seconds)
+
+  > **Key Equation:** T_{\text{max_recovery}} = T_{\text{detect}} + T_{\text{stage1_timeout}} + T_{\text{stage2_timeout}}
+
+  > **Options:**
+  > [ ] 90 seconds
+  > [ ] 105 seconds
+  > [x] 115 seconds
+  > [ ] 25 seconds
+
+  📖 **Deep Dive:** [Deployed Edge Systems](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Overnight Update Dilemma</b> · <code>firmware-convergence</code></summary>
+
+- **Interviewer:** "You are an engineer managing a fleet of 10,000 autonomous delivery robots. A critical 500 MB firmware update must be rolled out. The robots are only available to download this update during a 2-hour window each night while charging. The cellular connection to each robot is unreliable, giving it only a 90% chance of successfully completing the download on any given night.
+
+Calculate the minimum number of nights required for at least 99% of the fleet to be successfully updated. Explain your reasoning."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to focus on the best-case scenario for a single device. Engineers calculate the download time (which is short), see it fits in the 2-hour window, and incorrectly conclude the entire fleet will update in one night. This fails to model the probabilistic nature of network reliability at scale, which results in a 'long tail' of devices that repeatedly fail to update.
+
+  **Realistic Solution:** This is a problem of modeling the exponential decay of the non-updated device population. If 90% of devices succeed each night, it means 10% of the remaining un-updated devices will fail and carry over to the next night. We need to find the number of nights, 't', until the un-updated population is less than or equal to 1% of the total fleet.
+
+The target is to have ≤ 1% of 10,000 = 100 devices remaining on the old firmware. We can model the number of remaining devices day by day.
+
+  > **Napkin Math:** Total Fleet Size: 10,000 devices
+Target Updated Percentage: 99%
+Target Remaining (Un-updated) Devices: 10,000 * (1 - 0.99) = 100 devices
+Daily Success Probability (P_success): 0.90
+Daily Failure Probability (P_fail): 1.0 - 0.90 = 0.10
+
+- **End of Day 0:** 10,000 devices are un-updated.
+- **End of Day 1:** 10,000 * P_fail = 10,000 * 0.10 = 1,000 devices remain un-updated.
+- **End of Day 2:** 1,000 * P_fail = 1,000 * 0.10 = 100 devices remain un-updated.
+
+After 2 full days, the number of un-updated devices is 100, which meets the 99% convergence target.
+
+  > **Key Equation:** N_{remaining}(t) = N_{total} \times (P_{fail})^t
+
+  > **Options:**
+  > [ ] 1 day. The download time for a single device is much less than the 2-hour window, so all devices should finish on the first night.
+  > [ ] 44 days. This is the time required based on the decay of the 'successful' population, not the failing one.
+  > [x] 2 days. The un-updated portion of the fleet decays by 90% each day, reaching the 1% target after two days.
+  > [ ] 10 days. This confuses the fleet convergence with the expected number of trials for a single device to experience one failure (1 / 0.1).
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The A/B Storage Tax</b> · <code>ota-storage-management</code></summary>
+
+- **Interviewer:** "You are designing the Over-the-Air (OTA) update strategy for a fleet of autonomous edge devices. Each device has 16 GB of storage, and the complete system image (OS, runtime, and models) is 4 GB. To ensure that a failed update doesn't brick the device, you must implement a seamless A/B partitioning scheme. Identify the minimum total storage that must be reserved for the A and B system partitions combined."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers unfamiliar with embedded systems reliability often only budget for a single system partition, forgetting that a robust A/B scheme requires a full, independent copy of the entire system image. They mistakenly think about patch/delta sizes, not the space for the inactive slot that receives the full update before being swapped to active.
+
+  **Realistic Solution:** A robust A/B OTA update mechanism requires two identical partitions. One is the 'active' partition, running the current firmware. The other is the 'inactive' partition, which serves as the target for the new OTA update. This allows the system to remain fully functional while the update is downloaded and installed. If the update fails, the system can simply boot back into the original, untouched active partition. Therefore, the total storage required is twice the size of a single system image.
+
+  > **Napkin Math:** System Image Size: 4 GB
+Required Partitions for A/B Scheme: 2 (one active, one inactive)
+Total Reserved Storage = System Image Size × 2
+Total Reserved Storage = 4 GB × 2 = 8 GB
+
+This leaves the remaining 8 GB (16 GB total - 8 GB reserved) for user data, logs, and other application assets.
+
+  > **Key Equation:** $\text{Storage}_{\text{A/B}} = 2 \times S_{\text{image}}$
+
+  > **Options:**
+  > [ ] 4 GB
+  > [ ] 16 GB
+  > [x] 8 GB
+  > [ ] 6 GB
+
+  📖 **Deep Dive:** [Deployed Systems & Fleet Management](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The Frozen Robot Problem</b> · <code>watchdog-timer-fusa</code></summary>
+
+- **Interviewer:** "You are designing the safety system for an autonomous delivery robot. If the main perception software enters an infinite loop and completely freezes, what is the most fundamental hardware mechanism you would rely on to force a system reboot and recover the robot from this non-responsive state?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers from a cloud background often confuse hardware watchdogs with software-level health checks (like a Kubernetes liveness probe). A software check fails when the OS scheduler itself hangs. Another common confusion is with ECC memory, which only protects against memory bit-flips, not logical software freezes.
+
+  **Realistic Solution:** A hardware watchdog timer. This is a simple, independent hardware counter physically separate from the main processor. The main application software must 'pet the dog' (reset the timer) at a regular interval. If the software freezes, it fails to reset the timer. When the timer overflows, it triggers a hardware reset line on the CPU, forcing a full reboot. It's the ultimate hardware failsafe for a non-responsive system, which is critical for functional safety in robotics.
+
+  > **Napkin Math:** A typical edge system has a hard real-time deadline, for instance, a 33ms perception-action loop for a 30 FPS camera. A watchdog timer might be configured with a 100ms timeout. This means the software must successfully complete its loop and 'pet the dog' at least once every 100ms. If just 3 consecutive frames are dropped or the main loop gets stuck, the watchdog will trigger, rebooting the system before the robot can remain unresponsive for a dangerous amount of time.
+
+  > **Options:**
+  > [ ] A software liveness probe that pings a monitoring service.
+  > [ ] Error-Correcting Code (ECC) memory to prevent corruption.
+  > [x] A hardware watchdog timer that triggers a CPU reset.
+  > [ ] A graceful degradation module that switches to a simpler model.
+
+  📖 **Deep Dive:** [Edge Hardware Platforms](https://mlsysbook.ai/edge/01_hardware_platform)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The OTA Download Tax</b> · <code>ota-update-bottleneck</code></summary>
+
+- **Interviewer:** "You need to roll out a 500 MB containerized model update to a fleet of Jetson devices in a factory. These devices are connected via an industrial 4G LTE link with a stable 20 Mbps download speed. State the approximate time required for the download phase of this Over-the-Air (OTA) update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to multi-gigabit datacenter networking often forget that edge connectivity is far more constrained. They incorrectly assume the download is nearly instantaneous and that the bottleneck must be container decompression or model loading into memory. In reality, on slow or unreliable links, the network transfer time dominates all other steps.
+
+  **Realistic Solution:** The primary bottleneck is the network download. The solution requires converting the network speed from Megabits per second (Mbps) to MegaBytes per second (MB/s) and then calculating the total transfer time.
+
+1.  **Convert bits to bytes:** A byte has 8 bits, so a 20 Mbps link is 20 / 8 = 2.5 MB/s.
+2.  **Calculate time:** Transferring a 500 MB file at 2.5 MB/s takes 500 MB / 2.5 MB/s = 200 seconds.
+3.  **Convert to minutes:** 200 seconds is equal to 3 minutes and 20 seconds.
+
+  > **Napkin Math:** $\text{Download Speed (MB/s)} = \frac{\text{20 Mbps}}{\text{8 bits/byte}} = 2.5 \text{ MB/s}$
+
+$\text{Time} = \frac{\text{500 MB}}{\text{2.5 MB/s}} = 200 \text{ seconds} \approx 3.3 \text{ minutes}$
+
+  > **Key Equation:** $\text{Time} = \frac{\text{Total Size in Bytes}}{\text{Speed in Bits per Second} / 8}$
+
+  > **Options:**
+  > [ ] Less than 5 seconds
+  > [ ] ~25 seconds
+  > [x] ~3.3 minutes
+  > [ ] Over 30 minutes
+
+  📖 **Deep Dive:** [Edge AI: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Edge OTA Bandwidth Bottleneck</b> · <code>ota-update-bandwidth</code></summary>
+
+- **Interviewer:** "You're an ML Systems Engineer managing a fleet of 1,000 traffic cameras, each powered by a Jetson AGX Orin. You need to roll out a critical OTA (Over-the-Air) update. The new computer vision model is 250 MB. It is packaged inside a container that adds 450 MB for the base image, dependencies, and new safety guardrails. Each camera has a stable, dedicated 400 Mbps network connection. Explain the total time required to download the complete update package to a single device."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to focus only on the model artifact size (250 MB) and ignore the container overhead. In real-world edge deployments, the container—with its OS, libraries, and other dependencies—often constitutes the majority of the payload. Another frequent error is confusing megabits per second (Mbps) with megabytes per second (MB/s), leading to an 8x miscalculation.
+
+  **Realistic Solution:** To solve this, you must account for the *total* payload size and correctly convert network speed from bits to bytes.
+
+1.  **Calculate Total Payload Size:** The total size is the model plus the container overhead: 250 MB + 450 MB = 700 MB.
+2.  **Convert Network Bandwidth:** Network speeds are measured in bits, while file sizes are in bytes. You must divide the network speed by 8 to get bytes per second: 400 Mbps / 8 = 50 MB/s.
+3.  **Calculate Download Time:** Divide the total payload by the network speed in MB/s: 700 MB / 50 MB/s = 14 seconds.
+
+  > **Napkin Math:** 1. **Total Payload:** 250 MB (Model) + 450 MB (Container) = 700 MB
+2. **Network Speed in Bytes:** 400 Mbps / 8 bits/byte = 50 MB/s
+3. **Time to Download:** 700 MB / 50 MB/s = 14 seconds
+
+  > **Key Equation:** $\text{Time (s)} = \frac{(\text{Model Size (MB)} + \text{Container Overhead (MB)})}{\text{Bandwidth (MB/s)}}$
+
+  > **Options:**
+  > [ ] 5 seconds
+  > [ ] 1.75 seconds
+  > [x] 14 seconds
+  > [ ] 112 seconds
+
+  📖 **Deep Dive:** [Deployed Edge Systems](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Overnight OTA Dilemma</b> · <code>ota-update-analysis</code></summary>
+
+- **Interviewer:** "You are the systems engineer for a fleet of 10,000 autonomous delivery robots. A critical software update is required, which includes a new 500 MB perception model and a 1 GB local database for RAG, making the total update package 1.5 GB per device.
+
+Your cloud infrastructure provides a dedicated egress bandwidth of 10 Gbps for this rollout. The entire fleet must be updated during an 8-hour overnight maintenance window.
+
+Calculate the minimum time required to push this update to the entire fleet and explain if this rollout is feasible within the given maintenance window."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing bits and bytes. Network speeds are measured in Gigabits per second (Gbps), while file sizes are in Gigabytes (GB). Failing to convert units by multiplying the data size by 8 results in an 8x underestimation of the required time, leading to the incorrect conclusion that the update is trivial.
+
+  **Realistic Solution:** The rollout is feasible. The total data to be transferred is 15 TB, which will take approximately 3.33 hours over a 10 Gbps link, fitting comfortably within the 8-hour maintenance window.
+
+First, calculate the total data volume in Gigabytes (GB):
+1.5 GB/device × 10,000 devices = 15,000 GB
+
+Next, convert the total data volume to Gigabits (Gb) to match the network bandwidth units:
+15,000 GB × 8 Gb/GB = 120,000 Gb
+
+Finally, calculate the time required by dividing the total data volume in bits by the network speed:
+Time = 120,000 Gb / 10 Gbps = 12,000 seconds
+
+Convert seconds to hours:
+12,000 seconds / 3600 seconds/hour ≈ 3.33 hours.
+
+  > **Napkin Math:** 1. **Total Data (GB):** 1.5 GB/device * 10,000 devices = 15,000 GB
+2. **Total Data (Gb):** 15,000 GB * 8 Gb/GB = 120,000 Gb
+3. **Network Speed:** 10 Gbps
+4. **Time (seconds):** 120,000 Gb / 10 Gbps = 12,000 s
+5. **Time (hours):** 12,000 s / 3600 s/hr = 3.33 hours
+6. **Conclusion:** 3.33 hours < 8-hour window. Feasible.
+
+  > **Key Equation:** $\text{Time}_{\text{total}} = \frac{(\text{Update Size}_{\text{Bytes}} \times 8 \times \text{Fleet Size})}{\text{Network Bandwidth}_{\text{bps}}}$
+
+  > **Options:**
+  > [ ] ~25 minutes. The rollout is trivial.
+  > [ ] < 1 minute. It's nearly instantaneous.
+  > [ ] ~333 hours. The rollout is impossible with this infrastructure.
+  > [x] ~3.3 hours. The rollout is feasible.
+
+  📖 **Deep Dive:** [Edge AI](https://mlsysbook.ai/edge/)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The OTA Flash Budget</b> · <code>ota-updates</code></summary>
+
+- **Interviewer:** "You're an engineer on an automotive team responsible for deploying a new perception model to a fleet of vehicles. The target ECU has 2MB of total flash storage. When planning the over-the-air (OTA) update, which of the following is the most fundamental constraint to identify first?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to cloud or mobile environments often focus on network bandwidth or installation time. They forget that for robust embedded systems, especially in automotive, A/B partitioning for fail-safe updates is standard. This effectively halves the flash space available for a new firmware image, making storage the primary bottleneck before any other consideration.
+
+  **Realistic Solution:** The most fundamental constraint is the available flash storage in the inactive partition. To ensure the vehicle can recover from a failed update, a portion of the flash (often half) is reserved to hold the complete new firmware image while the current one is running. If the new image is larger than this reserved space, the update is physically impossible regardless of network speed or permitted downtime.
+
+  > **Napkin Math:** Total Flash: 2MB. For robust A/B updates, the flash is divided into two 1MB partitions. Partition A runs the current model, while the new model is downloaded to Partition B. This means the *entire* new firmware package (model, application code, dependencies) must fit into that 1MB slot. If the RTOS and bootloader take up 100KB within that partition, the hard limit for your update image is ~900KB, which is less than half the total storage.
+
+  > **Key Equation:** $\text{App}_{\text{max}} \approx \frac{\text{Flash}_{\text{total}}}{2} - \text{OS}_{\text{footprint}}$
+
+  > **Options:**
+  > [ ] The vehicle's 4G/5G network bandwidth for the download.
+  > [ ] The power consumed by the flash write operation.
+  > [x] The available storage space in the inactive firmware partition.
+  > [ ] The compute time required to validate the new model post-installation.
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Fleet Update Data Bill</b> · <code>ota-update-fleet-scale</code></summary>
+
+- **Interviewer:** "You are an ML Systems engineer for a large autonomous vehicle company. Your team needs to roll out a critical 4 GB perception model update to the entire production fleet of 10,000 vehicles. Explain the difference in scale between a single-vehicle update and a full fleet rollout, and calculate the total data volume required for this one-time update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers, especially those new to large-scale deployed systems, often focus on the per-unit payload size (4 GB), which seems manageable. They fail to multiply by the fleet size, thus underestimating the total data volume by several orders of magnitude. This leads to a failure to plan for cloud egress costs, content delivery network (CDN) strategy, and the server infrastructure required to handle 10,000 simultaneous connections.
+
+  **Realistic Solution:** The core task is to interpret the scale of the system. While a 4 GB update for one vehicle is simple, deploying it to a 10,000-unit fleet is a significant data-moving operation. The total data volume is the per-vehicle update size multiplied by the number of vehicles. This means the infrastructure must be prepared to serve 40,000 Gigabytes, or 40 Terabytes, of data. This amount of data incurs non-trivial cloud egress costs and requires a robust delivery architecture.
+
+  > **Napkin Math:** 1. **Identify per-unit size:** The update for one vehicle is 4 GB.
+2. **Identify fleet size:** The fleet consists of 10,000 vehicles.
+3. **Calculate total volume:** `Total Data = Update Size per Unit × Fleet Size`
+4. **Calculation:** `4 GB/vehicle × 10,000 vehicles = 40,000 GB`
+5. **Convert to Terabytes:** `40,000 GB / 1,000 GB/TB = 40 TB`
+
+  > **Key Equation:** $\text{Total Data Volume} = \text{Fleet Size} \times \text{Update Size per Unit}$
+
+  > **Options:**
+  > [ ] 4 GB. The update is 4 GB.
+  > [ ] 400 GB. It's a large update for a large fleet.
+  > [x] 40 TB. The total data is the per-vehicle size multiplied by the entire fleet.
+  > [ ] 5 TB. This comes from dividing the total gigabytes by 8, confusing bytes and bits.
+
+  📖 **Deep Dive:** [Edge: The Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Update Budget</b> · <code>ota-update-cost</code></summary>
+
+- **Interviewer:** "You're an engineer for an automotive company deploying a critical OTA (Over-the-Air) update. The update includes a new perception model with 50 million parameters, which will be deployed in a container. The model requires FP16 precision. Explain how to calculate the storage size of the model weights, and then calculate the total download size if the container's base layer adds another 150 MB."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the required bytes per parameter for different precisions. A common error is assuming 1 byte for FP16 (confusing it with INT8) or 4 bytes (confusing it with FP32). Another typical mistake is to focus only on the model weights and forget the significant overhead from the container base image, leading to a severe underestimation of the total required bandwidth and device storage.
+
+  **Realistic Solution:** The correct approach is to calculate the model size based on its parameter count and precision, then add the size of the container base. Each parameter in FP16 precision requires 2 bytes of storage. Therefore, a 50 million parameter model needs 100 MB for its weights. Adding the 150 MB container base results in a total update size of 250 MB.
+
+  > **Napkin Math:** 1. **Parameters**: 50,000,000
+2. **Bytes per Parameter (FP16)**: 2 bytes
+3. **Model Weights Size**: 50,000,000 params × 2 bytes/param = 100,000,000 bytes
+4. **Convert to MB**: 100,000,000 bytes / (1024 * 1024 bytes/MB) ≈ 95.4 MB. For napkin math, we use 1,000,000 bytes/MB, so 100 MB.
+5. **Container Base Size**: 150 MB
+6. **Total Update Size**: 100 MB (model) + 150 MB (container) = 250 MB
+
+  > **Key Equation:** $\text{Total Size} = (\text{Parameters} \times \text{Bytes per Param}) + \text{Container Size}$
+
+  > **Options:**
+  > [ ] 200 MB
+  > [ ] 100 MB
+  > [x] 250 MB
+  > [ ] 350 MB
+
+  📖 **Deep Dive:** [Edge: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Download Fallacy</b> · <code>edge-ota-bandwidth</code></summary>
+
+- **Interviewer:** "You are an engineer on an autonomous vehicle team responsible for Over-the-Air (OTA) updates. You need to calculate the time required to download a new 8 GB perception model update to a vehicle over its 1 Gbps cellular connection. Ignoring protocol overhead, calculate the approximate download time."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to confuse Gigabits (Gb) with Gigabytes (GB). Engineers often incorrectly divide the 8 GB package size by the 1 Gbps network speed and arrive at an answer of 8 seconds. This is wrong by a factor of 8, because network speeds are measured in bits while storage is measured in Bytes.
+
+  **Realistic Solution:** The correct way to solve this is to first make the units consistent. You must convert the network speed from Gigabits per second (Gbps) to Gigabytes per second (GB/s) by dividing by 8. Then, you can divide the total package size by the network speed in the correct units.
+
+1 Gbps is equal to 1,000,000,000 bits per second. There are 8 bits in a Byte, so the speed in GB/s is 1/8 = 0.125 GB/s.
+
+The download will take 8 GB / 0.125 GB/s = 64 seconds.
+
+  > **Napkin Math:** 1. **Convert Units**: Network speed is in bits, file size is in Bytes. Convert speed to Bytes.
+   `1 Gbps / 8 bits per Byte = 0.125 GB/s`
+2. **Calculate Time**: Divide the total data size by the speed.
+   `Time = 8 GB / 0.125 GB/s = 64 seconds`
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{Data Size (GB)} \times 8}{\text{Network Speed (Gbps)}}$
+
+  > **Options:**
+  > [ ] 8 seconds
+  > [ ] 4 seconds
+  > [x] 64 seconds
+  > [ ] 32 seconds
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Overnight OTA Update</b> · <code>edge-ota-bandwidth</code></summary>
+
+- **Interviewer:** "A new 8 GB perception model is ready for fleet-wide rollout to your company's autonomous vehicles. The only reliable window for updates is an 8-hour overnight period when cars are parked and connected to a 4G LTE network. You can assume a sustained, best-case download speed of 10 Mbps for each vehicle. Explain the minimum time required to download this update. Is the 8-hour window sufficient?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing bits (b) and bytes (B). Network speeds are measured in megabits per second (Mbps), while file sizes are measured in gigabytes (GB). This leads to an 8× error in calculation. Engineers either forget to multiply the file size by 8 to convert from bytes to bits, or they incorrectly assume 10 Mbps is 10 MB/s, leading to a result that is 8x too fast.
+
+  **Realistic Solution:** The correct approach is to standardize the units to bits. First, convert the model size from Gigabytes (GB) to Gigabits (Gb). Then, calculate the download time based on the available network bandwidth.
+
+The calculation shows the download takes approximately 1.8 hours. While this is technically well within the 8-hour window, a Staff+ engineer would recognize this still presents a risk. It leaves little buffer for real-world issues like network instability, failed downloads requiring retries, or the need to perform a staged rollout to mitigate risk, all of which could easily push the total time beyond the 8-hour limit for some vehicles.
+
+  > **Napkin Math:** 1. **Convert model size to bits:** 8 GB × 8 bits/byte = 64 Gbits.
+2. **Standardize units:** The network speed is 10 Mbps. We need to divide Giga-bits by Mega-bits.
+3. **Calculate time in seconds:** Time = Total Data / Bandwidth = 64,000 Mbits / 10 Mbits/s = 6,400 seconds.
+4. **Convert seconds to hours:** 6,400 seconds / 3,600 seconds/hour ≈ 1.78 hours.
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{File Size (bits)}}{\text{Bandwidth (bits/s)}}$
+
+  > **Options:**
+  > [ ] ~13.3 minutes
+  > [x] ~1.8 hours
+  > [ ] ~2.4 hours
+  > [ ] ~14.2 hours
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Automotive OTA Data Bill</b> · <code>ota-data-cost</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer at a leading automotive company. Your team needs to deploy a new 250 MB perception model to a fleet of 50,000 vehicles via an Over-the-Air (OTA) update. The vehicles use a cellular connection, and your enterprise data plan costs $8 per Gigabyte.
+
+Calculate the total data cost to update the entire fleet."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often make unit conversion errors, either by confusing MegaBytes (MB) with GigaBytes (GB) or by misinterpreting the cost basis (e.g., per gigabit instead of gigabyte). Another common mistake is to overcomplicate the problem by assuming the model size given is a parameter count, leading to an unnecessary and incorrect size calculation.
+
+  **Realistic Solution:** The correct approach is a straightforward calculation involving the total data volume and the cost per unit of data. First, calculate the total data required for the entire fleet by multiplying the model's size by the number of vehicles. Second, convert the total data from Megabytes to Gigabytes to match the pricing unit. Finally, multiply the result by the cost per Gigabyte.
+
+  > **Napkin Math:** 1. **Calculate Total Data in MB:** 250 MB/vehicle × 50,000 vehicles = 12,500,000 MB
+2. **Convert MB to GB:** 12,500,000 MB / 1,000 MB/GB = 12,500 GB
+3. **Calculate Total Cost:** 12,500 GB × $8/GB = $100,000
+
+  > **Key Equation:** $\text{Total Cost} = (\frac{\text{Model Size}_{\text{MB}} \times \text{Fleet Size}}{1000}) \times \text{Cost per GB}$
+
+  > **Options:**
+  > [ ] $12,500
+  > [ ] $200,000
+  > [x] $100,000
+  > [ ] $100,000,000
+
+  📖 **Deep Dive:** [Deployed Edge Systems](https://mlsysbook.ai/edge/deployed-systems.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Autonomous Fleet OTA Update</b> · <code>edge-ota-update</code></summary>
+
+- **Interviewer:** "You're an engineer for an autonomous vehicle company. A critical update to the main perception model, which has 500 million parameters and is deployed in INT8 precision, needs to be rolled out to a fleet of vehicles. The vehicles connect via a 4G LTE modem with an average real-world download speed of 25 Mbps. Calculate the approximate time required to download this update to a single vehicle."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing bits and bytes. Network speeds are marketed in megabits per second (Mbps), while file sizes are measured in megabytes (MB). Forgetting the 8x conversion factor leads to underestimating the download time by an order of magnitude.
+
+  **Realistic Solution:** First, calculate the model's size in bytes. With 500 million parameters and INT8 precision (1 byte/parameter), the size is 500 million bytes, which is approximately 477 MB. For napkin math, we can round this to 500 MB.
+
+Next, convert the network speed from megabits per second (Mbps) to megabytes per second (MB/s). 25 Mbps divided by 8 bits per byte equals 3.125 MB/s.
+
+Finally, divide the model size by the network speed: 500 MB / 3.125 MB/s = 160 seconds. It will take approximately 2 minutes and 40 seconds to download the update to a single vehicle.
+
+  > **Napkin Math:** 1. **Model Size:** 500M params × 1 byte/param (INT8) = 500,000,000 bytes ≈ 500 MB
+2. **Network Speed Conversion:** 25 Mbps / 8 bits/byte = 3.125 MB/s
+3. **Download Time:** 500 MB / 3.125 MB/s = 160 seconds
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{Model Size (Bytes)}}{\text{Network Speed (Bytes/s)}}$
+
+  > **Options:**
+  > [ ] ~20 seconds
+  > [ ] ~320 seconds
+  > [x] ~160 seconds
+  > [ ] ~640 seconds
+
+  📖 **Deep Dive:** [Edge AI: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Update Budget</b> · <code>ota-update-bandwidth</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer on an autonomous vehicle team. Your current perception model is 2.5 GB. You have a new, more accurate FP16 model that is 3.5 GB. The fleet connects via a standard LTE cellular connection, which provides a realistic average download speed of 25 Mbps (megabits per second). To manage data costs and ensure a good user experience, a full model update must complete in under 20 minutes while the vehicle is parked and charging. Explain if you can safely deploy the new 3.5 GB model. Calculate the best-case download time."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing bits and bytes. Network speeds are measured in megabits per second (Mbps), while file sizes on disk are measured in gigabytes (GB). Engineers often forget to multiply the file size in bytes by 8 to convert it to bits, leading to an 8x underestimate of the required download time and a failed deployment plan.
+
+  **Realistic Solution:** No, the update is too slow to fit safely within the 20-minute budget. The download alone would take approximately 18.7 minutes in ideal conditions, leaving almost no margin for network variability, download interruptions, or the time needed for on-device installation and verification. A production system requires a significant safety buffer (e.g., aiming for the process to take <50% of the allotted time). The correct engineering decision would be to reject this model for OTA deployment and work with the modeling team to quantize it or develop a delta patching strategy.
+
+  > **Napkin Math:** 1. **Convert File Size to bits**: Network bandwidth is in bits, so first convert the 3.5 GB model size to bits.
+   $3.5 \text{ GB} \times 8 \frac{\text{bits}}{\text{byte}} = 28 \text{ Gigabits (Gb)}$
+
+2. **Standardize Units**: The network speed is in Megabits per second (Mbps), so convert the file size to Megabits (Mb).
+   $28 \text{ Gb} \times 1000 \frac{\text{Mb}}{\text{Gb}} = 28,000 \text{ Mb}$
+
+3. **Calculate Time**: Divide the total data size by the network speed.
+   $\frac{28,000 \text{ Mb}}{25 \text{ Mbps}} = 1,120 \text{ seconds}$
+
+4. **Convert to Minutes**: Convert the total seconds into a more human-readable format.
+   $\frac{1,120 \text{ seconds}}{60 \frac{\text{s}}{\text{min}}} \approx 18.7 \text{ minutes}$
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{File Size (bits)}}{\text{Bandwidth (bits/s)}}$
+
+  > **Options:**
+  > [ ] ~2.3 minutes
+  > [ ] ~1.1 seconds
+  > [x] ~18.7 minutes
+  > [ ] ~149 minutes
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Fleet Update Dilemma</b> · <code>edge-ota-update</code></summary>
+
+- **Interviewer:** "You are an ML systems engineer for an autonomous vehicle company. A critical OTA (Over-the-Air) update for the main perception model is ready for deployment. The total update package size is 120 MB. The vehicles in the fleet are connected via a stable 4G cellular link with an average download speed of 80 Mbps (megabits per second). Ignoring any protocol overhead, calculate the time it will take for a single vehicle to download this update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing megabits per second (Mbps) with megabytes per second (MB/s). Network bandwidth is specified in bits, while file sizes are measured in bytes. Forgetting to divide the network speed by 8 results in an answer that is 8 times too fast.
+
+  **Realistic Solution:** First, convert the network speed from bits to bytes. Since there are 8 bits in a byte, a speed of 80 Mbps is equivalent to 10 MB/s. Then, divide the total file size by the download speed in the correct units. 120 MB divided by 10 MB/s equals 12 seconds.
+
+  > **Napkin Math:** 1. **Convert Bandwidth:** Network speed is given in bits, file size in bytes. You must normalize them.
+   `80 Mbps / 8 bits per byte = 10 MB/s`
+2. **Calculate Time:** Divide the total size by the download rate.
+   `120 MB / 10 MB/s = 12 seconds`
+
+  > **Key Equation:** $\text{Download Time (s)} = \frac{\text{File Size (Bytes)}}{\text{Bandwidth (bits/s)} / 8}$
+
+  > **Options:**
+  > [ ] 1.5 seconds
+  > [x] 12 seconds
+  > [ ] 15 seconds
+  > [ ] 120 seconds
+
+  📖 **Deep Dive:** [Edge: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Bandwidth Trap</b> · <code>ota-update-bandwidth</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer for an automotive company managing a fleet of vehicles. You need to push a critical over-the-air (OTA) update to fix a flaw in the pedestrian detection model. The binary patch for the model is **12 MegaBytes (MB)**. The vehicle's cellular modem has a stable connection averaging **10 Megabits per second (Mbps)**.
+
+Calculate the minimum time required for a single vehicle to download this patch. Ignore protocol overhead for this calculation."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing MegaBytes (MB) and Megabits (Mb). Network speeds are almost always measured in bits per second, while file sizes are measured in bytes. Forgetting to multiply the file size in bytes by 8 to get its size in bits leads to underestimating the download time by a factor of 8.
+
+  **Realistic Solution:** To solve this, you must first align the units. The data size is in MegaBytes (MB) and the bandwidth is in Megabits per second (Mbps). Since 1 Byte = 8 bits, you convert the patch size to bits and then divide by the bandwidth.
+
+The correct calculation is converting the 12 MB patch to Megabits, which is 12 MB × 8 = 96 Mb. Then, you divide by the 10 Mbps connection speed: 96 Mb / 10 Mbps = 9.6 seconds.
+
+  > **Napkin Math:** 1. **Convert Data Size to bits:** The patch is 12 MegaBytes (MB).
+   - 12 MB * 8 bits/Byte = 96 Megabits (Mb)
+2. **Identify Bandwidth:** The connection is 10 Megabits per second (Mbps).
+3. **Calculate Time:** Time = Total Data / Bandwidth
+   - Time = 96 Mb / 10 Mbps = **9.6 seconds**
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{Data Size (Bytes)} \times 8}{\text{Bandwidth (bits/s)}}$
+
+  > **Options:**
+  > [ ] 1.2 seconds
+  > [x] 9.6 seconds
+  > [ ] 12.0 seconds
+  > [ ] 96.0 seconds
+
+  📖 **Deep Dive:** [Edge: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Emergency OTA Rollout</b> · <code>ota-update-bandwidth</code></summary>
+
+- **Interviewer:** "You are an ML systems engineer for an autonomous vehicle company. A critical bug has been discovered in the perception model that requires an immediate Over-the-Air (OTA) update for the entire fleet. The compressed update package for the new model is 512 MB.
+
+Your vehicles maintain a stable cellular connection with a sustained download speed of 100 Megabits per second (Mbps).
+
+**Interviewer:** Ignoring protocol overhead and any delays from orchestration, calculate the minimum time required to download this update to a single vehicle. Explain your reasoning."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing Megabits (Mb) with MegaBytes (MB). Network bandwidth is almost always specified in bits per second (e.g., Mbps), while file sizes are given in bytes (e.g., MB). Forgetting to convert units leads to an 8x error in the final calculation, drastically underestimating the required time.
+
+  **Realistic Solution:** The correct approach is to harmonize the units before performing the division. Since there are 8 bits in a byte, we must convert the file size from MegaBytes to Megabits to match the bandwidth unit.
+
+1.  **Convert File Size to bits:** 512 MB * 8 bits/byte = 4096 Megabits (Mb).
+2.  **Calculate Download Time:** Divide the total data in bits by the download speed in bits per second.
+    Time = 4096 Mb / 100 Mbps = 40.96 seconds.
+
+Therefore, the minimum time to download the update is just under 41 seconds.
+
+  > **Napkin Math:** 1. **File Size:** 512 MB
+2. **Bandwidth:** 100 Mbps
+3. **Unit Conversion:** The units don't match (Bytes vs. bits). Convert size to bits:
+   `512 MB * 8 bits/byte = 4096 Mb`
+4. **Calculate Time:**
+   `Time = Total Data / Rate`
+   `Time = 4096 Mb / 100 Mbps = 40.96 seconds`
+5. **Sanity Check:** The answer is approximately 40 seconds.
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{File Size (MB)} \times 8}{\text{Bandwidth (Mbps)}}$
+
+  > **Options:**
+  > [ ] 5.1 seconds
+  > [x] 41.0 seconds
+  > [ ] 328 seconds
+  > [ ] 0.6 seconds
+
+  📖 **Deep Dive:** [Deployed Edge Systems](https://mlsysbook.ai/vol2/edge/deployed_system)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The OTA Update Tax</b> · <code>fleet-economics-tco</code></summary>
+
+- **Interviewer:** "An automotive company spends $2M on R&D for a new driver-assist model. They plan to deploy it to a fleet of 100,000 vehicles. The model is 200MB and will be updated over-the-air (OTA) quarterly over a 5-year vehicle lifespan. The cellular data cost is $5/GB. For the entire fleet over its lifetime, identify the relationship between the one-time R&D cost and the total recurring data transmission cost."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus heavily on the upfront non-recurring engineering (NRE) cost of model R&D, assuming it's the dominant expense. They underestimate how small, recurring operational expenses (OpEx), like data transmission for OTA updates, can accumulate to a massive scale across a large fleet's lifetime, potentially matching or exceeding the initial development investment.
+
+  **Realistic Solution:** The costs are surprisingly similar, demonstrating a critical TCO principle in large-scale edge deployments. The one-time R&D is a sunk cost of $2M. The lifetime data cost for the entire fleet also accumulates to $2M, meaning the operational cost of simply *delivering* the updates is as significant as the cost of creating the model in the first place. At scale, logistics often rival innovation in cost.
+
+  > **Napkin Math:** 1. **Calculate total updates per vehicle:**
+   - 4 updates/year × 5 years = 20 updates
+
+2. **Calculate total data transmitted per vehicle:**
+   - 20 updates × 200 MB/update = 4,000 MB = 4 GB
+
+3. **Calculate total data for the entire fleet:**
+   - 4 GB/vehicle × 100,000 vehicles = 400,000 GB
+
+4. **Calculate total data transmission cost:**
+   - 400,000 GB × $5/GB = $2,000,000
+
+5. **Compare costs:**
+   - R&D Cost ($2,000,000) is approximately equal to the Total Data Cost ($2,000,000).
+
+  > **Key Equation:** $\text{TCO} = \text{NRE} + \sum (\text{Recurring Costs})$
+
+  > **Options:**
+  > [ ] The R&D cost is significantly larger (>10x) than the data cost.
+  > [ ] The data cost is significantly larger (>10x) than the R&D cost.
+  > [x] The R&D cost and the total data cost are roughly equal.
+  > [ ] The costs are negligible compared to on-device inference power consumption.
+
+  📖 **Deep Dive:** [Deployed Edge Systems](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The 5 Terabyte Patch</b> · <code>ota-fleet-update</code></summary>
+
+- **Interviewer:** "You are an ML systems engineer for an autonomous taxi company with a fleet of 10,000 vehicles. A critical bug is discovered in the perception model, and you need to deploy a patch. The update is delivered as a 500 MB container image. Calculate the total data that needs to be transferred across the entire fleet for this single OTA update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to miscalculate the units or underestimate the scale. Engineers often think in terms of megabytes or gigabytes for a single device, but they fail to multiply by the fleet size and convert to the correct order of magnitude (terabytes). Another frequent error is confusing bytes and bits (a 1-byte vs 1-bit difference), which leads to an 8x miscalculation when cellular data plans are measured in bits.
+
+  **Realistic Solution:** The solution requires multiplying the size of the update by the number of vehicles in the fleet and then converting the units correctly. At 10,000 vehicles, the total data transfer is substantial, highlighting the significant operational costs and infrastructure requirements for managing a large-scale edge deployment. This is a foundational calculation for any fleet management strategy.
+
+  > **Napkin Math:** 10,000 vehicles × 500 MB/vehicle = 5,000,000 MB
+5,000,000 MB / 1,000 (MB/GB) = 5,000 GB
+5,000 GB / 1,000 (GB/TB) = 5 TB
+This single, routine patch consumes 5 terabytes of cellular data, which has major cost implications.
+
+  > **Key Equation:** $\text{Total Data} = \text{Fleet Size} \times \text{Update Size}$
+
+  > **Options:**
+  > [ ] 500 MB
+  > [ ] 5 GB
+  > [x] 5 TB
+  > [ ] 40 Tb
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Overnight OTA Update</b> · <code>ota-update-bandwidth</code></summary>
+
+- **Interviewer:** "You're an engineer on an autonomous vehicle team. A critical perception model update needs to be pushed to the fleet overnight. The full container image for the update is 800 MB. For safety, the update only occurs when the vehicle is parked in a garage with a stable cellular connection of at least 40 Mbps. Calculate the minimum time required for a vehicle to download this update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing Megabits (Mb) and MegaBytes (MB). Network bandwidth is specified in bits per second (Mbps), while file sizes are given in Bytes (MB). Engineers often forget the 8x conversion factor and divide the file size directly by the network speed, resulting in a wildly optimistic download time that is 8 times too small.
+
+  **Realistic Solution:** The correct approach requires standardizing the units. Since network bandwidth is in Megabits per second (Mbps), you must first convert the 800 MegaByte (MB) update size into Megabits (Mb). After that, it's a simple division to find the total time in seconds.
+
+  > **Napkin Math:** 1. Convert update size to Megabits: 800 MB * 8 bits/byte = 6400 Mb
+2. Calculate download time: 6400 Mb / 40 Mbps = 160 seconds
+3. Convert for intuition: 160 seconds is 2 minutes and 40 seconds, a reasonable time for a background download.
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{File Size (MB)} \times 8}{\text{Bandwidth (Mbps)}}$
+
+  > **Options:**
+  > [ ] 20 seconds
+  > [ ] 2.5 seconds
+  > [x] 160 seconds
+  > [ ] 1280 seconds
+
+  📖 **Deep Dive:** [Edge: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Downtime Tax</b> · <code>ota-update-storage-bottleneck</code></summary>
+
+- **Interviewer:** "You are an engineer on an autonomous vehicle team responsible for deploying model updates. Your fleet uses compute modules with UFS 4.0 flash storage. A critical OTA update is pending, which includes a 4 GB perception model and a 32 GB high-definition map file for the RAG system. During the final installation phase, the vehicle must be non-operational as these files are written to the primary flash partition. Calculate the approximate *minimum* downtime required for the vehicle to complete this file write operation."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Using the advertised 'read' speed for a 'write' operation. Flash storage, including UFS 4.0, has asymmetric performance; write speeds are almost always significantly lower than read speeds. A candidate might also forget to sum all components of the update payload, calculating the time for only the model or the map data.
+
+  **Realistic Solution:** The correct approach is to first sum the total data payload, then divide by a realistic write speed. The total size is 4 GB (model) + 32 GB (map data) = 36 GB. The `NUMBERS.md` table lists UFS 4.0 'Read' speed at ~4.2 GB/s. A reasonable engineering assumption for high-performance flash is that write speed is about 50% of read speed. Therefore, we estimate the write speed to be ~2.1 GB/s. The total downtime is the total size divided by this estimated write speed.
+
+  > **Napkin Math:** 1. **Total Update Size**: 4 GB (model) + 32 GB (map data) = 36 GB
+2. **Find Storage Speed**: From the spec sheet, UFS 4.0 *Read* Speed is ~4.2 GB/s.
+3. **Estimate Write Speed**: Assume Write Speed ≈ 50% of Read Speed → 0.5 * 4.2 GB/s = 2.1 GB/s.
+4. **Calculate Downtime**: Downtime = Total Size / Write Speed = 36 GB / 2.1 GB/s ≈ 17.1 seconds.
+
+  > **Key Equation:** $\text{Downtime} = \frac{\text{Total Update Size}}{\text{Storage Write Speed}}$
+
+  > **Options:**
+  > [ ] ~8.6 seconds
+  > [x] ~17.1 seconds
+  > [ ] ~1.9 seconds
+  > [ ] ~7.6 seconds
+
+  📖 **Deep Dive:** [Edge: Deployed Systems](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Bandwidth Budget</b> · <code>edge-ota-orchestration</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer for an autonomous vehicle company rolling out an updated perception model. The complete OTA update package, containerized for reliable deployment, is 400 MB. Your fleet of vehicles has a stable cellular connection that provides 80 Mbps (megabits per second) of download bandwidth. Explain how you would calculate the minimum time required for a single vehicle to download this update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to confuse megabits (Mb) and megabytes (MB). Network speeds are almost always advertised in bits per second, while file sizes are measured in bytes. Forgetting to convert the file size from megabytes to megabits by multiplying by 8 will result in an answer that is 8x too fast.
+
+  **Realistic Solution:** The correct way to solve this is to first make the units consistent. We must convert the package size from Megabytes (MB) to Megabits (Mb) to match the bandwidth unit.
+
+1. Convert Package Size to bits: 400 MB * 8 bits/byte = 3200 Mb.
+2. Divide by Bandwidth: 3200 Mb / 80 Mbps = 40 seconds.
+
+This calculation shows that under ideal conditions, the update would take 40 seconds to download. In a real-world rollout, you would also need to account for network variability, fleet-wide scheduling to avoid network congestion, and device power states.
+
+  > **Napkin Math:** Package Size in Megabits = 400 MB * 8 bits/byte = 3200 Mb
+Download Time = Total Size / Bandwidth = 3200 Mb / 80 Mbps = 40 seconds
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{File Size (MB)} \times 8}{\text{Bandwidth (Mbps)}}$
+
+  > **Options:**
+  > [ ] 5 seconds
+  > [ ] 50 seconds
+  > [x] 40 seconds
+  > [ ] 3200 seconds
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/vol2/edge/deployed-system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Fleet Update Data Bill</b> · <code>edge-ota-rollout</code></summary>
+
+- **Interviewer:** "You're an ML Systems Engineer at an autonomous vehicle company. A critical safety patch requires you to push a new 150 MB model container to the entire fleet of 10,000 vehicles over their cellular connections. Explain how you would calculate the total data bandwidth required for this Over-the-Air (OTA) rollout and what the final number is."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often miscalculate by an order of magnitude or confuse bits and bytes. A common error is misplacing a decimal in the fleet size (e.g., calculating for 1,000 cars instead of 10,000) or confusing Megabytes (MB) with Megabits (Mb), which differ by a factor of 8. This leads to drastic under- or over-estimation of data costs and network impact during the rollout.
+
+  **Realistic Solution:** The calculation is a direct multiplication of the update size by the number of devices in the fleet. This total data figure is a crucial input for budgeting cellular data costs with carriers and for designing a rollout strategy. For example, knowing the total data load might lead to a decision to perform a staged rollout (e.g., 10% of the fleet per day) to avoid network congestion and manage costs.
+
+  > **Napkin Math:** Total Data = Image Size per Vehicle × Number of Vehicles
+Total Data = 150 MB/vehicle × 10,000 vehicles
+Total Data = 1,500,000 MB
+
+To make this number easier to interpret, we convert it to larger units:
+1,500,000 MB / 1,000 MB/GB = 1,500 GB
+1,500 GB / 1,000 GB/TB = 1.5 Terabytes (TB)
+
+  > **Key Equation:** $\text{Total Data} = \text{Image Size} \times \text{Number of Devices}$
+
+  > **Options:**
+  > [ ] 150 GB
+  > [x] 1.5 TB
+  > [ ] 15 TB
+  > [ ] 12 TB
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Bandwidth Budget</b> · <code>edge-ota-bandwidth</code></summary>
+
+- **Interviewer:** "You're an engineer on an autonomous vehicle team. A critical patch is required for the perception model running on the vehicle's edge compute unit. The full model is packaged in a 550 MB container image. However, by leveraging container layering, the differential OTA (Over-the-Air) update is only 40 MB. Calculate the minimum time required to download this critical patch to a single vehicle assuming a stable 20 Mbps cellular connection."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse Megabits per second (Mbps) for network bandwidth with MegaBytes (MB) for file sizes. This leads to an 8x error, drastically underestimating the required download time. Another common pitfall is calculating the time for the full container, not the differential update.
+
+  **Realistic Solution:** The key is to harmonize the units before performing the division. Network speeds are universally measured in bits per second, while file sizes are measured in bytes. First, convert the network bandwidth from Mbps to MB/s by dividing by 8. Then, divide the size of the differential update by the bandwidth in MB/s to find the time in seconds.
+
+  > **Napkin Math:** 1. **Harmonize Units:** A 20 Mbps connection is `20 Megabits/sec / 8 bits/Byte = 2.5 MegaBytes/sec` (MB/s).
+2. **Calculate Time:** The update is 40 MB. So, `40 MB / 2.5 MB/s = 16 seconds`.
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{Update Size (MB)}}{\text{Bandwidth (Mbps)} / 8}$
+
+  > **Options:**
+  > [ ] 2 seconds
+  > [x] 16 seconds
+  > [ ] 220 seconds
+  > [ ] 27.5 seconds
+
+  📖 **Deep Dive:** [Deployed Systems](https://mlsysbook.ai/vol2/edge/deployment.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Automotive OTA Update</b> · <code>ota-update-rollout</code></summary>
+
+- **Interviewer:** "You are an ML Systems Engineer on the autonomous vehicle team. A critical bug requires you to roll out a new perception model to the entire fleet. The full update package, including the model, dependencies, and container image, is 2 GB. For a single vehicle connected to a stable cellular network with an average download speed of 40 Mbps, explain how long the download portion of the update will take."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing bits with Bytes. Network speeds are almost always advertised in megabits per second (Mbps), while file sizes are measured in megabytes (MB) or gigabytes (GB). Engineers often forget to multiply the file size in Bytes by 8 to get the size in bits, leading to an answer that is 8x too fast.
+
+  **Realistic Solution:** The correct way to solve this is to first make the units consistent (convert the file size from gigabytes to megabits) and then divide by the network speed.
+
+1.  **Convert Gigabytes to Megabits:** A 2 GB file needs to be converted into bits. There are 1024 megabytes in a gigabyte and 8 bits in a byte.
+2.  **Calculate Total Time:** Divide the total number of bits by the network's bits-per-second speed.
+
+  > **Napkin Math:** 1. **File Size in Megabytes (MB):**
+   2 GB * 1024 MB/GB = 2,048 MB
+
+2. **File Size in Megabits (Mbits):**
+   2,048 MB * 8 bits/Byte = 16,384 Mbits
+
+3. **Network Speed:**
+   40 Mbps (megabits per second)
+
+4. **Download Time:**
+   Time = Total Size (Mbits) / Speed (Mbps)
+   Time = 16,384 / 40 = 409.6 seconds
+
+5. **Convert to Minutes:**
+   409.6 seconds / 60 seconds/minute ≈ 6.8 minutes
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{File Size (Bytes)} \times 8}{\text{Network Speed (bits per second)}}$
+
+  > **Options:**
+  > [ ] ~51 seconds
+  > [ ] ~16 seconds
+  > [x] ~6.8 minutes
+  > [ ] ~2.7 minutes
+
+  📖 **Deep Dive:** [Edge AI: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Flash Budget Crunch</b> · <code>edge-ota-storage</code></summary>
+
+- **Interviewer:** "You're scoping the storage for an automotive ECU running a driver-assist feature. The ECU has a 512 MB flash memory chip. The bootloader and real-time operating system (RTOS) consume 48 MB. For safety, the system architecture requires a dedicated 150 MB partition for the OTA (Over-the-Air) update agent to download and stage new packages before installation. The current application, including its vision model, uses 200 MB. A pending update contains a new, larger vision model that is 120 MB. Explain if the new model update can be safely deployed. Calculate the remaining free space."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to ignore the reserved OTA partition. Engineers calculate the free space by only subtracting the OS and current application from the total (512 - 48 - 200 = 264 MB) and incorrectly conclude there is plenty of room. They forget that for a safe OTA update, the system needs a dedicated space to download the package, which is unavailable to the application, effectively reducing the usable flash.
+
+  **Realistic Solution:** No, the update cannot be safely deployed. We must account for all reserved space on the flash memory. The space available to the application is not the total flash size, but what remains after the OS and the critical OTA partition are reserved.
+
+  > **Napkin Math:** 1. **Total Storage:** 512 MB
+2. **Reserved System Space:** 48 MB (OS + Bootloader)
+3. **Reserved OTA Partition:** 150 MB
+4. **Current Application Size:** 200 MB
+5. **Total Committed Space:** 48 MB + 150 MB + 200 MB = 398 MB
+6. **Effective Free Space:** 512 MB (Total) - 398 MB (Committed) = 114 MB
+7. **New Model Size:** 120 MB
+8. **Conclusion:** The required 120 MB is greater than the available 114 MB. The update will fail.
+
+  > **Key Equation:** $\text{Effective Free Space} = \text{Total Flash} - (\text{System} + \text{Application} + \text{OTA Partition})$
+
+  > **Options:**
+  > [ ] Yes, it fits. The OS and app use 248 MB, leaving 264 MB of free space.
+  > [ ] Yes, it fits. The 120 MB model can be downloaded directly into the 150 MB OTA partition.
+  > [x] No, it does not fit. After reserving space for the OS and the OTA partition, only 114 MB of flash remains, which is less than the 120 MB required for the new model.
+  > [ ] Yes, it fits. After the OS (48 MB) and OTA partition (150 MB) are reserved, there is 314 MB of space for the application.
+
+  📖 **Deep Dive:** [Deployed Edge Systems](https://mlsysbook.ai/edge/deployed-systems)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Overnight OTA Update</b> · <code>ota-bandwidth-constraint</code></summary>
+
+- **Interviewer:** "You're an engineer on the autonomous driving team. A critical bug requires you to push an emergency OTA (Over-the-Air) update to a fleet of vehicles. The update package, containing a new perception model and system patches, is 300 MB. The vehicles connect via a cellular link with an average download speed of 10 Mbps. Explain how you would calculate the minimum time required to download this update to a single vehicle."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing megabits per second (Mbps) with megabytes per second (MB/s). Network speeds are measured in bits, while file sizes are measured in bytes. Forgetting the 8x conversion factor between bytes and bits is a classic, fundamental error that leads to drastically underestimating download times.
+
+  **Realistic Solution:** The correct approach is to make the units consistent before dividing. First, convert the payload size from MegaBytes (MB) to Megabits (Mb). Then, divide by the network bandwidth in Megabits per second (Mbps) to find the total time in seconds.
+
+  > **Napkin Math:** 1. **Convert Payload to Bits:** The payload is 300 MegaBytes (MB). Since 1 Byte = 8 bits, we convert the size to Megabits (Mb).
+   `300 MB * 8 bits/byte = 2400 Mb`
+2. **Calculate Download Time:** Divide the total data in bits by the network speed in bits per second.
+   `2400 Mb / 10 Mbps = 240 seconds`
+3. **Convert to Minutes:** Convert the total seconds into a more human-readable format.
+   `240 seconds / 60 seconds/minute = 4 minutes`
+
+  > **Key Equation:** $\text{Time} = \frac{\text{Payload Size (bits)}}{\text{Bandwidth (bits/sec)}}$
+
+  > **Options:**
+  > [ ] 30 seconds
+  > [x] 4 minutes
+  > [ ] 3.3 minutes
+  > [ ] 40 minutes
+
+  📖 **Deep Dive:** [Edge AI: Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Bandwidth Trap</b> · <code>ota-update-bandwidth</code></summary>
+
+- **Interviewer:** "You're an engineer on the autonomous vehicle (AV) team responsible for fleet updates. A new perception model, packaged as an 8 Gigabyte (GB) container, needs to be deployed via an Over-the-Air (OTA) update. The vehicles in the fleet have a stable cellular connection with a real-world sustained download speed of 100 Megabits per second (Mbps). Explain roughly how long it will take for a single vehicle to download this update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing Megabits (Mb) with MegaBytes (MB). Network speeds are almost always advertised in bits per second, while file sizes are measured in bytes. Forgetting to multiply the file size in bytes by 8 to convert it to bits will result in an answer that is 8 times too small.
+
+  **Realistic Solution:** The correct approach is to make the units consistent before dividing. The file size must be converted from Gigabytes to Megabits.
+
+1. **Convert Gigabytes to Megabits**: An 8 GB file is equal to `8 GB * 8 bits/Byte = 64` Gigabits (Gb).
+2. **Convert Gigabits to Megabits**: 64 Gb is `64 Gb * 1000 Mb/Gb = 64,000` Megabits (Mb).
+3. **Calculate Download Time**: Divide the file size in Megabits by the bandwidth in Megabits per second: `64,000 Mb / 100 Mbps = 640 seconds`.
+4. **Convert to Minutes**: `640 seconds / 60 s/min ≈ 10.7 minutes`.
+
+This calculation shows that even with a decent connection, a large model update is a significant time event, which has implications for fleet rollout strategy (e.g., scheduling updates for overnight when the vehicle is idle and has Wi-Fi access).
+
+  > **Napkin Math:** File Size = 8 GB
+Bandwidth = 100 Mbps
+
+1. Convert file size to bits:
+   8 GB * 8 bits/Byte = 64 Gb
+
+2. Make units consistent:
+   64 Gb * 1000 Mb/Gb = 64,000 Mb
+
+3. Calculate time:
+   Time = 64,000 Mb / 100 Mbps = 640 seconds
+
+4. Convert to human-readable format:
+   640 s / 60 s/min ≈ 11 minutes
+
+  > **Key Equation:** $$\text{Time} = \frac{\text{File Size (bits)}}{\text{Bandwidth (bits/sec)}}$$
+
+  > **Options:**
+  > [ ] ~80 seconds (~1.3 minutes)
+  > [x] ~11 minutes (~640 seconds)
+  > [ ] ~1 minute
+  > [ ] ~1 hour
+
+  📖 **Deep Dive:** [Edge: Deployed System](https://mlsysbook.ai/edge/deployed-system)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Update Bottleneck</b> · <code>ota-update-bandwidth</code></summary>
+
+- **Interviewer:** "You are an engineer for a fleet of autonomous delivery robots. A critical safety update for the perception model needs to be rolled out. The full model package is 120 MB. The robots' cellular modem provides a sustained download speed equivalent to a standard 4-wire SPI bus. Calculate the minimum time it will take for a single robot to download this update over the air (OTA)."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is failing to convert between MegaBytes (MB) and Megabits (Mb). Since network bandwidth is measured in bits per second, the model size in bytes must be converted to bits (by multiplying by 8) before the division. Forgetting this step leads to an answer that is 8x too fast.
+
+  **Realistic Solution:** The correct approach is to align the units. First, convert the model package size from MegaBytes (MB) to Megabits (Mb). Then, divide the total number of bits by the network bandwidth in bits per second.
+
+1.  **Find the bandwidth:** From the constants, a standard SPI bus has a bandwidth of 10 Mbps.
+2.  **Convert model size to bits:** 120 MB * 8 bits/byte = 960 Mb.
+3.  **Calculate time:** Divide the total bits by the bandwidth: 960 Mb / 10 Mbps = 96 seconds.
+
+  > **Napkin Math:** Total Data = 120 MB
+Bandwidth (SPI) = 10 Mbps
+
+# Convert Data to bits
+Total Data (bits) = 120 MegaBytes * 8 bits/Byte = 960 Megabits (Mb)
+
+# Calculate Time
+Time = Total Data (bits) / Bandwidth (bits/sec)
+Time = 960 Mb / 10 Mbps = 96 seconds
+
+  > **Key Equation:** $\text{Time} = \frac{\text{Total Data Size (bits)}}{\text{Bandwidth (bits per second)}}$
+
+  > **Options:**
+  > [ ] 12 seconds
+  > [x] 96 seconds
+  > [ ] 2400 seconds (40 minutes)
+  > [ ] 9.6 seconds
+
+  📖 **Deep Dive:** [Deployed Systems](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The 'Overnight Update' Bandwidth Bill</b> · <code>ota-fleet-bandwidth</code></summary>
+
+- **Interviewer:** "You're an ML Systems Engineer at an autonomous vehicle company. A critical perception model update is ready for rollout. The compressed model package is 500 MB. You need to push this Over-The-Air (OTA) update overnight to a fleet of 10,000 active vehicles. Explain how you would calculate the total data payload your cloud servers must serve for this single update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus only on the single-device update size (e.g., 500 MB) and fail to multiply by the total number of devices in the fleet. This leads to a 10,000x underestimation of the required bandwidth, infrastructure, and data egress costs for the rollout. They might also make unit conversion errors between MB, GB, and TB.
+
+  **Realistic Solution:** The total data payload is the size of the update package multiplied by the number of vehicles in the fleet. This calculation is the first step in capacity planning for the cloud storage and Content Delivery Network (CDN) that will serve the update. A 5 TB payload is a significant amount of data to serve in a short time window (e.g., 8 hours overnight), and correctly scoping this highlights that fleet operations are a major systems and cost challenge.
+
+  > **Napkin Math:** Update Size per Vehicle: 500 MB
+Fleet Size: 10,000 vehicles
+
+Total Data (in MB) = 500 MB/vehicle × 10,000 vehicles = 5,000,000 MB
+
+Convert to GB: 5,000,000 MB / 1,000 (MB/GB) = 5,000 GB
+
+Convert to TB: 5,000 GB / 1,000 (GB/TB) = 5 TB
+
+  > **Key Equation:** $\text{Total Payload} = \text{Update Size} \times \text{Fleet Size}$
+
+  > **Options:**
+  > [ ] 500 Megabytes (MB)
+  > [ ] 5 Gigabytes (GB)
+  > [x] 5 Terabytes (TB)
+  > [ ] 0.05 Megabytes (MB)
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Midnight Update</b> · <code>ota-update-fleet</code></summary>
+
+- **Interviewer:** "You are a systems engineer for an autonomous trucking company. A critical update to the perception model is required for your entire fleet. The full Over-the-Air (OTA) update package, which includes the new model, container dependencies, and updated calibration data, is 2 GB. The trucks in your fleet, when parked at a depot, have a stable cellular connection that reliably averages 50 Mbps (megabits per second).
+
+Explain how you would calculate the time required for a single truck to download this update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing Megabits per second (Mbps) with Megabytes per second (MB/s). Network bandwidth is almost always advertised in bits, while file sizes are measured in bytes. Forgetting to apply the 8x conversion factor (1 Byte = 8 bits) leads to underestimating the download time by a factor of 8.
+
+  **Realistic Solution:** The correct way to solve this is to make the units consistent. We must convert the file size from Gigabytes (GB) to Megabits (Mb) to match the network speed unit.
+
+1.  **Convert Gigabytes to Megabytes:** The file is 2 GB. There are 1,000 MB in a GB, so the size is `2,000 MB`.
+2.  **Convert Megabytes to Megabits:** Each Byte is 8 bits. So, we multiply the size in MB by 8: `2,000 MB * 8 bits/byte = 16,000 Mb`.
+3.  **Calculate Download Time:** Now we can divide the total size in Megabits by the network speed in Megabits per second: `16,000 Mb / 50 Mbps = 320 seconds`.
+4.  **Convert to Minutes:** To make the number easier to interpret, we convert seconds to minutes: `320 seconds / 60 seconds/minute ≈ 5.33 minutes`.
+
+This calculation shows the baseline time, which is critical for planning fleet-wide rollout schedules and understanding network load at depots.
+
+  > **Napkin Math:** $\text{File Size (GB)} \times \frac{1000 \text{ MB}}{1 \text{ GB}} \times \frac{8 \text{ bits}}{1 \text{ Byte}} = \text{File Size (Mb)}$
+
+$2 \text{ GB} \times 1000 \times 8 = 16,000 \text{ Mb}$
+
+$\frac{\text{File Size (Mb)}}{\text{Bandwidth (Mbps)}} = \text{Time (s)}$
+
+$\frac{16,000 \text{ Mb}}{50 \text{ Mbps}} = 320 \text{ seconds} \approx 5.3 \text{ minutes}$
+
+  > **Key Equation:** $\text{Time (s)} = \frac{\text{File Size (Bytes)} \times 8}{\text{Bandwidth (bits/s)}}$
+
+  > **Options:**
+  > [ ] ~40 seconds
+  > [ ] ~5.3 hours
+  > [x] ~5.3 minutes
+  > [ ] ~5 seconds
+
+  📖 **Deep Dive:** [Deployed System](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The Fleet Update Bandwidth Bill</b> · <code>ota-bandwidth-planning</code></summary>
+
+- **Interviewer:** "You are an engineer on the autonomous vehicle team. A critical perception model update is ready for deployment. The containerized update package is 750 MB. Your fleet consists of 10,000 vehicles that will download this update over a cellular network. Calculate the total data volume required for the full fleet rollout and explain the primary challenge this presents."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often focus on the size of a single package (750 MB) and vastly underestimate the multiplicative effect of the fleet size. This leads them to ignore the massive data transfer costs and network infrastructure strain associated with large-scale OTA updates.
+
+  **Realistic Solution:** The total data volume is the package size multiplied by the number of vehicles in the fleet. This simple calculation reveals that even a moderately sized update becomes a multi-terabyte operation at scale, making data transfer costs and network logistics the primary challenge, not the single-device download time.
+
+  > **Napkin Math:** 1. **Total Data Volume** = `Package Size` × `Fleet Size`
+2. **Calculation** = 750 MB/vehicle × 10,000 vehicles
+3. **Result in MB** = 7,500,000 MB
+4. **Convert to GB** = 7,500,000 MB / 1,000 (MB/GB) = 7,500 GB
+5. **Convert to TB** = 7,500 GB / 1,000 (GB/TB) = 7.5 TB
+
+The total data transfer required is 7.5 Terabytes.
+
+  > **Key Equation:** $\text{Total Data Volume} = \text{Package Size} \times \text{Number of Devices}$
+
+  > **Options:**
+  > [ ] 7.5 GB. The challenge is ensuring each car has a stable connection.
+  > [ ] 750 GB. The challenge is scheduling the downloads to avoid network congestion.
+  > [x] 7.5 TB. The primary challenge is the immense data transfer cost and logistics over cellular networks.
+  > [ ] 75 TB. The challenge is having enough storage on the central server.
+
+  📖 **Deep Dive:** [Deployed Edge Systems](https://mlsysbook.ai/edge/03_deployed_system.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Edge Container Overhead</b> · <code>deployment</code></summary>
 
@@ -48,7 +1287,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Bricked OTA Update</b> · <code>deployment</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Bricked OTA Update</b> · <code>deployment</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your fleet of 200 NXP i.MX 8M Plus devices monitors crop health on farms across Iowa. You push a 45 MB model update over 4G/LTE. 30 devices (15%) lose connectivity mid-update and are now bricked with a partially written model file. Why are ML model updates significantly more dangerous than generic firmware updates in constrained environments, and how does the model's size dictate your partition architecture?"
 
@@ -146,7 +1385,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Brick Avoidance Protocol</b> · <code>ota-updates</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Brick Avoidance Protocol</b> · <code>ota</code></summary>
 
 - **Interviewer:** "A critical OTA update for a new vision model fails on 10% of your 50,000 edge devices due to insufficient disk space. How do you prevent these devices from becoming unrecoverable and ensure they can eventually receive a working update?"
 
@@ -168,7 +1407,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Gradual Rollout Guru</b> · <code>model-versioning</code>, <code>a/b-testing</code>, <code>rollout-strategies</code>, <code>feature-flags</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Gradual Rollout Guru</b> · <code>model-registry</code>, <code>a/b-testing</code>, <code>rollout-strategies</code>, <code>feature-flags</code></summary>
 
 - **Interviewer:** "Your team has developed a new, improved version of an object detection model for your fleet of smart home security cameras. Before a full fleet rollout, you want to test its real-world performance on a small, controlled group of devices (e.g., 5% of your fleet) for a week. How would you design the system to enable this A/B testing, ensuring a smooth rollout and easy rollback if issues arise?"
 
@@ -207,10 +1446,9 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The OTA Brick Risk</b> · <code>model-update</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The OTA Brick Risk</b> · <code>ota</code></summary>
 
 - **Interviewer:** "You manage a fleet of 10,000 edge AI cameras running object detection. Each camera has a Jetson Orin Nano. You need to deploy an updated YOLOv8 model compiled with TensorRT. Your colleague suggests: 'Just push the new .engine file over the air and restart inference.' Why does the tight coupling between the ML model's tensor format and the hardware-specific runtime make this OTA update riskier than a generic firmware update, and how must your deployment strategy change to handle this?"
 
@@ -232,7 +1470,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Boot Time Budget</b> · <code>boot-time</code> <code>edge-deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Boot Time Budget</b> · <code>firmware</code> <code>edge-deployment</code></summary>
 
 - **Interviewer:** "Your edge AI security camera (Jetson Orin Nano, 8 GB RAM, 128 GB NVMe) must begin producing detections within 3 seconds of power-on. Currently, boot takes 22 seconds: 2s UEFI, 8s Linux kernel + systemd, 4s loading Python + PyTorch, 8s loading the YOLOv8-L model and building the TensorRT engine. How do you cut boot-to-first-detection from 22 seconds to under 3 seconds?"
 
@@ -252,7 +1490,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Resource Tug-of-War</b> · <code>resource-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Resource Tug-of-War</b> · <code>deployment</code></summary>
 
 - **Interviewer:** "An edge device is running two independent ML models on a single NPU: one for critical safety monitoring (high priority, low latency, e.g., collision avoidance) and another for background analytics (lower priority, best-effort, e.g., long-term behavior analysis). How do you ensure the safety model always meets its deadlines without significantly starving the analytics model, especially when both are contending for the NPU?"
 
@@ -281,7 +1519,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Edge Model A/B Testing</b> · <code>deployment</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Edge Model A/B Testing</b> · <code>deployment</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your cloud ML team A/B tests model updates by routing 5% of traffic to the new model and comparing metrics in real-time. They suggest the same approach for your fleet of 2,000 industrial inspection robots running on Hailo-8 (26 TOPS, 2.5W). You push back. Why doesn't cloud-style A/B testing work on edge, and what's the alternative?"
 
@@ -563,7 +1801,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CAN Bus Telemetry Flood</b> · <code>network-fabric</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CAN Bus Telemetry Flood</b> · <code>interconnect</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your autonomous forklift (TI TDA4VM, 8 TOPS) runs pallet detection and publishes results over the vehicle's CAN bus at 20 Hz. The forklift also has 15 other ECUs (motor controller, battery management, safety systems) sharing the same 500 Kbps CAN bus. After adding ML telemetry (detection count, confidence, latency, model version) to the CAN traffic, the safety system starts missing emergency stop messages. What went wrong, and how do you fix it without removing the telemetry?"
 
@@ -587,7 +1825,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Cellular Diet</b> · <code>ota-updates</code>, <code>bandwidth</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Cellular Diet</b> · <code>ota</code>, <code>bandwidth</code></summary>
 
 - **Interviewer:** "You need to deploy a 250MB model update to a fleet of 100,000 smart cameras in rural areas. Each camera has a cellular plan limited to an average of 500KB/day of free data for system updates. Exceeding this incurs significant costs. How do you efficiently manage this deployment without massive overages?"
 
@@ -635,7 +1873,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Data Ferry</b> · <code>data-management</code>, <code>connectivity</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Data Ferry</b> · <code>data-pipeline</code>, <code>connectivity</code></summary>
 
 - **Interviewer:** "Your fleet of agricultural IoT sensors collects environmental data and inference results (e.g., crop health scores). These devices operate in fields with highly intermittent and unreliable cellular connectivity. You need to ensure all critical data eventually reaches the cloud for analytics, without losing data or exhausting limited on-device storage (e.g., 2GB total)."
 
@@ -662,7 +1900,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Offline-First Edge Design</b> · <code>deployment</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Offline-First Edge Design</b> · <code>deployment</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your edge AI system monitors a remote oil pipeline in the Alaskan wilderness. It has satellite connectivity that works 4 hours per day (weather-dependent) with 256 Kbps bandwidth. The system must detect pipeline leaks 24/7. How do you design the system to operate independently of cloud connectivity?"
 
@@ -690,7 +1928,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Model Versioning Fleet Problem</b> · <code>deployment</code> <code>mlops</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The Model Versioning Fleet Problem</b> · <code>deployment</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You manage a fleet of 10,000 edge devices deployed across 200 retail stores for shelf monitoring. The fleet has 5 different hardware SKUs: (A) Jetson Orin Nano, (B) Hailo-8L on RPi5, (C) Google Coral on RPi4, (D) Intel NCS2 on x86 mini-PC, (E) Qualcomm RB3 Gen 2. You currently have 3 model versions in production (v2.1, v2.2, v2.3) because you can't update all devices simultaneously — OTA rollouts take 2 weeks per wave. How many distinct model binaries do you need to maintain, and what's the real operational cost?"
 
@@ -730,10 +1968,10 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Hardware Lifecycle Cliff</b> · <code>hardware-lifecycle</code> <code>fleet-management</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Hardware Lifecycle Cliff</b> · <code>deployment</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your company deployed 50,000 edge AI devices in 2022 using NVIDIA Jetson TX2 modules (Pascal GPU, 256 CUDA cores, 8 GB LPDDR4). It's now 2026. NVIDIA has announced end-of-life for the TX2: no more JetPack updates after 2027, no TensorRT updates after 2026. Your latest models require TensorRT 10 features (FP8 quantization, transformer engine) that will never be backported to Pascal. You can't replace 50,000 devices overnight. Design a 3-year hardware transition strategy."
 
@@ -753,7 +1991,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Disconnected Brain</b> · <code>edge-cloud-sync</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Disconnected Brain</b> · <code>interconnect</code></summary>
 
 - **Interviewer:** "You're deploying an ML model to autonomous agricultural robots operating in remote fields with intermittent and low-bandwidth cellular connectivity. How do you ensure reliable model updates, send diagnostic telemetry, and maintain local inference capability when the connection drops for extended periods?"
 
@@ -934,7 +2172,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Canary in the Coal Mine</b> · <code>deployment</code>, <code>fleet-management</code>, <code>a/b-testing</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Canary in the Coal Mine</b> · <code>deployment</code>, <code>deployment</code>, <code>a/b-testing</code></summary>
 
 - **Interviewer:** "You need to deploy a new, potentially risky ML model update to a fleet of 100,000 critical edge devices (e.g., medical imaging devices). A full rollout could have severe consequences if the model introduces regressions. How do you implement a safe, phased rollout strategy with robust monitoring to catch issues early?"
 
@@ -962,7 +2200,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Privacy-Preserving Data Whisperer</b> · <code>data-collection</code>, <code>privacy</code>, <code>bandwidth-constraints</code>, <code>federated-learning</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Privacy-Preserving Data Whisperer</b> · <code>data-pipeline</code>, <code>privacy</code>, <code>bandwidth-constraints</code>, <code>federated-learning</code></summary>
 
 - **Interviewer:** "You're operating a fleet of 100,000 smart cameras in sensitive environments (e.g., retail stores, homes) and need to collect data for continuous model improvement. Each camera generates ~10GB of raw video per day. Your challenge: bandwidth is extremely limited (average 1Mbps uplink), privacy regulations are strict (e.g., GDPR, CCPA), and you cannot upload raw video. Design an end-to-end data curation pipeline from the edge to the cloud for retraining, emphasizing data reduction, privacy, and efficiency."
 
@@ -997,7 +2235,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Fleet-Wide Model Drift Detection Threshold</b> · <code>mlops</code> <code>monitoring</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> Fleet-Wide Model Drift Detection Threshold</b> · <code>deployment</code> <code>monitoring</code></summary>
 
 - **Interviewer:** "You manage 2,000 edge cameras for traffic monitoring. Each device reports hourly inference statistics: mean confidence score, detection count per class, and a 64-bin histogram of confidence values. After 6 months, you notice that 150 devices in one region show a gradual decline in mean confidence from 0.82 to 0.71 over 3 weeks. Calculate the statistical threshold for triggering a drift alert, and determine whether this decline is real drift or normal variance."
 
@@ -1027,7 +2265,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Inconspicuous Sticker Attack</b> · <code>adversarial-robustness</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Inconspicuous Sticker Attack</b> · <code>adversarial</code></summary>
 
 - **Interviewer:** "Your company deploys ML-powered traffic cameras that classify vehicles (car, truck, bus, etc.) and read license plates. Researchers demonstrate a 'physical adversarial attack' where a specially designed, inconspicuous sticker placed on a vehicle's license plate consistently causes your edge model to misclassify it (e.g., a sedan is seen as a motorcycle) or misread the plate. How would you design your edge vision system to detect and mitigate such physical-world adversarial attacks?"
 
@@ -1051,9 +2289,11 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
   5.  **Explainability (XAI) for Anomaly Detection:** Use XAI techniques (e.g., saliency maps) to understand *why* the model made a certain classification. If the model is focusing on an unusual part of the image (the sticker) to make a misclassification, it's an indicator.
 
   > **Napkin Math:**
-  > - Running two diverse models adds ~100% compute overhead.
-  > - Running one robust model with enhanced pre-processing adds ~20-50% overhead.
-  > - Cost of misclassification (e.g., toll evasion, security breach) can be orders of magnitude higher than the compute cost of defense.
+  > - Frame budget at 30 FPS = 33.3 ms. Single YOLOv5s on Orin: ~15 ms + 2 ms preprocess = 17 ms
+  > - Dual diverse models: 2 × 15 ms + 2 ms = 32 ms (barely fits 33.3 ms budget)
+  > - Power: single ~8 W, dual ~15 W on 60 W Orin budget (25% utilization)
+  > - Dual-model energy cost: 15 W × 8,760 hr × $0.12/kWh = $15.77/year
+  > - => Defense costs <$16/year in energy; one missed toll evasion (~$50) pays for 3 years of dual-model compute
 
   > **Key Equation:** $Robustness = f(Input\_Validation, Sensor\_Diversity, Model\_Diversity, Adversarial\_Training)$
 
@@ -1064,7 +2304,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Fleet Health Dashboard</b> · <code>monitoring</code></summary>
@@ -1132,7 +2372,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Privacy Guardian</b> · <code>privacy</code>, <code>data-management</code>, <code>federated-learning</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Privacy Guardian</b> · <code>privacy</code>, <code>data-pipeline</code>, <code>federated-learning</code></summary>
 
 - **Interviewer:** "Your smart home devices collect audio and video data to detect activity and provide personalized experiences. This data potentially contains highly sensitive PII. You need to leverage this data for model improvement and debugging, but strict privacy regulations (GDPR, CCPA) prohibit sending raw PII to the cloud. How do you design an end-to-end system that respects privacy while enabling ML development?"
 
@@ -1227,7 +2467,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Self-Healing Edge AI Fleet</b> · <code>mlops</code> <code>fault-tolerance</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Self-Healing Edge AI Fleet</b> · <code>deployment</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "You operate a fleet of 5,000 edge AI devices deployed across 300 retail stores for loss prevention. The devices run 24/7 and you have 2 SREs managing the fleet. Current state: 3% of devices require manual intervention each week (150 devices), consuming 80% of SRE time. Design a self-healing system that reduces manual interventions by 90% — from 150/week to <15/week — without adding headcount."
 
@@ -1261,13 +2501,14 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 ---
 
 
-### 🛡️ Monitoring & Reliability
+### Monitoring & Reliability
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Watchdog Blind Spot</b> · <code>watchdog</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Watchdog Blind Spot</b> · <code>watchdog</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your edge AI cameras have a hardware watchdog timer (WDT) set to 60 seconds. The CPU application process kicks the watchdog every 10 seconds. You receive reports that cameras are freezing — the video stream stops and no detections are sent — but the devices aren't rebooting. You SSH in and find the CPU is running fine, but the GPU is deadlocked running a custom CUDA kernel for a new ML model. Why didn't the hardware watchdog trigger a reboot, and how do you design a watchdog system that actually monitors the ML hardware?"
 
@@ -1289,7 +2530,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Boot Loop of Doom</b> · <code>reliability</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Boot Loop of Doom</b> · <code>fault-tolerance</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your Rockchip RK3588 edge device runs a safety monitoring model in a chemical plant. After a power outage, the device enters a boot loop — it starts up, attempts to load the model, crashes, and reboots. The cycle repeats every 45 seconds. The eMMC filesystem shows no corruption (fsck passes). The model file exists and has the correct size. But the model fails to load with 'invalid header' error. What happened, and how do you prevent this in the future?"
 
@@ -1315,10 +2556,9 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The OTA Rollback Dilemma</b> · <code>fleet-management</code>, <code>ota</code>, <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The OTA Rollback Dilemma</b> · <code>deployment</code>, <code>ota</code>, <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "A critical OTA update for your vision model has been pushed to 50,000 edge devices. Two hours later, telemetry indicates a 5% failure rate in model inference on the updated devices. You need to initiate an immediate rollback for the affected devices while maintaining service for the rest of the fleet. Describe your rollback strategy, including how you identify affected devices and ensure data consistency."
 
@@ -1348,7 +2588,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The eMMC Wear-Out Problem</b> · <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The eMMC Wear-Out Problem</b> · <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your edge device writes inference metadata (bounding boxes, confidence scores) to its eMMC flash storage at 30 FPS. The eMMC is rated for 3,000 P/E (program/erase) cycles. The device has a 32 GB eMMC. Why does the high-frequency, small-payload nature of ML inference outputs create a massive write amplification problem, and how do you calculate the true time-to-failure for this ML workload?"
 
@@ -1370,10 +2610,10 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The 5-Year Edge Device Lifecycle</b> · <code>reliability</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The 5-Year Edge Device Lifecycle</b> · <code>fault-tolerance</code> <code>deployment</code></summary>
 
 - **Interviewer:** "You're designing an edge AI system for industrial quality inspection. The customer requires a 5-year operational lifetime with <1 hour of unplanned downtime per year (99.99% availability). The system runs 24/7 in a factory with ambient temperatures of 30-45°C. What are the failure modes you must design for, and how do you achieve the availability target?"
 
@@ -1407,10 +2647,10 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Unattended Fleet</b> · <code>long-term-reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Unattended Fleet</b> · <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "You manage a fleet of thousands of edge ML devices deployed in remote, inaccessible locations (e.g., agricultural sensors, remote pipeline monitoring, deep-sea exploration buoys) that are expected to operate autonomously for 5+ years with minimal human intervention. Design a system architecture that ensures continuous, reliable ML inference over this period, accounting for hardware failures, software bugs, model degradation (concept drift), and environmental changes. How do you achieve 'self-healing' and predictive maintenance for both the ML models and the underlying hardware/software stack?"
 
@@ -1442,10 +2682,11 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
       *   **Resource Forecasting:** Predict when storage will fill up, or when battery life will become critical, to schedule preemptive actions.
 
   > **Napkin Math:**
-  > - Mean Time Between Failures (MTBF) for a single edge device component: e.g., 50,000 hours (~5.7 years). With multiple components, system MTBF is lower.
-  > - Cost of a single truck roll to a remote site: $1,000 - $10,000+.
-  > - Cost of redundancy (e.g., dual SoC): ~50-100% hardware cost increase.
-  > - A system designed for 5-year unattended operation needs an effective MTBF > 43,800 hours. This is only achievable with self-healing, as component MTBFs will lead to failures within that period.
+  > - Component MTBF: 50,000 hr (5.7 yr). System with 5 key components: MTBF = 50,000 / 5 = 10,000 hr (1.1 yr)
+  > - Fleet of 1,000 devices: 1,000 × 8,760 / 10,000 = 876 failures/year
+  > - Manual truck roll: $5,000/visit × 876 = $4.38 M/year
+  > - Auto-failover (MTTR = 0.5 hr): availability = 99.999% vs 99.856% with 72-hr manual MTTR
+  > - => N+1 redundancy + auto-failover saves millions/year and is the only path to 5-year unattended operation
 
   > **Key Equation:** $Availability = MTBF / (MTBF + MTTR)$ (Maximize Mean Time Between Failures, Minimize Mean Time To Repair through self-healing and predictive maintenance).
 
@@ -1459,13 +2700,13 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 ---
 
 
-### 🔒 Functional Safety
+### Functional Safety
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Graceful Degradation Under Sensor Failure</b> · <code>functional-safety</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Graceful Degradation Under Sensor Failure</b> · <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your autonomous delivery robot has 3 sensors: a stereo camera pair, a 2D LiDAR, and an ultrasonic array. During a delivery, mud splashes onto the left stereo camera lens. Your perception stack loses stereo depth estimation. The robot is 500 meters from its destination on a busy sidewalk. What happens next?"
 
@@ -1491,10 +2732,10 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Degradation Ladder</b> · <code>functional-safety</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Degradation Ladder</b> · <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "You're the ML systems architect for an autonomous delivery robot. Your perception stack runs three models on a Jetson Orin: a primary YOLOv8-L detection model (22ms, 43.7 mAP), a semantic segmentation model (15ms), and a depth estimation model (12ms). During a delivery, the Orin's GPU develops a hardware fault — the DLA is still functional but the GPU CUDA cores are offline. Your total compute budget just dropped from 275 TOPS to 100 TOPS (DLA only). Design the graceful degradation strategy from first principles."
 
@@ -1524,7 +2765,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The ISO 26262 Neural Network Problem</b> · <code>functional-safety</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The ISO 26262 Neural Network Problem</b> · <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your autonomous vehicle uses a neural network for pedestrian detection. The safety team says you need ISO 26262 ASIL-D certification for this function (the highest automotive safety integrity level). But ISO 26262 was written for deterministic software — it requires 100% code coverage, formal verification, and traceable requirements. Neural networks are stochastic, opaque, and their 'requirements' are learned from data. How do you certify a neural network under ISO 26262?"
 
@@ -1552,7 +2793,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6%2B_Principal-red?style=flat-square" alt="Level 4" align="center"> The Remote Fleet Update Dilemma</b> · <code>model-deployment</code> <code>functional-safety</code> <code>long-term-autonomy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6%2B_Principal-red?style=flat-square" alt="Level 4" align="center"> The Remote Fleet Update Dilemma</b> · <code>deployment</code> <code>fault-tolerance</code> <code>long-term-autonomy</code></summary>
 
 - **Interviewer:** "You are responsible for deploying and maintaining ML models on a fleet of thousands of safety-critical edge devices (e.g., industrial robots, medical devices) operating in remote locations with intermittent connectivity. These devices must operate for years without human intervention. How do you design a robust, secure, and fault-tolerant over-the-air (OTA) update system for ML models and associated runtime software, ensuring functional safety, preventing device bricking, and enabling safe rollbacks, even if connectivity drops mid-update?"
 
@@ -1588,11 +2829,12 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 ---
 
 
-### 🔐 Security & Privacy
+### Security & Privacy
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Supply Chain Attack</b> · <code>security</code></summary>
 
@@ -1618,7 +2860,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Unverifiable Edge Inference</b> · <code>data-provenance</code> <code>security</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Unverifiable Edge Inference</b> · <code>data-versioning</code> <code>security</code></summary>
 
 - **Interviewer:** "Your company develops smart cameras for retail analytics. These cameras perform on-device ML inference (e.g., people counting, dwell time) and only send aggregated, anonymized data to the cloud. However, clients are concerned about the integrity and auditability of these local inferences, especially if disputes arise. How do you design the system to ensure data provenance and tamper-proof audit trails for on-device ML inferences, even with limited storage and intermittent cloud connectivity?"
 
@@ -1647,10 +2889,9 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Secure Boot Chain</b> · <code>secure-boot</code> <code>security</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Secure Boot Chain</b> · <code>firmware</code> <code>security</code></summary>
 
 - **Interviewer:** "Your team is deploying a proprietary face liveness detection model on a fleet of smart locks. You must extend the Secure Boot chain of trust to verify the model weights before inference. How does model weight integrity verification add to boot time, and how do you trade off boot-to-first-inference latency against model authenticity checks?"
 
@@ -1721,9 +2962,11 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
   7.  **Watermarking/Fingerprinting:** Embed subtle, non-disruptive watermarks into the model weights or activations that can identify a stolen model, aiding in forensic analysis.
 
   > **Napkin Math:**
-  > - Cost of TEE integration: ~5-15% increased development time, ~1-5% runtime overhead (context switching, memory access).
-  > - Cost of IP theft: Potentially billions in lost revenue, competitive advantage, and R&D investment.
-  > The overhead of robust security measures is often a small fraction of the value protected.
+  > - Model: 25 MB INT8 on Orin. AES-256 HW decrypt: 25 MB / 2 GB/s = 12.5 ms (one-time at boot)
+  > - TEE overhead: ~5% → inference 15 ms → 15.75 ms per frame (<1 ms penalty)
+  > - Security cost: ~$5/device × 5,000 devices = $25,000. Model training cost: $2,000,000
+  > - Security investment = $25 K / $2 M = 1.25% of model value
+  > - => TEE + encrypted weights adds <1 ms/frame latency and costs 1.25% of the asset it protects
 
   > **Key Equation:** $Integrity = f(Hardware\_Security, Software\_Security, Isolation, Cryptography)$
 
@@ -1734,7 +2977,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Model Theft from Edge Device</b> · <code>security</code></summary>
@@ -1797,7 +3040,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Tamper-Proof Model Fortress</b> · <code>security</code>, <code>hardware-root-of-trust</code>, <code>secure-boot</code>, <code>attestation</code>, <code>supply-chain-security</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Tamper-Proof Model Fortress</b> · <code>security</code>, <code>hardware-root-of-trust</code>, <code>firmware</code>, <code>attestation</code>, <code>supply-chain-security</code></summary>
 
 - **Interviewer:** "Your company develops highly sensitive ML models for critical infrastructure (e.g., energy grid optimization). These models are deployed on edge devices in remote, potentially unsecured locations. A malicious actor could gain physical access to a device. Design a strategy to ensure the integrity and authenticity of the deployed ML models, preventing unauthorized modification, replacement, or exfiltration, from manufacturing to runtime operation."
 
@@ -1832,7 +3075,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Physical Adversarial Gauntlet</b> · <code>adversarial-robustness</code> <code>physical-security</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Physical Adversarial Gauntlet</b> · <code>adversarial</code> <code>physical-security</code></summary>
 
 - **Interviewer:** "Your company's autonomous delivery robots operate in urban environments. A new threat emerges: malicious actors are placing subtly modified physical objects (e.g., stickers on stop signs, projected patterns on roads, specific sound frequencies) to trick the robots' perception systems, causing unsafe behaviors. How do you design the robot's perception and decision-making system to be robust against such 'physical world' adversarial attacks, and what detection and mitigation strategies would you implement?"
 
@@ -1861,7 +3104,7 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Model Fortress</b> · <code>security</code>, <code>ip-protection</code></summary>
@@ -1895,13 +3138,14 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 ---
 
 
-### 📎 Additional Topics
+### Additional Topics
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Silent eMMC Death</b> · <code>storage</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 3" align="center"> The Silent eMMC Death</b> · <code>persistent-storage</code> <code>fault-tolerance</code></summary>
 
 - **Interviewer:** "Your fleet of 1,000 edge AI cameras runs a quality inspection model at 30 FPS. The system logs the bounding boxes and confidence scores of every detection to the local 16 GB eMMC. After 14 months, devices start failing with read-only filesystems. How does continuous ML inference result logging create a write amplification pattern that kills eMMC faster than generic logging, and what is the ML-specific write rate math?"
 
@@ -1921,10 +3165,10 @@ OTA updates, fleet management, monitoring, functional safety, security, and long
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Edge-Cloud Federated Learning System</b> · <code>training</code> <code>privacy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 6+" align="center"> Edge-Cloud Federated Learning System</b> · <code>data-parallelism</code> <code>privacy</code></summary>
 
 - **Interviewer:** "Your fleet of 500 hospital bedside monitors runs a patient fall detection model. After 6 months, accuracy has dropped from 94% to 87% due to distribution shift (new patient demographics, seasonal clothing changes). HIPAA prohibits uploading patient video to the cloud. Design a federated learning system that retrains the model across the fleet without any raw data leaving the devices. Specify the communication protocol, privacy guarantees, convergence timeline, and the compute/bandwidth budget per device."
 

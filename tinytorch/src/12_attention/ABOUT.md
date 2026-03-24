@@ -27,8 +27,8 @@ glue("complexity_elements", f"{complexity_elements:,}")
 glue("complexity_mb", f"{complexity_mb:.0f} MB")
 glue("complexity_gpt3_attn_gb", f"{complexity_gpt3_attn_gb:.1f} GB")
 
-# --- Computational Complexity (prose): GPT-3 training (5x inference) ---
-complexity_train_multiplier = 5
+# --- Computational Complexity (prose): GPT-3 training (4x inference) ---
+complexity_train_multiplier = 4
 complexity_gpt3_train_gb = complexity_train_multiplier * complexity_gpt3_attn_gb
 glue("complexity_gpt3_train_gb", f"~{complexity_gpt3_train_gb:.1f} GB")
 
@@ -71,7 +71,7 @@ glue("q2_d_squared", f"{q2_d_squared:,}")
 glue("q2_crossover", f"{q2_crossover}")
 
 # --- Q5: Gradient Memory ---
-q5_multiplier = 5
+q5_multiplier = 4
 q5_layers = 96
 q5_attn_mb = q1_mb_b  # reuse 2048-context value: 16.0 MB
 q5_inference_gb = q5_layers * q5_attn_mb / 1024
@@ -941,8 +941,6 @@ Training attention requires storing activations for backpropagation. How much me
 
 **Backward pass (training) additional memory:**
 - Gradient of attention weights: n² values
-- Gradient of Q, K, V: 3 × (n × d) values
-- Intermediate gradients from softmax: n² values
 
 **With Adam optimizer (standard for transformers):**
 - First moment (momentum): n² values
@@ -950,7 +948,7 @@ Training attention requires storing activations for backpropagation. How much me
 
 **Total multiplier for attention matrix alone:**
 - Forward: 1× (attention weights)
-- Backward: +2× (gradients)
+- Backward: +1× (gradients)
 - Optimizer: +2× (Adam state)
 - **Total: {glue:text}`q5_multiplier`× inference memory**
 

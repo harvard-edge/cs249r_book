@@ -1,5 +1,5 @@
 """
-Module 10: Autograd - Integration Tests
+Module 08: Training - Autograd Integration Tests
 Tests that automatic differentiation works with all previous modules
 """
 

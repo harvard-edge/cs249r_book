@@ -154,11 +154,15 @@ Narrow valley problem:            Momentum solution:
 
 **SGD with Momentum Formula:**
 ```
-velocity = β * previous_velocity + (1-β) * current_gradient
+velocity = β * previous_velocity + current_gradient
 parameter = parameter - learning_rate * velocity
 
 Where β ≈ 0.9 means "90% memory of previous direction"
 ```
+
+Note: SGD momentum uses raw gradient accumulation (no (1-β) factor). Adam uses
+the EMA form `β * m + (1-β) * g` to keep moment estimates on the same scale as
+the gradient, which is needed for its bias-correction and adaptive scaling steps.
 
 ### Adam: Adaptive Learning for Each Parameter
 
@@ -1193,11 +1197,16 @@ AdamW's approach (correct):
 1. m = β₁ * m + (1-β₁) * pure_gradient  ← NO weight decay here
 2. v = β₂ * v + (1-β₂) * pure_gradient²
 3. step = m / √v
-4. parameter = parameter - learning_rate * step        ← gradient update
-5. parameter = parameter * (1 - weight_decay_rate)    ← separate decay
+4. parameter = parameter - learning_rate * step           ← gradient update
+5. parameter = parameter * (1 - lr * weight_decay)       ← separate decay
 
 Result: Consistent regularization independent of gradient magnitudes!
 ```
+
+Note: Step 5 uses the "decoupled" form where weight decay is scaled by the
+learning rate (`1 - lr * weight_decay`), not the simpler `(1 - weight_decay)`.
+This ensures the regularization strength scales consistently with the gradient
+update step size.
 
 ### Visual Comparison
 

@@ -157,7 +157,7 @@ Manual composition:
                                # Total: 203,530 params
 ```
 
-Memory usage: 4 bytes/param × 203,530 = ~814KB for weights alone
+Memory usage: 4 bytes/param × 203,530 = ~795 KB for weights alone
 """
 
 # %% [markdown]
@@ -268,12 +268,12 @@ Example: MNIST Digit Recognition
 Linear(784, 256) Parameters:
 ┌─────────────────────────────┐
 │ Weight Matrix W             │  784 × 256 = 200,704 params
-│ [784, 256] float32          │  × 4 bytes = 802.8 KB
+│ [784, 256] float32          │  × 4 bytes = ~784 KB
 ├─────────────────────────────┤
 │ Bias Vector b               │  256 params
-│ [256] float32               │  × 4 bytes = 1.0 KB
+│ [256] float32               │  × 4 bytes = ~1 KB
 └─────────────────────────────┘
-                Total: 803.8 KB for one layer
+                Total: ~785 KB for one layer
 ```
 """
 
@@ -907,15 +907,26 @@ class Sequential:
         else:
             self.layers = list(layers)
 
-    def forward(self, x):
-        """Forward pass through all layers sequentially."""
+    def forward(self, x, training=True):
+        """Forward pass through all layers sequentially.
+
+        Passes training=True/False to layers that support it (e.g. Dropout),
+        and falls back to a plain forward(x) call for layers that don't.
+        This lets you switch between training and eval mode with one flag:
+
+            output = model.forward(x, training=False)   # eval: Dropout disabled
+            output = model.forward(x, training=True)    # train: Dropout active
+        """
         for layer in self.layers:
-            x = layer.forward(x)
+            try:
+                x = layer.forward(x, training=training)
+            except TypeError:
+                x = layer.forward(x)
         return x
 
-    def __call__(self, x):
+    def __call__(self, x, training=True):
         """Allow model to be called like a function."""
-        return self.forward(x)
+        return self.forward(x, training=training)
 
     def parameters(self):
         """Collect all parameters from all layers."""
@@ -1168,13 +1179,14 @@ def analyze_layer_performance():
     batch_sizes = [1, 32, 128, 512]
     layer = Linear(784, 256)
 
-    print("\nLinear Layer FLOPs Analysis:")
-    print("Batch Size → Matrix Multiply FLOPs → Bias Add FLOPs → Total FLOPs")
+    print("\nLinear Layer MACs Analysis:")
+    print("Batch Size → Matrix Multiply MACs → Bias Add MACs → Total MACs")
+    print("Note: FLOPs = 2 × MACs (one multiply + one add per MAC)")
 
     for batch_size in batch_sizes:
-        # Matrix multiplication: (batch, in) @ (in, out) = batch * in * out FLOPs
+        # Matrix multiplication: (batch, in) @ (in, out) = batch * in * out MACs
         matmul_flops = batch_size * 784 * 256
-        # Bias addition: batch * out FLOPs
+        # Bias addition: batch * out MACs
         bias_flops = batch_size * 256
         total_flops = matmul_flops + bias_flops
 

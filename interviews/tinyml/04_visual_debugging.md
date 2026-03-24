@@ -17,7 +17,7 @@ TinyML architecture diagrams with hidden bottlenecks.
 ---
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Firmware Brick</b> · <code>ml-ops</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Firmware Brick</b> · <code>deployment</code> <code>fault-tolerance</code></summary>
 
 ### In-Place Update with No Rollback
 
@@ -60,7 +60,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory Collision</b> · <code>hardware</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Memory Collision</b> · <code>model-cost</code> <code>memory-hierarchy</code></summary>
 
 ### Stack Overflow into the Tensor Arena
 
@@ -103,7 +103,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The RF Energy Sink</b> · <code>sustainable-ai</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The RF Energy Sink</b> · <code>sustainable-ai</code> <code>power</code></summary>
 
 ### BLE Advertisement Power is Massively Underestimated
 
@@ -143,7 +143,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Quantization Blur</b> · <code>compression</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Quantization Blur</b> · <code>pruning</code></summary>
 
 ### Quantization Range Collapse on Discriminative Features
 
@@ -189,7 +189,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CPU Cycle Thief</b> · <code>hardware</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CPU Cycle Thief</b> · <code>model-cost</code> <code>latency</code></summary>
 
 ### The Blocking ISR Tax
 
@@ -231,7 +231,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Arena Swiss Cheese</b> · <code>hardware</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Arena Swiss Cheese</b> · <code>model-cost</code> <code>memory-hierarchy</code></summary>
 
 ### Memory Fragmentation
 
@@ -276,7 +276,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Jitter Storm</b> · <code>hardware</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Jitter Storm</b> · <code>model-cost</code> <code>latency</code></summary>
 
 ### Interrupt Priority Inversion
 
@@ -318,7 +318,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Ghost Drift</b> · <code>data-engineering</code> <code>sensor-fusion</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Ghost Drift</b> · <code>data-pipeline</code> <code>sensor-pipeline</code></summary>
 
 ### Independent Clock Dividers with Rounding Error
 
@@ -362,7 +362,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Observation Gap</b> · <code>sustainable-ai</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Observation Gap</b> · <code>sustainable-ai</code> <code>power</code></summary>
 
 ### The Duty Cycle Misses 92% of Events
 
@@ -408,7 +408,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The Memory-Mapped Weight Corruption</b> · <code>flash-memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-gold?style=flat-square" alt="Level 3" align="center"> The Memory-Mapped Weight Corruption</b> · <code>persistent-storage</code></summary>
 
 ### The Memory-Mapped Weight Corruption
 
@@ -450,7 +450,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The SPI Bus Latency Choke</b> · <code>hardware</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The SPI Bus Latency Choke</b> · <code>model-cost</code> <code>latency</code></summary>
 
 ### The SPI Bus Latency Choke
 

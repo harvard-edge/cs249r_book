@@ -1,5 +1,5 @@
 """
-Integration test for Module 15: TinyGPT
+Integration test for Module 18: Memoization (TinyGPT)
 Tests language model components and GPT-style transformer integration.
 """
 
@@ -125,7 +125,7 @@ def run_integration_test():
             "success": True,
             "message": "TinyGPT integration test passed",
             "components_tested": 8,
-            "module_name": "16_tinygpt"
+            "module_name": "18_memoization"
         }
 
     except Exception as e:
@@ -133,7 +133,7 @@ def run_integration_test():
         return {
             "success": False,
             "error": str(e),
-            "module_name": "16_tinygpt"
+            "module_name": "18_memoization"
         }
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ Content may be incomplete or change without notice. The published curriculum liv
 # The ML Systems Interview Playbook
 
 <p align="center">
-  <b>1,063 systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
+  <b>3,180 systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
   <i>You can generate the code, but you cannot prompt your way out of a silicon bottleneck.</i>
 </p>
 
@@ -37,7 +37,7 @@ Content may be incomplete or change without notice. The published curriculum liv
 We are building a next-generation interview platform based on this playbook. You can now use our **[Mock Interview Prompts](MOCK_INTERVIEWS.md)** to turn any LLM into a Principal Engineer who will grill you on hardware physics and system design.
 
 **Platform Status:**
-- ✅ **Content Corpus:** 1,063 questions parsed & categorized.
+- ✅ **Content Corpus:** 3,180 questions parsed & categorized.
 - ✅ **Physics Engine:** `mlsysim` integrated for deterministic grading.
 - 🏗️ **Website:** Next.js platform under construction.
 - 🏗️ **MCP Server:** Developer extension coming soon.
@@ -109,7 +109,7 @@ Each track targets a different deployment regime — different physics, differen
       <td><b><a href="cloud/README.md">☁️ Cloud</a></b></td>
       <td>Data center training & serving</td>
       <td>Memory bandwidth / network</td>
-      <td>296</td>
+      <td>819</td>
       <td>5</td>
       <td>PFLOPS, 80 GB HBM</td>
     </tr>
@@ -117,7 +117,7 @@ Each track targets a different deployment regime — different physics, differen
       <td><b><a href="edge/README.md">🤖 Edge</a></b></td>
       <td>Autonomous vehicles, robotics</td>
       <td>Thermal envelope / real-time</td>
-      <td>268</td>
+      <td>811</td>
       <td>4</td>
       <td>TOPS, 8–32 GB</td>
     </tr>
@@ -125,7 +125,7 @@ Each track targets a different deployment regime — different physics, differen
       <td><b><a href="mobile/README.md">📱 Mobile</a></b></td>
       <td>On-device AI for smartphones</td>
       <td>Battery life / shared resources</td>
-      <td>261</td>
+      <td>751</td>
       <td>4</td>
       <td>TOPS, 6–12 GB</td>
     </tr>
@@ -133,7 +133,7 @@ Each track targets a different deployment regime — different physics, differen
       <td><b><a href="tinyml/README.md">🔬 TinyML</a></b></td>
       <td>Microcontroller & ultra-low-power</td>
       <td>SRAM capacity / hard real-time</td>
-      <td>238</td>
+      <td>760</td>
       <td>4</td>
       <td>MFLOPS, 256 KB–2 MB</td>
     </tr>
