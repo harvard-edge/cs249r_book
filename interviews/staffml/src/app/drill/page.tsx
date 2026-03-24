@@ -44,6 +44,7 @@ function DrillPage() {
 
   const [pool, setPool] = useState<Question[]>([]);
   const [current, setCurrent] = useState<Question | null>(null);
+  const [directMode, setDirectMode] = useState(false); // true when loaded via ?q= or ?topic=
   const [showAnswer, setShowAnswer] = useState(false);
   const [userAnswer, setUserAnswer] = useState("");
   const [napkinResult, setNapkinResult] = useState<(NapkinResult & { userNum: number; modelNum: number }) | null>(null);
@@ -66,6 +67,7 @@ function DrillPage() {
     if (qParam) {
       const directQ = getQuestionById(qParam);
       if (directQ) {
+        setDirectMode(true);
         setCurrent(directQ);
         setSelectedTrack(directQ.track);
         setSelectedLevel(directQ.level);
@@ -89,6 +91,7 @@ function DrillPage() {
         return true;
       });
       if (topicPool.length > 0) {
+        setDirectMode(true);
         setPool(topicPool);
         setSelectedTrack(topicPool[0].track);
         if (levelParam) setSelectedLevel(levelParam);
@@ -125,8 +128,12 @@ function DrillPage() {
     setDueCount(getDueCount());
   }, []);
 
-  // Update pool when filters change
+  // Update pool when filters change — skip if loaded via direct link
   useEffect(() => {
+    if (directMode) {
+      setDirectMode(false); // Allow future filter changes to work normally
+      return;
+    }
     const filters: { track?: string; level?: string; competency_area?: string; company_archetype?: string } = {
       track: selectedTrack,
       level: selectedLevel,
