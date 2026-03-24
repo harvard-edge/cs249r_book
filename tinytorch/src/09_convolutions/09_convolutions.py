@@ -778,7 +778,7 @@ class Conv2d:
         """
         ### BEGIN SOLUTION
         # Step 1: Validate input
-        validate_4d_input(x, "Conv2D")
+        validate_4d_input(x, "Conv2d")
 
         batch_size, in_channels, in_height, in_width = x.shape
 

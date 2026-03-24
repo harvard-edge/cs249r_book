@@ -24,12 +24,12 @@ features from real-world photographs!
   Module 06 (Autograd)      : YOUR gradient computation
   Module 07 (Optimizers)    : YOUR Adam optimizer
   Module 08 (Training)      : YOUR training loops
-  Module 09 (Convolutions)  : YOUR Conv2D, MaxPool2D, Flatten
+  Module 09 (Convolutions)  : YOUR Conv2d, MaxPool2d, Flatten
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🏗️ ARCHITECTURE (Modern Pattern with BatchNorm):
     ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-    │ Input Image │  │   Conv2D    │  │ BatchNorm2D │  │   MaxPool   │  │   Conv2D    │  │ BatchNorm2D │  │   MaxPool   │  │   Linear    │  │   Linear    │
+    │ Input Image │  │   Conv2d    │  │ BatchNorm2d │  │   MaxPool   │  │   Conv2d    │  │ BatchNorm2d │  │   MaxPool   │  │   Linear    │  │   Linear    │
     │ 32×32×3 RGB │─▶│    3→32     │─▶│  Normalize  │─▶│     2×2     │─▶│    32→64    │─▶│  Normalize  │─▶│     2×2     │─▶│  2304→256   │─▶│   256→10    │
     │   Pixels    │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M4   │  │   YOUR M4   │
     └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘
@@ -232,7 +232,7 @@ class CIFARCNN:
         self.bn1 = BatchNorm2d(32)  # Module 09: YOUR BatchNorm! Stabilizes training
         self.conv2 = Conv2d(in_channels=32, out_channels=64, kernel_size=(3, 3))  # Module 09!
         self.bn2 = BatchNorm2d(64)  # Module 09: YOUR BatchNorm!
-        self.pool = MaxPool2d(pool_size=(2, 2))  # Module 09: YOUR pooling!
+        self.pool = MaxPool2d(kernel_size=2, stride=2)  # Module 09: YOUR pooling!
 
         # Activation functions
         self.relu = ReLU()  # Module 03: YOUR activation!
@@ -276,16 +276,16 @@ class CIFARCNN:
     def forward(self, x):
         """Forward pass through YOUR CNN architecture."""
         # First conv block: Conv → BatchNorm → ReLU → Pool (modern pattern)
-        x = self.conv1(x)           # Module 09: YOUR Conv2D!
+        x = self.conv1(x)           # Module 09: YOUR Conv2d!
         x = self.bn1(x)             # Module 09: YOUR BatchNorm! Normalizes activations
         x = self.relu(x)            # Module 03: YOUR ReLU!
-        x = self.pool(x)            # Module 09: YOUR MaxPool2D!
+        x = self.pool(x)            # Module 09: YOUR MaxPool2d!
 
         # Second conv block: Same modern pattern
-        x = self.conv2(x)           # Module 09: YOUR Conv2D!
+        x = self.conv2(x)           # Module 09: YOUR Conv2d!
         x = self.bn2(x)             # Module 09: YOUR BatchNorm!
         x = self.relu(x)            # Module 03: YOUR ReLU!
-        x = self.pool(x)            # Module 09: YOUR MaxPool2D!
+        x = self.pool(x)            # Module 09: YOUR MaxPool2d!
 
         # Flatten and classify
         x = flatten(x)              # Module 09: YOUR spatial→dense bridge!
@@ -628,7 +628,7 @@ def main():
     print("🎯 CIFAR-10 CNN - Natural Image Recognition with YOUR Convolution Modules!")
     print("   Historical significance: CNNs revolutionized computer vision")
     print("   YOUR achievement: Spatial feature extraction on real photos")
-    print("   Components used: YOUR Conv2D + MaxPool2D + complete system")
+    print("   Components used: YOUR Conv2d + MaxPool2d + complete system")
 
     # Visualization
     if args.visualize:
@@ -707,8 +707,8 @@ def main():
 
     print("\n✅ SUCCESS! CIFAR-10 CNN Milestone Complete!")
     print("\n🎓 What YOU Accomplished:")
-    print("   • YOUR Conv2D extracts spatial features from natural images")
-    print("   • YOUR MaxPool2D reduces dimensions while preserving information")
+    print("   • YOUR Conv2d extracts spatial features from natural images")
+    print("   • YOUR MaxPool2d reduces dimensions while preserving information")
     print("   • YOUR DataLoader efficiently batches and shuffles data")
     print("   • YOUR CNN achieves real accuracy on complex photos")
     print("   • YOUR complete ML system works end-to-end!")

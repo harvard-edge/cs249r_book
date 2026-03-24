@@ -95,7 +95,6 @@ milestones/
 ├── 04_1998_cnn/            # Milestone 04: LeNet CNN
 ├── 05_2017_transformer/    # Milestone 05: Attention Mechanism
 ├── 06_2018_mlperf/         # Milestone 06: Optimization Olympics
-├── extras/                 # Additional demos and variants (see extras/README.md)
 └── data_manager.py         # Shared dataset management utility
 ```
 
