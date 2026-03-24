@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Terminal, Crosshair, BarChart3, Target, BookOpen, Github, Menu, X, Calendar, Map, Cpu, Server } from "lucide-react";
+import { Terminal, Crosshair, BarChart3, Target, BookOpen, Github, Menu, X, Calendar, Map, Cpu, Server, Network } from "lucide-react";
 import clsx from "clsx";
 import StreakBadge from "@/components/StreakBadge";
 
@@ -20,6 +20,7 @@ const secondaryLinks = [
   { href: "/plans", label: "Plans", icon: Map },
   { href: "/roofline", label: "Roofline", icon: Cpu },
   { href: "/simulator", label: "Simulator", icon: Server },
+  { href: "/taxonomy", label: "Taxonomy", icon: Network },
 ];
 
 const allLinks = [...primaryLinks, ...secondaryLinks];

@@ -1437,381 +1437,1142 @@ def cmd_loop(args):
     print(f"  Log:           {log_path}")
 
 
-# ─── GRAPH ─────────────────────────────────────────────────────
-def cmd_graph(args):
-    """Generate interactive D3.js force graph of the taxonomy."""
-    corpus = load_corpus()
-    taxonomy = json.loads(TAXONOMY_PATH.read_text())
+# ─── TAXONOMY-CHECK ────────────────────────────────────────────
+def _tarjan_sccs(adj: dict, nodes: set) -> list[list[str]]:
+    """Tarjan's SCC algorithm. Returns SCCs with >1 node (cycles)."""
+    index_counter = [0]
+    stack = []
+    lowlink = {}
+    index = {}
+    on_stack = {}
+    sccs = []
 
-    concept_qs = defaultdict(int)
-    concept_levels = defaultdict(set)
+    def strongconnect(v):
+        index[v] = index_counter[0]
+        lowlink[v] = index_counter[0]
+        index_counter[0] += 1
+        stack.append(v)
+        on_stack[v] = True
+
+        for w in adj.get(v, []):
+            if w not in index:
+                strongconnect(w)
+                lowlink[v] = min(lowlink[v], lowlink[w])
+            elif on_stack.get(w, False):
+                lowlink[v] = min(lowlink[v], index[w])
+
+        if lowlink[v] == index[v]:
+            scc = []
+            while True:
+                w = stack.pop()
+                on_stack[w] = False
+                scc.append(w)
+                if w == v:
+                    break
+            if len(scc) > 1:
+                sccs.append(scc)
+
+    # Use explicit stack to avoid RecursionError on deep graphs
+    sys.setrecursionlimit(max(10000, len(nodes) * 2))
+    for node in sorted(nodes):
+        if node not in index:
+            strongconnect(node)
+
+    return sccs
+
+
+def cmd_taxonomy_check(args):
+    """Read-only diagnostic of taxonomy health."""
+    taxonomy = json.loads(TAXONOMY_PATH.read_text())
+    corpus = load_corpus()
+
+    concepts = taxonomy["concepts"]
+    edges = taxonomy["edges"]
+    all_ids = {c["id"] for c in concepts}
+
+    p0_count = 0  # Critical issues
+    warn_count = 0  # Warnings
+
+    print("═══ Taxonomy Health Check ═══\n")
+
+    # ── 1. Self-references ─────────────────────────────────────
+    self_refs = [c["id"] for c in concepts if c["id"] in c.get("prerequisites", [])]
+    if self_refs:
+        p0_count += len(self_refs)
+        print(f"  ❌ Self-references: {len(self_refs)}")
+        for s in self_refs:
+            print(f"     {s}")
+    else:
+        print("  ✅ Self-references: 0")
+
+    # ── 2. Dangling prereq refs (concept.prerequisites → missing ID) ──
+    dangling_prereqs = set()
+    dangling_detail = defaultdict(list)
+    for c in concepts:
+        for p in c.get("prerequisites", []):
+            if p not in all_ids:
+                dangling_prereqs.add(p)
+                dangling_detail[p].append(c["id"])
+    if dangling_prereqs:
+        p0_count += len(dangling_prereqs)
+        print(f"  ❌ Dangling prereq refs: {len(dangling_prereqs)}")
+        for d in sorted(dangling_prereqs)[:15]:
+            refs = ", ".join(dangling_detail[d][:3])
+            print(f"     {d}  (referenced by: {refs})")
+        if len(dangling_prereqs) > 15:
+            print(f"     ... and {len(dangling_prereqs) - 15} more")
+    else:
+        print("  ✅ Dangling prereq refs: 0")
+
+    # ── 3. Dangling edge refs ──────────────────────────────────
+    dangling_edges = [e for e in edges if e["source"] not in all_ids or e["target"] not in all_ids]
+    if dangling_edges:
+        p0_count += len(dangling_edges)
+        print(f"  ❌ Dangling edges: {len(dangling_edges)}")
+        for e in dangling_edges[:5]:
+            print(f"     {e['source']} -> {e['target']}")
+    else:
+        print("  ✅ Dangling edges: 0")
+
+    # ── 4. Bidirectional edges (A→B and B→A) ───────────────────
+    edge_set = set()
+    bidir = []
+    for e in edges:
+        pair = (e["source"], e["target"])
+        reverse = (e["target"], e["source"])
+        if reverse in edge_set:
+            bidir.append(pair)
+        edge_set.add(pair)
+    if bidir:
+        p0_count += len(bidir)
+        print(f"  ❌ Bidirectional edge pairs: {len(bidir)}")
+        for b in bidir:
+            print(f"     {b[0]} ↔ {b[1]}")
+    else:
+        print("  ✅ Bidirectional edges: 0")
+
+    # ── 5. Cycles (Tarjan's SCC) ──────────────────────────────
+    adj = defaultdict(list)
+    for e in edges:
+        if e["source"] in all_ids and e["target"] in all_ids:
+            adj[e["source"]].append(e["target"])
+    sccs = _tarjan_sccs(adj, all_ids)
+    if sccs:
+        p0_count += len(sccs)
+        print(f"  ❌ Cycles (SCCs): {len(sccs)}")
+        for scc in sccs:
+            print(f"     {' → '.join(scc)}")
+    else:
+        print("  ✅ Cycles: 0")
+
+    # ── 6. Stale taxonomy_concept in corpus ────────────────────
+    stale = []
+    stale_ids = defaultdict(int)
+    unmapped = []
+    for q in corpus:
+        tc = q.get("taxonomy_concept", "")
+        if tc and tc not in all_ids:
+            stale.append(q["id"])
+            stale_ids[tc] += 1
+        elif not tc:
+            unmapped.append(q["id"])
+    if stale:
+        p0_count += 1  # Count as one P0 issue
+        print(f"  ❌ Stale taxonomy_concept mappings: {len(stale)} questions → {len(stale_ids)} invalid IDs")
+        for tc_id, cnt in sorted(stale_ids.items(), key=lambda x: -x[1])[:10]:
+            print(f"     {tc_id}: {cnt} Qs")
+        if len(stale_ids) > 10:
+            print(f"     ... and {len(stale_ids) - 10} more invalid IDs")
+    else:
+        print("  ✅ Stale taxonomy_concept mappings: 0")
+
+    if unmapped:
+        warn_count += 1
+        print(f"  ⚠️  Unmapped questions (no taxonomy_concept): {len(unmapped)}")
+    else:
+        print("  ✅ Unmapped questions: 0")
+
+    # ── 7. Over-represented concepts (>30 Qs) ─────────────────
+    concept_qcount = defaultdict(int)
+    for q in corpus:
+        tc = q.get("taxonomy_concept", "")
+        if tc and tc in all_ids:
+            concept_qcount[tc] += 1
+    over = [(cid, cnt) for cid, cnt in concept_qcount.items() if cnt > 30]
+    over.sort(key=lambda x: -x[1])
+    if over:
+        warn_count += len(over)
+        print(f"  ⚠️  Over-represented concepts (>30 Qs): {len(over)}")
+        for cid, cnt in over[:10]:
+            print(f"     {cid}: {cnt} Qs")
+        if len(over) > 10:
+            print(f"     ... and {len(over) - 10} more")
+    else:
+        print("  ✅ Over-represented concepts: 0")
+
+    # ── 8. Graph shape ─────────────────────────────────────────
+    incoming = defaultdict(int)
+    outgoing = defaultdict(int)
+    for e in edges:
+        if e["source"] in all_ids and e["target"] in all_ids:
+            incoming[e["target"]] += 1
+            outgoing[e["source"]] += 1
+    roots = [cid for cid in all_ids if incoming[cid] == 0]
+    leaves = [cid for cid in all_ids if outgoing[cid] == 0]
+
+    # Compute depth via BFS from roots
+    depth = {r: 0 for r in roots}
+    queue = list(roots)
+    max_depth = 0
+    visited = set(roots)
+    while queue:
+        node = queue.pop(0)
+        for e in edges:
+            if e["source"] == node and e["target"] in all_ids and e["target"] not in visited:
+                depth[e["target"]] = depth[node] + 1
+                max_depth = max(max_depth, depth[e["target"]])
+                visited.add(e["target"])
+                queue.append(e["target"])
+
+    # Connected components (undirected)
+    undirected = defaultdict(set)
+    for e in edges:
+        if e["source"] in all_ids and e["target"] in all_ids:
+            undirected[e["source"]].add(e["target"])
+            undirected[e["target"]].add(e["source"])
+    comp_visited = set()
+    components = 0
+    for node in all_ids:
+        if node not in comp_visited:
+            components += 1
+            stack = [node]
+            while stack:
+                n = stack.pop()
+                if n not in comp_visited:
+                    comp_visited.add(n)
+                    stack.extend(undirected[n] - comp_visited)
+
+    print(f"\n── Graph Shape ──")
+    print(f"  Concepts:     {len(all_ids)}")
+    print(f"  Edges:        {len(edges)}")
+    print(f"  Roots:        {len(roots)} ({len(roots)/len(all_ids):.1%})")
+    print(f"  Leaves:       {len(leaves)} ({len(leaves)/len(all_ids):.1%})")
+    print(f"  Intermediates:{len(all_ids) - len(roots) - len(leaves)}")
+    print(f"  Max depth:    {max_depth}")
+    print(f"  Components:   {components}")
+
+    # ── 9. Question coverage ──────────────────────────────────
+    tested = sum(1 for cid in all_ids if concept_qcount.get(cid, 0) > 0)
+    print(f"\n── Question Coverage ──")
+    print(f"  Tested concepts:   {tested}/{len(all_ids)} ({tested/len(all_ids):.1%})")
+    print(f"  Untested concepts: {len(all_ids) - tested}")
+    print(f"  Mapped questions:  {len(corpus) - len(unmapped) - len(stale)}")
+    print(f"  Stale mappings:    {len(stale)}")
+    print(f"  Unmapped:          {len(unmapped)}")
+
+    # ── Summary ────────────────────────────────────────────────
+    print(f"\n{'═' * 40}")
+    if p0_count == 0:
+        print(f"  ✅ P0 issues: 0 — taxonomy is clean!")
+    else:
+        print(f"  ❌ P0 issues: {p0_count} — run `vault.py taxonomy-fix` to repair")
+    if warn_count > 0:
+        print(f"  ⚠️  Warnings: {warn_count}")
+    print(f"{'═' * 40}")
+
+    return {"p0": p0_count, "warnings": warn_count}
+
+
+# ─── TAXONOMY-FIX ──────────────────────────────────────────────
+def cmd_taxonomy_fix(args):
+    """Automated repair of P0 taxonomy issues."""
+    taxonomy = json.loads(TAXONOMY_PATH.read_text())
+    corpus = load_corpus()
+
+    concepts = taxonomy["concepts"]
+    edges = taxonomy["edges"]
+    all_ids = {c["id"] for c in concepts}
+    fixes = []
+
+    print("═══ Taxonomy Fix ═══\n")
+
+    # ── 1. Remove self-referential prerequisite edges ──────────
+    for c in concepts:
+        prereqs = c.get("prerequisites", [])
+        if c["id"] in prereqs:
+            c["prerequisites"] = [p for p in prereqs if p != c["id"]]
+            fixes.append(f"Removed self-ref: {c['id']}")
+    # Also remove self-ref edges
+    orig_edge_count = len(edges)
+    edges = [e for e in edges if e["source"] != e["target"]]
+    removed_self = orig_edge_count - len(edges)
+    if removed_self:
+        fixes.append(f"Removed {removed_self} self-referential edge(s)")
+    print(f"  [1] Self-references removed: {len([f for f in fixes if 'self-ref' in f.lower()])}")
+
+    # ── 2. Remove dangling prereq refs ─────────────────────────
+    dangling_removed = 0
+    for c in concepts:
+        prereqs = c.get("prerequisites", [])
+        valid = [p for p in prereqs if p in all_ids]
+        removed = len(prereqs) - len(valid)
+        if removed:
+            c["prerequisites"] = valid
+            dangling_removed += removed
+    if dangling_removed:
+        fixes.append(f"Removed {dangling_removed} dangling prereq refs from concepts")
+    print(f"  [2] Dangling prereq refs removed: {dangling_removed}")
+
+    # ── 3. Remove dangling edges ───────────────────────────────
+    before = len(edges)
+    edges = [e for e in edges if e["source"] in all_ids and e["target"] in all_ids]
+    dangling_edge_removed = before - len(edges)
+    if dangling_edge_removed:
+        fixes.append(f"Removed {dangling_edge_removed} dangling edge(s)")
+    print(f"  [3] Dangling edges removed: {dangling_edge_removed}")
+
+    # ── 4. Break bidirectional edges ───────────────────────────
+    # Strategy: for each A↔B pair, keep the pedagogically correct direction.
+    # Heuristic: keep edge where source has fewer prerequisites (more foundational).
+    prereq_count = {}
+    for c in concepts:
+        prereq_count[c["id"]] = len(c.get("prerequisites", []))
+
+    edge_set = set()
+    bidir_pairs = []
+    for e in edges:
+        pair = (e["source"], e["target"])
+        reverse = (e["target"], e["source"])
+        if reverse in edge_set:
+            bidir_pairs.append(pair)
+        edge_set.add(pair)
+
+    removed_bidir = set()
+    for a, b in bidir_pairs:
+        # Keep direction: more foundational (fewer prereqs) → more advanced
+        a_prereqs = prereq_count.get(a, 0)
+        b_prereqs = prereq_count.get(b, 0)
+        if a_prereqs <= b_prereqs:
+            # A is more foundational, keep A→B, remove B→A
+            removed_bidir.add((b, a))
+            fixes.append(f"Broke bidir: kept {a} → {b}, removed {b} → {a}")
+        else:
+            removed_bidir.add((a, b))
+            fixes.append(f"Broke bidir: kept {b} → {a}, removed {a} → {b}")
+    edges = [e for e in edges if (e["source"], e["target"]) not in removed_bidir]
+    print(f"  [4] Bidirectional edges broken: {len(bidir_pairs)}")
+
+    # ── 5. Break remaining cycles ──────────────────────────────
+    # Rebuild adjacency and find SCCs. For each cycle, remove the edge
+    # whose target has the fewest prerequisites (weakest dependency).
+    cycle_breaks = 0
+    for _pass in range(10):  # Max 10 passes
+        adj = defaultdict(list)
+        for e in edges:
+            adj[e["source"]].append(e["target"])
+        sccs = _tarjan_sccs(adj, all_ids)
+        if not sccs:
+            break
+        for scc in sccs:
+            # Find the weakest edge in this SCC to remove
+            scc_set = set(scc)
+            scc_edges = [(e["source"], e["target"]) for e in edges
+                         if e["source"] in scc_set and e["target"] in scc_set]
+            if not scc_edges:
+                continue
+            # Remove edge whose target has fewest prereqs (least dependent)
+            weakest = min(scc_edges, key=lambda x: prereq_count.get(x[1], 0))
+            edges = [e for e in edges if not (e["source"] == weakest[0] and e["target"] == weakest[1])]
+            cycle_breaks += 1
+            fixes.append(f"Broke cycle: removed {weakest[0]} → {weakest[1]}")
+    print(f"  [5] Cycle-breaking edges removed: {cycle_breaks}")
+
+    # ── 6. Fuzzy-match stale taxonomy_concept IDs ──────────────
+    stale_qs = []
+    stale_ids = set()
+    for q in corpus:
+        tc = q.get("taxonomy_concept", "")
+        if tc and tc not in all_ids:
+            stale_qs.append(q)
+            stale_ids.add(tc)
+
+    # Build fuzzy match candidates
+    remapped = 0
+    failed_remap = 0
+    remap_log = []
+    for stale_id in sorted(stale_ids):
+        # Try exact substring matches first
+        best_match = None
+        best_score = 0.0
+        for valid_id in all_ids:
+            score = SequenceMatcher(None, stale_id, valid_id).ratio()
+            if score > best_score:
+                best_score = score
+                best_match = valid_id
+
+        if best_score >= 0.70:
+            # Apply remap
+            count = 0
+            for q in corpus:
+                if q.get("taxonomy_concept") == stale_id:
+                    q["taxonomy_concept"] = best_match
+                    count += 1
+            remapped += count
+            remap_log.append(f"  {stale_id} → {best_match} ({count} Qs, score={best_score:.2f})")
+        else:
+            # Clear the invalid mapping rather than leave it broken
+            count = 0
+            for q in corpus:
+                if q.get("taxonomy_concept") == stale_id:
+                    q["taxonomy_concept"] = ""
+                    count += 1
+            failed_remap += count
+            remap_log.append(f"  {stale_id} → CLEARED ({count} Qs, best={best_match} score={best_score:.2f})")
+
+    print(f"  [6] Stale mappings remapped: {remapped}")
+    print(f"      Stale mappings cleared:  {failed_remap}")
+    if hasattr(args, "verbose") and args.verbose and remap_log:
+        for line in remap_log[:20]:
+            print(f"     {line}")
+
+    # ── 7. Sync concept.prerequisites with edges ──────────────
+    # Ensure edges and concept.prerequisites are consistent
+    edge_prereqs = defaultdict(set)
+    for e in edges:
+        edge_prereqs[e["target"]].add(e["source"])
+
+    synced = 0
+    for c in concepts:
+        new_prereqs = sorted(edge_prereqs.get(c["id"], set()))
+        if c.get("prerequisites", []) != new_prereqs:
+            c["prerequisites"] = new_prereqs
+            synced += 1
+    if synced:
+        fixes.append(f"Synced prerequisites for {synced} concepts to match edges")
+    print(f"  [7] Concepts re-synced with edges: {synced}")
+
+    # ── Save ───────────────────────────────────────────────────
+    taxonomy["edges"] = edges
+    taxonomy["stats"]["total_edges"] = len(edges)
+    TAXONOMY_PATH.write_text(json.dumps(taxonomy, indent=2))
+    save_corpus(corpus)
+
+    print(f"\n  Total fixes: {len(fixes)}")
+    print(f"  Saved: {TAXONOMY_PATH.name}, {CORPUS_PATH.name}")
+
+    # ── Verify ─────────────────────────────────────────────────
+    print(f"\n── Verify ──")
+    # Quick re-check
+    result = cmd_taxonomy_check(args)
+    return result
+
+
+# ─── TAXONOMY-IMPROVE ──────────────────────────────────────────
+
+IMPROVE_ROUNDS = {
+    "toc-validate": {
+        "desc": "Check textbook TOC against taxonomy for missing concepts",
+        "prompt_template": """You are an expert ML Systems curriculum designer.
+
+TASK: Compare this textbook chapter's table of contents against the existing taxonomy concepts and identify MISSING concepts.
+
+CHAPTER: {chapter}
+CHAPTER SECTIONS:
+{sections}
+
+EXISTING CONCEPTS for this chapter:
+{existing}
+
+RULES:
+1. Only propose concepts that represent distinct, testable engineering knowledge
+2. Each concept must have a unique kebab-case ID
+3. Each concept must have at least one prerequisite from existing concepts
+4. Do NOT propose concepts that are just rewordings of existing ones
+5. Focus on concepts a Staff ML engineer would need to know
+
+Return a JSON array of proposed new concepts. Each object must have:
+- "id": kebab-case unique identifier
+- "name": Human-readable name
+- "description": 1-2 sentence description
+- "prerequisites": array of existing concept IDs this depends on
+- "tracks": array from ["cloud", "edge", "mobile", "tinyml"]
+- "source_chapters": ["{chapter}"]
+- "rationale": Why this concept is missing and important
+
+If no concepts are missing, return an empty array: []
+
+Return ONLY the JSON array, no markdown fences or other text.""",
+    },
+    "split-overloaded": {
+        "desc": "Break up concepts with >50 questions into sub-concepts",
+        "prompt_template": """You are an expert ML Systems taxonomy designer.
+
+TASK: This concept has {question_count} questions, which is too many for a single concept.
+Break it into 3-7 more specific sub-concepts.
+
+CONCEPT: {concept_name} ({concept_id})
+DESCRIPTION: {description}
+CURRENT PREREQUISITES: {prerequisites}
+
+SAMPLE QUESTION TITLES (showing breadth):
+{sample_titles}
+
+RULES:
+1. Each sub-concept should cover a distinct facet of the parent concept
+2. Sub-concepts should have prerequisite edges between them where appropriate
+3. Existing questions should clearly map to exactly one sub-concept
+4. Use the parent concept ID as a prefix: "{concept_id}-<suffix>"
+5. The parent concept becomes a "hub" that points to all sub-concepts
+
+Return a JSON array of proposed sub-concepts. Each object must have:
+- "id": kebab-case ID (prefixed with parent)
+- "name": Human-readable name
+- "description": 1-2 sentence description
+- "prerequisites": array of concept IDs (can include other sub-concepts and existing concepts)
+- "tracks": {tracks}
+- "source_chapters": {source_chapters}
+- "parent_id": "{concept_id}"
+- "question_filter": keywords/patterns to match questions belonging to this sub-concept
+
+Return ONLY the JSON array, no markdown fences or other text.""",
+    },
+    "validate-edges": {
+        "desc": "Validate every prerequisite edge in the taxonomy",
+        "prompt_template": """You are an expert ML Systems pedagogy reviewer.
+
+TASK: Evaluate whether these prerequisite edges are correct.
+A prerequisite edge A → B means "you must understand A before learning B."
+
+EDGES TO VALIDATE:
+{edges}
+
+For each edge, return:
+- "edge": "source → target"
+- "valid": true/false
+- "reason": brief explanation
+- "fix": null if valid, or {{"action": "remove"}} or {{"action": "reverse"}}
+
+Return ONLY a JSON array of validation results.""",
+    },
+    "deepen-prereqs": {
+        "desc": "Propose prerequisite chains for leaf concepts with 0 prereqs",
+        "prompt_template": """You are an expert ML Systems curriculum designer.
+
+TASK: These concepts have NO prerequisites, meaning they appear as root/leaf nodes with no incoming edges.
+For each, propose 1-3 prerequisite concepts that already exist in the taxonomy.
+
+CONCEPTS WITHOUT PREREQUISITES:
+{concepts}
+
+AVAILABLE CONCEPTS (full list):
+{all_concepts}
+
+RULES:
+1. Only propose prerequisites from the AVAILABLE CONCEPTS list
+2. A prerequisite must genuinely be needed to understand the target concept
+3. Don't create circular dependencies
+
+Return a JSON array. Each object must have:
+- "concept_id": the concept that needs prerequisites
+- "proposed_prereqs": array of existing concept IDs
+- "rationale": why each prerequisite is needed
+
+Return ONLY the JSON array, no markdown fences or other text.""",
+    },
+}
+
+
+def _call_gemini(prompt: str, model: str, timeout: int = 180) -> str | None:
+    """Call Gemini CLI and return output text, or None on failure."""
+    try:
+        result = subprocess.run(
+            ["gemini", "-m", model, "-p", prompt, "-o", "text"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            return None
+        text = result.stdout.strip()
+        # Strip markdown fences if present
+        if text.startswith("```"):
+            text = re.sub(r"^```\w*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text)
+        return text.strip()
+    except (subprocess.TimeoutExpired, Exception):
+        return None
+
+
+def _parse_json_response(text: str) -> list | None:
+    """Parse JSON array from Gemini response."""
+    if not text:
+        return None
+    try:
+        data = json.loads(text)
+        if isinstance(data, list):
+            return data
+        return None
+    except json.JSONDecodeError:
+        # Try to extract JSON array from text
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group())
+            except json.JSONDecodeError:
+                return None
+        return None
+
+
+def cmd_taxonomy_improve(args):
+    """Run a taxonomy improvement round using Gemini."""
+    round_name = args.round
+    if round_name not in IMPROVE_ROUNDS:
+        print(f"❌ Unknown round: {round_name}")
+        print(f"   Available: {', '.join(IMPROVE_ROUNDS.keys())}")
+        sys.exit(1)
+
+    taxonomy = json.loads(TAXONOMY_PATH.read_text())
+    corpus = load_corpus()
+    concepts = taxonomy["concepts"]
+    all_ids = {c["id"] for c in concepts}
+    concept_map = {c["id"]: c for c in concepts}
+    model = CONFIG["models"].get("extractor", "gemini-2.5-flash")
+    count = args.count if hasattr(args, "count") and args.count else 0
+
+    round_info = IMPROVE_ROUNDS[round_name]
+    print(f"═══ Taxonomy Improve: {round_name} ═══")
+    print(f"  {round_info['desc']}")
+    print(f"  Model: {model}")
+
+    proposals = []
+
+    if round_name == "toc-validate":
+        proposals = _improve_toc_validate(taxonomy, corpus, model, count)
+    elif round_name == "split-overloaded":
+        proposals = _improve_split_overloaded(taxonomy, corpus, model, count)
+    elif round_name == "validate-edges":
+        proposals = _improve_validate_edges(taxonomy, model, count)
+    elif round_name == "deepen-prereqs":
+        proposals = _improve_deepen_prereqs(taxonomy, model, count)
+
+    if not proposals:
+        print("\n  No proposals generated.")
+        return
+
+    # Save proposals
+    prop_dir = BASE / "_taxonomy_proposals"
+    prop_dir.mkdir(exist_ok=True)
+    prop_file = prop_dir / f"{round_name}-{datetime.now():%Y%m%d-%H%M}.json"
+    prop_file.write_text(json.dumps(proposals, indent=2))
+
+    print(f"\n  Proposals: {len(proposals)}")
+    print(f"  Saved to:  {prop_file}")
+    print(f"\n  Review proposals, then run: vault.py taxonomy-apply {prop_file}")
+
+
+def _improve_toc_validate(taxonomy, corpus, model, count):
+    """Round: toc-validate — check textbook TOC against taxonomy."""
+    concepts = taxonomy["concepts"]
+    # Group concepts by chapter
+    by_chapter = defaultdict(list)
+    for c in concepts:
+        for ch in c.get("source_chapters", []):
+            by_chapter[ch].append(c)
+
+    chapters = sorted(by_chapter.keys())
+    if count:
+        chapters = chapters[:count]
+
+    # Try to find textbook QMD files for section headings
+    book_dir = BASE.parent / "book" / "quarto" / "contents"
+    all_proposals = []
+
+    for ch in chapters:
+        print(f"\n  Checking: {ch}")
+
+        # Find the QMD file for this chapter
+        sections_text = "(section headers not available — analyze based on concept names)"
+        ch_short = ch.replace("vol1_", "").replace("vol2_", "")
+        vol = "vol1" if "vol1" in ch else "vol2"
+
+        # Search for the QMD file
+        qmd_candidates = list((book_dir / vol).glob(f"**/{ch_short}*/*.qmd")) + \
+                         list((book_dir / vol).glob(f"**/{ch_short}*.qmd"))
+        if qmd_candidates:
+            # Extract ## and ### headings
+            qmd_text = qmd_candidates[0].read_text(errors='ignore')
+            headings = [line.strip() for line in qmd_text.split('\n')
+                       if line.strip().startswith('## ') or line.strip().startswith('### ')]
+            if headings:
+                sections_text = '\n'.join(headings[:30])
+
+        existing_text = '\n'.join(f"- {c['id']}: {c['name']} — {c['description'][:80]}"
+                                  for c in by_chapter[ch])
+
+        prompt = IMPROVE_ROUNDS["toc-validate"]["prompt_template"].format(
+            chapter=ch,
+            sections=sections_text,
+            existing=existing_text,
+        )
+
+        text = _call_gemini(prompt, model)
+        result = _parse_json_response(text)
+
+        if result:
+            for p in result:
+                p["round"] = "toc-validate"
+                p["source_chapter"] = ch
+            all_proposals.extend(result)
+            print(f"    → {len(result)} proposals")
+        else:
+            print(f"    → 0 proposals (parse failed)")
+
+    return all_proposals
+
+
+def _improve_split_overloaded(taxonomy, corpus, model, count):
+    """Round: split-overloaded — break up concepts with too many questions."""
+    concepts = taxonomy["concepts"]
+    concept_qs = defaultdict(list)
     for q in corpus:
         tc = q.get("taxonomy_concept", "")
         if tc:
-            concept_qs[tc] += 1
-            concept_levels[tc].add(q["level"])
+            concept_qs[tc].append(q)
 
-    concept_chapter = {}
-    for c in taxonomy["concepts"]:
-        concept_chapter[c["id"]] = (c.get("source_chapters") or ["unknown"])[0]
+    # Find overloaded concepts (>50 Qs)
+    overloaded = [(c, len(concept_qs[c["id"]])) for c in concepts
+                  if len(concept_qs.get(c["id"], [])) > 50]
+    overloaded.sort(key=lambda x: -x[1])
 
-    # Chapter color palette — distinct hues
-    chapters = sorted(set(concept_chapter.values()))
-    palette = [
-        "#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#a855f7",
-        "#06b6d4", "#f97316", "#ec4899", "#3b82f6", "#14b8a6",
-        "#8b5cf6", "#10b981", "#e11d48", "#0ea5e9", "#d946ef",
-        "#84cc16", "#f43f5e", "#2563eb", "#eab308", "#059669",
-        "#7c3aed", "#0891b2", "#dc2626", "#4f46e5", "#16a34a",
-        "#ea580c", "#9333ea",
-    ]
-    ch_color = {ch: palette[i % len(palette)] for i, ch in enumerate(chapters)}
+    if count:
+        overloaded = overloaded[:count]
 
-    # Prereq lookup
+    all_proposals = []
+    for c, qcount in overloaded:
+        print(f"\n  Splitting: {c['id']} ({qcount} Qs)")
+
+        # Sample question titles for context
+        qs = concept_qs[c["id"]]
+        titles = sorted(set(q["title"] for q in qs))
+        sample = titles[:20]
+
+        prompt = IMPROVE_ROUNDS["split-overloaded"]["prompt_template"].format(
+            question_count=qcount,
+            concept_name=c["name"],
+            concept_id=c["id"],
+            description=c["description"],
+            prerequisites=json.dumps(c.get("prerequisites", [])),
+            sample_titles='\n'.join(f"- {t}" for t in sample),
+            tracks=json.dumps(c.get("tracks", [])),
+            source_chapters=json.dumps(c.get("source_chapters", [])),
+        )
+
+        text = _call_gemini(prompt, model, timeout=240)
+        result = _parse_json_response(text)
+
+        if result:
+            for p in result:
+                p["round"] = "split-overloaded"
+            all_proposals.extend(result)
+            print(f"    → {len(result)} sub-concepts proposed")
+        else:
+            print(f"    → parse failed")
+
+    return all_proposals
+
+
+def _improve_validate_edges(taxonomy, model, count):
+    """Round: validate-edges — check if prerequisite edges are correct."""
+    edges = taxonomy["edges"]
+    concept_map = {c["id"]: c for c in taxonomy["concepts"]}
+
+    # Batch edges into groups of 20 for efficiency
+    edge_texts = []
+    for e in edges:
+        src = concept_map.get(e["source"], {})
+        tgt = concept_map.get(e["target"], {})
+        edge_texts.append(f"- {e['source']} ({src.get('name', '?')}) → {e['target']} ({tgt.get('name', '?')})")
+
+    if count:
+        edge_texts = edge_texts[:count]
+
+    batch_size = 20
+    all_proposals = []
+
+    for i in range(0, len(edge_texts), batch_size):
+        batch = edge_texts[i:i + batch_size]
+        print(f"\n  Validating edges {i+1}-{i+len(batch)} of {len(edge_texts)}")
+
+        prompt = IMPROVE_ROUNDS["validate-edges"]["prompt_template"].format(
+            edges='\n'.join(batch),
+        )
+
+        text = _call_gemini(prompt, model)
+        result = _parse_json_response(text)
+
+        if result:
+            for p in result:
+                p["round"] = "validate-edges"
+            all_proposals.extend(result)
+            invalid = sum(1 for p in result if not p.get("valid", True))
+            print(f"    → {len(result)} validated, {invalid} invalid")
+        else:
+            print(f"    → parse failed")
+
+    return all_proposals
+
+
+def _improve_deepen_prereqs(taxonomy, model, count):
+    """Round: deepen-prereqs — add prereq chains to orphaned concepts."""
+    concepts = taxonomy["concepts"]
+    edges = taxonomy["edges"]
+    all_ids = {c["id"] for c in concepts}
+
+    # Find concepts with no incoming edges (no prereqs via edges)
+    has_incoming = set()
+    for e in edges:
+        if e["target"] in all_ids:
+            has_incoming.add(e["target"])
+
+    orphans = [c for c in concepts if c["id"] not in has_incoming and c["id"] in all_ids]
+
+    if count:
+        orphans = orphans[:count]
+
+    print(f"\n  Orphaned concepts (no prereqs): {len(orphans)}")
+
+    if not orphans:
+        return []
+
+    # Batch into groups of 15
+    batch_size = 15
+    all_proposals = []
+    all_concept_names = '\n'.join(f"- {c['id']}: {c['name']}" for c in concepts)
+
+    for i in range(0, len(orphans), batch_size):
+        batch = orphans[i:i + batch_size]
+        print(f"\n  Processing batch {i+1}-{i+len(batch)}")
+
+        concepts_text = '\n'.join(f"- {c['id']}: {c['name']} — {c['description'][:80]}"
+                                   for c in batch)
+
+        prompt = IMPROVE_ROUNDS["deepen-prereqs"]["prompt_template"].format(
+            concepts=concepts_text,
+            all_concepts=all_concept_names,
+        )
+
+        text = _call_gemini(prompt, model, timeout=240)
+        result = _parse_json_response(text)
+
+        if result:
+            for p in result:
+                p["round"] = "deepen-prereqs"
+            all_proposals.extend(result)
+            print(f"    → {len(result)} proposals")
+        else:
+            print(f"    → parse failed")
+
+    return all_proposals
+
+
+def cmd_taxonomy_apply(args):
+    """Apply accepted proposals from a taxonomy-improve round."""
+    prop_path = Path(args.file)
+    if not prop_path.exists():
+        print(f"❌ File not found: {prop_path}")
+        sys.exit(1)
+
+    proposals = json.loads(prop_path.read_text())
+    taxonomy = json.loads(TAXONOMY_PATH.read_text())
+    concepts = taxonomy["concepts"]
+    edges = taxonomy["edges"]
+    all_ids = {c["id"] for c in concepts}
+
+    round_name = proposals[0].get("round", "unknown") if proposals else "unknown"
+    print(f"═══ Taxonomy Apply: {round_name} ═══\n")
+    print(f"  Proposals: {len(proposals)}")
+
+    added_concepts = 0
+    added_edges = 0
+    removed_edges = 0
+    reversed_edges = 0
+
+    if round_name in ("toc-validate", "split-overloaded"):
+        # Proposals are new concepts to add
+        for p in proposals:
+            cid = p.get("id", "")
+            if not cid or cid in all_ids:
+                continue
+
+            new_concept = {
+                "id": cid,
+                "name": p.get("name", cid),
+                "description": p.get("description", ""),
+                "prerequisites": [pid for pid in p.get("prerequisites", []) if pid in all_ids],
+                "tracks": p.get("tracks", []),
+                "source_chapters": p.get("source_chapters", []),
+                "question_count": 0,
+            }
+            concepts.append(new_concept)
+            all_ids.add(cid)
+            added_concepts += 1
+
+            # Add edges from prerequisites
+            for pid in new_concept["prerequisites"]:
+                edges.append({"source": pid, "target": cid, "type": "prerequisite"})
+                added_edges += 1
+
+    elif round_name == "validate-edges":
+        # Proposals are edge validations
+        for p in proposals:
+            if p.get("valid", True):
+                continue
+            fix = p.get("fix", {})
+            if not fix:
+                continue
+
+            # Parse edge string: "source → target"
+            edge_str = p.get("edge", "")
+            parts = edge_str.split(" → ")
+            if len(parts) != 2:
+                continue
+            src, tgt = parts[0].strip(), parts[1].strip()
+
+            if fix.get("action") == "remove":
+                edges = [e for e in edges if not (e["source"] == src and e["target"] == tgt)]
+                removed_edges += 1
+            elif fix.get("action") == "reverse":
+                edges = [e for e in edges if not (e["source"] == src and e["target"] == tgt)]
+                edges.append({"source": tgt, "target": src, "type": "prerequisite"})
+                reversed_edges += 1
+
+    elif round_name == "deepen-prereqs":
+        # Proposals are new edges for existing concepts
+        for p in proposals:
+            cid = p.get("concept_id", "")
+            if cid not in all_ids:
+                continue
+            for pid in p.get("proposed_prereqs", []):
+                if pid in all_ids and pid != cid:
+                    # Check if edge already exists
+                    exists = any(e["source"] == pid and e["target"] == cid for e in edges)
+                    if not exists:
+                        edges.append({"source": pid, "target": cid, "type": "prerequisite"})
+                        added_edges += 1
+
+    # Save
+    taxonomy["concepts"] = concepts
+    taxonomy["edges"] = edges
+    taxonomy["stats"]["total_concepts"] = len(concepts)
+    taxonomy["stats"]["total_edges"] = len(edges)
+    TAXONOMY_PATH.write_text(json.dumps(taxonomy, indent=2))
+
+    print(f"  Added concepts: {added_concepts}")
+    print(f"  Added edges:    {added_edges}")
+    print(f"  Removed edges:  {removed_edges}")
+    print(f"  Reversed edges: {reversed_edges}")
+    print(f"  Saved: {TAXONOMY_PATH.name}")
+
+    # Run check to verify
+    print(f"\n── Verify ──")
+    cmd_taxonomy_check(args)
+
+
+# ─── TAXONOMY-SYNC ─────────────────────────────────────────────
+def cmd_taxonomy_sync(args):
+    """Export enriched taxonomy to staffml/src/data/taxonomy.json."""
+    taxonomy = json.loads(TAXONOMY_PATH.read_text())
+    corpus = load_corpus()
+
+    concepts = taxonomy["concepts"]
+    edges = taxonomy["edges"]
+    all_ids = {c["id"] for c in concepts}
+
+    # Verify cycle-free
+    adj = defaultdict(list)
+    for e in edges:
+        if e["source"] in all_ids and e["target"] in all_ids:
+            adj[e["source"]].append(e["target"])
+    sccs = _tarjan_sccs(adj, all_ids)
+    if sccs:
+        print(f"❌ Cannot sync: {len(sccs)} cycles detected. Run taxonomy-fix first.")
+        sys.exit(1)
+
+    # Compute question counts and level distribution per concept
+    concept_qs = defaultdict(list)
+    for q in corpus:
+        tc = q.get("taxonomy_concept", "")
+        if tc and tc in all_ids:
+            concept_qs[tc].append(q)
+
+    # Build prereq/dependent maps from edges
     prereq_map = defaultdict(list)
-    dependents_map = defaultdict(list)
-    for e in taxonomy["edges"]:
-        prereq_map[e["target"]].append(e["source"])
-        dependents_map[e["source"]].append(e["target"])
+    dep_map = defaultdict(list)
+    for e in edges:
+        if e["source"] in all_ids and e["target"] in all_ids:
+            prereq_map[e["target"]].append(e["source"])
+            dep_map[e["source"]].append(e["target"])
 
-    # Build nodes
-    nodes_json = []
-    for c in taxonomy["concepts"]:
-        ch = concept_chapter[c["id"]]
-        qcount = concept_qs[c["id"]]
-        levels = sorted(concept_levels.get(c["id"], set()), key=lambda l: LEVELS_ORDER.index(l) if l in LEVELS_ORDER else 99)
-        prereqs = prereq_map.get(c["id"], [])
-        deps = dependents_map.get(c["id"], [])
-        nodes_json.append({
+    # Assign role: foundational, competency, contextual
+    def assign_role(c):
+        qcount = len(concept_qs.get(c["id"], []))
+        has_deps = len(dep_map.get(c["id"], [])) > 0
+        if qcount == 0 and has_deps:
+            return "foundational"
+        elif qcount > 0:
+            return "competency"
+        else:
+            return "contextual"
+
+    # Enrich concepts
+    enriched = []
+    for c in concepts:
+        qs = concept_qs.get(c["id"], [])
+        level_dist = defaultdict(int)
+        for q in qs:
+            level_dist[q["level"]] += 1
+
+        enriched.append({
             "id": c["id"],
-            "label": c["name"],
-            "desc": c["description"],
-            "ch": ch.replace("vol1_", "V1: ").replace("vol2_", "V2: ").replace("_", " ").title(),
-            "ch_raw": ch,
-            "qs": qcount,
-            "levels": ", ".join(levels) if levels else "none",
-            "tracks": ", ".join(c.get("tracks", [])),
-            "color": ch_color.get(ch, "#999"),
-            "prereqs": prereqs,
-            "deps": deps,
+            "name": c["name"],
+            "description": c["description"],
+            "tracks": c.get("tracks", []),
+            "source_chapters": c.get("source_chapters", []),
+            "prerequisites": sorted(prereq_map.get(c["id"], [])),
+            "dependents": sorted(dep_map.get(c["id"], [])),
+            "question_count": len(qs),
+            "level_distribution": dict(level_dist),
+            "role": assign_role(c),
         })
 
-    links_json = []
-    all_ids = {c["id"] for c in taxonomy["concepts"]}
-    for e in taxonomy["edges"]:
-        if e["source"] in all_ids and e["target"] in all_ids:
-            links_json.append({"source": e["source"], "target": e["target"]})
+    # Build output
+    out = {
+        "version": taxonomy.get("version", "3.2"),
+        "synced_at": datetime.now().isoformat(),
+        "total_concepts": len(enriched),
+        "total_edges": len(edges),
+        "total_questions": len(corpus),
+        "concepts": enriched,
+        "edges": [{"source": e["source"], "target": e["target"]} for e in edges
+                  if e["source"] in all_ids and e["target"] in all_ids],
+    }
 
-    tested = sum(1 for c in taxonomy["concepts"] if concept_qs[c["id"]] > 0)
-    total = len(taxonomy["concepts"])
+    # Write to staffml
+    out_path = BASE / "staffml" / "src" / "data" / "taxonomy.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(out, indent=2))
 
-    # Build heatmap data: track × level
-    heatmap = {}
-    for t in TRACKS:
-        for l in LEVELS_ORDER:
-            heatmap[f"{t}-{l}"] = sum(1 for q in corpus if q["track"] == t and q["level"] == l)
+    # Stats
+    roles = defaultdict(int)
+    for c in enriched:
+        roles[c["role"]] += 1
+    tested = sum(1 for c in enriched if c["question_count"] > 0)
 
-    # Chapter coverage data
-    by_chapter = defaultdict(lambda: {"total": 0, "tested": 0, "qs": 0})
-    for c in taxonomy["concepts"]:
-        ch = concept_chapter[c["id"]]
-        by_chapter[ch]["total"] += 1
-        if concept_qs[c["id"]] > 0:
-            by_chapter[ch]["tested"] += 1
-            by_chapter[ch]["qs"] += concept_qs[c["id"]]
-    chapter_data = [{"ch": k, "nice": k.replace("vol1_", "").replace("vol2_", "").replace("_", " ").title(),
-                     "vol": "V1" if "vol1" in k else "V2", **v} for k, v in sorted(by_chapter.items())]
+    print(f"═══ Taxonomy Sync ═══\n")
+    print(f"  Concepts:      {len(enriched)}")
+    print(f"  Edges:         {len(out['edges'])}")
+    print(f"  Tested:        {tested}/{len(enriched)} ({tested/len(enriched):.1%})")
+    print(f"  Roles:         foundational={roles['foundational']}, competency={roles['competency']}, contextual={roles['contextual']}")
+    print(f"  Output:        {out_path}")
 
-    # Untested concepts
-    untested = [{"id": c["id"], "name": c["name"], "ch": concept_chapter[c["id"]]}
-                for c in taxonomy["concepts"] if concept_qs[c["id"]] == 0]
 
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>StaffML Dashboard — {total} concepts, {len(corpus)} questions</title>
-<script src="https://d3js.org/d3.v7.min.js"></script>
-<style>
-:root {{ --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #c9d1d9;
-  --text2: #8b949e; --accent: #58a6ff; --green: #3fb950; --red: #f85149; --orange: #d29922; }}
-* {{ margin:0; padding:0; box-sizing:border-box; }}
-body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,sans-serif;
-  background:var(--bg); color:var(--text); }}
-.dashboard {{ max-width:1400px; margin:0 auto; padding:24px; }}
-h1 {{ font-size:24px; margin-bottom:4px; }}
-.subtitle {{ color:var(--text2); font-size:14px; margin-bottom:24px; }}
-.grid {{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }}
-.card {{ background:var(--card); border:1px solid var(--border); border-radius:8px; padding:16px; }}
-.card h2 {{ font-size:14px; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px;
-  margin-bottom:12px; }}
-.stat-row {{ display:flex; gap:16px; margin-bottom:16px; }}
-.stat-box {{ background:var(--card); border:1px solid var(--border); border-radius:8px;
-  padding:16px; flex:1; text-align:center; }}
-.stat-box .num {{ font-size:32px; font-weight:700; }}
-.stat-box .lbl {{ font-size:11px; color:var(--text2); text-transform:uppercase; margin-top:4px; }}
-.full {{ grid-column: 1 / -1; }}
-/* Heatmap */
-.hm-table {{ width:100%; border-collapse:collapse; }}
-.hm-table th {{ font-size:11px; color:var(--text2); padding:6px; text-align:center; }}
-.hm-table td {{ text-align:center; padding:6px; font-size:13px; font-weight:600;
-  border-radius:4px; cursor:default; }}
-/* Chapter bars */
-.ch-bar {{ display:flex; align-items:center; margin:4px 0; font-size:12px; }}
-.ch-bar .name {{ width:160px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
-.ch-bar .bar-bg {{ flex:1; height:18px; background:#21262d; border-radius:3px; position:relative; overflow:hidden; }}
-.ch-bar .bar-fill {{ height:100%; border-radius:3px; transition:width 0.3s; }}
-.ch-bar .bar-label {{ position:absolute; right:6px; top:1px; font-size:10px; color:var(--text); }}
-.ch-bar .count {{ width:60px; text-align:right; font-size:11px; color:var(--text2); }}
-/* Graph */
-#graph-container {{ width:100%; height:500px; position:relative; overflow:hidden; background:#0a0e14; border-radius:6px; }}
-#graph-container svg {{ width:100%; height:100%; }}
-.node {{ cursor:pointer; }}
-.node circle {{ stroke-width:1.5px; }}
-.node text {{ font-size:8px; fill:var(--text2); pointer-events:none; }}
-.link {{ stroke:rgba(100,100,100,0.2); stroke-width:0.5; }}
-/* Detail panel */
-#detail {{ position:absolute; top:12px; right:12px; width:280px; background:var(--card);
-  border:1px solid var(--border); border-radius:8px; padding:14px; display:none;
-  font-size:12px; z-index:5; box-shadow:0 4px 12px rgba(0,0,0,0.5); }}
-#detail h3 {{ font-size:15px; color:#f0f6fc; margin-bottom:6px; }}
-#detail .f {{ color:var(--text2); margin:3px 0; }}
-#detail .f b {{ color:var(--text); font-weight:500; }}
-#detail .tag {{ display:inline-block; background:#21262d; padding:1px 6px; border-radius:3px;
-  font-size:10px; margin:1px; }}
-/* Search */
-.search-box {{ width:100%; padding:8px 12px; background:var(--bg); border:1px solid var(--border);
-  border-radius:6px; color:var(--text); font-size:13px; margin-bottom:12px; }}
-.search-box:focus {{ outline:none; border-color:var(--accent); }}
-/* Concept list */
-.concept-list {{ max-height:300px; overflow-y:auto; }}
-.concept-item {{ display:flex; align-items:center; padding:4px 8px; border-radius:4px;
-  font-size:12px; cursor:pointer; }}
-.concept-item:hover {{ background:#21262d; }}
-.concept-item .dot {{ width:8px; height:8px; border-radius:50%; margin-right:8px; flex-shrink:0; }}
-.concept-item .cname {{ flex:1; }}
-.concept-item .cqs {{ color:var(--text2); font-size:10px; }}
-</style>
-</head>
-<body>
-<div class="dashboard">
-<h1>StaffML Taxonomy Dashboard</h1>
-<div class="subtitle">{total} concepts &middot; {len(links_json)} prerequisite edges &middot; {len(corpus)} questions &middot; Generated {datetime.now().strftime("%Y-%m-%d %H:%M")}</div>
+# ─── COMPETENCY-MODEL ──────────────────────────────────────────
+def cmd_competency_model(args):
+    """Extract competency clusters from the taxonomy graph via Gemini."""
+    taxonomy = json.loads(TAXONOMY_PATH.read_text())
+    corpus = load_corpus()
+    concepts = taxonomy["concepts"]
+    edges = taxonomy["edges"]
+    all_ids = {c["id"] for c in concepts}
+    model = CONFIG["models"].get("extractor", "gemini-2.5-flash")
 
-<div class="stat-row">
-  <div class="stat-box"><div class="num">{len(corpus):,}</div><div class="lbl">Questions</div></div>
-  <div class="stat-box"><div class="num">{total}</div><div class="lbl">Concepts</div></div>
-  <div class="stat-box"><div class="num" style="color:{'var(--green)' if tested/total > 0.9 else 'var(--orange)'}">{100*tested//total}%</div><div class="lbl">Coverage</div></div>
-  <div class="stat-box"><div class="num">{len(links_json)}</div><div class="lbl">Edges</div></div>
-  <div class="stat-box"><div class="num">{len(untested)}</div><div class="lbl">Untested</div></div>
-</div>
+    # Build concept summaries
+    concept_qs = defaultdict(int)
+    for q in corpus:
+        tc = q.get("taxonomy_concept", "")
+        if tc and tc in all_ids:
+            concept_qs[tc] += 1
 
-<div class="grid">
-<div class="card">
-  <h2>Track x Level Heatmap</h2>
-  <table class="hm-table"><thead><tr><th></th>{"".join(f'<th>{l}</th>' for l in LEVELS_ORDER)}<th>Total</th></tr></thead><tbody>"""
+    concept_list = '\n'.join(
+        f"- {c['id']}: {c['name']} ({concept_qs.get(c['id'], 0)} Qs, "
+        f"prereqs: {c.get('prerequisites', [])[:3]}, "
+        f"tracks: {c.get('tracks', [])})"
+        for c in concepts
+    )
 
-    for t in TRACKS:
-        row_total = sum(heatmap.get(f"{t}-{l}", 0) for l in LEVELS_ORDER)
-        cells = ""
-        for l in LEVELS_ORDER:
-            v = heatmap.get(f"{t}-{l}", 0)
-            max_v = max(heatmap.values()) if heatmap else 1
-            intensity = v / max_v if max_v else 0
-            r, g, b = int(13 + intensity * 30), int(17 + intensity * 160), int(23 + intensity * 50)
-            cells += f'<td style="background:rgb({r},{g},{b})">{v}</td>'
-        html += f'<tr><th style="text-align:left">{t}</th>{cells}<td style="color:var(--text2)">{row_total}</td></tr>'
+    prompt = f"""You are an expert ML Systems competency framework designer.
 
-    html += f"""</tbody></table>
-</div>
-<div class="card">
-  <h2>Chapter Coverage</h2>
-  <div style="max-height:280px;overflow-y:auto">"""
+TASK: Analyze this taxonomy of {len(concepts)} ML Systems concepts and identify 10-15 competency clusters.
 
-    for cd in chapter_data:
-        pct = 100 * cd["tested"] / cd["total"] if cd["total"] else 0
-        color = "var(--green)" if pct == 100 else "var(--orange)" if pct >= 80 else "var(--red)"
-        html += f'''<div class="ch-bar">
-  <span class="name" title="{cd['ch']}">{cd['vol']}: {cd['nice']}</span>
-  <div class="bar-bg"><div class="bar-fill" style="width:{pct}%;background:{color}"></div>
-    <span class="bar-label">{cd['tested']}/{cd['total']}</span></div>
-  <span class="count">{cd['qs']} Qs</span></div>'''
+A competency cluster is a group of 5-30 concepts that together enable a demonstrable engineering ability.
+Each competency should be something a Staff ML engineer could be evaluated on.
 
-    html += f"""</div>
-</div>
-</div>
+TAXONOMY CONCEPTS:
+{concept_list}
 
-<div class="card full">
-  <h2>Concept Graph</h2>
-  <input type="text" class="search-box" id="search" placeholder="Search concepts... (e.g. kv-cache, training, vol2)" autocomplete="off">
-  <div id="graph-container">
-    <div id="detail">
-      <h3 id="d-name"></h3>
-      <div class="f" id="d-desc"></div>
-      <hr style="border:none;border-top:1px solid var(--border);margin:8px 0">
-      <div class="f">Chapter: <b id="d-ch"></b></div>
-      <div class="f">Questions: <b id="d-qs"></b></div>
-      <div class="f">Levels: <b id="d-levels"></b></div>
-      <div class="f">Tracks: <b id="d-tracks"></b></div>
-      <div class="f">Prerequisites: <span id="d-prereqs"></span></div>
-      <div class="f">Dependents: <span id="d-deps"></span></div>
-    </div>
-  </div>
-</div>
+RULES:
+1. Each competency must have 5-30 concept IDs from the list above
+2. Competencies should cover the full breadth of the taxonomy
+3. Every concept should belong to at least one competency
+4. Competencies should be at the "ability" level, not the "knowledge" level
+   - Good: "Size and configure accelerator fleets for given workloads"
+   - Bad: "Know about GPU memory hierarchy"
+5. Include 2-3 example assessment tasks for each competency
 
-<div class="grid">
-<div class="card">
-  <h2>Untested Concepts ({len(untested)})</h2>
-  <div class="concept-list">"""
+Return a JSON array of competency objects. Each must have:
+- "id": kebab-case identifier
+- "name": Short human-readable name (3-5 words)
+- "description": One sentence describing the engineering ability
+- "concept_ids": Array of concept IDs from the taxonomy
+- "example_tasks": Array of 2-3 concrete assessment tasks
 
-    for u in untested:
-        ch = u["ch"].replace("vol1_", "V1: ").replace("vol2_", "V2: ").replace("_", " ")
-        html += f'<div class="concept-item"><span class="dot" style="background:var(--red)"></span><span class="cname">{u["name"]}</span><span class="cqs">{ch}</span></div>'
+Return ONLY the JSON array, no markdown fences or other text."""
 
-    html += f"""</div>
-</div>
-<div class="card">
-  <h2>All Concepts</h2>
-  <input type="text" class="search-box" id="concept-search" placeholder="Filter concepts..." autocomplete="off">
-  <div class="concept-list" id="concept-list"></div>
-</div>
-</div>
-</div>
+    print(f"═══ Competency Model Extraction ═══\n")
+    print(f"  Concepts: {len(concepts)}")
+    print(f"  Model:    {model}")
+    print(f"  Extracting competency clusters...\n")
 
-<script>
-const nodes = {json.dumps(nodes_json)};
-const links = {json.dumps(links_json)};
-const nodeMap = {{}};
-nodes.forEach(n => nodeMap[n.id] = n);
+    text = _call_gemini(prompt, model, timeout=300)
+    result = _parse_json_response(text)
 
-// Concept list
-const listEl = document.getElementById('concept-list');
-function renderList(filter) {{
-  listEl.innerHTML = '';
-  const f = (filter||'').toLowerCase();
-  nodes.filter(n => !f || n.label.toLowerCase().includes(f) || n.id.includes(f) || n.ch.toLowerCase().includes(f))
-    .sort((a,b) => b.qs - a.qs)
-    .forEach(n => {{
-      const d = document.createElement('div');
-      d.className = 'concept-item';
-      d.innerHTML = '<span class="dot" style="background:'+n.color+'"></span><span class="cname">'+n.label+'</span><span class="cqs">'+n.qs+'Q</span>';
-      d.onclick = () => showDetail(n);
-      listEl.appendChild(d);
-    }});
-}}
-renderList('');
-document.getElementById('concept-search').addEventListener('input', e => renderList(e.target.value));
+    if not result:
+        print("  ❌ Failed to parse Gemini response")
+        sys.exit(1)
 
-// Detail panel
-function showDetail(n) {{
-  const d = document.getElementById('detail');
-  d.style.display = 'block';
-  document.getElementById('d-name').textContent = n.label;
-  document.getElementById('d-desc').textContent = n.desc;
-  document.getElementById('d-ch').textContent = n.ch;
-  document.getElementById('d-qs').textContent = n.qs;
-  document.getElementById('d-levels').textContent = n.levels;
-  document.getElementById('d-tracks').textContent = n.tracks;
-  const prs = (n.prereqs||[]).map(id => nodeMap[id] ? nodeMap[id].label : id);
-  document.getElementById('d-prereqs').innerHTML = prs.length ? prs.map(p => '<span class="tag">'+p+'</span>').join(' ') : 'None';
-  const deps = (n.deps||[]).map(id => nodeMap[id] ? nodeMap[id].label : id);
-  document.getElementById('d-deps').innerHTML = deps.length ? deps.map(p => '<span class="tag">'+p+'</span>').join(' ') : 'None';
-}}
+    # Save competencies
+    comp_path = BASE / "competencies.json"
+    output = {
+        "version": "1.0",
+        "extracted_at": datetime.now().isoformat(),
+        "model": model,
+        "total_competencies": len(result),
+        "competencies": result,
+    }
+    comp_path.write_text(json.dumps(output, indent=2))
 
-// D3 Force Graph
-const container = document.getElementById('graph-container');
-const width = container.clientWidth;
-const height = 500;
+    # Stats
+    all_concept_ids = set()
+    for comp in result:
+        all_concept_ids.update(comp.get("concept_ids", []))
 
-const svg = d3.select('#graph-container').append('svg')
-  .attr('viewBox', [0, 0, width, height]);
+    coverage = len(all_concept_ids & all_ids) / len(all_ids) if all_ids else 0
 
-const g = svg.append('g');
+    print(f"  Competencies:      {len(result)}")
+    for comp in result:
+        print(f"    {comp['id']:35} {len(comp.get('concept_ids', []))} concepts")
+    print(f"\n  Concept coverage:  {len(all_concept_ids & all_ids)}/{len(all_ids)} ({coverage:.1%})")
+    print(f"  Saved to:          {comp_path}")
 
-// Zoom
-svg.call(d3.zoom().scaleExtent([0.3, 6]).on('zoom', (e) => g.attr('transform', e.transform)));
 
-const simulation = d3.forceSimulation(nodes)
-  .force('link', d3.forceLink(links).id(d => d.id).distance(40).strength(0.3))
-  .force('charge', d3.forceManyBody().strength(-60))
-  .force('center', d3.forceCenter(width/2, height/2))
-  .force('collision', d3.forceCollide().radius(d => Math.max(4, 2 + d.qs*0.2) + 2));
-
-const link = g.append('g').selectAll('line')
-  .data(links).join('line').attr('class', 'link');
-
-const node = g.append('g').selectAll('g')
-  .data(nodes).join('g').attr('class', 'node');
-
-node.append('circle')
-  .attr('r', d => Math.max(4, Math.min(16, 3 + d.qs * 0.2)))
-  .attr('fill', d => d.color)
-  .attr('stroke', d => d.qs === 0 ? 'var(--red)' : d.color)
-  .attr('stroke-opacity', 0.6);
-
-node.append('text')
-  .text(d => d.qs > 5 ? d.label : '')
-  .attr('dx', d => Math.max(4, 3 + d.qs*0.2) + 3).attr('dy', 3);
-
-node.on('click', (e, d) => {{
-  showDetail(d);
-  // Highlight neighbors
-  const neighborIds = new Set([d.id, ...(d.prereqs||[]), ...(d.deps||[])]);
-  node.select('circle').attr('opacity', n => neighborIds.has(n.id) ? 1 : 0.1);
-  node.select('text').attr('opacity', n => neighborIds.has(n.id) ? 1 : 0.05);
-  link.attr('stroke-opacity', l => (l.source.id===d.id||l.target.id===d.id) ? 0.8 : 0.03)
-    .attr('stroke', l => (l.source.id===d.id||l.target.id===d.id) ? 'var(--accent)' : 'rgba(100,100,100,0.2)');
-}});
-
-svg.on('click', (e) => {{
-  if (e.target === svg.node()) {{
-    node.select('circle').attr('opacity', 1);
-    node.select('text').attr('opacity', 1);
-    link.attr('stroke-opacity', 1).attr('stroke', 'rgba(100,100,100,0.2)');
-    document.getElementById('detail').style.display = 'none';
-  }}
-}});
-
-// Drag
-node.call(d3.drag()
-  .on('start', (e,d) => {{ if(!e.active) simulation.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; }})
-  .on('drag', (e,d) => {{ d.fx=e.x; d.fy=e.y; }})
-  .on('end', (e,d) => {{ if(!e.active) simulation.alphaTarget(0); d.fx=null; d.fy=null; }}));
-
-simulation.on('tick', () => {{
-  link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
-  node.attr('transform', d => 'translate('+d.x+','+d.y+')');
-}});
-
-// Graph search — highlights matching nodes
-document.getElementById('search').addEventListener('input', (e) => {{
-  const q = e.target.value.toLowerCase();
-  if (!q) {{
-    node.select('circle').attr('opacity', 1);
-    node.select('text').attr('opacity', 1).text(d => d.qs > 5 ? d.label : '');
-    link.attr('stroke-opacity', 1);
-    return;
-  }}
-  const matched = new Set(nodes.filter(n =>
-    n.label.toLowerCase().includes(q) || n.id.includes(q) || n.ch.toLowerCase().includes(q)
-  ).map(n => n.id));
-  node.select('circle').attr('opacity', n => matched.has(n.id) ? 1 : 0.08);
-  node.select('text').attr('opacity', n => matched.has(n.id) ? 1 : 0)
-    .text(n => matched.has(n.id) ? n.label : '');
-  link.attr('stroke-opacity', l => (matched.has(l.source.id) || matched.has(l.target.id)) ? 0.5 : 0.02);
-}});
-</script>
-</body>
-</html>"""
-
-    out_path = BASE / "_taxonomy_graph.html"
-    out_path.write_text(html)
-    print(f"✅ Interactive graph: {out_path}")
-    print(f"   {total} nodes, {len(links_json)} edges")
-
-    if not (hasattr(args, "no_open") and args.no_open):
-        import webbrowser
-        webbrowser.open(f"file://{out_path.resolve()}")
+# ─── GRAPH (deprecated) ────────────────────────────────────────
+# NOTE: cmd_graph removed — replaced by staffml/src/app/taxonomy/ (Phase 2+4)
+def cmd_graph(args):
+    """Placeholder — graph visualization moved to StaffML app."""
+    print("⚠️  The `graph` command has been removed.")
+    print("   Use the StaffML Taxonomy Explorer instead:")
+    print("   cd staffml && npm run dev → http://localhost:3000/taxonomy")
+    sys.exit(0)
 
 
 # ─── CLI ────────────────────────────────────────────────────────
@@ -1883,6 +2644,23 @@ def main():
     loop_p.add_argument("--max-rounds", type=int, default=20, help="Max generation rounds")
     loop_p.add_argument("--batch-size", type=int, default=20, help="Questions per round")
 
+    sub.add_parser("taxonomy-check", help="Read-only taxonomy health diagnostic")
+
+    tax_fix_p = sub.add_parser("taxonomy-fix", help="Automated taxonomy repair")
+    tax_fix_p.add_argument("--verbose", action="store_true", help="Show remap details")
+
+    sub.add_parser("taxonomy-sync", help="Export enriched taxonomy to staffml app")
+
+    improve_p = sub.add_parser("taxonomy-improve", help="Run taxonomy improvement round via Gemini")
+    improve_p.add_argument("--round", required=True, choices=list(IMPROVE_ROUNDS.keys()),
+                           help="Improvement round to run")
+    improve_p.add_argument("--count", type=int, default=0, help="Limit items to process (0=all)")
+
+    apply_p = sub.add_parser("taxonomy-apply", help="Apply accepted taxonomy proposals")
+    apply_p.add_argument("file", help="Path to proposals JSON file")
+
+    sub.add_parser("competency-model", help="Extract competency clusters from taxonomy graph")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -1907,6 +2685,12 @@ def main():
         "generate-batch": cmd_generate_batch,
         "merge": cmd_merge,
         "graph": cmd_graph,
+        "taxonomy-check": cmd_taxonomy_check,
+        "taxonomy-fix": cmd_taxonomy_fix,
+        "taxonomy-sync": cmd_taxonomy_sync,
+        "taxonomy-improve": cmd_taxonomy_improve,
+        "taxonomy-apply": cmd_taxonomy_apply,
+        "competency-model": cmd_competency_model,
     }
     cmds[args.command](args)
 

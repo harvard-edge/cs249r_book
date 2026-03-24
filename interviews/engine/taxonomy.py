@@ -1,20 +1,18 @@
 """
-ML Systems Interview Question Taxonomy
+DEPRECATED — Use taxonomy.json as the single source of truth.
 
+This file contains the legacy tag-based taxonomy (~50 tags across 12 areas).
+It has been superseded by taxonomy.json (549 concepts with prerequisite graph).
+
+The legacy importers (vault_loop.py, vault_fill.py) still reference this file.
+All new code should use taxonomy.json via vault.py commands:
+    vault.py taxonomy-check   — diagnose issues
+    vault.py taxonomy-sync    — export to staffml app
+    vault.py taxonomy-improve — Gemini-powered improvement
+
+Original description:
 The canonical tag vocabulary for all StaffML questions. Every question gets
 1-3 tags from this controlled set. No freestyling.
-
-Structure:
-- 10 primary competency areas (from TOPIC_MAP.md)
-- Each area has 3-8 specific tags
-- ~50 total canonical tags
-- Tags are kebab-case, lowercase
-
-This taxonomy reflects the enduring structure of ML systems engineering.
-The competency areas are physics — they don't change with framework trends.
-What changes across tracks is how each area manifests (GPU vs MCU vs NPU),
-but the underlying questions are the same: where does the data live, how
-fast can you move it, what's the bottleneck?
 """
 
 from __future__ import annotations
