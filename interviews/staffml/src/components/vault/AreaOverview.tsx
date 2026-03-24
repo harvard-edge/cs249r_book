@@ -34,20 +34,21 @@ export default function AreaOverview({ areas, onExpand, onSelectTopic, selectedI
               </div>
               {/* Level histogram */}
               <div className="hidden md:flex items-end gap-[3px] h-8 mr-2">
-                {LEVEL_IDS.map((level) => {
+                {LEVEL_IDS.map((level, i) => {
                   const count = area.levels[level] || 0;
                   const maxCount = Math.max(...LEVEL_IDS.map(l => area.levels[l] || 0), 1);
                   const height = count > 0 ? Math.max(6, (count / maxCount) * 32) : 4;
-                  const levelDef = LEVEL_DEFS.find(l => l.id === level);
+                  // Area color with opacity ramp: lighter for easy levels, darker for hard
+                  const opacity = count > 0 ? 0.3 + (i / (LEVEL_IDS.length - 1)) * 0.7 : 1;
                   return (
                     <div key={level} className="flex flex-col items-center gap-0.5">
                       <div className="w-[6px] rounded-sm"
                         style={{
                           height,
-                          backgroundColor: count > 0 ? (levelDef?.color || style.primary) : "var(--surface-hover)",
-                          opacity: count > 0 ? 0.8 : 1,
+                          backgroundColor: count > 0 ? style.primary : "var(--surface-hover)",
+                          opacity,
                         }}
-                        title={`${level} ${levelDef?.name || ''}: ${count}`}
+                        title={`${level}: ${count}`}
                       />
                       <span className="text-[9px] text-textMuted font-mono">{level.replace("L","").replace("+","")}</span>
                     </div>

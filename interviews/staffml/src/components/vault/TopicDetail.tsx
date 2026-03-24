@@ -51,28 +51,32 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
             <motion.div key={`level-${drillLevel}`}
               initial={{ x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }}
               exit={{ x: 40, opacity: 0 }} transition={{ duration: 0.15 }}
-              className="p-5">
+              className="flex flex-col h-full">
 
-              <button onClick={() => setDrillLevel(null)}
-                className="flex items-center gap-1.5 text-[13px] font-medium text-textSecondary hover:text-textPrimary mb-5 transition-colors">
-                <ChevronLeft className="w-4 h-4" /> Back to overview
-              </button>
+              {/* Pinned header */}
+              <div className="p-5 pb-3 shrink-0 border-b border-borderSubtle">
+                <button onClick={() => setDrillLevel(null)}
+                  className="flex items-center gap-1.5 text-[13px] font-medium text-textSecondary hover:text-textPrimary mb-4 transition-colors">
+                  <ChevronLeft className="w-4 h-4" /> Back to overview
+                </button>
 
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-3">
-                  <LevelBadge level={drillLevel} size="md" />
-                  <p className="text-[13px] text-textSecondary">
-                    {levelQs.length} question{levelQs.length !== 1 ? "s" : ""}
-                  </p>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <LevelBadge level={drillLevel} size="md" />
+                    <p className="text-[13px] text-textSecondary">
+                      {levelQs.length} question{levelQs.length !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+                  <Link href={`/practice?topic=${topic.id}&level=${drillLevel}`}
+                    className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold rounded-lg transition-all"
+                    style={{ backgroundColor: style.primary, color: "#101014" }}>
+                    <Target className="w-4 h-4" /> Drill
+                  </Link>
                 </div>
-                <Link href={`/practice?topic=${topic.id}&level=${drillLevel}`}
-                  className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold rounded-lg transition-all"
-                  style={{ backgroundColor: style.primary, color: "#101014" }}>
-                  <Target className="w-4 h-4" /> Drill
-                </Link>
               </div>
 
-              <div className="space-y-2">
+              {/* Scrollable question list */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-2">
                 {levelQs.map((q) => (
                   <Link key={q.id} href={`/practice?q=${q.id}`}
                     className="block p-3.5 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
