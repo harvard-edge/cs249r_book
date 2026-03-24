@@ -2,36 +2,21 @@
 
 import { useState, useMemo } from "react";
 import {
-  Search,
-  BookOpen,
-  ChevronRight,
-  ChevronLeft,
-  X,
-  ExternalLink,
-  Target,
-  Play,
+  Search, BookOpen, ChevronRight, ChevronLeft, X,
+  ExternalLink, Target, Play,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import clsx from "clsx";
 import Link from "next/link";
 import {
-  getAreas,
-  getVaultStats,
-  getAreaColor,
-  getAreaForTopic,
-  searchTopics,
-  type Topic,
-  type CompetencyArea,
+  getAreas, getVaultStats, getAreaStyle, getAreaForTopic, searchTopics,
+  type Topic, type CompetencyArea, type AreaStyle,
 } from "@/lib/taxonomy";
 
 const LEVELS = ["L1", "L2", "L3", "L4", "L5", "L6+"];
 const LEVEL_LABELS: Record<string, string> = {
-  L1: "Recall",
-  L2: "Understand",
-  L3: "Apply",
-  L4: "Analyze",
-  L5: "Design",
-  "L6+": "Architect",
+  L1: "Recall", L2: "Understand", L3: "Apply",
+  L4: "Analyze", L5: "Design", "L6+": "Architect",
 };
 
 export default function VaultPage() {
@@ -46,78 +31,59 @@ export default function VaultPage() {
     return searchTopics(query);
   }, [query]);
 
-  const selectedArea = selectedTopic
-    ? getAreaForTopic(selectedTopic.id)
-    : null;
+  const selectedArea = selectedTopic ? getAreaForTopic(selectedTopic.id) : null;
+  const selectedStyle = selectedArea ? getAreaStyle(selectedArea.id) : null;
 
   return (
     <div className="flex-1 flex flex-col min-h-screen">
-      {/* Hero */}
-      <div className="px-6 pt-10 pb-8 border-b border-border">
+      {/* ─── Header ─── */}
+      <div className="px-6 pt-8 pb-6 border-b border-border">
         <div className="max-w-5xl mx-auto">
-          <div className="mb-6">
-            <h1 className="text-3xl font-extrabold text-white tracking-tight mb-2">
-              Question Vault
-            </h1>
-            <p className="text-[15px] text-textSecondary">
-              {stats.totalQuestions.toLocaleString()} questions across{" "}
-              {stats.totalTopics} topics — find your weak spots and drill them.
-            </p>
-          </div>
+          <h1 className="text-[28px] font-extrabold text-white tracking-tight mb-1">
+            Question Vault
+          </h1>
+          <p className="text-[15px] text-textSecondary mb-5">
+            {stats.totalQuestions.toLocaleString()} questions across{" "}
+            {stats.totalTopics} topics — find your weak spots and drill them.
+          </p>
 
           {/* Area filter pills */}
-          <div className="flex items-center gap-2 flex-wrap mb-6">
-            <button
+          <div className="flex items-center gap-1.5 flex-wrap mb-5">
+            <FilterPill
+              label="All"
+              isActive={!expandedArea}
               onClick={() => setExpandedArea(null)}
-              className={clsx(
-                "px-3 py-1.5 rounded-full text-xs font-semibold transition-all border",
-                !expandedArea
-                  ? "border-white/30 bg-white/10 text-white"
-                  : "border-transparent text-textSecondary hover:text-white hover:bg-white/5"
-              )}
-            >
-              All
-            </button>
-            {areas.map((area) => (
-              <button
-                key={area.id}
-                onClick={() =>
-                  setExpandedArea(expandedArea === area.id ? null : area.id)
-                }
-                className={clsx(
-                  "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all border",
-                  expandedArea === area.id
-                    ? "border-white/30 bg-white/10 text-white"
-                    : "border-transparent text-textSecondary hover:text-white hover:bg-white/5"
-                )}
-              >
-                <span
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: getAreaColor(area.id) }}
+            />
+            {areas.map((area) => {
+              const style = getAreaStyle(area.id);
+              const Icon = style.icon;
+              return (
+                <FilterPill
+                  key={area.id}
+                  label={area.name}
+                  count={area.questionCount}
+                  isActive={expandedArea === area.id}
+                  color={style.primary}
+                  icon={<Icon className="w-3 h-3" />}
+                  onClick={() => setExpandedArea(expandedArea === area.id ? null : area.id)}
                 />
-                {area.name}
-                <span className="font-mono opacity-50">
-                  {area.questionCount}
-                </span>
-              </button>
-            ))}
+              );
+            })}
           </div>
 
           {/* Search */}
           <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-textTertiary" />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-textMuted" />
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search topics — e.g. KV cache, roofline, quantization..."
-              className="w-full pl-12 pr-12 py-3.5 bg-surface border border-border rounded-xl text-[15px] text-white placeholder:text-textTertiary focus:outline-none focus:border-white/30 focus:bg-surface/80 transition-all"
+              placeholder="Search topics — KV cache, roofline, quantization..."
+              className="w-full pl-12 pr-12 py-3 bg-surface border border-border rounded-xl text-[15px] font-medium text-white placeholder:text-textTertiary focus:outline-none focus:border-borderHighlight transition-colors"
             />
             {query && (
-              <button
-                onClick={() => setQuery("")}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-textTertiary hover:text-white"
-              >
+              <button onClick={() => setQuery("")}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-textTertiary hover:text-white">
                 <X className="w-4 h-4" />
               </button>
             )}
@@ -125,196 +91,288 @@ export default function VaultPage() {
         </div>
       </div>
 
-      {/* Main content */}
+      {/* ─── Main ─── */}
       <div className="flex-1 flex">
         <div className="flex-1 overflow-auto px-6 py-6">
           <div className="max-w-5xl mx-auto">
             {searchResults ? (
-              <div>
-                <p className="text-sm text-textSecondary mb-4">
-                  {searchResults.length} topic
-                  {searchResults.length !== 1 ? "s" : ""} matching &ldquo;
-                  {query}&rdquo;
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {searchResults.map((topic) => (
-                    <TopicCard
-                      key={topic.id}
-                      topic={topic}
-                      areaColor={getAreaColor(
-                        getAreaForTopic(topic.id)?.id || ""
-                      )}
-                      areaName={getAreaForTopic(topic.id)?.name}
-                      isSelected={selectedTopic?.id === topic.id}
-                      onClick={() => setSelectedTopic(topic)}
-                    />
-                  ))}
-                </div>
-              </div>
+              <SearchResults results={searchResults} query={query}
+                selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
+            ) : expandedArea ? (
+              <ExpandedArea area={areas.find(a => a.id === expandedArea)!}
+                selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
             ) : (
-              <div className="space-y-10">
-                {areas
-                  .filter((a) => !expandedArea || a.id === expandedArea)
-                  .map((area) => (
-                    <AreaSection
-                      key={area.id}
-                      area={area}
-                      selectedTopicId={selectedTopic?.id ?? null}
-                      onSelectTopic={setSelectedTopic}
-                      isExpanded={expandedArea === area.id}
-                    />
-                  ))}
-              </div>
+              <AreaOverview areas={areas} onExpand={setExpandedArea} onSelectTopic={setSelectedTopic}
+                selectedId={selectedTopic?.id ?? null} />
             )}
           </div>
         </div>
 
         {/* Detail panel */}
         <AnimatePresence>
-          {selectedTopic && (
+          {selectedTopic && selectedStyle && (
             <motion.div
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 420, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="shrink-0 overflow-hidden border-l border-border"
+              className="shrink-0 overflow-hidden border-l border-border hidden lg:block"
             >
-              <TopicDetail
-                topic={selectedTopic}
-                areaName={selectedArea?.name || ""}
-                areaColor={getAreaColor(selectedArea?.id || "")}
-                onClose={() => setSelectedTopic(null)}
-              />
+              <TopicDetail topic={selectedTopic}
+                areaName={selectedArea?.name || ""} style={selectedStyle}
+                onClose={() => setSelectedTopic(null)} />
             </motion.div>
           )}
         </AnimatePresence>
+      </div>
+
+      {/* Mobile detail sheet */}
+      <AnimatePresence>
+        {selectedTopic && selectedStyle && (
+          <motion.div
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ type: "spring", damping: 30, stiffness: 300 }}
+            className="fixed inset-x-0 bottom-0 z-50 border-t border-border rounded-t-2xl max-h-[85vh] overflow-auto bg-background lg:hidden"
+          >
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="w-10 h-1 rounded-full bg-borderHighlight" />
+            </div>
+            <TopicDetail topic={selectedTopic}
+              areaName={selectedArea?.name || ""} style={selectedStyle}
+              onClose={() => setSelectedTopic(null)} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ─── Filter Pill ───────────────────────────────────────────────
+
+function FilterPill({ label, count, isActive, color, icon, onClick }: {
+  label: string; count?: number; isActive: boolean;
+  color?: string; icon?: React.ReactNode; onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={isActive}
+      className={clsx(
+        "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all border",
+        isActive
+          ? "text-white border-borderHighlight"
+          : "border-transparent text-textSecondary hover:text-white hover:bg-surface"
+      )}
+      style={isActive && color ? { backgroundColor: `${color}12`, borderColor: `${color}30`, color } : undefined}
+    >
+      {icon}
+      {label}
+      {count !== undefined && (
+        <span className={clsx("font-mono text-[11px]", isActive ? "opacity-70" : "text-textMuted")}>
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+// ─── Tier 1: Area Overview ─────────────────────────────────────
+
+function AreaOverview({ areas, onExpand, onSelectTopic, selectedId }: {
+  areas: CompetencyArea[]; onExpand: (id: string) => void;
+  onSelectTopic: (t: Topic) => void; selectedId: string | null;
+}) {
+  return (
+    <div className="space-y-2">
+      {areas.map((area) => {
+        const style = getAreaStyle(area.id);
+        const Icon = style.icon;
+        return (
+          <div key={area.id} className="rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all">
+            {/* Area header — click to expand */}
+            <button
+              onClick={() => onExpand(area.id)}
+              className="w-full flex items-center gap-4 p-4 text-left group"
+            >
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+                style={{ backgroundColor: style.bg, border: `1px solid ${style.border}` }}>
+                <Icon className="w-5 h-5" style={{ color: style.primary }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-[16px] font-bold text-white">{area.name}</h2>
+                <p className="text-[13px] text-textSecondary mt-0.5">
+                  <span className="font-mono">{area.questionCount}</span> questions &middot;{" "}
+                  <span className="font-mono">{area.topicCount}</span> topics
+                </p>
+              </div>
+              {/* Preview top topics */}
+              <div className="hidden md:flex items-center gap-2">
+                {area.topics.slice(0, 3).map((t) => (
+                  <span key={t.id} className="text-[12px] text-textTertiary bg-surface px-2.5 py-1 rounded-md border border-borderSubtle">
+                    {t.name.length > 20 ? t.name.slice(0, 18) + "..." : t.name}
+                  </span>
+                ))}
+                {area.topics.length > 3 && (
+                  <span className="text-[12px] text-textMuted">+{area.topics.length - 3}</span>
+                )}
+              </div>
+              <ChevronRight className="w-5 h-5 text-textMuted group-hover:text-textSecondary shrink-0 transition-colors" />
+            </button>
+
+            {/* Quick-access: top 3 topic cards inline */}
+            <div className="px-4 pb-4 pt-0 grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {area.topics.slice(0, 3).map((topic) => (
+                <TopicCard key={topic.id} topic={topic} style={style}
+                  isSelected={selectedId === topic.id} onClick={() => onSelectTopic(topic)} compact />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Tier 2: Expanded Area ─────────────────────────────────────
+
+function ExpandedArea({ area, selectedId, onSelect }: {
+  area: CompetencyArea; selectedId: string | null; onSelect: (t: Topic) => void;
+}) {
+  const style = getAreaStyle(area.id);
+  const Icon = style.icon;
+
+  return (
+    <div>
+      {/* Area header */}
+      <div className="flex items-center gap-4 mb-6 pb-4 border-b border-borderSubtle">
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+          style={{ backgroundColor: style.bg, border: `1px solid ${style.border}` }}>
+          <Icon className="w-6 h-6" style={{ color: style.primary }} />
+        </div>
+        <div>
+          <h2 className="text-[22px] font-bold text-white">{area.name}</h2>
+          <p className="text-[14px] text-textSecondary mt-0.5">
+            <span className="font-mono font-semibold">{area.questionCount}</span> questions across{" "}
+            <span className="font-mono font-semibold">{area.topicCount}</span> topics
+          </p>
+        </div>
+      </div>
+
+      {/* Topic grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {area.topics.map((topic) => (
+          <TopicCard key={topic.id} topic={topic} style={style}
+            isSelected={selectedId === topic.id} onClick={() => onSelect(topic)} />
+        ))}
       </div>
     </div>
   );
 }
 
-// ─── Area Section ──────────────────────────────────────────────
+// ─── Search Results ────────────────────────────────────────────
 
-function AreaSection({
-  area,
-  selectedTopicId,
-  onSelectTopic,
-  isExpanded,
-}: {
-  area: CompetencyArea;
-  selectedTopicId: string | null;
-  onSelectTopic: (t: Topic) => void;
-  isExpanded: boolean;
+function SearchResults({ results, query, selectedId, onSelect }: {
+  results: Topic[]; query: string; selectedId: string | null; onSelect: (t: Topic) => void;
 }) {
-  const color = getAreaColor(area.id);
-  const visibleTopics = isExpanded ? area.topics : area.topics.slice(0, 6);
+  // Group by area
+  const grouped = useMemo(() => {
+    const map = new Map<string, { area: CompetencyArea; topics: Topic[] }>();
+    for (const t of results) {
+      const area = getAreaForTopic(t.id);
+      if (!area) continue;
+      if (!map.has(area.id)) map.set(area.id, { area, topics: [] });
+      map.get(area.id)!.topics.push(t);
+    }
+    return Array.from(map.values());
+  }, [results]);
 
   return (
     <div>
-      <div className="flex items-center gap-3 mb-4">
-        <div
-          className="w-3 h-3 rounded-sm"
-          style={{ backgroundColor: color }}
-        />
-        <h2 className="text-lg font-bold text-white">{area.name}</h2>
-        <span className="text-sm text-textSecondary">
-          {area.questionCount} questions &middot; {area.topicCount} topics
-        </span>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {visibleTopics.map((topic) => (
-          <TopicCard
-            key={topic.id}
-            topic={topic}
-            areaColor={color}
-            isSelected={selectedTopicId === topic.id}
-            onClick={() => onSelectTopic(topic)}
-          />
-        ))}
-      </div>
-
-      {!isExpanded && area.topics.length > 6 && (
-        <p className="mt-3 text-xs text-textSecondary">
-          +{area.topics.length - 6} more topics in {area.name}
-        </p>
-      )}
+      <p className="text-[14px] text-textSecondary mb-5">
+        {results.length} topic{results.length !== 1 ? "s" : ""} matching &ldquo;{query}&rdquo;
+      </p>
+      {grouped.map(({ area, topics }) => {
+        const style = getAreaStyle(area.id);
+        const Icon = style.icon;
+        return (
+          <div key={area.id} className="mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <Icon className="w-4 h-4" style={{ color: style.primary }} />
+              <span className="text-[13px] font-semibold text-textSecondary">{area.name}</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {topics.map((topic) => (
+                <TopicCard key={topic.id} topic={topic} style={style}
+                  isSelected={selectedId === topic.id} onClick={() => onSelect(topic)} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 // ─── Topic Card ────────────────────────────────────────────────
 
-function TopicCard({
-  topic,
-  areaColor,
-  areaName,
-  isSelected,
-  onClick,
-}: {
-  topic: Topic;
-  areaColor: string;
-  areaName?: string;
-  isSelected: boolean;
-  onClick: () => void;
+function TopicCard({ topic, style, isSelected, onClick, compact }: {
+  topic: Topic; style: AreaStyle; isSelected: boolean;
+  onClick: () => void; compact?: boolean;
 }) {
-  const maxLevel = Math.max(...Object.values(topic.levels), 1);
-
   return (
     <button
       onClick={onClick}
+      aria-label={`${topic.name}, ${topic.questionCount} questions`}
       className={clsx(
-        "w-full text-left p-4 rounded-xl border transition-all group",
+        "w-full text-left rounded-xl border transition-all duration-150 group relative overflow-hidden",
+        compact ? "p-3 pt-4" : "p-4 pt-5",
         isSelected
-          ? "border-white/30 bg-white/[0.07]"
-          : "border-border hover:border-white/20 bg-surface/50 hover:bg-surface"
+          ? "bg-surfaceElevated border-borderHighlight shadow-[0_0_0_1px_rgba(255,255,255,0.05)]"
+          : "bg-surface border-borderSubtle hover:bg-surfaceElevated hover:border-borderHighlight hover:shadow-[0_2px_12px_rgba(0,0,0,0.3)]"
       )}
     >
-      <div className="flex items-start justify-between gap-2 mb-3">
-        <h3 className="text-[13px] font-semibold text-white leading-snug">
+      {/* Colored top accent bar */}
+      <div className="absolute top-0 left-0 right-0 h-[2px] opacity-60"
+        style={{ background: `linear-gradient(90deg, ${style.primary}, transparent 80%)` }} />
+
+      {/* Title */}
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <h3 className={clsx(
+          "font-semibold text-white leading-snug",
+          compact ? "text-[13px]" : "text-[14px]"
+        )}>
           {topic.name}
         </h3>
-        <ChevronRight className="w-4 h-4 text-textTertiary shrink-0 mt-0.5 group-hover:text-white/60" />
+        <ChevronRight className="w-4 h-4 text-textMuted shrink-0 mt-0.5 group-hover:text-textTertiary transition-colors" />
       </div>
 
-      {areaName && (
-        <div className="flex items-center gap-1.5 mb-2">
-          <span
-            className="w-2 h-2 rounded-full"
-            style={{ backgroundColor: areaColor }}
-          />
-          <span className="text-xs text-textSecondary">{areaName}</span>
-        </div>
-      )}
+      {/* Question count */}
+      <div className="flex items-baseline gap-1.5 mb-2.5">
+        <span className={clsx("font-bold font-mono text-white", compact ? "text-[20px]" : "text-[22px]")}>
+          {topic.questionCount}
+        </span>
+        <span className="text-[12px] font-medium text-textTertiary">questions</span>
+      </div>
 
-      <div className="flex items-end justify-between">
-        <div>
-          <span className="text-2xl font-bold font-mono text-white">
-            {topic.questionCount}
-          </span>
-          <span className="text-xs text-textSecondary ml-1.5">Qs</span>
-        </div>
-        {/* Mini level bars */}
-        <div className="flex items-end gap-[3px] h-5">
-          {LEVELS.map((level) => {
-            const count = topic.levels[level] || 0;
-            const height =
-              count > 0 ? Math.max(5, (count / maxLevel) * 20) : 3;
-            return (
-              <div
-                key={level}
-                className="w-[5px] rounded-sm"
-                style={{
-                  height,
-                  backgroundColor:
-                    count > 0 ? areaColor : "rgba(255,255,255,0.1)",
-                  opacity: count > 0 ? 0.85 : 1,
-                }}
-                title={`${level}: ${count} questions`}
-              />
-            );
-          })}
-        </div>
+      {/* Horizontal stacked level bar */}
+      <div className="flex h-1.5 rounded-full overflow-hidden bg-white/[0.04]">
+        {LEVELS.map((level) => {
+          const count = topic.levels[level] || 0;
+          if (count === 0) return null;
+          const pct = (count / topic.questionCount) * 100;
+          return (
+            <div key={level} className="h-full first:rounded-l-full last:rounded-r-full"
+              style={{
+                width: `${pct}%`,
+                backgroundColor: style.primary,
+                opacity: 0.3 + (LEVELS.indexOf(level) / LEVELS.length) * 0.7,
+              }}
+              title={`${level}: ${count} questions`}
+            />
+          );
+        })}
       </div>
     </button>
   );
@@ -322,53 +380,34 @@ function TopicCard({
 
 // ─── Topic Detail Panel ────────────────────────────────────────
 
-function TopicDetail({
-  topic,
-  areaName,
-  areaColor,
-  onClose,
-}: {
-  topic: Topic;
-  areaName: string;
-  areaColor: string;
-  onClose: () => void;
+function TopicDetail({ topic, areaName, style, onClose }: {
+  topic: Topic; areaName: string; style: AreaStyle; onClose: () => void;
 }) {
   const [drillLevel, setDrillLevel] = useState<string | null>(null);
+  const Icon = style.icon;
 
-  const topicId = topic.id;
-  const [prevTopicId, setPrevTopicId] = useState(topicId);
-  if (topicId !== prevTopicId) {
-    setPrevTopicId(topicId);
-    setDrillLevel(null);
-  }
+  // Reset on topic change
+  const [prevId, setPrevId] = useState(topic.id);
+  if (topic.id !== prevId) { setPrevId(topic.id); setDrillLevel(null); }
 
-  const questionsForLevel = drillLevel
-    ? topic.questionsByLevel[drillLevel] || []
-    : [];
+  const levelQs = drillLevel ? topic.questionsByLevel[drillLevel] || [] : [];
 
   return (
     <div className="w-[420px] h-full flex flex-col bg-background">
-      {/* Header */}
-      <div className="p-5 border-b border-border">
+      {/* Header with area gradient wash */}
+      <div className="p-5 border-b border-border"
+        style={{ background: `linear-gradient(180deg, ${style.primary}08 0%, transparent 100%)` }}>
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <span
-                className="w-2.5 h-2.5 rounded-full"
-                style={{ backgroundColor: areaColor }}
-              />
-              <span className="text-xs font-semibold text-textSecondary uppercase tracking-wide">
-                {areaName}
-              </span>
+              <Icon className="w-4 h-4" style={{ color: style.primary }} />
+              <span className="text-[12px] font-semibold uppercase tracking-wide"
+                style={{ color: style.primary }}>{areaName}</span>
             </div>
-            <h2 className="text-xl font-bold text-white leading-tight">
-              {topic.name}
-            </h2>
+            <h2 className="text-[20px] font-bold text-white leading-tight">{topic.name}</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-textTertiary hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-          >
+          <button onClick={onClose} aria-label="Close"
+            className="p-1.5 text-textTertiary hover:text-white hover:bg-white/10 rounded-lg transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -378,71 +417,49 @@ function TopicDetail({
       <div className="flex-1 overflow-auto">
         <AnimatePresence mode="wait">
           {drillLevel ? (
-            /* ─── Level drill-down view ─── */
-            <motion.div
-              key={`level-${drillLevel}`}
-              initial={{ x: 50, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 50, opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="p-5"
-            >
-              <button
-                onClick={() => setDrillLevel(null)}
-                className="flex items-center gap-1.5 text-sm text-textSecondary hover:text-white mb-5 transition-colors"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                Back to overview
+            /* Level drill-down */
+            <motion.div key={`level-${drillLevel}`}
+              initial={{ x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 40, opacity: 0 }} transition={{ duration: 0.15 }}
+              className="p-5">
+
+              {/* Breadcrumb */}
+              <button onClick={() => setDrillLevel(null)}
+                className="flex items-center gap-1.5 text-[13px] font-medium text-textSecondary hover:text-white mb-5 transition-colors">
+                <ChevronLeft className="w-4 h-4" /> Back to overview
               </button>
 
               <div className="flex items-center justify-between mb-5">
                 <div>
-                  <h3 className="text-xl font-bold text-white">
+                  <h3 className="text-[20px] font-bold text-white">
                     {drillLevel}{" "}
-                    <span className="text-base font-medium text-textSecondary">
-                      {LEVEL_LABELS[drillLevel]}
-                    </span>
+                    <span className="text-[15px] font-medium text-textSecondary">{LEVEL_LABELS[drillLevel]}</span>
                   </h3>
-                  <p className="text-sm text-textSecondary mt-0.5">
-                    {questionsForLevel.length} question
-                    {questionsForLevel.length !== 1 ? "s" : ""}
+                  <p className="text-[13px] text-textSecondary mt-0.5">
+                    {levelQs.length} question{levelQs.length !== 1 ? "s" : ""}
                   </p>
                 </div>
-                <Link
-                  href={`/drill?topic=${topic.id}&level=${drillLevel}`}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-white text-black text-sm font-bold rounded-lg hover:bg-gray-100 transition-all"
-                >
-                  <Target className="w-4 h-4" />
-                  Drill
+                <Link href={`/drill?topic=${topic.id}&level=${drillLevel}`}
+                  className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold rounded-lg transition-all"
+                  style={{ backgroundColor: style.primary, color: "#101014" }}>
+                  <Target className="w-4 h-4" /> Drill
                 </Link>
               </div>
 
               <div className="space-y-2">
-                {questionsForLevel.map((q) => (
-                  <Link
-                    key={q.id}
-                    href={`/drill?q=${q.id}`}
-                    className="block p-3.5 rounded-lg border border-border bg-surface/50 hover:bg-surface hover:border-white/20 transition-all group"
-                  >
+                {levelQs.map((q) => (
+                  <Link key={q.id} href={`/drill?q=${q.id}`}
+                    className="block p-3.5 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-white leading-snug mb-1">
-                          {q.title}
-                        </p>
-                        <p className="text-xs text-textSecondary line-clamp-2 leading-relaxed">
-                          {q.scenario
-                            .replace(/^-\s*\*\*Interviewer:\*\*\s*/i, "")
-                            .replace(/^"/, "")
-                            .replace(/"$/, "")
-                            .slice(0, 140)}
-                          ...
+                        <p className="text-[14px] font-semibold text-white leading-snug mb-1">{q.title}</p>
+                        <p className="text-[13px] text-textSecondary line-clamp-2 leading-relaxed">
+                          {q.scenario.replace(/^-\s*\*\*Interviewer:\*\*\s*/i, "").replace(/^"/, "").replace(/"$/, "").slice(0, 140)}...
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0 mt-0.5">
-                        <span className="text-xs text-textSecondary capitalize">
-                          {q.track}
-                        </span>
-                        <Play className="w-3.5 h-3.5 text-textTertiary group-hover:text-white" />
+                        <span className="text-[12px] text-textTertiary capitalize font-medium">{q.track}</span>
+                        <Play className="w-3.5 h-3.5 text-textMuted group-hover:text-white transition-colors" />
                       </div>
                     </div>
                   </Link>
@@ -450,116 +467,76 @@ function TopicDetail({
               </div>
             </motion.div>
           ) : (
-            /* ─── Overview ─── */
-            <motion.div
-              key="overview"
-              initial={{ x: -50, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: -50, opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="p-5 space-y-6"
-            >
+            /* Overview */
+            <motion.div key="overview"
+              initial={{ x: -40, opacity: 0 }} animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -40, opacity: 0 }} transition={{ duration: 0.15 }}
+              className="p-5 space-y-6">
+
               {topic.description && (
-                <p className="text-sm text-textSecondary leading-relaxed">
-                  {topic.description}
-                </p>
+                <p className="text-[14px] text-textSecondary leading-relaxed">{topic.description}</p>
               )}
 
-              {/* Level breakdown — clickable rows */}
+              {/* Difficulty levels */}
               <div>
-                <h3 className="text-xs font-semibold text-textSecondary uppercase tracking-wide mb-3">
-                  Difficulty Levels
-                </h3>
-                <div className="space-y-1.5">
+                <SectionDivider label="Difficulty Levels" />
+                <div className="space-y-1.5 mt-3">
                   {LEVELS.map((level) => {
                     const count = topic.levels[level] || 0;
                     if (count === 0) return null;
                     const pct = (count / topic.questionCount) * 100;
                     return (
-                      <button
-                        key={level}
-                        onClick={() => setDrillLevel(level)}
-                        className="w-full flex items-center gap-3 p-3 rounded-lg border border-border bg-surface/30 hover:bg-surface hover:border-white/20 transition-all group"
-                      >
-                        <span className="text-sm font-bold font-mono text-white w-8">
-                          {level}
-                        </span>
+                      <button key={level} onClick={() => setDrillLevel(level)}
+                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
+                        <span className="text-[14px] font-bold font-mono text-white w-8">{level}</span>
                         <div className="flex-1">
                           <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-xs font-medium text-textSecondary">
-                              {LEVEL_LABELS[level]}
-                            </span>
-                            <span className="text-sm font-mono font-semibold text-white">
-                              {count}
-                            </span>
+                            <span className="text-[13px] font-medium text-textSecondary">{LEVEL_LABELS[level]}</span>
+                            <span className="text-[14px] font-mono font-bold text-white">{count}</span>
                           </div>
-                          <div className="h-2 bg-white/5 rounded-full overflow-hidden">
-                            <div
-                              className="h-full rounded-full"
-                              style={{
-                                width: `${pct}%`,
-                                backgroundColor: areaColor,
-                              }}
-                            />
+                          <div className="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: style.primary }} />
                           </div>
                         </div>
-                        <ChevronRight className="w-4 h-4 text-textTertiary group-hover:text-white shrink-0" />
+                        <ChevronRight className="w-4 h-4 text-textMuted group-hover:text-textSecondary shrink-0 transition-colors" />
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Drill all */}
-              <Link
-                href={`/drill?topic=${topic.id}`}
-                className="flex items-center justify-center gap-2 w-full py-3.5 bg-white text-black font-bold rounded-lg hover:bg-gray-100 transition-all text-sm"
-              >
+              {/* Drill all CTA */}
+              <Link href={`/drill?topic=${topic.id}`}
+                className="flex items-center justify-center gap-2 w-full py-3.5 font-bold rounded-xl text-[14px] transition-all hover:opacity-90"
+                style={{ backgroundColor: style.primary, color: "#101014" }}>
                 <Target className="w-4 h-4" />
                 Drill All {topic.questionCount} Questions
               </Link>
 
               {/* Tracks */}
               <div>
-                <h3 className="text-xs font-semibold text-textSecondary uppercase tracking-wide mb-2">
-                  Available In
-                </h3>
-                <div className="flex gap-2 flex-wrap">
+                <SectionDivider label="Available In" />
+                <div className="flex gap-2 flex-wrap mt-3">
                   {topic.tracks.map((t) => (
-                    <span
-                      key={t}
-                      className="px-3 py-1.5 rounded-full bg-surface border border-border text-sm text-white font-medium"
-                    >
-                      {t === "tinyml"
-                        ? "TinyML"
-                        : t.charAt(0).toUpperCase() + t.slice(1)}
+                    <span key={t} className="px-3 py-1.5 rounded-lg bg-surface border border-borderSubtle text-[13px] text-white font-medium">
+                      {t === "tinyml" ? "TinyML" : t.charAt(0).toUpperCase() + t.slice(1)}
                     </span>
                   ))}
                 </div>
               </div>
 
-              {/* Textbook link */}
+              {/* Deep dive */}
               {topic.chapterUrl && (
                 <div>
-                  <h3 className="text-xs font-semibold text-textSecondary uppercase tracking-wide mb-2">
-                    Deep Dive
-                  </h3>
-                  <a
-                    href={topic.chapterUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-3 p-4 rounded-lg border border-border bg-surface/50 hover:bg-surface hover:border-white/20 transition-all group"
-                  >
-                    <BookOpen className="w-5 h-5 text-textSecondary group-hover:text-accentBlue shrink-0" />
+                  <SectionDivider label="Deep Dive" />
+                  <a href={topic.chapterUrl} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-3 p-4 mt-3 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
+                    <BookOpen className="w-5 h-5 text-textTertiary group-hover:text-accentBlue shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-white">
-                        {topic.chapterName}
-                      </p>
-                      <p className="text-xs text-textSecondary">
-                        Read in the textbook at mlsysbook.ai
-                      </p>
+                      <p className="text-[14px] font-semibold text-white">{topic.chapterName}</p>
+                      <p className="text-[12px] text-textTertiary mt-0.5">Read in textbook &middot; mlsysbook.ai</p>
                     </div>
-                    <ExternalLink className="w-4 h-4 text-textTertiary group-hover:text-white shrink-0" />
+                    <ExternalLink className="w-4 h-4 text-textMuted group-hover:text-textSecondary shrink-0" />
                   </a>
                 </div>
               )}
@@ -567,6 +544,20 @@ function TopicDetail({
           )}
         </AnimatePresence>
       </div>
+    </div>
+  );
+}
+
+// ─── Section Divider (Linear-style centered label) ─────────────
+
+function SectionDivider({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="h-px flex-1 bg-borderSubtle" />
+      <span className="text-[11px] font-semibold uppercase tracking-widest text-textTertiary shrink-0">
+        {label}
+      </span>
+      <div className="h-px flex-1 bg-borderSubtle" />
     </div>
   );
 }
