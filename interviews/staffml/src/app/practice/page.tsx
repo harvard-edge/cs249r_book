@@ -44,9 +44,10 @@ function PracticePage() {
   const { show: showToast } = useToast();
   const [mounted, setMounted] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState("cloud");
-  const [selectedLevel, setSelectedLevel] = useState("L3");  // Default to L3 (Apply) — friendlier starting point
+  const [selectedLevel, setSelectedLevel] = useState("L3");
   const [selectedArea, setSelectedArea] = useState<string | null>(null);
   const [selectedArchetype, setSelectedArchetype] = useState<string | null>(null);
+  const [napkinOnly, setNapkinOnly] = useState(false);
 
   const [pool, setPool] = useState<Question[]>([]);
   const [current, setCurrent] = useState<Question | null>(null);
@@ -70,6 +71,11 @@ function PracticePage() {
   useEffect(() => {
     setMounted(true);
     setDailyDone(isDailyCompleted());
+
+    // Default to L1 for brand-new users (no attempts yet)
+    if (getAttempts().length === 0 && !searchParams.get('q') && !searchParams.get('topic') && !searchParams.get('level')) {
+      setSelectedLevel("L1");
+    }
 
     // Direct question link: ?q=<id> — load that specific question
     const qParam = searchParams.get('q');
@@ -158,7 +164,8 @@ function PracticePage() {
     };
     if (selectedArea) filters.competency_area = selectedArea;
     if (selectedArchetype) filters.company_archetype = selectedArchetype;
-    const q = getQuestionsByFilter(filters);
+    let q = getQuestionsByFilter(filters);
+    if (napkinOnly) q = q.filter(question => !!question.details.napkin_math);
     setPool(q);
     if (q.length > 0) {
       pickRandom(q);
@@ -168,7 +175,7 @@ function PracticePage() {
     setShowAnswer(false);
     setUserAnswer("");
     setNapkinResult(null);
-  }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedArchetype]);
+  }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedArchetype, napkinOnly]);
 
   // Keyboard shortcuts: Enter to reveal, 1-4 for scoring, N to skip
   useEffect(() => {
@@ -500,6 +507,17 @@ function PracticePage() {
             ))}
           </div>
         </div>
+
+        {/* Napkin Math toggle */}
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={napkinOnly}
+            onChange={() => setNapkinOnly(!napkinOnly)}
+            className="accent-accentBlue"
+          />
+          <span className="text-[11px] text-textSecondary font-medium">Napkin math only</span>
+        </label>
 
         <div className="text-[10px] font-mono text-textTertiary mt-auto">
           {pool.length} questions in pool

@@ -96,7 +96,7 @@ export default function HomePage() {
                   <Crosshair className="w-4 h-4" /> Mock Interview
                 </Link>
               </div>
-              <LevelExplainer defaultOpen />
+              <LevelExplainer />
             </div>
           )}
 

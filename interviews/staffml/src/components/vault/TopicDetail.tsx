@@ -135,6 +135,22 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
                 </div>
               </div>
 
+              {/* Deep dive — show learning resource before drill */}
+              {topic.chapterUrl && (
+                <div>
+                  <SectionDivider label="Learn First" />
+                  <a href={topic.chapterUrl} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-3 p-4 mt-3 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
+                    <BookOpen className="w-5 h-5 text-textTertiary group-hover:text-accentBlue shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[14px] font-semibold text-textPrimary">{topic.chapterName}</p>
+                      <p className="text-[12px] text-textTertiary mt-0.5">Read in textbook &middot; mlsysbook.ai</p>
+                    </div>
+                    <ExternalLink className="w-4 h-4 text-textMuted group-hover:text-textSecondary shrink-0" />
+                  </a>
+                </div>
+              )}
+
               {/* Drill all CTA */}
               <Link href={`/practice?topic=${topic.id}`}
                 className="flex items-center justify-center gap-2 w-full py-3.5 font-bold rounded-xl text-[14px] transition-all hover:opacity-90"
@@ -154,22 +170,6 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
                   ))}
                 </div>
               </div>
-
-              {/* Deep dive */}
-              {topic.chapterUrl && (
-                <div>
-                  <SectionDivider label="Deep Dive" />
-                  <a href={topic.chapterUrl} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-3 p-4 mt-3 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
-                    <BookOpen className="w-5 h-5 text-textTertiary group-hover:text-accentBlue shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[14px] font-semibold text-textPrimary">{topic.chapterName}</p>
-                      <p className="text-[12px] text-textTertiary mt-0.5">Read in textbook &middot; mlsysbook.ai</p>
-                    </div>
-                    <ExternalLink className="w-4 h-4 text-textMuted group-hover:text-textSecondary shrink-0" />
-                  </a>
-                </div>
-              )}
             </motion.div>
           )}
         </AnimatePresence>

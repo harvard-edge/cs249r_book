@@ -519,6 +519,35 @@ export default function GauntletPage() {
             })}
           </div>
 
+          {/* Per-question review */}
+          <div className="text-left mb-8 space-y-2">
+            <span className="text-[10px] font-mono text-textTertiary uppercase block mb-3">Question Review</span>
+            {questions.map((q, i) => {
+              const s = scores[i] ?? 0;
+              const labels = ['Skipped', 'Wrong', 'Partial', 'Nailed'];
+              return (
+                <details key={q.id} className="group rounded-lg border border-borderSubtle bg-surface">
+                  <summary className="flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm">
+                    <span className={clsx(
+                      "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0",
+                      s >= 2 ? "bg-accentGreen/20 text-accentGreen" : s === 1 ? "bg-accentRed/20 text-accentRed" : "bg-surface text-textTertiary"
+                    )}>
+                      {i + 1}
+                    </span>
+                    <span className="text-textPrimary truncate flex-1">{q.title}</span>
+                    <span className="text-[10px] font-mono text-textTertiary shrink-0">{labels[s]}</span>
+                  </summary>
+                  <div className="px-3 pb-3 pt-1 border-t border-borderSubtle space-y-2">
+                    <p className="text-[12px] text-textSecondary leading-relaxed">{q.details.realistic_solution}</p>
+                    {q.details.common_mistake && (
+                      <p className="text-[11px] text-accentRed/80"><span className="font-bold">Common mistake:</span> {q.details.common_mistake}</p>
+                    )}
+                  </div>
+                </details>
+              );
+            })}
+          </div>
+
           <div className="flex items-center gap-3 justify-center">
             <button
               onClick={() => { setPhase("setup"); setScores([]); }}
