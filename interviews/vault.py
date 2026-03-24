@@ -902,6 +902,218 @@ def cmd_analyze(args):
     return {"coverage": coverage, "untested": len(untested), "plan_size": len(plan)}
 
 
+# ─── PLAN-ALL ──────────────────────────────────────────────────
+def cmd_plan_all(args):
+    """Generate per-(level, track) plan files for parallel generation."""
+    corpus = load_corpus()
+    taxonomy = json.loads(TAXONOMY_PATH.read_text())
+
+    # Build existing coverage map: concept → set of (track, level)
+    concept_coverage = defaultdict(set)
+    for q in corpus:
+        tc = q.get("taxonomy_concept", "")
+        if tc:
+            concept_coverage[tc].add((q["track"], q["level"]))
+
+    plans_dir = BASE / "_plans"
+    plans_dir.mkdir(exist_ok=True)
+
+    # Priority mode: focus on highest-value work
+    priority = args.priority if hasattr(args, "priority") and args.priority else "all"
+
+    # Build per-concept, per-track level sets
+    concept_track_levels = defaultdict(lambda: defaultdict(set))
+    for q in corpus:
+        tc = q.get("taxonomy_concept", "")
+        if tc:
+            concept_track_levels[tc][q["track"]].add(q["level"])
+
+    total_items = 0
+    plan_files = []
+
+    for level in ["L1", "L2", "L3", "L4", "L5", "L6+"]:
+        for track in TRACKS:
+            items = []
+            for c in taxonomy["concepts"]:
+                if track not in c["tracks"]:
+                    continue
+                if (track, level) in concept_coverage.get(c["id"], set()):
+                    continue  # already covered
+
+                # Apply priority filter
+                has_any_in_track = bool(concept_track_levels.get(c["id"], {}).get(track))
+                has_any_anywhere = bool(concept_coverage.get(c["id"]))
+
+                if priority == "chains":
+                    # P1: Only add L1/L2/L6+ for concepts with existing L3-L5 in THIS track
+                    if level in ["L1", "L2", "L6+"] and has_any_in_track:
+                        pass  # include
+                    elif level in ["L3", "L4", "L5"] and not has_any_anywhere:
+                        pass  # P2: untested concepts
+                    else:
+                        continue
+                elif priority == "expand":
+                    # P3: Only cross-track expansion
+                    if has_any_anywhere and not has_any_in_track:
+                        pass  # include
+                    else:
+                        continue
+                # priority == "all" includes everything
+
+                items.append({
+                    "concept_id": c["id"],
+                    "concept_name": c["name"],
+                    "description": c["description"],
+                    "prerequisites": c.get("prerequisites", [])[:5],
+                    "tracks": c["tracks"],
+                    "source_chapters": c.get("source_chapters", [])[:3],
+                    "target_track": track,
+                    "target_level": level,
+                    "bloom": BLOOM_FOR_LEVEL[level],
+                })
+
+            if not items:
+                continue
+
+            plan_file = plans_dir / f"plan-{level.lower()}-{track}.json"
+            plan_file.write_text(json.dumps(items, indent=2))
+            plan_files.append({"file": str(plan_file.name), "level": level, "track": track, "count": len(items)})
+            total_items += len(items)
+
+    # Write manifest
+    manifest = {"total_questions": total_items, "plans": plan_files}
+    manifest_path = plans_dir / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+
+    print(f"═══ Plan-All: Parallel Generation Plans ═══\n")
+    print(f"  Total questions:  {total_items}")
+    print(f"  Plan files:       {len(plan_files)}")
+    print(f"  Output dir:       {plans_dir}\n")
+
+    print(f"  {'Level':6} {'Track':8} {'Count':>6}")
+    print(f"  {'─'*6} {'─'*8} {'─'*6}")
+    for p in plan_files:
+        print(f"  {p['level']:6} {p['track']:8} {p['count']:6}")
+
+    return manifest
+
+
+def cmd_generate_batch(args):
+    """Generate questions from a specific plan file. Writes to _generated/."""
+    plan_path = Path(args.plan)
+    if not plan_path.exists():
+        print(f"❌ Plan file not found: {plan_path}")
+        sys.exit(1)
+
+    plan = json.loads(plan_path.read_text())
+    if not plan:
+        print(f"⚠️ Empty plan: {plan_path}")
+        return {"generated": 0, "failed": 0}
+
+    model = CONFIG["models"]["generator"]
+    timeout = CONFIG.get("generation", {}).get("timeout_seconds", 180)
+    workers = args.workers if hasattr(args, "workers") and args.workers else 4
+
+    # Derive output name from plan filename
+    stem = plan_path.stem.replace("plan-", "batch-")
+    gen_dir = BASE / "_generated"
+    gen_dir.mkdir(exist_ok=True)
+    batch_file = gen_dir / f"{stem}-{datetime.now():%Y%m%d-%H%M}.json"
+
+    print(f"═══ Batch Generate: {plan_path.name} ═══")
+    print(f"  Items:   {len(plan)}")
+    print(f"  Model:   {model}")
+    print(f"  Workers: {workers}\n")
+
+    results = []
+    failed = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_generate_one, item, model, timeout): item for item in plan}
+        for future in as_completed(futures):
+            item = futures[future]
+            q = future.result()
+            if q:
+                results.append(q)
+                if len(results) % 10 == 0:
+                    print(f"  ... {len(results)}/{len(plan)} generated")
+            else:
+                failed += 1
+
+    # Deduplicate IDs
+    seen_ids = set()
+    for q in results:
+        base_id = q["id"]
+        suffix = 0
+        while q["id"] in seen_ids:
+            suffix += 1
+            q["id"] = f"{base_id[:-1]}{suffix}"
+        seen_ids.add(q["id"])
+
+    batch_file.write_text(json.dumps(results, indent=2))
+    print(f"\n  Generated: {len(results)}/{len(plan)} ({failed} failed)")
+    print(f"  Saved to:  {batch_file}")
+
+    return {"generated": len(results), "failed": failed, "batch_file": str(batch_file)}
+
+
+def cmd_merge(args):
+    """Merge all _generated/batch-*.json files into corpus. Validates + dedup."""
+    from schema import validate_corpus
+
+    gen_dir = BASE / "_generated"
+    pattern = args.pattern if hasattr(args, "pattern") and args.pattern else "batch-*.json"
+    batch_files = sorted(gen_dir.glob(pattern))
+
+    if not batch_files:
+        print(f"❌ No batch files matching {gen_dir / pattern}")
+        sys.exit(1)
+
+    # Load all batches
+    all_new = []
+    for bf in batch_files:
+        qs = json.loads(bf.read_text())
+        all_new.extend(qs)
+    print(f"═══ Merge: {len(batch_files)} files, {len(all_new)} questions ═══\n")
+
+    # Validate
+    valid, errors, _ = validate_corpus(all_new)
+    valid_ids = {q.id for q in valid}
+    passing = [q for q in all_new if q.get("id") in valid_ids]
+    print(f"  Valid:   {len(passing)}/{len(all_new)}")
+    if errors:
+        print(f"  Errors:  {len(errors)}")
+        for e in errors[:5]:
+            print(f"    {e}")
+
+    # Check ID conflicts with existing corpus
+    corpus = load_corpus()
+    existing_ids = {q["id"] for q in corpus}
+    to_add = [q for q in passing if q["id"] not in existing_ids]
+    skipped = len(passing) - len(to_add)
+
+    # Also dedup within the new batch itself
+    seen = set()
+    unique = []
+    for q in to_add:
+        if q["id"] not in seen:
+            seen.add(q["id"])
+            unique.append(q)
+    intra_dupes = len(to_add) - len(unique)
+
+    print(f"  ID conflicts: {skipped}")
+    print(f"  Intra-dupes:  {intra_dupes}")
+    print(f"  To add:       {len(unique)}")
+
+    if unique and not (hasattr(args, "dry_run") and args.dry_run):
+        corpus.extend(unique)
+        save_corpus(corpus)
+        print(f"\n  ✅ Added {len(unique)} questions. Total: {len(corpus)}")
+    elif hasattr(args, "dry_run") and args.dry_run:
+        print(f"\n  🔍 Dry run — no changes made")
+
+    return {"added": len(unique), "valid": len(passing), "total": len(all_new)}
+
+
 # ─── GENERATE ──────────────────────────────────────────────────
 
 def _build_prompt(item: dict) -> str:
@@ -1225,6 +1437,383 @@ def cmd_loop(args):
     print(f"  Log:           {log_path}")
 
 
+# ─── GRAPH ─────────────────────────────────────────────────────
+def cmd_graph(args):
+    """Generate interactive D3.js force graph of the taxonomy."""
+    corpus = load_corpus()
+    taxonomy = json.loads(TAXONOMY_PATH.read_text())
+
+    concept_qs = defaultdict(int)
+    concept_levels = defaultdict(set)
+    for q in corpus:
+        tc = q.get("taxonomy_concept", "")
+        if tc:
+            concept_qs[tc] += 1
+            concept_levels[tc].add(q["level"])
+
+    concept_chapter = {}
+    for c in taxonomy["concepts"]:
+        concept_chapter[c["id"]] = (c.get("source_chapters") or ["unknown"])[0]
+
+    # Chapter color palette — distinct hues
+    chapters = sorted(set(concept_chapter.values()))
+    palette = [
+        "#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#a855f7",
+        "#06b6d4", "#f97316", "#ec4899", "#3b82f6", "#14b8a6",
+        "#8b5cf6", "#10b981", "#e11d48", "#0ea5e9", "#d946ef",
+        "#84cc16", "#f43f5e", "#2563eb", "#eab308", "#059669",
+        "#7c3aed", "#0891b2", "#dc2626", "#4f46e5", "#16a34a",
+        "#ea580c", "#9333ea",
+    ]
+    ch_color = {ch: palette[i % len(palette)] for i, ch in enumerate(chapters)}
+
+    # Prereq lookup
+    prereq_map = defaultdict(list)
+    dependents_map = defaultdict(list)
+    for e in taxonomy["edges"]:
+        prereq_map[e["target"]].append(e["source"])
+        dependents_map[e["source"]].append(e["target"])
+
+    # Build nodes
+    nodes_json = []
+    for c in taxonomy["concepts"]:
+        ch = concept_chapter[c["id"]]
+        qcount = concept_qs[c["id"]]
+        levels = sorted(concept_levels.get(c["id"], set()), key=lambda l: LEVELS_ORDER.index(l) if l in LEVELS_ORDER else 99)
+        prereqs = prereq_map.get(c["id"], [])
+        deps = dependents_map.get(c["id"], [])
+        nodes_json.append({
+            "id": c["id"],
+            "label": c["name"],
+            "desc": c["description"],
+            "ch": ch.replace("vol1_", "V1: ").replace("vol2_", "V2: ").replace("_", " ").title(),
+            "ch_raw": ch,
+            "qs": qcount,
+            "levels": ", ".join(levels) if levels else "none",
+            "tracks": ", ".join(c.get("tracks", [])),
+            "color": ch_color.get(ch, "#999"),
+            "prereqs": prereqs,
+            "deps": deps,
+        })
+
+    links_json = []
+    all_ids = {c["id"] for c in taxonomy["concepts"]}
+    for e in taxonomy["edges"]:
+        if e["source"] in all_ids and e["target"] in all_ids:
+            links_json.append({"source": e["source"], "target": e["target"]})
+
+    tested = sum(1 for c in taxonomy["concepts"] if concept_qs[c["id"]] > 0)
+    total = len(taxonomy["concepts"])
+
+    # Build heatmap data: track × level
+    heatmap = {}
+    for t in TRACKS:
+        for l in LEVELS_ORDER:
+            heatmap[f"{t}-{l}"] = sum(1 for q in corpus if q["track"] == t and q["level"] == l)
+
+    # Chapter coverage data
+    by_chapter = defaultdict(lambda: {"total": 0, "tested": 0, "qs": 0})
+    for c in taxonomy["concepts"]:
+        ch = concept_chapter[c["id"]]
+        by_chapter[ch]["total"] += 1
+        if concept_qs[c["id"]] > 0:
+            by_chapter[ch]["tested"] += 1
+            by_chapter[ch]["qs"] += concept_qs[c["id"]]
+    chapter_data = [{"ch": k, "nice": k.replace("vol1_", "").replace("vol2_", "").replace("_", " ").title(),
+                     "vol": "V1" if "vol1" in k else "V2", **v} for k, v in sorted(by_chapter.items())]
+
+    # Untested concepts
+    untested = [{"id": c["id"], "name": c["name"], "ch": concept_chapter[c["id"]]}
+                for c in taxonomy["concepts"] if concept_qs[c["id"]] == 0]
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>StaffML Dashboard — {total} concepts, {len(corpus)} questions</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+:root {{ --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #c9d1d9;
+  --text2: #8b949e; --accent: #58a6ff; --green: #3fb950; --red: #f85149; --orange: #d29922; }}
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,sans-serif;
+  background:var(--bg); color:var(--text); }}
+.dashboard {{ max-width:1400px; margin:0 auto; padding:24px; }}
+h1 {{ font-size:24px; margin-bottom:4px; }}
+.subtitle {{ color:var(--text2); font-size:14px; margin-bottom:24px; }}
+.grid {{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }}
+.card {{ background:var(--card); border:1px solid var(--border); border-radius:8px; padding:16px; }}
+.card h2 {{ font-size:14px; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px;
+  margin-bottom:12px; }}
+.stat-row {{ display:flex; gap:16px; margin-bottom:16px; }}
+.stat-box {{ background:var(--card); border:1px solid var(--border); border-radius:8px;
+  padding:16px; flex:1; text-align:center; }}
+.stat-box .num {{ font-size:32px; font-weight:700; }}
+.stat-box .lbl {{ font-size:11px; color:var(--text2); text-transform:uppercase; margin-top:4px; }}
+.full {{ grid-column: 1 / -1; }}
+/* Heatmap */
+.hm-table {{ width:100%; border-collapse:collapse; }}
+.hm-table th {{ font-size:11px; color:var(--text2); padding:6px; text-align:center; }}
+.hm-table td {{ text-align:center; padding:6px; font-size:13px; font-weight:600;
+  border-radius:4px; cursor:default; }}
+/* Chapter bars */
+.ch-bar {{ display:flex; align-items:center; margin:4px 0; font-size:12px; }}
+.ch-bar .name {{ width:160px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+.ch-bar .bar-bg {{ flex:1; height:18px; background:#21262d; border-radius:3px; position:relative; overflow:hidden; }}
+.ch-bar .bar-fill {{ height:100%; border-radius:3px; transition:width 0.3s; }}
+.ch-bar .bar-label {{ position:absolute; right:6px; top:1px; font-size:10px; color:var(--text); }}
+.ch-bar .count {{ width:60px; text-align:right; font-size:11px; color:var(--text2); }}
+/* Graph */
+#graph-container {{ width:100%; height:500px; position:relative; overflow:hidden; background:#0a0e14; border-radius:6px; }}
+#graph-container svg {{ width:100%; height:100%; }}
+.node {{ cursor:pointer; }}
+.node circle {{ stroke-width:1.5px; }}
+.node text {{ font-size:8px; fill:var(--text2); pointer-events:none; }}
+.link {{ stroke:rgba(100,100,100,0.2); stroke-width:0.5; }}
+/* Detail panel */
+#detail {{ position:absolute; top:12px; right:12px; width:280px; background:var(--card);
+  border:1px solid var(--border); border-radius:8px; padding:14px; display:none;
+  font-size:12px; z-index:5; box-shadow:0 4px 12px rgba(0,0,0,0.5); }}
+#detail h3 {{ font-size:15px; color:#f0f6fc; margin-bottom:6px; }}
+#detail .f {{ color:var(--text2); margin:3px 0; }}
+#detail .f b {{ color:var(--text); font-weight:500; }}
+#detail .tag {{ display:inline-block; background:#21262d; padding:1px 6px; border-radius:3px;
+  font-size:10px; margin:1px; }}
+/* Search */
+.search-box {{ width:100%; padding:8px 12px; background:var(--bg); border:1px solid var(--border);
+  border-radius:6px; color:var(--text); font-size:13px; margin-bottom:12px; }}
+.search-box:focus {{ outline:none; border-color:var(--accent); }}
+/* Concept list */
+.concept-list {{ max-height:300px; overflow-y:auto; }}
+.concept-item {{ display:flex; align-items:center; padding:4px 8px; border-radius:4px;
+  font-size:12px; cursor:pointer; }}
+.concept-item:hover {{ background:#21262d; }}
+.concept-item .dot {{ width:8px; height:8px; border-radius:50%; margin-right:8px; flex-shrink:0; }}
+.concept-item .cname {{ flex:1; }}
+.concept-item .cqs {{ color:var(--text2); font-size:10px; }}
+</style>
+</head>
+<body>
+<div class="dashboard">
+<h1>StaffML Taxonomy Dashboard</h1>
+<div class="subtitle">{total} concepts &middot; {len(links_json)} prerequisite edges &middot; {len(corpus)} questions &middot; Generated {datetime.now().strftime("%Y-%m-%d %H:%M")}</div>
+
+<div class="stat-row">
+  <div class="stat-box"><div class="num">{len(corpus):,}</div><div class="lbl">Questions</div></div>
+  <div class="stat-box"><div class="num">{total}</div><div class="lbl">Concepts</div></div>
+  <div class="stat-box"><div class="num" style="color:{'var(--green)' if tested/total > 0.9 else 'var(--orange)'}">{100*tested//total}%</div><div class="lbl">Coverage</div></div>
+  <div class="stat-box"><div class="num">{len(links_json)}</div><div class="lbl">Edges</div></div>
+  <div class="stat-box"><div class="num">{len(untested)}</div><div class="lbl">Untested</div></div>
+</div>
+
+<div class="grid">
+<div class="card">
+  <h2>Track x Level Heatmap</h2>
+  <table class="hm-table"><thead><tr><th></th>{"".join(f'<th>{l}</th>' for l in LEVELS_ORDER)}<th>Total</th></tr></thead><tbody>"""
+
+    for t in TRACKS:
+        row_total = sum(heatmap.get(f"{t}-{l}", 0) for l in LEVELS_ORDER)
+        cells = ""
+        for l in LEVELS_ORDER:
+            v = heatmap.get(f"{t}-{l}", 0)
+            max_v = max(heatmap.values()) if heatmap else 1
+            intensity = v / max_v if max_v else 0
+            r, g, b = int(13 + intensity * 30), int(17 + intensity * 160), int(23 + intensity * 50)
+            cells += f'<td style="background:rgb({r},{g},{b})">{v}</td>'
+        html += f'<tr><th style="text-align:left">{t}</th>{cells}<td style="color:var(--text2)">{row_total}</td></tr>'
+
+    html += f"""</tbody></table>
+</div>
+<div class="card">
+  <h2>Chapter Coverage</h2>
+  <div style="max-height:280px;overflow-y:auto">"""
+
+    for cd in chapter_data:
+        pct = 100 * cd["tested"] / cd["total"] if cd["total"] else 0
+        color = "var(--green)" if pct == 100 else "var(--orange)" if pct >= 80 else "var(--red)"
+        html += f'''<div class="ch-bar">
+  <span class="name" title="{cd['ch']}">{cd['vol']}: {cd['nice']}</span>
+  <div class="bar-bg"><div class="bar-fill" style="width:{pct}%;background:{color}"></div>
+    <span class="bar-label">{cd['tested']}/{cd['total']}</span></div>
+  <span class="count">{cd['qs']} Qs</span></div>'''
+
+    html += f"""</div>
+</div>
+</div>
+
+<div class="card full">
+  <h2>Concept Graph</h2>
+  <input type="text" class="search-box" id="search" placeholder="Search concepts... (e.g. kv-cache, training, vol2)" autocomplete="off">
+  <div id="graph-container">
+    <div id="detail">
+      <h3 id="d-name"></h3>
+      <div class="f" id="d-desc"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:8px 0">
+      <div class="f">Chapter: <b id="d-ch"></b></div>
+      <div class="f">Questions: <b id="d-qs"></b></div>
+      <div class="f">Levels: <b id="d-levels"></b></div>
+      <div class="f">Tracks: <b id="d-tracks"></b></div>
+      <div class="f">Prerequisites: <span id="d-prereqs"></span></div>
+      <div class="f">Dependents: <span id="d-deps"></span></div>
+    </div>
+  </div>
+</div>
+
+<div class="grid">
+<div class="card">
+  <h2>Untested Concepts ({len(untested)})</h2>
+  <div class="concept-list">"""
+
+    for u in untested:
+        ch = u["ch"].replace("vol1_", "V1: ").replace("vol2_", "V2: ").replace("_", " ")
+        html += f'<div class="concept-item"><span class="dot" style="background:var(--red)"></span><span class="cname">{u["name"]}</span><span class="cqs">{ch}</span></div>'
+
+    html += f"""</div>
+</div>
+<div class="card">
+  <h2>All Concepts</h2>
+  <input type="text" class="search-box" id="concept-search" placeholder="Filter concepts..." autocomplete="off">
+  <div class="concept-list" id="concept-list"></div>
+</div>
+</div>
+</div>
+
+<script>
+const nodes = {json.dumps(nodes_json)};
+const links = {json.dumps(links_json)};
+const nodeMap = {{}};
+nodes.forEach(n => nodeMap[n.id] = n);
+
+// Concept list
+const listEl = document.getElementById('concept-list');
+function renderList(filter) {{
+  listEl.innerHTML = '';
+  const f = (filter||'').toLowerCase();
+  nodes.filter(n => !f || n.label.toLowerCase().includes(f) || n.id.includes(f) || n.ch.toLowerCase().includes(f))
+    .sort((a,b) => b.qs - a.qs)
+    .forEach(n => {{
+      const d = document.createElement('div');
+      d.className = 'concept-item';
+      d.innerHTML = '<span class="dot" style="background:'+n.color+'"></span><span class="cname">'+n.label+'</span><span class="cqs">'+n.qs+'Q</span>';
+      d.onclick = () => showDetail(n);
+      listEl.appendChild(d);
+    }});
+}}
+renderList('');
+document.getElementById('concept-search').addEventListener('input', e => renderList(e.target.value));
+
+// Detail panel
+function showDetail(n) {{
+  const d = document.getElementById('detail');
+  d.style.display = 'block';
+  document.getElementById('d-name').textContent = n.label;
+  document.getElementById('d-desc').textContent = n.desc;
+  document.getElementById('d-ch').textContent = n.ch;
+  document.getElementById('d-qs').textContent = n.qs;
+  document.getElementById('d-levels').textContent = n.levels;
+  document.getElementById('d-tracks').textContent = n.tracks;
+  const prs = (n.prereqs||[]).map(id => nodeMap[id] ? nodeMap[id].label : id);
+  document.getElementById('d-prereqs').innerHTML = prs.length ? prs.map(p => '<span class="tag">'+p+'</span>').join(' ') : 'None';
+  const deps = (n.deps||[]).map(id => nodeMap[id] ? nodeMap[id].label : id);
+  document.getElementById('d-deps').innerHTML = deps.length ? deps.map(p => '<span class="tag">'+p+'</span>').join(' ') : 'None';
+}}
+
+// D3 Force Graph
+const container = document.getElementById('graph-container');
+const width = container.clientWidth;
+const height = 500;
+
+const svg = d3.select('#graph-container').append('svg')
+  .attr('viewBox', [0, 0, width, height]);
+
+const g = svg.append('g');
+
+// Zoom
+svg.call(d3.zoom().scaleExtent([0.3, 6]).on('zoom', (e) => g.attr('transform', e.transform)));
+
+const simulation = d3.forceSimulation(nodes)
+  .force('link', d3.forceLink(links).id(d => d.id).distance(40).strength(0.3))
+  .force('charge', d3.forceManyBody().strength(-60))
+  .force('center', d3.forceCenter(width/2, height/2))
+  .force('collision', d3.forceCollide().radius(d => Math.max(4, 2 + d.qs*0.2) + 2));
+
+const link = g.append('g').selectAll('line')
+  .data(links).join('line').attr('class', 'link');
+
+const node = g.append('g').selectAll('g')
+  .data(nodes).join('g').attr('class', 'node');
+
+node.append('circle')
+  .attr('r', d => Math.max(4, Math.min(16, 3 + d.qs * 0.2)))
+  .attr('fill', d => d.color)
+  .attr('stroke', d => d.qs === 0 ? 'var(--red)' : d.color)
+  .attr('stroke-opacity', 0.6);
+
+node.append('text')
+  .text(d => d.qs > 5 ? d.label : '')
+  .attr('dx', d => Math.max(4, 3 + d.qs*0.2) + 3).attr('dy', 3);
+
+node.on('click', (e, d) => {{
+  showDetail(d);
+  // Highlight neighbors
+  const neighborIds = new Set([d.id, ...(d.prereqs||[]), ...(d.deps||[])]);
+  node.select('circle').attr('opacity', n => neighborIds.has(n.id) ? 1 : 0.1);
+  node.select('text').attr('opacity', n => neighborIds.has(n.id) ? 1 : 0.05);
+  link.attr('stroke-opacity', l => (l.source.id===d.id||l.target.id===d.id) ? 0.8 : 0.03)
+    .attr('stroke', l => (l.source.id===d.id||l.target.id===d.id) ? 'var(--accent)' : 'rgba(100,100,100,0.2)');
+}});
+
+svg.on('click', (e) => {{
+  if (e.target === svg.node()) {{
+    node.select('circle').attr('opacity', 1);
+    node.select('text').attr('opacity', 1);
+    link.attr('stroke-opacity', 1).attr('stroke', 'rgba(100,100,100,0.2)');
+    document.getElementById('detail').style.display = 'none';
+  }}
+}});
+
+// Drag
+node.call(d3.drag()
+  .on('start', (e,d) => {{ if(!e.active) simulation.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; }})
+  .on('drag', (e,d) => {{ d.fx=e.x; d.fy=e.y; }})
+  .on('end', (e,d) => {{ if(!e.active) simulation.alphaTarget(0); d.fx=null; d.fy=null; }}));
+
+simulation.on('tick', () => {{
+  link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+  node.attr('transform', d => 'translate('+d.x+','+d.y+')');
+}});
+
+// Graph search — highlights matching nodes
+document.getElementById('search').addEventListener('input', (e) => {{
+  const q = e.target.value.toLowerCase();
+  if (!q) {{
+    node.select('circle').attr('opacity', 1);
+    node.select('text').attr('opacity', 1).text(d => d.qs > 5 ? d.label : '');
+    link.attr('stroke-opacity', 1);
+    return;
+  }}
+  const matched = new Set(nodes.filter(n =>
+    n.label.toLowerCase().includes(q) || n.id.includes(q) || n.ch.toLowerCase().includes(q)
+  ).map(n => n.id));
+  node.select('circle').attr('opacity', n => matched.has(n.id) ? 1 : 0.08);
+  node.select('text').attr('opacity', n => matched.has(n.id) ? 1 : 0)
+    .text(n => matched.has(n.id) ? n.label : '');
+  link.attr('stroke-opacity', l => (matched.has(l.source.id) || matched.has(l.target.id)) ? 0.5 : 0.02);
+}});
+</script>
+</body>
+</html>"""
+
+    out_path = BASE / "_taxonomy_graph.html"
+    out_path.write_text(html)
+    print(f"✅ Interactive graph: {out_path}")
+    print(f"   {total} nodes, {len(links_json)} edges")
+
+    if not (hasattr(args, "no_open") and args.no_open):
+        import webbrowser
+        webbrowser.open(f"file://{out_path.resolve()}")
+
+
 # ─── CLI ────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(
@@ -1270,6 +1859,21 @@ def main():
     analyze_p = sub.add_parser("analyze", help="Taxonomy gap analysis")
     analyze_p.add_argument("--max-concepts", type=int, default=100, help="Max concepts to plan for")
 
+    planall_p = sub.add_parser("plan-all", help="Generate per-(level,track) plan files")
+    planall_p.add_argument("--priority", choices=["all", "chains", "expand"], default="all",
+                           help="chains=L1/L2/L6++untested, expand=cross-track, all=everything")
+
+    genbatch_p = sub.add_parser("generate-batch", help="Generate from a specific plan file")
+    genbatch_p.add_argument("plan", help="Path to plan JSON file")
+    genbatch_p.add_argument("--workers", type=int, default=4, help="Parallel workers")
+
+    merge_p = sub.add_parser("merge", help="Merge _generated/ batches into corpus")
+    merge_p.add_argument("--pattern", default="batch-*.json", help="Glob pattern for batch files")
+    merge_p.add_argument("--dry-run", action="store_true", help="Validate without adding")
+
+    graph_p = sub.add_parser("graph", help="Interactive taxonomy visualization")
+    graph_p.add_argument("--no-open", action="store_true", help="Don't auto-open browser")
+
     gen_p = sub.add_parser("generate", help="Generate questions from plan")
     gen_p.add_argument("--count", type=int, default=0, help="Max questions to generate (0=all)")
     gen_p.add_argument("--workers", type=int, default=4, help="Parallel workers")
@@ -1299,6 +1903,10 @@ def main():
         "analyze": cmd_analyze,
         "generate": cmd_generate,
         "loop": cmd_loop,
+        "plan-all": cmd_plan_all,
+        "generate-batch": cmd_generate_batch,
+        "merge": cmd_merge,
+        "graph": cmd_graph,
     }
     cmds[args.command](args)
 
