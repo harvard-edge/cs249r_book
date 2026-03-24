@@ -11,6 +11,12 @@ export interface Question {
   competency_area: string;
   company_archetype?: string;
   taxonomy_concept?: string;
+  // v5.3 Taxonomy (6-axis classification)
+  reasoning_competency?: string;   // RC-1 through RC-13
+  knowledge_area?: string;          // A1 through F1 (35 areas)
+  reasoning_mode?: string;          // 7 modes
+  concept_tags?: string[];          // ~132 tags, multi-label
+  primary_concept?: string;         // preserved taxonomy_concept
   details: {
     common_mistake: string;
     realistic_solution: string;
@@ -58,14 +64,44 @@ export function getQuestionsByFilter(filters: {
   level?: string;
   competency_area?: string;
   company_archetype?: string;
+  // v5.3 faceted filters
+  reasoning_competency?: string;
+  knowledge_area?: string;
+  reasoning_mode?: string;
+  concept_tag?: string;
 }): Question[] {
   return questions.filter((q) => {
     if (filters.track && q.track !== filters.track) return false;
     if (filters.level && q.level !== filters.level) return false;
     if (filters.competency_area && q.competency_area !== filters.competency_area) return false;
     if (filters.company_archetype && q.company_archetype !== filters.company_archetype) return false;
+    if (filters.reasoning_competency && q.reasoning_competency !== filters.reasoning_competency) return false;
+    if (filters.knowledge_area && q.knowledge_area !== filters.knowledge_area) return false;
+    if (filters.reasoning_mode && q.reasoning_mode !== filters.reasoning_mode) return false;
+    if (filters.concept_tag && !(q.concept_tags || []).includes(filters.concept_tag)) return false;
     return true;
   });
+}
+
+// v5.3 Taxonomy getters
+export function getReasoningCompetencies(): string[] {
+  const rcs = new Set(questions.map((q) => q.reasoning_competency).filter((v): v is string => !!v));
+  return Array.from(rcs).sort();
+}
+
+export function getKnowledgeAreas(): string[] {
+  const kas = new Set(questions.map((q) => q.knowledge_area).filter((v): v is string => !!v));
+  return Array.from(kas).sort();
+}
+
+export function getReasoningModes(): string[] {
+  const modes = new Set(questions.map((q) => q.reasoning_mode).filter((v): v is string => !!v));
+  return Array.from(modes).sort();
+}
+
+export function getConceptTags(): string[] {
+  const tags = new Set(questions.flatMap((q) => q.concept_tags || []));
+  return Array.from(tags).sort();
 }
 
 export function getQuestionsByTopic(topicId: string, level?: string): Question[] {

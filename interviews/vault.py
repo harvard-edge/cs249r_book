@@ -2576,6 +2576,125 @@ def cmd_graph(args):
 
 
 # ─── CLI ────────────────────────────────────────────────────────
+def cmd_facets(args):
+    """Show per-axis coverage audit for v5.3 taxonomy fields."""
+    corpus = load_corpus()
+    total = len(corpus)
+
+    axes = {
+        "reasoning_competency": {"label": "Axis 3: Reasoning Competency", "values": set()},
+        "knowledge_area": {"label": "Axis 4: Knowledge Area", "values": set()},
+        "reasoning_mode": {"label": "Axis 5: Reasoning Mode", "values": set()},
+        "concept_tags": {"label": "Axis 6: Concept Tags", "values": set()},
+        "primary_concept": {"label": "Primary Concept (preserved)", "values": set()},
+    }
+
+    populated = {k: 0 for k in axes}
+
+    for q in corpus:
+        for field in axes:
+            val = q.get(field)
+            if val is not None:
+                if isinstance(val, list):
+                    if len(val) > 0:
+                        populated[field] += 1
+                        axes[field]["values"].update(val)
+                elif val:
+                    populated[field] += 1
+                    axes[field]["values"].add(val)
+
+    print(f"\n{'='*60}")
+    print(f"  v5.3 FACETED CLASSIFICATION AUDIT ({total} questions)")
+    print(f"{'='*60}\n")
+
+    for field, info in axes.items():
+        pct = (populated[field] / total * 100) if total else 0
+        bar = '█' * int(pct / 2) + '░' * (50 - int(pct / 2))
+        print(f"  {info['label']}")
+        print(f"    Populated: {populated[field]:,}/{total:,} ({pct:.1f}%)")
+        print(f"    Distinct:  {len(info['values']):,} unique values")
+        print(f"    [{bar}]")
+        print()
+
+
+def cmd_reclassify_stats(args):
+    """Comprehensive distribution report for v5.3 taxonomy axes."""
+    from schema import (
+        VALID_REASONING_COMPETENCIES,
+        VALID_KNOWLEDGE_AREAS,
+        VALID_REASONING_MODES,
+    )
+
+    corpus = load_corpus()
+    total = len(corpus)
+
+    print(f"\n{'='*70}")
+    print(f"  v5.3 RECLASSIFICATION STATISTICS ({total} questions)")
+    print(f"{'='*70}\n")
+
+    # Axis 3: Reasoning Competency distribution
+    rc_counts = Counter(q.get("reasoning_competency") for q in corpus if q.get("reasoning_competency"))
+    print("  AXIS 3: REASONING COMPETENCY")
+    print("  " + "-" * 50)
+    for rc in sorted(VALID_REASONING_COMPETENCIES):
+        count = rc_counts.get(rc, 0)
+        pct = count / total * 100 if total else 0
+        bar = '█' * int(pct / 2)
+        print(f"    {rc:>5}: {count:>5} ({pct:5.1f}%) {bar}")
+    print()
+
+    # Axis 4: Knowledge Area distribution
+    ka_counts = Counter(q.get("knowledge_area") for q in corpus if q.get("knowledge_area"))
+    print("  AXIS 4: KNOWLEDGE AREA")
+    print("  " + "-" * 50)
+    for ka in sorted(VALID_KNOWLEDGE_AREAS):
+        count = ka_counts.get(ka, 0)
+        pct = count / total * 100 if total else 0
+        bar = '█' * int(pct / 2)
+        flag = " ⚠ LOW" if count < 50 else ""
+        print(f"    {ka:>3}: {count:>5} ({pct:5.1f}%) {bar}{flag}")
+    print()
+
+    # Axis 5: Reasoning Mode distribution
+    rm_counts = Counter(q.get("reasoning_mode") for q in corpus if q.get("reasoning_mode"))
+    print("  AXIS 5: REASONING MODE")
+    print("  " + "-" * 50)
+    for mode in sorted(VALID_REASONING_MODES):
+        count = rm_counts.get(mode, 0)
+        pct = count / total * 100 if total else 0
+        bar = '█' * int(pct / 2)
+        print(f"    {mode:>30}: {count:>5} ({pct:5.1f}%) {bar}")
+    print()
+
+    # Axis 6: Concept Tags — top 20
+    tag_counts = Counter()
+    for q in corpus:
+        for tag in q.get("concept_tags") or []:
+            tag_counts[tag] += 1
+    print(f"  AXIS 6: CONCEPT TAGS (top 20 of {len(tag_counts)} unique)")
+    print("  " + "-" * 50)
+    for tag, count in tag_counts.most_common(20):
+        pct = count / total * 100 if total else 0
+        flag = " ⚠ HIGH" if count > 300 else ""
+        print(f"    {tag:>40}: {count:>5} ({pct:5.1f}%){flag}")
+    print()
+
+    # Cross-axis: Level vs Reasoning Mode
+    print("  CROSS-AXIS: Level × Reasoning Mode")
+    print("  " + "-" * 50)
+    level_mode = defaultdict(Counter)
+    for q in corpus:
+        lvl = q.get("level", "?")
+        mode = q.get("reasoning_mode", "?")
+        if mode != "?":
+            level_mode[lvl][mode] += 1
+    for lvl in LEVELS_ORDER:
+        if level_mode[lvl]:
+            top_mode = level_mode[lvl].most_common(1)[0]
+            print(f"    {lvl}: top mode = {top_mode[0]} ({top_mode[1]}x)")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="StaffML Vault CLI",
@@ -2661,6 +2780,9 @@ def main():
 
     sub.add_parser("competency-model", help="Extract competency clusters from taxonomy graph")
 
+    sub.add_parser("facets", help="Per-axis coverage audit for v5.3 taxonomy fields")
+    sub.add_parser("reclassify-stats", help="Comprehensive distribution report for v5.3 axes")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -2691,6 +2813,8 @@ def main():
         "taxonomy-improve": cmd_taxonomy_improve,
         "taxonomy-apply": cmd_taxonomy_apply,
         "competency-model": cmd_competency_model,
+        "facets": cmd_facets,
+        "reclassify-stats": cmd_reclassify_stats,
     }
     cmds[args.command](args)
 
