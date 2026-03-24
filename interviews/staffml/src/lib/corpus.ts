@@ -10,6 +10,7 @@ export interface Question {
   scenario: string;
   competency_area: string;
   company_archetype?: string;
+  taxonomy_concept?: string;
   details: {
     common_mistake: string;
     realistic_solution: string;
@@ -63,6 +64,14 @@ export function getQuestionsByFilter(filters: {
     if (filters.level && q.level !== filters.level) return false;
     if (filters.competency_area && q.competency_area !== filters.competency_area) return false;
     if (filters.company_archetype && q.company_archetype !== filters.company_archetype) return false;
+    return true;
+  });
+}
+
+export function getQuestionsByTopic(topicId: string, level?: string): Question[] {
+  return questions.filter((q) => {
+    if (q.taxonomy_concept !== topicId) return false;
+    if (level && q.level !== level) return false;
     return true;
   });
 }

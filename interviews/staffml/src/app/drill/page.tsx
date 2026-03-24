@@ -13,6 +13,7 @@ import NapkinCalc from "@/components/NapkinCalc";
 import { useToast } from "@/components/Toast";
 import {
   getTracks, getLevels, getCompetencyAreas, getArchetypes, getQuestionsByFilter,
+  getQuestions, getQuestionsByTopic,
   Question, checkNapkinMath, extractFinalNumber, cleanScenario,
   NapkinResult
 } from "@/lib/corpus";
@@ -59,6 +60,43 @@ function DrillPage() {
 
   useEffect(() => {
     setMounted(true);
+
+    // Direct question link: ?q=<id> — load that specific question
+    const qParam = searchParams.get('q');
+    if (qParam) {
+      const directQ = getQuestionById(qParam);
+      if (directQ) {
+        setCurrent(directQ);
+        setSelectedTrack(directQ.track);
+        setSelectedLevel(directQ.level);
+        if (directQ.competency_area) setSelectedArea(directQ.competency_area);
+        // Set pool to topic-mates so "next" stays in topic
+        const topicPool = directQ.taxonomy_concept
+          ? getQuestions().filter(q => q.taxonomy_concept === directQ.taxonomy_concept)
+          : [directQ];
+        setPool(topicPool);
+        return; // Skip other param handling
+      }
+    }
+
+    // Topic filter: ?topic=<concept>&level=<L3> — filter pool to that topic
+    const topicParam = searchParams.get('topic');
+    const levelParam = searchParams.get('level');
+    if (topicParam) {
+      const topicPool = getQuestions().filter(q => {
+        if (q.taxonomy_concept !== topicParam) return false;
+        if (levelParam && q.level !== levelParam) return false;
+        return true;
+      });
+      if (topicPool.length > 0) {
+        setPool(topicPool);
+        setSelectedTrack(topicPool[0].track);
+        if (levelParam) setSelectedLevel(levelParam);
+        pickRandom(topicPool);
+        return; // Skip other param handling
+      }
+    }
+
     // Read URL params (from heat map click-through)
     const trackParam = searchParams.get('track');
     const areaParam = searchParams.get('area');
