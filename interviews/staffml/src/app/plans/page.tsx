@@ -111,7 +111,7 @@ export default function PlansPage() {
           <div className="flex items-center gap-3 mb-8">
             <Map className="w-8 h-8 text-accentBlue" />
             <div>
-              <h1 className="text-3xl font-extrabold text-white tracking-tight">Study Plans</h1>
+              <h1 className="text-3xl font-extrabold text-textPrimary tracking-tight">Study Plans</h1>
               <p className="text-sm text-textSecondary">Curated question sequences for targeted interview prep</p>
             </div>
           </div>
@@ -139,7 +139,7 @@ export default function PlansPage() {
                       <span className="text-[10px] font-mono text-textTertiary">{plan.duration}</span>
                     </div>
                   </div>
-                  <h3 className="text-lg font-bold text-white mb-1">{plan.title}</h3>
+                  <h3 className="text-lg font-bold text-textPrimary mb-1">{plan.title}</h3>
                   <p className="text-sm text-textSecondary mb-4 leading-relaxed">{plan.description}</p>
 
                   <div className="flex items-center justify-between">
@@ -182,10 +182,10 @@ export default function PlansPage() {
       {/* Plan progress header */}
       <div className="border-b border-border bg-surface/50 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <button onClick={() => setActivePlan(null)} className="text-xs text-textTertiary hover:text-white transition-colors">
+          <button onClick={() => setActivePlan(null)} className="text-xs text-textTertiary hover:text-textPrimary transition-colors">
             ← Plans
           </button>
-          <span className="text-sm font-medium text-white">{activePlan.icon} {activePlan.title}</span>
+          <span className="text-sm font-medium text-textPrimary">{activePlan.icon} {activePlan.title}</span>
           <span className="text-xs font-mono text-textTertiary">
             {completedIds.length}/{questions.length}
           </span>
@@ -207,7 +207,7 @@ export default function PlansPage() {
                 <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-border bg-surface">{current.competency_area}</span>
                 <span className="text-[10px] font-mono text-textTertiary">{current.track} / {current.level}</span>
               </div>
-              <h2 className="text-2xl lg:text-3xl font-bold text-white mb-6 tracking-tight">{current.title}</h2>
+              <h2 className="text-2xl lg:text-3xl font-bold text-textPrimary mb-6 tracking-tight">{current.title}</h2>
               <div className="prose max-w-none">
                 <p className="text-textSecondary leading-relaxed text-base">{cleanScenario(current.scenario)}</p>
               </div>

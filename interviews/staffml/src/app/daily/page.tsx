@@ -156,14 +156,14 @@ export default function DailyPage() {
           <div className="w-16 h-16 rounded-full bg-accentGreen/10 border border-accentGreen/30 flex items-center justify-center mx-auto mb-6">
             <CheckCircle2 className="w-8 h-8 text-accentGreen" />
           </div>
-          <h2 className="text-2xl font-bold text-white mb-2">Daily Complete</h2>
+          <h2 className="text-2xl font-bold text-textPrimary mb-2">Daily Complete</h2>
           <p className="text-sm text-textSecondary mb-6">
             You've already finished today's challenge. Come back tomorrow for 3 new questions.
           </p>
           <div className="flex items-center gap-3 justify-center">
             <Link
               href="/drill"
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-surface border border-border text-textSecondary hover:text-white rounded-lg transition-colors text-sm"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg transition-colors text-sm"
             >
               Keep Drilling
             </Link>
@@ -203,17 +203,17 @@ export default function DailyPage() {
             )} />
           </div>
 
-          <h2 className="text-2xl font-bold text-white mb-1">Daily Challenge Complete</h2>
+          <h2 className="text-2xl font-bold text-textPrimary mb-1">Daily Challenge Complete</h2>
           <p className="text-xs text-textTertiary font-mono mb-4">{today}</p>
 
           <div className="flex items-center justify-center gap-6 mb-8">
             <div>
-              <div className="text-3xl font-bold font-mono text-white">{pct}%</div>
+              <div className="text-3xl font-bold font-mono text-textPrimary">{pct}%</div>
               <div className="text-[10px] text-textTertiary uppercase">Score</div>
             </div>
             <div className="w-px h-10 bg-border" />
             <div>
-              <div className="text-3xl font-bold font-mono text-white">{scores.length}</div>
+              <div className="text-3xl font-bold font-mono text-textPrimary">{scores.length}</div>
               <div className="text-[10px] text-textTertiary uppercase">Questions</div>
             </div>
           </div>
@@ -237,7 +237,7 @@ export default function DailyPage() {
           <div className="flex items-center gap-3 justify-center">
             <Link
               href="/drill"
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-surface border border-border text-textSecondary hover:text-white rounded-lg transition-colors text-sm"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg transition-colors text-sm"
             >
               Keep Drilling
             </Link>
@@ -268,7 +268,7 @@ export default function DailyPage() {
       <div className="border-b border-border bg-surface/50 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Calendar className="w-4 h-4 text-accentAmber" />
-          <span className="text-sm font-medium text-white">Daily Challenge</span>
+          <span className="text-sm font-medium text-textPrimary">Daily Challenge</span>
           <span className="text-xs font-mono text-textTertiary">
             {currentIdx + 1} of {questions.length}
           </span>
@@ -308,7 +308,7 @@ export default function DailyPage() {
                   {current.track} / {current.level}
                 </span>
               </div>
-              <h2 className="text-2xl lg:text-3xl font-bold text-white mb-6 tracking-tight">
+              <h2 className="text-2xl lg:text-3xl font-bold text-textPrimary mb-6 tracking-tight">
                 {current.title}
               </h2>
               <div className="prose max-w-none">

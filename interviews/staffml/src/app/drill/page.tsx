@@ -278,7 +278,7 @@ function DrillPage() {
       <aside className="w-full lg:w-64 border-b lg:border-b-0 lg:border-r border-border bg-surface/50 p-5 flex flex-col gap-6 lg:overflow-y-auto">
         <div className="flex items-center gap-2">
           <Target className="w-5 h-5 text-accentBlue" />
-          <h2 className="text-lg font-bold text-white">Drill</h2>
+          <h2 className="text-lg font-bold text-textPrimary">Drill</h2>
           {questionsAnswered > 0 && (
             <span className="ml-auto text-[10px] font-mono text-textTertiary bg-surface px-2 py-0.5 rounded border border-border">
               {questionsAnswered} done
@@ -316,7 +316,7 @@ function DrillPage() {
             <span className="text-[10px] font-mono text-accentAmber uppercase block mb-1">
               {reviewMode ? "Review Mode Active" : "Due for Review"}
             </span>
-            <span className="text-sm text-white font-medium">{dueCount} questions</span>
+            <span className="text-sm text-textPrimary font-medium">{dueCount} questions</span>
             <span className="text-xs text-textTertiary ml-2">
               {reviewMode ? "click to exit" : "spaced repetition"}
             </span>
@@ -330,7 +330,7 @@ function DrillPage() {
             className="w-full text-left p-3 rounded-lg bg-accentRed/5 border border-accentRed/20 hover:border-accentRed/40 transition-colors"
           >
             <span className="text-[10px] font-mono text-accentRed uppercase block mb-1">Weakest area</span>
-            <span className="text-sm text-white capitalize font-medium">{weakestArea.area}</span>
+            <span className="text-sm text-textPrimary capitalize font-medium">{weakestArea.area}</span>
             <span className="text-xs text-textTertiary ml-2">{weakestArea.pct}% accuracy</span>
           </button>
         )}
@@ -468,7 +468,7 @@ function DrillPage() {
                         {current.track} / {current.level}
                       </span>
                     </div>
-                    <h2 className="text-2xl lg:text-3xl font-bold text-white mb-6 tracking-tight">
+                    <h2 className="text-2xl lg:text-3xl font-bold text-textPrimary mb-6 tracking-tight">
                       {current.title}
                     </h2>
                     <div className="prose max-w-none">
@@ -501,7 +501,7 @@ function DrillPage() {
                 </span>
                 <button
                   onClick={() => pickRandom()}
-                  className="text-[10px] font-mono text-textTertiary hover:text-white transition-colors flex items-center gap-1"
+                  className="text-[10px] font-mono text-textTertiary hover:text-textPrimary transition-colors flex items-center gap-1"
                 >
                   <SkipForward className="w-3 h-3" /> Skip
                 </button>

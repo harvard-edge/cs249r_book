@@ -39,7 +39,7 @@ export default function VaultPage() {
       {/* ─── Header ─── */}
       <div className="px-6 pt-8 pb-6 border-b border-border">
         <div className="max-w-5xl mx-auto">
-          <h1 className="text-[28px] font-extrabold text-white tracking-tight mb-1">
+          <h1 className="text-[28px] font-extrabold text-textPrimary tracking-tight mb-1">
             Question Vault
           </h1>
           <p className="text-[15px] text-textSecondary mb-5">
@@ -79,11 +79,11 @@ export default function VaultPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search topics — KV cache, roofline, quantization..."
-              className="w-full pl-12 pr-12 py-3 bg-surface border border-border rounded-xl text-[15px] font-medium text-white placeholder:text-textTertiary focus:outline-none focus:border-borderHighlight transition-colors"
+              className="w-full pl-12 pr-12 py-3 bg-surface border border-border rounded-xl text-[15px] font-medium text-textPrimary placeholder:text-textTertiary focus:outline-none focus:border-borderHighlight transition-colors"
             />
             {query && (
               <button onClick={() => setQuery("")}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-textTertiary hover:text-white">
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-textTertiary hover:text-textPrimary">
                 <X className="w-4 h-4" />
               </button>
             )}
@@ -162,8 +162,8 @@ function FilterPill({ label, count, isActive, color, icon, onClick }: {
       className={clsx(
         "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all border",
         isActive
-          ? "text-white border-borderHighlight"
-          : "border-transparent text-textSecondary hover:text-white hover:bg-surface"
+          ? "text-textPrimary border-borderHighlight"
+          : "border-transparent text-textSecondary hover:text-textPrimary hover:bg-surface"
       )}
       style={isActive && color ? { backgroundColor: `${color}12`, borderColor: `${color}30`, color } : undefined}
     >
@@ -201,7 +201,7 @@ function AreaOverview({ areas, onExpand, onSelectTopic, selectedId }: {
                 <Icon className="w-5 h-5" style={{ color: style.primary }} />
               </div>
               <div className="flex-1 min-w-0">
-                <h2 className="text-[16px] font-bold text-white">{area.name}</h2>
+                <h2 className="text-[16px] font-bold text-textPrimary">{area.name}</h2>
                 <p className="text-[13px] text-textSecondary mt-0.5">
                   <span className="font-mono">{area.questionCount}</span> questions &middot;{" "}
                   <span className="font-mono">{area.topicCount}</span> topics
@@ -262,7 +262,7 @@ function ExpandedArea({ area, selectedId, onSelect }: {
           <Icon className="w-6 h-6" style={{ color: style.primary }} />
         </div>
         <div>
-          <h2 className="text-[22px] font-bold text-white">{area.name}</h2>
+          <h2 className="text-[22px] font-bold text-textPrimary">{area.name}</h2>
           <p className="text-[14px] text-textSecondary mt-0.5">
             <span className="font-mono font-semibold">{area.questionCount}</span> questions across{" "}
             <span className="font-mono font-semibold">{area.topicCount}</span> topics
@@ -350,7 +350,7 @@ function TopicCard({ topic, style, isSelected, onClick, compact }: {
       {/* Title */}
       <div className="flex items-start justify-between gap-2 mb-2">
         <h3 className={clsx(
-          "font-semibold text-white leading-snug",
+          "font-semibold text-textPrimary leading-snug",
           compact ? "text-[13px]" : "text-[14px]"
         )}>
           {topic.name}
@@ -360,7 +360,7 @@ function TopicCard({ topic, style, isSelected, onClick, compact }: {
 
       {/* Question count */}
       <div className="flex items-baseline gap-1.5 mb-2.5">
-        <span className={clsx("font-bold font-mono text-white", compact ? "text-[20px]" : "text-[22px]")}>
+        <span className={clsx("font-bold font-mono text-textPrimary", compact ? "text-[20px]" : "text-[22px]")}>
           {topic.questionCount}
         </span>
         <span className="text-[12px] font-medium text-textTertiary">questions</span>
@@ -414,10 +414,10 @@ function TopicDetail({ topic, areaName, style, onClose }: {
               <span className="text-[12px] font-semibold uppercase tracking-wide"
                 style={{ color: style.primary }}>{areaName}</span>
             </div>
-            <h2 className="text-[20px] font-bold text-white leading-tight">{topic.name}</h2>
+            <h2 className="text-[20px] font-bold text-textPrimary leading-tight">{topic.name}</h2>
           </div>
           <button onClick={onClose} aria-label="Close"
-            className="p-1.5 text-textTertiary hover:text-white hover:bg-white/10 rounded-lg transition-colors">
+            className="p-1.5 text-textTertiary hover:text-textPrimary hover:bg-white/10 rounded-lg transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -435,13 +435,13 @@ function TopicDetail({ topic, areaName, style, onClose }: {
 
               {/* Breadcrumb */}
               <button onClick={() => setDrillLevel(null)}
-                className="flex items-center gap-1.5 text-[13px] font-medium text-textSecondary hover:text-white mb-5 transition-colors">
+                className="flex items-center gap-1.5 text-[13px] font-medium text-textSecondary hover:text-textPrimary mb-5 transition-colors">
                 <ChevronLeft className="w-4 h-4" /> Back to overview
               </button>
 
               <div className="flex items-center justify-between mb-5">
                 <div>
-                  <h3 className="text-[20px] font-bold text-white">
+                  <h3 className="text-[20px] font-bold text-textPrimary">
                     {drillLevel}{" "}
                     <span className="text-[15px] font-medium text-textSecondary">{LEVEL_LABELS[drillLevel]}</span>
                   </h3>
@@ -462,14 +462,14 @@ function TopicDetail({ topic, areaName, style, onClose }: {
                     className="block p-3.5 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-[14px] font-semibold text-white leading-snug mb-1">{q.title}</p>
+                        <p className="text-[14px] font-semibold text-textPrimary leading-snug mb-1">{q.title}</p>
                         <p className="text-[13px] text-textSecondary line-clamp-2 leading-relaxed">
                           {q.scenario.replace(/^-\s*\*\*Interviewer:\*\*\s*/i, "").replace(/^"/, "").replace(/"$/, "").slice(0, 140)}...
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0 mt-0.5">
                         <span className="text-[12px] text-textTertiary capitalize font-medium">{q.track}</span>
-                        <Play className="w-3.5 h-3.5 text-textMuted group-hover:text-white transition-colors" />
+                        <Play className="w-3.5 h-3.5 text-textMuted group-hover:text-textPrimary transition-colors" />
                       </div>
                     </div>
                   </Link>
@@ -498,11 +498,11 @@ function TopicDetail({ topic, areaName, style, onClose }: {
                     return (
                       <button key={level} onClick={() => setDrillLevel(level)}
                         className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
-                        <span className="text-[14px] font-bold font-mono text-white w-8">{level}</span>
+                        <span className="text-[14px] font-bold font-mono text-textPrimary w-8">{level}</span>
                         <div className="flex-1">
                           <div className="flex items-center justify-between mb-1.5">
                             <span className="text-[13px] font-medium text-textSecondary">{LEVEL_LABELS[level]}</span>
-                            <span className="text-[14px] font-mono font-bold text-white">{count}</span>
+                            <span className="text-[14px] font-mono font-bold text-textPrimary">{count}</span>
                           </div>
                           <div className="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
                             <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: style.primary }} />
@@ -528,7 +528,7 @@ function TopicDetail({ topic, areaName, style, onClose }: {
                 <SectionDivider label="Available In" />
                 <div className="flex gap-2 flex-wrap mt-3">
                   {topic.tracks.map((t) => (
-                    <span key={t} className="px-3 py-1.5 rounded-lg bg-surface border border-borderSubtle text-[13px] text-white font-medium">
+                    <span key={t} className="px-3 py-1.5 rounded-lg bg-surface border border-borderSubtle text-[13px] text-textPrimary font-medium">
                       {t === "tinyml" ? "TinyML" : t.charAt(0).toUpperCase() + t.slice(1)}
                     </span>
                   ))}
@@ -543,7 +543,7 @@ function TopicDetail({ topic, areaName, style, onClose }: {
                     className="flex items-center gap-3 p-4 mt-3 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
                     <BookOpen className="w-5 h-5 text-textTertiary group-hover:text-accentBlue shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-[14px] font-semibold text-white">{topic.chapterName}</p>
+                      <p className="text-[14px] font-semibold text-textPrimary">{topic.chapterName}</p>
                       <p className="text-[12px] text-textTertiary mt-0.5">Read in textbook &middot; mlsysbook.ai</p>
                     </div>
                     <ExternalLink className="w-4 h-4 text-textMuted group-hover:text-textSecondary shrink-0" />

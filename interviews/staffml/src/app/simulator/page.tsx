@@ -166,7 +166,7 @@ export default function SimulatorPage() {
         <div className="flex items-center gap-3 mb-6">
           <Server className="w-8 h-8 text-accentBlue" />
           <div>
-            <h1 className="text-2xl font-extrabold text-white tracking-tight">Distributed Training Simulator</h1>
+            <h1 className="text-2xl font-extrabold text-textPrimary tracking-tight">Distributed Training Simulator</h1>
             <p className="text-sm text-textSecondary">Configure a cluster, see compute/communication/bubble breakdown</p>
           </div>
         </div>
@@ -292,7 +292,7 @@ export default function SimulatorPage() {
               <h3 className="text-xs font-mono text-textTertiary uppercase mb-4">Iteration Time Breakdown</h3>
               <div className="flex h-10 rounded-lg overflow-hidden mb-3">
                 <div
-                  className="bg-accentBlue/60 flex items-center justify-center text-[10px] font-mono text-white"
+                  className="bg-accentBlue/60 flex items-center justify-center text-[10px] font-mono text-textPrimary"
                   style={{ width: `${Math.max(5, (result.computeTimeMs / result.iterTimeMs) * 100)}%` }}
                   title={`Compute: ${result.computeTimeMs.toFixed(1)}ms`}
                 >
@@ -300,7 +300,7 @@ export default function SimulatorPage() {
                 </div>
                 {result.allreduceTimeMs > 0 && (
                   <div
-                    className="bg-accentAmber/60 flex items-center justify-center text-[10px] font-mono text-white"
+                    className="bg-accentAmber/60 flex items-center justify-center text-[10px] font-mono text-textPrimary"
                     style={{ width: `${Math.max(5, result.commOverheadPct)}%` }}
                     title={`AllReduce: ${result.allreduceTimeMs.toFixed(1)}ms`}
                   >
@@ -309,7 +309,7 @@ export default function SimulatorPage() {
                 )}
                 {result.pipelineBubblePct > 0 && (
                   <div
-                    className="bg-accentRed/40 flex items-center justify-center text-[10px] font-mono text-white"
+                    className="bg-accentRed/40 flex items-center justify-center text-[10px] font-mono text-textPrimary"
                     style={{ width: `${Math.max(5, result.pipelineBubblePct * result.computeTimeMs / result.iterTimeMs * 100)}%` }}
                     title={`Pipeline bubble: ${result.pipelineBubblePct.toFixed(1)}%`}
                   >
@@ -378,7 +378,7 @@ export default function SimulatorPage() {
               </div>
               <div className="p-4 rounded-xl border border-border bg-surface/50">
                 <div className="text-[10px] font-mono text-textTertiary uppercase mb-2">Gradient AllReduce</div>
-                <div className="text-lg font-bold font-mono text-white">
+                <div className="text-lg font-bold font-mono text-textPrimary">
                   {result.gradientSizeGb.toFixed(1)} GB
                 </div>
                 <div className="text-[10px] text-textTertiary mt-1">
@@ -387,7 +387,7 @@ export default function SimulatorPage() {
               </div>
               <div className="p-4 rounded-xl border border-border bg-surface/50">
                 <div className="text-[10px] font-mono text-textTertiary uppercase mb-2">Training Time (1T tokens)</div>
-                <div className="text-lg font-bold font-mono text-white">
+                <div className="text-lg font-bold font-mono text-textPrimary">
                   {result.trainingTimeDays > 365
                     ? `${(result.trainingTimeDays / 365).toFixed(1)} yrs`
                     : `${result.trainingTimeDays.toFixed(0)} days`}

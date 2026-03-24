@@ -3,9 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Terminal, Crosshair, BarChart3, Target, BookOpen, Github, Menu, X, Calendar, Map, Cpu, Server, Library } from "lucide-react";
+import { Terminal, Crosshair, BarChart3, Target, BookOpen, Github, Menu, X, Calendar, Map, Cpu, Server, Library, Sun, Moon } from "lucide-react";
 import clsx from "clsx";
 import StreakBadge from "@/components/StreakBadge";
+import { useTheme } from "@/components/ThemeProvider";
 
 // Primary links always visible on desktop
 const primaryLinks = [
@@ -28,6 +29,7 @@ const allLinks = [...primaryLinks, ...secondaryLinks];
 export default function Nav() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <nav className="border-b border-border bg-background/80 backdrop-blur-md sticky top-0 z-50">
@@ -38,10 +40,10 @@ export default function Nav() {
             <svg viewBox="0 0 32 32" className="w-6 h-6 drop-shadow-[0_0_8px_rgba(59,130,246,0.4)]">
               <path d="M5,25 L16,9 L27,9" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
               <circle cx="16" cy="9" r="2.5" fill="#3b82f6" />
-              <circle cx="16" cy="9" r="1" fill="black" />
+              <circle cx="16" cy="9" r="1" fill="currentColor" />
             </svg>
-            <span className="text-white text-base font-extrabold tracking-tight">Staff</span>
-            <span className="text-white/60 text-base font-medium tracking-tight">ML</span>
+            <span className="text-textPrimary text-base font-extrabold tracking-tight">Staff</span>
+            <span className="text-textTertiary text-base font-medium tracking-tight">ML</span>
           </Link>
 
           {/* Desktop primary nav */}
@@ -55,7 +57,7 @@ export default function Nav() {
                   className={clsx(
                     "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-colors",
                     isActive
-                      ? "bg-surface text-white border border-border"
+                      ? "bg-surface text-textPrimary border border-border"
                       : "text-textTertiary hover:text-textSecondary hover:bg-surface/50"
                   )}
                 >
@@ -77,7 +79,7 @@ export default function Nav() {
                   className={clsx(
                     "flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[13px] font-medium transition-colors",
                     isActive
-                      ? "bg-surface text-white border border-border"
+                      ? "bg-surface text-textPrimary border border-border"
                       : "text-textTertiary hover:text-textSecondary hover:bg-surface/50"
                   )}
                 >
@@ -91,6 +93,13 @@ export default function Nav() {
 
         <div className="flex items-center gap-3">
           <StreakBadge />
+          <button
+            onClick={toggleTheme}
+            className="p-1.5 text-textTertiary hover:text-textSecondary transition-colors"
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
           <a
             href="https://mlsysbook.ai"
             target="_blank"
@@ -112,7 +121,7 @@ export default function Nav() {
           {/* Mobile/tablet hamburger */}
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
-            className="md:hidden p-1.5 text-textTertiary hover:text-white transition-colors"
+            className="md:hidden p-1.5 text-textTertiary hover:text-textPrimary transition-colors"
             aria-label="Toggle navigation menu"
           >
             {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -134,7 +143,7 @@ export default function Nav() {
                   "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors",
                   isActive
                     ? "bg-accentBlue/10 text-accentBlue"
-                    : "text-textSecondary hover:text-white hover:bg-surfaceHover"
+                    : "text-textSecondary hover:text-textPrimary hover:bg-surfaceHover"
                 )}
               >
                 <Icon className="w-4 h-4" />

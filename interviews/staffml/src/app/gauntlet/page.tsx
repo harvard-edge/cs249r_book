@@ -221,7 +221,7 @@ export default function GauntletPage() {
           <div className="flex items-center gap-3 mb-8">
             <Crosshair className="w-8 h-8 text-accentRed" />
             <div>
-              <h1 className="text-3xl font-extrabold text-white tracking-tight">The Gauntlet</h1>
+              <h1 className="text-3xl font-extrabold text-textPrimary tracking-tight">The Gauntlet</h1>
               <p className="text-sm text-textSecondary">Timed mock interview across competency areas</p>
             </div>
           </div>
@@ -237,7 +237,7 @@ export default function GauntletPage() {
                   className={clsx(
                     "px-4 py-3 rounded-lg border text-sm font-medium transition-all text-center capitalize",
                     selectedTrack === t
-                      ? "border-accentBlue bg-accentBlue/10 text-white"
+                      ? "border-accentBlue bg-accentBlue/10 text-textPrimary"
                       : "border-border bg-surface text-textSecondary hover:border-borderHighlight"
                   )}
                 >
@@ -259,7 +259,7 @@ export default function GauntletPage() {
                   className={clsx(
                     "px-4 py-3 rounded-lg border text-sm font-mono font-medium transition-all text-center",
                     selectedLevel === l
-                      ? "border-accentBlue bg-accentBlue/10 text-white"
+                      ? "border-accentBlue bg-accentBlue/10 text-textPrimary"
                       : "border-border bg-surface text-textSecondary hover:border-borderHighlight"
                   )}
                 >
@@ -280,7 +280,7 @@ export default function GauntletPage() {
                   className={clsx(
                     "px-4 py-3 rounded-lg border text-sm font-medium transition-all text-center",
                     selectedDuration === i
-                      ? "border-accentBlue bg-accentBlue/10 text-white"
+                      ? "border-accentBlue bg-accentBlue/10 text-textPrimary"
                       : "border-border bg-surface text-textSecondary hover:border-borderHighlight"
                   )}
                 >
@@ -359,7 +359,7 @@ export default function GauntletPage() {
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
               >
-                <h2 className="text-2xl lg:text-3xl font-bold text-white mb-6 tracking-tight">
+                <h2 className="text-2xl lg:text-3xl font-bold text-textPrimary mb-6 tracking-tight">
                   {q.title}
                 </h2>
                 <div className="prose max-w-none">
@@ -488,7 +488,7 @@ export default function GauntletPage() {
             </span>
           </div>
 
-          <h2 className="text-2xl font-bold text-white mb-2">Gauntlet Complete</h2>
+          <h2 className="text-2xl font-bold text-textPrimary mb-2">Gauntlet Complete</h2>
           <p className="text-sm text-textSecondary mb-2">
             {selectedTrack.toUpperCase()} × {selectedLevel} — {questions.length} questions
           </p>
@@ -521,7 +521,7 @@ export default function GauntletPage() {
           <div className="flex items-center gap-3 justify-center">
             <button
               onClick={() => { setPhase("setup"); setScores([]); }}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-surface border border-border text-textSecondary hover:text-white rounded-lg transition-colors text-sm"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg transition-colors text-sm"
             >
               <RotateCcw className="w-4 h-4" /> Try Again
             </button>

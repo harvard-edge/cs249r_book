@@ -95,10 +95,10 @@ export default function RooflinePage() {
           <svg viewBox="0 0 32 32" className="w-8 h-8">
             <path d="M5,25 L16,9 L27,9" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
             <circle cx="16" cy="9" r="2.5" fill="#3b82f6" />
-            <circle cx="16" cy="9" r="1" fill="black" />
+            <circle cx="16" cy="9" r="1" fill="currentColor" />
           </svg>
           <div>
-            <h1 className="text-3xl font-extrabold text-white tracking-tight">Interactive Roofline</h1>
+            <h1 className="text-3xl font-extrabold text-textPrimary tracking-tight">Interactive Roofline</h1>
             <p className="text-sm text-textSecondary">Visualize compute vs. bandwidth bottlenecks on real hardware</p>
           </div>
         </div>
@@ -119,7 +119,7 @@ export default function RooflinePage() {
               className={clsx(
                 "px-3 py-1.5 rounded-md text-xs font-mono transition-all border",
                 selectedHw.name === hw.name
-                  ? "border-accentBlue bg-accentBlue/10 text-white"
+                  ? "border-accentBlue bg-accentBlue/10 text-textPrimary"
                   : "border-border text-textTertiary hover:border-borderHighlight hover:text-textSecondary"
               )}
             >
@@ -268,7 +268,7 @@ export default function RooflinePage() {
                     : "border-border bg-surface/50 hover:border-borderHighlight"
                 )}
               >
-                <div className="text-xs font-medium text-white mb-1">{hw.name.replace('NVIDIA ', '')}</div>
+                <div className="text-xs font-medium text-textPrimary mb-1">{hw.name.replace('NVIDIA ', '')}</div>
                 <div className="text-[10px] font-mono text-textTertiary space-y-0.5">
                   <div>{hw.compute_tflops} TFLOPS {hw.compute_unit}</div>
                   <div>{hw.bandwidth_tbs} TB/s {hw.memory_type}</div>

@@ -85,18 +85,18 @@ export default function HeatMapPage() {
           <div className="flex items-center gap-3">
             <BarChart3 className="w-8 h-8 text-accentGreen" />
             <div>
-              <h1 className="text-3xl font-extrabold text-white tracking-tight">Readiness Heat Map</h1>
+              <h1 className="text-3xl font-extrabold text-textPrimary tracking-tight">Readiness Heat Map</h1>
               <p className="text-sm text-textSecondary">Track × Competency — your interview readiness at a glance</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
               <div className="text-xs text-textTertiary">Gauntlets completed</div>
-              <div className="text-lg font-bold font-mono text-white">{gauntletCount}</div>
+              <div className="text-lg font-bold font-mono text-textPrimary">{gauntletCount}</div>
             </div>
             <div className="text-right">
               <div className="text-xs text-textTertiary">Total questions</div>
-              <div className="text-lg font-bold font-mono text-white">{totalAttempted}</div>
+              <div className="text-lg font-bold font-mono text-textPrimary">{totalAttempted}</div>
             </div>
           </div>
         </div>
@@ -179,7 +179,7 @@ export default function HeatMapPage() {
           return (
             <div className="mb-6 p-5 rounded-xl border border-border bg-surface/80">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-bold text-white">Readiness Verdict</span>
+                <span className="text-sm font-bold text-textPrimary">Readiness Verdict</span>
                 <span className={clsx(
                   "text-lg font-bold font-mono",
                   overallPct >= 70 ? "text-accentGreen" : overallPct >= 40 ? "text-accentAmber" : "text-accentRed"
@@ -206,7 +206,7 @@ export default function HeatMapPage() {
             <div className="w-16 h-16 rounded-full bg-surface border border-border flex items-center justify-center mb-6">
               <BarChart3 className="w-8 h-8 text-textTertiary" />
             </div>
-            <h2 className="text-xl font-bold text-white mb-2">No data yet</h2>
+            <h2 className="text-xl font-bold text-textPrimary mb-2">No data yet</h2>
             <p className="text-sm text-textSecondary mb-6 max-w-md">
               Complete a Gauntlet or drill some questions to see your readiness heat map populate.
             </p>
@@ -379,13 +379,13 @@ export default function HeatMapPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setShowClearConfirm(false)}
-                    className="px-3 py-1.5 text-xs text-textTertiary hover:text-white transition-colors"
+                    className="px-3 py-1.5 text-xs text-textTertiary hover:text-textPrimary transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleClear}
-                    className="px-3 py-1.5 text-xs bg-accentRed text-white rounded-md hover:bg-accentRed/80 transition-colors"
+                    className="px-3 py-1.5 text-xs bg-accentRed text-textPrimary rounded-md hover:bg-accentRed/80 transition-colors"
                   >
                     Delete Everything
                   </button>
