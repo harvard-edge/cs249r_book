@@ -10,6 +10,9 @@ Usage:
     python3 vault.py chains       # Build depth chains + verify coherence
     python3 vault.py add <file>   # Validated insertion
     python3 vault.py export       # Generate .md files + sync to app
+    python3 vault.py analyze      # Taxonomy gap analysis → _generation_plan.json
+    python3 vault.py generate     # Generate questions from plan via Gemini
+    python3 vault.py loop         # Auto-loop: analyze→generate→add until saturated
 """
 
 from __future__ import annotations
@@ -19,7 +22,9 @@ import json
 import re
 import subprocess
 import sys
+import time
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -789,6 +794,437 @@ def cmd_release(args):
     print("\n✅ Release pipeline complete.")
 
 
+# ─── ANALYZE ───────────────────────────────────────────────────
+BLOOM_FOR_LEVEL = {
+    "L1": "remember",
+    "L2": "understand",
+    "L3": "apply",
+    "L4": "analyze",
+    "L5": "evaluate",
+    "L6+": "create",
+}
+
+
+def cmd_analyze(args):
+    """Compare taxonomy vs corpus → find untested concepts → output generation plan."""
+    corpus = load_corpus()
+    taxonomy = json.loads(TAXONOMY_PATH.read_text())
+
+    # Map questions to taxonomy concepts
+    concept_qs = defaultdict(list)
+    for q in corpus:
+        tc = q.get("taxonomy_concept", "")
+        if tc:
+            concept_qs[tc].append(q)
+
+    concepts = taxonomy["concepts"]
+    total_concepts = len(concepts)
+
+    # Find untested concepts (0 questions)
+    untested = [c for c in concepts if c["id"] not in concept_qs]
+
+    # Find partially tested (have some levels but not all)
+    incomplete_chains = []
+    for c in concepts:
+        qs = concept_qs.get(c["id"], [])
+        if qs:
+            levels = set(q["level"] for q in qs)
+            missing = [l for l in LEVELS_ORDER if l not in levels]
+            if missing and len(levels) >= 2:
+                incomplete_chains.append({"concept": c, "have": sorted(levels), "missing": missing})
+
+    # Type balance per track
+    type_balance = defaultdict(lambda: defaultdict(int))
+    for q in corpus:
+        type_balance[q["track"]][q["level"]] += 1
+
+    # Saturation metrics
+    tested_count = len(concept_qs)
+    coverage = tested_count / total_concepts if total_concepts else 0
+
+    # Build generation plan — prioritize untested concepts
+    max_concepts = args.max_concepts if hasattr(args, "max_concepts") and args.max_concepts else 100
+    plan = []
+
+    # Priority 1: untested concepts, mid-range levels first (most useful)
+    target_levels = ["L3", "L4", "L5", "L2", "L1", "L6+"]
+    for c in untested[:max_concepts]:
+        track = c["tracks"][0] if c["tracks"] else "cloud"
+        for level in target_levels[:3]:  # L3, L4, L5
+            plan.append({
+                "concept_id": c["id"],
+                "concept_name": c["name"],
+                "description": c["description"],
+                "prerequisites": c.get("prerequisites", []),
+                "tracks": c["tracks"],
+                "source_chapters": c.get("source_chapters", []),
+                "target_track": track,
+                "target_level": level,
+                "bloom": BLOOM_FOR_LEVEL[level],
+            })
+
+    # Priority 2: incomplete chains — fill missing levels
+    for item in incomplete_chains[:50]:
+        c = item["concept"]
+        track = c["tracks"][0] if c["tracks"] else "cloud"
+        for level in item["missing"][:2]:  # fill up to 2 missing levels
+            plan.append({
+                "concept_id": c["id"],
+                "concept_name": c["name"],
+                "description": c["description"],
+                "prerequisites": c.get("prerequisites", []),
+                "tracks": c["tracks"],
+                "source_chapters": c.get("source_chapters", []),
+                "target_track": track,
+                "target_level": level,
+                "bloom": BLOOM_FOR_LEVEL[level],
+            })
+
+    # Save plan
+    plan_path = BASE / "_generation_plan.json"
+    plan_path.write_text(json.dumps(plan, indent=2))
+
+    print(f"═══ Taxonomy Gap Analysis ═══\n")
+    print(f"  Total concepts:      {total_concepts}")
+    print(f"  Tested concepts:     {tested_count} ({100*coverage:.0f}%)")
+    print(f"  Untested concepts:   {len(untested)}")
+    print(f"  Incomplete chains:   {len(incomplete_chains)}")
+    print(f"  Coverage:            {coverage:.1%}")
+    print(f"\n  Generation plan:     {len(plan)} questions")
+    print(f"  Saved to:            {plan_path}")
+
+    if untested:
+        print(f"\n── Top 20 Untested Concepts ──")
+        for c in untested[:20]:
+            tracks = ", ".join(c["tracks"])
+            print(f"  {c['id']:40} [{tracks}]")
+
+    return {"coverage": coverage, "untested": len(untested), "plan_size": len(plan)}
+
+
+# ─── GENERATE ──────────────────────────────────────────────────
+
+def _build_prompt(item: dict) -> str:
+    """Build a Gemini prompt for one question generation task."""
+    tracks_str = ", ".join(item.get("tracks", ["cloud"]))
+    prereqs_str = ", ".join(item.get("prerequisites", [])[:5]) or "none"
+    chapters_str = ", ".join(item.get("source_chapters", [])[:3]) or "general"
+
+    # Determine competency area from concept description
+    desc = item.get("description", "")
+
+    prompt = f"""You are an expert ML Systems interview question author for the StaffML platform.
+
+Generate exactly ONE interview question as a JSON object. The question must test the concept described below.
+
+## Concept
+- **Name**: {item['concept_name']}
+- **Description**: {desc}
+- **Prerequisites**: {prereqs_str}
+- **Source chapters**: {chapters_str}
+
+## Target
+- **Track**: {item['target_track']}
+- **Level**: {item['target_level']} (Bloom's: {item['bloom']})
+- **Tracks this concept appears in**: {tracks_str}
+
+## Level Guidelines
+- L1 (Remember): Recall facts, definitions, hardware specs
+- L2 (Understand): Explain concepts, compare approaches
+- L3 (Apply): Calculate, estimate, use formulas with real numbers
+- L4 (Analyze): Diagnose bottlenecks, debug failures, root-cause analysis
+- L5 (Evaluate): Compare trade-offs, justify design decisions with quantitative reasoning
+- L6+ (Create): Design systems, architect solutions, propose novel approaches
+
+## Requirements
+1. scenario: A concrete, real-world scenario (min 50 chars). Use specific hardware specs and numbers.
+2. title: Short descriptive title (3-10 words)
+3. common_mistake: What most candidates get wrong (min 20 chars)
+4. realistic_solution: The correct approach with specific numbers (min 20 chars)
+5. napkin_math: Back-of-envelope calculation showing the key insight
+6. deep_dive_url: A real URL to a relevant technical resource (paper, docs, blog)
+7. competency_area: One of: compute, memory, latency, precision, power, architecture, optimization, parallelism, networking, deployment, reliability, data, cross-cutting
+
+## Output Format
+Return ONLY a valid JSON object with this exact structure (no markdown, no explanation):
+{{
+  "id": "{item['target_track']}-{item['concept_id']}-{item['target_level'].lower()}-0",
+  "track": "{item['target_track']}",
+  "scope": "Foundations",
+  "level": "{item['target_level']}",
+  "title": "...",
+  "topic": "{item['concept_id']}",
+  "competency_area": "...",
+  "scenario": "...",
+  "details": {{
+    "common_mistake": "...",
+    "realistic_solution": "...",
+    "napkin_math": "...",
+    "deep_dive_title": "...",
+    "deep_dive_url": "..."
+  }},
+  "bloom_level": "{item['bloom']}",
+  "canonical_topic": "{item['concept_id']}",
+  "taxonomy_concept": "{item['concept_id']}"
+}}"""
+    return prompt
+
+
+def _generate_one(item: dict, model: str, timeout: int) -> dict | None:
+    """Generate one question via Gemini CLI."""
+    prompt = _build_prompt(item)
+    try:
+        result = subprocess.run(
+            ["gemini", "-m", model, "-p", prompt, "-o", "text"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            print(f"  ✗ {item['concept_id']}/{item['target_level']}: gemini error")
+            return None
+
+        # Parse JSON from output — strip markdown fences if present
+        text = result.stdout.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```\w*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text)
+        text = text.strip()
+
+        q = json.loads(text)
+
+        # Ensure required fields
+        if not q.get("scenario") or len(q["scenario"]) < 30:
+            print(f"  ✗ {item['concept_id']}/{item['target_level']}: scenario too short")
+            return None
+
+        # Ensure taxonomy_concept is set
+        q["taxonomy_concept"] = item["concept_id"]
+        q["status"] = "published"
+        q["version"] = 1
+        q["created_at"] = datetime.now().isoformat()
+
+        return q
+
+    except json.JSONDecodeError as e:
+        print(f"  ✗ {item['concept_id']}/{item['target_level']}: JSON parse error: {e}")
+        return None
+    except subprocess.TimeoutExpired:
+        print(f"  ✗ {item['concept_id']}/{item['target_level']}: timeout")
+        return None
+    except Exception as e:
+        print(f"  ✗ {item['concept_id']}/{item['target_level']}: {e}")
+        return None
+
+
+def cmd_generate(args):
+    """Generate questions from _generation_plan.json via Gemini CLI."""
+    plan_path = BASE / "_generation_plan.json"
+    if not plan_path.exists():
+        print("❌ No _generation_plan.json found. Run 'vault.py analyze' first.")
+        sys.exit(1)
+
+    plan = json.loads(plan_path.read_text())
+    count = args.count if hasattr(args, "count") and args.count else len(plan)
+    plan = plan[:count]
+
+    model = CONFIG["models"]["generator"]
+    timeout = CONFIG.get("generation", {}).get("timeout_seconds", 180)
+    workers = args.workers if hasattr(args, "workers") and args.workers else CONFIG.get("generation", {}).get("max_parallel", 4)
+
+    print(f"═══ Question Generation ═══\n")
+    print(f"  Plan items:    {len(plan)}")
+    print(f"  Model:         {model}")
+    print(f"  Workers:       {workers}")
+    print(f"  Timeout:       {timeout}s\n")
+
+    # Generate in parallel
+    results = []
+    failed = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_generate_one, item, model, timeout): item for item in plan}
+        for i, future in enumerate(as_completed(futures)):
+            item = futures[future]
+            q = future.result()
+            if q:
+                results.append(q)
+                print(f"  ✓ [{len(results)}/{len(plan)}] {item['concept_id']}/{item['target_level']}")
+            else:
+                failed += 1
+
+    if not results:
+        print("\n❌ No questions generated successfully.")
+        return {"generated": 0, "failed": failed}
+
+    # Deduplicate IDs (append suffix if collision)
+    seen_ids = set()
+    for q in results:
+        base_id = q["id"]
+        suffix = 0
+        while q["id"] in seen_ids:
+            suffix += 1
+            q["id"] = f"{base_id[:-1]}{suffix}"
+        seen_ids.add(q["id"])
+
+    # Save batch
+    gen_dir = BASE / "_generated"
+    gen_dir.mkdir(exist_ok=True)
+    batch_file = gen_dir / f"batch-{datetime.now():%Y%m%d-%H%M}.json"
+    batch_file.write_text(json.dumps(results, indent=2))
+
+    print(f"\n  Generated: {len(results)}/{len(plan)} ({failed} failed)")
+    print(f"  Saved to:  {batch_file}")
+
+    # Auto-add if requested
+    if hasattr(args, "auto") and args.auto:
+        print(f"\n── Auto-adding to corpus ──")
+        _add_batch(results)
+
+    return {"generated": len(results), "failed": failed, "batch_file": str(batch_file)}
+
+
+def _add_batch(new_qs: list[dict]) -> int:
+    """Validate and add a batch of questions to corpus. Returns count added."""
+    from schema import validate_corpus
+
+    valid, errors, _ = validate_corpus(new_qs)
+    if errors:
+        print(f"  ⚠️ {len(errors)} validation errors, filtering to valid only")
+        # Keep only valid questions
+        valid_ids = {q.id for q in valid}
+        new_qs = [q for q in new_qs if q.get("id") in {v.id for v in valid}]
+        if not new_qs:
+            print(f"  ❌ No valid questions to add")
+            return 0
+
+    corpus = load_corpus()
+    existing_ids = {q["id"] for q in corpus}
+
+    # Filter out ID conflicts
+    to_add = [q for q in new_qs if q["id"] not in existing_ids]
+    skipped = len(new_qs) - len(to_add)
+    if skipped:
+        print(f"  Skipped {skipped} (ID conflict)")
+
+    if to_add:
+        corpus.extend(to_add)
+        save_corpus(corpus)
+        print(f"  ✅ Added {len(to_add)} questions. Total: {len(corpus)}")
+
+    return len(to_add)
+
+
+# ─── LOOP ──────────────────────────────────────────────────────
+def cmd_loop(args):
+    """Run analyze→generate→validate→add until saturated."""
+    import types
+
+    max_rounds = args.max_rounds if hasattr(args, "max_rounds") and args.max_rounds else 20
+    batch_size = args.batch_size if hasattr(args, "batch_size") and args.batch_size else 20
+    release_every = 5
+
+    print(f"═══ StaffML Generation Loop ═══")
+    print(f"  Max rounds:   {max_rounds}")
+    print(f"  Batch size:   {batch_size}")
+    print(f"  Release every: {release_every} rounds\n")
+
+    log_entries = []
+
+    for round_num in range(max_rounds):
+        round_start = time.time()
+        print(f"\n{'═'*50}")
+        print(f"  ROUND {round_num + 1}/{max_rounds}")
+        print(f"{'═'*50}\n")
+
+        # Step 1: Analyze (plan for more concepts than batch_size so we always have work)
+        analyze_args = types.SimpleNamespace(max_concepts=500)
+        result = cmd_analyze(analyze_args)
+
+        if result["coverage"] >= 0.95:
+            print(f"\n🎯 COVERAGE SATURATED at {result['coverage']:.1%}")
+            break
+
+        if result["plan_size"] == 0:
+            print(f"\n✅ No more gaps to fill")
+            break
+
+        # Step 2: Generate
+        gen_args = types.SimpleNamespace(
+            count=batch_size,
+            workers=CONFIG.get("generation", {}).get("max_parallel", 4),
+            auto=False,
+        )
+        gen_result = cmd_generate(gen_args)
+
+        if gen_result["generated"] == 0:
+            print(f"\n❌ Generation produced 0 questions, stopping")
+            break
+
+        # Step 3: Validate + Add
+        batch_file = gen_result.get("batch_file")
+        if batch_file:
+            new_qs = json.loads(Path(batch_file).read_text())
+            added = _add_batch(new_qs)
+        else:
+            added = 0
+
+        # Yield check
+        yield_rate = added / gen_result["generated"] if gen_result["generated"] else 0
+        elapsed = time.time() - round_start
+
+        entry = {
+            "round": round_num + 1,
+            "coverage": result["coverage"],
+            "generated": gen_result["generated"],
+            "added": added,
+            "yield_rate": yield_rate,
+            "elapsed_s": round(elapsed, 1),
+            "timestamp": datetime.now().isoformat(),
+            "corpus_size": len(load_corpus()),
+        }
+        log_entries.append(entry)
+
+        # Write progress file for monitoring
+        progress_path = BASE / "_loop_progress.json"
+        progress_path.write_text(json.dumps(log_entries, indent=2))
+
+        print(f"\n── Round {round_num + 1} Summary ──")
+        print(f"  Coverage:  {result['coverage']:.1%}")
+        print(f"  Generated: {gen_result['generated']}")
+        print(f"  Added:     {added}")
+        print(f"  Yield:     {yield_rate:.0%}")
+        print(f"  Time:      {elapsed:.0f}s")
+
+        if yield_rate < 0.20 and round_num > 0:
+            print(f"\n⚠️ YIELD SATURATED: {yield_rate:.0%} < 20%")
+            break
+
+        # Release every N rounds
+        if (round_num + 1) % release_every == 0:
+            print(f"\n── Intermediate Release ──")
+            release_args = types.SimpleNamespace(skip="figures")
+            cmd_release(release_args)
+
+    # Final release
+    print(f"\n{'═'*50}")
+    print(f"  FINAL RELEASE")
+    print(f"{'═'*50}\n")
+    release_args = types.SimpleNamespace(skip="figures")
+    cmd_release(release_args)
+
+    # Write loop log
+    log_path = BASE / f"vault_loop_{datetime.now():%Y%m%d-%H%M}.json"
+    log_path.write_text(json.dumps(log_entries, indent=2))
+
+    print(f"\n═══ Loop Complete ═══")
+    print(f"  Rounds:        {len(log_entries)}")
+    total_added = sum(e["added"] for e in log_entries)
+    print(f"  Total added:   {total_added}")
+    if log_entries:
+        print(f"  Final coverage: {log_entries[-1]['coverage']:.1%}")
+    print(f"  Log:           {log_path}")
+
+
 # ─── CLI ────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(
@@ -831,6 +1267,18 @@ def main():
         "--skip", default="", help="Comma-separated steps to skip"
     )
 
+    analyze_p = sub.add_parser("analyze", help="Taxonomy gap analysis")
+    analyze_p.add_argument("--max-concepts", type=int, default=100, help="Max concepts to plan for")
+
+    gen_p = sub.add_parser("generate", help="Generate questions from plan")
+    gen_p.add_argument("--count", type=int, default=0, help="Max questions to generate (0=all)")
+    gen_p.add_argument("--workers", type=int, default=4, help="Parallel workers")
+    gen_p.add_argument("--auto", action="store_true", help="Auto-add passing questions")
+
+    loop_p = sub.add_parser("loop", help="Auto-loop: analyze→generate→add")
+    loop_p.add_argument("--max-rounds", type=int, default=20, help="Max generation rounds")
+    loop_p.add_argument("--batch-size", type=int, default=20, help="Questions per round")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -848,6 +1296,9 @@ def main():
         "review": cmd_review,
         "figures": cmd_figures,
         "release": cmd_release,
+        "analyze": cmd_analyze,
+        "generate": cmd_generate,
+        "loop": cmd_loop,
     }
     cmds[args.command](args)
 
