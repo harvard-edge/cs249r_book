@@ -97,7 +97,31 @@ function parseSteps(raw: string): Step[] {
     return [{ text: cleanStepText(trimmed), isResult: true }];
   }
 
+  // Long single-line text: split on sentence boundaries that contain calculations
+  // Look for patterns like "result. Next sentence" or "value). Next"
+  if (trimmed.length > 120) {
+    const sentenceSteps = splitOnSentences(trimmed);
+    if (sentenceSteps.length > 1) {
+      return sentenceSteps;
+    }
+  }
+
   return [{ text: trimmed, isResult: false }];
+}
+
+/** Split a dense paragraph into steps at sentence boundaries */
+function splitOnSentences(text: string): Step[] {
+  // Split on ". " that follows a closing paren, number, unit, or word
+  // but NOT on decimal points like "3.5" or abbreviations
+  const parts = text.split(/(?<=[\d)%a-z])\.\s+(?=[A-Z])/g);
+  if (parts.length <= 1) return [{ text, isResult: false }];
+
+  return parts.map((part, i) => {
+    const cleaned = part.trim();
+    // Last sentence or sentences containing final "=" result tend to be conclusions
+    const isResult = i === parts.length - 1 && /=\s*[\d,]+/.test(cleaned);
+    return { text: cleaned, isResult };
+  });
 }
 
 function cleanStepText(text: string): string {
