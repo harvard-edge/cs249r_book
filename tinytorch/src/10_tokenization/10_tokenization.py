@@ -641,11 +641,11 @@ BPE is the secret sauce behind modern language models (GPT, BERT, etc.). It lear
 │ │ Training Data: ["hello", "hello", "help"]                         │ │
 │ │                                                                   │ │
 │ │ Initial Tokens (with end-of-word markers):                        │ │
-│ │   ['h','e','l','l','o'+Tokenizer.TOK_EOW]    (hello)              │ │
-│ │   ['h','e','l','l','o'+Tokenizer.TOK_EOW]    (hello)              │ │
-│ │   ['h','e','l','p'+Tokenizer.TOK_EOW]        (help)               │ │
+│ │   ['h','e','l','l','o</w>']    (hello)                            │ │
+│ │   ['h','e','l','l','o</w>']    (hello)                            │ │
+│ │   ['h','e','l','p</w>']        (help)                             │ │
 │ │                                                                   │ │
-│ │ Starting Vocab: ['h', 'e', 'l', 'o', 'p', Tokenizer.TOK_EOW]      │ │
+│ │ Starting Vocab: ['h', 'e', 'l', 'o', 'p', '</w>']                 │ │
 │ │                   ↑ All unique characters                         │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
@@ -667,12 +667,12 @@ BPE is the secret sauce behind modern language models (GPT, BERT, etc.). It lear
 │ │ Merge Operation: ('h', 'e') → 'he'                                │ │
 │ │                                                                   │ │
 │ │ BEFORE:                          AFTER:                           │ │
-│ │   ['h','e','l','l','o'+TOK_EOW]  →  ['he','l','l','o'+TOK_EOW]    │ │
-│ │   ['h','e','l','l','o'+TOK_EOW]  →  ['he','l','l','o'+TOK_EOW]    │ │
-│ │   ['h','e','l','p'+TOK_EOW]      →  ['he','l','p'+TOK_EOW]        │ │
+│ │   ['h','e','l','l','o</w>']  →  ['he','l','l','o</w>']            │ │
+│ │   ['h','e','l','l','o</w>']  →  ['he','l','l','o</w>']            │ │
+│ │   ['h','e','l','p</w>']      →  ['he','l','p</w>']                │ │
 │ │                                                                   │ │
-│ │ Updated Vocab: ['h','e','l','o','p',Tokenizer.TOK_EOW, 'he']      │ │
-│ │                                              NEW TOKEN! ↑         │ │
+│ │ Updated Vocab: ['h','e','l','o','p','</w>', 'he']                 │ │
+│ │                                              ↑ NEW TOKEN!         │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │ STEP 4: Repeat Until Target Vocab Size Reached                        │
@@ -680,12 +680,12 @@ BPE is the secret sauce behind modern language models (GPT, BERT, etc.). It lear
 │ │ Iteration 2: Next most frequent is ('l', 'l')                     │ │
 │ │ Merge ('l','l') → 'll'                                            │ │
 │ │                                                                   │ │
-│ │   ['he','l','l','o'+TOK_EOW]     →  ['he','ll','o'+TOK_EOW]       │ │
-│ │   ['he','l','l','o'+TOK_EOW]     →  ['he','ll','o'+TOK_EOW]       │ │
-│ │   ['he','l','p'+TOK_EOW]         →  ['he','l','p'+TOK_EOW]        │ │
+│ │   ['he','l','l','o</w>']     →  ['he','ll','o</w>']               │ │
+│ │   ['he','l','l','o</w>']     →  ['he','ll','o</w>']               │ │
+│ │   ['he','l','p</w>']         →  ['he','l','p</w>']                │ │
 │ │                                                                   │ │
-│ │ Updated Vocab: ['h','e','l','o','p',Tokenizer.TOK_EOW,'he','ll']  │ │
-│ │                                                        NEW!  ↑    │ │
+│ │ Updated Vocab: ['h','e','l','o','p','</w>','he','ll']             │ │
+│ │                                                  ↑ NEW!           │ │
 │ │                                                                   │ │
 │ │ Continue merging until vocab_size target...                       │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
@@ -694,8 +694,8 @@ BPE is the secret sauce behind modern language models (GPT, BERT, etc.). It lear
 │ ┌───────────────────────────────────────────────────────────────────┐ │
 │ │ Trained BPE can now encode efficiently:                           │ │
 │ │                                                                   │ │
-│ │ "hello" → ['he', 'll', 'o'+TOK_EOW]  = 3 tokens (vs 5 chars)      │ │
-│ │ "help"  → ['he', 'l', 'p'+TOK_EOW]   = 3 tokens (vs 4 chars)      │ │
+│ │ "hello" → ['he', 'll', 'o</w>']  = 3 tokens (vs 5 chars)          │ │
+│ │ "help"  → ['he', 'l', 'p</w>']   = 3 tokens (vs 4 chars)          │ │
 │ │                                                                   │ │
 │ │  Key Insights: BPE automatically discovers:                       │ │
 │ │    - Common prefixes ('he')                                       │ │
@@ -720,15 +720,15 @@ appears across all words, weighted by word frequency. This tells us which pair t
 Count Pairs Across All Words (weighted by frequency):
 
   word_tokens:                     word_freq:
-  "hello" → ['h','e','l','l','o'+TOK_EOW]    freq=3
-  "help"  → ['h','e','l','p'+TOK_EOW]        freq=1
+  "hello" → ['h','e','l','l','o</w>']    freq=3
+  "help"  → ['h','e','l','p</w>']        freq=1
 
   Pair counting (freq-weighted):
     ('h','e'):  3+1 = 4   ← appears in both words
     ('e','l'):  3+1 = 4   ← appears in both words
     ('l','l'):  3   = 3   ← only in "hello"
-    ('l','o'+TOK_EOW): 3 = 3  ← only in "hello"
-    ('l','p'+TOK_EOW): 1 = 1  ← only in "help"
+    ('l','o</w>'): 3 = 3  ← only in "hello"
+    ('l','p</w>'): 1 = 1  ← only in "help"
 ```
 """
 
@@ -826,9 +826,9 @@ pair with a single concatenated token.
 ```
 Merge Operation: ('h', 'e') → 'he'
 
-BEFORE merging:                               AFTER merging:
-  "hello" → ['h','e','l','l','o'+TOK_EOW]  →  ['he','l','l','o'+TOK_EOW]
-  "help"  → ['h','e','l','p'+TOK_EOW]      →  ['he','l','p'+TOK_EOW]
+BEFORE merging:                    AFTER merging:
+  "hello" → ['h','e','l','l','o</w>']  →  ['he','l','l','o</w>']
+  "help"  → ['h','e','l','p</w>']      →  ['he','l','p</w>']
 
 Algorithm (linear scan per word):
   i=0: tokens[0]='h', tokens[1]='e' → match! append 'he', skip 2
@@ -859,7 +859,7 @@ def _merge_pair(word_tokens: Dict[str, List[str]], pair: Tuple[str, str]) -> str
     >>> word_tokens = {"hello": ['h', 'e', 'l', 'l', 'o'+Tokenizer.TOK_EOW]}
     >>> merged = _merge_pair(word_tokens, ('h', 'e'))
     >>> word_tokens["hello"]
-    ['he', 'l', 'l', 'o</w>']
+    ['he', 'l', 'l', 'o'+Tokenizer.TOK_EOW]
     >>> merged
     'he'
 
@@ -914,15 +914,15 @@ def test_unit_merge_pair():
     merged = _merge_pair(word_tokens, ('h', 'e'))
     assert merged == 'he', f"Expected 'he', got '{merged}'"
     assert word_tokens["hello"] == ['he', 'l', 'l', 'o'+Tokenizer.TOK_EOW], \
-        f"Expected ['he', 'l', 'l', 'o{Tokenizer.TOK_EOW}'], got {word_tokens['hello']}"
+        f"Expected ['he', 'l', 'l', 'o'+TOK_EOW], got {word_tokens['hello']}"
     assert word_tokens["help"] == ['he', 'l', 'p'+Tokenizer.TOK_EOW], \
-        f"Expected ['he', 'l', 'p{Tokenizer.TOK_EOW}'], got {word_tokens['help']}"
+        f"Expected ['he', 'l', 'p'+TOK_EOW], got {word_tokens['help']}"
 
     # Now merge ('l', 'l') → 'll' (only affects "hello")
     merged2 = _merge_pair(word_tokens, ('l', 'l'))
     assert merged2 == 'll', f"Expected 'll', got '{merged2}'"
     assert word_tokens["hello"] == ['he', 'll', 'o'+Tokenizer.TOK_EOW], \
-        f"Expected ['he', 'll', 'o{Tokenizer.TOK_EOW}'], got {word_tokens['hello']}"
+        f"Expected ['he', 'll', 'o'+TOK_EOW], got {word_tokens['hello']}"
     # "help" unchanged (no 'l','l' pair)
     assert word_tokens["help"] == ['he', 'l', 'p'+Tokenizer.TOK_EOW], \
         f"help should be unchanged, got {word_tokens['help']}"
@@ -1015,7 +1015,7 @@ class BPETokenizer(Tokenizer):
 
         EXAMPLE:
         >>> tokenizer._get_pairs(['h', 'e', 'l', 'l', 'o'+Tokenizer.TOK_EOW])
-        {('h', 'e'), ('e', 'l'), ('l', 'l'), ('l', 'o</w>')}
+        {('h', 'e'), ('e', 'l'), ('l', 'l'), ('l', 'o'+Tokenizer.TOK_EOW)}
 
         HINT: Loop from 0 to len(word_tokens)-1 and create tuple pairs
         """
@@ -1110,7 +1110,7 @@ class BPETokenizer(Tokenizer):
         EXAMPLE:
         >>> # After training, merges might be [('h','e'), ('l','l')]
         >>> tokenizer._apply_merges(['h','e','l','l','o'+Tokenizer.TOK_EOW])
-        ['he','ll','o</w>']  # Applied both merges
+        ['he','ll','o'+Tokenizer.TOK_EOW]  # Applied both merges
 
         HINT: For each merge pair, scan through tokens and replace adjacent pairs
         """
@@ -1199,7 +1199,7 @@ class BPETokenizer(Tokenizer):
         "hello world"  # Reconstructed text
 
         HINTS:
-        - Use id_to_token dictionary with '<UNK>' as default
+        - Use id_to_token dictionary with Tokenizer.TOK_UNKNOWN as default
         - Join all tokens into single string with ''.join()
         - Replace Tokenizer.TOK_EOW markers with spaces for word boundaries
         """
@@ -1286,12 +1286,12 @@ BPE provides a balance between vocabulary size and sequence length. By learning 
 ```
 BPE Merging Visualization:
 
-Original: "tokenization" → ['t','o','k','e','n','i','z','a','t','i','o','n',Tokenizer.TOK_EOW]
+Original: "tokenization" → ['t','o','k','e','n','i','z','a','t','i','o','n','</w>']
                                                        ↓ Merge frequent pairs
-Step 1:   ('t','o') is frequent → ['to','k','e','n','i','z','a','t','i','o','n',Tokenizer.TOK_EOW]
-Step 2:   ('i','o') is frequent → ['to','k','e','n','io','z','a','t','io','n',Tokenizer.TOK_EOW]
-Step 3:   ('io','n') is frequent → ['to','k','e','n','io','z','a','t','ion',Tokenizer.TOK_EOW]
-Step 4:   ('to','k') is frequent → ['tok','e','n','io','z','a','t','ion',Tokenizer.TOK_EOW]
+Step 1:   ('t','o') is frequent → ['to','k','e','n','i','z','a','t','i','o','n','</w>']
+Step 2:   ('i','o') is frequent → ['to','k','e','n','io','z','a','t','io','n','</w>']
+Step 3:   ('io','n') is frequent → ['to','k','e','n','io','z','a','t','ion','</w>']
+Step 4:   ('to','k') is frequent → ['tok','e','n','io','z','a','t','ion','</w>']
                                                        ↓ Continue merging...
 Final:    "tokenization" → ['token','ization']  # 2 tokens vs 13 characters!
 ```
