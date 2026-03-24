@@ -11,6 +11,7 @@ import {
   getQuestions, Question, cleanScenario, checkNapkinMath,
   extractFinalNumber, NapkinResult
 } from "@/lib/corpus";
+import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import { saveAttempt, recordActivity } from "@/lib/progress";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 
@@ -385,9 +386,9 @@ export default function DailyPage() {
                   <p className="text-sm text-textPrimary">{current.details.realistic_solution}</p>
                 </div>
                 {current.details.napkin_math && (
-                  <div className="bg-background border border-border p-3 rounded-lg">
-                    <span className="text-[10px] font-mono text-accentBlue uppercase mb-1 block">Napkin Math</span>
-                    <pre className="font-mono text-xs text-textSecondary whitespace-pre-wrap">{current.details.napkin_math}</pre>
+                  <div className="bg-background border border-border p-4 rounded-lg">
+                    <span className="text-[10px] font-mono text-accentBlue uppercase mb-3 block">Napkin Math</span>
+                    <NapkinMathDisplay text={current.details.napkin_math} />
                   </div>
                 )}
 

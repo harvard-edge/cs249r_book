@@ -8,6 +8,7 @@ import Link from "next/link";
 import { STUDY_PLANS, getPlanQuestions, getPlanProgress, markPlanQuestionComplete, StudyPlan } from "@/lib/plans";
 import { Question, cleanScenario, checkNapkinMath, extractFinalNumber, NapkinResult } from "@/lib/corpus";
 import { saveAttempt, recordActivity } from "@/lib/progress";
+import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { useToast } from "@/components/Toast";
 import HardwareRef from "@/components/HardwareRef";
@@ -260,9 +261,9 @@ export default function PlansPage() {
                   <p className="text-sm text-textPrimary">{current.details.realistic_solution}</p>
                 </div>
                 {current.details.napkin_math && (
-                  <div className="bg-background border border-border p-3 rounded-lg">
-                    <span className="text-[10px] font-mono text-accentBlue uppercase mb-1 block">Napkin Math</span>
-                    <pre className="font-mono text-xs text-textSecondary whitespace-pre-wrap">{current.details.napkin_math}</pre>
+                  <div className="bg-background border border-border p-4 rounded-lg">
+                    <span className="text-[10px] font-mono text-accentBlue uppercase mb-3 block">Napkin Math</span>
+                    <NapkinMathDisplay text={current.details.napkin_math} />
                   </div>
                 )}
                 {rubricItems.length > 0 && (

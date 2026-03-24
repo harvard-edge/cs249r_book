@@ -13,6 +13,7 @@ import {
   getQuestionsByFilter, Question, cleanScenario
 } from "@/lib/corpus";
 import { saveAttempt, saveGauntletResult, AttemptRecord, recordActivity } from "@/lib/progress";
+import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 
 type Phase = "setup" | "active" | "review" | "results";
 
@@ -422,8 +423,8 @@ export default function GauntletPage() {
                   </div>
                   {q.details.napkin_math && (
                     <div className="bg-background border border-border p-4 rounded-lg">
-                      <span className="text-[10px] font-mono text-accentBlue uppercase mb-2 block">Napkin Math</span>
-                      <pre className="font-mono text-xs text-textSecondary whitespace-pre-wrap">{q.details.napkin_math}</pre>
+                      <span className="text-[10px] font-mono text-accentBlue uppercase mb-3 block">Napkin Math</span>
+                      <NapkinMathDisplay text={q.details.napkin_math} />
                     </div>
                   )}
 

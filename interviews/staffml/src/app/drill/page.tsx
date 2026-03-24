@@ -10,6 +10,8 @@ import {
 import clsx from "clsx";
 import HardwareRef from "@/components/HardwareRef";
 import NapkinCalc from "@/components/NapkinCalc";
+import NapkinMathDisplay from "@/components/NapkinMathDisplay";
+import LevelBadge from "@/components/LevelBadge";
 import { useToast } from "@/components/Toast";
 import {
   getTracks, getLevels, getCompetencyAreas, getArchetypes, getQuestionsByFilter,
@@ -461,11 +463,12 @@ function DrillPage() {
                     exit={{ opacity: 0, x: 20 }}
                   >
                     <div className="flex items-center gap-3 mb-4">
+                      <LevelBadge level={current.level} />
                       <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-border bg-surface">
                         {current.competency_area}
                       </span>
                       <span className="text-[10px] font-mono text-textTertiary uppercase">
-                        {current.track} / {current.level}
+                        {current.track}
                       </span>
                     </div>
                     <h2 className="text-2xl lg:text-3xl font-bold text-textPrimary mb-6 tracking-tight">
@@ -593,8 +596,8 @@ function DrillPage() {
                     </div>
                     {current.details.napkin_math && (
                       <div className="bg-background border border-border p-4 rounded-lg">
-                        <span className="text-[10px] font-mono text-accentBlue uppercase mb-2 block">Napkin Math</span>
-                        <pre className="font-mono text-xs text-textSecondary whitespace-pre-wrap">{current.details.napkin_math}</pre>
+                        <span className="text-[10px] font-mono text-accentBlue uppercase mb-3 block">Napkin Math</span>
+                        <NapkinMathDisplay text={current.details.napkin_math} />
                       </div>
                     )}
 
