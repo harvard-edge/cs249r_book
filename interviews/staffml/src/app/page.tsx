@@ -14,6 +14,7 @@ import { getAttempts, getStreakData } from "@/lib/progress";
 import { FilterPill, AreaOverview, ExpandedArea, SearchResults, TopicDetail } from "@/components/vault";
 import LevelExplainer from "@/components/LevelExplainer";
 import { isDailyCompleted } from "@/lib/daily";
+import manifest from "@/data/vault-manifest.json";
 
 export default function HomePage() {
   const [mounted, setMounted] = useState(false);
@@ -252,6 +253,8 @@ export default function HomePage() {
                 <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer" className="hover:text-textTertiary transition-colors">Open Source</a>
                 {" "}&middot;{" "}
                 <Link href="/about" className="hover:text-textTertiary transition-colors">About</Link>
+                {" "}&middot;{" "}
+                <span className="font-mono">v{manifest.version}</span>
               </p>
             </div>
           </div>

@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { BookOpen, Github, Target, ArrowLeft, Brain, Layers, BarChart3 } from "lucide-react";
+import { BookOpen, Github, Target, ArrowLeft, Brain, Layers, BarChart3, Package } from "lucide-react";
 import { LEVELS } from "@/lib/levels";
 import { getVaultStats } from "@/lib/taxonomy";
+import manifest from "@/data/vault-manifest.json";
 
 export default function AboutPage() {
   const stats = getVaultStats();
@@ -157,6 +158,29 @@ export default function AboutPage() {
           >
             <Github className="w-4 h-4" /> View on GitHub
           </a>
+        </section>
+
+        {/* Vault Version */}
+        <section className="mb-12">
+          <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
+            <Package className="w-4.5 h-4.5 text-textSecondary" /> Vault Version
+          </h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            {[
+              { label: "Version", value: `v${manifest.version}` },
+              { label: "Questions", value: manifest.questionCount.toLocaleString() },
+              { label: "Chains", value: manifest.chainCount.toLocaleString() },
+              { label: "Concepts", value: manifest.conceptCount.toLocaleString() },
+            ].map(({ label, value }) => (
+              <div key={label} className="p-3 bg-surface border border-borderSubtle rounded-lg text-center">
+                <span className="text-[18px] font-bold font-mono text-textPrimary block">{value}</span>
+                <span className="text-[11px] text-textTertiary">{label}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-[12px] text-textMuted font-mono">
+            Built {manifest.buildDate.slice(0, 10)} &middot; Hash {manifest.contentHash} &middot; Taxonomy v{manifest.taxonomyVersion}
+          </p>
         </section>
 
         {/* CTA */}
