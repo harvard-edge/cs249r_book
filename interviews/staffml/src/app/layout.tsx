@@ -4,21 +4,27 @@ import Nav from "@/components/Nav";
 import Providers from "@/components/Providers";
 
 export const metadata: Metadata = {
-  title: "StaffML — ML Systems Interview Prep",
-  description: "Physics-grounded system design prep for ML Engineers. 5,000+ questions across cloud, edge, mobile, and TinyML. 100% client-side.",
+  metadataBase: new URL("https://staffml.ai"),
+  title: {
+    default: "StaffML — ML Systems Interview Prep",
+    template: "%s | StaffML",
+  },
+  description: "Physics-grounded system design prep for ML Engineers. 4,800+ questions across cloud, edge, mobile, and TinyML. 100% client-side.",
   icons: {
     icon: "/favicon.svg",
   },
   openGraph: {
     title: "StaffML — ML Systems Interview Prep",
-    description: "5,000+ physics-grounded ML systems questions with napkin math verification. Free, open source, no accounts, runs entirely in your browser.",
+    description: "4,800+ physics-grounded ML systems questions with napkin math verification. Free, open source, no accounts, runs entirely in your browser.",
     type: "website",
     siteName: "StaffML",
+    images: [{ url: "/og-image.svg", width: 1200, height: 630, alt: "StaffML — 4,800+ ML systems interview questions" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "StaffML — ML Systems Interview Prep",
-    description: "5,000+ physics-grounded ML systems questions with napkin math. Free, open source, no accounts.",
+    description: "4,800+ physics-grounded ML systems questions with napkin math. Free, open source, no accounts.",
+    images: ["/og-image.svg"],
   },
 };
 
