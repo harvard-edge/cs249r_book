@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Search, X, Target, Crosshair, Flame } from "lucide-react";
+import { Search, X, Target, Crosshair, Flame, Calendar, CheckCircle2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import {
@@ -13,6 +13,7 @@ import { Cloud, Smartphone, Cpu, CircuitBoard } from "lucide-react";
 import { getAttempts, getStreakData } from "@/lib/progress";
 import { FilterPill, AreaOverview, ExpandedArea, SearchResults, TopicDetail } from "@/components/vault";
 import LevelExplainer from "@/components/LevelExplainer";
+import { isDailyCompleted } from "@/lib/daily";
 
 export default function HomePage() {
   const [mounted, setMounted] = useState(false);
@@ -23,6 +24,7 @@ export default function HomePage() {
   const [isReturning, setIsReturning] = useState(false);
   const [streakCount, setStreakCount] = useState(0);
   const [attemptCount, setAttemptCount] = useState(0);
+  const [dailyDone, setDailyDone] = useState(false);
 
   const stats = getVaultStats();
   const areas = getAreas();
@@ -34,6 +36,7 @@ export default function HomePage() {
     setAttemptCount(attempts.length);
     setStreakCount(streak.currentStreak);
     setIsReturning(attempts.length > 0);
+    setDailyDone(isDailyCompleted());
   }, []);
 
   const searchResults = useMemo(() => {
@@ -72,26 +75,49 @@ export default function HomePage() {
       <div className="px-6 pt-8 pb-6 border-b border-border">
         <div className="max-w-5xl mx-auto">
           {isReturning ? (
-            /* Returning user — compact row */
-            <div className="flex items-center justify-between gap-4 mb-5">
-              <div className="flex items-center gap-4">
-                {streakCount > 0 && (
-                  <div className="flex items-center gap-1.5 text-accentAmber">
-                    <Flame className="w-4 h-4" />
-                    <span className="text-sm font-bold font-mono">{streakCount}</span>
-                    <span className="text-xs text-textTertiary">day streak</span>
-                  </div>
-                )}
-                <span className="text-sm text-textSecondary">
-                  {attemptCount} questions answered
-                </span>
+            /* Returning user — compact row + daily CTA */
+            <div className="mb-5 space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  {streakCount > 0 && (
+                    <div className="flex items-center gap-1.5 text-accentAmber">
+                      <Flame className="w-4 h-4" />
+                      <span className="text-sm font-bold font-mono">{streakCount}</span>
+                      <span className="text-xs text-textTertiary">day streak</span>
+                    </div>
+                  )}
+                  <span className="text-sm text-textSecondary">
+                    {attemptCount} questions answered
+                  </span>
+                </div>
+                <Link
+                  href="/practice"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg text-sm transition-colors"
+                >
+                  <Target className="w-4 h-4" /> Browse & Drill
+                </Link>
               </div>
-              <Link
-                href="/practice"
-                className="inline-flex items-center gap-2 px-4 py-2 bg-accentBlue text-white font-bold rounded-lg text-sm hover:opacity-90 transition-opacity"
-              >
-                <Target className="w-4 h-4" /> Continue Practicing
-              </Link>
+              {/* Daily challenge card */}
+              {dailyDone ? (
+                <div className="flex items-center gap-3 px-4 py-3 bg-accentGreen/5 border border-accentGreen/20 rounded-lg">
+                  <CheckCircle2 className="w-5 h-5 text-accentGreen shrink-0" />
+                  <span className="text-sm text-accentGreen font-medium">Today&apos;s challenge complete</span>
+                  <span className="text-xs text-textTertiary ml-auto">New questions tomorrow</span>
+                </div>
+              ) : (
+                <Link href="/practice?daily=1"
+                  className="flex items-center gap-3 px-4 py-3 bg-accentBlue/5 border border-accentBlue/20 rounded-lg hover:bg-accentBlue/10 transition-colors group"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-accentBlue/10 flex items-center justify-center shrink-0">
+                    <Calendar className="w-4.5 h-4.5 text-accentBlue" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-bold text-textPrimary block">Today&apos;s Challenge</span>
+                    <span className="text-xs text-textTertiary">3 questions &middot; ~8 minutes</span>
+                  </div>
+                  <span className="text-sm font-bold text-accentBlue group-hover:translate-x-0.5 transition-transform">&rarr;</span>
+                </Link>
+              )}
             </div>
           ) : (
             /* New user — full hero */
@@ -113,10 +139,16 @@ export default function HomePage() {
               </p>
               <div className="flex items-center gap-3 mb-4">
                 <Link
-                  href="/practice"
+                  href="/practice?daily=1"
                   className="inline-flex items-center gap-2 px-5 py-2.5 bg-accentBlue text-white font-bold rounded-lg text-sm hover:opacity-90 transition-opacity"
                 >
-                  <Target className="w-4 h-4" /> Start Practicing
+                  <Calendar className="w-4 h-4" /> Today&apos;s Challenge
+                </Link>
+                <Link
+                  href="/practice"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-surface border border-border text-textSecondary font-medium rounded-lg text-sm hover:text-textPrimary transition-colors"
+                >
+                  <Target className="w-4 h-4" /> Browse All
                 </Link>
                 <Link
                   href="/gauntlet"
