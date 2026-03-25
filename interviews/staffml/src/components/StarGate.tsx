@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Github, Star, CheckCircle2, ExternalLink } from "lucide-react";
-import { verifyGitHubStar, getStarUrl, getFreeLimit } from "@/lib/star-gate";
+import { verifyGitHubStar, getStarUrl, getFreeLimit, bypassVerification } from "@/lib/star-gate";
 
 export default function StarGate({ onVerified }: { onVerified: () => void }) {
   const [username, setUsername] = useState("");
@@ -103,9 +103,15 @@ export default function StarGate({ onVerified }: { onVerified: () => void }) {
         </div>
 
         {/* Footer */}
-        <p className="text-[11px] text-textMuted text-center">
+        <p className="text-[11px] text-textMuted text-center mb-3">
           StaffML is free and open source. Your star helps us grow and keep building.
         </p>
+        <button
+          onClick={() => { bypassVerification(); onVerified(); }}
+          className="text-[11px] text-textMuted hover:text-textTertiary transition-colors underline block mx-auto"
+        >
+          Continue without starring
+        </button>
       </div>
     </div>
   );

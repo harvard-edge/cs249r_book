@@ -26,7 +26,7 @@ import { getTopicById } from "@/lib/taxonomy";
 import { getDailyQuestions, isDailyCompleted, markDailyCompleted } from "@/lib/daily";
 import { shouldShowGate, incrementReveals, getRemainingReveals, isStarVerified } from "@/lib/star-gate";
 import StarGate from "@/components/StarGate";
-import { Calendar, ArrowLeft } from "lucide-react";
+import { Calendar, ArrowLeft, Flag, LinkIcon } from "lucide-react";
 import Link from "next/link";
 
 export default function PracticePageWrapper() {
@@ -557,6 +557,29 @@ function PracticePage() {
                       <span className="text-[10px] font-mono text-textTertiary uppercase">
                         {current.track}
                       </span>
+                      <span className="flex-1" />
+                      {/* Copy link */}
+                      <button
+                        onClick={() => {
+                          const url = `${window.location.origin}/practice?q=${current.id}`;
+                          navigator.clipboard.writeText(url);
+                          showToast({ type: 'badge', title: 'Link copied', description: 'Share this question with others' });
+                        }}
+                        className="text-textMuted hover:text-textSecondary transition-colors"
+                        title="Copy question link"
+                      >
+                        <LinkIcon className="w-3.5 h-3.5" />
+                      </button>
+                      {/* Report issue */}
+                      <a
+                        href={`https://github.com/harvard-edge/cs249r_book/issues/new?title=${encodeURIComponent(`[StaffML] Issue with: ${current.title}`)}&body=${encodeURIComponent(`**Question ID:** ${current.id}\n**Title:** ${current.title}\n**Level:** ${current.level}\n**Track:** ${current.track}\n**Area:** ${current.competency_area}\n\n**Issue:**\n(describe the problem)\n`)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-textMuted hover:text-accentRed transition-colors"
+                        title="Report an issue with this question"
+                      >
+                        <Flag className="w-3.5 h-3.5" />
+                      </a>
                     </div>
                     <h2 className="text-2xl lg:text-3xl font-bold text-textPrimary mb-6 tracking-tight">
                       {current.title}
@@ -572,9 +595,9 @@ function PracticePage() {
                         href={current.details.deep_dive_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 mt-6 text-xs text-textTertiary hover:text-accentBlue transition-colors"
+                        className="inline-flex items-center gap-2 mt-6 px-3 py-2 text-[13px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
                       >
-                        <BookOpen className="w-3.5 h-3.5" />
+                        <BookOpen className="w-4 h-4" />
                         {current.details.deep_dive_title}
                       </a>
                     )}

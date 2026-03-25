@@ -78,9 +78,17 @@ export default function HomePage() {
               <h1 className="text-3xl sm:text-4xl font-extrabold text-textPrimary tracking-tight mb-2">
                 StaffML
               </h1>
-              <p className="text-[15px] text-textSecondary mb-3">
+              <p className="text-[15px] text-textSecondary mb-1">
                 {stats.totalQuestions.toLocaleString()} physics-grounded ML systems interview questions.
                 100% client-side. No accounts. No tracking.
+              </p>
+              <p className="text-[13px] text-textTertiary mb-3">
+                Built on{" "}
+                <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer"
+                  className="text-accentBlue hover:underline">
+                  Machine Learning Systems
+                </a>
+                {" "}by Prof. Vijay Janapa Reddi, Harvard University.
               </p>
               <div className="flex items-center gap-3 mb-4">
                 <Link
