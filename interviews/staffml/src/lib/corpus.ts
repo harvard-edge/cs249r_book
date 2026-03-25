@@ -268,9 +268,9 @@ for (const q of questions) {
   }
 }
 // Sort each chain by position
-for (const [, qs] of _chainIndex) {
+_chainIndex.forEach((qs) => {
   qs.sort((a, b) => a.position - b.position);
-}
+});
 
 /** Get chain info for a question, or null if not in a chain */
 export function getChainForQuestion(questionId: string): ChainInfo | null {
