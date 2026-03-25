@@ -8,6 +8,7 @@ Content may be incomplete or change without notice. The published curriculum liv
 <p>
 <a href="https://github.com/harvard-edge/cs249r_book/tree/dev"><img src="https://img.shields.io/badge/branch-dev-orange?logo=git&logoColor=white" alt="dev branch"></a>
 <a href="https://mlsysbook.ai"><img src="https://img.shields.io/badge/live_site-mlsysbook.ai-blue?logo=safari&logoColor=white" alt="live site"></a>
+<a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml"><img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml/badge.svg?branch=dev" alt="StaffML Build"></a>
 </p>
 </td></tr>
 </table>
@@ -17,7 +18,7 @@ Content may be incomplete or change without notice. The published curriculum liv
 # The ML Systems Interview Playbook
 
 <p align="center">
-  <b>3,180 systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
+  <b>5,700+ systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
   <i>You can generate the code, but you cannot prompt your way out of a silicon bottleneck.</i>
 </p>
 
@@ -37,9 +38,9 @@ Content may be incomplete or change without notice. The published curriculum liv
 We are building a next-generation interview platform based on this playbook. You can now use our **[Mock Interview Prompts](MOCK_INTERVIEWS.md)** to turn any LLM into a Principal Engineer who will grill you on hardware physics and system design.
 
 **Platform Status:**
-- ✅ **Content Corpus:** 3,180 questions parsed & categorized.
-- ✅ **Physics Engine:** `mlsysim` integrated for deterministic grading.
-- 🏗️ **Website:** Next.js platform under construction.
+- ✅ **Content Corpus:** 5,700+ questions across 1,100+ chains, 6 Bloom levels.
+- ✅ **StaffML App:** [staffml.ai](https://mlsysbook.ai/staffml) — vault, practice, mock interviews, progress tracking.
+- ✅ **CI/CD:** Auto-build and deploy on push to dev.
 - 🏗️ **MCP Server:** Developer extension coming soon.
 
 ---

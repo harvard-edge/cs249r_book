@@ -53,16 +53,79 @@ jobs:
           echo "📊 Build size: $(du -sh interviews/staffml/out | cut -f1)"
 
           # Verify critical pages exist
+          MISSING=0
           for page in practice gauntlet progress about 404; do
             if [ ! -f "interviews/staffml/out/${page}.html" ]; then
-              echo "⚠️ WARNING: ${page}.html missing"
+              echo "❌ MISSING: ${page}.html"
+              MISSING=$((MISSING + 1))
             fi
           done
+          if [ "$MISSING" -gt 0 ]; then
+            echo "❌ $MISSING critical pages missing. Aborting."
+            exit 1
+          fi
 
           # Show vault version
           if [ -f "interviews/staffml/src/data/vault-manifest.json" ]; then
             echo "📋 Vault version: $(python3 -c "import json; print(json.load(open('interviews/staffml/src/data/vault-manifest.json'))['version'])")"
           fi
+
+      - name: 🧪 Smoke tests
+        run: |
+          python3 -c "
+          import json, sys
+
+          # Test 1: Corpus integrity
+          with open('interviews/staffml/src/data/corpus.json') as f:
+              corpus = json.load(f)
+          assert len(corpus) >= 4000, f'Corpus too small: {len(corpus)} questions'
+          print(f'✅ Corpus: {len(corpus)} questions')
+
+          # Test 2: Every question has required fields
+          required = ['id', 'title', 'level', 'track', 'scenario', 'competency_area', 'details']
+          missing = []
+          for q in corpus:
+              for field in required:
+                  if not q.get(field):
+                      missing.append(f'{q.get(\"id\", \"???\")} missing {field}')
+          if missing:
+              print(f'⚠️ {len(missing)} questions with missing fields')
+              for m in missing[:5]:
+                  print(f'   {m}')
+              if len(missing) > 5:
+                  print(f'   ... and {len(missing) - 5} more')
+          else:
+              print('✅ All questions have required fields')
+
+          # Test 3: Every question has a valid level
+          valid_levels = {'L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L6+'}
+          bad_levels = [q['id'] for q in corpus if q.get('level') not in valid_levels]
+          assert len(bad_levels) == 0, f'{len(bad_levels)} questions with invalid levels: {bad_levels[:3]}'
+          print('✅ All levels valid (L1-L6+)')
+
+          # Test 4: Taxonomy loads and has concepts
+          with open('interviews/staffml/src/data/taxonomy.json') as f:
+              taxonomy = json.load(f)
+          concepts = taxonomy.get('concepts', [])
+          assert len(concepts) >= 100, f'Taxonomy too small: {len(concepts)} concepts'
+          print(f'✅ Taxonomy: {len(concepts)} concepts')
+
+          # Test 5: Manifest exists and is valid
+          with open('interviews/staffml/src/data/vault-manifest.json') as f:
+              manifest = json.load(f)
+          assert 'version' in manifest, 'Manifest missing version'
+          assert manifest['questionCount'] == len(corpus), f'Manifest count mismatch: {manifest[\"questionCount\"]} vs {len(corpus)}'
+          print(f'✅ Manifest: v{manifest[\"version\"]} ({manifest[\"questionCount\"]} Qs)')
+
+          # Test 6: Build output has static assets
+          import os
+          js_files = [f for f in os.listdir('interviews/staffml/out/_next/static') if not f.startswith('.')]
+          assert len(js_files) > 0, 'No static JS chunks found'
+          print(f'✅ Static assets: {len(js_files)} chunks')
+
+          print()
+          print('🎯 All smoke tests passed')
+          "
 
       - name: 🚀 Deploy to Dev Site via SSH
         env:
