@@ -146,7 +146,7 @@ The domain of the ML Systems Engineer. This round tests your understanding of wh
 
   **Realistic Solution:** You forgot the Energy-Movement Invariant. Fetching a bit of data from off-chip DRAM costs roughly 100-200x more energy than the math operation (MAC) itself. If your pruning was unstructured, you still have to load the same dense matrices from memory before applying a sparse mask, yielding zero energy savings.
 
-  > **Napkin Math:** A MAC operation costs ~1 pJ. A DRAM access costs ~200 pJ. If your model does 1 TFLOP of math but moves 100 GB of data, the energy split is: compute = 1 mJ, data movement = 20 J. Data movement dominates by 20,000×. Cutting compute in half saves almost nothing.
+  > **Napkin Math:** A MAC operation costs ~1 pJ. A DRAM access costs ~200 pJ. If your model does 1 TFLOP of math but moves 100 GB of data, the energy split is: compute = 1 J, data movement = 20 J. Data movement dominates by 20×. Cutting compute in half saves almost nothing.
 
   📖 **Deep Dive:** [Volume I: Neural Computation](https://harvard-edge.github.io/cs249r_book_dev/contents/neural_computation/neural_computation.html)
 

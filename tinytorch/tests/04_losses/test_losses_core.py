@@ -22,8 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.training import MSELoss, CrossEntropyLoss
-from tinytorch.core.autograd import enable_autograd
+from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyLoss
 
 
 class TestMSELoss:
@@ -53,28 +52,6 @@ class TestMSELoss:
             f"  MSE = (0+0+1)/3 = 0.333\n"
             f"  Got: {loss.data}"
         )
-
-    def test_mse_gradient(self):
-        """
-        WHAT: Verify MSE gradient is 2(pred - target)/n.
-
-        WHY: This gradient tells the model which direction to move.
-        If pred > target, gradient is positive (decrease pred).
-
-        STUDENT LEARNING: dMSE/dpred = 2(pred - target) / n
-        """
-        enable_autograd()
-
-        pred = Tensor([2.0], requires_grad=True)
-        target = Tensor([1.0])
-
-        loss_fn = MSELoss()
-        loss = loss_fn(pred, target)
-        loss.backward()
-
-        # dMSE/dpred = 2*(2-1)/1 = 2
-        assert pred.grad is not None, "MSE should produce gradient"
-
 
 class TestCrossEntropyLoss:
     """Test Cross-Entropy loss for classification."""

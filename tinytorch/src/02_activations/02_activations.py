@@ -281,7 +281,7 @@ def test_unit_sigmoid():
     assert np.all(result.data > 0) and np.all(result.data < 1), "All sigmoid outputs should be in (0, 1)"
 
     # Test specific values
-    # Temporarily sppress overflow warning, expected
+    # Temporarily suppress overflow warning, expected
     warnings.filterwarnings('ignore', category=RuntimeWarning)
     print("Suppressed expected warning about exp overflow...")
 
@@ -618,7 +618,7 @@ class GELU:
         >>> x = Tensor([-1, 0, 1])
         >>> result = gelu(x)
         >>> print(result.data)
-        [-0.159, 0.0, 0.841]  # Smooth, like ReLU but differentiable everywhere
+        [-0.15, 0.0, 0.85]  # Smooth, like ReLU but differentiable everywhere
 
         HINT: The 1.702 constant is empirically fitted so that sigmoid(1.702x) ≈ Φ(x)
         """
@@ -1169,7 +1169,7 @@ Congratulations! You've built the intelligence engine of neural networks!
 - **Built 5 core activation functions** with distinct behaviors and use cases
 - **Implemented forward passes** for Sigmoid, ReLU, Tanh, GELU, and Softmax
 - **Discovered computational cost differences** between activations (ReLU fastest)
-- **Handled numerical stability** with clipping and max subtraction techniques
+- **Handled numerical stability** with max subtraction techniques
 - **All tests pass** (validated by `test_module()`)
 
 ### Systems Insights Discovered

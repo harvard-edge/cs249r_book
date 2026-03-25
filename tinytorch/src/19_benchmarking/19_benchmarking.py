@@ -4010,7 +4010,8 @@ For a model that takes 1ms to execute:
 - At what model latency does timer overhead become negligible (<1%)? _____ ms
 
 ### 3. Benchmark Configuration Trade-offs
-Your optimize_benchmark_configuration() function tested different warmup/measurement combinations.
+The BenchmarkSuite class uses configurable warmup_runs and measurement_runs parameters
+(with DEFAULT_WARMUP_RUNS=5 and DEFAULT_MEASUREMENT_RUNS=100 as defaults).
 For a CI/CD pipeline that runs 100 benchmarks per day:
 - Fast config (3s each): _____ minutes total daily
 - Accurate config (15s each): _____ minutes total daily
@@ -4073,10 +4074,10 @@ def demo_benchmarking():
     print(f"Model: Linear(512 → 256)")
     print(f"Batch: 32 samples")
     print(f"\nBenchmark Results (10 iterations):")
-    print(f"  Mean latency: {result.mean*1000:.2f} ms")
-    print(f"  Std dev:      {result.std*1000:.2f} ms")
-    print(f"  Min:          {result.min_val*1000:.2f} ms")
-    print(f"  Max:          {result.max_val*1000:.2f} ms")
+    print(f"  Mean latency: {result.mean:.2f} ms")
+    print(f"  Std dev:      {result.std:.2f} ms")
+    print(f"  Min:          {result.min_val:.2f} ms")
+    print(f"  Max:          {result.max_val:.2f} ms")
 
     print("\n✨ Reliable measurements guide optimization decisions!")
 

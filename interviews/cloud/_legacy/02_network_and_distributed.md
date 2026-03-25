@@ -1236,7 +1236,7 @@ The domain of the AI Infrastructure Engineer. This round tests your understandin
 
   **The Fix:** You should use **Data Parallelism** (or Replica Parallelism) for serving. Run Replica A on GPUs 0,1 (TP=2) and Replica B on GPUs 2,3 (TP=2). This gives you exactly 2x the throughput with zero additional network overhead.
 
-  > **Napkin Math:** A 70B model with 80 layers requires 160 AllReduces per token. At TP=2, an NVLink AllReduce might take 5µs (160 * 5 = 0.8ms total). At TP=4, it might take 8µs (160 * 8 = 1.28ms total). The network overhead increases latency by 50% without speeding up the memory-bound math at all.
+  > **Napkin Math:** A 70B model with 80 layers requires 160 AllReduces per token. At TP=2, an NVLink AllReduce might take 5µs (160 * 5 = 0.8ms total). At TP=4, it might take 8µs (160 * 8 = 1.28ms total). The network overhead increases latency by 60% without speeding up the memory-bound math at all.
 
   📖 **Deep Dive:** [Volume II: Distributed Training](https://harvard-edge.github.io/cs249r_book_dev/contents/distributed_training/distributed_training.html)
 

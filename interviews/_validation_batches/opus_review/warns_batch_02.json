@@ -1,0 +1,818 @@
+[
+  {
+    "id": "cloud-data-pipeline-real-time-click-prediction-with-continua-82",
+    "title": "Real-Time Click Prediction with Continual Learning",
+    "level": "L6+",
+    "track": "cloud",
+    "ka": "A5",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "We need to update our ad click-through rate (CTR) prediction models in real-time. We receive over 10 million ad events (impressions, clicks, conversions) per second globally. How do you design the streaming ingestion and distributed training pipeline to update the model weights within 5 minutes of a user interacting with an ad, while rigorously handling delayed feedback (late clicks)?",
+    "common_mistake": "Using a standard batch data warehouse (like Presto/Spark) to join impressions and clicks on a micro-batch schedule. Alternatively, ignoring delayed feedback entirely, which forces the model to treat all impressions without immediate clicks as negative, catastrophically biasing the real-time distribution.",
+    "realistic_solution": "Utilize a streaming framework (e.g., Apache Flink) paired with Kafka for event ingestion. Implement a windowing strategy with watermarks to join impressions with clicks in memory. If no click arrives within a short window (e.g., 5 mins), emit a negative label to the training cluster. If a click arrives hours later, emit a positive label with an importance weight or use negative-sample correction techniques (e.g., Fake Negative Calibration) to correct the prior gradient update. Send joined examples to a distributed Parameter Server or an asynchronous DDP training cluster. Use Follow The Regularized Leader (FTRL) for sparse IDs and SGD for dense layers, periodically pushing updated weights to the inference fleet.",
+    "napkin_math": "10M events/sec. Average joined event size (dense features + sparse IDs) = 1KB. Network throughput = 10GB/sec. To keep up with ingestion, we need ~100 Flink nodes processing 100MB/s each. For training, a batch size of 8192 across 32 GPUs processes ~100k samples/sec/GPU. This requires a dedicated real-time training cluster of ~100 GPUs constantly consuming the streaming data to prevent backpressure.",
+    "flash_issues": [
+      "The napkin math's statement 'a batch size of 8192 across 32 GPUs processes ~100k samples/sec/GPU' is a bit vague and could be clarified regarding whether 100k samples/sec is per GPU or total throughput, and if it's a reasonable throughput for the implied model complexity."
+    ]
+  },
+  {
+    "id": "tinyml-duty-cycling-power-the-duty-cycle-power-drain-7",
+    "title": "The Duty Cycle Power Drain",
+    "level": "L1",
+    "track": "tinyml",
+    "ka": "D6",
+    "rc": "RC-8",
+    "mode": "concept-recall",
+    "scenario": "You are designing a battery-powered sensor with a Cortex-M4 microcontroller. To save energy, you use a duty cycle where the device is active for 1 second and then enters a deep sleep mode for 9 seconds. If the active power is 10 mW and the deep sleep power is 10 µW, what is the approximate average power consumption over the full 10-second period?",
+    "common_mistake": "Engineers often forget how dominant the active power is, even for a short duration, and incorrectly average the two power numbers (e.g., (10mW + 10µW)/2) without considering the time spent in each state. This ignores the core principle of a duty cycle and leads to a massive overestimation of power drain and underestimation of battery life.",
+    "realistic_solution": "The average power is the time-weighted average of the active and sleep power consumption. The device is active 10% of the time (1s out of 10s) and in deep sleep 90% of the time (9s out of 10s). The active phase dominates the calculation, while the sleep phase's contribution is almost negligible.",
+    "napkin_math": "Total Period = 1s (active) + 9s (sleep) = 10s",
+    "flash_issues": [
+      "The Napkin Math section is incomplete, only stating the total period without providing the full calculation for average power.",
+      "The Realistic Solution describes the calculation but does not state the numerical answer to the question 'what is the approximate average power consumption'."
+    ]
+  },
+  {
+    "id": "mobile-mobile-battery-drain-the-dashcam-battery-drain-150",
+    "title": "The Dashcam Battery Drain",
+    "level": "L2",
+    "track": "mobile",
+    "ka": "D5",
+    "rc": "RC-1",
+    "mode": "napkin-math",
+    "scenario": "You're a developer on a connected car platform, and your team owns the 'smart dashcam' feature that runs on the user's phone. Users are complaining that a 30-minute commute drains their battery significantly. Your telemetry shows that when the perception model is active, the phone's SoC draws an average of 4 Watts. Assuming a typical high-end smartphone has a 20 Watt-hour battery, calculate the percentage of the battery consumed during this 30-minute drive.",
+    "common_mistake": "The most common mistake is confusing power (a rate, in Watts) with energy (an amount, in Watt-hours). Candidates often incorrectly divide the power draw directly by the battery capacity without accounting for the time duration, or they make a unit conversion error between minutes and hours.",
+    "realistic_solution": "The correct approach is to first calculate the total energy consumed and then compare it to the battery's total capacity. The SoC consumes 4 Watts (which is 4 Joules per second). Over a 30-minute (0.5 hour) period, the total energy consumed is Power × Time. This equals 4 W × 0.5 h = 2 Wh. With a total battery capacity of 20 Wh, the drain is (2 Wh / 20 Wh) = 0.10, or 10%. This is a substantial drain and explains the user complaints, highlighting the need for power optimization, such as duty cycling.",
+    "napkin_math": "Power = 4 W | Time = 30 minutes = 0.5 hours | Energy Consumed = 4 W × 0.5 h = 2 Wh",
+    "flash_issues": [
+      "The Knowledge Area (KA) D5 (Throughput) is not the most precise fit for a question primarily focused on battery energy consumption; D4 (Power/Energy Efficiency) would be more appropriate."
+    ]
+  },
+  {
+    "id": "edge-fault-tolerance-the-gpu-driver-crash-recovery-424",
+    "title": "The GPU Driver Crash Recovery",
+    "level": "L4",
+    "track": "edge",
+    "ka": "C6",
+    "rc": "RC-7",
+    "mode": "tradeoff-analysis",
+    "scenario": "Your Jetson Orin-based autonomous forklift runs a safety-critical obstacle detection model. The NVIDIA GPU driver crashes once every ~72 hours (a known issue with the specific L4T version). The driver recovers in 3 seconds, but during recovery, the forklift has no perception. At 2 m/s, the forklift travels 6 meters blind. Your safety engineer says this is unacceptable. How do you maintain perception during a GPU driver crash?",
+    "common_mistake": "\"Update the driver\" or \"File a bug with NVIDIA.\" Both are correct long-term actions but don't solve the immediate safety problem for deployed units.",
+    "realistic_solution": "You need a perception fallback that doesn't depend on the GPU. The Orin has multiple independent compute engines: (1) **DLA (Deep Learning Accelerator)** — has its own driver stack, independent of the GPU driver. Pre-load a lightweight obstacle detection model (MobileNet-SSD, ~5 MB) on DLA1. It runs at lower accuracy (75% mAP vs 92% for the GPU model) but provides continuous perception during GPU recovery. DLA inference: 15ms per frame → 66 FPS, more than sufficient. (2) **CPU fallback** — the Orin's 12-core Cortex-A78AE can run a tiny YOLO-Nano model at ~5 FPS using ONNX Runtime with NEON SIMD. Latency: 200ms — marginal but better than blind. (3) **Ultrasonic/LiDAR safety curtain** — a hardware-only safety system using 4 ultrasonic sensors (no ML, no GPU, no driver) that triggers emergency stop when any object is within 2 meters. Response time: <10ms. Cost: $40 for 4 sensors + microcontroller.",
+    "napkin_math": "GPU driver crash: 3s recovery. Forklift speed: 2 m/s. Blind distance without fallback: 6m. With DLA fallback (200ms activation): 0.4m blind distance. With ultrasonic curtain (always active, 10ms response): 0.02m blind distance. DLA model size: 5 MB. DLA inference: 15ms/frame. CPU fallback: 200ms/frame = 5 FPS. Ultrasonic sensor cost: $10 each × 4 = $40. Microcontroller (STM32): $5. Total safety system cost: $45. MTBF of GPU driver crash: 72 hours. Expected blind events per year: 8760/72 = 122 events.",
+    "flash_issues": [
+      "The 'Realistic Solution' is cut off mid-sentence ('(2) CPU fallback — the O').",
+      "The Napkin Math for DLA fallback activation time (200ms) seems high for a pre-loaded model, which should be near-instantaneous to switch to; 200ms might be for CPU fallback or a cold start, but it's attributed to DLA here.",
+      "The Napkin Math for 'Expected blind events per year: 8760/72 = 122 ev' is missing the unit 'events'."
+    ]
+  },
+  {
+    "id": "cloud-constant-batch-size-scaling-l4-0",
+    "title": "Diagnosing Loss Spikes During Elastic Training Scaling",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "C5",
+    "rc": "RC-4",
+    "mode": "optimization-task",
+    "scenario": "Your training job for a 13B parameter LLM is configured for elastic scaling on AWS EC2 P4d (8x A100 40GB) instances. The job starts with 16 nodes (128 GPUs). When spot instances become available, the orchestrator scales the cluster up to 32 nodes (256 GPUs). Immediately after scaling, the training loss spikes drastically and the model diverges. The optimizer is AdamW with a learning rate of 1e-4, and the per-GPU micro-batch size is hardcoded to 8.",
+    "common_mistake": "Candidates often blame the loss spike on stale gradients, network congestion during the topology change, or optimizer state corruption during the checkpoint resume, failing to realize the effective batch size doubled, altering optimization dynamics.",
+    "realistic_solution": "Diagnose that the effective global batch size inadvertently doubled from 1024 to 2048 because the per-GPU batch size was hardcoded. The correct fix is to implement constant batch size scaling: dynamically reduce the per-GPU micro-batch size to 4 or decrease gradient accumulation steps proportionally so the global batch size remains exactly 1024.",
+    "napkin_math": "Initial GBS = 128 GPUs * 8 samples/GPU = 1024. After scaling up to 256 GPUs, if micro-batch remains 8, new GBS = 256 * 8 = 2048. To maintain constant GBS of 1024 across 256 GPUs: Target per-GPU batch size = 1024 / 256 = 4.",
+    "flash_issues": [
+      "The stated A100 HBM bandwidth of 2 TB/s is for the 80GB version; the A100 40GB has 1.555 TB/s."
+    ]
+  },
+  {
+    "id": "cloud-kernel-fusion-l5-0",
+    "title": "Evaluating Fusion Strategies for Custom Layers",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "B5",
+    "rc": "RC-9",
+    "mode": "tradeoff-analysis",
+    "scenario": "Your team is optimizing a custom Transformer layer on A100 GPUs (2039 GB/s HBM bandwidth). The layer includes a sequence of memory-bound operations: an element-wise activation, a custom normalization, and a masking step. Unfused, these operations process a 50MB tensor and take 150us. You must evaluate three options: (1) keep them as separate PyTorch operations, (2) write a hand-tuned CUDA kernel, or (3) use a JIT compiler like Triton. Justify your decision comparing memory traffic, execution latency, and engineering overhead.",
+    "common_mistake": "Assuming custom CUDA is always required for optimal performance, ignoring the significant engineering debt, or failing to identify that the operations are purely memory bandwidth bound rather than compute bound.",
+    "realistic_solution": "Use a JIT compiler like Triton (e.g., via torch.compile) to automatically fuse the operations. Since these are memory-bound, the primary latency comes from HBM reads/writes of intermediate tensors. Fusion keeps intermediates in SRAM. Triton achieves near-native CUDA performance for element-wise and reduction fusions with minimal maintenance overhead.",
+    "napkin_math": "Unfused: 3 operations require reading and writing the 50MB tensor (3 ops * 2 transfers * 50MB = 300MB total traffic). At 2 TB/s HBM bandwidth, bandwidth-limited time is 300MB / 2000GB/s = 150us. Fused: Read input once, write output once (2 transfers * 50MB = 100MB traffic). Bandwidth-limited time drops to 100MB / 2000GB/s = 50us. You achieve a 3x speedup purely from bandwidth savings.",
+    "flash_issues": [
+      "The scenario description is cut off at the end."
+    ]
+  },
+  {
+    "id": "tinyml-quantization-calibration-failure-the-silent-saturation-373",
+    "title": "The Silent Saturation",
+    "level": "L3",
+    "track": "tinyml",
+    "ka": "D2",
+    "rc": "RC-5",
+    "mode": "symptom-to-cause",
+    "scenario": "You are a TinyML engineer working on a keyword spotting device using a Cortex-M4 with 256KB of SRAM. Your CNN model achieves 96% accuracy in FP32 simulation. To meet the memory constraints, you apply post-training static quantization to convert the model to INT8. The model now fits on the device, but its accuracy plummets to less than 20% (near-random guessing). You have already verified that the model's *weights* were quantized correctly. Using your knowledge of the quantization process, diagnose the most likely cause of this catastrophic performance drop.",
+    "common_mistake": "Engineers often blame the tooling (`tflite_convert` has a bug), the hardware (stack overflow corrupting the tensor arena), or the model architecture itself. They frequently forget that quantization applies to both weights *and activations*, and that a mismatch between the calibration data's distribution and the real-world data's distribution can be fatal for activations.",
+    "realistic_solution": "The most likely cause is activation saturation due to an unrepresentative calibration dataset. Post-training static quantization uses a small set of data to determine the dynamic range (min/max values) of each layer's activations. If the real-world audio contains sounds that are louder or have a different frequency profile than the calibration set, the activation values in an intermediate layer (e.g., after a ReLU) can exceed the range observed during calibration. These values are then 'clipped' or 'saturated' to the INT8 min/max value (-128 or 127), destroying the information in that layer and causing a catastrophic failure downstream. The fix is to provide a calibration dataset that is truly representative of the inputs the device will see in production.",
+    "napkin_math": "Let's diagnose the issue with numbers. Your model has 300K parameters.",
+    "flash_issues": [
+      "The 'Napkin Math' section is empty, which is problematic for a technical interview question that often expects some numerical reasoning."
+    ]
+  },
+  {
+    "id": "edge-kv-cache-vram-accounting-the-in-car-kv-cache-budget-132",
+    "title": "The In-Car KV-Cache Budget",
+    "level": "L2",
+    "track": "edge",
+    "ka": "C1",
+    "rc": "RC-11",
+    "mode": "concept-recall",
+    "scenario": "You are an engineer on an automotive AI team, tasked with deploying a small vision-language model (VLM) for the in-car assistant on a Jetson AGX Orin platform. After a short conversation, the model's context has reached 512 tokens. Your lead asks for a quick estimate of the VRAM footprint for the KV-cache alone to ensure it fits within the memory budget.",
+    "common_mistake": "The most common mistake is to forget one or both of the `×2` multipliers in the equation. Engineers often forget to account for both the Key and Value tensors (the first `×2`), or they forget that FP16 precision requires two bytes per value (the second `×2`). This leads to underestimating the memory by 2-4x, a critical error when operating under the tight memory constraints of an edge device like the Jetson AGX Orin.",
+    "realistic_solution": "The correct way to calculate the KV-cache size is to multiply the context length by all the dimensions of the cache, and then account for the two tensors (Key and Value) and the byte size of the data type.",
+    "napkin_math": "Total Cache Size = Context Length × Num Layers × Num Heads × Head Dim × 2 (for K and V) × Bytes per Value",
+    "flash_issues": [
+      "The scenario does not provide the specific model parameters (Num Layers, Num Heads, Head Dim) required for the calculation, which are then assumed in the Napkin Math section."
+    ]
+  },
+  {
+    "id": "cloud-integration-bottleneck-l4-0",
+    "title": "Diagnosing HBM-to-SRAM Integration Bottlenecks in Attention",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "B3",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "You are deploying a large Transformer model on an NVIDIA H100 GPU (80GB HBM3, 3.35 TB/s bandwidth). Profiling reveals that standard Attention kernels are severely underutilizing the 989 TFLOPs (FP16) Tensor Cores. Furthermore, power consumption spikes during data transfers between HBM and SRAM rather than during matrix multiplications. How do you analyze this integration bottleneck, and what algorithmic or architectural optimization is required to keep the compute units fed?",
+    "common_mistake": "Candidates often suggest simply increasing the batch size, buying faster HBM, or pruning the model, missing that the fundamental issue is the O(N^2) memory read/write complexity of standard attention materializing intermediate logits in HBM, which starves the compute units.",
+    "realistic_solution": "Implement an IO-aware kernel like FlashAttention that fuses the attention operations. By tiling the Q, K, and V matrices and computing the softmax incrementally in the GPU's SRAM (50MB capacity), you bypass the HBM read/write integration bottleneck. This reduces memory accesses from O(N^2) to O(N) and allows Tensor Cores to run continuously without stalling for data.",
+    "napkin_math": "Standard attention (N=4096, d=128): Intermediate attention matrix S = Q*K^T is 4096x4096. Storing S in FP16 takes 4096*4096*2 = 33.5 MB. Reading/writing this to HBM for softmax and V-multiplication requires ~134 MB of HBM traffic per head. Fusing operations and keeping this in SRAM saves ~134 MB of HBM bandwidth per head. Across 32 heads, this saves ~4.2 GB of HBM traffic per layer, bypassing the integration bottleneck.",
+    "flash_issues": [
+      "The napkin math's claim of '~134 MB of HBM traffic per head' for standard attention and the corresponding saving seems to be roughly 2x the actual calculated O(N^2) memory traffic (closer to 67-71 MB) for N=4096, d=128."
+    ]
+  },
+  {
+    "id": "edge-security-the-model-theft-from-edge-device-94",
+    "title": "The Model Theft from Edge Device",
+    "level": "L5",
+    "track": "edge",
+    "ka": "E2",
+    "rc": "RC-7",
+    "mode": "tradeoff-analysis",
+    "scenario": "Your company spent $2M training a proprietary detection model. It's deployed on 5,000 edge devices running Jetson Orin. A competitor buys one of your devices on the secondary market. How do they extract your model, and what can you do to prevent it?",
+    "common_mistake": "\"Encrypt the model file on disk.\" Encryption at rest is necessary but not sufficient — the model must be decrypted into GPU memory to run inference, and that's where extraction happens.",
+    "realistic_solution": "Attack vectors for model extraction from a physical device:",
+    "napkin_math": "Training cost: $2M. Disk extraction (unencrypted): $500 for the device + 10 minutes. Disk extraction (encrypted, no HSM): $5,000 for JTAG equipment + 1 week. API distillation: 100,000 queries × $0.01/query = $1,000 + 1 month of training = ~$50,000. With all defenses: physical extraction requires defeating secure boot + TEE + HSM ≈ $500,000+ and specialized expertise. The goal: make extraction cost > $2M.",
+    "flash_issues": [
+      "The 'Realistic Solution' text is truncated and does not fully describe the solutions, only lists attack vectors."
+    ]
+  },
+  {
+    "id": "cloud-b2-the-gqa-prefill-illusion-5",
+    "title": "The GQA Prefill Illusion",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "B2",
+    "rc": "RC-1",
+    "mode": "symptom-to-cause",
+    "scenario": "A cloud provider serves a 70B LLM. To improve throughput, they switch from Multi-Head Attention (MHA) to Grouped-Query Attention (GQA), reducing KV heads by 8x. They observe a 3x throughput increase in the decoding phase. However, for a prominent enterprise customer who sends massive 50k-token prompts and only generates 10 tokens per request, the end-to-end latency drops by a mere 2%.",
+    "common_mistake": "Assuming reducing KV cache size by 8x will uniformly speed up all attention operations by reducing memory traffic.",
+    "realistic_solution": "Decoding is heavily memory-bandwidth bound because the model must read the entire KV cache from HBM for every single generated token. GQA reduces this memory payload by 8x, directly speeding up decoding. Prefill (prompt processing), however, is compute-bound. It performs a dense matrix multiplication of Q x K^T. Even though the K matrix is smaller in GQA, the number of FLOPs required to compute the attention scores (N x N) remains dominated by the sequence length N and is bounded by the GPU's compute ceiling. Reducing memory traffic yields negligible latency benefits when the operation is bottlenecked by the MXUs.",
+    "napkin_math": "Prefill attention FLOPs for N=50k, d=4096: 2 x 50k x 50k x 4096 = 20.4 TFLOPs. On H100 (989 TFLOPS FP16), compute time = ~20ms. Memory to load MHA K, V for 50k tokens = 50k x 4096 x 2 x 2 = ~800 MB. Loading 800 MB at 3.35 TB/s takes ~0.24 ms. GQA reduces the 0.24 ms to 0.03 ms. The operation is entirely dominated by the 20ms compute time, so saving 0.21 ms of memory transfer yields a ~1% speedup.",
+    "flash_issues": [
+      "The napkin math calculates a ~1% latency drop, which is slightly different from the scenario's claim of a 2% drop."
+    ]
+  },
+  {
+    "id": "cloud-a2-batch-norm-distributed-training-17",
+    "title": "BatchNorm Breaks in Distributed Training",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "A2",
+    "rc": "RC-4",
+    "mode": "symptom-to-cause",
+    "scenario": "Your team is scaling a ResNet-50 training job from 1 GPU to 64 GPUs using data parallelism. After scaling, validation accuracy drops by 2.3% despite identical hyperparameters. The only difference: the effective local batch size per GPU dropped from 256 to 4 (global batch 256 preserved). A senior engineer suspects BatchNorm. Explain the root cause and two solutions.",
+    "common_mistake": "Blaming the optimizer or learning rate schedule for the accuracy drop. The root cause is that BatchNorm statistics computed over a local batch of 4 samples are extremely noisy, degrading normalization quality.",
+    "realistic_solution": "Root cause: BatchNorm computes mean and variance over the local batch dimension. With batch size 4 per GPU, these statistics have high variance (standard error of mean ~ 1/sqrt(4) = 0.5), causing noisy normalization during training and a mismatch with the running statistics accumulated for inference. Solutions: (1) SyncBatchNorm: compute mean/variance across all 64 GPUs before normalizing. This restores the effective batch size to 256 for statistics, but adds an AllReduce per BatchNorm layer per forward pass. Cost: 2 AllReduces (mean and variance) per BN layer. For ResNet-50 with 53 BN layers: 106 AllReduces per forward pass + 106 per backward pass, adding ~5-10ms per step on NVLink. (2) Replace BatchNorm with LayerNorm or GroupNorm: these compute statistics per-sample, so they are invariant to batch size. No communication overhead. Trade-off: slightly different convergence behavior requiring hyperparameter retuning.",
+    "napkin_math": "BN noise: std_error = sigma / sqrt(B_local). B_local=256: error ~ sigma/16. B_local=4: error ~ sigma/2 (8x noisier). SyncBN cost: 53 BN layers * 2 AllReduces * 2 (fwd+bwd) = 212 AllReduces per step. At 10us per AllReduce on NVLink: ~2ms overhead per step.",
+    "flash_issues": [
+      "The 'Realistic Solution' only provides one solution (SyncBatchNorm) but the question asks for 'two solutions'."
+    ]
+  },
+  {
+    "id": "cloud-b4-memory-coalescing-penalty-2",
+    "title": "The Memory Coalescing Penalty",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "B4",
+    "rc": "RC-11",
+    "mode": "napkin-math",
+    "scenario": "Two CUDA kernels process the same 2D matrix stored in row-major order. Kernel A has each thread in a warp access consecutive elements in the same row (thread $i$ accesses `M[row][i]`). Kernel B has each thread access elements in the same column (thread $i$ accesses `M[i][col]`). Both kernels perform the same arithmetic. On an H100 with 3.35 TB/s HBM bandwidth, Kernel A runs 8x faster than Kernel B. Why?",
+    "common_mistake": "Assuming both access patterns are equivalent because they access the same total number of elements. Engineers from CPU backgrounds may not realize that GPU memory transactions are coalesced at the warp level.",
+    "realistic_solution": "GPU memory controllers coalesce memory requests from threads within the same warp into a minimum number of cache-line-sized transactions (128 bytes on modern GPUs). In Kernel A, 32 consecutive threads access 32 consecutive 4-byte floats = 128 bytes, which is exactly one cache line transaction. In Kernel B, 32 threads access elements separated by a full row stride, causing up to 32 separate cache line fetches for the same warp. Each fetch loads 128 bytes but only uses 4 bytes, wasting 124/128 = 97% of bandwidth. The effective bandwidth drops from 3.35 TB/s to roughly 3.35 TB/s / 32 = ~105 GB/s.",
+    "napkin_math": "Coalesced (Kernel A): 32 threads x 4 bytes = 128 bytes per transaction. 1 transaction per warp. Strided (Kernel B): 32 threads x 1 cache line (128 bytes) = 4,096 bytes fetched but only 128 bytes used. Bandwidth waste ratio: 4096/128 = 32x. Effective bandwidth: 3.35 TB/s / 32 = ~105 GB/s. Speedup of A over B: ~32x theoretical, ~8x in practice due to L2 cache partially mitigating strided accesses.",
+    "flash_issues": [
+      "The 'Realistic Solution' text is cut off at the end."
+    ]
+  },
+  {
+    "id": "cloud-gpu-roofline-arithmetic-intensity-defining-arithmetic-intensity-13",
+    "title": "Defining Arithmetic Intensity",
+    "level": "L1",
+    "track": "cloud",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "concept-recall",
+    "scenario": "In the context of the GPU Roofline Model, what does the term 'Arithmetic Intensity' fundamentally represent?",
+    "common_mistake": "Engineers often confuse Arithmetic Intensity with raw performance (TFLOPS) or memory bandwidth (GB/s). Another common mistake is inverting the ratio, thinking it's Bytes per FLOP instead of FLOPs per Byte.",
+    "realistic_solution": "Arithmetic Intensity is the ratio of total floating-point operations (FLOPs) performed by a kernel to the total bytes of data moved from memory (HBM, in the case of a datacenter GPU) to serve those operations. It quantifies how much computation a workload performs for each byte of data it fetches. A high AI means a lot of compute work for little memory traffic, while a low AI means the workload is memory-heavy.",
+    "napkin_math": "Imagine a simple operation, like adding two vectors of 1000 FP32 numbers (4 bytes each).",
+    "flash_issues": [
+      "The `Napkin Math` section is incomplete, preventing full verification of the intended example calculation."
+    ]
+  },
+  {
+    "id": "edge-gpu-roofline-intensity-the-edge-roofline-bottleneck-203",
+    "title": "The Edge Roofline Bottleneck",
+    "level": "L1",
+    "track": "edge",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "concept-recall",
+    "scenario": "An autonomous vehicle team deploys a new vision model on a Jetson AGX Orin. The model performs 50 Giga-operations (G-ops) and accesses 250 Megabytes (MB) of data from memory for each frame. What fundamental hardware limit is this workload most likely hitting?",
+    "common_mistake": "Engineers often fixate on the peak TOPS number advertised for a chip (e.g., 275 TOPS for the Orin) and assume their workload is always compute-bound. They forget that if the model doesn't perform enough computation for every byte it fetches from memory, the system will spend most of its time waiting for data, no matter how fast the processor is. Performance is dictated by the bottleneck.",
+    "realistic_solution": "The model is memory-bound. To determine the bottleneck, we look at the model's arithmetic intensity (AI) — the ratio of compute to memory access. The Jetson AGX Orin has a memory bandwidth of about 205 GB/s and a peak compute of 275 TOPS (INT8). Its 'ridge point'—the AI needed to balance compute and memory—is roughly 1,342 Ops/Byte. This model's AI is far below that, meaning the memory system cannot supply data fast enough to keep the compute units busy.",
+    "napkin_math": "1.  **Calculate the model's Arithmetic Intensity (AI):**",
+    "flash_issues": [
+      "The 'Napkin Math' section is incomplete, missing the calculation of the model's arithmetic intensity and the final comparison to the ridge point."
+    ]
+  },
+  {
+    "id": "cloud-c2-diagnosing-pcie-numa-mismatch-1",
+    "title": "Diagnosing PCIe NUMA Mismatch",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "C2",
+    "rc": "RC-2",
+    "mode": "failure-to-root-cause",
+    "scenario": "You deploy a ResNet-50 training job on a dual-socket server with 8x A100 GPUs. GPUs 0-3 achieve 1500 images/s each, but GPUs 4-7 consistently drop to 700 images/s, limiting total throughput to 8800 img/s instead of the expected 12000 img/s. GPU utilization on 4-7 fluctuates wildly between 40-60%. The PyTorch dataloader uses 64 CPU workers configured with default settings.",
+    "common_mistake": "Assuming the GPUs 4-7 are thermally throttling or defective, leading to a hardware swap.",
+    "realistic_solution": "The root cause is a NUMA (Non-Uniform Memory Access) topology mismatch. By default, the OS may spawn all 64 dataloader CPU workers on NUMA node 0. GPUs 0-3 are attached to CPU 0's PCIe root complex, enjoying direct PCIe Gen4 x16 bandwidth. However, GPUs 4-7 are attached to CPU 1. Data fetched by workers on CPU 0 must traverse the inter-socket UPI (Ultra Path Interconnect) link to reach CPU 1 before going to GPUs 4-7. The UPI link is bottlenecked by the heavy cross-traffic. The solution is to use `numactl` or PyTorch's `DataLoader` affinity settings to pin workers 0-31 to NUMA node 0 for GPUs 0-3, and workers 32-63 to NUMA node 1 for GPUs 4-7.",
+    "napkin_math": "1500 img/s * 3MB/img = 4.5 GB/s per GPU. 4 GPUs = 18 GB/s. A typical UPI link delivers ~20 GB/s real-world throughput. If 4 GPUs pull 18 GB/s across the UPI link simultaneously, it saturates, causing the host-device transfer for GPUs 4-7 to drop to ~8.4 GB/s (equivalent to 700 img/s * 3MB * 4 GPUs).",
+    "flash_issues": [
+      "The napkin math states '1500 img/s * 3MB/img = 4.5 GB/s per GPU'. While 3MB is a plausible image size, it's not explicitly stated in the scenario. It would be good to either state this assumption or make it a variable.",
+      "The napkin math states 'A typical UPI link delivers ~20 GB/s real-world throughput'. This is a reasonable estimate, but it's good to specify if this is for a single link or aggregate, and which generation (e.g., UPI 2.0). For a dual-socket server, there are typically 2-3 UPI links, each capable of 10.4 GT/s or 11.2 GT/s per lane, with multiple lanes. A single UPI link can provide more than 20 GB/s, but cross-socket traffic might be limited by the aggregate bandwidth of the active links and contention."
+    ]
+  },
+  {
+    "id": "cloud-e3-fairness-impossibility-tradeoff-1",
+    "title": "The Fairness Impossibility Tradeoff",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "E3",
+    "rc": "RC-8",
+    "mode": "concept-recall",
+    "scenario": "Your team's loan approval model must satisfy both demographic parity (equal approval rates across groups) and equalized odds (equal TPR and FPR across groups). A fairness researcher on the team says satisfying both simultaneously is mathematically impossible except in trivial cases. Why?",
+    "common_mistake": "Assuming you can tune thresholds to satisfy all fairness criteria at once. The impossibility is mathematical, not an engineering limitation — no amount of compute or data fixes it.",
+    "realistic_solution": "The Chouldechova-Kleinberg impossibility theorem (2016-2017) proves that when base rates differ between groups (e.g., different default rates across demographics), you cannot simultaneously satisfy calibration, equalized odds, and demographic parity. Intuitively: if Group A has a 5% default rate and Group B has 15%, equalizing approval rates (demographic parity) forces different score thresholds per group, which breaks equalized odds. Conversely, enforcing equal error rates across groups with different base rates necessarily produces unequal approval rates. This means every fairness-aware system must make an explicit policy choice about which fairness criterion to prioritize — this is a design decision, not a technical optimization.",
+    "napkin_math": "Group A base rate: 5% default, Group B: 15% default. If demographic parity requires 80% approval for both → Group A threshold set lower (easy to meet), Group B threshold set higher (harder to meet). Group A FPR will be much lower than Group B FPR, violating equalized odds.",
+    "flash_issues": [
+      "The 'Realistic Solution' text is truncated, which slightly impacts readability."
+    ]
+  },
+  {
+    "id": "edge-degradation-ladder-watchdog-the-degradation-ladder-3",
+    "title": "The Degradation Ladder",
+    "level": "L2",
+    "track": "edge",
+    "ka": "C6",
+    "rc": "RC-7",
+    "mode": "concept-recall",
+    "scenario": "You're designing the reliability system for a fleet of Jetson AGX Orin devices performing real-time object detection for a security application. The system must never be down for more than a few minutes. You design a three-stage degradation ladder triggered by a watchdog process.",
+    "common_mistake": "Engineers often underestimate the Maximum Time to Recovery by only considering the longest single timeout (the 90-second hardware watchdog) instead of summing the timeouts of the sequential stages. They forget that the system must fail through each preceding stage before the next one is triggered, making the total time cumulative.",
+    "realistic_solution": "The maximum time to recovery is the sum of the timeouts for each sequential stage in the degradation ladder. The clock starts when the application hangs, and each stage must fail for its full timeout period before the next one begins.",
+    "napkin_math": "Total Time = (Initial Detection Timeout) + (Service Restart Timeout) + (OS Reboot Timeout)",
+    "flash_issues": [
+      "The scenario describes a 3-stage degradation ladder but does not provide specific timeout values for each stage, preventing a concrete numerical calculation in the Napkin Math section.",
+      "The question implicitly asks for an explanation of the maximum time to recovery, but the prompt doesn't explicitly state this as the question to be answered."
+    ]
+  },
+  {
+    "id": "mobile-gpu-interconnects-the-slow-style-transfer-303",
+    "title": "The Slow Style Transfer",
+    "level": "L3",
+    "track": "mobile",
+    "ka": "C3",
+    "rc": "RC-1",
+    "mode": "symptom-to-cause",
+    "scenario": "You are a Staff ML Engineer on a mobile team developing an 'AI Photo Booth' feature. The app offloads a burst of photos to a cloud backend for a complex style transfer effect. The backend runs on a server with multiple H100 GPUs.",
+    "common_mistake": "Engineers often blame software (e.g., driver settings, CPU copies) or the network (InfiniBand) for latency inside a server. Another common mistake is to assume all multi-GPU servers are architected identically with high-speed interconnects, without realizing that using standard PCIe slots without a proper NVLink bridge is a common and critical misconfiguration that forces communication over a much slower bus.",
+    "realistic_solution": "The most likely cause is an architectural misconfiguration in the server. The H100 GPUs are likely installed in standard motherboard PCIe slots that are not connected by an NVLink bridge. This forces all peer-to-peer (P2P) communication to travel 'up' to the CPU's root complex and back 'down' over the PCIe bus, which is an order of magnitude slower than the direct, high-bandwidth path provided by NVLink.\nThe ~4 second transfer time for a large data payload is characteristic of a PCIe Gen5 bus bottleneck, not a software issue or a problem with the much faster NVLink interconnect.",
+    "napkin_math": "Let's assume the intermediate feature maps for the photo burst total around 250 GB.",
+    "flash_issues": [
+      "The reasoning_competency (RC-1: Cost/Benefit Analysis) does not precisely match the question's focus on diagnosing a performance bottleneck due to hardware architecture (KA: C3: Hardware/Software Co-design)."
+    ]
+  },
+  {
+    "id": "edge-gpu-interconnect-topology-the-dual-gpu-latency-trap-411",
+    "title": "The Dual-GPU Latency Trap",
+    "level": "L3",
+    "track": "edge",
+    "ka": "C3",
+    "rc": "RC-1",
+    "mode": "napkin-math",
+    "scenario": "You are an ML Systems Engineer for an autonomous vehicle company. Your new sensor fusion platform uses two H100 GPUs in a single server box: GPU_A for perception (from cameras/LiDAR) and GPU_B for path planning. Every 33ms, GPU_A must send a 256MB object detection and world state tensor to GPU_B. However, you measure this GPU-to-GPU transfer taking nearly 15ms, completely wrecking your latency budget. Your investigation reveals the server uses a standard motherboard where both GPUs are in PCIe Gen5 slots, but there is no NVLink bridge connecting them. What is the most likely diagnosis for this severe latency?",
+    "common_mistake": "Engineers often fixate on theoretical peak bandwidth and forget that latency is determined by the physical path data travels. A high-bandwidth path can still be high-latency if it involves multiple hops, memory copies, and CPU/OS intervention. Believing that putting two GPUs on the same motherboard guarantees fast communication is a classic trap.",
+    "realistic_solution": "The root cause is the data path. Without a direct connection like NVLink, the transfer from GPU_A to GPU_B cannot happen directly. Instead, the data must be copied from GPU_A's memory, across its PCIe bus to the system's main RAM (CPU memory), and then copied again from system RAM across GPU_B's PCIe bus into its memory. This 'bounce' through system memory is coordinated by the CPU and operating system, adding massive latency overhead from memory bus contention and kernel scheduling. The correct solution is to use a server motherboard and GPU configuration that supports an NVLink bridge, which creates a direct, low-latency memory-to-memory path between the GPUs, bypassing the CPU and system RAM entirely.",
+    "napkin_math": "1. **Calculate Required Bandwidth:** The application needs to move 256 MB in under its budget. Let's say the budget for this transfer is 5ms. Required bandwidth = 256 MB / 0.005s = 51.2 GB/s.",
+    "flash_issues": [
+      "The scenario's description of the GPU connection ('PCIe G') is incomplete and could be clearer about the absence of NVLink.",
+      "The napkin math calculates a required bandwidth but does not use it to explain the observed 15ms latency or the bottleneck, making it less diagnostic."
+    ]
+  },
+  {
+    "id": "cloud-gpu-roofline-analysis-the-h100-ridge-point-78",
+    "title": "The H100 Ridge Point",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "concept-recall",
+    "scenario": "A key characteristic of any accelerator is its Roofline Model, which helps determine whether a workload will be memory-bound or compute-bound. Given an NVIDIA H100 GPU with a peak FP16 Tensor Core performance of 989 TFLOPS and a memory bandwidth of 3.35 TB/s, calculate the 'Ridge Point' of the accelerator. Explain what this value tells you about the types of workloads that will perform well on this hardware.",
+    "common_mistake": "A common mistake is to invert the formula (dividing bandwidth by compute) or to confuse the units, leading to an incorrect interpretation. Engineers might also know the formula but fail to explain what the resulting value practically means: it's the minimum operational intensity required to start saturating the GPU's compute units. Without hitting this threshold, any further kernel optimizations are largely futile as the GPU is just waiting for data.",
+    "realistic_solution": "The ridge point is the minimum Arithmetic Intensity (AI) a workload must achieve to become compute-bound. For the H100, a workload must perform approximately 295 floating-point operations for every byte of data it transfers from HBM to be limited by compute. Workloads with an AI lower than 295 FLOPs/Byte are memory-bound, meaning their performance is bottlenecked by memory bandwidth, not the processor's speed. To improve performance for memory-bound workloads, you must increase AI, often through techniques like operator fusion.",
+    "napkin_math": "The ridge point is the ratio of peak compute throughput to peak memory bandwidth.",
+    "flash_issues": [
+      "The reasoning_mode is classified as 'concept-recall' but the question requires a calculation, making 'napkin-math' a more appropriate classification."
+    ]
+  },
+  {
+    "id": "edge-dma-bottleneck-the-dma-bottleneck-99",
+    "title": "The DMA Bottleneck",
+    "level": "L2",
+    "track": "edge",
+    "ka": "C2",
+    "rc": "RC-1",
+    "mode": "concept-recall",
+    "scenario": "An autonomous vehicle's perception pipeline streams high-resolution video to a Hailo-8 accelerator. Before processing, a 25 MB sensor frame is transferred from system DRAM into the accelerator's SRAM via a DMA channel rated at 2 GB/s. The perception model requires 0.2 TeraOps to process the frame. Explain which takes longer: transferring the data *into* the chip, or the chip *computing* the result?",
+    "common_mistake": "A common mistake is to be 'dazzled by TOPS' and assume that computation is always the primary bottleneck. Engineers often focus on the peak performance of the accelerator (26 TOPS for the Hailo-8) and neglect the time it takes to move data from system memory to the compute unit, which is often the true performance limiter in real-world systems.",
+    "realistic_solution": "The data transfer is the bottleneck. Calculating the time for each step shows that the DMA transfer takes significantly longer than the actual computation. This is a classic example of a memory-bound problem on an edge device, where I/O performance, not raw compute power, dictates the end-to-end latency.",
+    "napkin_math": "1.  **Calculate Transfer Time:** The DMA channel has a bandwidth of 2 GB/s (2000 MB/s).",
+    "flash_issues": [
+      "The reasoning_mode 'concept-recall' is less precise; the question requires explicit calculation and comparison as detailed in the 'Napkin Math' section."
+    ]
+  },
+  {
+    "id": "tinyml-roofline-the-production-clock-discrepancy-434",
+    "title": "The Production Clock Discrepancy",
+    "level": "L4",
+    "track": "tinyml",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "symptom-to-cause",
+    "scenario": "Your audio classification product uses a Cortex-M4 (STM32F4, 168 MHz, 192 KB SRAM). During development, inference takes 22 ms on the Nucleo dev board. In production, the same binary on the same chip (STM32F407VGT6) on your custom PCB takes 23.1 ms — 5% slower. This pushes your real-time audio pipeline over its 23 ms deadline, causing sample drops. The crystal oscillator is the same frequency (8 MHz HSE). What's causing the 5% slowdown?",
+    "common_mistake": "\"5% variation is within normal tolerance — just increase the deadline to 24 ms.\" Increasing the deadline means reducing the model size or audio quality. Understanding the root cause may reveal a cheaper fix.",
+    "realistic_solution": "The 5% slowdown has a specific hardware cause: **flash memory access time varies with supply voltage and temperature.**",
+    "napkin_math": "Dev board: 3.3V, 25°C, 22 ms inference. Production: 3.0V, 45°C. Voltage effect on flash: ~2.3% slower (ART miss rate + branch penalty). Temperature effect: ~2% slower (20°C × 0.1%/°C). Crystal drift: ~0.1%. Total: 4.4%. Expected production time: 22 × 1.044 = 22.97 ms. Observed: 23.1 ms (4.5% slower). Close match. SRAM execution fix: copy 20 KB of CMSIS-NN to SRAM. Flash wait states eliminated for hot code. Expected time: 22 ms × 0.95 (removing the 5% flash overhead) = 20.9 ms. New headroom: 23 - 20.9 = 2.1 ms (9.1% margin). Sufficient for voltage and temperature variation.",
+    "flash_issues": [
+      "There is a minor inconsistency in the percentage calculation (observed 23.1ms is 5% slower than 22ms, but the text states 4.5% slower).",
+      "The napkin math is cut off at the end."
+    ]
+  },
+  {
+    "id": "cloud-preemptive-scheduling-l3-0",
+    "title": "KV Cache Preemption Swap Latency",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "C7",
+    "rc": "RC-8",
+    "mode": "napkin-math",
+    "scenario": "You manage an LLM inference service running a 70B model on an A100 node. A low-priority batch of 32 requests, each currently at a sequence length of 2,000 tokens, is preempted to free up KV cache for high-priority traffic. The system swaps their KV cache (320 KB per token) from GPU HBM to CPU RAM over a PCIe Gen4 x16 bus (effective bandwidth 25 GB/s), and will swap it back when resuming. Calculate the total PCIe latency penalty incurred by this preemption.",
+    "common_mistake": "Ignoring the PCIe bottleneck entirely, or only calculating the swap-out time while forgetting that the KV cache must also be swapped back in to resume generation.",
+    "realistic_solution": "Calculate the total KV cache volume for the batch, divide by the effective PCIe bandwidth, and multiply by two to account for both the swap-out and swap-in phases.",
+    "napkin_math": "KV size = 32 reqs * 2,000 tokens * 320 KB/token = 20.48 GB. Single transfer time = 20.48 GB / 25 GB/s = 0.819 seconds. Total penalty (out + in) = 0.819s * 2 = 1.638 seconds.",
+    "flash_issues": [
+      "The effective PCIe Gen4 x16 bandwidth is typically closer to 28-30 GB/s, not '25 GB/s'.",
+      "The KV cache size of '320 KB per token' is a reasonable approximation but lacks specific model parameters (layers, heads, dim, precision) for a precise calculation, which would be expected for a rigorous review."
+    ]
+  },
+  {
+    "id": "edge-model-cost-the-npu-definition-597",
+    "title": "The NPU Definition",
+    "level": "L1",
+    "track": "edge",
+    "ka": "B3",
+    "rc": "RC-3",
+    "mode": "concept-recall",
+    "scenario": "Modern edge devices often feature an NPU alongside the CPU and GPU. What does NPU stand for, and what mathematical operation is it physically optimized to perform?",
+    "common_mistake": "Thinking it stands for Network Processing Unit or assuming it's just a faster CPU.",
+    "realistic_solution": "Neural Processing Unit. It is highly optimized for massively parallel, low-precision Multiply-Accumulate (MAC) operations, which form the backbone of matrix multiplications in neural networks.",
+    "napkin_math": "- Orin NPU (DLA): 275 TOPS INT8. CPU (Cortex-A78): ~50 GOPS INT8. NPU is ~5,500× more efficient for MAC ops. | - One Conv2D layer (3×3, 256 channels, 56×56): ~462M MACs. NPU: 462M / 275T = 1.7μs. CPU: 462M / 50G = 9.2ms. | - => NPU completes in microseconds what takes the CPU milliseconds — purpose-built silicon for the dominant operation.",
+    "flash_issues": [
+      "The 'Napkin Math' section's calculation 'NPU: 462M / 275T = 1.7μs' is incorrect. 275 TOPS (Tera Operations Per Second) is 275 * 10^12 ops/sec. 462M MACs is 462 * 10^6 ops. So, 462 * 10^6 / (275 * 10^12) = 1.68 * 10^-6 seconds = 1.68 μs. The calculation is correct, but the unit conversion from TOPS to ops/sec is implicitly assumed and should be explicit for clarity.",
+      "The 'Napkin Math' section's CPU GOPS estimate (~50 GOPS INT8) is a bit high for a general-purpose Cortex-A78 CPU for sustained INT8 MACs, especially compared to dedicated NPU/DLA. While it can do some INT8, 50 GOPS is more typical for a high-end mobile CPU's *peak* vector instructions, not necessarily sustained MACs for a large Conv2D."
+    ]
+  },
+  {
+    "id": "edge-gpu-roofline-edge-the-edge-perception-bottleneck-108",
+    "title": "The Edge Perception Bottleneck",
+    "level": "L2",
+    "track": "edge",
+    "ka": "B2",
+    "rc": "RC-10",
+    "mode": "concept-recall",
+    "scenario": "You are designing a perception system for an autonomous vehicle using a Jetson AGX Orin, which has a thermal design power (TDP) of 60W. Your primary CNN performs 50 Trillion INT8 Operations (TOPS) and reads 50 Gigabytes of data from LPDDR5 memory for each frame it processes.",
+    "common_mistake": "Engineers often confuse the relationship between Arithmetic Intensity (AI) and the hardware's ridge point. A common error is to think that a *low* AI means you are compute-bound ('I'm not doing enough math, so the math must be the problem') or to simply guess based on the absolute magnitude of the numbers ('50 TOPS sounds like a lot, it must be compute-bound') without calculating the ratio.",
+    "realistic_solution": "The workload is **memory-bound**. The key is to calculate the workload's Arithmetic Intensity (AI) and compare it to the hardware's ridge point.",
+    "napkin_math": "1. **Calculate Workload Arithmetic Intensity (AI):**",
+    "flash_issues": [
+      "The A100 and H100 hardware specifications are included in the 'Napkin Math' section but are not relevant to the calculation for the Jetson AGX Orin, potentially causing confusion."
+    ]
+  },
+  {
+    "id": "cloud-direct-attach-copper-l4-0",
+    "title": "400G DAC Link Degradation in Dense Racks",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "C3",
+    "rc": "RC-12",
+    "mode": "failure-to-root-cause",
+    "scenario": "You are bringing up a new dense AI rack containing 8-GPU H100 nodes. To minimize latency and cost, you use 3-meter 400G passive Direct Attach Copper (DAC) cables to connect the ConnectX-7 NICs to the Top-of-Rack (ToR) switch at the top of the 42U rack. During a 24-hour NCCL bandwidth burn-in test, you observe intermittent port flapping and high Forward Error Correction (FEC) uncorrectable symbol errors specifically on the nodes located at the very bottom of the rack. What is the most likely physical root cause, and how do you systematically diagnose and mitigate it?",
+    "common_mistake": "Assuming the DAC cables are simply defective or suspecting switch firmware bugs, leading to unnecessary RMAs without considering the strict physical insertion loss budgets of PAM4 signaling over maximum-length passive copper.",
+    "realistic_solution": "Identify that 3-meter 400G passive DACs are at the absolute limit of the insertion loss budget. Nodes at the bottom of the rack require tight cable routing; violating the minimum bend radius degrades signal integrity beyond what KP4 FEC can correct. The fix is to replace the bottom-node cables with Active Electrical Cables (AECs) or Active Optical Cables (AOCs), or reposition the ToR switch to the Middle-of-Rack (MoR) to restrict all DAC lengths to a safer 1.5-2 meters.",
+    "napkin_math": "400G passive DAC utilizes 50G PAM4 signaling with a strict max insertion loss budget of ~17.16 dB at Nyquist (13.28 GHz). A typical AWG26 3m DAC has ~14 dB loss. Tight bends (< 5x cable diameter) cause impedance mismatches that add 2-4 dB of loss. Total loss: 14 dB + 3.5 dB = 17.5 dB. This exceeds the 17.16 dB budget, driving the pre-FEC Bit Error Rate (BER) above the KP4 FEC threshold of 2.4e-4, resulting in uncorrectable errors and dropped packets.",
+    "flash_issues": [
+      "The A100 GPU is 40GB SXM, not H100. The scenario mentions '8-GPU H100 nodes' but then refers to 'A100 GPU' in the context of the problem. This is a minor inconsistency in the scenario description.",
+      "The 'Napkin Math' states '400G passive DAC utilizes 50G PAM4 signaling'. While 400GBASE-DR4/FR4 uses 4x100G PAM4, and 400GBASE-SR8 uses 8x50G PAM4, 400G DACs typically use 8x50G PAM4 lanes (e.g., QSFP-DD to 8x50G breakout) or 4x100G PAM4 lanes (e.g., QSFP-DD to QSFP-DD). The statement '50G PAM4 signaling' is a bit vague and could be more precise about the lane configuration for 400G DACs.",
+      "The insertion loss budget of ~17.16 dB at Nyquist (13.28 GHz) for 400G passive DACs is a specific number that might vary slightly by standard (e.g., IEEE 802.3db). While plausible, it's good to acknowledge that these numbers can be vendor/standard-specific."
+    ]
+  },
+  {
+    "id": "tinyml-sram-tensor-arena-the-tensor-arena-squeeze-60",
+    "title": "The Tensor Arena Squeeze",
+    "level": "L2",
+    "track": "tinyml",
+    "ka": "C1",
+    "rc": "RC-1",
+    "mode": "concept-recall",
+    "scenario": "You're deploying a keyword spotting model to a Cortex-M4 microcontroller with 256KB of SRAM. The TensorFlow Lite for Microcontrollers interpreter needs a pre-allocated 'tensor arena' for activations. Your model has the following structure and intermediate tensor sizes:",
+    "common_mistake": "The most common mistake is to sum the sizes of *all* tensors. This ignores the fact that the memory interpreter reuses memory. Once a tensor is no longer needed for a subsequent calculation (e.g., the input tensor after the first convolution), its memory can be reclaimed for a future tensor. The peak usage is what matters, not the total.",
+    "realistic_solution": "The tensor arena is a single, contiguous block of memory allocated upfront from which TensorFlow Lite for Microcontrollers carves out space for all input, output, and intermediate activation tensors. It uses a memory manager to reuse space from tensors that are no longer live in the computation graph.",
+    "napkin_math": "1. Calculate size of each tensor:",
+    "flash_issues": [
+      "The `reasoning_mode` is classified as `concept-recall` but the question requires quantitative calculation."
+    ]
+  },
+  {
+    "id": "mobile-mobile-roofline-analysis-the-mobile-generative-ai-lag-273",
+    "title": "The Mobile Generative AI Lag",
+    "level": "L3",
+    "track": "mobile",
+    "ka": "B2",
+    "rc": "RC-10",
+    "mode": "napkin-math",
+    "scenario": "You are an ML Systems Engineer on a mobile team developing a new 'Magic Editor' feature. It uses a custom generative model for real-time photo in-painting on the latest iPhone, which uses an Apple A17 Pro chip. Your latency budget is 16ms to avoid UI jank. However, profiling a single inference reveals it takes 45ms. The profiler reports the model's core execution performs 70 Giga-INT8-Ops and accesses a total of 500 MB of data from DRAM. Using the provided hardware constants, diagnose the primary performance bottleneck.",
+    "common_mistake": "Engineers often focus on the absolute number of operations (70 G-ops seems high!) and incorrectly conclude the model is compute-bound. They might also guess at thermal throttling without evidence. The key is to analyze the *ratio* of compute to memory access (Arithmetic Intensity) and compare it to the hardware's capabilities.",
+    "realistic_solution": "The problem is that the model is memory-bound. The A17 Pro's Neural Engine is being starved by slow data access from DRAM. To diagnose this, you must calculate the model's Arithmetic Intensity (AI) and compare it to the A17 Pro's known Ridge Point. The model's AI is far below the hardware's threshold, meaning the chip spends most of its time waiting for data. The optimization priority should be reducing memory traffic (e.g., operator fusion, re-architecting layers to be less memory-intensive) rather than just reducing operation count.",
+    "napkin_math": "1. **Calculate the model's Arithmetic Intensity (AI):**",
+    "flash_issues": [
+      "The reasoning_competency (RC-10: Distributed Systems & Communication) is incorrect for a question focused on single-node performance analysis using the Roofline model."
+    ]
+  },
+  {
+    "id": "cloud-convolutional-neural-network-l5-0",
+    "title": "Evaluating 3D vs Factorized Convolutions for Video",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "B3",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "Your team is deploying a video action recognition model on NVIDIA T4 GPUs (16GB VRAM, 320 GB/s memory bandwidth) in the cloud. The input is 32 frames of 1080p video encoded in FP16. The research team proposes a 3D ResNet architecture utilizing standard 3x3x3 spatial-temporal convolutions. During initial load testing, the inference service frequently hits OOM errors and exhibits unacceptably high latency. Evaluate the architectural trade-offs between attempting to retain the standard 3D CNN (e.g., via aggressive batch size reduction) versus replacing it with a factorized (2D spatial + 1D temporal) convolutional approach.",
+    "common_mistake": "Candidates often suggest generic techniques like quantization, pruning, or model parallelism to fit the model into VRAM, failing to evaluate how factorizing the convolution fundamentally improves the arithmetic intensity and drastically reduces the activation memory footprint required by 3D processing.",
+    "realistic_solution": "Replace the standard 3x3x3 convolutions with a (2+1)D factorized architecture (a 2D spatial convolution followed by a 1D temporal convolution). This algebraically reduces computational complexity and shrinks the size of intermediate feature maps that must be read/written to VRAM. This higher arithmetic intensity allows the model to comfortably fit within the 16GB T4 limit while enabling larger batch sizes to hide memory latency.",
+    "napkin_math": "Standard 3D Conv (3x3x3) computation per channel: 3 × 3 × 3 = 27 MACs. Factorized (2+1)D Conv computation per channel: (3 × 3 spatial) + (3 × 1 temporal) = 9 + 3 = 12 MACs. This 27/12 = 2.25x reduction directly translates to 2.25x fewer parameter fetches and intermediate activation writes, critically mitigating the T4's 320 GB/s bandwidth bottleneck when processing the massive 32 × 1080 × 1920 input volumes.",
+    "flash_issues": [
+      "The reasoning_competency 'RC-8 Cost Optimization' is a slight mismatch; 'RC-3 Performance Optimization' or 'RC-12 System Design & Architecture' would be more precise as the primary focus is architectural efficiency for performance and VRAM, not direct cost calculation."
+    ]
+  },
+  {
+    "id": "mobile-model-cost-the-backbone-bloat-4",
+    "title": "The Backbone Bloat",
+    "level": "L4",
+    "track": "mobile",
+    "ka": "B3",
+    "rc": "RC-3",
+    "mode": "tradeoff-analysis",
+    "scenario": "Your mobile app has three different computer vision features (Face Detection, Face Mesh, and Segmentation). All three use the same MobileNetV3 backbone. Based on the VRAM diagram, what is the 'efficiency gap' in your model loading strategy?",
+    "common_mistake": "\"Run the models in parallel on different cores.\" The phone has one NPU — parallel execution doesn't help. And you'd still waste 171 MB of memory.",
+    "realistic_solution": "You have **Backbone Redundancy**. The app loads three identical copies of the backbone weights and computes the same features three times per frame. The fix is a **Multi-Task Architecture with Shared Backbone**: load the backbone once (12 MB), run it once (6ms), and branch into three lightweight task heads. This reduces memory by 64% and latency by 40%.",
+    "napkin_math": "Current: 3 backbones × 12 MB = 36 MB weights. Shared: 1 backbone × 12 MB = 12 MB. Latency: 3 × 6ms = 18ms (sequential backbone runs) vs 1 × 6ms = 6ms.",
+    "flash_issues": [
+      "The napkin math for latency reduction is inconsistent; reducing backbone latency from 18ms to 6ms is a 67% reduction, not 40% as claimed."
+    ]
+  },
+  {
+    "id": "cloud-interconnect-the-all-reduce-bottleneck-446",
+    "title": "The All-Reduce Bottleneck",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "C3",
+    "rc": "RC-1",
+    "mode": "concept-recall",
+    "scenario": "In a synchronous DDP setup, the training step cannot complete until all GPUs have exchanged their gradients. If one GPU is slightly slower (a straggler), what happens to the rest of the cluster?",
+    "common_mistake": "Assuming the fast GPUs just move on to the next batch or that the slow GPU is automatically dropped.",
+    "realistic_solution": "The entire cluster stalls. The All-Reduce operation acts as a global barrier; the fastest GPU must wait completely idle for the slowest GPU to finish its backward pass before the gradients can be synchronized and the optimizer can step.",
+    "napkin_math": "- 8 GPUs, step time = 100ms. If 1 straggler takes 150ms, all 7 fast GPUs idle for 50ms each. | - Wasted compute: 7 × 50ms = 350ms of GPU-time per step. Over 1M steps: 350s × 1M = 97 GPU-hours wasted. | - => A single 50% straggler reduces cluster throughput by 33% (100/150).",
+    "flash_issues": [
+      "The 'Napkin Math' calculation '350s × 1M' is a typo; it should be '350ms × 1M steps = 350,000 seconds' to correctly represent the total wasted time."
+    ]
+  },
+  {
+    "id": "edge-roofline-analysis-edge-the-self-driving-perception-stall-398",
+    "title": "The Self-Driving Perception Stall",
+    "level": "L3",
+    "track": "edge",
+    "ka": "B2",
+    "rc": "RC-10",
+    "mode": "napkin-math",
+    "scenario": "You are an ADAS engineer deploying a new perception model on a fleet of NVIDIA Jetson AGX Orin compute units. The unit is thermally constrained to a **30W** power budget, which allows for a sustained **150 TOPS** of INT8 compute. The model must process the front camera stream with a latency of **33ms (30 FPS)** or less.",
+    "common_mistake": "Engineers often calculate the theoretical performance for the compute-bound case (26.7ms) and the memory-bound case (14.6ms), see that both *should* meet the 33ms deadline, and then incorrectly blame external factors like 'power throttling' or 'inaccurate profiling' without digging deeper. The key is to use the observed latency to calculate the *effective* bandwidth and quantify just how severe the memory bottleneck truly is.",
+    "realistic_solution": "The model is severely memory-bound, but not because of the hardware's peak limits. The true bottleneck is the low *effective* memory bandwidth being achieved by the model's memory access patterns.",
+    "napkin_math": "1. **Calculate Arithmetic Intensity (AI):**",
+    "flash_issues": [
+      "The specific latency numbers provided in the 'Common Mistake' (26.7ms and 14.6ms) do not align with the calculations derived from the problem's parameters (100 G-Ops, 2 GB data, 150 TOPS, 204.8 GB/s), making the common mistake less plausible for this specific scenario."
+    ]
+  },
+  {
+    "id": "edge-power-power-budget-for-multi-model-edge-pipeli-297",
+    "title": "Power Budget for Multi-Model Edge Pipeline",
+    "level": "L3",
+    "track": "edge",
+    "ka": "D5",
+    "rc": "RC-1",
+    "mode": "napkin-math",
+    "scenario": "You're building a smart retail camera that runs three models simultaneously: person detection (YOLOv8n, runs on GPU), pose estimation (MoveNet, runs on DLA), and face blur for privacy (a small U-Net, runs on GPU). The system is powered by PoE+ delivering 25.5W at the device. The camera sensor + ISP draws 3W, the network stack draws 1.5W, and the SoC housekeeping draws 2W. Estimate the power budget remaining for ML inference and determine if all three models can run concurrently on a Jetson Orin Nano.",
+    "common_mistake": "\"The Orin Nano TDP is 15W, so just check if 15W < 25.5W − 6.5W = 19W. It fits.\" This ignores that TDP is the sustained thermal design power, not the actual power draw, which varies with utilization. More critically, it ignores the DC-DC conversion losses between the 48V PoE rail and the various voltage domains.",
+    "realistic_solution": "Build the full power tree from the PoE input to each consumer.",
+    "napkin_math": "PoE+ budget: 25.5W → 21.1W usable (17% conversion loss). Fixed: 6.5W. ML budget: 14.6W. Actual ML draw: 11.5W. Electrical margin: 3.1W (21%). Thermal check: 18W × 4°C/W + 40°C ambient = 112°C > 105°C limit. Must reduce to ~16.25W total → ML budget drops to 9.75W. Solution: run face blur on DLA instead of GPU (saves ~2W), or duty-cycle pose estimation (run every other frame, halving DLA power).",
+    "flash_issues": [
+      "The 'Realistic Solution' is cut off mid-sentence.",
+      "The 'Napkin Math' section is cut off mid-sentence."
+    ]
+  },
+  {
+    "id": "cloud-stationarity-assumption-l4-0",
+    "title": "Diagnosing Silent Failures in Cloud Fraud Detection",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "A7",
+    "rc": "RC-12",
+    "mode": "tradeoff-analysis",
+    "scenario": "You are serving a cloud-based transaction fraud detection model handling 25,000 TPS on AWS g5.4xlarge instances. Hardware utilization is stable (GPU compute at 65%, P99 latency at 45ms). However, the business team reports a 30% spike in false positives over the last 48 hours following a new international product launch. System metrics and infrastructure health checks are completely green. How do you analyze the root cause of this degradation?",
+    "common_mistake": "Assuming the degradation is an infrastructure bottleneck, memory leak, or application-layer software bug, instead of recognizing the breakdown of the stationarity assumption caused by the newly introduced geographic data distribution.",
+    "realistic_solution": "Implement statistical distance monitoring (e.g., Kullback-Leibler divergence or Population Stability Index) on the live feature distributions compared to the training baseline. The international launch introduced user behavioral patterns absent from the training set, violating the stationarity assumption. You must deploy a data validation pipeline and trigger retraining on the new distribution.",
+    "napkin_math": "If the training dataset contained 1% international transactions, but the new live traffic mix is 35% international, the input distribution P(X) has severely shifted. A Population Stability Index (PSI) calculation: PSI = sum((Actual_% - Expected_%) * ln(Actual_% / Expected_%)) would yield PSI = (0.35 - 0.01) * ln(0.35 / 0.01) ≈ 1.2. Any PSI > 0.2 indicates a critical distribution shift requiring immediate retraining.",
+    "flash_issues": [
+      "The napkin math for Population Stability Index (PSI) is incomplete as it only calculates the contribution from one bin (international transactions) and omits the domestic bin."
+    ]
+  },
+  {
+    "id": "tinyml-depthwise-separable-convolution-the-micro-convolution-budget-300",
+    "title": "The Micro-Convolution Budget",
+    "level": "L3",
+    "track": "tinyml",
+    "ka": "B3",
+    "rc": "RC-3",
+    "mode": "optimization-task",
+    "scenario": "You are tasked with optimizing a keyword-spotting model for a Cortex-M4 MCU with only 256KB of SRAM. A profiler shows one specific layer, a standard 3x3 convolution with 64 input channels and 128 output channels operating on a 16x16 feature map, is consuming the majority of your compute budget. A colleague suggests you apply a depthwise separable convolution instead. Demonstrate the computational savings by calculating the approximate reduction factor in Multiply-Accumulate (MAC) operations.",
+    "common_mistake": "Engineers often confuse parameter reduction with computational reduction. While related, they are not the same. Others incorrectly calculate the cost of either the standard or the two-part separable convolution, underestimating the massive efficiency gain of the separable approach.",
+    "realistic_solution": "The correct approach is to calculate the MACs for both the standard convolution and the two parts of the depthwise separable convolution (depthwise and pointwise) and then find the ratio. The reduction is typically dramatic, on the order of 8-9x for common kernel sizes, making it a foundational optimization for mobile and edge devices.",
+    "napkin_math": "1. **Standard Convolution MACs:**",
+    "flash_issues": [
+      "The 'Napkin Math' section is incomplete and does not show the calculations for either convolution type or the final reduction factor."
+    ]
+  },
+  {
+    "id": "edge-edge-interconnect-bottleneck-the-autonomous-vehicle-dma-bounce-388",
+    "title": "The Autonomous Vehicle DMA Bounce",
+    "level": "L3",
+    "track": "edge",
+    "ka": "C2",
+    "rc": "RC-1",
+    "mode": "napkin-math",
+    "scenario": "You are an ML Systems Engineer at an autonomous vehicle company diagnosing a latency issue in the sensor fusion system. The architecture uses two GPUs on a single board connected via a PCIe Gen4 x16 bus. GPU A runs perception and sends a 256 MB feature tensor to GPU B, which runs path planning. Your end-to-end latency budget from camera to planned path is a hard real-time 33ms. Using a profiler, you've recorded the following timings:",
+    "common_mistake": "Engineers often focus only on the peak theoretical bandwidth of an interconnect like PCIe and forget about the protocol-level overhead and the actual data path. They might calculate the theoretical transfer time (256MB / 32GB/s = 8ms), see it fits the budget, and incorrectly conclude the interconnect is not the problem. This fails to account for *how* the data is being transferred (e.g., direct peer-to-peer vs. a CPU-mediated bounce).",
+    "realistic_solution": "The most likely cause is a 'DMA bounce' through host (CPU) memory. Without a direct peer-to-peer transfer path correctly configured (e.g., using NVIDIA's GPUDirect), the driver defaults to a safe but slow path: the data is first copied from GPU A's VRAM to the CPU's main RAM, and then from RAM to GPU B's VRAM. This involves two separate DMA operations, effectively traversing the PCIe bus twice and adding significant overhead from OS scheduling and memory management. The observed 20ms latency strongly suggests this two-hop journey is occurring instead of a direct, single-hop peer-to-peer transfer.",
+    "napkin_math": "1. **Calculate Theoretical PCIe Bandwidth:** A PCIe Gen4 x16 link has a theoretical bandwidth of 16 lanes * ~2 GB/s/lane = ~32 GB/s.",
+    "flash_issues": [
+      "The Napkin Math states 'This 20.48 ms perfectly matches the observed 20ms', which is a slight overstatement for a difference of 0.48ms."
+    ]
+  },
+  {
+    "id": "cloud-streaming-inference-l5-0",
+    "title": "Stateful Streaming vs Stateless Batching ASR",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "D3",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "You are designing the backend for a real-time voice agent handling 5,000 concurrent active sessions. You must choose between two ASR architectures: a stateless Transformer that requires 1.5-second audio chunks to decode accurately (utilizing dynamic batching), and a stateful streaming RNN-T that incrementally processes 100ms frames. The strict SLA dictates a Time-To-First-Word (TTFW) of <300ms. The deployment targets an autoscaling cluster of NVIDIA A10G (24GB VRAM) GPUs. Evaluate the latency, memory, and throughput trade-offs to justify your final architectural design and cluster sizing.",
+    "common_mistake": "Candidates often choose the stateless Transformer to easily leverage existing dynamic batching infrastructure and stateless load balancing, failing to realize that accumulating the minimum 1.5s audio chunk duration natively violates the 300ms TTFW SLA before any compute even begins.",
+    "realistic_solution": "Adopt the stateful streaming RNN-T to easily meet the 300ms SLA, and implement session-aware routing (sticky sessions). Since 5,000 sessions requiring 20MB of hidden state each results in 100GB of persistent memory demand, shard the traffic across at least 5 A10G GPUs using consistent hashing, and perform continuous batching across concurrent incoming 100ms frames on each node.",
+    "napkin_math": "Stateless Latency = 1500ms (audio buffer) + 50ms (compute) = 1550ms TTFW (Fails 300ms SLA). Stateful Latency = 100ms (buffer) + 15ms (compute) = 115ms TTFW (Passes SLA). Memory requirement: 5,000 streams * 20MB state/stream = 100GB total state. Minimum GPUs = ceil(100GB / 24GB A10G capacity) = 5 GPUs.",
+    "flash_issues": [
+      "The scenario description is truncated at the end: 'Evaluate the latency, m'."
+    ]
+  },
+  {
+    "id": "tinyml-sensor-pipeline-the-keyword-spotting-pipeline-506",
+    "title": "The Keyword Spotting Pipeline",
+    "level": "L6+",
+    "track": "tinyml",
+    "ka": "D6",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "Design the complete inference pipeline for an always-on keyword spotting system on a Cortex-M4 (100 MHz, 256 KB SRAM, no FPU). The microphone samples at 16 kHz. You need to detect the wake word 'Hey Device' within 500 ms of it being spoken. Walk me through every stage — from raw audio samples to classification output — and show me the memory budget.",
+    "common_mistake": "\"Collect 1 second of audio, compute an FFT, run the model.\" This approach buffers too much audio (32 KB just for raw samples), uses floating-point FFT (no FPU), and doesn't account for the streaming nature of the problem.",
+    "realistic_solution": "The pipeline must be streaming and integer-only: Raw audio at 16 kHz × 16-bit × 1 second = 32 KB. But streaming with 30 ms frames only needs 960 bytes live — a 34× memory reduction. The 512-point fixed-point FFT on Cortex-M4 takes ~0.3 ms via CMSIS-",
+    "napkin_math": "Raw audio at 16 kHz × 16-bit × 1 second = 32 KB. But streaming with 30 ms frames only needs 960 bytes live — a 34× memory reduction. The 512-point fixed-point FFT on Cortex-M4 takes ~0.3 ms via CMSIS-DSP. 40 Mel filters on 256 frequency bins = 10,240 multiply-accumulates = 0.1 ms. Total feature extraction per frame: ~0.5 ms. The CPU is idle 98% of the time between frames.",
+    "flash_issues": [
+      "The `reasoning_competency` 'RC-8: Cost Optimization & TCO' is too broad; 'RC-2: System Design & Architecture' or 'RC-3: Performance Optimization & Profiling' would be more precise for designing a system under technical constraints."
+    ]
+  },
+  {
+    "id": "mobile-heterogeneous-compute-the-heterogeneous-pipeline-director-476",
+    "title": "The Heterogeneous Pipeline Director",
+    "level": "L5",
+    "track": "mobile",
+    "ka": "B3",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "You are designing an on-device ML pipeline for an augmented reality application. The pipeline involves pre-processing (CPU), a light-weight pose estimation model (NPU-preferred), and a heavy visual effects rendering step (GPU). Your goal is to achieve minimal end-to-end latency while adhering to a strict 2W average power budget for the entire pipeline, considering the mobile SoC's heterogeneous architecture. How would you approach scheduling and resource allocation across these different compute units?",
+    "common_mistake": "\"Run everything in parallel on its preferred hardware.\" While parallelism is good, blindly doing so ignores power constraints and inter-unit communication overheads, potentially leading to thermal throttling or exceeding the power budget.",
+    "realistic_solution": "This requires a sophisticated **heterogeneous task scheduler** aware of device-specific power profiles, latency characteristics, and inter-processor communication (IPC) costs.\n  1.  **Profiling & Characterization:**\n      *   Profile each stage on its target hardware (CPU, NPU, GPU) for latency, power consumption, and memory bandwidth usage under various load conditions (e.g., different clock frequencies, number of threads).\n      *   Measure IPC overheads (e.g., copying data from CPU to NPU, NPU to GPU).\n  2.  **Task Graph & Dependencies:** Model the pipeline as a directed acyclic graph (DAG) where nodes are tasks and edges are data dependencies.\n  3.  **Dynamic Voltage and Frequency Scaling (DVFS) & Power Domains:**\n      *   Recognize that different compute units (CPU cores, NPU, GPU) reside in different power domains and can operate at various clock frequencies and voltages (DVFS). Lowering frequency reduces power quadratically ($P \\propto fV^2$).\n      *   The scheduler must dynamically adjust DVFS settings for each unit based on the current workload and overall power budget. For example, if the NPU is idle, it should be in a low-power state. If a stage is not latency-critical, its unit can be down-clocked.\n  4.  **Scheduling Algorithm (e.g., Earliest Deadline First with Power Awareness):**\n      *   Prioritize latency-critical tasks.\n      *   Consider data locality: minimize copies between disparate memory regions. Using shared memory or zero-copy mechanisms (if available, e.g., ION buffers on Android) is crucial.\n      *   Exploit parallelism where possible, but manage contention for shared resources (e.g., DRAM bandwidth).\n      *   Implement a feedback loop: monitor actual power consumption and adjust DVFS/scheduling dynamically to stay within the 2W budget. If power budget is tight, some tasks might need to run on less power-efficient but faster hardware for short bursts, then downclock.\n  5.  **Synchronization & Orchestration:** Use efficient synchronization primitives (e.g., fences, semaphores) to coordinate execution across different processing units without introducing excessive stalls. Asynchronous execution is key.",
+    "napkin_math": "CPU stage: 5ms, 500mW. NPU stage: 10ms, 800mW. GPU stage: 15ms, 1200mW. | If run sequentially: Total Latency = 30ms. Total Power (average over 30ms) = (5*500 + 10*800 + 15*1200) / 30 = (2500 + 8000 + 18000) / 30 = 28500 / 30 = 950mW (well within 2W). | If NPU and GPU can run partially in parallel after CPU finish, but GPU needs NPU output: | CPU (5ms) -> NPU (10ms) -> GPU (15ms). Total latency 30ms. | If power budget is hit, e.g., GPU runs at 1.5W instead of 1.2W for 15ms, average power over 30ms is higher. | If GPU is downclocked to 1.0W, its latency might increase to 20ms, increasing total latency to 35ms. The scheduler must find the optimal operating points (frequency/voltage) for each unit to meet both latency and power targets.",
+    "flash_issues": [
+      "The napkin math section becomes confusing and incomplete after correctly calculating the sequential case.",
+      "The text discusses parallelism but then states the total latency remains 30ms, which would only be true for a fully sequential pipeline."
+    ]
+  },
+  {
+    "id": "tinyml-quantization-overflow-tinyml-the-hypersensitive-wake-word-503",
+    "title": "The Hypersensitive Wake-Word",
+    "level": "L5",
+    "track": "tinyml",
+    "ka": "B1",
+    "rc": "RC-5",
+    "mode": "tradeoff-analysis",
+    "scenario": "Your team has developed a keyword-spotting model for a smart home device. The FP32 model achieves 99% accuracy in the lab. To deploy it on a Cortex-M4 microcontroller with only 256KB of SRAM, you use post-training quantization (PTQ) to convert the entire model to INT8. You use a clean, curated dataset of spoken keywords for calibration. The resulting INT8 model passes all lab tests, maintaining >98% accuracy, and successfully fits within the memory budget.",
+    "common_mistake": "The most common and immediate reaction is to blame the training data. 'The model wasn't trained on enough noisy audio.' While adding noise to the training set is a good practice, it misses the core systems issue. Retraining the FP32 model won't fix a numerical representation failure in the INT8 model if the calibration process that defines the INT8 representation is itself flawed. The problem isn't the model's learned logic; it's that the logic is breaking due to arithmetic overflow.",
+    "realistic_solution": "The root cause is a **dynamic range mismatch** leading to **INT8 overflow**. The quantization calibration was performed on clean speech, which has a relatively low and predictable range of activation values. The tool calculated a scale factor optimized for this narrow range. However, loud, unpredictable background noise (like a TV explosion or loud music) generates feature values (e.g., in the initial MFCC or convolutional layers) with a much larger magnitude than ever seen during calibration.",
+    "napkin_math": "Let's assume an activation in an early convolutional layer has a dynamic range of `[-6.0, 6.0]` on the clean calibration dataset.",
+    "flash_issues": [
+      "The `reasoning_mode` 'tradeoff-analysis' is not the primary mode tested; 'failure-to-root-cause' or 'symptom-to-cause' would be more appropriate as the question asks to diagnose an existing failure."
+    ]
+  },
+  {
+    "id": "mobile-cnn-vs-transformer-the-npu-architecture-dilemma:-cnn-vs.-vi-289",
+    "title": "The NPU Architecture Dilemma: CNN vs. ViT",
+    "level": "L3",
+    "track": "mobile",
+    "ka": "B2",
+    "rc": "RC-3",
+    "mode": "optimization-task",
+    "scenario": "You're designing a new camera feature for a flagship smartphone (e.g., using an Apple A17 Pro or Snapdragon 8 Gen 3 SoC). You must choose an architecture for real-time scene understanding. You have two prototypes with similar accuracy: a MobileNetV3-based CNN and a small Vision Transformer (ViT). The ViT has 20% fewer parameters but requires 50% more total FLOPs. Both models are fully delegated to the phone's NPU. Which model is likely to be faster and why?",
+    "common_mistake": "Engineers often default to thinking CNNs are always more efficient on mobile because of 'local' operations and fewer FLOPs. They might also incorrectly assume that fewer parameters automatically means faster inference. This thinking fails to account for how well an architecture's computational patterns match the underlying hardware's strengths.",
+    "realistic_solution": "The Vision Transformer (ViT) is likely to be faster. Modern mobile NPUs are highly parallel processors with high peak TOPs but relatively limited memory bandwidth (e.g., Apple A17 Pro Ridge Point is ~683 Ops/Byte). They achieve peak performance on operations with high arithmetic intensity. The core operation in a ViT, self-attention, is dominated by large matrix multiplications (Q @ K.T), which are compute-bound and have very high arithmetic intensity. In contrast, the depthwise convolutions that make CNNs like MobileNet efficient in terms of FLOPs have very low arithmetic intensity, making them memory-bandwidth bound on powerful NPUs. The NPU will spend most of its time idle, waiting for data. Therefore, the ViT can better saturate the NPU's compute units, achieving higher utilization and lower latency despite its higher FLOP count.",
+    "napkin_math": "Let's compare the 'bang for the buck' on an NPU like the Apple A17 Pro (35 TOPS, ~51.2 GB/s BW, Ridge Point ~683 Ops/Byte).",
+    "flash_issues": [
+      "The 'Napkin Math' correctly calculates the device's ridge point but fails to estimate the arithmetic intensity of the competing operations (matrix multiplication vs. depthwise convolution)."
+    ]
+  },
+  {
+    "id": "mobile-quantization-memory-the-quantization-memory-payoff-55",
+    "title": "The Quantization Memory Payoff",
+    "level": "L1",
+    "track": "mobile",
+    "ka": "D2",
+    "rc": "RC-5",
+    "mode": "concept-recall",
+    "scenario": "You are tasked with deploying a 7-billion parameter language model on a high-end mobile device. To reduce its memory footprint, you decide to quantize the model weights from FP16 to INT8. What is the final memory requirement for the model's weights after this quantization?",
+    "common_mistake": "A frequent mistake is to confuse the reduction factor, applying a 4x saving (common for FP32-to-INT8) instead of the correct 2x saving for FP16-to-INT8. Another error is to state the original FP16 size (14 GB) or to be off by an order of magnitude, underestimating the large size of modern LLMs.",
+    "realistic_solution": "INT8 representation uses exactly one byte for every parameter. Therefore, a 7-billion parameter model requires 7 GB to store its weights. This is a 50% reduction from the 14 GB required for FP16, but it is still far too large for a typical mobile application memory budget (often <2GB).",
+    "napkin_math": "The calculation is a direct application of the scaling rule:",
+    "flash_issues": [
+      "The 'Napkin Math' section is empty and should contain the calculation.",
+      "The Reasoning Competency (RC-5: System Design & Architecture) might be slightly misaligned for a direct memory calculation; RC-1 (Quantitative Analysis) or RC-2 (Technical Knowledge) would be a better fit."
+    ]
+  },
+  {
+    "id": "cloud-serving-the-prefill-decode-disaggregation-435",
+    "title": "The Prefill-Decode Disaggregation",
+    "level": "L6+",
+    "track": "cloud",
+    "ka": "D4",
+    "rc": "RC-6",
+    "mode": "requirements-to-architecture",
+    "scenario": "We serve a 70B model on a fleet of 64 H100 GPUs. During peak traffic, our P99 latency spikes to 5× the P50 because long-prompt requests (8k+ tokens) block short-prompt requests in the same batch. An architect proposes splitting the fleet into separate 'prefill GPUs' and 'decode GPUs.' This sounds like it wastes resources. Why would dedicating GPUs to different phases actually improve both throughput and latency?",
+    "common_mistake": "\"Splitting the fleet means each pool has fewer GPUs, so both pools will be slower.\" This applies static capacity thinking to a problem that's fundamentally about workload heterogeneity.",
+    "realistic_solution": "Prefill and decode have opposite computational profiles, and mixing them on the same GPU creates destructive interference. **Prefill** (processing the input prompt) is **compute-bound**: it processes all prompt tokens in parallel through matrix multiplications. Optimal batch size is small (1-4 requests) because each request consumes massive FLOPs. **Decode** (generating output tokens) is **memory-bandwidth-bound**: it reads the entire model weights to produce one token per request. Optimal batch size is large (64-256 requests) to amortize the weight-reading cost. When both phases share a GPU, you can't optimize for either: large decode batches starve prefill of compute, while prefill's heavy compute blocks decode tokens from being emitted, causing latency spikes. Disaggregation lets each pool run at its optimal operating point. Prefill GPUs run small batches at high compute utilization; decode GPUs run large batches at high bandwidth utilization. A lightweight scheduler routes requests: new requests go to prefill GPUs, and once the KV-cache is computed, it's transferred to a decode GPU (KV-cache transfer is a one-time cost per request).",
+    "napkin_math": "**70B model, H100 (989 TFLOPS, 3.35 TB/s).** **Prefill (2048-token prompt):** FLOPs = $2 \\times 70\\text{B} \\times 2048 = 287$ TFLOPS. Time at 60% MFU: $287 / (989 \\times 0.6) = $ **0.48 s**. Arithmetic intensity = $287 \\times 10^{12} / (140 \\times 10^9) = 2050$ Ops/Byte — deeply compute-bound. Optimal batch: 1-2 requests. **Decode (1 token):** FLOPs = $2 \\times 70\\text{B} = 140$ GFLOPs. Weight read = 140 GB. Time (bandwidth-bound): $140 / 3350 = $ **41.8 ms**. Arithmetic intensity = $140 \\times 10^9 / (140 \\times 10^9) = 1$ Ops/Byte — deeply memory-bound. Optimal batch: at batch=128, you do 128× more compute with the same weight read, pushing utilization from 0.34% to ~43%. **Mixed fleet (64 GPUs):** Prefill requests with 8k tokens take ~1.9 s, blocking decode for all co-located requests → P99 spikes. **Disaggregated (20 prefill + 44 decode):** Prefill GPUs: 20 GPUs handle ~42 prefill requests/s. Decode GPUs: 44 GPUs at batch=128 each handle ~3,072 tokens/s decode. KV-cache transfer (2048 tokens, 8 KV-heads GQA ≈ 0.67 GB): ~0.7 ms over NVLink — negligible. P99 decode latency drops from ~200 ms to ~50 ms because decode GPUs never stall on prefill compute.",
+    "flash_issues": [
+      "The arithmetic intensity calculation for the decode phase in the napkin math is incomplete."
+    ]
+  },
+  {
+    "id": "tinyml-real-time-deadlines-the-real-time-wake-word-budget-110",
+    "title": "The Real-Time Wake Word Budget",
+    "level": "L2",
+    "track": "tinyml",
+    "ka": "D6",
+    "rc": "RC-6",
+    "mode": "concept-recall",
+    "scenario": "You're designing a 'Hey, Cortex' wake word detection system on a device using a Cortex-M4 microcontroller. The audio driver delivers a new chunk of audio every 20ms. To avoid dropping any audio and missing a potential wake word, the inference for each chunk *must* complete before the next chunk arrives. Your keyword spotting model requires 3 million MAC (Multiply-Accumulate) operations to process one chunk. Given the specs, can the Cortex-M4 meet this real-time deadline?",
+    "common_mistake": "The most common mistake is to confuse FLOPS (Floating Point Operations) with MACs (Multiply-Accumulate operations). A MAC operation consists of a multiplication and an addition, making it roughly equivalent to 2 FLOPS. Using the raw MFLOPS number from the spec sheet without dividing by two will make the chip appear twice as fast as it is for this workload, leading to an incorrect conclusion that there is plenty of headroom.",
+    "realistic_solution": "Yes, the Cortex-M4 can meet the 20ms deadline, but just barely.",
+    "napkin_math": "1. **Get MACs/sec:** A Cortex-M4 does ~336 MFLOPS. A MAC is ~2 FLOPS. So, `336 / 2 = 168` M MACs/sec.",
+    "flash_issues": [
+      "The 'reasoning_mode' is 'concept-recall' but the question requires a calculation, making 'napkin-math' more appropriate."
+    ]
+  },
+  {
+    "id": "tinyml-fault-tolerance-the-silent-battery-killer-39",
+    "title": "The Silent Battery Killer",
+    "level": "L1",
+    "track": "tinyml",
+    "ka": "C6",
+    "rc": "RC-7",
+    "mode": "concept-recall",
+    "scenario": "You've deployed a fleet of 10,000 battery-powered keyword-spotting sensors. A rare software bug causes some devices to enter an infinite loop, hanging in their 'active' state instead of returning to 'deep sleep'. When hung, the device is unresponsive. State the name of the essential hardware peripheral used to automatically recover the device from this type of software freeze.",
+    "common_mistake": "Engineers unfamiliar with embedded systems often suggest software-only solutions (like checkpointing or OTA updates) or confuse the fault type. They fail to realize that if the main software loop is frozen, it cannot execute recovery code. The only solution is an independent hardware-level intervention.",
+    "realistic_solution": "The correct answer is a Watchdog Timer (WDT). A WDT is an independent hardware counter that, if not 'kicked' (reset) by the main software loop within a specific timeout period, will automatically trigger a full hardware reset of the microcontroller. This forces a clean reboot, recovering the device from the software freeze.",
+    "napkin_math": "The impact of a hang is catastrophic for battery life. Using the provided specs:",
+    "flash_issues": [
+      "The 'Napkin Math' section introduces new, unstated parameters (Active Current, Sleep Current, Battery Capacity, Voltage) that are not part of the scenario."
+    ]
+  },
+  {
+    "id": "cloud-flashattention-speculative-decoding-the-tale-of-two-latencies-198",
+    "title": "The Tale of Two Latencies",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "D3",
+    "rc": "RC-6",
+    "mode": "tradeoff-analysis",
+    "scenario": "You are serving a 70B LLM on H100s. Users have two main complaints:\n1. 'When I submit a long document (8k tokens) for summarization, it takes many seconds before the first word appears.' (High prefill latency)\n2. 'When I use the chatbot for conversation, the time between each generated word is too long.' (High time-per-token)",
+    "common_mistake": "Confusing the domains of the two optimizations. A common error is to think FlashAttention, which makes attention faster, will significantly speed up per-token latency (it doesn't, because decoding is memory-bound). Another error is to think Speculative Decoding can help with the initial prompt processing (it can't, as it's an auto-regressive optimization).",
+    "realistic_solution": "The two problems map directly to the two main phases of LLM inference.\n1. **Prefill Latency:** Processing the initial long prompt is bottlenecked by the attention mechanism's $O(N^2)$ complexity with respect to sequence length. This involves reading and writing the massive attention matrix to/from slow HBM. FlashAttention is designed specifically for this; it's an I/O-aware algorithm that fuses attention calculations in fast on-chip SRAM, avoiding the HBM bottleneck. It directly addresses the long document summarization problem.\n2. **Time-per-token:** Generating subsequent tokens is an auto-regressive process where the bottleneck is memory bandwidth—reading the entire 140GB of model weights from HBM for every single token generated. Speculative Decoding addresses this by using a small, fast 'draft' model to generate several candidate tokens, and then using the large, slow model to verify them in a single forward pass. This amortizes the high cost of the large model's memory-bound pass over multiple tokens, increasing tokens/second and reducing perceived latency.",
+    "napkin_math": "**Problem 1 (Prefill):** With a sequence length N=8192, the attention matrix has $N^2 \\approx 67$ million elements. For one head, this is $67M \\times 2 \\text{ bytes/elem} \\approx 134$ MB. A 70B model has many heads and layers (e.g., Llama 70B has 80 layers, 8 heads per group), so the intermediate state is many gigabytes. A standard attention implementation would repeatedly read and write this data to HBM (3.35 TB/s bandwidth, ~300ns latency). FlashAttention avoids this by keeping the operations in on-chip SRAM (~1.2 GB/s on a TinyML MCU, much higher on GPU, but the principle is avoiding off-chip), dramatically reducing the I/O bottleneck.",
+    "flash_issues": [
+      "The napkin math section is incomplete; it sets up the problem by calculating the size of an attention matrix but does not perform any calculations to demonstrate the HBM bottleneck.",
+      "The reasoning mode 'tradeoff-analysis' is a minor mismatch, as the question is about mapping two distinct problems to their respective solutions rather than trading off between them."
+    ]
+  },
+  {
+    "id": "cloud-f1-multi-agent-consensus-26",
+    "title": "The Multi-Agent Consistency Problem",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "F1",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "You're building a financial analysis system where 3 specialized agents (market data agent, SEC filing agent, news sentiment agent) independently gather information, then a synthesis agent combines their outputs. The market data agent takes 2s, SEC filing agent takes 8s (slow API), and news agent takes 1s. The synthesis agent needs all 3 inputs. Users see 'thinking...' for 8 seconds waiting for the slowest agent. Redesign the system to provide progressive results while maintaining factual consistency when agents return conflicting information.",
+    "common_mistake": "Simply streaming partial results as each agent completes. This creates a jarring UX where the synthesis changes dramatically when the SEC data arrives at 8s — potentially contradicting what was shown at 2s based on market data alone.",
+    "realistic_solution": "Three-pronged approach: (1) Staggered synthesis with confidence markers: When market data arrives at 2s, generate a 'preliminary analysis' (explicitly labeled 'based on market data only — SEC filings pending'). When news arrives at 1s, update the synthesis. When SEC data arrives at 8s, generate the 'final analysis.' Each intermediate result carries a completeness score (33%, 66%, 100%). (2) Optimistic concurrency with reconciliation: The synthesis agent maintains a 'fact ledger.' When SEC data conflicts with the preliminary market analysis (e.g., revenue expectations differ), the synthesis agent highlights the conflict and explains the discrepancy rather than silently overwriting. (3) Pipeline optimization: Cache SEC filing retrievals aggressively (filings change quarterly, not per-request). Pre-fetch common filings during off-peak hours. This could reduce SEC agent from 8s to 500ms for cached filings (90% of requests). (4) Deadline-aware degradation: If 8s timeout is unacceptable, set a 3s deadline. If SEC agent hasn't responded, proceed with 2/3 agents and note the gap.",
+    "napkin_math": "Without streaming: user waits max(2s, 8s, 1s) + 2s synthesis = 10s. With staggered synthesis: first result at max(2s, 1s) + 1s partial synthesis = 3s. Final result still at 10s but perceived latency is 3s. With SEC caching (90% hit): P90 latency = max(2s, 0.5s, 1s) + 2s = 4s. P99 (cache miss): 10s. Daily SEC API calls: 100K queries × 10% miss = 10K API calls vs 100K without cache.",
+    "flash_issues": [
+      "The 'Realistic Solution' description is cut off mid-sentence."
+    ]
+  },
+  {
+    "id": "cloud-serving-the-multi-model-serving-platform-226",
+    "title": "The Multi-Model Serving Platform",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "D4",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "Your company runs 12 different LLMs in production (ranging from 1B to 70B parameters) serving 50,000 QPS total across all models. Currently each model has its own dedicated GPU pool. The CFO says GPU costs are \\$2M/month. Design a multi-model serving platform that cuts costs by at least 40% without violating per-model latency SLAs.",
+    "common_mistake": "\"Just put all models on the same GPUs and multiplex.\" Naive co-location causes memory fragmentation and SLA violations because large models evict small ones from VRAM.",
+    "realistic_solution": "A multi-model platform needs three architectural layers: (1) **Model tiering** — group models by size and latency SLA. Tier 1 (1B–7B, <100ms): always resident in VRAM, share GPUs via MPS or time-slicing. Tier 2 (13B–30B, <500ms): resident on dedicated GPUs with overflow to CPU offload. Tier 3 (70B, <2s): tensor-parallel across multi-GPU, dedicated but right-sized. (2) **Predictive autoscaling** — use traffic forecasting (not reactive scaling) to pre-warm models 10 minutes before demand spikes. (3) **KV-cache sharing** — for models serving similar prompts (e.g., system prompts), cache the KV-state of common prefixes across requests.",
+    "napkin_math": "Current: 12 models × dedicated pools. Typical utilization: 30% (peak-provisioned). Monthly cost: \\$2M across ~700 GPUs at ~\\$4/hr average (mix of A100 and H100 instances). Optimized: Tier 1 (8 small models, 1B–7B): consolidate from 200 GPUs to 75 (shared via MPS, 80% util). Savings: 125 GPUs × \\$4/hr × 720 = \\$360k/mo. Tier 2 (3 mid models, 13B–30B): right-size from 200 GPUs to 120 with predictive autoscaling. Savings: 80 GPUs × \\$4/hr × 720 = \\$230k/mo. Tier 3 (1 large model, 70B): reduce from 300 GPUs to 200 with continuous batching + PagedAttention. Savings: 100 GPUs × \\$4/hr × 720 = \\$288k/mo. **Total savings: \\$878k/mo (43.9%)** — exceeds the 40% target. The additional levers (spot instances for stateless Tier 1, INT8 quantization for Tier 2, prefix caching across all tiers) provide further headroom and redundancy against traffic spikes.",
+    "flash_issues": [
+      "The \"Napkin Math\" section for Tier 3 is incomplete, making it impossible to verify if the proposed solution achieves the \"at least 40% cost reduction\" target."
+    ]
+  },
+  {
+    "id": "global-e1-the-overclocking-energy-trap-1",
+    "title": "The Overclocking Energy Trap",
+    "level": "L4",
+    "track": "global",
+    "ka": "E1",
+    "rc": "RC-10",
+    "mode": "failure-to-root-cause",
+    "scenario": "Your team is training a 100B parameter model on 512 A100 GPUs. To meet a deadline, the infrastructure team applies a 15% GPU frequency boost (overclock). The training time successfully decreases from 30 days to 26 days. However, the total energy consumed for the run (in kWh) unexpectedly increases by nearly 40%.",
+    "common_mistake": "Assuming energy consumption scales linearly with training time, so a shorter run should use less energy.",
+    "realistic_solution": "The root cause lies in the CMOS power equation: Dynamic Power (P) = α · C · V² · f. To achieve a 15% increase in frequency (f), the GPU must operate at a higher voltage (V) to maintain stability. Because power scales linearly with frequency but *quadratically* with voltage, the dynamic power draw increases cubically. Furthermore, the higher power dissipation increases the silicon temperature, which exponentially increases the static (leakage) power. Total energy is Power × Time. Even though the time decreased to 0.86x, the total power draw increased to ~1.6x, resulting in a net increase in total energy consumed. To optimize perf/watt, GPUs actually need to be slightly underclocked, not overclocked.",
+    "napkin_math": "Original: f=1.0, V=1.0 -> P=1.0. Time = 30 days. Energy = 1.0 × 30 = 30 units. Overclocked: f=1.15, requiring V=1.12 to be stable. New Dynamic Power = 1.12² × 1.15 ≈ 1.44x. Add 15% increase in leakage power due to heat -> Total Power ≈ 1.6x. New Time = 26 days (0.86x). New Energy = 1.6 × 26 = 41.6 units. 41.6 / 30 = 1.38 (38% increase in total energy).",
+    "flash_issues": [
+      "The statement 'dynamic power draw increases cubically' is an oversimplification; power typically scales with frequency to a power between 2 and 2.5, not strictly 3.",
+      "The 'Total Power ≈ 1.6x' in the napkin math is an assumed value without explicitly stating the original dynamic vs. static power split or how the 15% leakage increase contributes to the total."
+    ]
+  }
+]

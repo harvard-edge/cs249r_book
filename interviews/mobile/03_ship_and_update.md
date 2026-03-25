@@ -17,13 +17,336 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 ---
 
 
-### 🚀 Deployment & Model Delivery
+### Deployment & Model Delivery
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Conversion Cliff</b> · <code>model-formats</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The App Store Diet</b> · <code>on-demand-model-download</code></summary>
+
+- **Interviewer:** "You are a Mobile ML Engineer building a new "Magic Stylus" feature that uses an on-device model with 70 million parameters. Your base app is already 150 MB. To avoid exceeding the app store's ~200 MB cellular download limit and forcing users onto Wi-Fi, you plan to use on-demand resource APIs to download the model after the initial install.
+
+For your technical design document, you need to state the storage footprint of the model. Calculate the size of the 70M parameter model if stored in FP16 precision."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is confusing the byte requirements for different precisions. Engineers often default to thinking '1 parameter = 1 byte', which is only true for INT8 quantization. This leads to an answer that is half the correct size. A less common error is using 4 bytes per parameter, the standard for FP32, which would be correct for training weights but is overkill for most mobile inference scenarios and results in a 2x overestimate.
+
+  **Realistic Solution:** The correct answer is 140 MB. A 70 million parameter model requires 140 MB of storage in FP16 precision. This is because each FP16 parameter requires 2 bytes of storage. Adding this to the 150 MB base app size would create a 290 MB binary, which is significantly over the cellular download limit, confirming that an on-demand download strategy is necessary.
+
+  > **Napkin Math:** 1. **Identify parameters:** 70,000,000
+2. **Identify bytes per parameter:** FP16 precision uses 16 bits, which is 2 bytes.
+3. **Calculate total size:** 70,000,000 parameters × 2 bytes/parameter = 140,000,000 bytes
+4. **Convert to megabytes:** 140,000,000 bytes ≈ 140 MB
+
+  > **Key Equation:** $\text{Model Size (Bytes)} = \text{Number of Parameters} \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] 70 MB
+  > [ ] 280 MB
+  > [x] 140 MB
+  > [ ] 17.5 MB
+
+  📖 **Deep Dive:** [Mobile: Shipping and Updating](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The OTA Cellular Limit</b> · <code>ota-updates</code></summary>
+
+- **Interviewer:** "You are an engineer on an automotive team, and you need to push a critical update to a driver-assistance model. To avoid waiting for a full app store review, you plan to use an Over-the-Air (OTA) update. To ensure the update reaches the maximum number of vehicles, including those not on Wi-Fi, you must stay within the cellular download limit imposed by the mobile OS. What is the typical size limit you must stay under for a cellular download that doesn't require explicit user opt-in?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often confuse the large multi-gigabyte *initial install* size with the much stricter *cellular update* size. They might assume that since the app is 2 GB, a 500 MB update is fine, failing to realize OSes strictly cap non-Wi-Fi downloads to protect users' data plans. This leads to failed rollouts for users who aren't on Wi-Fi.
+
+  **Realistic Solution:** Most mobile operating systems, like iOS and Android, impose a limit of around 200-250 MB for automatic downloads over a cellular network. To be safe, an engineering team should target a budget of ~200 MB for any OTA update that needs to be deployed urgently and widely.
+
+  > **Napkin Math:** If your new uncompressed driver-assistance model is 900 MB, you need to achieve a significant compression ratio to meet the OTA limit.
+
+`Required Ratio = Uncompressed Size / Target Size`
+`Required Ratio = 900 MB / 200 MB = 4.5x`
+
+You would need to apply quantization (e.g., FP16 to INT4 is a 4x reduction), pruning, or other techniques to meet this budget.
+
+  > **Key Equation:** $\text{Update Size} \le \text{Cellular Limit}$
+
+  > **Options:**
+  > [ ] 20 MB
+  > [ ] 2 GB
+  > [x] ~200 MB
+  > [ ] Unlimited, as long as the user has a data plan.
+
+  📖 **Deep Dive:** [Mobile: Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Update Budget</b> · <code>ota-update-cost</code></summary>
+
+- **Interviewer:** "You are an ML systems engineer for an automotive company deploying a new driver-assistance feature. The model has 250 million parameters and is stored in FP16 precision. To update the fleet, the model must be sent over-the-air (OTA) via cellular networks. Calculate the size of the model update package that needs to be transmitted."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistake is to confuse the storage requirements for different numerical precisions. Engineers often default to thinking in terms of INT8 (1 byte/param) or FP32 (4 bytes/param), leading to a 2x error in either direction. Another mistake is to confuse bits and bytes, accidentally multiplying by 16 (for FP16) instead of 2, resulting in an 8x overestimation.
+
+  **Realistic Solution:** Each parameter in an FP16 (half-precision float) model requires 2 bytes of storage. To calculate the total size, you multiply the number of parameters by the size of each parameter.
+
+250,000,000 parameters × 2 bytes/parameter = 500,000,000 bytes.
+
+Converting bytes to megabytes (dividing by 1,000,000), you get 500 MB. This is a significant download size for a cellular network, impacting data costs and update reliability across a large fleet of vehicles.
+
+  > **Napkin Math:** $\text{Model Size} = \text{Number of Parameters} \times \text{Bytes per Parameter}$
+
+$\text{Model Size} = 250,000,000 \times 2 \text{ bytes} = 500,000,000 \text{ bytes}$
+
+$500,000,000 \text{ bytes} / 10^6 \text{ bytes/MB} = 500 \text{ MB}$
+
+  > **Key Equation:** $\text{Model Size (Bytes)} = \text{Parameters} \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] 250 MB
+  > [ ] 1 GB
+  > [x] 500 MB
+  > [ ] 4 GB
+
+  📖 **Deep Dive:** [Mobile: Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The OTA Update Budget</b> · <code>ota-update-size</code></summary>
+
+- **Interviewer:** "Your team is updating a keyword spotting model that runs continuously in a mobile app. The update will be pushed Over-the-Air (OTA) to millions of users, many on cellular data. The model is quantized to INT8. To avoid user complaints and high CDN costs, you must estimate the update size. State the most realistic size for this OTA model update package."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers accustomed to cloud models (GBs) or even larger mobile vision models (10s of MB) often misjudge the scale required for ubiquitous, low-friction mobile features. They forget that for OTA updates on cellular, especially for a background service, the size budget is extremely strict. A multi-megabyte update would be considered prohibitively expensive and intrusive by the product team.
+
+  **Realistic Solution:** A quantized keyword spotting model is designed for extreme efficiency and must be very small. A realistic size is in the hundreds of kilobytes. This ensures the OTA update is fast, cheap, and goes unnoticed by the user, which is critical for a background feature on a cellular-connected device.
+
+  > **Napkin Math:** From the `NUMBERS.md` guide, the *entire Flash budget* for a TinyML device (where keyword spotting is a canonical task) after accounting for the OS and bootloader is only ~454 KB. While a mobile phone has more memory, the model architecture for this task remains fundamentally small to conserve power and CPU. Therefore, a size in the hundreds of kilobytes is the only plausible answer.
+
+  > **Options:**
+  > [ ] ~50 MB
+  > [ ] ~5 GB
+  > [x] ~500 KB
+  > [ ] ~50 KB
+
+  📖 **Deep Dive:** [Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Data Budget</b> · <code>ota-update-cost</code></summary>
+
+- **Interviewer:** "You're a Staff ML Engineer on the mobile team for a popular social media app. Your team is launching a new generative AI feature for creating image filters. The v1 model is 80 MB. After a month of user feedback and fine-tuning, the data science team has produced a v2 model that is 10% more accurate but now weighs 120 MB. Your product manager is concerned about the data cost for users when rolling out this over-the-air (OTA) update. Explain the data consumption for a single user if you ship the full update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** A common mistake is to only consider the difference in size (120 MB - 80 MB = 40 MB), assuming a differential 'diff' update mechanism is in place. While possible, diffing is complex to engineer. The default, and most common, OTA update strategy for mobile ML models is to replace the entire file. Another mistake is to ignore the user cost entirely in favor of the accuracy gain, which is not a user-centric or systems-aware tradeoff.
+
+  **Realistic Solution:** The update will download the entire 120 MB model file to the user's device, consuming 120 MB of their cellular or Wi-Fi data plan. This is a significant data cost, especially for users on limited or prepaid mobile plans in emerging markets. It could lead to unexpected data charges or cause users to disable background updates, harming future feature adoption. A Staff engineer must flag this cost and propose mitigations.
+
+  > **Napkin Math:** The calculation is a direct interpretation of the model's storage size as network transfer size.
+
+1. **Identify model size:** The v2 model is 120 MB (MegaBytes).
+2. **Assume full update:** For a standard OTA rollout where the entire asset is replaced, the data downloaded is equal to the full size of the new asset.
+3. **Calculate data cost:** `Data Transferred = v2 Model Size = 120 MB`.
+
+This is not a trivial amount of a monthly data allocation for many users.
+
+  > **Key Equation:** $\text{Data}_{\text{OTA}} = \text{Size}_{\text{Model}}$
+
+  > **Options:**
+  > [ ] The update will only transfer the 40 MB difference, which is a manageable size.
+  > [ ] The 10% accuracy gain is worth the user data cost; we should ship the 120 MB update immediately.
+  > [x] The update will consume 120 MB of the user's data plan, a significant cost we must address.
+  > [ ] The update is about 960 Megabits (Mb), but this is standard and shouldn't be a concern.
+
+  📖 **Deep Dive:** [Mobile: Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Update Budget Shock</b> · <code>ota-update-cost</code></summary>
+
+- **Interviewer:** "You're an ML Systems Engineer on the mobile team for 'AutoDash,' a popular dashcam application. The app uses a 350 MB computer vision model on-device. Your team has trained an improved model and needs to roll it out via an Over-the-Air (OTA) update to 5 million active users. The product manager wants to know the potential network data bill for this rollout. Assuming an average carrier data cost of $2.00 per GB, calculate the estimated total cost to update the entire user base."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the aggregate cost of 'small' updates at scale. A common mistake is a simple unit conversion error, for example, treating the model size in MB as if it were an insignificant fraction of a GB, or miscalculating the total data volume by a factor of 100 or 1000 when converting from Megabytes to Gigabytes for millions of users.
+
+  **Realistic Solution:** The correct approach is to first calculate the total data volume required for the entire fleet, and then multiply that by the cost per unit of data. Careful unit conversion from Megabytes (MB) to Gigabytes (GB) is critical.
+
+1.  **Total Data Volume:** 5,000,000 users × 350 MB/user = 1,750,000,000 MB
+2.  **Unit Conversion:** 1,750,000,000 MB / 1,000 MB/GB = 1,750,000 GB
+3.  **Total Cost:** 1,750,000 GB × $2.00/GB = $3,500,000
+
+This high cost is a major reason why mobile teams invest heavily in model compression and delta updates.
+
+  > **Napkin Math:** 5M users * 350 MB/user = 1,750,000,000 MB
+1,750,000,000 MB / 1000 (MB/GB) = 1,750,000 GB
+1,750,000 GB * $2/GB = $3,500,000
+
+  > **Key Equation:** $\text{Total Cost} = (\text{Number of Users} \times \text{Model Size}_{\text{GB}}) \times \text{Cost per GB}$
+
+  > **Options:**
+  > [ ] $35,000
+  > [ ] $350,000
+  > [x] $3,500,000
+  > [ ] $1,750,000
+
+  📖 **Deep Dive:** [Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L1_Foundation-brightgreen?style=flat-square" alt="Level 1" align="center"> The OTA Bandwidth Bottleneck</b> · <code>ota-updates</code></summary>
+
+- **Interviewer:** "You're a Staff Engineer on an automotive OS team. You need to design the Over-the-Air (OTA) update strategy for a new 500 MB perception model being deployed to the vehicle fleet. Which of the following is the most critical *physical constraint* to consider for the update delivery mechanism?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often underestimate the 'last mile' problem in mobile and automotive deployments. They might focus on server-side scalability or on-device compute for installation, but for large models, the bottleneck is almost always the physical transmission of bits over unreliable, low-bandwidth wireless networks. A 500 MB download can easily fail or take an impractically long time on a typical cellular connection.
+
+  **Realistic Solution:** The primary constraint is the unreliable and often low-bandwidth cellular connection. While storage space and CPU are factors, the sheer time and potential for failure during the download of a large file over a mobile network is the most pressing issue. A stable, multi-minute download is not guaranteed in a moving vehicle, making robust delta-updating, compression, and pause/resume logic absolutely critical.
+
+  > **Napkin Math:** Let's quantify the best-case download time.
+- **Model Size:** 500 MB
+- **Convert to Megabits (Mb):** 500 MB × 8 bits/byte = 4000 Mb
+- **Assumed cellular speed:** 10 Mbps (a reasonable but not guaranteed average)
+- **Time = Total Data / Speed** = 4000 Mb / 10 Mbps = 400 seconds.
+
+400 seconds is nearly 7 minutes. On a poor 1 Mbps connection, this would be 4000 seconds, or ~67 minutes. This long duration makes the connection's reliability the dominant factor.
+
+  > **Options:**
+  > [ ] On-device flash storage capacity
+  > [ ] CPU cycles required for model decompression
+  > [x] Unreliable, low-bandwidth cellular connectivity
+  > [ ] Power consumption during the download
+
+  📖 **Deep Dive:** [Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Data Budget</b> · <code>ota-update-cost</code></summary>
+
+- **Interviewer:** "You are an ML engineer for a popular AI Keyboard app. Your team has developed a new transformer-based suggestion model that improves accuracy significantly. The current production model has 10 million parameters and uses FP16 precision. The new model has 15 million parameters and also uses FP16. Your product manager is concerned about the data cost for users on cellular plans when you ship this as an Over-the-Air (OTA) update. Calculate the *additional* download size for a user receiving this update."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often report the total size of the new model instead of the incremental increase. Another common error is using the wrong number of bytes for a given precision, such as assuming 4 bytes for FP16 (confusing it with FP32) or 1 byte (confusing it with INT8 quantization).
+
+  **Realistic Solution:** The correct approach is to calculate the storage size for both the old and new models and then find the difference. Since both models use FP16 precision, each parameter requires 16 bits, or 2 bytes, of storage. The additional download size is the difference in the total storage required for the parameters of the two models.
+
+  > **Napkin Math:** 1. **Old Model Size:** 10,000,000 parameters × 2 bytes/parameter = 20,000,000 bytes (20 MB)
+2. **New Model Size:** 15,000,000 parameters × 2 bytes/parameter = 30,000,000 bytes (30 MB)
+3. **Additional Download:** 30 MB (New) - 20 MB (Old) = 10 MB
+
+  > **Key Equation:** $\text{Update Size} = (P_{\text{new}} - P_{\text{old}}) \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] 5 MB
+  > [x] 10 MB
+  > [ ] 20 MB
+  > [ ] 30 MB
+
+  📖 **Deep Dive:** [Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Budget Constraint</b> · <code>mobile-ota-updates</code></summary>
+
+- **Interviewer:** "You're a mobile ML engineer. The product manager has mandated that any over-the-air (OTA) model update must be under 150 MB to avoid angering users on cellular data plans. Your team wants to ship a new 70 million parameter model. To preserve quality, you plan to deploy it using FP16 precision. Can you explain whether the model update will fit within the OTA budget?"
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** The most common mistakes are confusing the data types and their sizes, or errors in unit conversion. For instance, using the size of FP32 (4 bytes) or INT8 (1 byte) instead of FP16 (2 bytes), or incorrectly converting from parameters to megabytes.
+
+  **Realistic Solution:** Yes, the model will fit. A model using FP16 precision requires 2 bytes of storage for every parameter. With 70 million parameters, the total size is 140 million bytes. In the context of file sizes, one megabyte is commonly treated as one million bytes. Therefore, the model's size is 140 MB, which is just under the 150 MB limit set by the product manager.
+
+  > **Napkin Math:** 70,000,000 parameters × 2 bytes/parameter = 140,000,000 bytes
+140,000,000 bytes / 1,000,000 bytes/MB = 140 MB
+140 MB < 150 MB (Requirement Met)
+
+  > **Key Equation:** $\text{Model Size (Bytes)} = \text{Parameters} \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] 280 MB, so it fails the requirement.
+  > [ ] 70 MB, so it easily meets the requirement.
+  > [x] 140 MB, so it meets the requirement.
+  > [ ] 17.5 MB, so it easily meets the requirement.
+
+  📖 **Deep Dive:** [Mobile: Ship & Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L2_Analytical-blue?style=flat-square" alt="Level 2" align="center"> The OTA Update Budget</b> · <code>ota-update-cost</code></summary>
+
+- **Interviewer:** "You're a mobile ML engineer for an automotive app that includes a 'Driver Focus' feature running on-device. The current v1 model has 5 million parameters and is quantized to FP16. The research team has delivered a v2 model that is 7 million parameters, also in FP16, with significantly better performance.
+
+Your product manager is concerned about data usage for your 10 million users. They ask you to calculate the *minimum additional data* a user would need to download to get this new model via an Over-the-Air (OTA) update, assuming your infrastructure can ship *only* the change in model weights."
+
+  <details>
+  <summary><b>🔍 Reveal Answer</b></summary>
+
+  **Common Mistake:** Engineers often calculate the total size of the new model, forgetting that efficient OTA updates only ship the delta. Another common error is using the wrong number of bytes for the given precision (e.g., using 4 for FP32 or 1 for INT8, instead of 2 for FP16).
+
+  **Realistic Solution:** The correct approach is to calculate the size of the *difference* in parameters between the two models, and then multiply that by the number of bytes required for FP16 precision.
+
+1.  **Find the parameter delta:** The new model has 7M parameters and the old one has 5M, so the difference is 2M parameters.
+2.  **Determine bytes per parameter:** FP16 (half-precision floating point) uses 2 bytes per parameter.
+3.  **Calculate total size:** Multiplying the 2 million new parameters by 2 bytes/parameter gives a total download size of 4,000,000 bytes, or 4 MB.
+
+  > **Napkin Math:** 1. **Parameter Delta** = `New Parameters` - `Old Parameters`
+   `2,000,000 = 7,000,000 - 5,000,000`
+
+2. **Bytes per Parameter** = 2 (for FP16)
+
+3. **Download Size (Bytes)** = `Parameter Delta` × `Bytes per Parameter`
+   `4,000,000 bytes = 2,000,000 × 2`
+
+4. **Convert to MB** = `4,000,000 bytes / 1,000,000 bytes/MB = 4 MB`
+
+  > **Key Equation:** $\text{Download Size} = (P_{\text{new}} - P_{\text{old}}) \times \text{Bytes per Parameter}$
+
+  > **Options:**
+  > [ ] 14 MB
+  > [ ] 8 MB
+  > [x] 4 MB
+  > [ ] 2 MB
+
+  📖 **Deep Dive:** [Mobile: Ship and Update](https://mlsysbook.ai/mobile/03_ship_and_update.html)
+  </details>
+</details>
+
+
+
+
+
+
+
+
+
+
+#### 🟢 L3
+<details>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The Conversion Cliff</b> · <code>deployment</code></summary>
 
 - **Interviewer:** "You trained a PyTorch model with a custom GELU activation and grouped query attention. You convert it to CoreML for iPhone deployment. The conversion succeeds with no errors, but on-device accuracy is significantly worse than your PyTorch baseline. What went wrong?"
 
@@ -240,7 +563,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The ML Notification Backlash</b> · <code>mlops</code> <code>monitoring</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The ML Notification Backlash</b> · <code>deployment</code> <code>monitoring</code></summary>
 
 - **Interviewer:** "Your news app uses an on-device ML model to predict which articles a user will click, and sends push notifications for high-confidence predictions. After launching the feature on the Google Pixel 8 (Tensor G3), your app's rating drops from 4.5 to 3.2 stars in two weeks. Reviews say 'too many notifications' and 'the app thinks it knows what I want but it's wrong.' The model has 78% precision on your test set. What went wrong?"
 
@@ -270,7 +593,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The App Size Bloat</b> · <code>deployment</code> <code>storage</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The App Size Bloat</b> · <code>deployment</code> <code>persistent-storage</code></summary>
 
 - **Interviewer:** "Your team is adding an offline translation feature to your iOS app. The models total 300 MB. You bundle them directly into the app binary and ship the update. The next week, your product manager reports that app installations from new users have plummeted by 40%. Why did bundling the model destroy your acquisition metrics?"
 
@@ -294,8 +617,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Secure Enclave Boundary</b> · <code>security</code></summary>
 
@@ -325,7 +647,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Cold Start Jitter</b> · <code>model-loading</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Cold Start Jitter</b> · <code>serving</code></summary>
 
 - **Interviewer:** "Your ML-powered camera app experiences a noticeable 'hiccup' the very first time a user opens it and tries to snap a photo, even though subsequent photo captures are instantaneous. The inference itself is fast (5ms). What system-level factors contribute to this initial delay, and how would you optimize them?"
 
@@ -681,7 +1003,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Device-Free ML Testing Strategy</b> · <code>testing</code> <code>deployment</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Device-Free ML Testing Strategy</b> · <code>monitoring</code> <code>deployment</code></summary>
 
 - **Interviewer:** "Your team ships an ML-powered camera feature to 200 million users across iOS and Android. You don't have a device farm — you have 5 test phones on your desk. How do you test the ML pipeline across devices without a device farm?"
 
@@ -711,7 +1033,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Cross-Version Compatibility Maze</b> · <code>deployment</code></summary>
@@ -833,10 +1155,10 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Delivery Paradox</b> · <code>model-delivery</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Delivery Paradox</b> · <code>deployment</code></summary>
 
 - **Interviewer:** "You're shipping an on-device LLM assistant (3B parameters, INT4) to a global Android app with 500 million installs. The quantized model is 1.7 GB. Google Play's install-time APK limit is 150 MB, and on-demand delivery via Play Asset Delivery has a 2 GB limit. Design the model delivery system. What breaks at this scale that doesn't break in a demo?"
 
@@ -866,7 +1188,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Multi-Model Orchestration Nightmare</b> · <code>multi-model-inference</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Multi-Model Orchestration Nightmare</b> · <code>serving</code></summary>
 
 - **Interviewer:** "Your team is building a sophisticated AR application that requires running three ML models concurrently: a body pose estimation (high-res video input, GPU/NPU), a small speech recognition (audio input, CPU), and a gesture classifier (low-res video region, NPU). All must run in real-time. Describe how you would design the inference pipeline to manage resource contention, prioritize tasks, and ensure real-time performance on a single mobile SoC."
 
@@ -909,11 +1231,12 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 ---
 
 
-### 🔒 Privacy & Security
+### Privacy & Security
 
 
-#### 🟢 L3 — Recall & Define
+#### 🟢 L1/L2
 
+#### 🟢 L3
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L3_Junior-brightgreen?style=flat-square" alt="Level 1" align="center"> The User Consent Minefield</b> · <code>privacy</code></summary>
 
@@ -967,8 +1290,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Federated Keyboard</b> · <code>privacy</code></summary>
 
@@ -1002,7 +1324,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The On-Device Personalization Privacy</b> · <code>privacy</code> <code>training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 4" align="center"> The On-Device Personalization Privacy</b> · <code>privacy</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "Your photo search app needs to learn each user's personal categories — 'my dog,' 'my office,' 'my kids' soccer games.' You'll fine-tune a CLIP-like vision encoder (150M params, FP16 = 300 MB) on-device using LoRA. The adapted weights never leave the device. Walk me through the LoRA adapter sizing, training memory, time to convergence, and what happens when the user gets a new phone."
 
@@ -1032,7 +1354,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
 <summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 5" align="center"> The Keyboard Prediction Privacy Leak</b> · <code>privacy</code> <code>deployment</code></summary>
@@ -1131,10 +1453,10 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Federated Learning System for a Social Media App</b> · <code>privacy</code> <code>distributed</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The Federated Learning System for a Social Media App</b> · <code>privacy</code> <code>data-parallelism</code></summary>
 
 - **Interviewer:** "Design a federated learning system for a social media app with 500 million daily active users. The model personalizes the content feed. You must improve the model without collecting user interaction data on your servers. Cover device selection, communication efficiency, convergence, and privacy guarantees."
 
@@ -1165,13 +1487,12 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 ---
 
 
-### 🏋️ On-Device Training & Federated Learning
+### On-Device Training & Federated Learning
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The On-Device Fine-Tuning Pipeline</b> · <code>training</code> <code>privacy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The On-Device Fine-Tuning Pipeline</b> · <code>data-parallelism</code> <code>privacy</code></summary>
 
 - **Interviewer:** "Your photo app has a 'search by description' feature powered by a CLIP-like model. Users in Japan complain it doesn't understand Japanese food categories. Users in Brazil say it misclassifies local bird species. You can't collect user photos on your servers. Design an on-device personalization system that adapts the model to each user's photo library."
 
@@ -1201,10 +1522,10 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🟡 L5 — Analyze & Predict
+#### 🟡 L5
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Privacy-Utility Squeeze</b> · <code>on-device-training</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Privacy-Utility Squeeze</b> · <code>continual-learning</code></summary>
 
 - **Interviewer:** "You're implementing federated learning for a next-word prediction model across 100 million Android devices. Each device fine-tunes locally and uploads gradient updates. The privacy team mandates differential privacy with ε = 2. After deployment, the model's perplexity is 40% worse than centralized training. The PM asks you to 'just increase epsilon.' What do you tell them?"
 
@@ -1228,10 +1549,10 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> Designing Cross-Device Federated Personalization</b> · <code>training</code> <code>privacy</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> Designing Cross-Device Federated Personalization</b> · <code>data-parallelism</code> <code>privacy</code></summary>
 
 - **Interviewer:** "You're the ML systems architect for a health platform spanning Apple Watch (S9 chip, 1 GB RAM), iPhone (A18 Pro, 8 GB RAM), and iPad (M4, 16 GB RAM). Each device collects different health signals: the Watch has heart rate and motion, the iPhone has location and app usage, and the iPad has extended workout videos. You want to train a personalized health model that fuses data from all three devices — but Apple's privacy framework prohibits sending raw health data between devices, even within the same user's iCloud account. Design a federated personalization system that trains across a single user's device ecosystem without centralizing raw data."
 
@@ -1261,7 +1582,7 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> Designing an On-Device Continual Learning System</b> · <code>training</code> <code>security</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> Designing an On-Device Continual Learning System</b> · <code>data-parallelism</code> <code>security</code></summary>
 
 - **Interviewer:** "You're designing a continual learning system for a mobile keyboard that adapts to each user's evolving vocabulary — new slang, work jargon, names of new contacts, trending topics. The model must learn new patterns without forgetting old ones, train entirely on-device for privacy, resist adversarial manipulation (a malicious app trying to poison the model via accessibility services), and work across the Snapdragon 8 Gen 3 (12 GB RAM) down to the Helio G99 (4 GB RAM). Design the system."
 
@@ -1294,13 +1615,13 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 ---
 
 
-### 💰 Economics & Platform Constraints
+### Economics & Platform Constraints
 
 
-#### 🔴 L6+ — Synthesize & Derive
+#### 🔴 L6+
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The 50-Feature Mobile ML Platform</b> · <code>platform</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L6+_Principal-red?style=flat-square" alt="Level 4" align="center"> The 50-Feature Mobile ML Platform</b> · <code>deployment</code></summary>
 
 - **Interviewer:** "You're the ML platform architect for a super-app (like WeChat or Grab) that has 50 different ML features: face filters, speech recognition, recommendation, fraud detection, OCR, translation, smart replies, and more. Each feature team wants to ship their own model. The app is already 300 MB. Users on budget phones with 3 GB RAM complain about performance. Design the mobile ML platform."
 
@@ -1335,13 +1656,12 @@ App store constraints, model delivery, A/B testing, monitoring, privacy, and on-
 ---
 
 
-### 📎 Additional Topics
+### Additional Topics
 
 
-#### 🔵 L4 — Apply & Identify
-
+#### 🔵 L4
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Model Loading I/O Cliff</b> · <code>storage-io</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Model Loading I/O Cliff</b> · <code>persistent-storage</code></summary>
 
 - **Interviewer:** "Your Android app loads a 200 MB on-device LLM from internal storage. On a Pixel 8 Pro (UFS 4.0), the model loads in 180ms. On a Samsung Galaxy A15 (eMMC 5.1), the same model takes 4.2 seconds. The user sees a blank screen for 4 seconds on the budget phone. Both devices have enough RAM. Why is there a 23× difference, and how do you fix the user experience?"
 

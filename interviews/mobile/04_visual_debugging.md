@@ -61,7 +61,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Operator Gap</b> · <code>frameworks</code> <code>latency</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Operator Gap</b> · <code>compilation</code> <code>latency</code></summary>
 
 ### NPU-CPU Ping-Pong Creates Pipeline Bubbles
 
@@ -104,7 +104,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Jetsam Guillotine</b> · <code>memory</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Jetsam Guillotine</b> · <code>memory-hierarchy</code> <code>fault-tolerance</code></summary>
 
 ### ML Model + Camera ISP Compete for the Same RAM Pool
 
@@ -148,7 +148,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Burst Benchmarking Illusion</b> · <code>benchmarking</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Burst Benchmarking Illusion</b> · <code>roofline</code> <code>power</code></summary>
 
 ### Benchmarking Peak Performance, Not Sustained Performance
 
@@ -188,7 +188,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Backbone Bloat</b> · <code>architecture</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Backbone Bloat</b> · <code>model-cost</code> <code>memory-hierarchy</code></summary>
 
 ### Three Copies of the Same Backbone
 
@@ -235,7 +235,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Frankenstein Model</b> · <code>ml-ops</code> <code>reliability</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Frankenstein Model</b> · <code>deployment</code> <code>fault-tolerance</code></summary>
 
 ### No Atomicity Guarantee for Model Updates
 
@@ -275,7 +275,7 @@ graph LR
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CPU Wake-Lock Tax</b> · <code>sustainable-ai</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The CPU Wake-Lock Tax</b> · <code>sustainable-ai</code> <code>power</code></summary>
 
 ### The CPU Wake-Lock Tax
 
@@ -318,7 +318,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silicon Shared Oven</b> · <code>sustainable-ai</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L4_Mid-blue?style=flat-square" alt="Level 2" align="center"> The Silicon Shared Oven</b> · <code>sustainable-ai</code> <code>power</code></summary>
 
 ### The Shared Silicon Thermal Envelope
 
@@ -365,7 +365,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Radio Energy Wall</b> · <code>sustainable-ai</code> <code>power-thermal</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The Radio Energy Wall</b> · <code>sustainable-ai</code> <code>power</code></summary>
 
 ### The Cellular Radio Wake Dominates Power, Not the Model
 
@@ -404,7 +404,7 @@ graph TD
 </details>
 
 <details>
-<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The UMA Bandwidth Wall</b> · <code>hardware</code> <code>memory</code></summary>
+<summary><b><img src="https://img.shields.io/badge/Level-L5_Senior-yellow?style=flat-square" alt="Level 3" align="center"> The UMA Bandwidth Wall</b> · <code>model-cost</code> <code>memory-hierarchy</code></summary>
 
 ### UMA Bandwidth Contention
 

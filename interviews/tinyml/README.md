@@ -33,13 +33,15 @@ Each file represents a **system scope** — the system you're reasoning about. W
   <thead>
     <tr>
       <th width="5%">#</th>
-      <th width="30%">Scope</th>
-      <th width="35%">What you're studying</th>
-      <th width="10%">L3</th>
-      <th width="10%">L4</th>
-      <th width="10%">L5</th>
-      <th width="10%">L6+</th>
-      <th width="10%">Total</th>
+      <th width="25%">Scope</th>
+      <th width="25%">What you're studying</th>
+      <th width="7%">L1</th>
+      <th width="7%">L2</th>
+      <th width="7%">L3</th>
+      <th width="7%">L4</th>
+      <th width="7%">L5</th>
+      <th width="7%">L6+</th>
+      <th width="8%">Total</th>
     </tr>
   </thead>
   <tbody>
@@ -47,36 +49,44 @@ Each file represents a **system scope** — the system you're reasoning about. W
       <td><b>01</b></td>
       <td><b><a href="01_microcontroller.md">The Microcontroller</a></b></td>
       <td><i>What fits in 256 KB of SRAM?</i></td>
-      <td>27</td>
-      <td>62</td>
-      <td>40</td>
-      <td>16</td>
-      <td><b>145</b></td>
+      <td>130</td>
+      <td>141</td>
+      <td>162</td>
+      <td>70</td>
+      <td>66</td>
+      <td>58</td>
+      <td><b>623</b></td>
     </tr>
     <tr>
       <td><b>02</b></td>
       <td><b><a href="02_sensing_pipeline.md">The Sensing Pipeline</a></b></td>
       <td><i>From sensor input to inference output</i></td>
+      <td>1</td>
+      <td>1</td>
       <td>7</td>
       <td>26</td>
       <td>17</td>
-      <td>6</td>
-      <td><b>56</b></td>
+      <td>7</td>
+      <td><b>58</b></td>
     </tr>
     <tr>
       <td><b>03</b></td>
       <td><b><a href="03_deployed_device.md">The Deployed Device</a></b></td>
       <td><i>How you update firmware and keep it alive for years</i></td>
-      <td>6</td>
+      <td>10</td>
+      <td>32</td>
+      <td>7</td>
       <td>9</td>
       <td>9</td>
-      <td>2</td>
-      <td><b>26</b></td>
+      <td>4</td>
+      <td><b>68</b></td>
     </tr>
     <tr>
       <td><b>04</b></td>
       <td><b><a href="04_visual_debugging.md">Visual Architecture Debugging</a></b></td>
       <td><i>Can you spot the bottleneck in a TinyML system diagram?</i></td>
+      <td>—</td>
+      <td>—</td>
       <td>1</td>
       <td>5</td>
       <td>5</td>
@@ -84,7 +94,7 @@ Each file represents a **system scope** — the system you're reasoning about. W
       <td><b>11</b></td>
     </tr>
     <tr>
-      <td></td><td><b>Total</b></td><td></td><td></td><td></td><td></td><td></td><td><b>238</b></td>
+      <td></td><td><b>Total</b></td><td></td><td><b>141</b></td><td><b>174</b></td><td><b>177</b></td><td><b>110</b></td><td><b>97</b></td><td><b>69</b></td><td><b>760</b></td>
     </tr>
   </tbody>
 </table>

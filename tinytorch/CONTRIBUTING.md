@@ -81,17 +81,16 @@ pytest tests/
 tito module test 01
 
 # 5. Commit with descriptive messages (NO auto-attribution)
-git add .
+git add <specific-files>    # Never use 'git add .' — stage files explicitly
 git commit -m "Fix tensor broadcasting bug in Module 02
 
 - Resolve shape mismatch in batch operations
 - Add comprehensive test cases
 - Update documentation with edge cases"
 
-# 6. Merge to dev when complete
-git checkout dev
-git merge feature/your-improvement
-git branch -d feature/your-improvement
+# 6. Push and open a pull request
+git push origin feature/your-improvement
+# Then open a PR on GitHub targeting the 'dev' branch
 ```
 
 ### **Critical Policies - NO EXCEPTIONS**

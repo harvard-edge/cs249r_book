@@ -4,7 +4,7 @@ Native validation commands for MLSysBook Binder CLI.
 Validation logic is implemented in Binder where possible (e.g. references,
 citations, labels, figures, rendering). Some checks still delegate to scripts
 under book/tools/scripts/ (tables, spelling, epub, sources, grid-tables,
-images). See book/cli/BINDER_NATIVE_AUDIT.md for the full list.
+images).
 """
 
 from __future__ import annotations
@@ -171,7 +171,9 @@ class ValidateCommand:
             ("contractions", "_run_contractions"),
             ("unblended-prose", "_run_unblended_prose"),
             ("times-spacing", "_run_times_spacing"),
+            ("times-product-spacing", "_run_times_product_spacing"),
             ("purpose-unnumbered", "_run_purpose_unnumbered"),
+            ("div-fences", "_run_div_fences"),
         ],
         "images": [
             ("formats", "_run_image_formats"),
@@ -2701,6 +2703,68 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
+    # Times product spacing (space around $\times$ in product expressions)
+    # ------------------------------------------------------------------
+
+    # Catch tight $\times$ in product expressions involving inline code or
+    # numbers.  Multiplier patterns like `val`$\times$ speedup (space after,
+    # followed by a word) are intentional and NOT flagged.
+    #
+    # Patterns flagged (all need spaces around $\times$):
+    #   `val`$\times$`val`   — inline × inline
+    #   `val`$\times$3       — inline × number
+    #   3$\times$`val`       — number × inline
+    #   `val`$\times$$math$  — inline × math span
+    TIMES_PRODUCT_PATTERNS = [
+        # inline × inline:  `..`$\times$`..`
+        re.compile(r"`\$\\times\$`"),
+        # inline × number:  `..`$\times$<digit>
+        re.compile(r"`\$\\times\$\d"),
+        # number × inline:  <digit>$\times$`..`
+        re.compile(r"\d\$\\times\$`"),
+        # inline × math:    `..`$\times$$..$ (tight dollar after times)
+        re.compile(r"`\$\\times\$\$"),
+    ]
+
+    def _run_times_product_spacing(self, root: Path) -> ValidationRunResult:
+        """Flag tight $\\times$ in product expressions (should be spaced)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                for pat in self.TIMES_PRODUCT_PATTERNS:
+                    for m in pat.finditer(line):
+                        context = line[max(0, m.start() - 10) : min(len(line), m.end() + 10)].strip()
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="times_product_spacing",
+                                message="Add space around $\\times$ in product (e.g. ` $\\times$ ` not `$\\times$`)",
+                                severity="warning",
+                                context=context,
+                            )
+                        )
+
+        return ValidationRunResult(
+            name="times-product-spacing",
+            description="Space around $\\times$ in product expressions",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
     # Purpose sections must be unnumbered
     # ------------------------------------------------------------------
 
@@ -2730,6 +2794,61 @@ class ValidateCommand:
         return ValidationRunResult(
             name="purpose-unnumbered",
             description="Ensure Purpose sections are unnumbered",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Div fence validation  (malformed ::: / :::: fences)
+    # ------------------------------------------------------------------
+
+    # ::: or :::: followed by space then non-{ character — malformed fence
+    _DIV_FENCE_3 = re.compile(r"^:::[ ]+[^{ ]")
+    _DIV_FENCE_4 = re.compile(r"^::::[ ]+[^{ ]")
+
+    def _run_div_fences(self, root: Path) -> ValidationRunResult:
+        """Flag ::: or :::: lines with trailing text instead of {.class} or closure."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if self._DIV_FENCE_4.match(stripped):
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="malformed_div_fence_4",
+                            message="Nested div fence (::::) has trailing text; must be bare :::: or :::: {.class}",
+                            severity="error",
+                            context=stripped[:80],
+                        )
+                    )
+                elif self._DIV_FENCE_3.match(stripped):
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="malformed_div_fence_3",
+                            message="Div fence (:::) has trailing text; must be bare ::: or ::: {.class}",
+                            severity="error",
+                            context=stripped[:80],
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="div-fences",
+            description="Malformed div fences (::: / ::::) with trailing text",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),

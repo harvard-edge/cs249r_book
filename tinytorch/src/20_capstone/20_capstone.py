@@ -1104,11 +1104,11 @@ def run_optimization_workflow_example():
         magnitude_prune = None
 
     try:
-        from tinytorch.benchmarking import Benchmark, BenchmarkResult
+        from tinytorch.perf.benchmarking import BenchmarkSuite, BenchmarkResult
         print("  ✅ Module 19 (Benchmarking) imported")
     except ImportError:
         print("  ⚠️  Module 19 (Benchmarking) not available - using basic benchmarking")
-        Benchmark = None
+        BenchmarkSuite = None
 
     # Step 1: Create dataset
     print("\n" + "="*70)

@@ -241,7 +241,7 @@ Input: [[1, 2, 3], [4, 5, 6]]
          ↓
 NumPy allocates: [1][2][3][4][5][6] in contiguous memory
          ↓
-Tensor wraps with: shape=(2,3), size=6, dtype=int64
+Tensor wraps with: shape=(2,3), size=6, dtype=float32
 ```
 
 **Key Design Principle**: Our Tensor is a wrapper around NumPy arrays that adds ML-specific functionality. We leverage NumPy's battle-tested memory management and computation kernels while adding the operation chaining needed for machine learning.
@@ -882,6 +882,20 @@ normalized = (batch_data - mean) / std
 ```
 
 **Performance Note**: Element-wise operations are highly optimized in NumPy and run efficiently on modern CPUs with vectorization (SIMD instructions).
+
+**⚠️ Broadcasting Pitfall**: Broadcasting is powerful but dangerous. When shapes are
+*accidentally* mismatched, NumPy silently broadcasts instead of raising an error:
+
+```
+predictions shape: (32, 4)   ← 32 samples, 4 outputs each
+targets shape:     (4,)      ← oops, forgot the batch dimension!
+
+NumPy broadcasts (4,) → (32, 4) by repeating the same row for all 32 samples.
+No error. No warning. Just wrong results.
+```
+
+This is the #1 source of silent bugs in ML code. Always verify shapes match
+before element-wise operations like loss computation.
 """
 
 
@@ -917,6 +931,18 @@ def test_unit_arithmetic_operations():
     result = matrix + vector
     expected = np.array([[11, 22], [13, 24]], dtype=np.float32)
     assert np.array_equal(result.data, expected)
+
+    # ⚠️ Broadcasting pitfall: verify shapes match before element-wise ops
+    # In ML, predictions (batch, features) minus targets (features,) broadcasts
+    # silently — the same target row repeats for every sample. Always check!
+    predictions = Tensor(np.ones((4, 3)))   # 4 samples, 3 features
+    targets_good = Tensor(np.zeros((4, 3)))  # correct: same shape
+    targets_bad = Tensor(np.zeros((3,)))     # dangerous: missing batch dim
+    assert predictions.shape == targets_good.shape, "Matching shapes — safe"
+    assert predictions.shape != targets_bad.shape, (
+        f"Shape mismatch: {predictions.shape} vs {targets_bad.shape}. "
+        f"NumPy broadcasts silently — this is almost always a bug in ML code."
+    )
 
     # Test subtraction (data centering)
     result = b - a
@@ -968,9 +994,6 @@ Data Samples × Projection Matrix = Projected Data
 Matrix Multiplication Process:
     A (2×3)      B (3×2)         C (2×2)
    ┌       ┐    ┌     ┐       ┌                         ┐
-   │ 1 2 3 │    │ 7 8 │       │ 1×7+2×9+3×1 1×8+2×1+3×2 │   ┌       ┐
-   │       │ ×  │ 9 1 │  =    │                         │ = │ 28 16 │
-   │ 4 5 6 │    │ 1 2 │       │ 4×7+5×9+6×1 4×8+5×1+6×2 │   │ 79 49 │
    │ 1 2 3 │    │ 7 8 │       │ 1×7+2×9+3×1 1×8+2×1+3×2 │   ┌       ┐
    │       │ ×  │ 9 1 │  =    │                         │ = │ 28 16 │
    │ 4 5 6 │    │ 1 2 │       │ 4×7+5×9+6×1 4×8+5×1+6×2 │   │ 79 49 │
@@ -1212,7 +1235,7 @@ Common ML Reshapes:
 ### Transpose: Swapping Dimensions
 
 ```
-Transposing (swapping dimensions - data rearrangement):
+Transposing (swapping dimensions - stride reinterpretation):
 Original: [[1, 2, 3],    (shape: (2, 3))
            [4, 5, 6]]
          ↓ transpose()
@@ -1222,9 +1245,9 @@ Result:  [[1, 4],        (shape: (3, 2))
 
 Memory Layout (rearranged):
 Before: [1][2][3][4][5][6]
-After:  [1][4][2][5][3][6]  ← Data actually moves in memory
+After:  [1][4][2][5][3][6]  ← Same data, different stride interpretation — cache-unfriendly access pattern
 
-Key Insight: Transpose involves data movement - more expensive than reshape.
+Key Insight: Transpose is a non-contiguous view (no copy, but poor cache locality) - more expensive to access than reshape.
 
 Common Linear Algebra Usage:
 ┌─────────────────────┬─────────────────────┬─────────────────────┐
@@ -1244,12 +1267,12 @@ Operation Performance (for 1000×1000 matrix):
 │ Operation       │ Time         │ Memory Access   │ Cache Behavior  │
 ├─────────────────┼──────────────┼─────────────────┼─────────────────┤
 │ reshape()       │ ~0.001 ms    │ No data copy    │ No cache impact │
-│ transpose()     │ ~10 ms       │ Full data copy  │ Poor locality   │
+│ transpose()     │ ~0.001 ms    │ Non-contiguous view │ Poor locality   │
 │ view() (future) │ ~0.001 ms    │ No data copy    │ No cache impact │
 └─────────────────┴──────────────┴─────────────────┴─────────────────┘
 
 Why transpose() is slower:
-- Must rearrange data in memory
+- Non-contiguous view: same data, different stride interpretation
 - Poor cache locality (accessing columns)
 - Can't be parallelized easily
 ```
@@ -1330,7 +1353,7 @@ if __name__ == "__main__":
 """
 ## 🏗️ Reduction Operations: Aggregating Information
 
-Reduction operations collapse dimensions by aggregating data, which is essential for computing statistics, statistics, and preparing data for further processing.
+Reduction operations collapse dimensions by aggregating data, which is essential for computing statistics and preparing data for further processing.
 
 ### Why Reductions are Crucial in ML
 
@@ -1551,7 +1574,7 @@ def analyze_memory_layout():
     print("\n🚀 REAL-WORLD IMPLICATIONS:")
     print("   • Image processing libraries use specific memory formats for cache efficiency")
     print("   • Matrix multiplication optimized with blocking (tile into cache-sized chunks)")
-    print(f"   • Transpose is expensive ({slowdown:.1f}×) because it changes memory layout")
+    print(f"   • Transpose is expensive ({slowdown:.1f}×) because it creates a non-contiguous view with poor cache locality")
     print("   • Hardware-optimized libraries leverage memory layout for better performance")
 
     print("\n" + "=" * 60)

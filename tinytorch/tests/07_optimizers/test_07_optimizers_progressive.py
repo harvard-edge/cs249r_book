@@ -34,14 +34,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 class TestFoundationStackStillWorks:
     """
-    🔄 REGRESSION CHECK: Verify foundation stack (01→05) still works.
+    🔄 REGRESSION CHECK: Verify foundation stack (01→06) still works.
 
     💡 If these fail: You may have broken something in the foundation while working on optimizers.
     """
 
     def test_foundation_pipeline_stable(self):
         """
-        ✅ TEST: Complete foundation pipeline (01→05) should still work
+        ✅ TEST: Complete foundation pipeline (01→06) should still work
         """
         try:
             from tinytorch.core.activations import ReLU
@@ -110,7 +110,7 @@ class TestFoundationStackStillWorks:
             assert False, f"Foundation forward pass broken: {str(e)}"
 
 
-class TestModule06OptimizersCore:
+class TestModule07OptimizersCore:
     """
     🆕 NEW FUNCTIONALITY: Test Module 07 (Optimizers) core implementation.
 
@@ -402,10 +402,10 @@ class TestOptimizerIntegration:
 
 class TestRegressionPrevention:
     """
-    🛡️ REGRESSION PREVENTION: Ensure Module 06 doesn't break earlier modules.
+    🛡️ REGRESSION PREVENTION: Ensure Module 07 doesn't break earlier modules.
     """
 
-    def test_module_05_not_broken(self):
+    def test_module_06_not_broken(self):
         """Ensure autograd still works after adding optimizers."""
         try:
             from tinytorch.core.tensor import Tensor
