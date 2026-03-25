@@ -70,14 +70,14 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-screen">
+    <div className="flex-1 flex flex-col h-[calc(100vh-3.5rem)] overflow-hidden">
       {/* ─── Hero ─── */}
       <div className="px-6 pt-8 pb-6 border-b border-border">
         <div className="max-w-5xl mx-auto">
           {isReturning ? (
             /* Returning user — compact row + daily CTA */
             <div className="mb-5 space-y-3">
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-4">
                   {streakCount > 0 && (
                     <div className="flex items-center gap-1.5 text-accentAmber">
@@ -94,7 +94,7 @@ export default function HomePage() {
                   href="/practice"
                   className="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg text-sm transition-colors"
                 >
-                  <Target className="w-4 h-4" /> Browse & Drill
+                  <Target className="w-4 h-4" /> Browse &amp; Drill
                 </Link>
               </div>
               {/* Daily challenge card */}
@@ -137,7 +137,7 @@ export default function HomePage() {
                 </a>
                 {" "}by Prof. Vijay Janapa Reddi, Harvard University.
               </p>
-              <div className="flex items-center gap-3 mb-4">
+              <div className="flex flex-wrap items-center gap-2.5 mb-4">
                 <Link
                   href="/practice?daily=1"
                   className="inline-flex items-center gap-2 px-5 py-2.5 bg-accentBlue text-white font-bold rounded-lg text-sm hover:opacity-90 transition-opacity"
@@ -146,13 +146,13 @@ export default function HomePage() {
                 </Link>
                 <Link
                   href="/practice"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-surface border border-border text-textSecondary font-medium rounded-lg text-sm hover:text-textPrimary transition-colors"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-surface border border-border text-textSecondary font-medium rounded-lg text-sm hover:text-textPrimary transition-colors"
                 >
                   <Target className="w-4 h-4" /> Browse All
                 </Link>
                 <Link
                   href="/gauntlet"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-surface border border-border text-textSecondary font-medium rounded-lg text-sm hover:text-textPrimary transition-colors"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-surface border border-border text-textSecondary font-medium rounded-lg text-sm hover:text-textPrimary transition-colors"
                 >
                   <Crosshair className="w-4 h-4" /> Mock Interview
                 </Link>
@@ -239,6 +239,18 @@ export default function HomePage() {
               <AreaOverview areas={filteredAreas} onExpand={setExpandedArea} onSelectTopic={setSelectedTopic}
                 selectedId={selectedTopic?.id ?? null} />
             )}
+
+            {/* Footer */}
+            <div className="mt-12 pt-6 border-t border-borderSubtle text-center pb-8">
+              <p className="text-[12px] text-textMuted">
+                Built at{" "}
+                <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="hover:text-textTertiary transition-colors">Harvard University</a>
+                {" "}&middot;{" "}
+                <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer" className="hover:text-textTertiary transition-colors">Open Source</a>
+                {" "}&middot;{" "}
+                <Link href="/about" className="hover:text-textTertiary transition-colors">About</Link>
+              </p>
+            </div>
           </div>
         </div>
 

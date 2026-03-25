@@ -76,6 +76,18 @@ function PracticePage() {
     setMounted(true);
     setDailyDone(isDailyCompleted());
 
+    // Auto-trigger daily challenge from ?daily=1 link
+    const dailyParam = searchParams.get('daily');
+    if (dailyParam === '1' && !isDailyCompleted()) {
+      const dailyQs = getDailyQuestions();
+      if (dailyQs.length > 0) {
+        skipFilterCount.current = 3;
+        setPool(dailyQs);
+        setCurrent(dailyQs[0]);
+        return; // Skip other param handling
+      }
+    }
+
     // Default to L1 for brand-new users (no attempts yet)
     if (getAttempts().length === 0 && !searchParams.get('q') && !searchParams.get('topic') && !searchParams.get('level')) {
       setSelectedLevel("L1");

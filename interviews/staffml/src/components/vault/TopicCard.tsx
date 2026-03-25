@@ -23,9 +23,9 @@ export default function TopicCard({ topic, style, isSelected, onClick, compact }
           : "bg-surface border-borderSubtle hover:bg-surfaceElevated hover:border-borderHighlight"
       )}
     >
-      {/* Colored top accent bar */}
-      <div className="absolute top-0 left-0 right-0 h-[2px] opacity-60"
-        style={{ background: `linear-gradient(90deg, ${style.primary}, transparent 80%)` }} />
+      {/* Colored left accent */}
+      <div className="absolute top-2 left-0 bottom-2 w-[3px] rounded-r-full opacity-50"
+        style={{ backgroundColor: style.primary }} />
 
       {/* Title */}
       <div className="flex items-start justify-between gap-2 mb-2">
