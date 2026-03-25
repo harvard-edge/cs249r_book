@@ -73,10 +73,16 @@ export function getLevelDef(id: string): LevelDef {
 
 export function getLevelLabel(id: string): string {
   const def = LEVEL_MAP[id];
-  return def ? `${def.id}: ${def.name} (${def.role})` : id;
+  return def ? `${def.name} (${def.role})` : id;
 }
 
 export function getLevelShortLabel(id: string): string {
+  const def = LEVEL_MAP[id];
+  return def ? def.name : id;
+}
+
+/** Display name for UI — uses Bloom name, not L-number */
+export function getLevelDisplayId(id: string): string {
   const def = LEVEL_MAP[id];
   return def ? def.name : id;
 }

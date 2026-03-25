@@ -23,6 +23,7 @@ import { saveAttempt, getAttempts, updateSRCard, getDueQuestionIds, getDueCount,
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { getQuestionById } from "@/lib/corpus";
 import { getTopicById } from "@/lib/taxonomy";
+import { getLevelDef } from "@/lib/levels";
 import { getDailyQuestions, isDailyCompleted, markDailyCompleted } from "@/lib/daily";
 import { shouldShowGate, incrementReveals, getRemainingReveals, isStarVerified } from "@/lib/star-gate";
 import StarGate from "@/components/StarGate";
@@ -435,22 +436,31 @@ function PracticePage() {
 
         {/* Level */}
         <div>
-          <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Level</label>
-          <div className="grid grid-cols-3 gap-1">
-            {levels.map(l => (
-              <button
-                key={l}
-                onClick={() => setSelectedLevel(l)}
-                className={clsx(
-                  "px-2 py-1.5 rounded text-xs font-mono font-medium text-center transition-all",
-                  selectedLevel === l
-                    ? "bg-accentBlue/10 text-accentBlue border border-accentBlue/30"
-                    : "text-textSecondary hover:bg-surfaceHover border border-transparent"
-                )}
-              >
-                {l}
-              </button>
-            ))}
+          <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Difficulty</label>
+          <div className="grid grid-cols-2 gap-1">
+            {levels.map(l => {
+              const def = getLevelDef(l);
+              return (
+                <button
+                  key={l}
+                  onClick={() => setSelectedLevel(l)}
+                  className={clsx(
+                    "px-2 py-1.5 rounded text-xs font-medium text-left transition-all flex items-center gap-1.5",
+                    selectedLevel === l
+                      ? "border"
+                      : "text-textSecondary hover:bg-surfaceHover border border-transparent"
+                  )}
+                  style={selectedLevel === l ? {
+                    color: def.color,
+                    backgroundColor: `${def.color}10`,
+                    borderColor: `${def.color}30`,
+                  } : undefined}
+                >
+                  <div className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: def.color }} />
+                  {def.name}
+                </button>
+              );
+            })}
           </div>
         </div>
 

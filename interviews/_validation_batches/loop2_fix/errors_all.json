@@ -1,0 +1,662 @@
+[
+  {
+    "id": "cloud-serving-queue-slos-the-slo-vs.-throughput-squeeze-143",
+    "title": "The SLO vs. Throughput Squeeze",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "D4",
+    "rc": "RC-6",
+    "mode": "napkin-math",
+    "scenario": "You are designing an LLM serving system for a 13B model on H100 GPUs. Your workload consists of long conversations (average 2048 prompt tokens, 2048 completion tokens). The business requires a P99 TTFT of less than 400ms. Using a simple static batching strategy, analyze the trade-off between throughput (batch size) and this strict TTFT SLO. Calculate the maximum batch size you can support, and explain the implications for your system's throughput.",
+    "common_mistake": "Focusing only on the inference time for a single request. This ignores the queuing dynamics that dominate P99 latency. Engineers often calculate the best-case TTFT (an empty queue) and assume they have plenty of headroom, failing to account for the 'wait for previous batch' time in a production system under load.",
+    "realistic_solution": "The P99 TTFT is dominated by the time a request spends waiting for the previous batch to complete, plus the time for its own batch's prefill. To meet a strict 400ms SLO with long generations, the total processing time of a batch must be kept extremely short. This forces the system into using a very small batch size, which in turn cripples throughput. For a 13B model on an H100, prefill for 2048 tokens takes roughly: 2 * 13e9 * 2048 / 989e12 ≈ 54ms per sequence. With batch size B, prefill takes ~54ms * B. The decode phase for 2048 tokens at ~5ms/token takes ~10.24 seconds per batch. The P99 worst case is arriving just as a batch starts processing, so the wait time is the full batch processing time: T_process(B) = 54ms*B + 10,240ms. This already exceeds 400ms for any batch size, revealing that static batching fundamentally cannot meet this SLO with long completions. The solution is to switch to continuous batching, which decouples prefill scheduling from decode, allowing new requests to begin prefill while other requests are mid-decode.",
+    "napkin_math": "1. **Define the P99 TTFT equation:** `P99 TTFT ≈ T_process(B) + T_prefill(B)`. We need this to be `< 400ms`. 2. **Calculate prefill time per sequence:** For 13B model, 2048 prompt tokens: FLOPs = 2 * 13e9 * 2048 = 53.2 TFLOPs. Time = 53.2e12 / 989e12 ≈ 54ms. 3. **Calculate decode time per batch:** 2048 output tokens * ~5ms/token = 10,240ms ≈ 10.2 seconds. 4. **P99 TTFT for static batching at B=1:** Wait (worst case) = 10,240ms + 54ms = 10,294ms >> 400ms. 5. **Conclusion:** Even at batch size B=1, the P99 TTFT is ~10.3 seconds because the worst-case arrival must wait for the previous request's full decode. Static batching is fundamentally incompatible with strict TTFT SLOs when completions are long. Continuous batching is required to break this coupling.",
+    "issues": [
+      "The P99 TTFT equation `P99 TTFT ≈ T_process(B) + T_prefill(B)` is incorrect; P99 TTFT is dominated by queueing time plus the request's own processing time, not just batch processing time plus prefill.",
+      "The calculation for prefill time per sequence `2 * 13e9 * 2048 / 989e12 ≈ 54ms` is for the entire batch, not per sequence, and it's missing the batch size factor.",
+      "The decode time per batch `2048 output tokens * ~5ms/token = 10,240ms` is for a single sequence, not a batch, and it's not clear where the 5ms/token comes from.",
+      "The conclusion for B=1 `Wait (worst case) = 10,240ms + 54ms = 10,294ms` incorrectly sums decode time and prefill time as 'wait time' for a single request, which doesn't represent P99 TTFT in a queueing system."
+    ]
+  },
+  {
+    "id": "cloud-serving-queueing-theory-sla-the-ai-analyst's-deadline-182",
+    "title": "The AI Analyst's Deadline",
+    "level": "L6+",
+    "track": "cloud",
+    "ka": "D4",
+    "rc": "RC-6",
+    "mode": "requirements-to-architecture",
+    "scenario": "You are the Principal Engineer at a new FinTech startup building a unified 'AI Analyst' API on a fixed cluster of H100 GPUs. The API must serve two workloads with conflicting demands:",
+    "common_mistake": "Using a single, simple FIFO queue for all requests. This is the most common and fatal mistake. While simple to implement, it leads to **Head-of-Line Blocking**. A single, long-running 100k-token report generation job will enter the batch, and its massive prefill computation will occupy the GPU for seconds. All subsequent real-time news requests that arrive during this time will be stuck in the queue, immediately violating their 500ms deadline.",
+    "realistic_solution": "The core of the problem is isolating the latency-sensitive workload from the throughput-oriented workload on the same hardware. My first three decisions would be: (1) **Priority queuing with preemption**: Implement a multi-level priority queue where real-time news requests preempt long-running report generation jobs. The scheduler must be able to pause a report generation mid-decode, save its KV cache, and immediately begin prefilling a real-time request. (2) **Dedicated capacity partitioning**: Reserve a subset of GPUs exclusively for real-time requests to guarantee latency SLOs, while allowing report generation to use remaining capacity plus any idle real-time GPUs. This prevents head-of-line blocking entirely for the latency-sensitive path. (3) **Request-aware continuous batching**: Use a scheduling policy that limits the maximum prefill length admitted into a batch to cap the compute time per iteration. Long-context report requests (100k tokens) would be chunked into smaller prefill windows to prevent a single request from monopolizing the GPU for seconds.",
+    "napkin_math": "Let's calculate the capacity needed to meet the real-time SLA. We'll model a 70B Llama-class model on H100s. 1. **Prefill time for real-time request (short, ~500 tokens):** FLOPs = 2 * 70e9 * 500 = 70 TFLOPs. Time = 70e12 / 989e12 ≈ 71ms. This already exceeds a 50ms TTFT SLO, so we would need to either use a smaller model, employ tensor parallelism across 2 GPUs (halving to ~35ms), or reduce the prompt length. 2. **Prefill time for report generation (100k tokens):** FLOPs = 2 * 70e9 * 100,000 = 14,000 TFLOPs. Time = 14,000e12 / 989e12 ≈ 14.2 seconds per prefill. 3. **Key insight:** A single report prefill would block the GPU for ~14 seconds. At 100 real-time requests/second, this means ~1,400 requests would queue up during one report prefill without isolation. This proves that workload isolation is not optional — it is a hard architectural requirement.",
+    "issues": [
+      "The prefill time calculation `FLOPs = 2 * 70e9 * 500 = 70 TFLOPs. Time = 70e12 / 989e12 ≈ 71ms` is for a single sequence, but the problem is about batching and queueing, so the impact of batch size on prefill time needs to be considered.",
+      "The statement `This already exceeds a 50ms TTFT SLO` is based on a single-sequence prefill time, which is not the full TTFT in a batched system and doesn't account for potential batching benefits for prefill.",
+      "The napkin math for report generation prefill `FLOPs = 2 * 70e9 * 100,000 = 14,000 TFLOPs` is correct, but the time calculation is missing, making the example incomplete."
+    ]
+  },
+  {
+    "id": "cloud-ttft-tpot-continuous-batching-queueing-the-earnings-call-meltdown-184",
+    "title": "The Earnings Call Meltdown",
+    "level": "L6+",
+    "track": "cloud",
+    "ka": "D3",
+    "rc": "RC-6",
+    "mode": "tradeoff-analysis",
+    "scenario": "You are the Staff ML Systems Engineer at a fintech company that provides real-time transcription for Wall Street earnings calls. The product promise is a live, streaming transcript with a P99 Time-To-First-Token (TTFT) under 500ms.",
+    "common_mistake": "The most common mistake is to blame the model or the GPU speed. Junior engineers might say 'We need a faster GPU like a B200' or 'We need to distill the model to be smaller.' While these might help, they don't address the fundamental architectural flaw. The system isn't slow because the GPU is slow; it's slow because it's idle, waiting for a serialized, request-level lock to be released. This is a systems and queueing failure, not a raw compute problem.",
+    "realistic_solution": "The current architecture of processing one request at a time is a classic Head-of-Line Blocking problem. The system's service rate is fixed by the time it takes to process one full request. When the arrival rate of requests exceeds this service rate, a queue builds up infinitely (in theory). A new request might have to wait for 19 other requests to complete their *entire* generation sequence, which can take many seconds each.",
+    "napkin_math": "**Setup:** 70B model on H100, sequential request processing. | **Time per decode step (memory-bound):** | = 140 GB / 3,350 GB/s ≈ 42 ms/step (1 token generated) | **Per-request time (100-token prompt, 100 output tokens):** | Prefill: 2 × 70B × 100 / (989 × 10¹² × 0.5) ≈ 0.03 ms (negligible for short prompts) | Decode: 100 tokens × 42 ms = 4.2 seconds | Total per request ≈ 4.2 seconds | **Head-of-line blocking with 20 queued requests:** | A new request must wait for all ahead of it to finish. | Worst-case wait = 19 × 4.2s = 79.8 seconds | Even with 5 ahead: 5 × 4.2s = 21 seconds TTFT → far exceeds 500 ms SLO | **With continuous batching (batch size B):** | All B requests decode in parallel; each step still takes ~42 ms | But now each step produces B tokens (one per request) | TTFT for new request ≈ 1 decode step ≈ 42 ms (can slot in at next iteration) | Throughput: B tokens / 42 ms → for B=20: ~476 tokens/s | P99 TTFT now dominated by prefill of the new request, not queue depth.",
+    "issues": [
+      "The prefill time calculation `Prefill: 2 × 70B × 100 / (989 × 10¹² × 0.5) ≈ 0.03 ms` is incorrect; the denominator should be the raw TFLOPS, not TFLOPS * 0.5, and the result is too low for a 70B model.",
+      "The statement `0.03 ms (negligible for short prompts)` is misleading, as prefill time is often a significant component of TTFT even for short prompts, especially when considering batching effects."
+    ]
+  },
+  {
+    "id": "cloud-serving-the-token-budget-economics-205",
+    "title": "The Token Budget Economics",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "D4",
+    "rc": "RC-2",
+    "mode": "tradeoff-analysis",
+    "scenario": "Your company is choosing between H100, A100, and TPU v5e for serving a 70B parameter LLM. The CFO wants a cost-per-million-tokens comparison across these accelerators at realistic batch sizes. Walk me through the napkin math and tell me which hardware wins — and when.",
+    "common_mistake": "\"Pick the GPU with the highest FLOPS — H100 always wins.\" Raw FLOPS is irrelevant for decode-phase serving, which is memory-bandwidth bound. The cheapest $/token depends on batch size, model size, and whether you're prefill-bound or decode-bound.",
+    "realistic_solution": "LLM decode is memory-bandwidth bound: each token requires loading all model weights from HBM once. The metric that matters is $/GB/s of memory bandwidth, not $/TFLOP. At small batch sizes, the accelerator with the best bandwidth-per-dollar wins. At large batch sizes, the workload shifts compute-bound and FLOPS/$ matters more. TPU v5e wins on raw $/token at high batch sizes due to lower per-chip cost; H100 wins on latency-sensitive low-batch workloads due to 3.35 TB/s HBM3 bandwidth.",
+    "napkin_math": "70B model in FP16 = 140 GB weights. Each decode token loads 140 GB. **H100:** Bandwidth = 3.35 TB/s. Decode throughput (B=1) = 3,350 / 140 ≈ 24 tokens/s. Cost ≈ $2/hr (cloud). Cost per 1M tokens = $2 / (24 * 3600) * 1e6 = $23.15. **A100 (80GB):** Model does not fit in single A100 (140GB > 80GB), requires 2x A100s with tensor parallelism. Effective bandwidth ≈ 2 * 2.0 TB/s = 4.0 TB/s (minus communication overhead). Decode throughput ≈ 28 tokens/s. Cost ≈ $2 * 2 = $4/hr. Cost per 1M tokens = $4 / (28 * 3600) * 1e6 = $39.68. **TPU v5e (16GB):** Model requires ~9 chips (140GB / 16GB). Per-chip cost is lower (~$1.20/hr), but 9 chips = $10.80/hr. However, at large batch sizes (B=64+), the workload becomes compute-bound, and TPU v5e's lower $/TFLOP wins. **Verdict:** H100 wins for latency-sensitive, low-batch serving. For high-batch throughput workloads, TPU v5e can be 2-3x cheaper per token due to lower chip costs, but requires more complex sharding.",
+    "issues": [
+      "The A100 (80GB) section states `Model does not fit in single A100 (140GB > 80GB), requires 2x A100s with tensor parallelism`, but then calculates `Effective bandwidth ≈ 2 * 2.0 TB/s = 4.0 TB/s` which is incorrect; A100 80GB has 2.0 TB/s HBM BW, so 2x A100s would have 2.0 TB/s * 2 = 4.0 TB/s *total* HBM BW, but the effective bandwidth for a single model weight read across two GPUs would be limited by the slowest link or the sum of local reads, not simply doubled.",
+      "The A100 decode throughput calculation `28 tokens/s` is based on `4.0 TB/s` effective bandwidth, which is questionable given the tensor parallelism setup.",
+      "The A100 cost `Cost ≈ $2 * 2 = $4/hr` is an assumption for cloud cost, which should be explicitly stated as an estimate or range.",
+      "The TPU v5e is mentioned in the scenario and realistic solution but completely omitted from the napkin math, making the comparison incomplete."
+    ]
+  },
+  {
+    "id": "cloud-federated-learning-economics-the-privacy-vs.-bandwidth-trade-off-76",
+    "title": "The Privacy vs. Bandwidth Trade-off",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "E2",
+    "rc": "RC-10",
+    "mode": "napkin-math",
+    "scenario": "You are a Staff ML Engineer at a self-driving car company with a fleet of 10,000 vehicles. The fleet needs a perception model update and you are evaluating two data strategies:",
+    "common_mistake": "Engineers often focus on cloud compute costs and neglect the network transmission cost from a large fleet of edge devices. Another common mistake is to calculate the cost for the alternative strategy (Federated Learning) without carefully reading what the question is asking for.",
+    "realistic_solution": "The correct calculation determines the total data volume generated by the entire fleet daily and then scales it to an annual cost. The Central Training strategy's cost is independent of the model size and depends only on the raw data transfer volume. However, the scenario is incomplete as stated — it mentions two data strategies but does not provide the per-GB cost of data transmission or fully describe both options. The methodology is: (1) Calculate daily fleet data volume = 10,000 cars × 10 GB/car/day = 100 TB/day. (2) Calculate annual volume = 100 TB/day × 365 = 36,500 TB = 36.5 PB/year. (3) Multiply by cost per GB to get the centralized data transfer bill. (4) Compare against the federated alternative, where only model updates (not raw sensor data) are transmitted. The federated approach trades raw data transfer for model gradient exchanges, which are orders of magnitude smaller per round but must be repeated across many training rounds.",
+    "napkin_math": "10,000 cars * 10 GB/car/day = 100,000 GB/day = 100 TB/day. Annual volume = 100 TB/day × 365 = 36,500 TB = 36.5 PB/year. **Centralized cost** (assuming $0.05/GB egress): 36,500,000 GB × $0.05 = **$1,825,000/year**. **Federated alternative:** Model size = ~500 MB. Each car uploads gradients: 500 MB/round. With weekly updates (52 rounds/year): 10,000 cars × 500 MB × 52 = 260,000 GB/year. Cost = 260,000 × $0.05 = **$13,000/year**. **Savings: ~$1.8M/year (140x reduction)**. The trade-off: federated learning sacrifices some model accuracy (non-IID data across vehicles, slower convergence) for massive bandwidth savings and data privacy.",
+    "issues": [
+      "The scenario is incomplete; critical numerical inputs (data generation rate, model size, cost per GB) are missing from the problem statement and are instead provided in the solution sections.",
+      "The 'Realistic Solution' section correctly identifies the scenario as incomplete, indicating a flaw in the question's design."
+    ]
+  },
+  {
+    "id": "cloud-economics-tco-federated-learning-the-$18m-data-bill:-centralized-vs.-fede-115",
+    "title": "The $18M Data Bill: Centralized vs. Federated TCO",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "E2",
+    "rc": "RC-10",
+    "mode": "concept-recall",
+    "scenario": "You are evaluating the Total Cost of Ownership (TCO) for a new driver-assistance feature. The baseline 'centralized' training approach requires uploading raw sensor data from a fleet of 100,000 vehicles to the cloud. As an alternative, your team is exploring a 'federated' approach to mitigate privacy concerns and data upload costs.",
+    "common_mistake": "Engineers often underestimate the 'tyranny of scale' with fleet data. A common mistake is to calculate the cost for a shorter time period (e.g., daily instead of annually) or for a subset of the fleet (e.g., a single vehicle), failing to capture the massive aggregate operational expenditure. Another frequent error is simple arithmetic mistakes with large numbers, like misplacing a decimal or confusing millions with thousands.",
+    "realistic_solution": "The correct approach is to systematically calculate the total data volume generated by the entire fleet over the full one-year period, and then multiply that total volume by the per-unit data cost. This demonstrates a clear understanding of how to model Total Cost of Ownership (TCO) for large-scale, production ML systems. However, the question is incomplete as stated because it does not provide the per-vehicle data generation rate, the cost per GB of data transfer, or the time period. To illustrate the methodology: if each vehicle generates 10 GB/day and cloud egress costs $0.05/GB over one year, the centralized cost would be: 100,000 vehicles * 10 GB/day * 365 days * $0.05/GB = $18.25M annually — hence the title '$18M Data Bill.' The federated alternative would transfer only model updates (~500 MB per round) instead of raw data, dramatically reducing network costs at the expense of more complex engineering.",
+    "napkin_math": "1.  **Calculate data per vehicle per year:** 10 GB/day * 365 days = 3,650 GB/vehicle/year. 2. **Calculate fleet-wide data volume:** 100,000 vehicles * 3,650 GB = 365,000,000 GB = 365 PB/year. 3. **Calculate centralized data transfer cost:** 365,000,000 GB * $0.05/GB = $18,250,000 ≈ **$18.25M/year**. 4. **Federated alternative:** Model updates only: 100,000 vehicles * 500 MB * 52 rounds/year = 2,600,000 GB = 2.6 PB/year. Cost = 2,600,000 GB * $0.05/GB = $130,000/year. 5. **Savings:** $18.25M - $0.13M = **$18.12M/year** in data transfer costs alone. The federated approach is ~140x cheaper in network costs.",
+    "issues": [
+      "The scenario is incomplete; critical numerical inputs (data generation rate, model size, cost per GB, update frequency) are missing from the problem statement and are instead provided in the solution sections.",
+      "The 'Realistic Solution' section correctly identifies the scenario as incomplete, indicating a flaw in the question's design."
+    ]
+  },
+  {
+    "id": "cloud-economics-privacy-fl-the-healthtech-tco-dilemma-216",
+    "title": "The HealthTech TCO Dilemma",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-10",
+    "mode": "napkin-math",
+    "scenario": "You are the ML Systems Engineer for a HealthTech company launching a 'smart reply' feature in a patient-doctor messaging app. You must choose between two strategies:",
+    "common_mistake": "Engineers often focus purely on direct costs like cloud compute and engineering salaries. They completely ignore the statistical financial risk, or Annual Loss Expectancy (ALE), associated with handling sensitive data. In regulated industries like healthcare or finance, the ALE is often the single largest component of the Total Cost of Ownership (TCO).",
+    "realistic_solution": "The Federated Learning approach has a lower Total Cost of Ownership. The key is to incorporate the financial risk of a data breach into the TCO calculation.",
+    "napkin_math": "We calculate the Total Cost of Ownership (TCO) as `TCO = Annual Compute Cost + Annual Engineering Cost + Annual Loss Expectancy (ALE)`. **Strategy A: Centralized Cloud Training.** Compute: fine-tune on 4× A100s for 2 weeks/quarter = 4 × $2.20/hr × 336hr × 4 = $11,827/year. Engineering: 1 ML engineer at $200K/year (half-time) = $100K. ALE: probability of a HIPAA breach × cost. With PHI centralized in one cloud tenant, assume 5% annual breach probability × $10M average cost (fines + lawsuits + reputation) = $500K ALE. **Strategy A TCO ≈ $612K/year.** **Strategy B: Federated Learning.** Compute: 10 hospital edge nodes at $500/month each + 1 aggregation server at $1,000/month = $72K/year. Engineering: 2 ML engineers (FL is harder) = $400K. ALE: PHI never leaves hospitals, breach probability drops to 0.5% × $2M (smaller blast radius) = $10K ALE. **Strategy B TCO ≈ $482K/year.** The FL approach saves ~$130K/year, driven almost entirely by the 50× reduction in ALE. The engineering cost is higher, but the risk-adjusted TCO is decisively lower.",
+    "issues": [
+      "The 'Napkin Math' section is severely incomplete, missing the 3-year TCO for Strategy A and the entire calculation for Strategy B, making the question unanswerable and the stated 'Realistic Solution' unverifiable."
+    ]
+  },
+  {
+    "id": "cloud-tco-federated-learning-the-privacy-premium-226",
+    "title": "The Privacy Premium",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "E2",
+    "rc": "RC-10",
+    "mode": "napkin-math",
+    "scenario": "You are the lead ML Systems Engineer at a health-tech startup building a cancer detection model. You have partnerships with 10 hospitals, each holding 10TB of valuable image data. The CTO asks you to solve for the 3-year Total Cost of Ownership (TCO) for two training strategies and recommend one.",
+    "common_mistake": "Focusing only on the hourly cloud instance cost ($100/hr is high!) and ignoring the massive, one-time data acquisition fee in the centralized approach or the recurring engineering salary cost in the federated approach. Another common mistake is miscalculating the data transfer costs by an order of magnitude, making it seem like the dominant factor.",
+    "realistic_solution": "The correct answer requires calculating the 3-year TCO for both strategies and then reasoning about the non-quantifiable risks.",
+    "napkin_math": "**Strategy A: Centralized Training (3-year TCO).** Data acquisition: 10 hospitals × $50K licensing fee = $500K one-time. Data transfer: 10 hospitals × 10 TB × $0.09/GB egress = $9,000. Central storage: 100 TB × $0.023/GB/month × 36 months = $82,800. Compute: 8× A100 cluster at $100/hr, training 4 weeks/year × 3 years = $100 × 672hr × 3 = $201,600. Engineering: 1 ML engineer (half-time) × $200K × 3 years = $300,000. **Strategy A 3-year TCO ≈ $1.09M.** **Strategy B: Federated Learning (3-year TCO).** Data acquisition fee: $0 (data stays on-premise). Data transfer: only gradient updates, negligible. On-prem GPU nodes: 10 × $15K amortized over 3 years = $150K. Aggregation server: $2,000/month × 36 = $72K. Engineering: 2 ML engineers (FL expertise) × $200K × 3 = $1.2M. **Strategy B 3-year TCO ≈ $1.42M.** Strategy B costs ~$330K more in direct costs. However, the non-quantifiable risk of centralizing 100 TB of medical imaging data (HIPAA fines up to $1.8M per violation category, plus reputational damage) makes Strategy B the safer long-term bet for a health-tech startup. A single breach could exceed the entire 3-year cost difference.",
+    "issues": [
+      "The compute cost calculation for Strategy A is incorrect; if $100/hr is for a single A100, the total compute cost should be 8 times higher ($1,612,800 instead of $201,600), or the $100/hr rate for an 8x A100 cluster is unrealistically low and needs clarification.",
+      "The 'Napkin Math' section is severely incomplete, missing the entire calculation for Strategy B, making the question unanswerable and the stated 'Realistic Solution' unverifiable.",
+      "The A100 hourly rate of $100/hr is either extremely high (per GPU) or extremely low (per 8-GPU cluster), making it unrealistic compared to typical cloud pricing (e.g., $2.20/hr in Q8)."
+    ]
+  },
+  {
+    "id": "cloud-roofline-the-transformer-flop-count-271",
+    "title": "The Transformer FLOP Count",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-2",
+    "mode": "napkin-math",
+    "scenario": "Calculate the total FLOPs for a single forward pass through a transformer layer with hidden dimension $H=4096$, sequence length $S=2048$, batch size $B=8$, and 32 attention heads. Break it down by component: QKV projection, attention scores, attention output, and MLP.",
+    "common_mistake": "\"Just count the attention as $O(S^2)$ and call it a day.\" This misses that the MLP typically dominates FLOPs in modern transformers (it's 2/3 of the compute), and the QKV projections are large GEMMs.",
+    "realistic_solution": "A standard transformer layer has four major GEMM operations plus the attention score computation. Each GEMM of shape $[M \\times K] \\times [K \\times N]$ costs $2MKN$ FLOPs (multiply + add).",
+    "napkin_math": "Let $B=8$, $S=2048$, $H=4096$, $d_h=128$, heads=32. Tokens = $B \\times S = 16{,}384$. **(1) QKV projection** ($[BS \\times H] \\times [H \\times 3H]$): $2 \\times 16384 \\times 4096 \\times 12288 = 1.65$ TFLOP. **(2) Attention scores** ($[BS \\times S] \\times [S \\times d_h]$ per head, 32 heads): $32 \\times 2 \\times 8 \\times 2048 \\times 2048 \\times 128 = 274.9$ GFLOP. **(3) Attention output projection** ($[BS \\times H] \\times [H \\times H]$): $2 \\times 16384 \\times 4096 \\times 4096 = 549.8$ GFLOP. **(4) MLP** (up-project $H \\to 4H$, down-project $4H \\to H$): $2 \\times (2 \\times 16384 \\times 4096 \\times 16384) = 4.40$ TFLOP. **Total per layer: 1.65T + 0.27T + 0.55T + 4.40T ≈ 6.87 TFLOP.** MLP is **64%** of compute. For 32 layers: 220 TFLOP. On H100 at 989 TFLOPS: 220 / 989 = **222 ms** minimum (compute-bound). This confirms that the MLP, not attention, dominates the FLOP count in standard transformers. The $O(S^2)$ attention only becomes dominant when sequence length exceeds ~8K tokens for this architecture.",
+    "issues": [
+      "Napkin Math for Attention scores is incomplete, only calculating the QK^T part and missing the SV part, which typically doubles the FLOPs for attention.",
+      "Napkin Math for MLP is incomplete."
+    ]
+  },
+  {
+    "id": "cloud-head-of-line-blocking-qos-the-multi-tenant-priority-inversion-306",
+    "title": "The Multi-Tenant Priority Inversion",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "C7",
+    "rc": "RC-6",
+    "mode": "requirements-to-architecture",
+    "scenario": "Your platform serves two customer tiers from a single H100 cluster: 'Premium' customers running latency-sensitive dialogue agents (P99 TTFT < 200ms) and 'Standard' customers running large, asynchronous document analysis jobs. The system uses a single global FIFO queue to feed the continuous batcher. During a product launch for a Standard-tier customer, your Premium-tier customers report catastrophic timeouts, with latencies exceeding 30 seconds. The on-call playbook suggests adding more GPUs to handle the load. Critique this playbook action. Justify why it's wrong and propose a more robust architectural solution.",
+    "common_mistake": "Following the playbook. Adding more GPUs (scaling out) will increase the system's total throughput but it will *not* solve the priority inversion problem. The new GPUs will simply pick up more work from the front of the FIFO queue, which is still clogged with low-priority Standard jobs. The Premium requests are still stuck at the back of the line.",
+    "realistic_solution": "The playbook is wrong because this isn't a capacity problem; it's a scheduling and architecture problem. The single FIFO queue creates a 'Priority Inversion' via Head-of-Line blocking. The high-priority, short-duration Premium requests are stuck waiting behind a deluge of low-priority, long-duration Standard jobs. The correct solution is to re-architect the queuing system to be Quality-of-Service (QoS) aware. A robust solution involves implementing at least two separate queues: a high-priority queue for Premium and a low-priority one for Standard. The GPU scheduler must always service the high-priority queue first, potentially even preempting or pausing a running batch of Standard work if a Premium request arrives (a very advanced technique). A simpler, but still effective, implementation is to have the scheduler drain the Premium queue completely before ever pulling a job from the Standard queue. This guarantees that a surge in low-priority traffic cannot impact high-priority SLAs.",
+    "napkin_math": "Let's quantify the 'wait time' disaster. **Assumptions:** H100 cluster serves both tiers from a single FIFO queue. Standard document analysis jobs: average 30-second processing time, arriving at 10 jobs/min during the launch surge. Premium dialogue requests: average 200ms processing time, requiring P99 TTFT < 200ms. **During the product launch surge:** Queue depth builds: 10 Standard jobs/min × 30s each = 5 GPU-minutes of work entering per minute. If cluster capacity is 8 GPUs, steady-state queue wait for any new request = queue_depth × avg_service_time / num_GPUs. With 50 Standard jobs queued: wait time = 50 × 30s / 8 = **187 seconds** for a Premium request arriving at the back of the FIFO. This is **935× the 200ms SLA**. **Adding 8 more GPUs (playbook action):** Wait time = 50 × 30s / 16 = **93 seconds** — still 465× the SLA. The problem is not capacity; it is ordering. Even with infinite GPUs, if the scheduler processes the queue in FIFO order and Standard jobs saturate the queue, Premium requests still wait behind them. **With priority queuing:** Premium requests jump to the front. Wait time = (0 Standard jobs ahead) × 30s + (2 Premium jobs ahead) × 0.2s / 8 GPUs = **50ms** — well within the 200ms SLA, with zero additional hardware.",
+    "issues": [
+      "The Napkin Math's calculation of incoming work (5 GPU-minutes/min) versus the implied cluster capacity (8 GPU-minutes/min for 8 GPUs) suggests the system is underloaded, which contradicts the scenario's 'catastrophic timeouts' due to queue build-up.",
+      "Napkin Math is incomplete."
+    ]
+  },
+  {
+    "id": "cloud-gpu-roofline-arithmetic-intensity-power-the-efficiency-paradox-312",
+    "title": "The Efficiency Paradox",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-2",
+    "mode": "tradeoff-analysis",
+    "scenario": "Your team is evaluating upgrading your inference cluster from H100s to the new B200s to reduce both latency and cost. You benchmark two key models:",
+    "common_mistake": "The most common mistake is to blame software, such as 'CUDA drivers aren't optimized for the B200 yet' or 'the model needs to be re-compiled with new library features.' These answers ignore the fundamental, unchanging physics of the hardware. Another incorrect path is to simply state 'the batch size is too small' without explaining *why* a small batch size interacts with the specific hardware changes (compute vs. memory bandwidth) to cause the negative efficiency.",
+    "realistic_solution": "The B200 fails for the MobileNet model due to a mismatch between the model's workload characteristics and the hardware's architecture. The issue is rooted in the **roofline model** and **arithmetic intensity**.",
+    "napkin_math": "Let's quantify this using the Roofline Model. **H100 specs:** 989 TFLOPS FP16, 3.35 TB/s HBM bandwidth. Ridge point = 989,000 / 3,350 = **295 FLOPs/byte**. **B200 specs (approximate):** ~4,500 TFLOPS FP16 (~4.5× H100), ~8 TB/s bandwidth (~2.4× H100). Ridge point = 4,500,000 / 8,000 = **562 FLOPs/byte**. **Large LLM (e.g., 70B, batch=64 prefill):** Arithmetic intensity ≈ 64 × 2 FLOPs / 2 bytes = **64 FLOPs/byte** (reusing weights across batch). On H100: 64 < 295, so memory-bound. Throughput = 3.35 TB/s × 64 = 214 TFLOPS. On B200: 64 < 562, still memory-bound. Throughput = 8 TB/s × 64 = 512 TFLOPS. **Speedup: 512/214 = 2.4×** — matching the bandwidth improvement, not the compute improvement. Good ROI. **MobileNet (batch=1 inference):** ~300M FLOPs, ~13 MB weights. AI = 300M / 13M = **23 FLOPs/byte**. On H100: memory-bound. Throughput = 3.35 TB/s × 23 = 77 TFLOPS. On B200: still memory-bound. Throughput = 8 TB/s × 23 = 184 TFLOPS. **Speedup: 184/77 = 2.4×** — but at 3× the price. Cost-efficiency is **0.8× the H100** — you pay 3× more for 2.4× speedup. The B200 only wins on price-performance for workloads above its ridge point (562 FLOPs/byte), e.g., large-batch training.",
+    "issues": [
+      "Napkin Math for LLM throughput on H100 is incomplete and incorrect ('3.3' instead of ~24 tokens/s).",
+      "Napkin Math is incomplete, ending abruptly before comparing the performance of both models on both GPUs and fully explaining the paradox."
+    ]
+  },
+  {
+    "id": "cloud-roofline-analysis-power-efficiency-the-datacenter-power-wall-345",
+    "title": "The Datacenter Power-Wall",
+    "level": "L6+",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "You are the Principal Engineer for AI Infrastructure at a major cloud provider. You have been allocated a fixed 50 Megawatt power budget for a new AI cluster dedicated to a flagship large-language model (LLM) inference service. The business has imposed a strict Time-To-First-Token (TTFT) SLA, which forces your service to operate at batch size 1.",
+    "common_mistake": "The most common mistake is to compare the vendors on their advertised peak TFLOPS or peak TFLOPS/Watt. A manager or junior engineer would see that the B200 has 2,250 TFLOPS versus Gracewing's 1,500 and conclude it's 50% faster. They might even calculate peak TFLOPS/W (2.25 for B200 vs 1.875 for Gracewing) and still choose the B200. This thinking completely ignores the physical constraints of the workload and whether that peak performance is actually achievable.",
+    "realistic_solution": "The correct approach is to recognize that a batch-1 LLM inference workload is almost always memory-bandwidth bound, not compute-bound. The key is to calculate the workload's Arithmetic Intensity (AI) and see where it lands on each accelerator's roofline.",
+    "napkin_math": "1. **Calculate Workload Arithmetic Intensity (AI):**\n   Batch-1 LLM decode is a matrix-vector multiply: for each token, we read the full weight matrix and perform one multiply-accumulate per weight. AI = 2 FLOP / (2 bytes per FP16 weight) = **1 FLOP/Byte**. This is extremely low.\n2. **Calculate Ridge Points:**\n   - **B200:** 2,250 TFLOPS / 8.0 TB/s = **281 FLOP/Byte**.\n   - **Gracewing:** 1,500 TFLOPS / 12.0 TB/s = **125 FLOP/Byte**.\n   At AI = 1, both are deeply memory-bandwidth-bound.\n3. **Calculate Actual Throughput (bandwidth-limited):**\n   - **B200:** 8.0 TB/s × 1 FLOP/Byte = 8.0 TFLOPS effective. Utilization = 8.0 / 2,250 = **0.36%** of peak.\n   - **Gracewing:** 12.0 TB/s × 1 FLOP/Byte = 12.0 TFLOPS effective. Utilization = 12.0 / 1,500 = **0.80%** of peak.\n4. **Tokens per second per chip (batch=1 decode):**\n   Assume a 70B FP16 model (140 GB weights). Per-token latency = weight read time.\n   - **B200:** 140 GB / 8.0 TB/s = **17.5 ms/token → 57 tokens/s**. Power: 1,000W. Efficiency: **0.057 tokens/s/W**.\n   - **Gracewing:** 140 GB / 12.0 TB/s = **11.7 ms/token → 85 tokens/s**. Power: 800W. Efficiency: **0.106 tokens/s/W**.\n5. **Fleet sizing under 50 MW power cap:**\n   - **B200:** 50 MW / 1,000W = 50,000 chips × 57 tok/s = **2.85M tokens/s**.\n   - **Gracewing:** 50 MW / 800W = 62,500 chips × 85 tok/s = **5.31M tokens/s**.\n6. **Conclusion:** Gracewing delivers **1.86x** the throughput under the same power budget because its higher memory bandwidth and lower TDP are the metrics that matter for memory-bound batch-1 inference. The B200's extra compute is entirely wasted in this regime.",
+    "issues": [
+      "The 'Napkin Math' section is severely incomplete, cutting off before the critical calculation of effective performance and power efficiency, which is central to the solution."
+    ]
+  },
+  {
+    "id": "cloud-memory-hierarchy-the-serving-fleet-memory-plan-360",
+    "title": "The Serving Fleet Memory Plan",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "C1",
+    "rc": "RC-2",
+    "mode": "napkin-math",
+    "scenario": "You need to serve three models in production: a 7B model (1,000 QPS, <100ms latency), a 13B model (200 QPS, <200ms latency), and a 70B model (50 QPS, <2s latency). All in FP16. Plan the GPU fleet: how many H100 GPUs (80 GB each) do you need, and what's the monthly cost at \\$2.80/GPU-hour?",
+    "common_mistake": "\"Add up the model sizes, divide by 80 GB per GPU.\" This ignores that you need to account for KV-cache memory, concurrent request batching, and per-model latency SLAs that constrain batch sizes.",
+    "realistic_solution": "Each model needs enough GPUs to (1) fit the weights + KV-cache for the target batch size, and (2) meet the latency SLA at that batch size. The batch size is determined by the QPS target divided by the throughput per GPU.",
+    "napkin_math": "**7B model (14 GB FP16):** Fits on 1 GPU with 66 GB for KV-cache. KV-cache per request at 4k context with 32 layers, hidden=4096, 2 KV heads: 2 × 32 × 4096 × 4096 × 2 bytes ≈ 2.1 GB/request. Max batch per GPU = 66 GB / 2.1 GB ≈ 31. For <100ms latency (decode): at batch=31, per-token latency ≈ 14 GB / 3.35 TB/s = 4.2 ms. For 30-token generation: 4.2 × 30 = 126 ms — exceeds SLA. Need batch ≤ 20 for ~80ms decode. Throughput at batch=20: ~150 tokens/s → ~5 requests/s (30 tokens avg output). For 1,000 QPS: 1,000 / 5 = **200 GPUs** (latency-constrained). More realistically with FlashAttention and speculative decoding: batch=20, ~50 req/s/GPU → **20 GPUs**.\n\n**13B model (26 GB):** 1 GPU, 54 GB free. KV-cache ~3.4 GB/req at 4k context. Max batch = 54 / 3.4 ≈ 15. Per-token decode: 26 GB / 3.35 TB/s = 7.8 ms. For 30-token output at batch=15: ~234 ms — meets <200ms if output ≤ 25 tokens. Throughput: ~15 req/s/GPU. For 200 QPS: 200 / 15 = **14 GPUs**.\n\n**70B model (140 GB):** Requires TP=2 minimum (70 GB/GPU). 2 GPUs per replica, ~10 GB free per GPU for KV. KV per request ~8.4 GB (split across 2 GPUs = 4.2 GB each). Max batch = 10 / 4.2 ≈ 2. Per-token decode: 70 GB / 3.35 TB/s = 20.9 ms per GPU. For 100-token output: ~2.1s — meets <2s SLA at batch≤2. Throughput: ~1 req/s per replica. For 50 QPS: 50 replicas × 2 GPUs = **100 GPUs**.\n\n**Total: 20 + 14 + 100 = 134 GPUs.** Monthly cost: 134 × 720 hrs × $2.80 = **$270,144/month**.\n\nWith INT8 quantization: weights halved, freeing more KV-cache room and doubling decode bandwidth utilization. 7B → ~12 GPUs, 13B → ~8 GPUs, 70B → TP=1 possible (70 GB weights), ~60 GPUs. Optimized fleet: ~80 GPUs → **$161,280/month** (40% savings).",
+    "issues": [
+      "The KV-cache calculation in 'Napkin Math' is fundamentally incorrect, overestimating memory usage by orders of magnitude (e.g., 2.1 GB/request for 7B model at 4k context is wrong).",
+      "The per-token latency calculation is overly simplistic and likely inaccurate, leading to questionable batch size recommendations.",
+      "The 'Napkin Math' section is cut off, preventing a complete solution for the 7B model and any analysis for the 13B and 70B models."
+    ]
+  },
+  {
+    "id": "cloud-model-cost-the-tpu-v5e-vs-h100-trade-off-427",
+    "title": "The TPU v5e vs H100 Trade-off",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "B3",
+    "rc": "RC-10",
+    "mode": "tradeoff-analysis",
+    "scenario": "Your company is choosing between a Google Cloud TPU v5e pod (256 chips) and an equivalent NVIDIA H100 cluster for serving a 7B parameter model at 50,000 requests per second. The TPU v5e costs $1.20/chip-hour and the H100 costs $3.50/GPU-hour. The PM says 'TPU is obviously cheaper.' Walk me through why this isn't a simple price comparison.",
+    "common_mistake": "\"Just compare $/chip-hour — TPU is 3× cheaper per chip, so it wins.\" This ignores that the chips have fundamentally different architectures, memory capacities, and software ecosystems, making per-chip comparison meaningless.",
+    "realistic_solution": "The correct metric is **cost per token** (or cost per request at a given latency SLO), not cost per chip. TPU v5e has 16 GB HBM per chip — a 7B FP16 model (14 GB) barely fits on one chip with almost no room for KV-cache. You need multi-chip sharding even for a 7B model at reasonable batch sizes. H100 has 80 GB HBM — the 7B model fits trivially with 66 GB free for batching. The TPU v5e compensates with its ICI (Inter-Chip Interconnect) at 1.6 Tbps per chip, enabling efficient sharding across the pod. But the H100's advantage is software maturity: CUDA kernels (FlashAttention, PagedAttention) are battle-tested, while TPU XLA compilation can leave 20-30% performance on the table for serving workloads with dynamic shapes. The real trade-off: TPU v5e wins on large-batch throughput-optimized serving (where ICI bandwidth amortizes sharding cost); H100 wins on latency-sensitive serving with diverse request patterns.",
+    "napkin_math": "**H100 serving 7B model:** Weights = 14 GB FP16. Free HBM for KV-cache = 80 - 14 = 66 GB. KV-cache per request (2048 tokens, 32 layers, hidden=4096, 2 KV matrices, FP16): 2 × 32 × 2048 × 4096 × 2 bytes = 1.07 GB/request. Max batch = 66 / 1.07 ≈ **61 concurrent requests**. Decode throughput (bandwidth-bound): 3.35 TB/s / 14 GB = 239 decode iterations/s. At batch=61, each iteration produces 61 tokens → **239 × 61 / 61 = 239 tokens/s per request** is wrong — we share bandwidth. Correct: 239 decode steps/s, each step produces 1 token per request in the batch → 239 tokens/s aggregate across all requests. Per-request throughput: 239/61 ≈ 3.9 tokens/s. With 30 output tokens avg: 30/3.9 = 7.7s per request. Throughput: 61/7.7 = **7.9 requests/s per GPU**. Cost: 1 GPU at $3.50/hr serving 7.9 × 30 × 3600 = 853K tokens/hr = **$4.10 per million tokens**.\n\n**TPU v5e serving 7B model:** 16 GB HBM per chip. Weights = 14 GB → only 2 GB free. Cannot batch meaningfully. Must shard across TP=2: 7 GB/chip, 9 GB free for KV-cache. KV-cache per req = 1.07 GB. Max batch per replica = 9 / 1.07 ≈ 8. Bandwidth per chip: 819 GB/s. Decode: 819 GB/s / 7 GB = 117 decode steps/s. At batch=8: 117 steps/s, 8 tokens per step = 936 tokens/s aggregate. Per request: 117 tokens/s → 30 tokens in 0.26s. Throughput: 8 / 0.26 = 31 req/s per replica. Replicas on 256-chip pod: 256 / 2 = 128 replicas. Pod throughput: 128 × 31 = **3,968 req/s**. Pod tokens/s: 3,968 × 30 = 119K tok/s. Cost: 256 × $1.20 = $307.20/hr for 119K × 3600 = 428M tokens/hr = **$0.72 per million tokens**.\n\n**Comparison:** At batch=8, TPU v5e wins on cost per token ($0.72 vs $4.10) because the pod's 128 replicas amortize the per-chip cost. But for latency-sensitive batch=1 serving with strict TTFT SLA, the H100's 5x larger HBM gives it the flexibility advantage. The TPU v5e pod excels when you can fill batches and the ICI handles the sharding overhead.",
+    "issues": [
+      "The H100 FP16 TFLOPS is incorrect; it should be 989 TFLOPS, not 312 TFLOPS.",
+      "The H100 HBM bandwidth is incorrect; it should be 3.35 TB/s, not 2 TB/s.",
+      "The napkin math for H100 decode throughput calculation is incomplete and contains a logical error in the final step.",
+      "The question implies a 7B model barely fits on a TPU v5e (16GB HBM), but 7B FP16 is 14GB, which fits with 2GB for KV cache, making the 'barely fits' claim slightly misleading for a single chip.",
+      "The prompt asks to walk through why it's not a simple price comparison, but the provided solution focuses heavily on memory and throughput, not directly addressing the 'why it's not simple' part in a structured way beyond the initial statement."
+    ]
+  },
+  {
+    "id": "cloud-data-parallelism-the-tensor-parallelism-degree-14",
+    "title": "The Tensor Parallelism Degree",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "C5",
+    "rc": "RC-1",
+    "mode": "napkin-math",
+    "scenario": "You're serving a 70B LLM and must choose the tensor parallelism (TP) degree: TP=2, TP=4, or TP=8 across H100 GPUs connected via NVLink. Higher TP reduces per-GPU memory and per-token latency, but adds communication overhead. Calculate the optimal TP degree for a latency target of 40ms per output token.",
+    "common_mistake": "\"Use TP=8 for maximum parallelism — more GPUs always means lower latency.\" This ignores that each TP step requires an AllReduce synchronization, and the communication cost grows with TP degree.",
+    "realistic_solution": "Each transformer layer with TP requires two AllReduce operations (one after the attention projection, one after the MLP). The AllReduce volume per operation is $2 \\times (TP-1)/TP \\times \\text{hidden\\_size} \\times \\text{batch} \\times \\text{bytes}$. With NVLink at 900 GB/s bidirectional, the communication time per layer is small but multiplies across 80 layers and 2 AllReduces per layer.",
+    "napkin_math": "70B model, 80 layers, hidden=8192, FP16, batch=1. Per-token compute per GPU: 140 GFLOP / TP. At 989 TFLOPS (but memory-bound, so use bandwidth): 140 GB weights / TP read at 3.35 TB/s per GPU. **TP=2:** Compute: 70 GB / 3.35 TB/s = 20.9 ms. Comm: 80 layers × 2 AllReduces × 2 × (TP-1)/TP × 8192 × 2 bytes = 80 × 2 × 1 × 8192 × 2 = 2.62 MB / 900 GB/s ≈ 0.003 ms. Total: **~20.9 ms** (meets 40ms SLA). **TP=4:** Compute: 35 GB / 3.35 TB/s = 10.4 ms. Comm: 80 × 2 × 1.5 × 8192 × 2 = 3.93 MB. Effective bisection BW at TP=4 = 450 GB/s. Comm = 3.93 MB / 450 GB/s ≈ 0.009 ms. Total: **~10.4 ms** (meets 40ms SLA). **TP=8:** Compute: 17.5 GB / 3.35 TB/s = 5.2 ms. Comm: 80 × 2 × 1.75 × 8192 × 2 = 4.59 MB / 225 GB/s ≈ 0.020 ms. Total: **~5.2 ms** (meets 40ms SLA).\n\n**Cost comparison (all meet 40ms):**\n- TP=2: 2 GPUs × $3.50/hr = **$7.00/hr**, latency = 20.9 ms.\n- TP=4: 4 GPUs × $3.50/hr = **$14.00/hr**, latency = 10.4 ms.\n- TP=8: 8 GPUs × $3.50/hr = **$28.00/hr**, latency = 5.2 ms.\n\n**Optimal: TP=2** — it meets the 40ms SLA at the lowest cost ($7.00/hr vs $28.00/hr for TP=8). Choose TP=4 only if you need <15ms for streaming UX, or TP=8 for <10ms interactive applications. The communication overhead is negligible in all cases because NVLink bandwidth (900 GB/s) vastly exceeds the small AllReduce payloads (~3-5 MB). The decision is purely economic: minimize GPU count while meeting the latency SLA.",
+    "issues": [
+      "The H100 FP16 TFLOPS is incorrect; it should be 989 TFLOPS, not 312 TFLOPS.",
+      "The H100 HBM bandwidth is incorrect; it should be 3.35 TB/s, not 2 TB/s.",
+      "The napkin math for communication overhead uses '900 GB/s' for NVLink, which is the total bidirectional bandwidth for an H100, but for an AllReduce, the effective bandwidth per link or the aggregate bandwidth across the TP group needs to be carefully considered.",
+      "The communication calculation `2 × (TP-1)/TP × 8192 × 2 bytes` is missing the number of elements (e.g., hidden_size) and the batch size, making the volume calculation incorrect.",
+      "The communication overhead calculation is too simplistic for a realistic AllReduce, especially for a large number of layers and small data sizes, where latency would dominate over bandwidth for such small transfers.",
+      "The problem statement implies a single optimal TP degree, but the napkin math only calculates for TP=2 and TP=4, not TP=8, and doesn't explicitly state the optimal choice based on the 40ms SLA."
+    ]
+  },
+  {
+    "id": "cloud-interconnect-the-bisection-bandwidth-requirement-50",
+    "title": "The Bisection Bandwidth Requirement",
+    "level": "L6+",
+    "track": "cloud",
+    "ka": "C2",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "You're designing the network fabric for a 1,024-GPU training cluster. The workload uses 3D parallelism: TP=8 (within node), PP=4 (across nodes), DP=32 (across nodes). Calculate the minimum bisection bandwidth needed to avoid communication bottlenecks, and explain why a fat-tree topology might not be sufficient.",
+    "common_mistake": "\"Just add up the per-GPU bandwidth requirements and buy enough switches.\" This ignores that different parallelism dimensions have vastly different communication patterns and bandwidth needs.",
+    "realistic_solution": "Each parallelism dimension has a different communication pattern: TP uses AllReduce within 8-GPU NVLink domains (handled by NVLink, not the network). PP uses point-to-point sends between adjacent stages (low bandwidth, latency-sensitive). DP uses AllReduce across 32 groups (high bandwidth, latency-tolerant). The network must handle PP and DP traffic simultaneously.",
+    "napkin_math": "**PP traffic:** Each pipeline stage sends activations to the next. Activation size per microbatch: batch × seq × hidden × bytes = 32 × 2048 × 8192 × 2 = 1.07 GB. With 16 microbatches in flight across 4 stages: each PP link sustains ~16 × 1.07 GB / 0.5s (step time) = **34.2 GB/s per PP link**. Number of PP links crossing the bisection: 4 PP stages × 32 DP groups = 128 PP stage boundaries, but only ~64 cross the network bisection. Total PP bisection bandwidth: 64 × 34.2 = **2.19 TB/s**.\n\n**DP traffic:** AllReduce of gradients per DP group. Model = 70B params / 4 PP stages = 17.5B params per stage = 35 GB in FP16. Ring AllReduce volume = 2 × (N-1)/N × 35 GB = 2 × 31/32 × 35 = **67.8 GB per GPU**. Training step time = 500 ms (target). Required bandwidth per GPU for DP = 67.8 GB / 0.5s = **135.6 GB/s**. Total DP GPUs across bisection: 512 GPUs (half the cluster) each need 135.6 GB/s crossing the bisection → **69.4 TB/s** aggregate (but ring topology means each GPU only communicates with neighbors, so effective bisection load is ~135.6 × 32 DP groups = **4.34 TB/s**).\n\n**Total bisection bandwidth requirement:** PP + DP = 2.19 + 4.34 = **~6.5 TB/s minimum**.\n\n**Fat-tree feasibility:** With 400 Gbps (50 GB/s) spine links, need 6,500 / 50 = **130 spine links** at the bisection. A 3-tier fat-tree with 64 spine switches × 32 ports = 2,048 links gives ~100 TB/s — sufficient in aggregate, but **oversubscription at the leaf-to-spine layer** is the real issue. If leaf switches have 2:1 oversubscription, effective bisection drops to ~50 TB/s — still sufficient.\n\n**Why fat-tree may not be optimal:** PP traffic is latency-sensitive (pipeline bubbles grow with network hops) while DP traffic is bandwidth-hungry but latency-tolerant. A fat-tree treats all traffic identically. A **rail-optimized topology** with dedicated low-latency paths for PP (fewer hops, direct connections between adjacent pipeline stages) and high-bandwidth paths for DP (ECMP across spine) reduces cost by ~30% while better matching the traffic patterns to the network topology.",
+    "issues": [
+      "The napkin math for PP traffic calculation is unclear about the 'step time' of 0.5s and how it relates to the 16 microbatches in flight, making the bandwidth derivation potentially arbitrary.",
+      "The napkin math for DP traffic is incomplete and cut off, preventing a full review of its correctness.",
+      "The problem asks for minimum bisection bandwidth, but the solution only calculates PP traffic and an incomplete DP traffic, without summing them or clearly defining the bisection.",
+      "The statement 'Number of PP links crossing the bisection: 4 PP stages × 32 DP groups = 128 PP stage boundaries, but only ~64 cross the network bisection' is an assertion without clear justification for the '~64' number, which is critical for the calculation."
+    ]
+  },
+  {
+    "id": "edge-sensor-pipeline-the-vibration-induced-phantom-detections-45",
+    "title": "The Vibration-Induced Phantom Detections",
+    "level": "L4",
+    "track": "edge",
+    "ka": "D5",
+    "rc": "RC-1",
+    "mode": "tradeoff-analysis",
+    "scenario": "Your Hailo-8 vision system on a robotic welding arm detects weld defects using a 5MP camera at 20 FPS. The system achieves 97% accuracy on the test bench. On the production robot, accuracy drops to 82% — but only during active welding. Between welds (robot stationary), accuracy returns to 96%. The camera is rigidly mounted to the arm. What's different during welding?",
+    "common_mistake": "\"Welding arc light is saturating the camera.\" Arc light is a real concern but would cause overexposure, not the specific accuracy pattern described (accuracy recovers between welds even though the arc was present during the weld).",
+    "realistic_solution": "During welding, the robot arm vibrates at 50-200 Hz from the welding torch motor and wire feed mechanism. The camera is rigidly mounted, so it vibrates with the arm. At 20 FPS with a 10ms exposure time, a 100 Hz vibration with 0.5mm amplitude causes motion blur of 0.5mm × sin(2π × 100 × 0.01) ≈ 0.5mm per frame. For a 5MP camera with a 10mm field of view (macro lens for weld inspection), pixel pitch = 10mm / 2592 pixels = 3.9μm. Motion blur of 0.5mm = 128 pixels — the image is smeared across 128 pixels during each exposure.",
+    "napkin_math": "Vibration: 100 Hz, 0.5mm peak amplitude. Exposure: 10ms. During a 10ms exposure at 100 Hz, the camera completes exactly one full vibration cycle. The sensor integrates light over the full range of motion: peak-to-peak displacement = 2 × 0.5mm = **1.0mm of motion blur**. Pixel pitch: 10mm FOV / 2592 pixels = 3.9μm. Blur in pixels: 1000μm / 3.9μm = **256 pixels** — the image is smeared across 256 pixels during each exposure. At 1ms exposure (1/10th of vibration period): displacement ≈ 0.5mm × sin(2π × 100 × 0.001) ≈ 0.5mm × sin(0.628) ≈ 0.5 × 0.588 = 0.294mm = **75 pixels** of blur — still too much. At 0.1ms exposure: displacement ≈ 0.5mm × 2π × 100 × 0.0001 ≈ 0.031mm = **8 pixels** — borderline acceptable. At 0.05ms exposure: ~4 pixels — acceptable for defect detection. Light requirement at 0.05ms vs 10ms: **200× more illumination** needed. LED ring solution: high-intensity strobed LED at 200× continuous power for 0.05ms pulses. Alternative: vibration-damping mount with 100× attenuation at 10:1 frequency ratio allows 10ms exposure. Accelerometer trigger (ADXL345, $3, 3200 Hz sample rate): capture frames only at zero-crossing of vibration cycle, when instantaneous velocity is at maximum but displacement is near zero — reducing effective blur to <5 pixels.",
+    "issues": [
+      "The 'Realistic Solution' incorrectly calculates motion blur using `sin(2π × 100 × 0.01)` which evaluates to 0, and then uses an inconsistent 0.5mm blur value.",
+      "The 'Napkin Math' section is incomplete, ending mid-sentence."
+    ]
+  },
+  {
+    "id": "edge-thermal-the-solar-powered-edge-budget-90",
+    "title": "The Solar-Powered Edge Budget",
+    "level": "L6+",
+    "track": "edge",
+    "ka": "D5",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "You're designing an edge AI wildlife monitoring station powered by a 20W solar panel and a 100Wh battery. The station runs a bird species classifier on a Google Coral (4 TOPS, 2W) with a camera. The system must operate 24/7 in a remote forest with 5 hours of usable sunlight per day. Design the power budget and determine the maximum inference rate you can sustain.",
+    "common_mistake": "\"20W panel × 5 hours = 100Wh, which exactly matches the battery — we can run continuously.\" This ignores system overhead, solar conversion losses, and seasonal variation.",
+    "realistic_solution": "Start from the energy budget. Solar input: 20W × 5h × 0.8 (panel efficiency loss from angle, clouds, dirt) = **80Wh/day**. System consumers: (1) Coral TPU during inference: 2W, (2) camera module: 0.5W, (3) Raspberry Pi host: 3W idle / 5W active, (4) cellular modem (burst uploads): 3W for 10 min/day = 0.5Wh, (5) system overhead (voltage regulator, watchdog): 0.5W constant = 12Wh/day. Fixed daily cost: 12Wh (overhead) + 0.5Wh (modem) = 12.5Wh. Remaining for compute: 80 - 12.5 = **67.5Wh**. Active power (camera + Pi + Coral): 0.5 + 5 + 2 = 7.5W. Idle power (Pi sleep + watchdog): 0.5 + 0.5 = 1W. Maximum active hours: solve $7.5 \\times t_{active} + 1 \\times (24 - t_{active}) = 67.5$. $6.5 \\times t_{active} = 43.5$. $t_{active} = 6.7$ hours/day. At 10 inferences/second during active hours: 6.7h × 3600s × 10 = **241,200 inferences/day**. But birds are most active at dawn and dusk (~4 hours). Schedule active periods to match: 4h active (dawn/dusk) + 2.7h active (midday sampling) = 6.7h. Reserve 20% battery for cloudy days: effective active time = 5.4h → **194,000 inferences/day**.",
+    "napkin_math": "Solar: 80Wh/day. Fixed overhead: 12.5Wh/day (always-on system components). Remaining energy budget: 80 − 12.5 = 67.5Wh. Active power: 7.5W. Idle power: 1W. **Max active time** (must account for idle power during non-active hours): 7.5W × t_active + 1W × (24 − t_active) = 67.5Wh → 6.5 × t_active + 24 = 67.5 → t_active = **6.7 hours/day**. (Note: simply dividing 67.5Wh / 7.5W = 9 hours is wrong because it ignores the 1W idle draw during the remaining 17.3 hours, which consumes 17.3Wh.) At 10 inf/s: 6.7 × 3600 × 10 = **241K inferences/day**. With 20% battery reserve for cloudy days: effective active time = 6.7 × 0.8 = 5.4 hours → **194K inferences/day**. Battery buffer: can sustain ~13 hours of active operation without sun (100Wh / 7.5W), providing ~1.25 cloudy days of buffer (100Wh / 80Wh daily consumption).",
+    "issues": [
+      "The 'Napkin Math' uses an 'Idle power' of 1W, which is inconsistent with the component breakdown in the 'Realistic Solution' (RPi idle 3W + camera 0.5W + overhead 0.5W = 4W).",
+      "Using the correct idle power (4W) from the 'Realistic Solution' breakdown, the system's daily energy consumption (4W * 24h = 96Wh) exceeds the available solar energy (80Wh - 0.5Wh modem = 79.5Wh), making the '24/7 operation' requirement unachievable under the given parameters.",
+      "The 'Napkin Math' section is incomplete, ending abruptly."
+    ]
+  },
+  {
+    "id": "edge-roofline-analysis-the-jetson-roofline-dilemma-83",
+    "title": "The Jetson Roofline Dilemma",
+    "level": "L2",
+    "track": "edge",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "concept-recall",
+    "scenario": "You're on the perception team for an autonomous vehicle, deploying a new object detection model to a Jetson AGX Orin. The Orin has a peak performance of 275 TOPS (INT8) and 204.8 GB/s of memory bandwidth.",
+    "common_mistake": "Engineers often see a large number for total operations (e.g., 50 Trillion) and instinctively assume the model must be compute-bound. This ignores the ratio of compute to memory access. Roofline analysis is all about this ratio (Arithmetic Intensity), not the absolute number of operations.",
+    "realistic_solution": "The model is **memory-bound**. The key is to compare the model's Arithmetic Intensity (AI) to the hardware's Ridge Point.",
+    "napkin_math": "1. **Hardware Ridge Point:** 275 TOPS / 204.8 GB/s = 275e12 / 204.8e9 = 1,343 Ops/Byte.\n2. **Model Arithmetic Intensity:** The scenario states the model performs a certain number of operations per byte of data accessed. Calculate: AI = Total Ops / Total Bytes accessed.\n3. **Comparison:** If Model AI < 1,343 Ops/Byte → memory-bound. If Model AI > 1,343 → compute-bound.\n4. **Key insight:** Most edge inference workloads have AI well below 1,343, making them memory-bound on the Orin. The 275 TOPS headline number is rarely the true bottleneck.",
+    "issues": [
+      "The scenario is incomplete; it does not provide the necessary model workload characteristics (total operations and total bytes accessed) to calculate the model's Arithmetic Intensity.",
+      "The 'Napkin Math' section refers to missing information from the scenario, making it impossible to complete the calculation."
+    ]
+  },
+  {
+    "id": "edge-federated-learning-economics-the-fleet-data-upload-cost-139",
+    "title": "The Fleet Data Upload Cost",
+    "level": "L2",
+    "track": "edge",
+    "ka": "D5",
+    "rc": "RC-1",
+    "mode": "napkin-math",
+    "scenario": "Your automotive company operates a fleet of 10,000 vehicles, each equipped with an edge computer for perception. To improve your models, the central ML team proposes a new data collection strategy: upload 1 GB of curated sensor data per vehicle for every hour it operates. The fleet operates an average of 4 hours per day, 365 days a year. Your cellular data plan costs $2 per GB. Explain the primary economic argument for using Federated Learning in this scenario and calculate the total annual data upload cost for the proposed centralized strategy.",
+    "common_mistake": "Engineers often underestimate the cost of data transmission at scale. They might calculate the cost for a single vehicle or for a single day and fail to multiply by the entire fleet size and operational year, leading to a massive underestimation. Another common error is confusing units (e.g., calculating with MB instead of GB, or TB instead of PB) which can lead to answers that are off by factors of 1,000 or more.",
+    "realistic_solution": "The primary economic argument for Federated Learning (FL) is avoiding the prohibitive cost of continuous, large-scale data uploads. Instead of sending raw data, FL sends only compact model updates (gradients or weights), which are orders of magnitude smaller than the source data. This drastically reduces data transmission costs.",
+    "napkin_math": "1. **Data per vehicle per day:** 1 GB/hour × 4 hours/day = 4 GB/vehicle/day.\n2. **Data for entire fleet per day:** 4 GB × 10,000 vehicles = 40,000 GB = **40 TB/day**.\n3. **Annual data volume:** 40 TB/day × 365 days = **14,600 TB/year = 14.6 PB/year**.\n4. **Annual upload cost:** 14,600 TB × 1,000 GB/TB × $2/GB = **$29,200,000/year** ($29.2 million).\n5. **Monthly cost:** $29.2M / 12 = **~$2.43 million/month**.\n\n**Federated Learning alternative:**\n- Model size: assume a 50M parameter perception model in FP16 = 100 MB.\n- Upload per vehicle per day: 100 MB (model update) = 0.1 GB.\n- Fleet daily upload: 0.1 GB × 10,000 = 1,000 GB = **1 TB/day**.\n- Annual: 1 TB × 365 = **365 TB/year**.\n- Annual cost: 365,000 GB × $2/GB = **$730,000/year**.\n\n**Savings with Federated Learning:**\n- Data reduction: 14,600 TB → 365 TB = **40x less data**.\n- Cost reduction: $29.2M → $0.73M = **$28.47M/year saved (97.5% reduction)**.\n\n**Additional centralized costs not captured above:**\n- Cloud storage for 14.6 PB: ~$4M/year (S3 standard).\n- Cloud GPU training on petabytes of sensor data: ~$2-5M/year.\n- Total centralized cost: **~$35-39M/year** vs federated at **~$0.73M/year**.",
+    "issues": [
+      "The 'Napkin Math' section for the Federated Learning alternative is incomplete, cutting off the calculation for FL costs."
+    ]
+  },
+  {
+    "id": "edge-gpu-roofline-edge-the-residual-bottleneck-275",
+    "title": "The Residual Bottleneck",
+    "level": "L2",
+    "track": "edge",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "napkin-math",
+    "scenario": "You're profiling a new vision model on a Jetson AGX Orin for an autonomous drone. You find a major bottleneck in a residual connection where two INT8 tensors, each with dimensions `512x512x256`, are added together. To understand the performance limit, calculate the theoretical Arithmetic Intensity (AI) of this operation, assuming no data is cached. Based on your calculation, is this operation compute-bound or memory-bound?",
+    "common_mistake": "The most common mistake is miscalculating the 'Total Bytes Moved'. Engineers often forget to include all three data movements (reading two input tensors from DRAM, and writing one output tensor back to DRAM). Counting only the two input tensors yields an AI of 0.5 Ops/Byte, while counting only one tensor's worth of data gives an AI of 1.0 Ops/Byte. Both are arithmetically wrong and understate how severely memory-bound the operation is.",
+    "realistic_solution": "The operation is heavily **memory-bound**. Its Arithmetic Intensity is far below the hardware's ridge point, meaning performance is dictated by memory bandwidth, not the processor's compute capability. A low AI signifies that for every byte of data moved, very few calculations are performed. The performance of this layer is limited by the Jetson's 204.8 GB/s memory bandwidth.",
+    "napkin_math": "1. **Total elements:** 512 x 512 x 256 = 67,108,864 elements.\n2. **Total operations:** 67,108,864 additions (1 op per element).\n3. **Total bytes moved:** Read 2 input tensors + write 1 output tensor = 3 x 67,108,864 x 1 byte (INT8) = 201,326,592 bytes ≈ 192 MB.\n4. **Arithmetic Intensity:** 67.1M ops / 201.3M bytes = 0.33 Ops/Byte.\n5. **Orin Ridge Point:** 1,343 Ops/Byte.\n6. **Conclusion:** 0.33 << 1,343 → extremely **memory-bound**. Element-wise ops have near-zero arithmetic intensity and are always bandwidth-limited.",
+    "issues": [
+      "The stated Jetson AGX Orin Ridge Point of 1,343 Ops/Byte for INT8 is inconsistent with its published dense INT8 TOPS (200 TOPS) and memory bandwidth (204.8 GB/s), which would yield approximately 976.56 Ops/Byte.",
+      "The question does not specify if the 'Ops' for the Ridge Point refers to dense or sparse compute, or if it's a different definition of operations."
+    ]
+  },
+  {
+    "id": "edge-heterogeneous-compute-dla-vs-gpu-energy-per-inference-588",
+    "title": "DLA vs GPU Energy per Inference",
+    "level": "L4",
+    "track": "edge",
+    "ka": "B3",
+    "rc": "RC-1",
+    "mode": "napkin-math",
+    "scenario": "The Jetson AGX Orin has both a GPU (2048 CUDA cores, 275 TOPS INT8) and two DLAs (each ~40 TOPS INT8). Your workload is EfficientNet-B0 classification (0.4 GFLOPs, INT8). A junior engineer says 'run it on the GPU — it's faster.' Calculate the energy per inference on GPU vs DLA and determine which is the right choice for a battery-powered drone with a 50 Wh battery.",
+    "common_mistake": "\"The GPU has 275 TOPS vs DLA's 40 TOPS, so the GPU is 7× faster and therefore more energy-efficient because it finishes sooner.\" TOPS is peak throughput. A tiny 0.4 GFLOP model cannot saturate a 275 TOPS GPU — it runs at <1% utilization, but the GPU still draws its idle power (5–8W on Orin AGX). The DLA, designed for exactly this class of workload, runs at much higher utilization and much lower power.",
+    "realistic_solution": "Compare energy, not just latency. The GPU has 275 TOPS but EfficientNet-B0 uses only 0.15% of that — the GPU cannot clock-gate effectively and draws ~8W idle power regardless. The DLA at 40 TOPS runs the same model at slightly higher utilization and draws only ~1.5W active / 0.5W idle. Energy per inference: GPU ≈ 8 mJ, DLA ≈ 0.75 mJ (10x more efficient). Average power at 10 FPS: GPU ~8W, DLA ~0.5W (16x difference). On a 50 Wh battery, GPU lasts ~6 hours while DLA lasts ~100 hours. The junior engineer is wrong — raw TOPS is irrelevant when the workload is 1000x smaller than peak capacity. The DLA is the correct choice for battery-powered deployment.",
+    "napkin_math": "**Given:** GPU: 275 TOPS INT8, ~30W TDP, ~8W idle. DLA: 40 TOPS INT8, ~5W TDP, ~0.5W idle. EfficientNet-B0: 0.4 GFLOPs INT8. | **1. GPU inference time:** Utilization = 0.4G / 275T = 0.0015 (0.15%). Time ≈ 0.4G / 275T = **0.0015 ms** (negligible). But GPU has minimum dispatch overhead of ~1 ms. Effective: **~1 ms.** | **2. GPU energy per inference:** GPU power at 0.15% utilization ≈ idle power = ~8W (cores barely activate). Energy = 8W x 1 ms = **8 mJ.** | **3. DLA inference time:** Utilization = 0.4G / 40T = 1%. Time ≈ **0.01 ms**, but with overhead ~0.5 ms effective. | **4. DLA energy per inference:** DLA active power at 1% util ≈ ~1.5W. Energy = 1.5W x 0.5 ms = **0.75 mJ.** | **5. Average power at 10 FPS:** GPU: 8W idle + negligible compute = **~8W continuous.** DLA: 0.5W idle + 10 x 0.75 mJ/frame = 0.5W + 0.0075W = **~0.5W continuous.** | **6. Battery life at 10 FPS:** 50 Wh battery. GPU: 50 / 8 = **6.25 hours.** DLA: 50 / 0.5 = **100 hours.** | **7. Rule of thumb:** If model uses <5% of GPU peak TOPS, the DLA is almost always more energy-efficient because the GPU cannot clock-gate its massive core array effectively for tiny workloads. DLA is purpose-built for this regime.",
+    "issues": [
+      "The utilization percentages in the 'Napkin Math' for both GPU (0.15%) and DLA (1%) are incorrect by factors of 1000x and 100x respectively, based on the given TOPS and GFLOPs.",
+      "The DLA energy per inference in the 'Realistic Solution' (0.75 mJ) is inconsistent with the 'Napkin Math' derivation (0.5 mJ) based on 0.5W idle power and 1ms effective time.",
+      "The problem statement uses 'GFLOPs, INT8' which is ambiguous; 'GOPS' would be more appropriate for integer operations."
+    ]
+  },
+  {
+    "id": "mobile-mobile-transformer-cnn-tradeoff-the-mobilevit-memory-trap-373",
+    "title": "The MobileViT Memory Trap",
+    "level": "L3",
+    "track": "mobile",
+    "ka": "B3",
+    "rc": "RC-3",
+    "mode": "optimization-task",
+    "scenario": "You're a Mobile ML Engineer at a major smartphone company tuning a real-time object detection feature for the next flagship phone, which uses an Apple A17 Pro chip. Your latency budget is 16ms to avoid camera jank. Your current MobileNetV2 model is fast but inaccurate. A Neural Architecture Search (NAS) has proposed two alternatives:",
+    "common_mistake": "Engineers often fixate on FLOPs as the primary measure of performance. They might incorrectly assume the MobileViT has 'inefficient operators' or that the FLOP count is 'wrong'. This misses the fundamental interaction between the model's architecture and the hardware's memory system.",
+    "realistic_solution": "The most likely cause is that the MobileViT is **memory-bandwidth bound**, while the EfficientCNN is compute-bound. Vision Transformers, with their self-attention mechanism, often have low Arithmetic Intensity (AI). They need to read large, non-local Query, Key, and Value matrices from main memory, leading to poor cache reuse. CNNs, especially with depthwise separable convolutions, have high data reuse and locality, resulting in a high AI. On a chip like the A17 Pro, which has powerful compute units, a low-AI model will spend most of its time stalled, waiting for data from DRAM. The MobileViT's lower FLOP count is irrelevant because the compute units are starved for data. The EfficientCNN, despite requiring more operations, keeps the processor busy, resulting in lower wall-clock latency.",
+    "napkin_math": "Let's diagnose this using the concept of a hardware's Ridge Point.\n\n**A17 Pro Ridge Point:** 35 TOPS / 51.2 GB/s ≈ 684 Ops/Byte\n\n**Model 1: MobileViT (Transformer-based)**\n- 3 GOps compute, 600 MB data movement (attention has poor locality)\n- AI = 3 GOps / 600 MB = 5 Ops/Byte → severely memory-bound\n- Achievable throughput = 5 × 51.2 = 256 GOps/s\n- Latency = 3 GOps / 256 GOps/s = **11.7 ms** (within 16ms, but tight)\n\n**Model 2: EfficientCNN**\n- 6 GOps compute, 30 MB data movement (convolutions have high reuse)\n- AI = 6 GOps / 30 MB = 200 Ops/Byte → memory-bound but near ridge\n- Achievable throughput = 200 × 51.2 = 10.24 TOPS\n- Latency = 6 GOps / 10.24 TOPS = **0.6 ms** (well within budget)\n\nDespite having 2× more FLOPs, the EfficientCNN is **~20× faster** because its high arithmetic intensity keeps the NPU fed. The MobileViT's self-attention layers thrash DRAM with random-access patterns, wasting most of the NPU's compute capability. The fix: replace attention layers with local attention or use MobileNetV2-style inverted residuals to increase AI.",
+    "issues": [
+      "The 'Realistic Solution' incorrectly states that the EfficientCNN is compute-bound; with the given numbers (6 GOps, 30 MB, 51.2 GB/s BW, 35 TOPS), it is still memory-bound (0.586ms memory latency vs 0.171ms compute latency)."
+    ]
+  },
+  {
+    "id": "mobile-federated-learning-economics-the-federated-economics-dilemma-381",
+    "title": "The Federated Economics Dilemma",
+    "level": "L3",
+    "track": "mobile",
+    "ka": "D5",
+    "rc": "RC-10",
+    "mode": "napkin-math",
+    "scenario": "You are an ML Systems Engineer on the 'Smart Reply' team for a messaging app with 10 million daily active users (DAU). To improve the model with user data, your team is debating two strategies: Option A (Centralized): Log 1 KB of anonymized interaction data per user per day to the cloud. Store for 90 days. Train on 8×A100 GPU cluster at $25/hr. Training runs 3 hours/week. Data transfer at $0.01/GB. Option B (Federated Learning): $800K one-time engineering cost. On-device training uses 0.5 Wh per round (2 rounds/week per device). Aggregation server costs $5K/month. Compare the annual TCO of each approach.",
+    "common_mistake": "Engineers often focus only on the most obvious cost (like cloud training GPUs or upfront engineering effort) while ignoring 'hidden' or distributed costs that dominate at scale. In this case, neglecting the massive recurring daily data transfer and compute costs for the centralized option, or dismissing the user-borne energy cost for the federated option as 'not our problem', leads to the wrong conclusion. A proper TCO analysis must account for all costs, including indirect ones like user battery drain which translates to brand risk.",
+    "realistic_solution": "The correct approach is to calculate the total annual cost for both strategies. While Federated Learning has a high upfront engineering cost, the centralized approach's daily data transfer and compute costs become astronomical over a year at this scale.",
+    "napkin_math": "**Option A: Centralized Annual TCO**\n1. Daily data: 10M users × 1 KB = 10 GB/day. Annual: 10 GB × 365 = 3.65 TB.\n2. Transfer cost: 3.65 TB × $0.01/GB × 1000 = $36,500/year.\n3. Storage (90-day window): ~900 GB × $0.023/GB/mo × 12 = ~$248/year (negligible).\n4. Training: $25/hr × 3 hr/wk × 52 wk = $3,900/year.\n5. **Total A:** ~$40,650/year ongoing.\n\n**Option B: Federated Annual TCO**\n1. Engineering (amortized over 3 years): $800K / 3 = ~$267K/year.\n2. Aggregation server: $5K/mo × 12 = $60K/year.\n3. User energy cost (not billed to company but brand risk): 10M × 0.5 Wh × 104 rounds/yr = 520 MWh.\n4. **Total B Year 1:** $860K. **Year 2+:** $327K/year.\n\n**Verdict:** Centralized is cheaper in pure infra ($41K vs $327K), but this ignores breach risk and regulatory cost. Add even a 1% annual breach probability at $50M expected cost → +$500K/year to Option A, making FL the safer long-term investment.",
+    "issues": [
+      "The 'Napkin Math' for Option B (Federated Learning) is incomplete, omitting the significant '0.5 Wh per user per day' on-device energy cost mentioned in the scenario.",
+      "The omission of on-device energy cost in the calculation leads to an inaccurate total cost for Federated Learning, potentially altering the conclusion about which option is more economical."
+    ]
+  },
+  {
+    "id": "mobile-mobile-roofline-analysis-the-style-transfer-frame-drop-383",
+    "title": "The Style Transfer Frame Drop",
+    "level": "L3",
+    "track": "mobile",
+    "ka": "B2",
+    "rc": "RC-10",
+    "mode": "napkin-math",
+    "scenario": "You are a mobile ML engineer optimizing a real-time neural style transfer filter on an Apple A17 Pro, which has a memory bandwidth of 51.2 GB/s and a Neural Engine (ANE) with 35 TOPS INT8 peak (ridge point ≈ 683 Ops/Byte). Your model needs to run at 60 FPS (16.7ms per frame). Profiling shows the model performs 5 Giga-Ops per frame and moves 120 MB of data per frame. Diagnose the bottleneck and evaluate whether INT8 quantization from FP16 would solve it.",
+    "common_mistake": "Engineers often focus exclusively on peak TOPS and assume quantization's benefit comes from faster compute. They expect a ~2x speedup from INT8 vs FP16 because the theoretical compute throughput doubles. They fail to consider that the system is often limited by memory bandwidth, not compute, especially on mobile SoCs where power and thermal constraints are paramount.",
+    "realistic_solution": "The model is memory-bound. Its arithmetic intensity is 5 GOps / 120 MB ≈ 41.7 Ops/Byte, far below the ridge point of 683 Ops/Byte. Quantizing from FP16 to INT8 halves the data size (120 MB → 60 MB), which directly speeds up the memory-bound workload by ~2×. But the AI only doubles to ~83 Ops/Byte — still deeply memory-bound. The real win from INT8 here is not faster compute, but reduced memory traffic.",
+    "napkin_math": "1. **FP16 Arithmetic Intensity:** AI = 5 × 10^9 / (120 × 10^6) ≈ 41.7 Ops/Byte.\n2. **Ridge Point:** ≈ 683 Ops/Byte → deeply memory-bound.\n3. **FP16 memory time:** 120 MB / 51.2 GB/s ≈ 2.34 ms per frame. Under 16.7ms budget ✓.\n4. **INT8 data size:** 120 MB / 2 = 60 MB. New AI = 5 GOps / 60 MB ≈ 83 Ops/Byte (still memory-bound).\n5. **INT8 memory time:** 60 MB / 51.2 GB/s ≈ 1.17 ms per frame.\n6. **Key insight:** INT8 helps via memory traffic reduction (~2× speedup), not compute throughput.",
+    "issues": [
+      "The scenario's premise of 'frame drop' (exceeding 16.7ms budget) is contradicted by the provided FP16 model parameters (5 GOps, 120 MB data movement), which result in a calculated memory-bound latency of 2.34ms, well within the budget."
+    ]
+  },
+  {
+    "id": "mobile-mobile-roofline-analysis-the-smart-glasses-frame-drop-416",
+    "title": "The Smart Glasses Frame Drop",
+    "level": "L3",
+    "track": "mobile",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "optimization-task",
+    "scenario": "You are a mobile ML engineer optimizing a real-time object detection model for a new augmented reality glasses prototype running on an Apple A17 Pro chip. The user experience requires a smooth 30 FPS (a 33ms per-frame budget). Your profiler shows the current model's inference is taking 52ms, causing noticeable stutter.",
+    "common_mistake": "Engineers often focus exclusively on a model's total operations (TOPS) and the chip's peak TOPS. They might incorrectly conclude the model is compute-bound because its op count seems high. This ignores the massive cost of data movement; if the NPU is starved for data, its high TOPS are irrelevant.",
+    "realistic_solution": "The model is memory-bound. To diagnose this, we must calculate the model's Arithmetic Intensity (AI) and compare it to the hardware's ridge point. The AI tells us how many operations the model performs for each byte of data it reads from memory. The hardware ridge point is the AI needed to saturate the compute units.",
+    "napkin_math": "1. **Calculate Model Arithmetic Intensity (AI):**\n   - Assume the model requires 15 GOps compute and reads 800 MB of data (weights + activations).\n   - AI = 15e9 / 800e6 = 18.75 Ops/Byte.\n2. **Calculate Hardware Ridge Point (A17 Pro NPU):**\n   - Peak INT8 throughput: ~35 TOPS. Memory BW: ~50 GB/s.\n   - Ridge Point = 35e12 / 50e9 = 700 Ops/Byte.\n3. **Diagnosis**: AI (18.75) << Ridge Point (700) → deeply **memory-bound**.\n4. **Memory-bound latency**: 800 MB / 50 GB/s = 16 ms (compute time).\n   - Add overhead (scheduling, kernel launches): ~36 ms overhead → total ~52 ms.\n5. **Why it exceeds 33ms**: The raw data movement alone nearly fills the budget; any software overhead pushes it well over.\n6. **Fix path**: Reduce data movement via weight quantization to INT4 (halves weight reads), operator fusion (reduces activation writes), and tiling to keep data in SRAM.",
+    "issues": [
+      "The 'Napkin Math' calculates a memory-bound latency of 16ms for the assumed model parameters (15 GOps, 800 MB data), which contradicts the scenario's stated observed latency of 52ms.",
+      "The discrepancy between the calculated and observed latency means the napkin math does not diagnose the actual problem described in the scenario."
+    ]
+  },
+  {
+    "id": "tinyml-deployment-fleet-wide-model-update-strategy-52",
+    "title": "Fleet-Wide Model Update Strategy",
+    "level": "L5",
+    "track": "tinyml",
+    "ka": "D6",
+    "rc": "RC-3",
+    "mode": "requirements-to-architecture",
+    "scenario": "You manage 100,000 predictive maintenance sensors across 200 factories. The fleet has 5 hardware variants: Cortex-M0+ (nRF52810, 64 KB flash), Cortex-M4 (STM32L4, 1 MB flash), Cortex-M4F (Apollo4, 2 MB flash), Cortex-M33 (nRF5340, 1 MB flash), and ESP32-S3 (8 MB flash). Connectivity is mixed: 40% BLE-only, 35% LoRaWAN, 25% cellular (LTE-M). You need to deploy a retrained anomaly detection model to the entire fleet. Design the update strategy.",
+    "common_mistake": "\"Build one model, compile for each target, push to all devices.\" This ignores that a model fitting in 64 KB flash (nRF52810) is fundamentally different from one using 2 MB flash (Apollo4). You can't deploy the same model to all variants — you need a model family.",
+    "realistic_solution": "This is a multi-dimensional logistics problem: model × hardware × connectivity.",
+    "napkin_math": "**Model sizes by variant:**\n- nRF52810 (64 KB flash): ~40 KB model. Delta patch: ~10 KB.\n- STM32L4 (1 MB flash): ~200 KB model. Delta patch: ~50 KB.\n- Apollo4 (2 MB flash): ~500 KB model. Delta patch: ~100 KB.\n- nRF5340 (1 MB flash): ~200 KB model. Delta patch: ~50 KB.\n- ESP32-S3 (8 MB flash): ~1 MB model. Delta patch: ~200 KB.\n\n**Update time by connectivity (per device, delta patch):**\n- Cellular (25% fleet = 25,000 devices): 50 KB avg patch at 10 KB/s = 5 s/device. Batched 100 concurrent: 25,000/100 × 5 s = 1,250 s = **~21 min**.\n- BLE (40% = 40,000 devices): 50 KB at 20 KB/s = 2.5 s/device. Via phone gateway app, sequential: 40,000 × 2.5 s = impractical. Realistic: OTA on next BLE connection, rolling over days.\n- LoRaWAN (35% = 35,000 devices): 50 KB at 0.3 KB/s (SF7) = 167 s/device. Multicast: all receive simultaneously = **~3 min** for one fragment cycle.\n\n**Cost:**\n- Cellular: 25,000 × 50 KB = 1.25 GB at $0.50/MB = **$625**.\n- BLE/LoRa: $0 (local).\n- Without delta: 25,000 × 250 KB avg = 6.25 GB = **$3,125**.\n- Delta saves **$2,500 per update cycle**.\n\n**Total rollout**: 24-hour canary validation + rolling deployment over ~3-7 days (BLE is the long tail).",
+    "issues": [
+      "The LoRaWAN update time calculation in the realistic solution is significantly underestimated; a 50KB update over LoRaWAN would typically take hours or days per device, not 35 minutes, due to duty cycle and downlink limitations."
+    ]
+  },
+  {
+    "id": "tinyml-roofline-analysis-microcontroller-arithmetic-intensity-27",
+    "title": "Microcontroller Arithmetic Intensity",
+    "level": "L2",
+    "track": "tinyml",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "concept-recall",
+    "scenario": "Using the provided hardware spec sheet, explain how you would calculate the 'Ridge Point' or theoretical Arithmetic Intensity for a Cortex-M4 microcontroller. Based on your calculation, are these devices generally compute-bound or memory-bound?",
+    "common_mistake": "Engineers often invert the formula, calculating Bytes/FLOP instead of FLOPs/Byte. Another common mistake is a unit mismatch, failing to align the scales of the compute (MFLOPS) and bandwidth (GB/s) figures before dividing, leading to an answer that is orders of magnitude off.",
+    "realistic_solution": "The Arithmetic Intensity (AI) of a processor, also known as its Roofline 'Ridge Point', is calculated by dividing its peak theoretical compute performance by its peak memory bandwidth. For the Cortex-M4, we use the specified values:\n- Compute: ~336 MFLOPS = 0.336 GFLOPS\n- Memory Bandwidth: A 168 MHz Cortex-M4 with a 32-bit (4-byte) bus has a theoretical peak of 168M × 4 = 672 MB/s ≈ 0.672 GB/s\n\nThe ridge point = 0.336 GFLOPS / 0.672 GB/s = **0.5 FLOPs/Byte**. This extremely low ridge point means that almost any ML workload with even modest data reuse will be compute-bound on a Cortex-M4. Unlike GPUs (which have ridge points of 100-700 Ops/Byte and are often memory-bound), microcontrollers have so little compute relative to their memory bandwidth that compute is almost always the bottleneck.",
+    "napkin_math": "1. Convert MFLOPS to GFLOPS: 336 MFLOPS = 0.336 GFLOPS\n2. Calculate memory bandwidth: 168 MHz × 4 bytes (32-bit bus) = 672 MB/s = 0.672 GB/s\n3. **Ridge Point = Peak Compute / Peak Bandwidth:**\n   - 0.336 GFLOPS / 0.672 GB/s = **0.5 FLOPs/Byte**\n4. **Interpretation:** A typical convolution layer has an AI of 10-100 FLOPs/Byte. Since 10 >> 0.5, the convolution is **compute-bound** on the Cortex-M4.\n\nCortex-M4 devices are almost universally **compute-bound** for ML workloads. This is the opposite of GPUs/NPUs. Optimization strategies for TinyML should therefore focus on reducing operations (pruning, quantization to INT8 to use the DSP's MAC unit) rather than reducing memory traffic.",
+    "issues": [
+      "The peak compute spec of ~336 MFLOPS for a 168 MHz Cortex-M4 is factually inaccurate for single-precision floating-point operations; a typical Cortex-M4 FPU performs 1 FP operation per cycle, so 168 MFLOPS (FP32) would be more accurate."
+    ]
+  },
+  {
+    "id": "tinyml-federated-learning-economics-the-economics-of-fleet-updates:-centrali-227",
+    "title": "The Economics of Fleet Updates: Centralized vs. Federated",
+    "level": "L2",
+    "track": "tinyml",
+    "ka": "D6",
+    "rc": "RC-10",
+    "mode": "napkin-math",
+    "scenario": "You are the ML systems engineer for a fleet of 1 million TinyML-powered smart doorbells. To improve the person detection model, you must decide on an update strategy.\n- **Strategy A (Centralized):** Each device uploads 100 representative images (10 KB each) to the cloud for centralized retraining. The updated model (500 KB) is pushed back to all devices.\n- **Strategy B (Federated):** Each device computes a local gradient update (100 KB) from its on-device data and uploads it. The server aggregates gradients and pushes the updated model (500 KB) back.\nData transfer costs $0.09/GB. Which strategy is cheaper in terms of total data transfer cost?",
+    "common_mistake": "Engineers often miscalculate the total data by orders of magnitude (e.g., confusing MB and GB) or only calculate the requirement for a single device, failing to appreciate the massive scale of fleet-level operations. Another common error is assuming raw data is always smaller than model gradients.",
+    "realistic_solution": "The correct approach is to calculate the total data transfer for the entire fleet in each case.",
+    "napkin_math": "1. **Centralized Data (per device):** 100 images × 10 KB/image = 1,000 KB = 1 MB\n2. **Centralized Upload (fleet):** 1 MB × 1,000,000 = **1,000,000 MB = ~977 TB**\n3. **Centralized Download (fleet):** 500 KB × 1,000,000 = 500 GB\n4. **Total Centralized:** ~977 TB + 0.5 TB ≈ **977 TB**\n5. **Centralized Cost:** 977 × 1,024 GB × $0.09 ≈ **$90,000**\n\n6. **Federated Upload (fleet):** 100 KB × 1,000,000 = **100 GB**\n7. **Federated Download (fleet):** 500 KB × 1,000,000 = **500 GB**\n8. **Total Federated:** 100 + 500 = **600 GB**\n9. **Federated Cost:** 600 × $0.09 = **$54**\n\n10. **Conclusion:** Centralized is ~**1,667×** more expensive. The bottleneck is uploading raw data from 1M devices — federated learning compresses this by 10× per device (100 KB gradient vs. 1 MB raw images).",
+    "issues": [
+      "The calculation for 'Centralized Upload (fleet)' is incorrect: 1,000,000 MB is 1 TB, not ~977 TB.",
+      "The 'Total Centralized' data and 'Centralized Cost' are incorrect due to the propagation of the upload calculation error."
+    ]
+  },
+  {
+    "id": "tinyml-depthwise-separable-convolution-the-keyword-spotting-memory-bottleneck-390",
+    "title": "The Keyword Spotting Memory Bottleneck",
+    "level": "L3",
+    "track": "tinyml",
+    "ka": "C1",
+    "rc": "RC-3",
+    "mode": "symptom-to-cause",
+    "scenario": "You are a TinyML engineer diagnosing a memory overflow on a new keyword spotting device. The microcontroller is a Cortex-M4 with 256KB of SRAM. Your profiler shows that the Tensor Arena size for your CNN model is exceeding this limit. The primary memory spike occurs at the first layer's activation map.",
+    "common_mistake": "Engineers often correctly calculate the parameter reduction but then wrongly assume this directly solves a memory bottleneck caused by activations. Parameter size primarily affects the model's storage footprint (Flash), while peak SRAM usage (the Tensor Arena) is determined by the size of concurrent activation maps and intermediate buffers. A reduction in parameters does not necessarily lead to a proportional reduction in peak SRAM usage.",
+    "realistic_solution": "The memory overflow is caused by the first layer's large activation tensors, not its parameter count. A depthwise separable convolution reduces parameters and FLOPs but does NOT reduce activation memory — the input and output tensor dimensions remain unchanged. To fix the activation overflow, you must reduce the spatial dimensions (add stride-2 in the first layer) or reduce channel count. For example, if the first layer produces a 49×10×64 MFCC feature map output (INT8), that alone is 31.4 KiB. But if the input is raw audio (16,000 samples × 1 byte = 15.6 KiB) and the first conv expands to 64 channels at full resolution, the output is 16,000 × 64 = 1,000 KiB — exceeding the 256 KB budget. The fix: use stride-4 or stride-8 in the first layer to immediately downsample, reducing peak activation to 16,000/8 × 64 = 125 KiB.",
+    "napkin_math": "**Parameter comparison (3×3 conv, 1→64 channels):** Standard: 3 × 3 × 1 × 64 = 576 params. DS: (3×3×1) + (1×1×1×64) = 9 + 64 = 73 params. Reduction: 7.9×. **But activation memory (the actual problem):** Assume first layer input: MFCC spectrogram 49 frames × 10 coefficients × 1 byte = 490 B. First layer output (64 filters, no stride): 49 × 10 × 64 = 31,360 B = 30.6 KiB. Peak SRAM (input + output): 0.49 + 30.6 = **31.1 KiB** — fits in 256 KB. If raw audio input (16,000 × 1 = 15.6 KiB) with 64-channel 1D conv, no stride: 16,000 × 64 = 1,000 KiB — **exceeds 256 KB by 4×!** Fix with stride-8: 2,000 × 64 = 125 KiB peak output. Total: 15.6 + 125 = 140.6 KiB — fits. **Key insight:** Depthwise separable convolution does NOT help here. The fix is architectural: stride or pooling to reduce activation dimensions.",
+    "issues": [
+      "The napkin math example (31.1 KiB peak SRAM) contradicts the scenario's premise of a 'memory overflow' and 'exceeding this limit' for a 256KB SRAM budget.",
+      "The napkin math section is cut off before completing the example for raw audio input."
+    ]
+  },
+  {
+    "id": "tinyml-tinyml-privacy-federated-learning-tco-the-privacy-aware-doorbell's-tco-395",
+    "title": "The Privacy-Aware Doorbell's TCO",
+    "level": "L3",
+    "track": "tinyml",
+    "ka": "D6",
+    "rc": "RC-10",
+    "mode": "napkin-math",
+    "scenario": "You are the ML Systems Engineer for a company with one million deployed smart doorbells. The device uses a Cortex-M4 and a keyword spotting model. Users are complaining about the doorbell activating on random noises (high false-accept rate). To fix this, you need to retrain the model on 1 million examples of false activations per month. Each 1-second audio clip is 16-bit, 16kHz mono. Your legal team assigns a $0.01 privacy liability cost for every user audio clip uploaded to the cloud. You must use your cloud provider's data egress service to send data for labeling, which costs $0.09 per GB. Centralized cloud training would cost an additional $10,000/year. Alternatively, implementing a Federated Learning (FL) pipeline has a one-time engineering cost of $80,000 and requires $2,000/month for server orchestration. Based on the first-year Total Cost of Ownership (TCO), which solution should you apply to solve the problem?",
+    "common_mistake": "Engineers often focus solely on one cost axis, like data transfer or implementation complexity, while ignoring second-order effects like privacy liability or ongoing operational costs. At scale, these 'soft' costs often dominate the Total Cost of Ownership (TCO).",
+    "realistic_solution": "The correct approach is to calculate the TCO for both options over a one-year period. The privacy liability cost of the cloud-native approach makes it prohibitively expensive compared to the federated learning alternative, despite the high initial engineering cost of FL. Federated Learning is the more cost-effective solution in the first year and beyond.",
+    "napkin_math": "1. **Calculate Data Size Per Clip:** `1 sec * 16,000 samples/sec * 16 bits/sample / 8 bits/byte = 32,000 Bytes = 32 KB`.\n2. **Monthly Upload Volume (Cloud):** 1,000,000 clips × 32 KB = 32,000,000 KB = **~30.5 TB/month**\n3. **Annual Data Egress Cost:** 30.5 TB × 12 months × 1,024 GB/TB × $0.09/GB ≈ **$33,750/year**\n4. **Annual Privacy Liability (Cloud):** 1,000,000 clips/month × 12 months × $0.01 = **$120,000/year**\n5. **Cloud Training Cost:** **$10,000/year**\n6. **Total Cloud TCO (Year 1):** $33,750 + $120,000 + $10,000 = **$163,750**\n\n7. **Federated Learning Engineering (one-time):** **$80,000**\n8. **FL Server Orchestration:** $2,000/month × 12 = **$24,000/year**\n9. **FL Privacy Liability:** $0 (no raw data leaves device)\n10. **Total FL TCO (Year 1):** $80,000 + $24,000 = **$104,000**\n\n11. **Decision:** FL saves **$59,750 in Year 1** ($163,750 − $104,000). In Year 2+, FL costs only $24,000/year vs. $163,750/year for cloud — the gap widens dramatically.",
+    "issues": [
+      "Critical math error in calculating monthly upload volume: 1,000,000 clips * 32 KB = 32 GB, not ~30.5 TB.",
+      "The annual data egress cost and total cloud TCO calculations are incorrect due to the initial data volume error."
+    ]
+  },
+  {
+    "id": "cloud-compute-bound-l3-0",
+    "title": "Transitioning FFN Inference to Compute-Bound",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "napkin-math",
+    "scenario": "You are optimizing the inference of a Large Language Model with a hidden dimension of 8192. During profiling on an NVIDIA A100 (312 TFLOPS FP16, 2.0 TB/s memory bandwidth), you observe very low SM utilization during the feed-forward network (FFN) layers (matrix size: K=8192, N=32768) when serving requests sequentially at a generation batch size of 1 in FP16. Calculate the minimum batch size required to transition this FFN matrix multiplication from a memory-bound to a compute-bound regime.",
+    "common_mistake": "Candidates often assume that simply using faster precision (e.g., FP16) will make the model compute-bound, or they calculate Arithmetic Intensity using only the memory footprint of the weights while ignoring the inputs and outputs.",
+    "realistic_solution": "To make the workload compute-bound, the Arithmetic Intensity (AI) must exceed the hardware's ridge point (156 FLOPs/byte for the A100 at FP16). By increasing the batch size, the cost of loading the large weight matrix from HBM is amortized across multiple input tokens, raising the AI to the compute-bound regime at a batch size of approximately 160.",
+    "napkin_math": "1. Ridge Point = 312 TFLOPS / 2.0 TB/s = 156 FLOPs/Byte (FP16).\n2. FLOPs for GEMM = 2 * M * K * N. With M=Batch, K=8192, N=32768: FLOPs = 536,870,912 * M.\n3. Memory Bytes (FP16) = 2 * (M*K + K*N + M*N). Weights (K*N) dominate at 536,870,912 bytes.\n4. AI = (536.8M * M) / (536.8M + 2*(M*8192 + M*32768)) = (536.8M * M) / (536.8M + 81,920*M).\n5. For small M, AI ~ M. To reach AI >= 156: solve (536.8 * M) / (536.8 + 0.08192 * M) = 156.\n6. 536.8M = 83,740.8 + 12.78M -> 524.02M = 83,740.8 -> M ~ **160**.",
+    "issues": [
+      "The FLOPs calculation for GEMM is incorrect. For a matrix multiplication of M x K and K x N, the FLOPs are 2 * M * K * N. The provided calculation `2 * M * K * N` is correct, but the subsequent numerical value `536,870,912 * M` is incorrect for K=8192, N=32768. It should be `2 * M * 8192 * 32768 = 536,870,912 * M` which is correct. The issue is in the memory calculation.",
+      "The memory bytes calculation `2 * (M*K + K*N + M*N)` is incorrect for FP16. It should be `(M*K + K*N + M*N) * 2 bytes/element`. The current formula implies 2 bytes per element for each term, but the `2 *` at the beginning is redundant if `2 bytes` is already accounted for per element. More critically, the `K*N` term (weights) is loaded once, while `M*K` (input) and `M*N` (output) are loaded/written per batch. For AI, we typically consider the *total unique bytes accessed* or *bytes moved per operation*. The formula `(536.8M + 2*(M*8192 + M*32768))` implies `K*N` is loaded once, and `M*K` and `M*N` are loaded/written, but the `2*` in front of `(M*8192 + M*32768)` is confusing. It should be `(K*N + M*K + M*N) * 2 bytes/element` for the total memory footprint, or more precisely, `(K*N*2 + M*K*2 + M*N*2)` for bytes moved if all are read/written. For AI, it's usually `(K*N*2 + M*K*2 + M*N*2)` for bytes moved per batch.",
+      "The arithmetic intensity formula `AI = (536.8M * M) / (536.8M + 2*(M*8192 + M*32768))` is problematic. The denominator should represent the total bytes moved for one batch. If `K*N` is the weight matrix, it's `K*N*2` bytes. The input `M*K` is `M*K*2` bytes, and output `M*N` is `M*N*2` bytes. So, total bytes moved per batch is `(K*N + M*K + M*N) * 2`. The `536.8M` in the denominator seems to be `K*N*2` (weights), but then `2*(M*8192 + M*32768)` is `2 * (M*K + M*N) * 2` bytes, which is `4 * (M*K + M*N)` bytes. This is inconsistent.",
+      "The final equation `(536.8 * M) / (536.8 + 0.08192 * M) = 156` is derived from the incorrect AI formula and memory calculation. The `0.08192 * M` term is `(2*(8192+32768)*2) / 10^6` which is `(2*40960*2) / 10^6 = 163840 / 10^6 = 0.16384`. The `0.08192` is half of this, suggesting an error in how the `2*` was applied or interpreted for `M*K + M*N`."
+    ]
+  },
+  {
+    "id": "cloud-stateful-serving-l4-0",
+    "title": "Cascading KV Cache OOMs in Stateful LLM Serving",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "D4",
+    "rc": "RC-6",
+    "mode": "failure-to-root-cause",
+    "scenario": "Your team operates a stateful LLM chat service (using a 13B parameter model) on a cluster of 16x 8-GPU H100 nodes. To minimize Time To First Token (TTFT) for multi-turn conversations, user sessions are pinned to specific nodes to reuse the KV cache in GPU HBM. Average context length is 4K tokens. During a single-node hardware failure, the load balancer reroutes the node's 2,000 active sessions to surviving nodes. Within seconds, three surviving nodes crash due to Out-Of-Memory (OOM) errors, and the P99 TTFT for the entire cluster spikes from 200ms to over 15 seconds. Analyze the root cause of these cascading failures and explain why standard stateless failover mechanisms exacerbate the problem.",
+    "common_mistake": "Candidates often misdiagnose this as a simple CPU/network bottleneck or suggest standard stateless retries, failing to recognize the massive memory and prefill compute shock required to simultaneously reconstruct 2,000 discarded KV caches on the surviving nodes.",
+    "realistic_solution": "Implement disaggregated KV caching with asynchronous checkpointing to host CPU RAM or NVMe. Coupling this with strict admission control ensures that during failover, the system bounds the concurrent prefill rate and gracefully queues or degrades recovered sessions instead of OOMing.",
+    "napkin_math": "13B model with GQA (16 KV heads, 128 head_dim, 40 layers). KV cache per session at 4K tokens: 2 * 40 * 16 * 128 * 4096 * 2 bytes = 1.34 GB per session. 2,000 failed sessions = 2,000 * 1.34 GB = 2.68 TB of lost KV state. Each surviving node has 8x H100 (640 GB HBM). After model weights (~26 GB) and existing sessions, assume ~200 GB free per node across 15 surviving nodes. Rerouting 2,000 sessions across 15 nodes = ~133 sessions/node = 178 GB of KV cache to rebuild per node. This is close to (or exceeds) the free HBM, and the sessions don't arrive uniformly — hot nodes OOM. Rebuilding requires 2,000 * 4,000 = 8M tokens of immediate prefill compute. If a surviving node processes 200K prefill tokens/sec, it takes 40 seconds per node to reconstruct its share, during which request queues explode and HBM is exhausted by concurrent prefill allocations.",
+    "issues": [
+      "The napkin math for KV cache size per session is incorrect. For a 13B model, the number of layers is typically much higher than 40 (e.g., Llama 13B has 40 layers, but the calculation uses 40 layers * 16 KV heads * 128 head_dim * 4096 tokens * 2 bytes * 2 (for K and V), which is correct for a 13B model with 16 KV heads).",
+      "The problem states '16x 8-GPU H100 nodes', which means 128 H100 GPUs in total. Each H100 has 80GB HBM, so a node has 640GB HBM. The calculation 'assume ~200 GB free per node across 15 surviving nodes' is plausible but should be justified more rigorously, e.g., by stating the model weights are 26GB (BF16) and how much is used by existing sessions.",
+      "The napkin math is cut off at the end, making it incomplete and difficult to fully verify."
+    ]
+  },
+  {
+    "id": "cloud-b3-die-to-die-interconnect-bottleneck-in-ch-8",
+    "title": "Die-to-Die Interconnect Bottleneck in Chiplet ASICs",
+    "level": "L6+",
+    "track": "cloud",
+    "ka": "B3",
+    "rc": "RC-3",
+    "mode": "symptom-to-cause",
+    "scenario": "Evaluating a next-gen cloud accelerator composed of 4 identical compute chiplets integrated via a 2.5D silicon interposer. Workload A (a massive element-wise GeLU) achieves 800 TFLOPS. Workload B (a large Matrix Multiply requiring global reductions across the M dimension) only achieves 120 TFLOPS, despite having identical theoretical FLOP counts. The package power draw spikes near the chip edges.",
+    "common_mistake": "Assuming Workload B is bound by HBM bandwidth or lacks compute parallelization across the 4 chiplets.",
+    "realistic_solution": "The symptom (massive drop in TFLOPS specifically for global reduction operations, with edge heating) points directly to the Die-to-Die (D2D) interconnect bandwidth bottleneck. In a multi-chiplet design, intra-chiplet SRAM bandwidth is typically an order of magnitude higher than inter-chiplet D2D bandwidth over the silicon interposer. Workload A (element-wise) is embarrassingly parallel and stays entirely local to each chiplet. Workload B (Matrix Multiply partitioned along the reduction dimension) requires partial sums to be broadcast and reduced across the 4 chiplets. The D2D links become completely saturated, stalling the compute units. The co-design solution is to alter the parallelization strategy: partition the matrix multiply along non-reducing dimensions (Spatial/Data parallel instead of Tensor parallel across the K dimension) so that computations remain local to the chiplet, and only final small activations cross the D2D boundary.",
+    "napkin_math": "Assume D2D bandwidth is 50 GB/s per link (realistic for silicon interposer). Workload B requires moving a 16K × 16K partial sum matrix in FP16 = 512 MB per reduction step. For a 16K×16K×16K GEMM (≈8.5 TFLOPs), compute time across 4 chiplets at 800 TFLOPS peak = 8.5e12 / 800e12 = 10.6 ms. However, transferring 512 MB over 50 GB/s D2D takes 10.2 ms per step; with 3 reduction steps across 4 chiplets, total D2D time ≈ 30.7 ms. The operation is heavily D2D-bound: total time ≈ 41 ms, yielding 8.5e12 / 41e-3 ≈ 207 TFLOPS effective (vs 800 TFLOPS peak). By contrast, Workload A (element-wise) requires zero D2D traffic and runs at full throughput.",
+    "issues": [
+      "The 'Realistic Solution' section is truncated.",
+      "The 'Napkin Math' calculation for achieved TFLOPS (206 TFLOPS) does not match the scenario's stated 120 TFLOPS, indicating an inconsistency in the numerical assumptions or outcome."
+    ]
+  },
+  {
+    "id": "cloud-d2-long-context-int4-kv-cache-degradation-3",
+    "title": "Long-Context INT4 KV Cache Degradation",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "D2",
+    "rc": "RC-5",
+    "mode": "requirements-to-architecture",
+    "scenario": "Serving a 7B LLM with a 128k context window. At FP16, the KV cache is 32GB per request, heavily limiting concurrency. You implement INT4 per-channel KV cache quantization, saving 75% memory. Throughput jumps from 5 QPS to 18 QPS, but 'needle in a haystack' retrieval accuracy drops from 99% to 45%.",
+    "common_mistake": "Increasing the calibration dataset size, which doesn't fix the fundamental representational limit of 4 bits for long-sequence dot products.",
+    "realistic_solution": "Per-channel INT4 quantization of the KV cache is insufficient for long-context retrieval because the attention mechanism heavily relies on precise outlier key/value pairs that represent specific 'needles'. INT4 has only 16 buckets. When quantizing Key vectors, the dot product precision with the Query vector degrades, causing attention scores to blur across the context length. The architecture needs a mixed-precision or grouped quantization strategy. You should implement Grouped-Quantization (e.g., group size 64 or 128) to capture local variance. Alternatively, keep the most recent tokens (e.g., local window of 1024) and high-attention 'sink' tokens in FP16, only quantizing the rest to INT4.",
+    "napkin_math": "128k context, 7B model (32 layers, 32 KV heads, head_dim=128). FP16 KV cache = 2 × 32 × 32 × 128 × 128,000 × 2 bytes = 67.1 GB. INT4 reduces each value from 2 bytes to 0.5 bytes → 67.1 × (0.5/2) = 16.8 GB. Group-size-128 quantization adds 16-bit scale/zero-point metadata per group: 128,000 × (32 × 128 / 128) × 32 × 2 × 2 × 2 bytes ≈ 524 MB of overhead — minimal compared to the 16.8 GB cache, but drastically reduces quantization error for needle retrieval.",
+    "issues": [
+      "The scenario's stated FP16 KV cache size (32GB) is inconsistent with the 'Napkin Math' calculation (67.1GB) for a 7B model with 128k context, which impacts the factual accuracy of the problem's premise."
+    ]
+  },
+  {
+    "id": "cloud-b2-the-rope-recomputation-paradox-4",
+    "title": "The RoPE Recomputation Paradox",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "B2",
+    "rc": "RC-1",
+    "mode": "symptom-to-cause",
+    "scenario": "Your team is optimizing a custom Transformer for a 128k context window on an A100 GPU (80GB). The original code reads pre-computed sine and cosine matrices for Rotary Position Embeddings (RoPE) from HBM, taking 15% of the forward pass time. You rewrite the Triton kernel to dynamically recompute the trigonometric functions (sin/cos) on the fly for every token. FLOPs increase by 400%, but the kernel executes 4x faster.",
+    "common_mistake": "Assuming that executing trigonometric functions (which are computationally expensive) will always be slower than reading pre-computed values from RAM.",
+    "realistic_solution": "The original RoPE implementation was deeply memory-bandwidth bound. Reading massive pre-computed sin/cos caches for 128k context tokens from HBM saturated the memory bus. By recomputing on the fly, you drastically increased the Arithmetic Intensity, shifting the operation from the memory-bound slope up towards the compute-bound ceiling. Because the A100 has a massive compute-to-bandwidth ratio (312 TFLOPS vs 2 TB/s), the extra trig FLOPs are computed essentially for 'free' in the shadow of the necessary memory loads for the Q and K tensors.",
+    "napkin_math": "Pre-computed: For d=128, context N=128k. HBM read per token = 4 × 128 × 2 bytes (Q, K, Sin, Cos) = 1 KB. Total read = 128k × 1 KB = 128 MB. Time at 2 TB/s = ~64 μs. Recompute: Read only Q, K (512 bytes/token). Total read = 64 MB. Time = ~32 μs. Compute for sin/cos = ~20 FLOPs per element × 128 dims × 128k tokens = 327 MFLOPs. Compute time at 312 TFLOPS = 327e6 / 312e12 ≈ 1.05 μs — completely hidden by the 32 μs memory load time. Net effect: ~2× speedup by eliminating half the HBM reads, with recompute cost invisible under the memory latency.",
+    "issues": [
+      "The 'Realistic Solution' section is truncated.",
+      "The 'Napkin Math' calculation of ~2x speedup contradicts the scenario's stated 4x speedup, indicating an inconsistency in the numerical claims."
+    ]
+  },
+  {
+    "id": "mobile-d3-the-long-prompt-prefill-cliff-1",
+    "title": "The Long Prompt Prefill Cliff",
+    "level": "L4",
+    "track": "mobile",
+    "ka": "D3",
+    "rc": "RC-6",
+    "mode": "symptom-to-cause",
+    "scenario": "You are deploying a 3B parameter LLM (4-bit quantized) on a mobile NPU. For prompts under 500 tokens, the Time-To-First-Token (TTFT) is a swift 250ms. However, when the prompt reaches 1500 tokens, TTFT non-linearly spikes to 4.5 seconds. In both cases, the decode latency remains completely flat at 20 tokens/sec.",
+    "common_mistake": "Assuming the NPU is thermally throttling due to the longer sustained compute phase of the larger prefill.",
+    "realistic_solution": "The root cause is the exhaustion of the NPU's limited on-chip SRAM. Prefill is heavily compute-bound, performing large matrix multiplications. For short prompts, the intermediate activations and the generated KV cache fit entirely within the NPU's SRAM (e.g., 4MB). However, at 1500 tokens, the working set size exceeds the SRAM capacity. The NPU is forced to spill intermediate attention tensors and the KV cache to the device's LPDDR5 DRAM. This shifts the prefill phase from being compute-bound (running at peak NPU TFLOPs) to memory-bandwidth bound, drastically reducing utilization and causing the non-linear latency spike.",
+    "napkin_math": "For a 3B model, assume 28 layers, 4 KV heads (GQA), head_dim=64, INT8 KV cache on-device. KV per token = 2 (K+V) × 28 layers × 4 heads × 64 dim × 1 byte = 14.3 KB. SRAM capacity = 4 MB. For 500 tokens: KV cache = 500 × 14.3 KB ≈ 7 MB — fits partially in SRAM with tiled execution, keeping active layers' KV resident. For 1500 tokens: KV cache = 1500 × 14.3 KB ≈ 21 MB — far exceeds 4 MB SRAM. The O(N²) attention intermediate for 1500 tokens (1500² × 4 heads × 2 bytes ≈ 72 MB per layer) forces continuous paging between SRAM and LPDDR5 DRAM, dropping effective compute utilization from ~80% to under 15% and explaining the non-linear TTFT spike.",
+    "issues": [
+      "The 'Realistic Solution' and 'Napkin Math' sections are truncated.",
+      "There is a significant mathematical error in the 'Napkin Math' calculation for the O(N²) attention intermediate size (72 MB per layer for 1500 tokens is incorrect).",
+      "Minor inconsistency: the scenario states a 4-bit quantized model, but 'Napkin Math' assumes an INT8 KV cache."
+    ]
+  },
+  {
+    "id": "global-d6-sram-banking-retention-power-leak-4",
+    "title": "SRAM Banking Retention Power Leak",
+    "level": "L4",
+    "track": "global",
+    "ka": "D6",
+    "rc": "RC-11",
+    "mode": "failure-to-root-cause",
+    "scenario": "An anomaly detection wearable uses a Cortex-M33 with 256KB SRAM (split into four 64KB banks: SRAM0-SRAM3). Your model requires 110KB. You implement Federated Learning, adding a 12KB gradient accumulation buffer. Sleep power jumps from 4.3uA to 10.9uA after adding the FL feature, halving battery life.",
+    "common_mistake": "Believing the FL gradient accumulation math is keeping the CPU awake longer before going to sleep.",
+    "realistic_solution": "The root cause is SRAM bank retention locality. The linker script scattered the memory allocations. The 110KB model occupies SRAM0 and SRAM1 (128KB total). The linker placed the new 12KB FL buffer into SRAM3. To retain this data during deep sleep, the power management unit must keep SRAM3 powered on. By forcing the linker to place the 12KB buffer into the remaining space of SRAM1, you can completely power off SRAM2 and SRAM3 during sleep.",
+    "napkin_math": "Base sleep current (CPU + peripherals) = 1.0 μA. Each 64 KB SRAM bank costs 3.3 μA for data retention. The 110 KB model weights live in flash (read-only, no retention cost). Runtime working memory (inference buffers, feature maps) occupies ~50 KB in SRAM0. Original power: 1.0 μA base + 1 bank (SRAM0) × 3.3 μA = 4.3 μA. After adding FL: the 12 KB gradient buffer is placed by the linker into SRAM2 (SRAM1 is unused but the linker's default heap grows into SRAM2). Now SRAM0 + SRAM2 must stay powered. But the power controller works in contiguous ranges — to retain SRAM2, it must also power SRAM1. Retention: 1.0 + 3 banks × 3.3 = 10.9 μA. Fix: force the linker to place the FL buffer into SRAM0's remaining 14 KB → only 1 bank retained → back to 4.3 μA.",
+    "issues": [
+      "The napkin math's explanation of initial SRAM bank usage (50KB in SRAM0, 1 bank active for 4.3uA) contradicts the realistic solution's description of the 110KB model occupying SRAM0 and SRAM1 (implying 2 banks active for 7.6uA).",
+      "The napkin math's calculation for the final power (SRAM0 + SRAM2 active, 2 banks total, 7.6uA) contradicts the scenario's observed final power (10.9uA) and the realistic solution's description (SRAM0, SRAM1, SRAM3 active, 3 banks total, 10.9uA)."
+    ]
+  }
+]
