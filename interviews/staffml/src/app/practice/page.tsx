@@ -736,6 +736,19 @@ function PracticePage() {
                       </div>
                     )}
 
+                    {/* Textbook deep-dive in answer panel */}
+                    {current.details.deep_dive_title && (
+                      <a
+                        href={current.details.deep_dive_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 px-3 py-2.5 text-[12px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
+                      >
+                        <BookOpen className="w-3.5 h-3.5 shrink-0" />
+                        <span>Want to learn more? Read <span className="font-semibold">{current.details.deep_dive_title}</span></span>
+                      </a>
+                    )}
+
                     {/* Rubric checkboxes */}
                     {rubricItems.length > 0 && (
                       <div className="border-t border-border pt-5">

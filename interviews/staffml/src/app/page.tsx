@@ -8,6 +8,8 @@ import {
   getAreas, getVaultStats, getAreaStyle, getAreaForTopic, searchTopics,
   type Topic,
 } from "@/lib/taxonomy";
+import { getTracks } from "@/lib/corpus";
+import { Cloud, Smartphone, Cpu, CircuitBoard } from "lucide-react";
 import { getAttempts, getStreakData } from "@/lib/progress";
 import { FilterPill, AreaOverview, ExpandedArea, SearchResults, TopicDetail } from "@/components/vault";
 import LevelExplainer from "@/components/LevelExplainer";
@@ -17,6 +19,7 @@ export default function HomePage() {
   const [query, setQuery] = useState("");
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [expandedArea, setExpandedArea] = useState<string | null>(null);
+  const [selectedTrack, setSelectedTrack] = useState<string | null>(null);
   const [isReturning, setIsReturning] = useState(false);
   const [streakCount, setStreakCount] = useState(0);
   const [attemptCount, setAttemptCount] = useState(0);
@@ -35,8 +38,26 @@ export default function HomePage() {
 
   const searchResults = useMemo(() => {
     if (!query.trim()) return null;
-    return searchTopics(query);
-  }, [query]);
+    let results = searchTopics(query);
+    if (selectedTrack) results = results.filter(t => t.tracks.includes(selectedTrack));
+    return results;
+  }, [query, selectedTrack]);
+
+  // Filter areas by selected track
+  const filteredAreas = useMemo(() => {
+    if (!selectedTrack) return areas;
+    return areas
+      .map(area => ({
+        ...area,
+        topics: area.topics.filter(t => t.tracks.includes(selectedTrack)),
+      }))
+      .filter(area => area.topics.length > 0)
+      .map(area => ({
+        ...area,
+        questionCount: area.topics.reduce((s, t) => s + t.questionCount, 0),
+        topicCount: area.topics.length,
+      }));
+  }, [areas, selectedTrack]);
 
   const selectedArea = selectedTopic ? getAreaForTopic(selectedTopic.id) : null;
   const selectedStyle = selectedArea ? getAreaStyle(selectedArea.id) : null;
@@ -108,6 +129,26 @@ export default function HomePage() {
             </div>
           )}
 
+          {/* Track filter pills */}
+          <div className="flex items-center gap-1.5 flex-wrap mb-3">
+            <span className="text-[10px] font-mono text-textMuted uppercase tracking-wide mr-1">Track</span>
+            <FilterPill label="All" isActive={!selectedTrack} onClick={() => setSelectedTrack(null)} />
+            {[
+              { id: "cloud", label: "Cloud", icon: <Cloud className="w-3 h-3" /> },
+              { id: "edge", label: "Edge", icon: <Cpu className="w-3 h-3" /> },
+              { id: "mobile", label: "Mobile", icon: <Smartphone className="w-3 h-3" /> },
+              { id: "tinyml", label: "TinyML", icon: <CircuitBoard className="w-3 h-3" /> },
+            ].map(t => (
+              <FilterPill
+                key={t.id}
+                label={t.label}
+                isActive={selectedTrack === t.id}
+                icon={t.icon}
+                onClick={() => setSelectedTrack(selectedTrack === t.id ? null : t.id)}
+              />
+            ))}
+          </div>
+
           {/* Area filter pills */}
           <div className="flex items-center gap-1.5 flex-wrap mb-5">
             <FilterPill
@@ -115,7 +156,7 @@ export default function HomePage() {
               isActive={!expandedArea}
               onClick={() => setExpandedArea(null)}
             />
-            {areas.map((area) => {
+            {filteredAreas.map((area) => {
               const style = getAreaStyle(area.id);
               const Icon = style.icon;
               return (
@@ -160,10 +201,10 @@ export default function HomePage() {
               <SearchResults results={searchResults} query={query}
                 selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
             ) : expandedArea ? (
-              <ExpandedArea area={areas.find(a => a.id === expandedArea)!}
+              <ExpandedArea area={filteredAreas.find(a => a.id === expandedArea)!}
                 selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
             ) : (
-              <AreaOverview areas={areas} onExpand={setExpandedArea} onSelectTopic={setSelectedTopic}
+              <AreaOverview areas={filteredAreas} onExpand={setExpandedArea} onSelectTopic={setSelectedTopic}
                 selectedId={selectedTopic?.id ?? null} />
             )}
           </div>

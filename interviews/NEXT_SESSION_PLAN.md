@@ -28,9 +28,10 @@
 ### What's Left
 1. **Fix ~1,742 WARN questions** — mostly incomplete napkin_math stubs
 2. **Fix 13 remaining ERRORs** — math inconsistencies
-3. **Grow global track** — still sparse (L3=12, needs more)
-4. **Grow thin KAs** — 12 areas with <40 questions each
-5. **Update paper.tex** figures and coverage section
+3. **Fix ~1,000 taxonomy_concept catch-all buckets** — audit found 10/20 top concepts have <50% accuracy (see `_validation_batches/taxonomy_concept_audit.json`). Worst: `blue-green-deployment` (120 Qs, 0% correct), `chiplet-architecture` (42→0 fixed this session), `activation-logic-unit-cost` (84 Qs, 0% correct)
+4. **Grow global track** — still sparse (L3=12, needs more)
+5. **Grow thin KAs** — 12 areas with <40 questions each
+6. **Update paper.tex** figures and coverage section
 
 ---
 

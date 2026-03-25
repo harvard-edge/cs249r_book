@@ -57,6 +57,10 @@ export default function Nav() {
               <circle cx="16" cy="9" r="1" fill="currentColor" />
             </svg>
             <span className="text-textPrimary text-base font-extrabold tracking-tight">Staff</span>
+            <svg viewBox="0 0 8 8" className="w-2 h-2 -mx-0.5">
+              <circle cx="4" cy="4" r="3" fill="#3b82f6" opacity="0.6" />
+              <circle cx="4" cy="4" r="1.5" fill="#3b82f6" />
+            </svg>
             <span className="text-textTertiary text-base font-medium tracking-tight">ML</span>
           </Link>
 

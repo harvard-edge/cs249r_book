@@ -162,14 +162,17 @@ export default function RooflinePage() {
             })()}
 
             {/* Workload dots */}
-            {WORKLOADS.map(wl => {
+            {WORKLOADS.map((wl, wi) => {
               const perf = Math.min(wl.ops_per_byte * selectedHw.bandwidth_tbs, selectedHw.compute_tflops);
               const { sx, sy } = toSvg(wl.ops_per_byte, perf);
-              const bound = wl.ops_per_byte < ridge ? 'mem' : 'compute';
+              // Stagger labels vertically to avoid overlap
+              const yOffset = (wi % 2 === 0) ? -10 : 12;
               return (
                 <g key={wl.name}>
-                  <circle cx={sx} cy={sy} r="4" fill={wl.color} opacity="0.8" />
-                  <text x={sx + 6} y={sy + 3} fill={wl.color} fontSize="8" fontFamily="JetBrains Mono, monospace" opacity="0.9">
+                  <circle cx={sx} cy={sy} r="5" fill={wl.color} opacity="0.9" />
+                  <rect x={sx + 7} y={sy + yOffset - 9} width={wl.name.length * 6.5 + 8} height="14" rx="3"
+                    fill="var(--background)" opacity="0.85" />
+                  <text x={sx + 10} y={sy + yOffset} fill={wl.color} fontSize="10" fontWeight="600" fontFamily="JetBrains Mono, monospace">
                     {wl.name}
                   </text>
                 </g>
