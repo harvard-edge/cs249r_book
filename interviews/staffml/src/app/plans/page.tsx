@@ -234,7 +234,7 @@ export default function PlansPage() {
                   spellCheck="false"
                   autoFocus
                 />
-                <button onClick={handleReveal} className="mt-4 w-full bg-white text-black font-bold py-3 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center gap-2">
+                <button onClick={handleReveal} className="mt-4 w-full bg-textPrimary text-background font-bold py-3 rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-2">
                   Reveal <span className="text-[10px] opacity-50 ml-1">⌘↵</span>
                 </button>
               </>

@@ -219,7 +219,7 @@ export default function ProgressPage() {
             </p>
             <Link
               href="/gauntlet"
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-white text-black font-bold rounded-lg hover:bg-gray-100 transition-all text-sm"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-textPrimary text-background font-bold rounded-lg hover:opacity-90 transition-all text-sm"
             >
               <Crosshair className="w-4 h-4" /> Start a Gauntlet
             </Link>

@@ -301,7 +301,7 @@ export default function GauntletPage() {
             <button
               onClick={startGauntlet}
               disabled={availableCount < DURATIONS[selectedDuration].questions}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-white text-black font-bold rounded-lg hover:bg-gray-100 transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-[0_0_20px_rgba(255,255,255,0.1)]"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-textPrimary text-background font-bold rounded-lg hover:opacity-90 transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-[0_0_20px_rgba(255,255,255,0.1)]"
             >
               Begin <Play className="w-4 h-4" />
             </button>
@@ -395,7 +395,7 @@ export default function GauntletPage() {
                   <div className="flex items-center gap-3 mt-4">
                     <button
                       onClick={revealAnswer}
-                      className="flex-1 bg-white text-black font-bold py-3 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center gap-2"
+                      className="flex-1 bg-textPrimary text-background font-bold py-3 rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-2"
                     >
                       Reveal Answer <span className="text-[10px] opacity-50 ml-1">⌘↵</span>
                     </button>
