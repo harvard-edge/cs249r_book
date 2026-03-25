@@ -77,10 +77,10 @@ A growing community of contributors helps improve every part of it: fixing error
 
 ## The Curriculum
 
-Every component connects. The textbook gives you the mental models. The labs let you reason through trade-offs interactively, powered by MLSys·im — a modeling engine for infrastructure you can't physically access, and a standalone tool in its own right. TinyTorch makes you build the machinery yourself. The hardware kits put you face-to-face with real deployment constraints. The interview playbook tests whether you actually understand it. And the instructor hub, slides, and newsletter give educators everything they need to bring this into a classroom.
+Every component connects. The textbook gives you the mental models. The labs let you reason through trade-offs interactively, powered by MLSys·im — a modeling engine for infrastructure you can't physically access, and a standalone tool in its own right. TinyTorch makes you build the machinery yourself. The hardware kits put you face-to-face with real deployment constraints. StaffML tests whether you actually understand it. And the instructor hub, slides, and newsletter give educators everything they need to bring this into a classroom.
 
 <p align="center">
-  <img src="README/curriculum-map.svg?v=3" alt="Curriculum map showing how the textbook, labs, Tiny Torch, hardware kits, MLSys im, and interview playbook connect" width="760">
+  <img src="README/curriculum-map.svg?v=4" alt="Curriculum map showing how the textbook, labs, TinyTorch, hardware kits, MLSys im, and StaffML connect" width="760">
 </p>
 
 ### For Students
@@ -255,7 +255,7 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
     </tr>
     <tr>
       <td align="center"><h3>③</h3></td>
-      <td><b>Test yourself.</b> Drill the <a href="interviews/README.md">interview playbook</a>: 1,000+ systems design questions across cloud, edge, mobile, and TinyML.</td>
+      <td><b>Test yourself.</b> Drill <a href="interviews/README.md">StaffML</a>: physics-grounded systems design questions across cloud, edge, mobile, and TinyML.</td>
     </tr>
     <tr>
       <td align="center"><h3>④</h3></td>
