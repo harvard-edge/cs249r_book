@@ -1,0 +1,73 @@
+name: '🎯 StaffML · 🚀 Publish (Live)'
+
+# Builds and deploys StaffML to mlsysbook.ai/staffml/ (or staffml.ai)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: gh-pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    name: '🔧 Build & Deploy StaffML'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: interviews/staffml/package-lock.json
+
+      - name: 📦 Install dependencies
+        working-directory: interviews/staffml
+        run: npm ci
+
+      - name: 🧮 Regenerate vault manifest
+        run: python3 interviews/staffml/scripts/generate-manifest.py
+
+      - name: 🔨 Build StaffML
+        working-directory: interviews/staffml
+        run: npm run build
+
+      - name: 🔍 Validate build
+        run: |
+          if [ ! -f "interviews/staffml/out/index.html" ]; then
+            echo "❌ CRITICAL: index.html missing. Aborting deployment."
+            exit 1
+          fi
+
+          PAGE_COUNT=$(find interviews/staffml/out -name '*.html' | wc -l)
+          echo "✅ StaffML built: $PAGE_COUNT pages"
+          echo "📊 Build size: $(du -sh interviews/staffml/out | cut -f1)"
+
+          if [ "$PAGE_COUNT" -lt 8 ]; then
+            echo "⚠️ WARNING: Expected at least 8 pages, got $PAGE_COUNT"
+          fi
+
+          # Show vault version
+          if [ -f "interviews/staffml/src/data/vault-manifest.json" ]; then
+            VERSION=$(python3 -c "import json; print(json.load(open('interviews/staffml/src/data/vault-manifest.json'))['version'])")
+            QUESTIONS=$(python3 -c "import json; print(json.load(open('interviews/staffml/src/data/vault-manifest.json'))['questionCount'])")
+            echo "📋 Vault v${VERSION} — ${QUESTIONS} questions"
+          fi
+
+      - name: 🚀 Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./interviews/staffml/out
+          destination_dir: staffml
+          publish_branch: gh-pages
+          keep_files: true
+          commit_message: '🎯 Deploy StaffML live v${{ github.run_number }} - ${{ github.sha }}'

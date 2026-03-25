@@ -1,0 +1,111 @@
+name: '🎯 StaffML · 👁️ Preview (Dev)'
+
+# Builds and deploys StaffML interview prep app to dev preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - 'interviews/staffml/**'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: staffml-dev-deploy
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: '🎯 Build & Deploy StaffML (Dev)'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: interviews/staffml/package-lock.json
+
+      - name: 📦 Install dependencies
+        working-directory: interviews/staffml
+        run: npm ci
+
+      - name: 🔨 Build StaffML
+        working-directory: interviews/staffml
+        run: npm run build
+
+      - name: 🔍 Validate build
+        run: |
+          if [ ! -f "interviews/staffml/out/index.html" ]; then
+            echo "❌ CRITICAL: index.html missing. Aborting deployment."
+            exit 1
+          fi
+
+          PAGE_COUNT=$(find interviews/staffml/out -name '*.html' | wc -l)
+          echo "✅ StaffML built: $PAGE_COUNT pages"
+          echo "📊 Build size: $(du -sh interviews/staffml/out | cut -f1)"
+
+          # Verify critical pages exist
+          for page in practice gauntlet progress about 404; do
+            if [ ! -f "interviews/staffml/out/${page}.html" ]; then
+              echo "⚠️ WARNING: ${page}.html missing"
+            fi
+          done
+
+          # Show vault version
+          if [ -f "interviews/staffml/src/data/vault-manifest.json" ]; then
+            echo "📋 Vault version: $(python3 -c "import json; print(json.load(open('interviews/staffml/src/data/vault-manifest.json'))['version'])")"
+          fi
+
+      - name: 🚀 Deploy to Dev Site via SSH
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning dev preview repository..."
+          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+          cd target-repo
+
+          echo "🧹 Cleaning staffml directory..."
+          rm -rf staffml
+          mkdir -p staffml
+
+          echo "🚚 Copying StaffML build..."
+          cp -r "${{ github.workspace }}/interviews/staffml/out/." staffml/
+
+          if [ ! -f "staffml/index.html" ]; then
+            echo "❌ CRITICAL: staffml/index.html missing. Aborting."
+            exit 1
+          fi
+
+          echo "📦 Committing and pushing..."
+          git add .
+          git commit -m "🎯 Deploy StaffML dev to /staffml/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+
+          # Retry push with rebase to handle concurrent deploys
+          for i in 1 2 3; do
+            if git push origin main 2>/dev/null; then
+              echo "✅ Push succeeded on attempt $i"
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin main || true
+          done
+
+          echo "✅ StaffML deployed to dev preview"
