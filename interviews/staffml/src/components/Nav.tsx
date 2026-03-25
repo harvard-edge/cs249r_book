@@ -124,7 +124,7 @@ export default function Nav() {
           <StreakBadge />
           <button
             onClick={toggleTheme}
-            className="p-1.5 text-textTertiary hover:text-textSecondary transition-colors"
+            className="p-2 text-textTertiary hover:text-textSecondary transition-colors"
             aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
           >
             {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -151,7 +151,7 @@ export default function Nav() {
           {/* Mobile hamburger */}
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
-            className="md:hidden p-1.5 text-textTertiary hover:text-textPrimary transition-colors"
+            className="md:hidden p-2 text-textTertiary hover:text-textPrimary transition-colors"
             aria-label="Toggle navigation menu"
           >
             {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}

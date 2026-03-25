@@ -127,7 +127,10 @@ export default function HomePage() {
               </h1>
               <p className="text-[15px] text-textSecondary mb-1">
                 {stats.totalQuestions.toLocaleString()} physics-grounded ML systems interview questions.
-                100% client-side. No accounts. No tracking.
+              </p>
+              <p className="text-[13px] text-textTertiary mb-1">
+                Browse topics below &middot; Drill with spaced repetition &middot; Test yourself in timed mock interviews.
+                100% client-side &mdash; no accounts, no tracking.
               </p>
               <p className="text-[13px] text-textTertiary mb-3">
                 Built on{" "}
@@ -181,8 +184,8 @@ export default function HomePage() {
             ))}
           </div>
 
-          {/* Area filter pills */}
-          <div className="flex items-center gap-1.5 flex-wrap mb-5">
+          {/* Area filter pills — horizontal scroll on mobile, wrap on desktop */}
+          <div className="flex items-center gap-1.5 overflow-x-auto md:flex-wrap mb-5 pb-1 scrollbar-hide snap-x">
             <FilterPill
               label="All"
               isActive={!expandedArea}
@@ -272,23 +275,35 @@ export default function HomePage() {
         </AnimatePresence>
       </div>
 
-      {/* Mobile detail sheet */}
+      {/* Mobile detail sheet + backdrop */}
       <AnimatePresence>
         {selectedTopic && selectedStyle && (
-          <motion.div
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
-            transition={{ type: "spring", damping: 30, stiffness: 300 }}
-            className="fixed inset-x-0 bottom-0 z-50 border-t border-border rounded-t-2xl max-h-[85vh] overflow-auto bg-background lg:hidden"
-          >
-            <div className="flex justify-center pt-3 pb-1">
-              <div className="w-10 h-1 rounded-full bg-borderHighlight" />
-            </div>
-            <TopicDetail topic={selectedTopic}
-              areaName={selectedArea?.name || ""} style={selectedStyle}
-              onClose={() => setSelectedTopic(null)} />
-          </motion.div>
+          <>
+            {/* Backdrop — tap to close */}
+            <motion.div
+              key="backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+              onClick={() => setSelectedTopic(null)}
+            />
+            <motion.div
+              key="sheet"
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 30, stiffness: 300 }}
+              className="fixed inset-x-0 bottom-0 z-50 border-t border-border rounded-t-2xl max-h-[85vh] overflow-auto bg-background lg:hidden"
+            >
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-10 h-1 rounded-full bg-borderHighlight" />
+              </div>
+              <TopicDetail topic={selectedTopic}
+                areaName={selectedArea?.name || ""} style={selectedStyle}
+                onClose={() => setSelectedTopic(null)} />
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
     </div>

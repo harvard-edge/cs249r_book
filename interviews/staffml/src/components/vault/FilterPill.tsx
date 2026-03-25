@@ -9,7 +9,7 @@ export default function FilterPill({ label, count, isActive, color, icon, onClic
       onClick={onClick}
       aria-pressed={isActive}
       className={clsx(
-        "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all border",
+        "flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold transition-all border whitespace-nowrap shrink-0",
         isActive
           ? "text-textPrimary border-borderHighlight"
           : "border-transparent text-textSecondary hover:text-textPrimary hover:bg-surface"

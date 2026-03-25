@@ -283,6 +283,13 @@ function PracticePage() {
           title: activity.newMilestone,
           description: `${activity.streak.currentStreak} day streak!`,
         });
+      } else if (questionsAnswered === 0) {
+        // First question — reassure user data is saved locally
+        showToast({
+          type: 'success',
+          title: 'Saved to your browser',
+          description: 'No account needed. Your progress is stored locally.',
+        });
       }
       setQuestionsAnswered(prev => prev + 1);
       setDueCount(getDueCount());

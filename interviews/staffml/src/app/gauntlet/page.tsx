@@ -12,6 +12,7 @@ import {
   getTracks, getLevels, getCompetencyAreas, selectGauntletQuestions,
   getQuestionsByFilter, Question, cleanScenario
 } from "@/lib/corpus";
+import { getLevelDef } from "@/lib/levels";
 import { saveAttempt, saveGauntletResult, AttemptRecord, recordActivity } from "@/lib/progress";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 
@@ -251,23 +252,30 @@ export default function GauntletPage() {
 
           {/* Level selection */}
           <div className="mb-6">
-            <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Difficulty</label>
-            <p className="text-[10px] text-textTertiary mb-3">L1-L2 recall → L3 apply → L4-L5 analyze → L6+ design</p>
-            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-              {levels.map(l => (
-                <button
-                  key={l}
-                  onClick={() => setSelectedLevel(l)}
-                  className={clsx(
-                    "px-4 py-3 rounded-lg border text-sm font-mono font-medium transition-all text-center",
-                    selectedLevel === l
-                      ? "border-accentBlue bg-accentBlue/10 text-textPrimary"
-                      : "border-border bg-surface text-textSecondary hover:border-borderHighlight"
-                  )}
-                >
-                  {l}
-                </button>
-              ))}
+            <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-3">Difficulty</label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {levels.map(l => {
+                const def = getLevelDef(l);
+                return (
+                  <button
+                    key={l}
+                    onClick={() => setSelectedLevel(l)}
+                    className={clsx(
+                      "px-4 py-3 rounded-lg border text-left transition-all",
+                      selectedLevel === l
+                        ? "border-accentBlue bg-accentBlue/10"
+                        : "border-border bg-surface hover:border-borderHighlight"
+                    )}
+                  >
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <div className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: def.color }} />
+                      <span className="text-sm font-mono font-bold text-textPrimary">{l}</span>
+                      <span className="text-[11px] text-textTertiary">{def.name}</span>
+                    </div>
+                    <span className="text-[10px] text-textMuted">{def.role}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 

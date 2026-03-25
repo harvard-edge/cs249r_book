@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { BarChart3, Trash2, Terminal, Crosshair, Download, Upload } from "lucide-react";
+import { BarChart3, Trash2, Terminal, Crosshair, Download, Upload, Target } from "lucide-react";
 import clsx from "clsx";
 import Link from "next/link";
 import { getCompetencyAreas, getTracks, getQuestionsByFilter } from "@/lib/corpus";
@@ -195,11 +195,19 @@ export default function ProgressPage() {
                 </span>
               </div>
               <p className="text-sm text-textSecondary mb-3">{verdict}</p>
-              <div className="flex items-center gap-4 text-[10px] font-mono text-textTertiary">
+              <div className="flex items-center gap-4 text-[10px] font-mono text-textTertiary mb-4">
                 {strongest && <span>Strongest: <span className="text-accentGreen capitalize">{strongest.area}</span> ({strongest.pct}%)</span>}
                 {weakest && <span>Weakest: <span className="text-accentRed capitalize">{weakest.area}</span> ({weakest.pct}%)</span>}
                 <span>{totalAttempted} total answers</span>
               </div>
+              {weakest && weakest.pct < 70 && (
+                <Link
+                  href={`/practice?area=${encodeURIComponent(weakest.area)}`}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-accentBlue text-white font-bold rounded-lg text-sm hover:opacity-90 transition-opacity"
+                >
+                  <Target className="w-4 h-4" /> Drill {weakest.area}
+                </Link>
+              )}
             </div>
           );
         })()}

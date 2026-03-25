@@ -38,7 +38,7 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
             <h2 className="text-[20px] font-bold text-textPrimary leading-tight">{topic.name}</h2>
           </div>
           <button onClick={onClose} aria-label="Close"
-            className="p-1.5 text-textTertiary hover:text-textPrimary hover:bg-surfaceHover rounded-lg transition-colors">
+            className="p-2.5 -mr-1 text-textTertiary hover:text-textPrimary hover:bg-surfaceHover rounded-lg transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
