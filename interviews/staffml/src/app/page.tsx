@@ -262,7 +262,7 @@ export default function HomePage() {
               animate={{ width: 420, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="shrink-0 overflow-hidden border-l border-border hidden lg:block"
+              className="shrink-0 overflow-hidden border-l border-border hidden lg:block h-full"
             >
               <TopicDetail topic={selectedTopic}
                 areaName={selectedArea?.name || ""} style={selectedStyle}
