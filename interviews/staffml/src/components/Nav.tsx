@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   Library, Target, Crosshair, BarChart3, BookOpen, Github,
   Menu, X, Sun, Moon, Map, Cpu, Server, ChevronDown, Info,
+  Star, Bug,
 } from "lucide-react";
 import clsx from "clsx";
 import StreakBadge from "@/components/StreakBadge";
@@ -16,13 +17,13 @@ const primaryLinks = [
   { href: "/practice", label: "Practice", icon: Target },
   { href: "/gauntlet", label: "Mock Interview", icon: Crosshair },
   { href: "/progress", label: "Progress", icon: BarChart3 },
+  { href: "/about", label: "About", icon: Info },
 ];
 
 const toolLinks = [
   { href: "/plans", label: "Study Plans", icon: Map },
   { href: "/roofline", label: "Roofline", icon: Cpu },
   { href: "/simulator", label: "Simulator", icon: Server },
-  { href: "/about", label: "About", icon: Info },
 ];
 
 export default function Nav() {
@@ -129,22 +130,23 @@ export default function Nav() {
             {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
           <a
-            href="https://mlsysbook.ai"
+            href="https://github.com/harvard-edge/cs249r_book/issues/new?template=blank&title=%5BStaffML%5D+&labels=staffml"
             target="_blank"
             rel="noopener noreferrer"
             className="hidden lg:flex text-textTertiary hover:text-textSecondary items-center gap-1.5 text-xs transition-colors"
+            title="Report an issue"
           >
-            <BookOpen className="w-3.5 h-3.5" />
-            MLSysBook.ai
+            <Bug className="w-3.5 h-3.5" />
+            Report Issue
           </a>
           <a
             href="https://github.com/harvard-edge/cs249r_book"
             target="_blank"
             rel="noopener noreferrer"
-            className="hidden lg:flex text-textTertiary hover:text-textSecondary items-center gap-1.5 text-xs transition-colors"
+            className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg text-textSecondary hover:text-textPrimary hover:bg-surface transition-colors"
           >
-            <Github className="w-3.5 h-3.5" />
-            Star
+            <Star className="w-3.5 h-3.5" />
+            Star on GitHub
           </a>
           {/* Mobile hamburger */}
           <button
@@ -195,12 +197,15 @@ export default function Nav() {
               </Link>
             ))}
           </div>
-          <div className="border-t border-border pt-2 mt-2 flex items-center gap-4">
+          <div className="border-t border-border pt-2 mt-2 flex flex-wrap items-center gap-4">
             <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-textTertiary hover:text-textSecondary text-xs flex items-center gap-1.5">
               <BookOpen className="w-3.5 h-3.5" /> MLSysBook.ai
             </a>
             <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer" className="text-textTertiary hover:text-textSecondary text-xs flex items-center gap-1.5">
-              <Github className="w-3.5 h-3.5" /> Star
+              <Star className="w-3.5 h-3.5" /> Star on GitHub
+            </a>
+            <a href="https://github.com/harvard-edge/cs249r_book/issues/new?template=blank&title=%5BStaffML%5D+&labels=staffml" target="_blank" rel="noopener noreferrer" className="text-textTertiary hover:text-textSecondary text-xs flex items-center gap-1.5">
+              <Bug className="w-3.5 h-3.5" /> Report Issue
             </a>
           </div>
         </div>
