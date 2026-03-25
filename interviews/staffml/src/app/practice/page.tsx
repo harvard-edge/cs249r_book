@@ -595,7 +595,7 @@ function PracticePage() {
                       </button>
                       {/* Report issue */}
                       <a
-                        href={`https://github.com/harvard-edge/cs249r_book/issues/new?title=${encodeURIComponent(`[StaffML] Issue with: ${current.title}`)}&body=${encodeURIComponent(`**Question ID:** ${current.id}\n**Title:** ${current.title}\n**Level:** ${current.level}\n**Track:** ${current.track}\n**Area:** ${current.competency_area}\n\n**Issue:**\n(describe the problem)\n`)}`}
+                        href={`https://github.com/harvard-edge/cs249r_book/issues/new?labels=staffml&title=${encodeURIComponent(`[StaffML] Issue with: ${current.title}`)}&body=${encodeURIComponent(`**Question ID:** \`${current.id}\`\n**Title:** ${current.title}\n**Level:** ${current.level}\n**Track:** ${current.track}\n**Area:** ${current.competency_area}\n\n**What's wrong:**\n\n\n**Expected:**\n\n`)}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-textMuted hover:text-accentRed transition-colors"

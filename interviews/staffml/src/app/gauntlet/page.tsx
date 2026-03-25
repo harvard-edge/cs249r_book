@@ -543,6 +543,14 @@ export default function GauntletPage() {
                     {q.details.common_mistake && (
                       <p className="text-[11px] text-accentRed/80"><span className="font-bold">Common mistake:</span> {q.details.common_mistake}</p>
                     )}
+                    <a
+                      href={`https://github.com/harvard-edge/cs249r_book/issues/new?labels=staffml&title=${encodeURIComponent(`[StaffML] Issue with: ${q.title}`)}&body=${encodeURIComponent(`**Question ID:** \`${q.id}\`\n**Title:** ${q.title}\n**Level:** ${q.level}\n**Track:** ${q.track}\n**Area:** ${q.competency_area}\n\n**What's wrong:**\n\n\n**Expected:**\n\n`)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] text-textMuted hover:text-accentRed transition-colors"
+                    >
+                      <AlertTriangle className="w-3 h-3" /> Report issue with this question
+                    </a>
                   </div>
                 </details>
               );
