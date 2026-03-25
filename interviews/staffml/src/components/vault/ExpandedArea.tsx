@@ -11,7 +11,7 @@ export default function ExpandedArea({ area, selectedId, onSelect }: {
 
   return (
     <div>
-      <div className="flex items-center gap-4 mb-4 pb-4 border-b border-borderSubtle">
+      <div className="flex items-center gap-4 mb-5 pb-4 border-b border-borderSubtle">
         <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
           style={{ backgroundColor: style.bg, border: `1px solid ${style.border}` }}>
           <Icon className="w-6 h-6" style={{ color: style.primary }} />
@@ -23,19 +23,15 @@ export default function ExpandedArea({ area, selectedId, onSelect }: {
             <span className="font-mono font-semibold">{area.topicCount}</span> topics
           </p>
         </div>
-      </div>
-
-      {/* Level color legend */}
-      <div className="flex items-center gap-3 mb-5 flex-wrap">
-        <span className="text-[10px] text-textMuted uppercase font-mono tracking-wide">Levels</span>
-        {LEVEL_DEFS.map((level) => (
-          <div key={level.id} className="flex items-center gap-1.5">
-            <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: level.color }} />
-            <span className="text-[11px] text-textSecondary font-medium">
-              <span className="font-mono">{level.id}</span> {level.name}
-            </span>
-          </div>
-        ))}
+        {/* Level color legend — top right, mirrors histogram position */}
+        <div className="hidden md:flex items-center gap-2.5 shrink-0">
+          {LEVEL_DEFS.map((level) => (
+            <div key={level.id} className="flex items-center gap-1">
+              <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: level.color }} />
+              <span className="text-[10px] text-textTertiary font-mono">{level.id}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
