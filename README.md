@@ -128,8 +128,8 @@ Every component connects. The textbook gives you the mental models. The labs let
     <tr>
       <td align="center">💼</td>
       <td><b>StaffML</b></td>
-      <td>5,700+ physics-grounded interview questions for ML systems roles. Vault, practice drills, mock interviews, and progress tracking.</td>
-      <td><a href="interviews/staffml/">Launch app</a> <i>(dev)</i></td>
+      <td>Physics-grounded interview questions for ML systems roles. Vault, practice drills, mock interviews, and progress tracking.</td>
+      <td><a href="interviews/staffml/">Coming soon</a> <i>(dev)</i></td>
     </tr>
   </tbody>
 </table>
