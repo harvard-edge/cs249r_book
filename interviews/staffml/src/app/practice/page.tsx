@@ -27,6 +27,8 @@ import { getLevelDef } from "@/lib/levels";
 import { getDailyQuestions, isDailyCompleted, markDailyCompleted } from "@/lib/daily";
 import { shouldShowGate, incrementReveals, getRemainingReveals, isStarVerified } from "@/lib/star-gate";
 import StarGate from "@/components/StarGate";
+import { getChainForQuestion, ChainInfo } from "@/lib/corpus";
+import ChainStrip from "@/components/ChainStrip";
 import { Calendar, ArrowLeft, Flag, LinkIcon } from "lucide-react";
 import Link from "next/link";
 
@@ -66,6 +68,9 @@ function PracticePage() {
   const [dailyDone, setDailyDone] = useState(false);
   const [sourceTopic, setSourceTopic] = useState<{ id: string; name: string } | null>(null);
   const [showStarGate, setShowStarGate] = useState(false);
+
+  // Chain tracking — update when current question changes
+  const chainInfo = current ? getChainForQuestion(current.id) : null;
 
   const tracks = getTracks().filter(t => t !== "global");
   const levels = getLevels();
@@ -856,6 +861,24 @@ function PracticePage() {
                       >
                         <Flag className="w-3 h-3" /> Something wrong with this question?
                       </a>
+
+                      {/* Chain navigation — go deeper */}
+                      {chainInfo && (
+                        <ChainStrip
+                          chain={chainInfo}
+                          onNavigate={(qId) => {
+                            const q = getQuestionById(qId);
+                            if (q) {
+                              skipFilterCount.current = 3;
+                              setCurrent(q);
+                              setShowAnswer(false);
+                              setUserAnswer("");
+                              setNapkinResult(null);
+                              setRubricItems([]);
+                            }
+                          }}
+                        />
+                      )}
                     </div>
                   </motion.div>
                 )}

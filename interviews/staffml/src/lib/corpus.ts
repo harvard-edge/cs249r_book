@@ -17,6 +17,8 @@ export interface Question {
   reasoning_mode?: string;          // 7 modes
   concept_tags?: string[];          // ~132 tags, multi-label
   primary_concept?: string;         // preserved taxonomy_concept
+  chain_ids?: string;           // chain this question belongs to
+  chain_positions?: string;     // position in chain (as string number)
   details: {
     common_mistake: string;
     realistic_solution: string;
@@ -238,4 +240,51 @@ export function extractFinalNumber(text: string): number | null {
   const numbers = text.match(/[\d,]+(?:\.\d+)?/g)?.map(s => Number(s.replace(/,/g, ''))) || [];
   const valid = numbers.filter(n => !isNaN(n) && isFinite(n));
   return valid.length > 0 ? valid[valid.length - 1] : null;
+}
+
+// ─── Chain helpers ──────────────────────────────────────────
+// Chains are deepening question sequences on a topic (L1 → L6+)
+
+export interface ChainInfo {
+  chainId: string;
+  position: number;       // 0-indexed position of current question
+  total: number;          // total questions in chain
+  questions: { id: string; title: string; level: string; position: number }[];
+}
+
+// Build chain index once
+const _chainIndex = new Map<string, { id: string; title: string; level: string; position: number }[]>();
+for (const q of questions) {
+  const chainId = q.chain_ids;
+  const chainPos = q.chain_positions;
+  if (chainId && chainPos !== undefined) {
+    if (!_chainIndex.has(chainId)) _chainIndex.set(chainId, []);
+    _chainIndex.get(chainId)!.push({
+      id: q.id,
+      title: q.title,
+      level: q.level,
+      position: parseInt(chainPos, 10),
+    });
+  }
+}
+// Sort each chain by position
+for (const [, qs] of _chainIndex) {
+  qs.sort((a, b) => a.position - b.position);
+}
+
+/** Get chain info for a question, or null if not in a chain */
+export function getChainForQuestion(questionId: string): ChainInfo | null {
+  const q = questions.find(x => x.id === questionId);
+  if (!q) return null;
+  const chainId = q.chain_ids;
+  const chainPos = q.chain_positions;
+  if (!chainId || chainPos === undefined) return null;
+  const chain = _chainIndex.get(chainId);
+  if (!chain || chain.length <= 1) return null; // skip single-question "chains"
+  return {
+    chainId,
+    position: parseInt(chainPos, 10),
+    total: chain.length,
+    questions: chain,
+  };
 }
