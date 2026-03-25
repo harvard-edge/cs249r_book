@@ -457,7 +457,7 @@ function PracticePage() {
                   } : undefined}
                 >
                   <div className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: def.color }} />
-                  {def.name}
+                  <span className="font-mono">{def.id}</span> {def.name}
                 </button>
               );
             })}

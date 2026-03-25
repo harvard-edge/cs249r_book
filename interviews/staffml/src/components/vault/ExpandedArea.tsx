@@ -32,7 +32,7 @@ export default function ExpandedArea({ area, selectedId, onSelect }: {
           <div key={level.id} className="flex items-center gap-1.5">
             <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: level.color }} />
             <span className="text-[11px] text-textSecondary font-medium">
-              {level.name}
+              <span className="font-mono">{level.id}</span> {level.name}
             </span>
           </div>
         ))}

@@ -1,139 +1,106 @@
-# Next Session: Validation & Error Fixes
+# Next Session: WARN Fixes + Coverage Growth
 
-**Goal:** Validate all 5,198 questions via Gemini CLI, fix flagged errors, re-export, commit.
+**Goal:** Push production-ready from 63% → 80%+ by fixing WARNs and growing coverage.
 
 **Start by reading this file, then execute phases in order.**
 
 ---
 
-## Current State (as of 2026-03-24 late evening)
+## Current State (as of 2026-03-25 early morning)
 
-### What's Done
-- **5,198 questions** in corpus.json (4,779 original + 419 generated L4-L6+)
-- **6-axis faceted classification** at 100% coverage (track, level, RC, KA, mode, tags)
-- **paper.tex** fully updated (working notes removed, v5.3 scrubbed, numbers current)
-- **4 PDF figures** and `corpus_stats.json` regenerated
-- **Committed** at `078ab8f64` on `dev` branch
-- **Schema validation passes** — all 5,198 questions clean
+### What's Done (this session)
+- **Three-model validation** (Flash → Pro → Opus) on all 5,228 questions
+- **414 duplicates removed** (same-track, same-title)
+- **366 content fixes** (math errors, truncated text) via 28 parallel Opus agents
+- **1,169 taxonomy fixes** (KA, taxonomy_concept, reasoning_mode, level) via 5 Opus audits
+- **144 mode reclassifications** (concept-recall → napkin-math)
+- **30 new global questions** generated (L1/L3/L5)
+- **ERRORs reduced 648 → 13** (98% reduction)
+- Committed at `62d8c383d` on `dev`
+
+### Current Numbers
+- **4,802 active questions** (426 archived/deleted)
+- **OK: 3,041 (63.3%)**
+- **WARN: 1,742 (36.3%)**
+- **ERROR: 13 (0.3%)**
+- Schema validation: all 5,228 pass
 
 ### What's Left
-1. **Validate all 5,198 questions** via Gemini (math, facts, quality)
-2. **Fix ~61 flagged errors** from partial validation (truncated text, KV-cache math)
-3. **Re-export** to StaffML and recommit
-
-### Why Validation Failed Last Session
-- Gemini API key quota: 250 requests/day on `gemini-3.1-pro` — exhausted by generation + validation
-- Small batch size (20 Qs/call) meant 260 API calls needed — way over quota
-- CLI fallback was too slow with small batches due to subprocess overhead
-
-### The Fix: Large Batches via Gemini CLI
-- Gemini 3.1 Pro has **1M token context** and **65K token output**
-- 200 questions per batch ≈ ~100K input tokens — well within limits
-- 5,198 / 200 = **26 CLI calls** total (vs 260 before)
-- 3 parallel workers × ~30s per call ≈ **~4-5 minutes** total
+1. **Fix ~1,742 WARN questions** — mostly incomplete napkin_math stubs
+2. **Fix 13 remaining ERRORs** — math inconsistencies
+3. **Grow global track** — still sparse (L3=12, needs more)
+4. **Grow thin KAs** — 12 areas with <40 questions each
+5. **Update paper.tex** figures and coverage section
 
 ---
 
-## Phase 1: Validate via Gemini CLI (5 min)
+## Phase 1: Fix WARNs in Waves (30 min)
 
-### 1.1 Update validate_questions.py for large CLI batches
+The dominant WARN issue is incomplete `napkin_math` — stubs that start a calculation but never finish. These need Opus to complete them with physics-grounded math.
 
-The `--cli` flag already exists (added last session). The key change is using
-`--batch-size 200` to leverage Gemini's massive context window.
+### Strategy: Batch by issue type, fix with parallel Opus agents
 
 ```bash
-python3 validate_questions.py --cli --batch-size 200 --workers 3
-```
-
-This will:
-- Send 26 batches of 200 questions to `gemini-3.1-pro-preview` via CLI (OAuth creds)
-- Parse JSON review responses
-- Stamp each question with `validated`, `validation_status`, `validation_issues`
-- Save results to `_validation_results/`
-
-### 1.2 If CLI is still slow, use the API with a different model
-
-The API has huge quota on Flash:
-```bash
-# Gemini 2.5 Flash: 10,000 RPD — plenty of headroom
-source ~/.zshrc_secrets
-python3 validate_questions.py --batch-size 200 --workers 5
-```
-But change `MODEL = "gemini-2.5-flash"` in the script first.
-
----
-
-## Phase 2: Fix Flagged Errors (10 min)
-
-### Known issues from partial validation (61 ERRORs):
-
-**Category 1: Truncated text (~40 questions)**
-Old corpus questions with truncated scenario/solution/napkin_math fields. IDs include:
-- `cloud-llm-serving-*-121` through `-136` (serving latency questions)
-- `cloud-continuous-batching-*-22`, `-26`, `-30`
-- `cloud-kv-cache-*-21`, `-25`, `-29`, `-31`
-
-Fix: Load these questions, check which fields are truncated, and either:
-- Regenerate the truncated fields via Gemini
-- Or delete questions that are too broken to salvage
-
-**Category 2: KV-cache math errors (~5 questions)**
-Questions that don't account for Grouped Query Attention in Llama-70B:
-- `cloud-kv-cache-vram-accounting-the-kv-cache-vram-budget-21`
-- `cloud-kv-cache-vram-accounting-the-kv-cache-vram-budget-25`
-- `cloud-kv-cache-vram-the-kv-cache-memory-bomb-29`
-
-Fix: Update KV-cache calculations to use 8 KV-heads (GQA) not 64 (MHA).
-Formula: `KV = 2 × layers × kv_heads × head_dim × seq_len × bytes`
-For Llama-70B: `2 × 80 × 8 × 128 × seq_len × 2` (not `× 64`)
-
-### Approach
-```python
-# Script to find and fix truncated questions
+# 1. Extract WARN questions, categorize by issue
+python3 -c "
 import json
-corpus = json.load(open("corpus.json"))
+c = json.load(open('corpus.json'))
+warns = [q for q in c if q.get('validation_status') == 'WARN' and q.get('status') != 'deleted']
+print(f'Total WARNs: {len(warns)}')
+"
 
-truncated = [q for q in corpus if
-    len(q["scenario"]) > 50 and q["scenario"].rstrip()[-1] not in ".?!\"')"
-    or len(q["details"].get("realistic_solution", "")) > 50
-    and q["details"]["realistic_solution"].rstrip()[-1] not in ".?!\"')"]
+# 2. Split into batches of 25, launch Opus agents to complete napkin_math
+# Use mlsysim/core/formulas.py as ground truth for calculations
+# Hardware specs: A100 2TB/s 312TFLOPS, H100 3.35TB/s 989TFLOPS
+# KV-cache: 2 * L * kv_heads * head_dim * seq_len * bytes
 
-print(f"Found {len(truncated)} potentially truncated questions")
+# 3. Validate fixes with Flash (batch=10, workers=10)
+source ~/.zshrc_secrets
+PYTHONUNBUFFERED=1 python3 validate_questions.py --batch-size 10 --workers 10
+
+# 4. Re-validate ERRORs with Pro for consensus
 ```
 
 ---
 
-## Phase 3: Re-export & Commit (2 min)
+## Phase 2: Coverage Growth (20 min)
 
+### Priority gaps:
+- **Global track**: L3=12 (need 20+), still the weakest track
+- **Thin KAs** (< 40 questions): A1, A2, A3, A4, A6, B4, B8, C4, C7, C8, C9, F1
+- **L6+ questions**: Only 496 across corpus
+
+Generate with Opus, validate with Flash + Pro.
+
+---
+
+## Phase 3: Paper Update (10 min)
+
+After fixes:
 ```bash
-python3 vault.py validate          # Confirm 0 errors
-python3 vault.py export            # Sync to StaffML
-python3 vault.py facets            # Verify 100% coverage
-
-git add interviews/corpus.json interviews/validate_questions.py \
-  interviews/staffml/src/data/corpus.json
-git commit -m "staffml: validate 5,198 questions, fix truncated text and KV-cache math"
+python3 vault.py stats              # Regenerate corpus_stats.json
+python3 vault.py export             # Sync to StaffML
+# Update paper.tex \newcommand values
+# Regenerate figures if needed
 ```
 
 ---
 
 ## Technical Notes
 
-- **Gemini CLI** uses OAuth creds cached at `~/.config/gemini/`. No API key needed.
-- **API key** is in `~/.zshrc_secrets` (NOT `~/.zshrc` — the one in `.zshrc` is stale)
-- **API quotas** (as of 2026-03-24):
-  - `gemini-3.1-pro`: 250 RPD (API key), unlimited via CLI (OAuth)
-  - `gemini-2.5-pro`: 1,000 RPD
-  - `gemini-2.5-flash`: 10,000 RPD
-- **Schema validation**: `from schema import validate_corpus` returns `(valid, errors, warnings)`
-- **Question ID format**: `<track>-<ka-lowercase>-<kebab-title>-<number>`
-- **Level "L6+" not "L6"**: The plus sign is required in the level field
+- **Validation command**: `source ~/.zshrc_secrets && PYTHONUNBUFFERED=1 python3 validate_questions.py --batch-size 10 --workers 10`
+- **Model**: `gemini-2.5-flash` (10K RPD) for bulk, `gemini-2.5-pro` (1K RPD) for second opinions
+- **Always** use `PYTHONUNBUFFERED=1` for background scripts
+- **Physics formulas**: `/Users/VJ/GitHub/MLSysBook/mlsysim/core/formulas.py`
+- **Hardware specs source of truth**: mlsysim constants
+- **Small batches, fast feedback**: batch=10, workers=10, verify output within 15 seconds
 
 ## Quick Start
 
 ```
 Read interviews/NEXT_SESSION_PLAN.md.
 Execute Phases 1-3 in order.
-Use Gemini CLI (--cli flag) with large batches (--batch-size 200).
-Always use `source ~/.zshrc_secrets` before Python scripts that need GEMINI_API_KEY.
+Use small batches (10) with high parallelism (10 workers).
+Launch parallel Opus agents for fixes.
+Always validate with Flash, confirm with Pro.
 ```

@@ -132,16 +132,16 @@ export default function RooflinePage() {
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-surface border border-border rounded-xl p-4 mb-6">
           <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: '420px' }}>
             {/* Background */}
-            <rect width={W} height={H} fill="#0a0a0a" rx="8" />
+            <rect width={W} height={H} fill="var(--surface)" rx="8" />
 
             {/* Grid lines */}
             {[0.1, 1, 10, 100, 1000].map(v => {
               const { sx } = toSvg(v, yMin);
-              return <line key={`xg-${v}`} x1={sx} y1={PAD.top} x2={sx} y2={PAD.top + PH} stroke="#222" strokeWidth="0.5" />;
+              return <line key={`xg-${v}`} x1={sx} y1={PAD.top} x2={sx} y2={PAD.top + PH} stroke="var(--border)" strokeWidth="0.5" />;
             })}
             {[0.1, 1, 10, 100, 1000, 10000].filter(v => v <= yMax).map(v => {
               const { sy } = toSvg(xMin, v);
-              return <line key={`yg-${v}`} x1={PAD.left} y1={sy} x2={PAD.left + PW} y2={sy} stroke="#222" strokeWidth="0.5" />;
+              return <line key={`yg-${v}`} x1={PAD.left} y1={sy} x2={PAD.left + PW} y2={sy} stroke="var(--border)" strokeWidth="0.5" />;
             })}
 
             {/* Roofline curve */}
@@ -153,7 +153,7 @@ export default function RooflinePage() {
               return (
                 <g>
                   <circle cx={sx} cy={sy} r="5" fill="#3b82f6" />
-                  <circle cx={sx} cy={sy} r="2" fill="#0a0a0a" />
+                  <circle cx={sx} cy={sy} r="2" fill="var(--surface)" />
                   <text x={sx + 8} y={sy - 8} fill="#3b82f6" fontSize="9" fontFamily="JetBrains Mono, monospace">
                     Ridge: {ridge.toFixed(0)} Ops/B
                   </text>
@@ -181,9 +181,9 @@ export default function RooflinePage() {
               const { sx, sy } = toSvg(customPoint.oi, customPoint.perf);
               return (
                 <g>
-                  <circle cx={sx} cy={sy} r="6" fill="none" stroke="#fff" strokeWidth="2" />
-                  <circle cx={sx} cy={sy} r="2" fill="#fff" />
-                  <text x={sx + 10} y={sy + 3} fill="#fff" fontSize="9" fontFamily="JetBrains Mono, monospace" fontWeight="bold">
+                  <circle cx={sx} cy={sy} r="6" fill="none" stroke="var(--text-primary)" strokeWidth="2" />
+                  <circle cx={sx} cy={sy} r="2" fill="var(--text-primary)" />
+                  <text x={sx + 10} y={sy + 3} fill="var(--text-primary)" fontSize="9" fontFamily="JetBrains Mono, monospace" fontWeight="bold">
                     {customPoint.perf.toFixed(1)} TFLOPS ({customPoint.bound})
                   </text>
                 </g>
@@ -191,10 +191,10 @@ export default function RooflinePage() {
             })()}
 
             {/* Axis labels */}
-            <text x={W / 2} y={H - 10} textAnchor="middle" fill="#888" fontSize="10" fontFamily="JetBrains Mono, monospace">
+            <text x={W / 2} y={H - 10} textAnchor="middle" fill="var(--text-tertiary)" fontSize="10" fontFamily="JetBrains Mono, monospace">
               Operational Intensity (Ops/Byte)
             </text>
-            <text x="15" y={H / 2} textAnchor="middle" fill="#888" fontSize="10" fontFamily="JetBrains Mono, monospace"
+            <text x="15" y={H / 2} textAnchor="middle" fill="var(--text-tertiary)" fontSize="10" fontFamily="JetBrains Mono, monospace"
               transform={`rotate(-90, 15, ${H / 2})`}>
               Performance (TFLOPS)
             </text>
@@ -202,16 +202,16 @@ export default function RooflinePage() {
             {/* X axis tick labels */}
             {[0.1, 1, 10, 100, 1000].map(v => {
               const { sx } = toSvg(v, yMin);
-              return <text key={`xl-${v}`} x={sx} y={PAD.top + PH + 20} textAnchor="middle" fill="#666" fontSize="9" fontFamily="JetBrains Mono, monospace">{v}</text>;
+              return <text key={`xl-${v}`} x={sx} y={PAD.top + PH + 20} textAnchor="middle" fill="var(--text-muted)" fontSize="9" fontFamily="JetBrains Mono, monospace">{v}</text>;
             })}
             {/* Y axis tick labels */}
             {[0.1, 1, 10, 100, 1000, 10000].filter(v => v <= yMax).map(v => {
               const { sy } = toSvg(xMin, v);
-              return <text key={`yl-${v}`} x={PAD.left - 8} y={sy + 3} textAnchor="end" fill="#666" fontSize="9" fontFamily="JetBrains Mono, monospace">{v >= 1000 ? `${v / 1000}K` : v}</text>;
+              return <text key={`yl-${v}`} x={PAD.left - 8} y={sy + 3} textAnchor="end" fill="var(--text-muted)" fontSize="9" fontFamily="JetBrains Mono, monospace">{v >= 1000 ? `${v / 1000}K` : v}</text>;
             })}
 
             {/* Title */}
-            <text x={W / 2} y="25" textAnchor="middle" fill="#fff" fontSize="12" fontWeight="bold" fontFamily="JetBrains Mono, monospace">
+            <text x={W / 2} y="25" textAnchor="middle" fill="var(--text-primary)" fontSize="12" fontWeight="bold" fontFamily="JetBrains Mono, monospace">
               {selectedHw.name} — {selectedHw.compute_tflops} TFLOPS, {selectedHw.bandwidth_tbs} TB/s
             </text>
 
@@ -221,10 +221,10 @@ export default function RooflinePage() {
               const midComp = toSvg(Math.sqrt(ridge * xMax), selectedHw.compute_tflops * 0.7);
               return (
                 <>
-                  <text x={midBW.sx} y={midBW.sy} textAnchor="middle" fill="#555" fontSize="10" fontFamily="JetBrains Mono, monospace" fontStyle="italic">
+                  <text x={midBW.sx} y={midBW.sy} textAnchor="middle" fill="var(--text-muted)" fontSize="10" fontFamily="JetBrains Mono, monospace" fontStyle="italic">
                     Memory-bound
                   </text>
-                  <text x={midComp.sx} y={midComp.sy} textAnchor="middle" fill="#555" fontSize="10" fontFamily="JetBrains Mono, monospace" fontStyle="italic">
+                  <text x={midComp.sx} y={midComp.sy} textAnchor="middle" fill="var(--text-muted)" fontSize="10" fontFamily="JetBrains Mono, monospace" fontStyle="italic">
                     Compute-bound
                   </text>
                 </>

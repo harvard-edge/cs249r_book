@@ -17,7 +17,8 @@ export default function LevelBadge({ level, size = "sm" }: { level: string; size
         borderColor: `${def.color}30`,
       }}
     >
-      {def.name}
+      <span className="font-mono font-bold">{def.id}</span>
+      <span className="opacity-70">{def.name}</span>
     </span>
   );
 }
