@@ -135,7 +135,7 @@ export default function Nav() {
             className="hidden lg:flex text-textTertiary hover:text-textSecondary items-center gap-1.5 text-xs transition-colors"
           >
             <BookOpen className="w-3.5 h-3.5" />
-            Textbook
+            MLSysBook.ai
           </a>
           <a
             href="https://github.com/harvard-edge/cs249r_book"
@@ -197,7 +197,7 @@ export default function Nav() {
           </div>
           <div className="border-t border-border pt-2 mt-2 flex items-center gap-4">
             <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-textTertiary hover:text-textSecondary text-xs flex items-center gap-1.5">
-              <BookOpen className="w-3.5 h-3.5" /> Textbook
+              <BookOpen className="w-3.5 h-3.5" /> MLSysBook.ai
             </a>
             <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer" className="text-textTertiary hover:text-textSecondary text-xs flex items-center gap-1.5">
               <Github className="w-3.5 h-3.5" /> Star

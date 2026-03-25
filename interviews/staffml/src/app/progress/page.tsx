@@ -88,21 +88,21 @@ export default function ProgressPage() {
         </div>
 
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
           <div className="flex items-center gap-3">
-            <BarChart3 className="w-8 h-8 text-accentGreen" />
+            <BarChart3 className="w-8 h-8 text-accentGreen shrink-0" />
             <div>
-              <h1 className="text-3xl font-extrabold text-textPrimary tracking-tight">Progress</h1>
-              <p className="text-sm text-textSecondary">Track × Competency — your interview readiness at a glance</p>
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-textPrimary tracking-tight">Progress</h1>
+              <p className="text-sm text-textSecondary">Track &times; Competency &mdash; your readiness at a glance</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <div className="text-xs text-textTertiary">Gauntlets completed</div>
+              <div className="text-[10px] text-textTertiary">Gauntlets</div>
               <div className="text-lg font-bold font-mono text-textPrimary">{gauntletCount}</div>
             </div>
             <div className="text-right">
-              <div className="text-xs text-textTertiary">Total questions</div>
+              <div className="text-[10px] text-textTertiary">Questions</div>
               <div className="text-lg font-bold font-mono text-textPrimary">{totalAttempted}</div>
             </div>
           </div>

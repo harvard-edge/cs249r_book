@@ -126,7 +126,7 @@ export default function AboutPage() {
         {/* ─── Textbook ─── */}
         <section className="mb-10">
           <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
-            <BookOpen className="w-4.5 h-4.5 text-accentBlue" /> The Textbook
+            <BookOpen className="w-4.5 h-4.5 text-accentBlue" /> The Book
           </h2>
           <p className="text-[14px] text-textSecondary leading-relaxed mb-3">
             StaffML is built on <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline font-medium">Machine Learning Systems</a>,

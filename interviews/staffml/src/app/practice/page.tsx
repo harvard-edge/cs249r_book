@@ -322,7 +322,7 @@ function PracticePage() {
   return (
     <div className="flex-1 flex flex-col lg:flex-row">
       {/* Sidebar filters */}
-      <aside className="w-full lg:w-64 border-b lg:border-b-0 lg:border-r border-border bg-surface/50 p-5 flex flex-col gap-6 lg:overflow-y-auto">
+      <aside className="w-full lg:w-64 border-b lg:border-b-0 lg:border-r border-border bg-surface/50 p-4 lg:p-5 flex flex-col gap-4 lg:gap-6 lg:overflow-y-auto">
         {/* Back to vault link */}
         {sourceTopic && (
           <Link
@@ -428,13 +428,14 @@ function PracticePage() {
         {/* Track */}
         <div>
           <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Track</label>
-          <div className="space-y-1">
+          <div className="flex flex-wrap gap-1 lg:flex-col lg:gap-1">
             {tracks.map(t => (
               <button
                 key={t}
                 onClick={() => setSelectedTrack(t)}
                 className={clsx(
-                  "w-full text-left px-3 py-2 rounded-md text-sm font-medium capitalize transition-all",
+                  "px-3 py-1.5 lg:py-2 lg:w-full rounded-md text-sm font-medium capitalize transition-all",
+                  "lg:text-left",
                   selectedTrack === t
                     ? "bg-accentBlue/10 text-accentBlue"
                     : "text-textSecondary hover:bg-surfaceHover"
@@ -476,8 +477,8 @@ function PracticePage() {
           </div>
         </div>
 
-        {/* Competency Area */}
-        <div>
+        {/* Competency Area — hidden on mobile to save space */}
+        <div className="hidden lg:block">
           <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Competency</label>
           <div className="space-y-1 max-h-64 overflow-y-auto">
             <button
@@ -748,7 +749,7 @@ function PracticePage() {
                       </div>
                     )}
 
-                    {/* Textbook deep-dive in answer panel */}
+                    {/* Deep-dive link to MLSysBook.ai */}
                     {current.details.deep_dive_title && (
                       <a
                         href={current.details.deep_dive_url}
@@ -757,7 +758,7 @@ function PracticePage() {
                         className="flex items-center gap-2 px-3 py-2.5 text-[12px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
                       >
                         <BookOpen className="w-3.5 h-3.5 shrink-0" />
-                        <span>Want to learn more? Read <span className="font-semibold">{current.details.deep_dive_title}</span></span>
+                        <span>Learn more on <span className="font-semibold">MLSysBook.ai</span> &mdash; {current.details.deep_dive_title}</span>
                       </a>
                     )}
 

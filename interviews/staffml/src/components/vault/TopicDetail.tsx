@@ -144,7 +144,7 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
                     <BookOpen className="w-5 h-5 text-textTertiary group-hover:text-accentBlue shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-[14px] font-semibold text-textPrimary">{topic.chapterName}</p>
-                      <p className="text-[12px] text-textTertiary mt-0.5">Read in textbook &middot; mlsysbook.ai</p>
+                      <p className="text-[12px] text-textTertiary mt-0.5">Read on MLSysBook.ai</p>
                     </div>
                     <ExternalLink className="w-4 h-4 text-textMuted group-hover:text-textSecondary shrink-0" />
                   </a>

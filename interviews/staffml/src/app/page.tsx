@@ -133,7 +133,7 @@ export default function HomePage() {
                 Built on{" "}
                 <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer"
                   className="text-accentBlue hover:underline">
-                  Machine Learning Systems
+                  MLSysBook.ai
                 </a>
                 {" "}by Prof. Vijay Janapa Reddi, Harvard University.
               </p>
