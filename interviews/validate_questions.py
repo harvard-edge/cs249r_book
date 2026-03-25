@@ -31,26 +31,35 @@ BASE = Path(__file__).parent
 CORPUS_PATH = BASE / "corpus.json"
 RESULTS_DIR = BASE / "_validation_results"
 
-MODEL = "gemini-3.1-pro-preview"
+MODEL = "gemini-2.5-flash"
 
 # ─── Gemini Client ────────────────────────────────────────────
 # Try API first (fast), fall back to CLI (uses cached OAuth)
+# Use --cli flag to force CLI mode
 
 _use_api = False
-try:
-    from google import genai
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    if api_key and "expired" not in api_key.lower():
-        _client = genai.Client(api_key=api_key)
-        # Quick test
-        _test = _client.models.generate_content(model=MODEL, contents="Say OK")
-        if _test.text:
-            _use_api = True
-            print(f"  Using Gemini API (fast mode)")
-except Exception:
-    pass
+_client = None
+_force_cli = "--cli" in sys.argv
 
-if not _use_api:
+
+def init_gemini():
+    """Initialize Gemini client. Call after argparse."""
+    global _use_api, _client
+    if _force_cli:
+        print(f"  Using Gemini CLI (forced via --cli)")
+        return
+    try:
+        from google import genai
+        api_key = os.environ.get("GEMINI_API_KEY", "")
+        if api_key and "expired" not in api_key.lower():
+            _client = genai.Client(api_key=api_key)
+            _test = _client.models.generate_content(model=MODEL, contents="Say OK")
+            if _test.text:
+                _use_api = True
+                print(f"  Using Gemini API (fast mode)")
+                return
+    except Exception:
+        pass
     print(f"  Using Gemini CLI (cached credentials)")
 
 
@@ -61,13 +70,14 @@ def call_gemini(prompt: str, retries: int = 2) -> str | None:
             if _use_api:
                 response = _client.models.generate_content(
                     model=MODEL, contents=prompt,
-                    config={"temperature": 0.1, "max_output_tokens": 8192},
+                    config={"temperature": 0.1, "max_output_tokens": 65000},
                 )
                 text = response.text.strip()
             else:
+                # Pipe prompt via stdin to avoid ARG_MAX limits on large batches
                 result = subprocess.run(
-                    ["gemini", "-m", MODEL, "-p", prompt, "-o", "text"],
-                    capture_output=True, text=True, timeout=300,
+                    ["gemini", "-m", MODEL, "-o", "text"],
+                    input=prompt, capture_output=True, text=True, timeout=300,
                 )
                 if result.returncode != 0:
                     if attempt < retries:
@@ -188,9 +198,13 @@ def main():
     parser.add_argument("--new-only", action="store_true", help="Only validate newly generated questions")
     parser.add_argument("--ka", type=str, help="Only validate one knowledge area (e.g., F1)")
     parser.add_argument("--sample", type=int, help="Random sample of N questions")
-    parser.add_argument("--batch-size", type=int, default=20, help="Questions per Gemini call (default: 20)")
+    parser.add_argument("--batch-size", type=int, default=200, help="Questions per Gemini call (default: 200)")
     parser.add_argument("--workers", type=int, default=8, help="Parallel workers (default: 8)")
+    parser.add_argument("--cli", action="store_true", help="Force Gemini CLI mode (OAuth, no API key)")
     args = parser.parse_args()
+
+    # Initialize Gemini client
+    init_gemini()
 
     # Load corpus
     corpus = json.load(open(CORPUS_PATH))
