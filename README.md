@@ -16,10 +16,10 @@
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&label=TinyTorch&logo=python&cacheSeconds=300" alt="TinyTorch"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/labs-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/labs-validate-dev.yml?branch=dev&label=Labs&logo=jupyter&cacheSeconds=300" alt="Labs"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-validate-dev.yml?branch=dev&label=Kits&logo=arduino&cacheSeconds=300" alt="Kits"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/mlsysim-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/mlsysim-validate-dev.yml?branch=dev&label=MLSys%C2%B7im&logo=python&cacheSeconds=300" alt="MLSys·im"></a>
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/staffml-preview-dev.yml?branch=dev&label=StaffML&logo=next.js&cacheSeconds=300" alt="StaffML"></a></br>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/mlsysim-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/mlsysim-validate-dev.yml?branch=dev&label=MLSys%C2%B7im&logo=python&cacheSeconds=300" alt="MLSys·im"></a></br>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/slides-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/slides-validate-dev.yml?branch=dev&label=Slides&logo=googleslides&cacheSeconds=300" alt="Slides"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/instructors-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/instructors-validate-dev.yml?branch=dev&label=Instructors&logo=googleclassroom&cacheSeconds=300" alt="Instructors"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/staffml-preview-dev.yml?branch=dev&label=StaffML&logo=target&cacheSeconds=300" alt="StaffML"></a>
   <img src="https://img.shields.io/github/last-commit/harvard-edge/cs249r_book/dev?label=Updated&logo=git&cacheSeconds=300" alt="Updated">
 </p>
 
@@ -35,7 +35,7 @@
   <b>📙 Vol I + Vol II <i>(Summer 2026)</i></b> •
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
   <b><a href="mlsysim/README.md">🔮 MLSys·im <i>(dev)</i></a></b> •
-  <b><a href="interviews/README.md">💼 Interview Playbook <i>(dev)</i></a></b> •
+  <b><a href="interviews/README.md">💼 StaffML <i>(dev)</i></a></b> •
   <b><a href="https://mlsysbook.org">🌐 Ecosystem</a></b>
 </p>
 
@@ -127,9 +127,9 @@ Every component connects. The textbook gives you the mental models. The labs let
     </tr>
     <tr>
       <td align="center">💼</td>
-      <td><b>Interview Playbook</b></td>
-      <td>1,000+ systems design questions for AI infrastructure roles. Silicon physics, distributed infra, production serving, and ML operations.</td>
-      <td><a href="interviews/README.md">Start drilling</a> <i>(dev)</i></td>
+      <td><b>StaffML</b></td>
+      <td>5,700+ physics-grounded interview questions for ML systems roles. Vault, practice drills, mock interviews, and progress tracking.</td>
+      <td><a href="interviews/staffml/">Launch app</a> <i>(dev)</i></td>
     </tr>
   </tbody>
 </table>
@@ -293,11 +293,11 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
       <td>
         <b>Volume I</b> — two-volume split (content complete, editorial polish)<br>
         <b>Volume II</b> — At Scale (active development)<br>
-        <b>Curriculum</b> — TinyTorch, Kits, MLSys·im, Labs, Interview Playbook
+        <b>Curriculum</b> — TinyTorch, Kits, MLSys·im, Labs, StaffML
       </td>
       <td>
         TinyTorch and Hardware Kits are live.<br>
-        MLSys·im, Labs, and Interview Playbook are in development.
+        MLSys·im, Labs, and StaffML are in development.
       </td>
     </tr>
   </tbody>
