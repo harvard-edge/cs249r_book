@@ -45,13 +45,13 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         <AnimatePresence mode="wait">
           {drillLevel ? (
             <motion.div key={`level-${drillLevel}`}
               initial={{ x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }}
               exit={{ x: 40, opacity: 0 }} transition={{ duration: 0.15 }}
-              className="flex flex-col h-full">
+              className="flex flex-col flex-1 min-h-0">
 
               {/* Pinned header */}
               <div className="p-5 pb-3 shrink-0 border-b border-borderSubtle">
@@ -100,7 +100,7 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
             <motion.div key="overview"
               initial={{ x: -40, opacity: 0 }} animate={{ x: 0, opacity: 1 }}
               exit={{ x: -40, opacity: 0 }} transition={{ duration: 0.15 }}
-              className="p-5 space-y-6">
+              className="p-5 space-y-6 flex-1 overflow-y-auto">
 
               {topic.description && (
                 <p className="text-[14px] text-textSecondary leading-relaxed">{topic.description}</p>
