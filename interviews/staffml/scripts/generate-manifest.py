@@ -65,11 +65,17 @@ def main():
         with open(MANIFEST_PATH) as f:
             prev_manifest = json.load(f)
 
-    prev_version = prev_manifest.get("version", "0.1.0") if prev_manifest else "0.1.0"
-    parts = prev_version.split(".")
+    prev_version = prev_manifest.get("version", "0.0.0-dev") if prev_manifest else "0.0.0-dev"
+    # Parse version, preserving -dev suffix
+    base_version = prev_version.split("-")[0]
+    suffix = "-dev" if "-dev" in prev_version else ""
+    parts = base_version.split(".")
     major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
 
-    if "--bump-minor" in sys.argv:
+    if "--release" in sys.argv:
+        # Strip -dev suffix for public release
+        suffix = ""
+    elif "--bump-minor" in sys.argv:
         minor += 1
         patch = 0
     elif "--bump-patch" in sys.argv:
@@ -78,7 +84,7 @@ def main():
         # Auto-bump patch if content changed
         patch += 1
 
-    version = f"{major}.{minor}.{patch}"
+    version = f"{major}.{minor}.{patch}{suffix}"
 
     # Build changelog entry
     changelog_entry = None
