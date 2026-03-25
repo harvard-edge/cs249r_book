@@ -567,6 +567,15 @@ function PracticePage() {
                         {current.details.deep_dive_title}
                       </a>
                     )}
+
+                    {/* Next question button — always visible */}
+                    <button
+                      onClick={() => pickRandom()}
+                      className="mt-8 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-textSecondary hover:text-textPrimary bg-surface border border-border rounded-lg transition-colors"
+                    >
+                      <SkipForward className="w-4 h-4" /> Next Question
+                      <span className="text-[10px] text-textMuted ml-1">N</span>
+                    </button>
                   </motion.div>
                 </AnimatePresence>
               </div>

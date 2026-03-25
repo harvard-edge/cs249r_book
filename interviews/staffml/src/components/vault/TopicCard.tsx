@@ -9,6 +9,15 @@ export default function TopicCard({ topic, style, isSelected, onClick, compact }
   topic: Topic; style: AreaStyle; isSelected: boolean;
   onClick: () => void; compact?: boolean;
 }) {
+  // Get levels that have questions, sorted by level order
+  const activeLevels = LEVEL_IDS
+    .filter(level => (topic.levels[level] || 0) > 0)
+    .map(level => ({
+      id: level,
+      count: topic.levels[level] || 0,
+      def: LEVEL_DEFS.find(l => l.id === level)!,
+    }));
+
   return (
     <button
       onClick={onClick}
@@ -44,26 +53,20 @@ export default function TopicCard({ topic, style, isSelected, onClick, compact }
         <span className="text-[12px] font-medium text-textTertiary">questions</span>
       </div>
 
-      {/* Level distribution bar — area color with increasing opacity */}
-      <div className="flex h-1.5 rounded-full overflow-hidden bg-surfaceHover">
-        {LEVEL_IDS.map((level, i) => {
-          const count = topic.levels[level] || 0;
-          if (count === 0) return null;
-          const pct = (count / topic.questionCount) * 100;
-          const levelDef = LEVEL_DEFS.find(l => l.id === level);
-          // Use area color with opacity ramping from 0.25 (L1) to 1.0 (L6+)
-          const opacity = 0.25 + (i / (LEVEL_IDS.length - 1)) * 0.75;
-          return (
-            <div key={level} className="h-full first:rounded-l-full last:rounded-r-full"
-              style={{
-                width: `${pct}%`,
-                backgroundColor: style.primary,
-                opacity,
-              }}
-              title={`${level} ${levelDef?.name || ''}: ${count} questions`}
-            />
-          );
-        })}
+      {/* Level pills — explicit labels */}
+      <div className="flex flex-wrap gap-1">
+        {activeLevels.map(({ id, count, def }) => (
+          <span
+            key={id}
+            className="text-[10px] font-mono px-1.5 py-0.5 rounded"
+            style={{
+              color: def.color,
+              backgroundColor: `${def.color}10`,
+            }}
+          >
+            {id}:{count}
+          </span>
+        ))}
       </div>
     </button>
   );
