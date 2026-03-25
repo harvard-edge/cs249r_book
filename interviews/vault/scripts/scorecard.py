@@ -3,8 +3,8 @@
 StaffML Quality Scorecard — single-command corpus health check.
 
 Usage:
-    python3 interviews/scripts/scorecard.py
-    python3 interviews/scripts/scorecard.py --compare path/to/previous.json
+    python3 staffml/vault/scripts/scorecard.py
+    python3 staffml/vault/scripts/scorecard.py --compare path/to/previous.json
 """
 
 import json
@@ -148,9 +148,9 @@ def print_scorecard(sc: dict, prev: dict = None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--corpus", default="interviews/corpus.json")
-    parser.add_argument("--chains", default="interviews/chains.json")
-    parser.add_argument("--taxonomy", default="interviews/taxonomy.json")
+    parser.add_argument("--corpus", default="corpus.json")
+    parser.add_argument("--chains", default="chains.json")
+    parser.add_argument("--taxonomy", default="taxonomy.json")
     parser.add_argument("--compare", help="Path to previous scorecard JSON for delta")
     parser.add_argument("--output", help="Save scorecard JSON to this path")
     args = parser.parse_args()
@@ -172,7 +172,7 @@ def main():
     else:
         # Default output
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out = f"interviews/_validation_results/scorecard_{ts}.json"
+        out = f"_validation_results/scorecard_{ts}.json"
         Path(out).parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w") as f:
             json.dump(sc, f, indent=2)

@@ -37,7 +37,7 @@ StaffML is an interview prep platform for ML systems engineers. It provides a cu
 
 Built on [MLSysBook.ai](https://mlsysbook.ai) by Prof. Vijay Janapa Reddi, Harvard University.
 
-**App:** [staffml/](staffml/) · **Corpus data:** `corpus.json` · **Taxonomy:** `taxonomy.json`
+**App:** [staffml/](staffml/) · **Corpus data:** [`vault/corpus.json`](vault/corpus.json) · **Taxonomy:** [`vault/taxonomy.json`](vault/taxonomy.json)
 
 ---
 

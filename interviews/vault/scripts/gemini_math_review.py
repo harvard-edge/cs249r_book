@@ -8,11 +8,11 @@ and calls gemini CLI for each chunk.
 
 Usage:
     source ~/.zshrc_secrets
-    PYTHONUNBUFFERED=1 python3 interviews/scripts/gemini_math_review.py \
+    PYTHONUNBUFFERED=1 python3 staffml/vault/scripts/gemini_math_review.py \
         --workers 8 --batch-size 30
 
 Output:
-    interviews/_validation_results/gemini_review_YYYYMMDD_HHMMSS/
+    _validation_results/gemini_review_YYYYMMDD_HHMMSS/
 """
 
 import json
@@ -287,7 +287,7 @@ def review_chunk(chunk_idx: int, chunk: dict, output_dir: Path, model: str) -> d
 
 def main():
     parser = argparse.ArgumentParser(description="Gemini math review of StaffML corpus")
-    parser.add_argument("--corpus", default="interviews/corpus.json")
+    parser.add_argument("--corpus", default="corpus.json")
     parser.add_argument("--batch-size", type=int, default=30)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--model", default="gemini-3.1-pro-preview")
@@ -295,7 +295,7 @@ def main():
     args = parser.parse_args()
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = Path(f"interviews/_validation_results/gemini_review_{timestamp}")
+    output_dir = Path(f"_validation_results/gemini_review_{timestamp}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Chunking corpus from {args.corpus}...")

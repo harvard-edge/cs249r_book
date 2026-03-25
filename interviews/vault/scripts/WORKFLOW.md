@@ -19,7 +19,7 @@ A standardized, reproducible pipeline for maintaining question quality.
 ## Step 1: MEASURE (scorecard.py)
 
 ```bash
-python3 interviews/scripts/scorecard.py
+python3 staffml/vault/scripts/scorecard.py
 ```
 
 Computes:
@@ -50,7 +50,7 @@ Three fix modes, chosen automatically based on diagnosis:
 
 ### Mode A: Math/Content Fix (for ERRORs and WARNs)
 ```bash
-python3 interviews/scripts/fix_warns.py --model gemini-3.1-pro-preview --workers 8 --batch-size 25
+python3 staffml/vault/scripts/fix_warns.py --model gemini-3.1-pro-preview --workers 8 --batch-size 25
 # Fallback: --model opus if Gemini quota hit
 ```
 - Reads questions with WARN/ERROR status
@@ -60,7 +60,7 @@ python3 interviews/scripts/fix_warns.py --model gemini-3.1-pro-preview --workers
 
 ### Mode B: Generation (for Bloom/mode gaps)
 ```bash
-python3 interviews/scripts/generate_gaps.py --model gemini-3.1-pro-preview --workers 6
+python3 staffml/vault/scripts/generate_gaps.py --model gemini-3.1-pro-preview --workers 6
 ```
 - Reads scorecard gap analysis
 - Generates targeted questions for worst imbalances
@@ -69,7 +69,7 @@ python3 interviews/scripts/generate_gaps.py --model gemini-3.1-pro-preview --wor
 
 ### Mode C: Chain Building (for coverage gaps)
 ```bash
-python3 interviews/scripts/build_chains.py --model gemini-3.1-pro-preview --track edge
+python3 staffml/vault/scripts/build_chains.py --model gemini-3.1-pro-preview --track edge
 ```
 - Finds unchained questions with 3+ Bloom levels per topic
 - LLM selects best question at each level
@@ -78,7 +78,7 @@ python3 interviews/scripts/build_chains.py --model gemini-3.1-pro-preview --trac
 ## Step 4: VALIDATE (separate pass)
 
 ```bash
-python3 interviews/scripts/gemini_math_review.py --batch-size 40 --workers 8
+python3 staffml/vault/scripts/gemini_math_review.py --batch-size 40 --workers 8
 ```
 - Reviews ALL questions (or just newly fixed ones with `--status OK --since-date`)
 - Chunks by track × topic for topical coherence
@@ -88,13 +88,13 @@ python3 interviews/scripts/gemini_math_review.py --batch-size 40 --workers 8
 ## Step 5: MEASURE again → compare to previous scorecard
 
 ```bash
-python3 interviews/scripts/scorecard.py --compare _validation_results/scorecard_previous.json
+python3 staffml/vault/scripts/scorecard.py --compare _validation_results/scorecard_previous.json
 ```
 
 ## Automation: One Command
 
 ```bash
-python3 interviews/scripts/qa_loop.py --rounds 3 --target-ok 95
+python3 staffml/vault/scripts/qa_loop.py --rounds 3 --target-ok 95
 ```
 
 This script:

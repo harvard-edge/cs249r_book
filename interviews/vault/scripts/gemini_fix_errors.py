@@ -7,7 +7,7 @@ Outputs corrected question JSON for each batch.
 
 Usage:
     source ~/.zshrc_secrets
-    PYTHONUNBUFFERED=1 python3 interviews/scripts/gemini_fix_errors.py --workers 8
+    PYTHONUNBUFFERED=1 python3 staffml/vault/scripts/gemini_fix_errors.py --workers 8
 """
 
 import json
@@ -185,7 +185,7 @@ def main():
     print(f"Found {len(batch_files)} batches to fix")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = Path(f"interviews/_validation_results/gemini_fixes_{timestamp}")
+    output_dir = Path(f"_validation_results/gemini_fixes_{timestamp}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Output: {output_dir}")
