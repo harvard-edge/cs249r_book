@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Library, Target, Crosshair, BarChart3, BookOpen, Github,
-  Menu, X, Sun, Moon, Map, Cpu, Server, ChevronDown,
+  Menu, X, Sun, Moon, Map, Cpu, Server, ChevronDown, Info,
 } from "lucide-react";
 import clsx from "clsx";
 import StreakBadge from "@/components/StreakBadge";
@@ -22,6 +22,7 @@ const toolLinks = [
   { href: "/plans", label: "Study Plans", icon: Map },
   { href: "/roofline", label: "Roofline", icon: Cpu },
   { href: "/simulator", label: "Simulator", icon: Server },
+  { href: "/about", label: "About", icon: Info },
 ];
 
 export default function Nav() {
