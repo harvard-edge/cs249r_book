@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   Crosshair, Play, Clock, CheckCircle2, XCircle, Terminal,
-  RotateCcw, BarChart3, AlertTriangle
+  RotateCcw, BarChart3, AlertTriangle, Share2, Check
 } from "lucide-react";
 import clsx from "clsx";
 import Link from "next/link";
@@ -43,6 +43,7 @@ export default function GauntletPage() {
 
   // Review state (self-assessment per question)
   const [scores, setScores] = useState<number[]>([]);
+  const [copied, setCopied] = useState(false);
 
   const tracks = getTracks().filter(t => t !== "global");
   const levels = getLevels();
@@ -548,7 +549,33 @@ export default function GauntletPage() {
             })}
           </div>
 
-          <div className="flex items-center gap-3 justify-center">
+          <div className="flex items-center gap-3 justify-center flex-wrap">
+            <button
+              onClick={() => {
+                const areaLines = Object.entries(byArea)
+                  .map(([area, data]) => {
+                    const ap = Math.round((data.score / data.total) * 100);
+                    const bar = ap >= 70 ? "🟩" : ap >= 40 ? "🟨" : "🟥";
+                    return `${bar} ${area}: ${ap}%`;
+                  })
+                  .join("\n");
+                const text = [
+                  `StaffML Gauntlet — ${pct}%`,
+                  `${selectedTrack.toUpperCase()} × ${selectedLevel} — ${questions.length} questions`,
+                  "",
+                  areaLines,
+                  "",
+                  "https://staffml.ai",
+                ].join("\n");
+                navigator.clipboard.writeText(text).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                });
+              }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-accentBlue text-white font-bold rounded-lg hover:opacity-90 transition-all text-sm"
+            >
+              {copied ? <><Check className="w-4 h-4" /> Copied!</> : <><Share2 className="w-4 h-4" /> Share Score</>}
+            </button>
             <button
               onClick={() => { setPhase("setup"); setScores([]); }}
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg transition-colors text-sm"
@@ -557,9 +584,9 @@ export default function GauntletPage() {
             </button>
             <Link
               href="/progress"
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-white text-black font-bold rounded-lg hover:bg-gray-100 transition-all text-sm"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg transition-colors text-sm"
             >
-              <BarChart3 className="w-4 h-4" /> View Heat Map
+              <BarChart3 className="w-4 h-4" /> View Progress
             </Link>
           </div>
         </motion.div>
