@@ -596,13 +596,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- INTERVIEWS-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table>
-  <tbody>
-    <tr>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧠 🎨 ✍️</td>
-    </tr>
-  </tbody>
-</table>
+<p><em>Coming soon!</em></p>
 
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
