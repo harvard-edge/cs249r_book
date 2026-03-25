@@ -45,17 +45,15 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
       </div>
 
       {/* Body */}
-      <div className="flex-1 relative min-h-0">
-        <div className="absolute inset-0 overflow-hidden flex flex-col">
+      <div className="flex-1 overflow-y-auto min-h-0">
         <AnimatePresence mode="wait">
           {drillLevel ? (
             <motion.div key={`level-${drillLevel}`}
               initial={{ x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 40, opacity: 0 }} transition={{ duration: 0.15 }}
-              className="flex flex-col flex-1 min-h-0">
+              exit={{ x: 40, opacity: 0 }} transition={{ duration: 0.15 }}>
 
-              {/* Pinned header */}
-              <div className="p-5 pb-3 shrink-0 border-b border-borderSubtle">
+              {/* Pinned sub-header */}
+              <div className="p-5 pb-3 border-b border-borderSubtle sticky top-0 bg-background z-10">
                 <button onClick={() => setDrillLevel(null)}
                   className="flex items-center gap-1.5 text-[13px] font-medium text-textSecondary hover:text-textPrimary mb-4 transition-colors">
                   <ChevronLeft className="w-4 h-4" /> Back to overview
@@ -76,8 +74,8 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
                 </div>
               </div>
 
-              {/* Scrollable question list */}
-              <div className="flex-1 overflow-y-auto p-5 space-y-2">
+              {/* Question list */}
+              <div className="p-5 space-y-2">
                 {levelQs.map((q) => (
                   <Link key={q.id} href={`/practice?q=${q.id}`}
                     className="block p-3.5 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
@@ -101,8 +99,7 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
             <motion.div key="overview"
               initial={{ x: -40, opacity: 0 }} animate={{ x: 0, opacity: 1 }}
               exit={{ x: -40, opacity: 0 }} transition={{ duration: 0.15 }}
-              className="p-5 space-y-6 flex-1 overflow-y-auto min-h-0"
-              style={{ maxHeight: "100%" }}>
+              className="p-5 space-y-6">
 
               {topic.description && (
                 <p className="text-[14px] text-textSecondary leading-relaxed">{topic.description}</p>
@@ -175,7 +172,6 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
             </motion.div>
           )}
         </AnimatePresence>
-        </div>
       </div>
     </div>
   );
