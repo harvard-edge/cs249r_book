@@ -1,0 +1,424 @@
+[
+  {
+    "id": "cloud-llm-inference-ttft-the-real-time-batching-dilemma-73",
+    "title": "The Real-Time Batching Dilemma",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "D3",
+    "rc": "RC-6",
+    "mode": "concept-recall",
+    "scenario": "You are deploying a Llama 70B model on a single H100 GPU for a real-time chatbot. The product team has a strict requirement that the time-to-first-token (TTFT) must be under 300ms. Given the hardware specs, explain how batch size impacts TTFT and calculate the maximum theoretical batch size you can use while staying within this latency budget. For this calculation, you can ignore all overheads like network latency and CUDA kernel launch times, focusing only on the raw prefill computation.",
+    "common_mistake": "Engineers often make unit errors or misidentify the bottleneck. A common error is mixing up TFLOPS and GFLOPS, leading to a 1000x error in the calculation. Another is incorrectly assuming the prefill stage is memory-bound and basing the calculation on HBM bandwidth, rather than being compute-bound. Finally, a simple slip is forgetting the `2 * P` rule of thumb for inference FLOPs, leading to an off-by-2x error.",
+    "realistic_solution": "The correct approach is to determine if the operation is compute-bound or memory-bound. The prefill step for a large language model is a large matrix multiplication, which is compute-bound. Therefore, we should use the GPU's computational throughput (FLOPS), not its memory bandwidth.",
+    "napkin_math": "1. **Calculate FLOPs for Prefill (per item):** The rule of thumb for inference is `2 * Parameters` FLOPs per token generated. For a 70B model, this is:",
+    "issues": [
+      "The problem is unsolvable as it omits the prompt sequence length, which is a critical variable for calculating prefill time.",
+      "The Napkin Math section is incomplete and does not provide a final calculation.",
+      "The reasoning_mode should be 'napkin-math' as the question explicitly asks for a calculation."
+    ]
+  },
+  {
+    "id": "cloud-continuous-batching-throughput-the-continuous-batching-throughput-limit-82",
+    "title": "The Continuous Batching Throughput Limit",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "D3",
+    "rc": "RC-6",
+    "mode": "concept-recall",
+    "scenario": "You are tasked with estimating the peak capacity of an LLM inference service running on a single H100 GPU. The service runs a 70B parameter model and uses continuous batching. At steady state, telemetry shows that there are, on average, 32 requests being actively processed concurrently. The average request requires a 20ms prefill/prompt processing phase and then generates 128 new tokens.",
+    "common_mistake": "Engineers often misapply throughput formulas. A common mistake is to simply invert the per-token generation time, which calculates the *token* throughput, not the *request* throughput. Another is to calculate the throughput for a single, isolated request, ignoring the massive parallelism gains from batching. A third mistake is to apply static batching logic, where the throughput is the batch size divided by the time it takes for the slowest member of the batch to complete, which underestimates the efficiency of continuous batching.",
+    "realistic_solution": "The correct approach is to use Little's Law, which states that the average number of items in a system (L) is equal to their average arrival rate (λ) multiplied by the average time they spend in the system (W).",
+    "napkin_math": "1. **Find total time per request (W):**",
+    "issues": [
+      "The problem is unsolvable as it omits the per-token generation time for the decode phase, which is needed to calculate the total time per request (W).",
+      "The Napkin Math section is incomplete."
+    ]
+  },
+  {
+    "id": "cloud-serving-queue-slos-the-slo-vs.-throughput-squeeze-143",
+    "title": "The SLO vs. Throughput Squeeze",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "D4",
+    "rc": "RC-6",
+    "mode": "napkin-math",
+    "scenario": "You are designing an LLM serving system for a 13B model on H100 GPUs. Your workload consists of long conversations (average 2048 prompt tokens, 2048 completion tokens). The business requires a P99 TTFT of less than 400ms. Using a simple static batching strategy, analyze the trade-off between throughput (batch size) and this strict TTFT SLO. Calculate the maximum batch size you can support, and explain the implications for your system's throughput.",
+    "common_mistake": "Focusing only on the inference time for a single request. This ignores the queuing dynamics that dominate P99 latency. Engineers often calculate the best-case TTFT (an empty queue) and assume they have plenty of headroom, failing to account for the 'wait for previous batch' time in a production system under load.",
+    "realistic_solution": "The P99 TTFT is dominated by the time a request spends waiting for the previous batch to complete, plus the time for its own batch's prefill. To meet a strict 400ms SLO with long generations, the total processing time of a batch must be kept extremely short. This forces the system into using a very small batch size, which in turn cripples throughput.",
+    "napkin_math": "1. **Define the P99 TTFT equation:** `P99 TTFT ≈ T_process(B) + T_prefill(B)`. We need this to be `< 400ms`.",
+    "issues": [
+      "The scenario is numerically impossible: the time to generate 2048 tokens (~16 seconds) is over 40x greater than the 400ms P99 TTFT SLO, making the trade-off analysis moot.",
+      "The Napkin Math section is incomplete; it provides a formula but does not perform the required calculation."
+    ]
+  },
+  {
+    "id": "cloud-serving-queueing-theory-sla-the-ai-analyst's-deadline-182",
+    "title": "The AI Analyst's Deadline",
+    "level": "L6+",
+    "track": "cloud",
+    "ka": "D3",
+    "rc": "RC-6",
+    "mode": "requirements-to-architecture",
+    "scenario": "You are the Principal Engineer at a new FinTech startup building a unified 'AI Analyst' API on a fixed cluster of H100 GPUs. The API must serve two workloads with conflicting demands:",
+    "common_mistake": "Using a single, simple FIFO queue for all requests. This is the most common and fatal mistake. While simple to implement, it leads to **Head-of-Line Blocking**. A single, long-running 100k-token report generation job will enter the batch, and its massive prefill computation will occupy the GPU for seconds. All subsequent real-time news requests that arrive during this time will be stuck in the queue, immediately violating their 500ms deadline.",
+    "realistic_solution": "The core of the problem is isolating the latency-sensitive workload from the throughput-oriented workload on the same hardware. My first three decisions would be:",
+    "napkin_math": "Let's calculate the capacity needed to meet the real-time SLA. We'll model a 70B Llama-class model on H100s.",
+    "issues": [
+      "The Napkin Math section assumes a 70B model, but the prefill time for such a model (~72ms) already violates the 50ms TTFT SLO, making the capacity planning calculation impossible.",
+      "The Napkin Math section is incomplete and does not perform the capacity calculation it proposes."
+    ]
+  },
+  {
+    "id": "cloud-serving-the-token-budget-economics-205",
+    "title": "The Token Budget Economics",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "D4",
+    "rc": "RC-2",
+    "mode": "tradeoff-analysis",
+    "scenario": "Your company is choosing between H100, A100, and TPU v5e for serving a 70B parameter LLM. The CFO wants a cost-per-million-tokens comparison across these accelerators at realistic batch sizes. Walk me through the napkin math and tell me which hardware wins — and when.",
+    "common_mistake": "\"Pick the GPU with the highest FLOPS — H100 always wins.\" Raw FLOPS is irrelevant for decode-phase serving, which is memory-bandwidth bound. The cheapest $/token depends on batch size, model size, and whether you're prefill-bound or decode-bound.",
+    "realistic_solution": "LLM decode is memory-bandwidth bound: each token requires loading all model weights from HBM once. The metric that matters is $/GB/s of memory bandwidth, not $/TFLOP. At small batch sizes, the accelerator with the best bandwidth-per-dollar wins. At large batch sizes, the workload shifts compute-bound and FLOPS/$ matters more. TPU v5e wins on raw $/token at high batch sizes due to lower per-chip cost; H100 wins on latency-sensitive low-batch workloads due to 3.35 TB/s HBM3 bandwidth.",
+    "napkin_math": "70B model in FP16 = 140 GB weights. Each decode token loads 140 GB.",
+    "issues": [
+      "The napkin math is incomplete; it sets up the problem but doesn't perform the promised cost-per-token comparison across devices.",
+      "The scenario is unrealistic as a 70B model (140GB) does not fit on a single H100/A100 (80GB) or TPU v5e (16GB), which the question ignores."
+    ]
+  },
+  {
+    "id": "cloud-arithmetic-intensity-calculating-gemm-kernel-intensity-15",
+    "title": "Calculating GEMM Kernel Intensity",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "concept-recall",
+    "scenario": "Imagine a single GEMM (General Matrix-Matrix Multiplication) kernel is the core of your model's attention layer. This specific kernel performs 200 GFLOPs of computation. To do this, it needs to read two 500MB matrices from HBM and write a 500MB result matrix back to HBM. Explain how you would calculate the Arithmetic Intensity for this kernel and what the result is.",
+    "common_mistake": "The most common mistake is to only count the input data (the two 500MB reads) and forget to include the output data (the 500MB write) in the total memory traffic. This undercounts the total bytes moved and inflates the perceived arithmetic intensity. Another error is inverting the ratio to Bytes/FLOP.",
+    "realistic_solution": "Arithmetic Intensity (AI) is the ratio of total floating-point operations to the total bytes moved to and from memory. The total data moved includes all reads and all writes required for the computation.",
+    "napkin_math": "1. **Calculate Total FLOPs:** | `Total FLOPs = 200 * 10^9 FLOPs`",
+    "issues": [
+      "The 'Napkin Math' section is incomplete and does not show the final calculation.",
+      "The reasoning mode 'concept-recall' is less accurate than 'napkin-math' for a question requiring a calculation."
+    ]
+  },
+  {
+    "id": "cloud-gpu-roofline-the-h100's-roofline-ridge-point-16",
+    "title": "The H100's Roofline Ridge Point",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "concept-recall",
+    "scenario": "An NVIDIA H100 GPU has a peak FP16 tensor core performance of 989 TFLOPS and a memory bandwidth of 3.35 TB/s. Interpret these two numbers to calculate the 'ridge point' of the H100's roofline model. What does this value represent for a kernel running on the GPU?",
+    "common_mistake": "A frequent error is unit mismatch. Engineers often divide the numbers directly (989 / 3.35) without ensuring the units are consistent (e.g., both in Tera- or both in Giga-). Since TFLOPS and TB/s both use the same 10^12 prefix, the prefixes cancel out, but this is often a point of confusion.",
+    "realistic_solution": "The ridge point is the value of Arithmetic Intensity (AI) at which a workload transitions from being memory-bound to compute-bound. It is the intersection of the memory bandwidth roof and the compute performance ceiling in a roofline plot. It's calculated by dividing the peak compute performance by the peak memory bandwidth.",
+    "napkin_math": "1. **Identify Peak Compute:** | `Peak Compute = 989 TFLOPS = 989 * 10^12 FLOPs/s`",
+    "issues": [
+      "The 'Napkin Math' section is incomplete and does not show the final calculation.",
+      "The reasoning mode 'concept-recall' is less accurate than 'napkin-math' for a question requiring a calculation."
+    ]
+  },
+  {
+    "id": "cloud-mixed-precision-training-the-mixed-precision-memory-budget-19",
+    "title": "The Mixed Precision Memory Budget",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "B1",
+    "rc": "RC-1",
+    "mode": "concept-recall",
+    "scenario": "You are tasked with training a 7 billion parameter language model using the Adam optimizer. A standard FP32 training run requires approximately 16 bytes of memory per parameter (4 for the model weights, 4 for the gradients, and 8 for the Adam optimizer's momentum and variance). Your H100 GPU has 80GB of HBM. To reduce the memory footprint, you switch to mixed-precision training. In this setup, the forward and backward passes use FP16 for weights and gradients, but you still maintain a master copy of the weights and the full optimizer state in FP32 for stable updates. Explain the new memory composition and calculate the total peak memory requirement in Gigabytes (GB).",
+    "common_mistake": "A common mistake is assuming 'mixed precision' simply halves the total memory requirement (e.g., from 16 bytes/param to 8 bytes/param). This is incorrect because the Adam optimizer's state (its momentum and variance accumulators) must be kept in FP32 to prevent loss of precision during updates, and a master copy of the weights is also kept in FP32. These components do not get compressed and constitute the majority of the memory footprint.",
+    "realistic_solution": "In mixed-precision training, only the model weights used during computation and the gradients are downcast to FP16. The high-precision master copy of the weights and the optimizer state remain in FP32.",
+    "napkin_math": "1. Identify persistent FP32 components: Master Weights (4 bytes) and Optimizer State (8 bytes).",
+    "issues": [
+      "The 'Napkin Math' is incomplete and the implied memory calculation is incorrect.",
+      "The premise is misleading; switching to mixed precision saves only ~2 bytes/param for parameter-related memory (16B -> 14B), with major savings coming from activations, which are not mentioned."
+    ]
+  },
+  {
+    "id": "cloud-moe-scaling-laws-the-moe-compute-fallacy-20",
+    "title": "The MoE Compute Fallacy",
+    "level": "L1",
+    "track": "cloud",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "concept-recall",
+    "scenario": "You are planning the training run for a new Mixture-of-Experts (MoE) LLM. The model has a total of 1 Trillion parameters, composed of 10 experts of 100B parameters each. During a forward pass, the router sends each token to the 2 best experts.",
+    "common_mistake": "The most common mistake is to use the total parameter count (1T) in the scaling law formula, rather than the active parameter count (200B). This overestimates the required compute by a significant margin, leading to a wildly incorrect budget and resource allocation. Another mistake is forgetting the factor of 6 for the forward and backward pass, underestimating the compute needed.",
+    "realistic_solution": "The Chinchilla scaling law for training compute is `C ≈ 6 * P * D`, where `P` is the active parameter count and `D` is the optimal number of tokens (`D ≈ 20 * P`). For an MoE model, the active parameter count is the number of parameters a single token 'sees' during a forward pass. Here, with 2 active experts of 100B each, `P_active = 200B`.",
+    "napkin_math": "1. **Identify Active Parameters (P):** 2 experts × 100B params/expert = 200B params.",
+    "issues": [
+      "The 'Napkin Math' section is incomplete and does not calculate the final training compute.",
+      "The prompt is slightly vague, as it sets up a planning scenario but only asks to identify one variable."
+    ]
+  },
+  {
+    "id": "cloud-scaling-laws-transformer-architecture-cost-the-chinchilla-compute-budget-21",
+    "title": "The Chinchilla Compute Budget",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "concept-recall",
+    "scenario": "You're scoping the training budget for a new 100-billion parameter dense transformer model. Your team plans to follow the Chinchilla scaling laws for an optimally-trained model.",
+    "common_mistake": "The most common mistake is to underestimate the cost of the backward pass. Many engineers incorrectly assume training FLOPs are simply `2PD` (a forward pass and an equally expensive backward pass). In reality, the backward pass requires re-computation and gradient calculations that make it approximately twice as expensive as the forward pass, leading to the `6PD` approximation (`2PD` for forward, `4PD` for backward).",
+    "realistic_solution": "The correct approach uses two key formulas from scaling laws. First, the Chinchilla-optimal number of training tokens (`D`) is roughly 20 times the number of non-embedding parameters (`P`). Second, the total training compute (`C`) is approximately `6PD` FLOPs. This factor of 6 accounts for the forward pass (2PD) and the more computationally expensive backward pass (4PD).",
+    "napkin_math": "1. **Parameters (P):** 100 Billion (`1e11`)",
+    "issues": [
+      "The 'Napkin Math' section is incomplete and does not show the final calculation.",
+      "The prompt is slightly vague, as it sets up a budgeting scenario but doesn't explicitly ask for the final FLOPs count."
+    ]
+  },
+  {
+    "id": "cloud-federated-learning-economics-the-privacy-vs.-bandwidth-trade-off-76",
+    "title": "The Privacy vs. Bandwidth Trade-off",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-10",
+    "mode": "napkin-math",
+    "scenario": "You are a Staff ML Engineer at a self-driving car company with a fleet of 10,000 vehicles. The fleet needs a perception model update and you are evaluating two data strategies:",
+    "common_mistake": "Engineers often focus on cloud compute costs and neglect the network transmission cost from a large fleet of edge devices. Another common mistake is to calculate the cost for the alternative strategy (Federated Learning) without carefully reading what the question is asking for.",
+    "realistic_solution": "The correct calculation determines the total data volume generated by the entire fleet daily and then scales it to an annual cost. The Central Training strategy's cost is independent of the model size and depends only on the raw data transfer volume.",
+    "napkin_math": "10,000 cars * 10 GB/car/day = 100,000 GB/day",
+    "issues": [
+      "The scenario does not contain an explicit question for the candidate to answer.",
+      "The scenario and napkin math are missing a crucial number: the cost per GB for data transmission.",
+      "The 'Napkin Math' is incomplete; it calculates daily data volume but not the final cost."
+    ]
+  },
+  {
+    "id": "cloud-gpu-roofline-arithmetic-intensity-roofline-reality-check:-compute-bound-vs-96",
+    "title": "Roofline Reality Check: Compute-Bound vs. Memory-Bound",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "concept-recall",
+    "scenario": "You are profiling a new model on an NVIDIA H100 GPU and seeing poor utilization. Your team lead suspects the model is memory-bound. To verify this, you need to calculate the model's Arithmetic Intensity (AI) and compare it to the GPU's capabilities.",
+    "common_mistake": "The most common mistake is assuming that any large model running on a powerful GPU must be compute-bound. Engineers often focus on the peak TFLOPS of the hardware without considering the data movement required. They forget that if a model doesn't perform enough math operations for each byte it fetches from memory, the memory subsystem will become the bottleneck, leaving the powerful compute cores idle.",
+    "realistic_solution": "To determine if the workload is compute or memory-bound, we must compare the model's Arithmetic Intensity (AI) to the GPU's ridge point.",
+    "napkin_math": "1. **Calculate GPU Ridge Point:**",
+    "issues": [
+      "The question is incomplete; it sets up a scenario but provides no specific numbers for the model's FLOPs or data movement to analyze."
+    ]
+  },
+  {
+    "id": "cloud-economics-tco-federated-learning-the-$18m-data-bill:-centralized-vs.-fede-115",
+    "title": "The $18M Data Bill: Centralized vs. Federated TCO",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-10",
+    "mode": "concept-recall",
+    "scenario": "You are evaluating the Total Cost of Ownership (TCO) for a new driver-assistance feature. The baseline 'centralized' training approach requires uploading raw sensor data from a fleet of 100,000 vehicles to the cloud. As an alternative, your team is exploring a 'federated' approach to mitigate privacy concerns and data upload costs.",
+    "common_mistake": "Engineers often underestimate the 'tyranny of scale' with fleet data. A common mistake is to calculate the cost for a shorter time period (e.g., daily instead of annually) or for a subset of the fleet (e.g., a single vehicle), failing to capture the massive aggregate operational expenditure. Another frequent error is simple arithmetic mistakes with large numbers, like misplacing a decimal or confusing millions with thousands.",
+    "realistic_solution": "The correct approach is to systematically calculate the total data volume generated by the entire fleet over the full one-year period, and then multiply that total volume by the per-unit data cost. This demonstrates a clear understanding of how to model Total Cost of Ownership (TCO) for large-scale, production ML systems.",
+    "napkin_math": "1.  **Calculate data per vehicle per year:**",
+    "issues": [
+      "The question is incomplete; it lacks crucial numbers like data generated per vehicle, data upload cost per GB, and the time period for the TCO calculation."
+    ]
+  },
+  {
+    "id": "cloud-federated-learning-economics-the-federated-learning-data-bill-121",
+    "title": "The Federated Learning Data Bill",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-1",
+    "mode": "concept-recall",
+    "scenario": "You are calculating the weekly data ingress costs for a new Federated Learning system that trains a predictive keyboard model. You have a fleet of 10 million users. Each user's device will upload 200 MB of compressed model gradients to your cloud backend once per week. Explain how to calculate the total data volume your servers will receive each week and interpret the final number.",
+    "common_mistake": "The most common mistake is failing to appreciate the scale of a large user fleet. Engineers may calculate the data for a single user correctly but then either forget to multiply by the total number of users or make an order-of-magnitude error during unit conversions (e.g., confusing terabytes with petabytes), drastically underestimating the infrastructure requirements and cost.",
+    "realistic_solution": "The correct approach is to multiply the data contribution of a single user by the total number of users in the fleet. This calculation reveals the immense scale of data ingress that cloud systems must handle, even when using a technique like Federated Learning that avoids uploading raw user data. The final figure is a critical input for Total Cost of Ownership (TCO) analysis, directly impacting network bandwidth provisioning and data handling costs.",
+    "napkin_math": "1.  Start with the number of users: 10,000,000 users",
+    "issues": [
+      "The 'Napkin Math' section is incomplete and does not show the final calculation.",
+      "The 'Realistic Solution' describes the method but fails to state the final answer (2 PB)."
+    ]
+  },
+  {
+    "id": "cloud-economics-tco-the-first-year-tco-of-a-small-ai-factory-144",
+    "title": "The First-Year TCO of a Small AI Factory",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-1",
+    "mode": "napkin-math",
+    "scenario": "Your team is building a small, on-premise AI cluster for continuous model retraining. You've been approved to purchase 10 NVIDIA H100 GPUs to run 24/7. Your finance partner needs a first-year Total Cost of Ownership (TCO) estimate.",
+    "common_mistake": "The most common mistake is to only consider the upfront hardware (CapEx) cost and forget the significant operational costs (OpEx), especially power and cooling. A second common error is to calculate the power draw for the GPUs but forget the additional power required for cooling and other datacenter infrastructure, which is what PUE accounts for. Finally, simple unit conversion errors (e.g., confusing W and kW) can lead to answers that are off by orders of magnitude.",
+    "realistic_solution": "The correct approach is to sum the three main components of first-year TCO: the initial hardware cost (CapEx), the annual maintenance cost, and the annual power cost (OpEx). The power cost must include the overhead from the datacenter's PUE. The calculation requires converting the GPUs' power consumption from Watts to kiloWatts and calculating the total energy used over a full year.",
+    "napkin_math": "1. **Hardware CapEx**: 10 GPUs × $30,000/GPU = $300,000",
+    "issues": [
+      "The 'Napkin Math' section is incomplete, only showing the hardware CapEx calculation.",
+      "The 'Realistic Solution' describes the components of TCO but does not compute the final value."
+    ]
+  },
+  {
+    "id": "cloud-economics-tco-ab-testing-the-capex-of-an-a/b-test-148",
+    "title": "The CapEx of an A/B Test",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-1",
+    "mode": "concept-recall",
+    "scenario": "Your team is proposing an A/B test for a new, much larger recommendation model. To get a clean signal, you need to run a shadow serving stack for the new model, which requires a dedicated fleet of 100 H100 GPUs. Using the provided hardware constants, explain how you would calculate the initial capital expenditure (CapEx) required just for the GPUs to run this three-month experiment.",
+    "common_mistake": "Engineers often focus only on the performance uplift of the new model and ignore the massive capital investment required to even test it. They might also confuse capital expenditure (a one-time hardware purchase) with operational expenditure (ongoing costs like power or cloud rental fees), or simply miscalculate by an order of magnitude.",
+    "realistic_solution": "The solution is a straightforward multiplication of the number of required GPUs by their unit cost. This calculation provides a baseline 'cost of entry' for the experiment, which is a critical input for deciding if the potential gains from the new model justify the test itself. It separates the one-time hardware cost from ongoing operational costs.",
+    "napkin_math": "1. **Identify required units:** The experiment requires 100 H100 GPUs.",
+    "issues": [
+      "The question asks for a calculation but fails to provide the necessary input data, specifically the unit cost of an H100 GPU.",
+      "The 'Napkin Math' section is incomplete and does not perform the calculation required by the scenario."
+    ]
+  },
+  {
+    "id": "cloud-cloud-economics-tco-the-first-year-cost-of-an-h100-182",
+    "title": "The First-Year Cost of an H100",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-1",
+    "mode": "concept-recall",
+    "scenario": "A new project requires a dedicated NVIDIA H100 GPU running 24/7 for a full year. Using the hardware constants, calculate the Total Cost of Ownership (TCO) for the first year. Assume an electricity cost of $0.15/kWh and an average datacenter Power Usage Effectiveness (PUE) of 1.1.",
+    "common_mistake": "Engineers often underestimate TCO by only considering the Capital Expense (CapEx) — the sticker price of the GPU. They forget to include significant Operational Expenses (OpEx) like power and maintenance, which can accumulate to a substantial fraction of the initial hardware cost over the asset's lifetime. Another common mistake is forgetting the PUE multiplier, which accounts for the energy used by cooling and other datacenter infrastructure, not just the GPU itself.",
+    "realistic_solution": "The TCO is the sum of the initial hardware cost (CapEx) and all operational costs (OpEx) for the period. For the first year, this includes the H100 unit cost, the annual maintenance cost, and the total power cost (including the PUE overhead).",
+    "napkin_math": "1. **Capital Expense (CapEx)**: $30,000",
+    "issues": [
+      "The scenario does not provide a maintenance cost, which is a required component for the TCO calculation mentioned in the solution.",
+      "The 'Napkin Math' section is incomplete, only stating the CapEx and not calculating the OpEx.",
+      "The reasoning mode should be 'napkin-math', not 'concept-recall'."
+    ]
+  },
+  {
+    "id": "cloud-federated-learning-tco-the-economics-of-privacy:-federated-vs.--183",
+    "title": "The Economics of Privacy: Federated vs. Centralized Training",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-10",
+    "mode": "napkin-math",
+    "scenario": "You are a Staff ML Engineer at a healthcare AI company. Your team needs to train a new diagnostic model on sensitive patient data from 1,000 hospitals. Each hospital has a 10 TB dataset. The model itself is 500 MB.",
+    "common_mistake": "Engineers often miscalculate the federated learning cost by forgetting one of the multiplicative factors: the number of clients (hospitals) or the number of communication rounds. They might calculate the cost for a single client or a single round, underestimating the total cost by orders of magnitude. Another common mistake is to believe the costs are comparable, failing to appreciate that gradients are vastly smaller than raw datasets.",
+    "realistic_solution": "The correct approach is to calculate the total data transferred for each scenario and multiply by the cost per GB.",
+    "napkin_math": "### Centralized Training Cost | Total Data = 1,000 hospitals × 10 TB/hospital = 10,000 TB | Convert to GB: 10,000 TB × 1,000 GB/TB = 10,000,000 GB | **Cost = 10,000,000 GB × $0.05/GB = $500,000**",
+    "issues": [
+      "The 'Napkin Math' section is incomplete, providing the cost calculation for centralized training but omitting the required comparison calculation for federated learning."
+    ]
+  },
+  {
+    "id": "cloud-power-and-cooling-the-datacenter-power-budget-194",
+    "title": "The Datacenter Power Budget",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-8",
+    "mode": "napkin-math",
+    "scenario": "You are a systems engineer at a cloud provider designing a new AI datacenter. Your standard rack configuration includes four servers, and each server contains eight H100 GPUs. Assuming a modern datacenter with a Power Usage Effectiveness (PUE) of 1.1, apply your knowledge of hardware specifications to determine if these racks can be air-cooled.",
+    "common_mistake": "Engineers often underestimate total power consumption by focusing only on the GPU's nameplate TDP. They forget to account for the rest of the server components (CPU, memory, networking) and the critical overhead from the datacenter's cooling infrastructure, represented by the PUE.",
+    "realistic_solution": "The conclusion is that the rack requires liquid cooling. The total power draw exceeds the typical ~30 kW limit for air cooling. The calculation must account for the full server power draw, not just the GPUs, and then multiply the total IT load by the PUE to find the true power required from the facility.",
+    "napkin_math": "1. **Single GPU Power:** An H100 GPU has a Thermal Design Power (TDP) of 700 W.",
+    "issues": [
+      "The scenario omits the power consumption of the server components other than the GPUs, which is a critical variable for the calculation.",
+      "The 'Napkin Math' section is incomplete, only stating the power of a single GPU."
+    ]
+  },
+  {
+    "id": "cloud-fault-tolerance-checkpointing-the-silent-failure-cascade-200",
+    "title": "The Silent Failure Cascade",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "C6",
+    "rc": "RC-7",
+    "mode": "napkin-math",
+    "scenario": "You are training a 175B parameter LLM on a cluster of 4,096 H100 GPUs. The training job is expected to take 25 days. Three days into the run, the job crashes with no obvious error log, losing all progress. Team members suggest different checkpointing strategies. Given the known GPU Mean Time To Failure (MTTF), diagnose the most effective checkpointing interval to balance progress against overhead.",
+    "common_mistake": "Engineers often choose arbitrary checkpoint intervals like 'every epoch' or 'every hour'. This ignores the statistical reality of large-scale hardware failure. Checkpointing too often introduces significant overhead, while checkpointing too infrequently risks catastrophic work loss.",
+    "realistic_solution": "The problem is to find the statistically optimal checkpoint interval that minimizes time lost to both checkpointing overhead and failure recovery. At this scale, individual component MTTF translates into a continuous cluster-level failure rate. The optimal interval is a function of the cluster's aggregate MTTF and the time it takes to save a checkpoint. We must first calculate the failure rate for the entire 4,096-GPU cluster and the time required to save the model's state.",
+    "napkin_math": "1. **Calculate Cluster MTTF:** A single GPU has an MTTF of ~50,000 hours. For a cluster of 4,096 GPUs, the effective MTTF is `50,000 hours / 4,096 GPUs ≈ 12.2 hours`. This means we can expect a hardware failure roughly every 12 hours.",
+    "issues": [
+      "The napkin math is incomplete; it correctly calculates the cluster's Mean Time To Failure (MTTF) but stops before calculating the checkpointing overhead and the final optimal checkpoint interval."
+    ]
+  },
+  {
+    "id": "cloud-fault-tolerance-the-silent-gpu-killer-207",
+    "title": "The Silent GPU Killer",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "C6",
+    "rc": "RC-7",
+    "mode": "napkin-math",
+    "scenario": "You are an ML Systems Engineer training a large language model on a 1,024-GPU H100 cluster. The training job, which is scheduled to run for 72 hours, keeps failing after about 4-5 hours. The cluster scheduler (e.g., Slurm) terminates the job with a 'watchdog timer expired' error. Your application logs show normal training steps right up until the termination, with no exceptions. However, digging into the kernel logs (`dmesg`) on one of the failed nodes reveals a GPU-related 'Xid' error message that occurred just before the job was killed. What is the most likely cause of this failure, and what should be your immediate action?",
+    "common_mistake": "Engineers from smaller-scale environments often assume software bugs (like an infinite loop) are the primary cause of hangs, underestimating the statistical certainty of hardware faults in large fleets. They incorrectly begin debugging the Python application code instead of treating the failure as an infrastructure-level, routine event and hardening the system's fault tolerance.",
+    "realistic_solution": "The `dmesg` log showing a GPU 'Xid' error is the smoking gun for a transient, non-recoverable GPU hardware or driver fault. At this scale, hardware failures are not exceptions; they are routine operational occurrences. The watchdog timer expired because the faulty GPU became unresponsive, which in turn froze the user-space training process and prevented it from signaling its liveness. The correct immediate action is to ensure the cluster's fault-tolerance system is working as designed: automatically detect the failed node, quarantine it for diagnostics, and reschedule the training job to restart from its most recent checkpoint on a healthy replacement node.",
+    "napkin_math": "We can use the 'Fleet Math' numbers to prove that this is an expected event. The Mean Time To Failure (MTTF) for a single high-end GPU is roughly 50,000 hours. For a fleet of 1,024 GPUs, the *entire fleet's* MTTF is drastically lower.",
+    "issues": [
+      "The napkin math is incomplete and the single-GPU MTTF value used (50,000 hours) results in a cluster MTTF (~49 hours) that is inconsistent with the scenario's observed failure time (4-5 hours)."
+    ]
+  },
+  {
+    "id": "cloud-federated-learning-tco-the-federated-tco-dilemma-223",
+    "title": "The Federated TCO Dilemma",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-1",
+    "mode": "napkin-math",
+    "scenario": "You are the Staff ML Engineer at a fintech company planning to improve your mobile app's text prediction model. The new model requires sensitive user keystroke data. The legal team has estimated that a data breach involving this raw data would incur a one-time fine of $50M, with a 1% chance of happening this year if you use a centralized training strategy. You must use a TCO analysis to choose between two deployment strategies.",
+    "common_mistake": "Engineers often champion a technology like Federated Learning for its technical elegance and privacy-preserving properties without rigorously costing out its second-order effects. They may ignore or underestimate intangible costs like user churn from poor UX (battery drain) or tangible costs like the high price and scarcity of specialized engineering talent required to build and maintain a complex distributed system.",
+    "realistic_solution": "The correct answer is to perform a Total Cost of Ownership (TCO) analysis for both strategies. The analysis shows that the Centralized strategy is significantly more cost-effective.",
+    "napkin_math": "1. **Calculate Centralized TCO:**",
+    "issues": [
+      "The napkin math is incomplete; it calculates the Annual Loss Expectancy (ALE) for one strategy but omits all other costs for both strategies, making a TCO comparison impossible."
+    ]
+  },
+  {
+    "id": "cloud-tco-federated-learning-the-privacy-vs.-price-dilemma-246",
+    "title": "The Privacy vs. Price Dilemma",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-10",
+    "mode": "symptom-to-cause",
+    "scenario": "You are the ML Systems Lead for a large hospital network evaluating strategies for a new AI diagnostic tool. Your compliance officer has flagged the immense regulatory risk (e.g., HIPAA fines) of centralizing sensitive patient data.",
+    "common_mistake": "Engineers often focus purely on the most obvious costs, like hardware (CapEx) or engineer salaries, while ignoring less direct but massive costs like managed service fees or the quantified business impact of model performance degradation. They might also miscalculate TCO by looking at only one component (e.g., just salaries) instead of the sum of all capital and operational expenses.",
+    "realistic_solution": "The correct approach is to sum all capital and operational expenses for the Federated Learning option over a one-year period.",
+    "napkin_math": "1. **Calculate FL Capital Expenditures (CapEx):**",
+    "issues": [
+      "The realistic solution is incomplete, as it only describes calculating the cost for the Federated Learning option without providing a comparison or final decision.",
+      "The reasoning mode is misclassified as 'symptom-to-cause' when the problem is a TCO comparison."
+    ]
+  },
+  {
+    "id": "cloud-federated-learning-tco-the-federated-learning-data-bill-259",
+    "title": "The Federated Learning Data Bill",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-8",
+    "mode": "napkin-math",
+    "scenario": "You are an ML Systems Engineer designing the personalization strategy for a new smart keyboard feature. The feature needs to be trained on user data. You are launching to 1 million users in a market where mobile data is expensive, and your company has committed to covering the data costs. You must diagnose the most cost-effective approach between two options:",
+    "common_mistake": "Engineers often focus exclusively on the privacy benefits of Federated Learning or the server-side compute cost of centralized training. They mistakenly assume FL is always cheaper because raw data isn't moved, underestimating the massive, recurring cost of transferring large model updates across a fleet of millions of devices, which can easily dominate the Total Cost of Ownership (TCO).",
+    "realistic_solution": "The correct approach is to calculate the total data volume transferred over a year for each strategy and multiply by the cost per GB. While Federated Learning sends updates less frequently, the size of each update is two orders of magnitude larger. When aggregated across a million users for a year, the FL strategy results in a significantly higher data bill.",
+    "napkin_math": "1.  Start with the number of users: 10,000,000 users | 2.  Multiply by the data size per user: 10,000,000 users × 200 MB/user = 2,000,000,000 MB | 3.  Convert Megabytes (MB) to Gigabytes (GB) by dividing by 1,000: 2,000,000,000 MB ÷ 1,000 = 2,000,000 GB | 4.  Convert Gigabytes (GB) to Terabytes (TB) by dividing by 1,000: 2,000,000 GB ÷ 1,000 = 2,000 TB | 5.  Convert Terabytes (TB) to Petabytes (PB) by dividing by 1,000: 2,000 TB ÷ 1,000 = 2 PB",
+    "issues": [
+      "The napkin math section uses 10,000,000 users, which contradicts the 1,000,000 users specified in the scenario.",
+      "The provided napkin math is incomplete, as it only calculates the data volume for one of the two options being compared."
+    ]
+  },
+  {
+    "id": "cloud-roofline-the-transformer-flop-count-271",
+    "title": "The Transformer FLOP Count",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "napkin-math",
+    "scenario": "Calculate the total FLOPs for a single forward pass through a transformer layer with hidden dimension $H=4096$, sequence length $S=2048$, batch size $B=8$, and 32 attention heads. Break it down by component: QKV projection, attention scores, attention output, and MLP.",
+    "common_mistake": "\"Just count the attention as $O(S^2)$ and call it a day.\" This misses that the MLP typically dominates FLOPs in modern transformers (it's 2/3 of the compute), and the QKV projections are large GEMMs.",
+    "realistic_solution": "A standard transformer layer has four major GEMM operations plus the attention score computation. Each GEMM of shape $[M \\times K] \\times [K \\times N]$ costs $2MKN$ FLOPs (multiply + add).",
+    "napkin_math": "Let $B=8$, $S=2048$, $H=4096$, $d_h=128$, heads=32. Tokens = $B \\times S = 16{,}384$. **(1) QKV projection** ($[BS \\times H] \\times [H \\times 3H]$): $2 \\times 16384 \\times 4096 \\times 12288 = 1.65$ TFLOP. **(2) Attention scores** ($[BS \\times S] \\times [S \\times d_h]$ per head, 32 heads): $32 \\times 2 \\times 8 \\times 2048 \\times 2048 \\times 128 = 274.9$ GFLOP. **(3) Attention output projection** ($[BS \\times H] \\times [H \\times H]$): $2 \\times 16384 \\times 4096 \\times 4096 = 549.8$ GFLOP. **(4) MLP** (up-project $H \\to 4H$, down-project $4H \\to H$): $2 \\times (2 \\times 16384 \\times 4096 \\times 16384) = 4.40$ TFLOP. **Total per layer: 1.65T + 0.27T + 0.55T + 4.40T ≈ 6.87 TFLOP.** MLP is **64%** of compute. For 32 layers: 220 TFLOP. On H100 at 989 TFLOPS: 220 / 989 = **222 ms** minimum (compute-bound).",
+    "issues": [
+      "The question text is truncated and incomplete, stopping abruptly in the middle of the Napkin Math section.",
+      "The description of the attention scores calculation shape `[BS x S] x [S x d_h]` is confusing and incorrect for a batched operation."
+    ]
+  }
+]

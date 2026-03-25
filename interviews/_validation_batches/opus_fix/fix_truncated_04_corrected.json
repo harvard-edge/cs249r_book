@@ -1,0 +1,169 @@
+[
+  {
+    "id": "tinyml-sram-tensor-arena-the-sram-arena-squeeze-82",
+    "fixes": {
+      "scenario": "You're deploying a keyword spotting model to a Cortex-M4 microcontroller with 256KB of SRAM. You've analyzed the model in TensorFlow Lite for Microcontrollers and found the three largest consecutive tensors have the following sizes:\n- Input tensor (audio spectrogram): 40 KB\n- Intermediate feature tensor (after Conv1): 32 KB\n- Output tensor (after Conv2): 8 KB\nThe memory planner requires both the input and output of a given operation to be resident in SRAM simultaneously, but reclaims memory from tensors no longer needed by any future operation. What is the minimum tensor arena size required?",
+      "realistic_solution": "The correct approach is to calculate the memory required at each stage of inference and find the maximum. The peak usage occurs at the transition between the largest layers.\n1. **During Conv1:** The input tensor (40 KB) and intermediate tensor (32 KB) must both be live. Peak = 40 + 32 = 72 KB.\n2. **During Conv2:** The intermediate tensor (32 KB) and output tensor (8 KB) must both be live. The input tensor has been freed. Peak = 32 + 8 = 40 KB.\nThe minimum tensor arena size is the maximum of these peaks: **72 KB**.",
+      "napkin_math": "1. **Analyze Op 1 (Input -> Conv1):** Both input (40 KB) and intermediate (32 KB) must coexist. Peak = 40 + 32 = **72 KB**.\n2. **Analyze Op 2 (Conv1 -> Conv2):** Input is freed. Intermediate (32 KB) and output (8 KB) coexist. Peak = 32 + 8 = **40 KB**.\n3. **Find high-water mark:** max(72, 40) = **72 KB**.\n4. **Sanity check:** 72 KB << 256 KB SRAM, so the model fits comfortably."
+    }
+  },
+  {
+    "id": "tinyml-roofline-analysis-the-microcontroller-ridge-point-105",
+    "fixes": {
+      "napkin_math": "1. **Peak Compute** = 336 MFLOPS = 336 × 10^6 Ops/sec\n2. **Memory Bandwidth** = 1.2 GB/s = 1.2 × 10^9 Bytes/sec\n3. **Ridge Point** = Peak Compute / Memory Bandwidth = (336 × 10^6) / (1.2 × 10^9) = **0.28 Ops/Byte**\n4. **Interpretation:** Any operation with an Arithmetic Intensity (AI) below 0.28 Ops/Byte is memory-bound; above 0.28 is compute-bound. Since most simple ML operations (e.g., element-wise activations at ~1 Op/Byte) exceed this threshold, the Cortex-M4 is typically **compute-bound** for ML workloads — a stark contrast to GPU systems which are often memory-bound."
+    }
+  },
+  {
+    "id": "tinyml-sram-tensor-arena-the-sram-tensor-arena-squeeze-117",
+    "fixes": {
+      "napkin_math": "Peak memory is the high-water mark of simultaneously live tensors.\n1. **Stage 1 (Input -> Intermediate):** Input (40 KB) + Intermediate (20 KB) = **60 KB** peak.\n2. **Stage 2 (Intermediate -> Output):** Input freed. Intermediate (20 KB) + Output (10 KB) = **30 KB** peak.\n3. **Minimum Arena Size** = max(60, 30) = **60 KB**.\n\nNote: Summing all tensors (40 + 20 + 10 = 70 KB) would overestimate by ~17%. The memory planner saves 10 KB by reusing the freed input tensor's space."
+    }
+  },
+  {
+    "id": "tinyml-depthwise-separable-convolution-the-depthwise-separable-memory-dividend-138",
+    "fixes": {
+      "realistic_solution": "A depthwise separable convolution splits a standard convolution into two smaller operations: a depthwise convolution that processes each input channel independently, followed by a pointwise (1x1) convolution that combines the outputs.\n\n1. **Standard Convolution:** Applies 32 filters, each of size 3×3×16. Total parameters = 3 × 3 × 16 × 32 = **4,608**.\n2. **Depthwise Convolution:** Applies one 3×3 filter per input channel. Parameters = 3 × 3 × 16 = **144**.\n3. **Pointwise Convolution:** A 1×1 convolution mapping 16 channels to 32 outputs. Parameters = 1 × 1 × 16 × 32 = **512**.\n4. **Total Depthwise Separable:** 144 + 512 = **656** parameters.\n5. **Reduction Factor:** 4,608 / 656 ≈ **7.0×** fewer parameters.\n\nThis ~7× reduction is critical for fitting models within the limited Flash memory of microcontrollers.",
+      "napkin_math": "Standard Conv Params = (3 * 3 * 16) * 32 = 4,608\nDepthwise Params = 3 * 3 * 16 = 144\nPointwise Params = 1 * 1 * 16 * 32 = 512\nDepthwise Separable Total = 144 + 512 = **656**\nReduction Factor = 4,608 / 656 ≈ **7.0×**"
+    }
+  },
+  {
+    "id": "tinyml-depthwise-separable-convolution-the-depthwise-separable-dividend-146",
+    "fixes": {
+      "realistic_solution": "A depthwise separable convolution splits a standard convolution into two much cheaper layers:\n1. **Depthwise layer:** One 3×3 filter per input channel, applied spatially. This captures spatial features independently per channel.\n2. **Pointwise layer:** A 1×1 convolution that linearly combines the depthwise outputs to produce the desired number of output channels.\n\nThe computational savings come from avoiding the full cross-channel multiply at every spatial position.",
+      "napkin_math": "1. **Standard Convolution Cost:**\n   - MACs = K² × C_in × C_out × H_out × W_out = 3² × 32 × 64 × 16 × 16 = **4,718,592 MACs**\n2. **Depthwise Convolution Cost:**\n   - MACs = K² × C_in × H_out × W_out = 3² × 32 × 16 × 16 = **73,728 MACs**\n3. **Pointwise Convolution Cost:**\n   - MACs = 1² × C_in × C_out × H_out × W_out = 1 × 32 × 64 × 16 × 16 = **524,288 MACs**\n4. **Total Depthwise Separable Cost:** 73,728 + 524,288 = **598,016 MACs**\n5. **Speedup Factor:** 4,718,592 / 598,016 ≈ **7.9×** fewer operations\n\nThe savings come from factoring the expensive K² × C_out term into two separate, cheaper terms."
+    }
+  },
+  {
+    "id": "tinyml-depthwise-separable-convolution-the-depthwise-separable-dividend-153",
+    "fixes": {
+      "napkin_math": "Let's analyze a single layer with a 3x3 kernel, 16 input channels, and 32 output channels.\n1. **Standard Conv MACs per output pixel:** K² × C_in × C_out = 9 × 16 × 32 = **4,608 MACs/pixel**\n2. **Depthwise MACs per output pixel:** K² × C_in = 9 × 16 = **144 MACs/pixel**\n3. **Pointwise MACs per output pixel:** C_in × C_out = 16 × 32 = **512 MACs/pixel**\n4. **Total Depthwise Separable:** 144 + 512 = **656 MACs/pixel**\n5. **Reduction Factor:** 4,608 / 656 ≈ **7.0×** fewer MACs\n\nFor a resource-constrained MCU, this ~7× reduction translates directly to ~7× lower latency and energy consumption per layer, making real-time inference feasible."
+    }
+  },
+  {
+    "id": "tinyml-sram-tensor-arena-the-tensor-arena-squeeze-167",
+    "fixes": {
+      "scenario": "You are deploying a simple keyword-spotting model on a Cortex-M4 microcontroller. The TensorFlow Lite for Microcontrollers runtime uses a 'Tensor Arena' in SRAM to manage memory for input, output, and intermediate activation tensors. Your model has the following sequential structure, using INT8 precision:\n- Input: 32×32×1 (grayscale spectrogram)\n- Layer 1 (Conv2D): Output 16×16×8\n- Layer 2 (Conv2D): Output 8×8×16\n- Layer 3 (Dense): Output 12 (number of keywords)\nWhat is the minimum tensor arena size required to run inference?",
+      "napkin_math": "1.  **Calculate size of Input Tensor:** `32 * 32 * 1 byte/element = 1,024 bytes (1 KB)`\n2.  **Calculate size of Layer 1 Output:** `16 * 16 * 8 = 2,048 bytes (2 KB)`\n3.  **Calculate size of Layer 2 Output:** `8 * 8 * 16 = 1,024 bytes (1 KB)`\n4.  **Calculate size of Layer 3 Output:** `12 bytes (~0.01 KB)`\n5.  **Peak at Layer 1 execution:** Input + L1 Output = 1 KB + 2 KB = **3 KB**\n6.  **Peak at Layer 2 execution:** L1 Output + L2 Output = 2 KB + 1 KB = **3 KB**\n7.  **Peak at Layer 3 execution:** L2 Output + L3 Output = 1 KB + 0.01 KB ≈ **1 KB**\n8.  **Minimum Arena Size:** max(3, 3, 1) = **3 KB**\n\nThis is well within the 256 KB SRAM budget, leaving ample room for the runtime, stack, and other buffers."
+    }
+  },
+  {
+    "id": "tinyml-depthwise-separable-convolution-the-depthwise-separable-advantage-170",
+    "fixes": {
+      "napkin_math": "1.  **Standard Convolution Params:**\n    - Params = K × K × C_in × C_out = 3 × 3 × 128 × 128 = **147,456**\n    - Memory (INT8) = 147,456 × 1 byte = **144 KB**\n2.  **Depthwise Convolution Params:**\n    - Params = K × K × C_in = 3 × 3 × 128 = **1,152**\n3.  **Pointwise Convolution Params:**\n    - Params = 1 × 1 × C_in × C_out = 128 × 128 = **16,384**\n4.  **Total Depthwise Separable Params:** 1,152 + 16,384 = **17,536**\n    - Memory (INT8) = 17,536 × 1 byte ≈ **17.1 KB**\n5.  **Reduction Factor:** 147,456 / 17,536 ≈ **8.4×** fewer parameters\n\nThis saves ~127 KB of Flash per layer — significant when the total budget is ~450 KB."
+    }
+  },
+  {
+    "id": "tinyml-economics-tco-the-tco-blindspot-171",
+    "fixes": {
+      "napkin_math": "Device Power: Assume a simple duty cycle: 1s active at 10mW, 59s sleep at 10µW (from the numbers table).\n1. **Average Power:** (1/60 × 10mW) + (59/60 × 0.01mW) ≈ 0.167 mW + 0.010 mW ≈ **0.177 mW**\n2. **Energy per year:** 0.177 mW × 8,760 hrs = **1.55 Wh/year**\n3. **Battery capacity (typical coin cell):** ~1,000 mWh = 1 Wh → needs replacement ~every 6.5 months, or roughly **7-8 replacements over 5 years**.\n4. **Replacement labor cost:** ~$75/truck roll × 8 replacements = **$600/device over 5 years**\n5. **Fleet TCO breakdown for 100,000 devices over 5 years:**\n   - Hardware CapEx: 100K × $2 = **$200K**\n   - Battery replacement OpEx: 100K × $600 = **$60,000,000**\n6. **Conclusion:** OpEx (battery + labor) is **300×** the initial hardware cost. This is why TinyML engineers obsess over sleep current and duty cycle optimization."
+    }
+  },
+  {
+    "id": "tinyml-tinyml-economics-tco-the-energy-cost-of-intelligence:-on-devi-180",
+    "fixes": {
+      "napkin_math": "**1. Calculate Total Energy for Always-On TinyML:**\n   - Power = 30 mW (always active)\n   - Energy/day = 30 mW × 24 hrs = **720 mWh/day**\n\n**2. Calculate Total Energy for Cloud Offload:**\n   - Active time per day: 24 wake-ups × 5 sec = 120 sec = 0.0333 hrs\n   - Sleep time per day: 24 hrs - 0.0333 hrs ≈ 23.967 hrs\n   - Active energy: 500 mW (modem TX) × 0.0333 hrs = **16.7 mWh**\n   - Sleep energy: 0.01 mW × 23.967 hrs = **0.24 mWh**\n   - Total energy/day = 16.7 + 0.24 ≈ **16.9 mWh/day**\n\n**3. Comparison:**\n   - Always-On TinyML: **720 mWh/day**\n   - Cloud Offload: **16.9 mWh/day**\n   - Ratio: 720 / 16.9 ≈ **42.6×** more energy for always-on\n\n**4. Conclusion:** The Cloud Offload approach uses ~43× less energy because its aggressive duty cycling (deep sleep for 99.86% of the time) dominates the high peak power of the modem."
+    }
+  },
+  {
+    "id": "tinyml-depthwise-separable-convolution-the-flash-budget-diet-186",
+    "fixes": {
+      "napkin_math": "1.  **Standard Convolution Parameters:**\n    - Params = K × K × C_in × C_out = 3 × 3 × 16 × 32 = **4,608**\n2.  **Depthwise Convolution Parameters:**\n    - One 3×3 filter per input channel: 3 × 3 × 16 = **144**\n3.  **Pointwise (1×1) Convolution Parameters:**\n    - Maps 16 channels to 32 outputs: 1 × 1 × 16 × 32 = **512**\n4.  **Total Depthwise Separable:** 144 + 512 = **656 parameters**\n5.  **Reduction Factor:** 4,608 / 656 ≈ **7.0×**\n6.  **Memory Savings (INT8):** Standard = 4,608 bytes ≈ 4.5 KB → DS = 656 bytes ≈ 0.64 KB. Saves ~3.9 KB per layer.\n\nThe theoretical reduction factor for depthwise separable convolutions is approximately 1/C_out + 1/K² ≈ 1/32 + 1/9 ≈ 0.14, giving a ~7× reduction — matching our calculation."
+    }
+  },
+  {
+    "id": "tinyml-tinyml-federated-learning-economics-the-federated-economics-of-a-million-doo-188",
+    "fixes": {
+      "scenario": "You're the ML Systems Engineer for a company that has deployed one million cellular-connected smart doorbells. Each doorbell has a keyword spotting model. A product decision has been made to add a new wake-word. You must compare the data transmission cost of two strategies for this update:\n- **Strategy A (Centralized):** Each device uploads 100 audio snippets (32 KB each) to the cloud for retraining. The retrained model (200 KB) is then pushed back to all devices.\n- **Strategy B (Federated):** Each device trains locally and uploads only a gradient update (50 KB) to the aggregation server. The aggregated model (200 KB) is then pushed to all devices.\nData transfer costs $0.09/GB. Compare the total data transfer cost for each strategy.",
+      "napkin_math": "1.  **Data per device:** 100 snippets/device × 32 KB/snippet = 3,200 KB/device\n2.  **Fleet upload (Centralized):** 3,200 KB × 1,000,000 devices = 3,200,000,000 KB = **3,200 TB**\n3.  **Model push-back:** 200 KB × 1,000,000 = 200 GB\n4.  **Total Centralized Data:** ~3,200 TB + 0.2 TB ≈ **3,200 TB**\n5.  **Centralized Cost:** 3,200 TB × 1,024 GB/TB × $0.09/GB ≈ **$294,912**\n\n6.  **Fleet upload (Federated):** 50 KB × 1,000,000 = 50 GB\n7.  **Model push-back (same):** 200 GB\n8.  **Total Federated Data:** 50 + 200 = **250 GB**\n9.  **Federated Cost:** 250 GB × $0.09/GB = **$22.50**\n\n10. **Savings:** Centralized is ~**13,000×** more expensive in data transfer costs. The raw audio upload dominates — this is why federated learning is compelling at fleet scale."
+    }
+  },
+  {
+    "id": "tinyml-mcu-roofline-analysis-the-microcontroller's-ceiling-190",
+    "fixes": {
+      "realistic_solution": "The correct way to solve this is to apply the roofline model.\n1. **Calculate the Ridge Point:** Ridge Point = Peak Compute / Memory BW = 336 MFLOPS / 1.2 GB/s = 0.28 Ops/Byte.\n2. **Calculate the operation's Arithmetic Intensity (AI):** A 3-tap FIR filter on 256 FP32 samples performs 3 multiply-accumulate operations per sample = 3 × 2 = 6 FLOPs/sample, totaling 6 × 256 = 1,536 FLOPs. Data moved: 256 input samples + 3 kernel coefficients + 256 output samples ≈ 515 × 4 bytes = 2,060 bytes. AI = 1,536 / 2,060 ≈ 0.75 Ops/Byte.\n3. **Compare:** Since AI (0.75) > Ridge Point (0.28), the FIR filter is **compute-bound** on this MCU.\n4. **Attainable throughput** = Peak Compute = 336 MFLOPS (limited by the compute ceiling, not memory bandwidth).",
+      "napkin_math": "The 'ridge point' of a roofline model tells you how much arithmetic intensity is needed to become compute-bound. | Cortex-M4 Compute: ~336 MFLOPS | Cortex-M4 Memory BW: ~1.2 GB/s\n1. **Ridge Point** = 336 × 10^6 / 1.2 × 10^9 = **0.28 Ops/Byte**\n2. **FIR FLOPs:** 3 taps × 2 ops/tap (multiply + accumulate) × 256 samples = **1,536 FLOPs**\n3. **Data moved:** (256 input + 256 output + 3 kernel) × 4 bytes = **2,060 bytes**\n4. **Arithmetic Intensity:** 1,536 / 2,060 ≈ **0.75 Ops/Byte**\n5. **Comparison:** 0.75 > 0.28 → **compute-bound**\n6. **Attainable performance:** capped at 336 MFLOPS (the compute ceiling)"
+    }
+  },
+  {
+    "id": "tinyml-depthwise-separable-convolution-the-depthwise-separable-memory-diet-194",
+    "fixes": {
+      "napkin_math": "The calculation for the parameter count of a standard convolutional layer is `kernel_height × kernel_width × input_channels × output_channels`.\n1. **Standard Conv Params:** 3 × 3 × 32 × 64 = **18,432 parameters**\n2. **Memory (INT8):** 18,432 × 1 byte = **18 KB**\n3. **For comparison — Depthwise Separable:**\n   - Depthwise: 3 × 3 × 32 = 288\n   - Pointwise: 1 × 1 × 32 × 64 = 2,048\n   - Total: 288 + 2,048 = **2,336 parameters** = **2.3 KB**\n4. **Reduction Factor:** 18,432 / 2,336 ≈ **7.9×** fewer parameters"
+    }
+  },
+  {
+    "id": "tinyml-tinyml-arithmetic-intensity-the-tinyml-compute-memory-tradeoff-198",
+    "fixes": {
+      "scenario": "You're optimizing a keyword spotting model on a Cortex-M4 microcontroller. A key layer is a 2D convolution with the following properties:\n- Input feature map: 16×16×8 (H×W×C_in)\n- Output feature map: 16×16×16 (H×W×C_out)\n- Kernel size: 3×3\n- Precision: INT8 (1 byte per element)\n- Cortex-M4 specs: 336 MFLOPS peak compute, 1.2 GB/s SRAM bandwidth\nIs this convolutional layer compute-bound or memory-bound on the Cortex-M4?",
+      "napkin_math": "*   **Hardware Ridge Point:** (336 M-ops/s) / (1.2 G-bytes/s) ≈ 0.28 Ops/Byte\n*   **FLOPs for Conv2D:** K² × C_in × C_out × H_out × W_out = 9 × 8 × 16 × 16 × 16 = **294,912 FLOPs**\n*   **Data moved:** Input (16×16×8 = 2,048 B) + Weights (3×3×8×16 = 1,152 B) + Output (16×16×16 = 4,096 B) = **7,296 bytes**\n*   **Arithmetic Intensity:** 294,912 / 7,296 ≈ **40.4 Ops/Byte**\n*   **Comparison:** 40.4 >> 0.28 → This layer is deeply **compute-bound**.\n*   **Implication:** Optimizations should target reducing FLOPs (e.g., depthwise separable convolution, pruning), not memory access patterns."
+    }
+  },
+  {
+    "id": "tinyml-sram-tensor-arena-the-tinyml-tensor-arena-squeeze-199",
+    "fixes": {
+      "scenario": "You are deploying a keyword spotting model on a Cortex-M4 microcontroller which has 256 KB of SRAM. After analyzing the model graph, you determine the point of peak memory usage occurs during the execution of Layer 5. At this moment, TensorFlow Lite needs to hold the input tensor for Layer 5 (which is the output from Layer 4) and the output tensor for Layer 5 in memory concurrently.\n- Layer 4 output tensor dimensions: 8×8×16, INT8 precision\n- Layer 5 output tensor dimensions: 8×8×32, INT8 precision\nWhat is the peak memory usage at this point, and does it fit within the SRAM budget?",
+      "napkin_math": "1. **Calculate L4 Output Size:** 8 × 8 × 16 × 1 byte = **1,024 bytes (1.0 KB)**\n2. **Calculate L5 Output Size:** 8 × 8 × 32 × 1 byte = **2,048 bytes (2.0 KB)**\n3. **Peak Memory at Layer 5:** 1,024 + 2,048 = **3,072 bytes (3.0 KB)**\n4. **SRAM Budget Check:** 3.0 KB << 256 KB → **fits easily**\n5. **Note:** The full tensor arena must also account for the TFLM runtime overhead (~2-5 KB for the interpreter and scratch buffers), so the practical minimum arena size would be approximately 5-8 KB."
+    }
+  },
+  {
+    "id": "tinyml-tinyml-flash-budget-the-tinyml-flash-budget-225",
+    "fixes": {
+      "napkin_math": "Using standard values for a 1MB (1000 KB) microcontroller:\n1. **Bootloader:** ~16 KB\n2. **RTOS + drivers:** ~64 KB\n3. **TFLM runtime:** ~50 KB\n4. **OTA update buffer (A/B partitioning):** ~500 KB (half of total flash)\n5. **Application code:** ~50 KB\n6. **Total overhead:** 16 + 64 + 50 + 500 + 50 = **680 KB**\n7. **Available for ML model:** 1,000 - 680 = **~320 KB**\n\n**Formula:** Model Budget = Total Flash − Bootloader − RTOS − TFLM Runtime − OTA Buffer − App Code\n\nThe OTA buffer alone consumes 50% of flash. Without it, the model budget would be ~820 KB — but OTA is essential for field updates. This is why INT8 quantization (4× smaller than FP32) is non-negotiable for TinyML."
+    }
+  },
+  {
+    "id": "tinyml-federated-learning-economics-the-economics-of-fleet-updates:-centrali-227",
+    "fixes": {
+      "scenario": "You are the ML systems engineer for a fleet of 1 million TinyML-powered smart doorbells. To improve the person detection model, you must decide on an update strategy.\n- **Strategy A (Centralized):** Each device uploads 100 representative images (10 KB each) to the cloud for centralized retraining. The updated model (500 KB) is pushed back to all devices.\n- **Strategy B (Federated):** Each device computes a local gradient update (100 KB) from its on-device data and uploads it. The server aggregates gradients and pushes the updated model (500 KB) back.\nData transfer costs $0.09/GB. Which strategy is cheaper in terms of total data transfer cost?",
+      "napkin_math": "1. **Centralized Data (per device):** 100 images × 10 KB/image = 1,000 KB = 1 MB\n2. **Centralized Upload (fleet):** 1 MB × 1,000,000 = **1,000,000 MB = ~977 TB**\n3. **Centralized Download (fleet):** 500 KB × 1,000,000 = 500 GB\n4. **Total Centralized:** ~977 TB + 0.5 TB ≈ **977 TB**\n5. **Centralized Cost:** 977 × 1,024 GB × $0.09 ≈ **$90,000**\n\n6. **Federated Upload (fleet):** 100 KB × 1,000,000 = **100 GB**\n7. **Federated Download (fleet):** 500 KB × 1,000,000 = **500 GB**\n8. **Total Federated:** 100 + 500 = **600 GB**\n9. **Federated Cost:** 600 × $0.09 = **$54**\n\n10. **Conclusion:** Centralized is ~**1,667×** more expensive. The bottleneck is uploading raw data from 1M devices — federated learning compresses this by 10× per device (100 KB gradient vs. 1 MB raw images)."
+    }
+  },
+  {
+    "id": "tinyml-tinyml-roofline-analysis-the-microcontroller-roofline-dilemma-250",
+    "fixes": {
+      "scenario": "You are profiling a keyword-spotting model on a Cortex-M4 microcontroller. The profiler shows the most critical layer performs **40,000 floating-point operations (FLOPs)** and reads/writes a total of **20 kilobytes (KB)** of data from SRAM per inference. The Cortex-M4 has a peak compute of **336 MFLOPS** and an SRAM bandwidth of **1.2 GB/s**.",
+      "realistic_solution": "The layer is **compute-bound**. 1. **Convert Data to Bytes:** 20 KB * 1024 bytes/KB = 20,480 bytes\n2. **Calculate Arithmetic Intensity (AI):** AI = FLOPs / Bytes = 40,000 / 20,480 ≈ **1.95 Ops/Byte**\n3. **Calculate Ridge Point:** Ridge Point = Peak Compute / Memory BW = 336 × 10^6 / 1.2 × 10^9 = **0.28 Ops/Byte**\n4. **Compare:** AI (1.95) > Ridge Point (0.28) → The layer is **compute-bound**.\n5. **Attainable Performance:** Since it is compute-bound, performance is capped at 336 MFLOPS regardless of how much data is accessed. Optimization should focus on reducing FLOPs (e.g., pruning, quantization, depthwise separable convolutions) rather than improving memory access patterns.",
+      "napkin_math": "1. **Convert Data to Bytes:** 20 KB * 1024 bytes/KB = 20,480 bytes\n2. **Arithmetic Intensity:** 40,000 FLOPs / 20,480 bytes ≈ **1.95 Ops/Byte**\n3. **Ridge Point:** 336 MFLOPS / 1.2 GB/s = **0.28 Ops/Byte**\n4. **Verdict:** 1.95 >> 0.28 → **compute-bound**\n5. **Inference time estimate:** 40,000 / 336 × 10^6 ≈ 0.12 ms (compute-limited, not memory-limited)"
+    }
+  },
+  {
+    "id": "tinyml-nas-power-budget-the-power-aware-nas-dilemma-327",
+    "fixes": {
+      "scenario": "You are using Neural Architecture Search (NAS) to find a model for an always-on audio sensor. The system has a strict average power budget of 1mW to ensure a 1-year battery life. The device runs on a Cortex-M4, which consumes 10mW when active and 10µW in deep sleep. The audio pipeline runs once every second (t_period = 1s). The NAS returns two candidate models:\n- **Model A:** Accuracy = 92%, Active inference time = 50 ms\n- **Model B:** Accuracy = 89%, Active inference time = 20 ms\nWhich model should you select based on the power budget constraint?",
+      "napkin_math": "**Formula for Average Power:**\nP_avg = (t_active / t_period) × P_active + (1 − t_active / t_period) × P_sleep\n\n**Model A:**\n- Duty cycle = 50 ms / 1000 ms = 0.05\n- P_avg = 0.05 × 10 mW + 0.95 × 0.01 mW = 0.5 + 0.0095 = **0.51 mW** ✓ (under 1 mW budget)\n\n**Model B:**\n- Duty cycle = 20 ms / 1000 ms = 0.02\n- P_avg = 0.02 × 10 mW + 0.98 × 0.01 mW = 0.2 + 0.0098 = **0.21 mW** ✓ (under 1 mW budget)\n\n**Decision:** Both models fit within the 1 mW power budget. Since both are feasible, **select Model A** for its higher accuracy (92% vs. 89%). Model B's lower power (0.21 vs. 0.51 mW) provides no additional benefit once the constraint is met — accuracy should be maximized within the power envelope."
+    }
+  },
+  {
+    "id": "tinyml-tinyml-privacy-federated-learning-tco-the-privacy-aware-doorbell's-tco-395",
+    "fixes": {
+      "napkin_math": "1. **Calculate Data Size Per Clip:** `1 sec * 16,000 samples/sec * 16 bits/sample / 8 bits/byte = 32,000 Bytes = 32 KB`.\n2. **Monthly Upload Volume (Cloud):** 1,000,000 clips × 32 KB = 32,000,000 KB = **~30.5 TB/month**\n3. **Annual Data Egress Cost:** 30.5 TB × 12 months × 1,024 GB/TB × $0.09/GB ≈ **$33,750/year**\n4. **Annual Privacy Liability (Cloud):** 1,000,000 clips/month × 12 months × $0.01 = **$120,000/year**\n5. **Cloud Training Cost:** **$10,000/year**\n6. **Total Cloud TCO (Year 1):** $33,750 + $120,000 + $10,000 = **$163,750**\n\n7. **Federated Learning Engineering (one-time):** **$80,000**\n8. **FL Server Orchestration:** $2,000/month × 12 = **$24,000/year**\n9. **FL Privacy Liability:** $0 (no raw data leaves device)\n10. **Total FL TCO (Year 1):** $80,000 + $24,000 = **$104,000**\n\n11. **Decision:** FL saves **$59,750 in Year 1** ($163,750 − $104,000). In Year 2+, FL costs only $24,000/year vs. $163,750/year for cloud — the gap widens dramatically."
+    }
+  },
+  {
+    "id": "tinyml-tinyml-economics-tco-the-tco-of-a-2%-accuracy-gain-405",
+    "fixes": {
+      "scenario": "You are the Staff ML Engineer for a new battery-powered smart security camera fleet. Your team is A/B testing two person-detection models on a fleet of 1,000,000 devices. The device's battery is designed to last exactly 2 years under normal operation with Model A, and a field replacement costs the company $5.00 per device. Using the provided data, solve for the best business decision by calculating the Total Cost of Ownership (TCO) impact of deploying Model B over a 2-year period.\n- **Model A:** Average power = 1.0 mW, Accuracy = 90%, Revenue per device = $10/year\n- **Model B:** Average power = 1.5 mW, Accuracy = 92%, Revenue per device = $10.50/year\n- Battery capacity is sized for exactly 2 years at 1.0 mW average power.",
+      "napkin_math": "1.  **Calculate Revenue Gain from Model B:**\n    - Model A revenue: $10/year × 2 years × 1M = **$20,000,000**\n    - Model B revenue: $10.50/year × 2 years × 1M = **$21,000,000**\n    - Revenue gain: **+$1,000,000**\n\n2.  **Calculate Battery Life Impact:**\n    - Battery sized for 2 years at 1.0 mW → capacity proportional to 1.0 mW × 2 years\n    - Model B at 1.5 mW: lifetime = 2 years × (1.0 / 1.5) = **1.33 years**\n    - Every device needs 1 battery replacement within the 2-year window\n\n3.  **Calculate Replacement Cost:**\n    - Replacements: 1,000,000 devices × 1 replacement × $5.00 = **$5,000,000**\n\n4.  **Net TCO Impact of Model B:**\n    - Revenue gain: +$1,000,000\n    - Replacement cost: −$5,000,000\n    - **Net impact: −$4,000,000**\n\n5.  **Decision: Reject Model B.** The 2% accuracy gain generates $1M in extra revenue but triggers $5M in battery replacements. The 50% power increase creates a catastrophic cost cliff at fleet scale."
+    }
+  },
+  {
+    "id": "tinyml-tinyml-federated-tco-the-federated-learning-power-trap-410",
+    "fixes": {
+      "scenario": "You are a Staff ML Systems Engineer at a company building a new battery-powered smart home device for keyword spotting. The device uses a Cortex-M4 MCU that consumes 50 mW during active operation. Your team needs to decide on a strategy for collecting data to improve the model. There are two proposals:\n- **Strategy A (Centralized Upload):** The device wakes up once per hour, records a 5-second audio clip, and transmits it via BLE to a nearby hub. BLE transmission consumes 30 mW and takes 10 seconds per clip. The MCU sleeps at 10 µW otherwise.\n- **Strategy B (Federated Learning):** The device performs local on-device training for 60 seconds per hour at full MCU power (50 mW), then uploads a 2 KB gradient via BLE (30 mW, 1 second). The MCU sleeps at 10 µW otherwise.\nCompare the daily energy consumption of both strategies.",
+      "napkin_math": "### Strategy A: Centralized Upload\n1. **Active (recording):** 5 sec/hr × 50 mW = 250 mW·s per hour\n2. **BLE TX:** 10 sec/hr × 30 mW = 300 mW·s per hour\n3. **Sleep:** (3600 − 15) sec/hr × 0.01 mW = 35.85 mW·s per hour\n4. **Hourly energy:** 250 + 300 + 35.85 = **585.85 mW·s/hr**\n5. **Daily energy:** 585.85 × 24 = **14,060 mW·s = 3.91 mWh/day**\n\n### Strategy B: Federated Learning\n1. **On-device training:** 60 sec/hr × 50 mW = 3,000 mW·s per hour\n2. **BLE TX:** 1 sec/hr × 30 mW = 30 mW·s per hour\n3. **Sleep:** (3600 − 61) sec/hr × 0.01 mW = 35.39 mW·s per hour\n4. **Hourly energy:** 3,000 + 30 + 35.39 = **3,065.39 mW·s/hr**\n5. **Daily energy:** 3,065.39 × 24 = **73,569 mW·s = 20.44 mWh/day**\n\n### Comparison:\n- Strategy B uses **5.2× more energy** than Strategy A\n- The 60-second on-device training dominates the power budget\n- **Conclusion:** Federated Learning is not always better for battery-powered devices — the on-device compute cost of local training can far exceed the communication cost of uploading raw data."
+    }
+  },
+  {
+    "id": "tinyml-federated-learning-tco-the-smart-doorbell's-privacy-tax-411",
+    "fixes": {
+      "scenario": "You are the Staff ML Systems Engineer for a new smart doorbell product line which has a fleet of 1 million devices, each equipped with a Cortex-M4 MCU. Your team wants to improve the on-device 'familiar face' model. To preserve user privacy, two strategies are proposed:\n- **Strategy A (Federated Learning):** Each device trains locally for 5 minutes per day at 50 mW, then uploads a 10 KB gradient update. User electricity cost is ~$0.12/kWh. Server aggregation costs $3,000/month.\n- **Strategy B (Centralized OTA):** A cloud-trained model update (500 KB) is pushed to all devices once per month via cellular. Cellular data costs $0.10/MB. Cloud training costs $5,000/month.\nCalculate the annual operational cost for each strategy across the entire fleet.",
+      "napkin_math": "### 1. Federated Learning Annual Cost\n- **On-device energy:** 5 min × 50 mW × 365 days = 91,250 mW·min = 1,520.8 mWh/device/year ≈ 0.00152 kWh\n- Fleet electricity: 1M × 0.00152 kWh × $0.12 = **$182/year** (negligible)\n- **Gradient upload cost:** 10 KB × 365 days × 1M devices = 3.65 TB/year. At $0.10/MB: 3.65 × 10^6 MB × $0.10 = **$365,000/year**\n- **Server aggregation:** $3,000/month × 12 = **$36,000/year**\n- **FL Total:** $182 + $365,000 + $36,000 ≈ **$401,182/year**\n\n### 2. Centralized OTA Annual Cost\n- **OTA data cost:** 500 KB × 12 months × 1M devices = 6,000,000 MB = 6 TB/year. At $0.10/MB: 6 × 10^6 × $0.10 = **$600,000/year**\n- **Cloud training:** $5,000/month × 12 = **$60,000/year**\n- **OTA Total:** $600,000 + $60,000 = **$660,000/year**\n\n### Conclusion:\nFL saves **~$259,000/year** ($660K − $401K). The dominant cost in both strategies is cellular data transfer at fleet scale, not compute or cloud training."
+    }
+  },
+  {
+    "id": "tinyml-federated-learning-economics-the-federated-learning-tco-fallacy-412",
+    "fixes": {
+      "scenario": "You are the lead ML Systems Engineer for a new smart speaker product with a planned fleet of 1 million devices. The current device uses a minimal Cortex-M4 MCU. The product team wants to add a feature to let users create custom \"wake words\", and they are pushing for a Federated Learning (FL) approach for user privacy. This would require upgrading the entire fleet to a more powerful Cortex-M7 MCU, adding $1.00 to the Bill of Materials (BOM) cost per device.\n- **Strategy A (Cloud Retraining):** Users upload 50 wake-word samples (5 KB each) to the cloud. Cloud training costs $500/month. Data transfer costs $0.09/GB.\n- **Strategy B (Federated Learning):** Requires the $1.00 MCU upgrade for on-device training capability. FL server orchestration costs $2,000/month. Each device uploads a 20 KB gradient per training round, with 12 rounds per year. Data transfer costs $0.09/GB.\nCompare the 2-year TCO of each strategy.",
+      "napkin_math": "### Strategy A: Cloud Retraining TCO\n**CapEx:** $0 (no hardware change)\n**OpEx:**\n- Data upload: 50 samples × 5 KB × 1M devices = 250 GB (one-time onboarding). At $0.09/GB = **$22.50**\n- Cloud training: $500/month × 24 months = **$12,000**\n- Total OpEx (2 years): ≈ **$12,023**\n**Total TCO (A):** **$12,023**\n\n### Strategy B: Federated Learning TCO\n**CapEx:** $1.00 × 1,000,000 devices = **$1,000,000**\n**OpEx:**\n- Gradient uploads: 20 KB × 12 rounds × 1M devices = 240 GB/year. At $0.09/GB = $21.60/year × 2 = **$43.20**\n- Server orchestration: $2,000/month × 24 months = **$48,000**\n- Total OpEx (2 years): ≈ **$48,043**\n**Total TCO (B):** $1,000,000 + $48,043 = **$1,048,043**\n\n### Decision:\nCloud retraining is **~87× cheaper** over 2 years. The $1/device MCU upgrade at 1M-unit scale ($1M CapEx) completely dominates. FL's privacy benefits must be weighed against this ~$1M cost premium. This is the \"BOM trap\" — at consumer electronics scale, even $1 in hardware cost dwarfs years of cloud OpEx."
+    }
+  }
+]

@@ -1,0 +1,416 @@
+[
+  {
+    "id": "tinyml-memory-hierarchy-kv-cache-dma-the-streaming-sensor-fusion-dilemma-536",
+    "title": "The Streaming Sensor Fusion Dilemma",
+    "level": "L6+",
+    "track": "tinyml",
+    "ka": "C2",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "You are the technical lead for a new autonomous drone project. The drone uses a low-cost Cortex-M7 microcontroller (1MB Flash, 256KB SRAM) for its flight controller. A new requirement has come down: add a 'situational awareness' feature that fuses data from three high-frequency sensors (IMU, barometer, microphone) in real-time to predict flight instability. The research team has proposed a small, transformer-like model that requires a 512-token KV-cache to maintain temporal context. Your constraints are a hard real-time deadline of 1ms per inference and the existing MCU. The junior team's initial analysis concludes it's impossible, as the KV-cache alone (512 tokens * 16 layers * 128 embed_dim * FP16 = ~2MB) is 8x larger than the available SRAM. Design a system architecture that makes this model feasible. What are your first three architectural decisions, and justify them with quantitative analysis?",
+    "common_mistake": "Applying virtual memory or mobile-style memory management concepts. A common mistake is to assume you can just 'offload' to Flash like it's slow RAM or a swap file, without accounting for the physical realities of Flash (erase/write cycles, block-based access) and the lack of an MMU. Another error is focusing solely on model quantization, which shrinks weights but doesn't solve the fundamental KV-cache state size problem.",
+    "realistic_solution": "The problem requires abandoning the monolithic 'all-in-SRAM' memory model and designing a dataflow architecture that treats memory as a multi-level hierarchy managed explicitly in software.",
+    "napkin_math": "1.  **Verify Impossibility of Naive Approach:**",
+    "issues": [
+      "The scenario lacks key parameters (e.g., model embedding dimension, data type) to make the KV-cache size calculation concrete and prove the 'impossibility' of the naive approach.",
+      "The Napkin Math section is missing the crucial calculation of the KV-cache size.",
+      "The Realistic Solution is too abstract and doesn't describe a specific, workable software architecture."
+    ]
+  },
+  {
+    "id": "tinyml-real-time-scheduling-batching-the-predictive-maintenance-scheduler's-d-539",
+    "title": "The Predictive Maintenance Scheduler's Dilemma",
+    "level": "L6+",
+    "track": "tinyml",
+    "ka": "D6",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "You are the Staff ML Systems Engineer at a company building industrial monitoring devices. Your product uses a single Cortex-M7 MCU to run three models on three different sensor streams:",
+    "common_mistake": "The most common L4/L5 answer is: \"Just use a Real-Time Operating System (RTOS) with fixed-priority preemption.\" While this is a necessary first step to solve the immediate deadline violation, it is not a complete L6+ architecture. This solution prevents priority inversion, but it doesn't address the significant inefficiencies of the v1 design. A pure RTOS approach might preempt the audio inference, run the vibration inference, and then restart the audio inference from scratch, wasting the 50ms of work it had already done. It fails to 'Create' a novel system that maximizes the value of the hardware.",
+    "realistic_solution": "A Staff-level solution involves designing a hybrid, two-level architecture that recognizes the different constraints of each task.",
+    "napkin_math": "The justification must start by proving *why* the v1 system fails.",
+    "issues": [
+      "The scenario is missing the critical parameters for the three models: their execution times, deadlines/periods, and real-time requirements.",
+      "The Napkin Math section is a placeholder and does not contain the necessary schedulability analysis to demonstrate the failure of a naive approach."
+    ]
+  },
+  {
+    "id": "tinyml-memory-hierarchy-execute-in-place-vs-copy-to-sram-for-mod-579",
+    "title": "Execute-in-Place vs Copy-to-SRAM for Model Weights",
+    "level": "L4",
+    "track": "tinyml",
+    "ka": "C1",
+    "rc": "RC-11",
+    "mode": "symptom-to-cause",
+    "scenario": "Your TinyML model has 500 KB of INT8 weights stored in on-chip flash on an STM32H7 (Cortex-M7, 480 MHz, 1 MB SRAM, 2 MB flash). The default CMSIS-NN implementation reads weights directly from flash via XIP (execute-in-place). A colleague suggests copying all 500 KB of weights to SRAM before inference for faster access. Flash read latency is ~5 wait states at 480 MHz (~10ns effective), while SRAM is zero-wait-state (~2ns). Should you copy to SRAM?",
+    "common_mistake": "\"SRAM is 5× faster than flash, so copying weights to SRAM gives a 5× inference speedup.\" This ignores the M7's ART Accelerator (flash prefetch cache), the sequential access pattern of weight reads, and the cost of the copy itself.",
+    "realistic_solution": "The answer depends on the access pattern and the flash cache hit rate.",
+    "napkin_math": "Model: 500 KB weights, 20 layers. Small layers (weights < 16 KB): 15 layers, 150 KB total, D-cache hit rate ~95%. Large layers (weights > 16 KB): 5 layers, 350 KB total, D-cache hit rate ~20%. Flash XIP inference: small layers at ~2ns effective + large layers at ~10ns effective. Blended: 15 layers × 2ms + 5 layers × 8ms = 70ms. Selective SRAM copy (large layers only): 15 layers × 2ms + 5 layers × 1.5ms = 37.5ms. Speedup: 70 / 37.5 = **1.87×**. SRAM cost: 200 KB (of 1 MB). Full SRAM copy: all layers at ~2ns → 15 × 2ms + 5 × 1.5ms = 37.5ms (same speedup, but costs 500 KB SRAM). Selective copy gives the same speedup at 60% less SRAM cost.",
+    "issues": [
+      "The napkin math incorrectly states the SRAM cost for copying large layers is 200 KB, but the scenario defines the large layers as totaling 350 KB."
+    ]
+  },
+  {
+    "id": "tinyml-memory-hierarchy-multi-model-sram-partitioning-581",
+    "title": "Multi-Model SRAM Partitioning",
+    "level": "L4",
+    "track": "tinyml",
+    "ka": "C1",
+    "rc": "RC-2",
+    "mode": "symptom-to-cause",
+    "scenario": "Your smart home sensor hub on a Cortex-M7 (512 KB SRAM, 480 MHz) runs three models: (1) voice activity detection (VAD, 20 KB weights, 8 KB peak activations, runs continuously at 16 kHz), (2) keyword spotting (KWS, 80 KB weights, 45 KB peak activations, runs when VAD triggers), (3) command classification (CMD, 120 KB weights, 60 KB peak activations, runs when KWS triggers). Design the SRAM partitioning strategy. Can all three models coexist in memory?",
+    "common_mistake": "\"Load all three models into SRAM: 20 + 80 + 120 = 220 KB for weights, plus activations. Fits in 512 KB.\" This ignores that weights typically live in flash (not SRAM) for TinyML, and that the activation arenas are the real SRAM consumers. But more critically, it ignores the cascading trigger pattern — these models don't all run simultaneously.",
+    "realistic_solution": "Exploit the cascading trigger pattern to time-multiplex SRAM.",
+    "napkin_math": "SRAM usage: 200 KB / 512 KB = 39%. If all three arenas were separate: 12 + 65 + 80 = 157 KB for arenas alone. Shared: 12 + 80 = 92 KB. Savings: 65 KB (41% reduction). With 312 KB headroom, you could add a 4th model (e.g., speaker verification, ~40 KB arena) without any changes. Flash usage: 20 + 80 + 120 = 220 KB for weights. On a 1 MB flash device: 22% for models, leaving 780 KB for firmware + OTA staging. Power: VAD always-on at 0.5ms/64ms = 0.78% duty cycle. Average current: 0.0078 × 30 mA + 0.9922 × 0.5 mA = 0.73 mA. Battery life (225 mAh CR2032): 308 hours = 12.8 days. Need a larger battery or lower-power MCU for always-on VAD.",
+    "issues": [
+      "The peak activation sizes are inconsistent between the scenario (8, 45, 60 KB) and the napkin math (12, 65, 80 KB).",
+      "The napkin math introduces an unexplained '200 KB' SRAM usage figure that does not correspond to any clear value from the scenario."
+    ]
+  },
+  {
+    "id": "cloud-networking-nvlink-vs-pcie-tensor-parallel-gen",
+    "title": "The NVLink vs PCIe Tensor Parallel Gap",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "C3",
+    "rc": "RC-1",
+    "mode": "concept-recall",
+    "scenario": "You are deciding whether tensor parallelism is viable across PCIe-connected GPUs versus NVLink-connected GPUs. Tensor parallelism requires an all-reduce of the activation tensor after every transformer layer. For batch=32, seq=2048, hidden=4096 in FP16, compare the per-layer communication time over NVLink 4.0 (450 GB/s unidirectional) vs PCIe Gen5 x16 (32 GB/s unidirectional).",
+    "common_mistake": "Assuming PCIe is 'only a little slower.' The ~14x bandwidth gap makes tensor parallelism over PCIe impractical for latency-sensitive inference, adding milliseconds of overhead per layer.",
+    "realistic_solution": "Activation tensor = 32 * 2048 * 4096 * 2 bytes = 537 MB. NVLink: 537 MB / 450 GB/s = 1.2 ms. PCIe: 537 MB / 32 GB/s = 16.8 ms. Over a 32-layer model, PCIe adds 32 * 16.8 = 537 ms vs NVLink's 38 ms. This is why tensor parallelism requires NVLink.",
+    "napkin_math": "Activation = 32 * 2048 * 4096 * 2 = 537 MB. NVLink time = 537 / 450,000 = 1.19 ms. PCIe time = 537 / 32,000 = 16.8 ms. Ratio: 14.1x slower on PCIe.",
+    "issues": [
+      "The unidirectional bandwidth for PCIe Gen5 x16 is stated as 32 GB/s, which is incorrect; the correct value is ~63 GB/s. The value used corresponds to PCIe Gen4."
+    ]
+  },
+  {
+    "id": "edge-parallelism-the-multi-model-memory-tetris-gen",
+    "title": "The Multi-Model Memory Tetris",
+    "level": "L6+",
+    "track": "edge",
+    "ka": "B4",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "A robotics platform runs 5 concurrent models on a Jetson Orin (32 GB LPDDR5, 204.8 GB/s): SLAM (3.2 GB, 40ms), object detection (1.8 GB, 15ms), path planning (0.5 GB, 8ms), speech recognition (0.8 GB, 25ms), and gesture recognition (0.6 GB, 12ms). All models must run within a 50ms window. The total memory for weights is 6.9 GB, but with activations and workspace the total peaks at 18 GB. Design a scheduling strategy that respects both the memory ceiling and the 50ms deadline. What happens if you add a 6th model (4 GB weights, 20ms)?",
+    "common_mistake": "Only budgeting model weights without accounting for activation memory, TensorRT workspace, and CUDA context overhead. Also, assuming all 5 models can start simultaneously — memory fragmentation and concurrent allocation peaks can push well beyond the sum of static weights.",
+    "realistic_solution": "Phase 1 (0-15ms): Run detection (1.8 GB) and path planning (0.5 GB) and gesture (0.6 GB) concurrently on GPU = 2.9 GB weights + ~4 GB activations = ~7 GB. Phase 2 (15-40ms): SLAM (3.2 GB) and speech (0.8 GB) concurrently = 4.0 GB weights + ~5 GB activations = ~9 GB. Peak memory: max(7, 9) + 2 GB system overhead = 11 GB — fits in 32 GB. Total wall time: 40ms < 50ms deadline. Adding a 6th model (4 GB, 20ms): schedule in Phase 1 alongside path planning and gesture, but detection must move to Phase 2. New Phase 2 peak: 3.2 + 0.8 + 1.8 = 5.8 GB weights + ~7 GB activations = ~13 GB. Still fits. But time: Phase 1 = max(20, 8, 12) = 20ms, Phase 2 = max(40, 25, 15) = 40ms. Total = 60ms > 50ms deadline. Need to optimize SLAM to < 30ms or pipeline SLAM across frames.",
+    "napkin_math": "32 GB LPDDR5 total. 5 models: 3.2+1.8+0.5+0.8+0.6 = 6.9 GB weights. Activations ≈ 1.5× weights = 10.4 GB. Peak if all concurrent: 6.9+10.4+2 (system) = 19.3 GB — fits, but leaves only 12.7 GB headroom. Two-phase schedule peak: ~11 GB, 40ms wall time. 6th model: Phase 1 = 20ms, Phase 2 = 40ms, total = 60ms > 50ms budget. Must optimize SLAM by 10ms.",
+    "issues": [
+      "The total wall time calculation is incorrect; a 15ms phase followed by a 40ms phase results in a total time of 55ms, which exceeds the 50ms deadline."
+    ]
+  },
+  {
+    "id": "cloud-adversarial-debiasing-l5-0",
+    "title": "Evaluating Adversarial Debiasing Dynamics in Credit Models",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "E3",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "You are training a 50M parameter ranking model for a credit scoring system on a cluster of 8x A100 GPUs. To meet regulatory requirements, you implement adversarial debiasing using a Gradient Reversal Layer (GRL) to prevent the model from learning protected attributes via proxy variables (e.g., purchasing history). You attach a 5M parameter adversary network to the penultimate layer. During training, throughput drops by 40%, the main model's AUC degrades by 12%, and the adversary's loss quickly goes to zero. Evaluate the architectural and optimization dynamics causing this failure, and justify a redesign to balance the fairness-accuracy trade-off while recovering training throughput.",
+    "common_mistake": "Assuming the gradient reversal scaling factor should be static (e.g., 1.0) from the start or that the adversary needs massive capacity, failing to recognize that a too-strong adversary early in training destroys the main model's feature representations.",
+    "realistic_solution": "Implement a warm-up schedule for the gradient reversal penalty, scaling it dynamically over the first 20% of epochs, and heavily restrict the adversary's capacity (e.g., 2-layer MLP, 0.5M params) to balance the minimax game and reduce FLOPs.",
+    "napkin_math": "Without debiasing: AUC=0.85, Demographic Parity Difference (DPD)=0.18. With strong adversary (capacity=5M, static penalty=1.0): AUC=0.73 (-12%), DPD=0.02, Throughput=1200 samples/s. With scheduled penalty and reduced adversary (capacity=0.5M): AUC=0.83 (-2%), DPD=0.04, Throughput=1900 samples/s. The optimized approach sacrifices only 2% AUC for a 77% relative improvement in fairness, meeting the <0.05 DPD constraint while recovering 58% of the lost throughput.",
+    "issues": [
+      "The calculation for recovering 58% of lost throughput is mathematically incorrect; based on the numbers provided, the recovery is 87.5%."
+    ]
+  },
+  {
+    "id": "cloud-alignment-gap-l4-0",
+    "title": "Diagnosing Clickbait Degradation in DLRM",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "E3",
+    "rc": "RC-12",
+    "mode": "failure-to-root-cause",
+    "scenario": "You are managing a large-scale video recommendation pipeline deployed on 32 NVIDIA A100s handling 40k QPS. Your team recently deployed a heavy parameter-server-based DLRM that improved offline AUC by 0.05 and increased online Click-Through Rate (CTR) by 14%. The P99 latency strictly maintained its 50ms SLA. However, after a two-week A/B test, overall daily active user (DAU) retention dropped by 8% and total daily platform watch-time plummeted by 15%. Diagnose the root cause of this system degradation.",
+    "common_mistake": "Candidates often assume an infrastructure failure, investigating feature staleness, embedding cache misses, or silent latency regressions, completely missing that the system perfectly optimized the wrong objective.",
+    "realistic_solution": "Identify this as an Alignment Gap. The system optimized for CTR (the proxy metric), which inadvertently surfaced 'clickbait' content, harming user satisfaction (the business metric). The solution is to transition the architecture to a Multi-Gate Mixture-of-Experts (MMoE) to jointly predict clicks and expected watch-time, ranking items by P(Click) * Expected_Watch_Time.",
+    "napkin_math": "Old Model: 5% CTR * 120s avg watch time per click = 6.0s expected watch time per impression. New Model: 8% CTR (a massive 60% relative increase in clicks) * 40s avg watch time per click (due to clickbait) = 3.2s expected watch time per impression. Despite a 60% boost in the technical proxy metric (CTR), the business metric (expected watch time) dropped by 46.7%.",
+    "issues": [
+      "The numerical values in the scenario (+14% CTR, -15% watch-time) are inconsistent with the values used in the napkin math (+60% CTR, -46.7% watch-time)."
+    ]
+  },
+  {
+    "id": "cloud-compute-bound-l3-0",
+    "title": "Transitioning FFN Inference to Compute-Bound",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "B2",
+    "rc": "RC-2",
+    "mode": "napkin-math",
+    "scenario": "You are optimizing the inference of a Large Language Model with a hidden dimension of 8192. During profiling on an NVIDIA A100 (312 TFLOPs TF32, 2.0 TB/s memory bandwidth), you observe very low SM utilization during the feed-forward network (FFN) layers (matrix size: K=8192, N=32768) when serving requests sequentially at a generation batch size of 1. Calculate the minimum batch size required to transition this FFN matrix multiplication from a memory-bound to a compute-bound regime.",
+    "common_mistake": "Candidates often assume that simply using faster precision (e.g., FP16) will make the model compute-bound, or they calculate Arithmetic Intensity using only the memory footprint of the weights while ignoring the inputs and outputs.",
+    "realistic_solution": "To make the workload compute-bound, the Arithmetic Intensity (AI) must exceed the hardware's ridge point (156 FLOPs/byte for the A100). By increasing the batch size, the cost of loading the large weight matrix from HBM is amortized across multiple input tokens, raising the AI to the compute-bound regime at a batch size of approximately 160.",
+    "napkin_math": "1. Ridge Point = 312 TFLOPs / 2.0 TB/s = 156 FLOPs/Byte.\n2. FLOPs for GEMM = 2 * M * K * N. With M=Batch, K=8192, N=32768: FLOPs = 536,870,912 * M.\n3. Memory Bytes (FP16) = 2 * (M*K + K*N + M*N). Weights (K*N) dominate at 536,870,912 bytes.\n4. AI ≈ (536.8M * M) / (536.8M + 81920*M) ≈ M (for small M).\n5. To reach AI >= 156, we set (536.8 * M) / (536.8 + 0.08192 * M) = 156.\n6. 536.8M = 83740.8 + 12.78M -> 524.02M = 83740.8 -> M ≈ 160.",
+    "issues": [
+      "The question states the workload is TF32 but uses the A100's FP16/BF16 performance spec (312 TFLOPS) instead of the correct TF32 spec (156 TFLOPS) for the calculation."
+    ]
+  },
+  {
+    "id": "cloud-energy-per-byte-l4-0",
+    "title": "Root-Causing Memory Power in LLM Inference",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-10",
+    "mode": "tradeoff-analysis",
+    "scenario": "Your team is profiling an auto-regressive decoding microservice serving a 20-billion parameter LLM (FP16, 40GB memory footprint) on a cloud accelerator with HBM2. At a batch size of 1, generating 100 tokens per second, the chip's arithmetic logic units (ALUs) consume merely ~4W, but overall chip power draw unexpectedly hits 340W. Diagnose why the chip's power consumption is massively disproportionate to the actual FLOPs performed.",
+    "common_mistake": "Candidates often misdiagnose this as an inefficient matrix multiplication kernel, static leakage, or cooling overhead, failing to realize that data movement (fetching weights from HBM) inherently costs orders of magnitude more energy than ALUs.",
+    "realistic_solution": "Diagnose the issue as extreme energy-per-byte disparity. At batch size 1, every parameter must be loaded from HBM to SRAM for a single multiply-accumulate. Off-chip HBM access costs ~80 pJ/byte, whereas an FP16 MAC operation costs ~0.1 pJ. To resolve the power bottleneck, increase the batch size (to amortize weight reads over multiple tokens) or quantize weights to INT4/FP8 to significantly reduce the raw bytes fetched.",
+    "napkin_math": "HBM Read Volume: 40 GB/token * 100 tokens/sec = 4 TB/sec. HBM Energy Cost: ~80 picoJoules (pJ) per byte. Power = 4e12 bytes/sec * 80e-12 J/byte = 320 Watts just for memory reads. Compute Power: 40 TFLOPs * 0.1 pJ/FLOP = 4 Watts. Memory movement consumes 80x more power than compute.",
+    "issues": [
+      "The required memory bandwidth of 4 TB/s exceeds the physical limits of current single accelerators like the A100 (~2 TB/s) or H100 (~3.35 TB/s).",
+      "The compute power calculation is dimensionally incorrect and uses inconsistent numbers; it should be based on 4 TFLOP/s for a 20B model, not 40 TFLOPs."
+    ]
+  },
+  {
+    "id": "cloud-influence-functions-l3-0",
+    "title": "Calculating Influence Functions for Model Debugging",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "E2",
+    "rc": "RC-12",
+    "mode": "napkin-math",
+    "scenario": "You are debugging a confidently incorrect prediction from a 50-million parameter ResNet model trained on a 1-million image dataset. To identify which training samples most heavily caused this prediction, you plan to use influence functions. You have a cluster of 100 A100 GPUs (each delivering ~312 TFLOPS in FP32). Calculate the computational time and memory required to exactly compute the inverse Hessian, and apply the appropriate approximation technique to solve this.",
+    "common_mistake": "Attempting to explicitly materialize the full Hessian matrix ($O(p^2)$ memory) or computing its exact inverse ($O(p^3)$ compute), which is practically impossible for modern deep neural networks.",
+    "realistic_solution": "Instead of forming the Hessian, apply the Linear time Stochastic Second-Order Algorithm (LiSSA) or Conjugate Gradient to compute an implicit Inverse Hessian-Vector Product (IHVP), reducing both time and memory complexity to $O(p)$.",
+    "napkin_math": "Full Hessian memory: $(50 \\times 10^6)^2 \\times 4 \\text{ bytes} = 10 \\text{ PB}$. Exact inverse compute: $(50 \\times 10^6)^3 = 1.25 \\times 10^{23} \\text{ FLOPs}$. On 100 A100s ($3.12 \\times 10^{16} \\text{ FLOPS}$ total), time = $1.25 \\times 10^{23} / 3.12 \\times 10^{16} \\approx 4 \\times 10^6 \\text{ seconds}$ (>46 days). IHVP approximation reduces compute to $O(p)$, taking minutes instead of weeks on a single GPU.",
+    "issues": [
+      "The A100 FP32 performance is stated as 312 TFLOPS, which is incorrect; this value is for sparse FP16/BF16, while the FP32 performance is 19.5 TFLOPS."
+    ]
+  },
+  {
+    "id": "cloud-kv-cache-quantization-l4-0",
+    "title": "Diagnosing Output Degradation in INT8 KV Cache",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "C1",
+    "rc": "RC-1",
+    "mode": "failure-to-root-cause",
+    "scenario": "You deploy a Llama-2-70B model on an 8x A100 (80GB) cluster using vLLM. To double your concurrent request capacity from 64 to 128, you enable naive INT8 per-tensor KV cache quantization. While the memory savings are realized and the system avoids OOM errors, users report that after generating ~500 tokens, the model's output abruptly degrades into infinite repetitive loops and gibberish. The FP16 baseline does not exhibit this. What is the root cause of this failure?",
+    "common_mistake": "Misdiagnosing the issue as a RoPE (Rotary Position Embedding) scaling bug, a temperature/sampling misconfiguration, or context window overflow, without realizing how quantization clipping affects attention logits.",
+    "realistic_solution": "Diagnose that large LLMs exhibit massive, systematic outlier channels in their Key vectors (often >100x the mean). Naive per-tensor quantization clips these outliers, completely destroying the attention score distributions during generation. The fix is to use per-channel quantization for Key vectors or a mixed-precision cache (like AWQ/SpQR) that keeps the ~1% outlier channels in FP16.",
+    "napkin_math": "For a 70B model (8192 context, 8 KV heads, 128 head dim), FP16 KV cache is ~500MB per request. INT8 halves this to 250MB. If you isolate the top 1% outlier Key channels and keep them in FP16, the added memory overhead is just `0.01 * 250MB = 2.5MB` per request. You restore full FP16 accuracy while retaining 99% of the memory savings.",
+    "issues": [
+      "The napkin math for the KV cache size is incorrect by a factor of ~5; a 70B model with 8k context has a KV cache of ~2.7 GB per sequence, not 500 MB."
+    ]
+  },
+  {
+    "id": "cloud-model-parallelism-l5-0",
+    "title": "Evaluating TP and PP Placement for 175B LLMs",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "C5",
+    "rc": "RC-4",
+    "mode": "tradeoff-analysis",
+    "scenario": "Your team is architecting the training cluster for a 175B parameter language model using FP16. The model states require over 2TB of memory, far exceeding a single A100 80GB GPU. You have a cluster of DGX A100 nodes (8 GPUs per node, 600 GB/s NVLink intra-node, 200 Gbps InfiniBand inter-node). You must evaluate and justify the optimal combination and placement of Tensor Parallelism (TP) and Pipeline Parallelism (PP) across this hardware topology to maximize MFU (Model Flops Utilization).",
+    "common_mistake": "Placing Tensor Parallelism across node boundaries, failing to recognize that TP requires synchronous all-reduce operations on every layer, which will be severely bottlenecked by the slower inter-node InfiniBand.",
+    "realistic_solution": "Restrict Tensor Parallelism strictly to intra-node GPUs (e.g., TP=8) to utilize the 600 GB/s NVLink for intensive all-reduce operations. Use Pipeline Parallelism (PP) across nodes, as PP only requires passing activation boundaries, which easily fits within the 25 GB/s InfiniBand capacity.",
+    "napkin_math": "TP communication needs ~100GB/s per layer for typical LLM batches. NVLink provides 600GB/s (sufficient), but IB provides only 25GB/s (a 4x bottleneck). PP only transmits boundary activations (e.g., ~50GB per micro-batch), which can be efficiently pipelined over the 25GB/s IB link without stalling compute.",
+    "issues": [
+      "The napkin math for Pipeline Parallelism activation size is stated as ~50GB per micro-batch, which is incorrect by three orders of magnitude; it should be closer to ~50MB."
+    ]
+  },
+  {
+    "id": "cloud-stateful-serving-l4-0",
+    "title": "Cascading KV Cache OOMs in Stateful LLM Serving",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "D4",
+    "rc": "RC-6",
+    "mode": "failure-to-root-cause",
+    "scenario": "Your team operates a stateful LLM chat service on a cluster of 16x 8-GPU H100 nodes. To minimize Time To First Token (TTFT) for multi-turn conversations, user sessions are pinned to specific nodes to reuse the KV cache in GPU HBM. Average context length is 8K tokens. During a single-node hardware failure, the load balancer reroutes the node's 2,000 active sessions to surviving nodes. Within seconds, three surviving nodes crash due to Out-Of-Memory (OOM) errors, and the P99 TTFT for the entire cluster spikes from 200ms to over 15 seconds. Analyze the root cause of these cascading failures and explain why standard stateless failover mechanisms exacerbate the problem.",
+    "common_mistake": "Candidates often misdiagnose this as a simple CPU/network bottleneck or suggest standard stateless retries, failing to recognize the massive memory and prefill compute shock required to simultaneously reconstruct 2,000 discarded KV caches on the surviving nodes.",
+    "realistic_solution": "Implement disaggregated KV caching with asynchronous checkpointing to host CPU RAM or NVMe. Coupling this with strict admission control ensures that during failover, the system bounds the concurrent prefill rate and gracefully queues or degrades recovered sessions instead of OOMing.",
+    "napkin_math": "1 session = 8K tokens. Assuming 1MB per 1K tokens for the KV cache, 1 session = 8MB. 2,000 failed sessions = 16GB of lost state. Rebuilding this requires 2,000 * 8,000 = 16M tokens of immediate prefill compute. If a surviving node processes 100K prefill tokens/sec, it takes 160 seconds just to reconstruct the state, causing request queues to explode and exhaust HBM.",
+    "issues": [
+      "The napkin math for KV cache size (1MB per 1K tokens) is incorrect by over 100x for any modern LLM, making the scenario physically impossible.",
+      "A single 8K-context session on a 70B model requires ~2.7GB of VRAM, so 2,000 sessions would need 5.4TB, far exceeding the node's 640GB."
+    ]
+  },
+  {
+    "id": "cloud-f1-semantic-cache-collision-20",
+    "title": "The Semantic Cache Collision Problem",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "F1",
+    "rc": "RC-8",
+    "mode": "failure-to-root-cause",
+    "scenario": "To reduce LLM costs, you implement a semantic cache: if a new query's embedding is within cosine distance 0.05 of a cached query, return the cached response. This works well initially, but users start reporting wrong answers. Query: 'What is Apple's revenue?' returns the cached answer for 'What is Apple's stock price?' — both queries have embeddings with cosine similarity 0.97. How do you fix semantic caching without losing its cost benefits?",
+    "common_mistake": "Tightening the similarity threshold to 0.99. This dramatically reduces cache hit rate (from 40% to 5%) and makes the cache nearly useless — you're back to paying full LLM cost on almost every query.",
+    "realistic_solution": "The fundamental problem: embedding similarity measures topical relevance, not semantic equivalence. Two questions about Apple financials are topically similar but require different answers. Fixes: (1) Two-stage cache: semantic similarity threshold (0.95) for candidate retrieval, then a lightweight classifier (or exact keyword match on key entities) for equivalence verification. Cost: 2ms per lookup vs 2000ms for LLM. (2) Cache at the (query_intent, entity, time_window) level instead of raw embedding similarity. Use a small model to extract structured intent before cache lookup. (3) Hierarchical caching: exact string match (free) → normalized query match (cheap) → semantic match with verification (moderate) → LLM generation (expensive). (4) User-feedback loop: if a user rephrases a question after receiving a cached answer, flag the cache entry for invalidation.",
+    "napkin_math": "At 0.05 cosine distance threshold: 40% hit rate, 2% false positive rate → 0.8% of all queries get wrong answers (2% of 40%). At 0.01 threshold: 5% hit rate, 0.1% false positive → 0.005% wrong answers but 87.5% less cost savings. Two-stage (0.05 threshold + classifier): 35% hit rate, 0.1% false positive → best of both worlds. Classifier cost: 2ms × 40% of 10K QPS = 80 calls/s on CPU ≈ $50/month vs $9K/month LLM savings.",
+    "issues": [
+      "The napkin math is internally inconsistent; a traffic volume of 10K QPS would yield millions of dollars in savings, not $9K/month."
+    ]
+  },
+  {
+    "id": "cloud-f1-model-cascade-routing-28",
+    "title": "The Model Cascade Routing Decision",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "F1",
+    "rc": "RC-10",
+    "mode": "requirements-to-architecture",
+    "scenario": "You serve a customer support chatbot with a 3-tier model cascade: a 1B model ($0.0002/request, 85% accuracy), a 7B model ($0.002/request, 93% accuracy), and a 70B model ($0.02/request, 98% accuracy). Design a routing system that achieves 95% effective accuracy while minimizing cost. Your traffic is 100K requests/day. What routing strategy achieves the best cost-accuracy Pareto frontier?",
+    "common_mistake": "Always routing to the 70B model for guaranteed 98% accuracy. This costs $2,000/day. Or routing everything to 1B to save cost, accepting 85% accuracy.",
+    "realistic_solution": "Confidence-based cascading: Route every request to the 1B model first. If confidence > 0.9, return the response (most simple questions). If confidence 0.7-0.9, escalate to 7B. If confidence < 0.7 from 7B, escalate to 70B. Typical traffic distribution: 60% of requests are simple (1B handles with high confidence), 25% are medium complexity (need 7B), 15% are complex (need 70B). Effective accuracy: 0.60 × 0.85 + 0.25 × 0.93 + 0.15 × 0.98 = 0.51 + 0.2325 + 0.147 = 0.89 — too low! The problem: the 1B model's 85% accuracy on the 'easy' queries it keeps actually means it's wrong on 15% of 60K requests/day = 9K wrong answers. Fix: train a separate lightweight router model (~100M params, 1ms inference) that predicts query complexity. Or use a hybrid: 1B model generates + 1B classifier checks consistency. If inconsistent, escalate. With a well-trained router: 65% → 1B, 20% → 7B, 15% → 70B, and the router correctly identifies difficulty, achieving 0.65 × 0.92 + 0.20 × 0.95 + 0.15 × 0.98 = 0.95 effective accuracy.",
+    "napkin_math": "All 70B: 100K × $0.02 = $2,000/day. Naive cascade: (60K × $0.0002 + 25K × $0.002 + 15K × $0.02) = $12 + $50 + $300 = $362/day at 89% accuracy. Optimized with router: (65K × $0.0002 + 20K × $0.002 + 15K × $0.02) + router cost ($5/day) = $13 + $40 + $300 + $5 = $358/day at 95% accuracy. Cost savings vs all-70B: 82%.",
+    "issues": [
+      "The napkin math for calculating the cascade's effective accuracy is fundamentally incorrect; it uses a formula for a simple traffic router, not a sequential cascade."
+    ]
+  },
+  {
+    "id": "cloud-a1-large-scale-experiment-infrastructure-27",
+    "title": "The 10,000-Experiment Infrastructure Challenge",
+    "level": "L6+",
+    "track": "global",
+    "ka": "A1",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "You are the Staff engineer responsible for ML infrastructure at a company that runs 10,000 experiments per month across 20 teams. The current system uses a shared MLflow instance backed by a PostgreSQL database. The system is failing: experiment logging adds 200ms of latency per training step (with 10,000 steps per experiment, this is 33 minutes of overhead per experiment), queries for cross-team experiment comparison time out, and the metadata store has grown to 500GB. Design the next-generation experiment tracking infrastructure that can scale to 100,000 experiments per month.",
+    "common_mistake": "Proposing to 'just shard the database' or 'switch to MongoDB.' The problem is architectural: synchronous logging on the training critical path and a single queryable store for both write-heavy (logging) and read-heavy (analysis) workloads.",
+    "realistic_solution": "Separate the write path from the read path (CQRS pattern for experiment tracking): Write path (hot, latency-sensitive): Replace synchronous RPCs with asynchronous, buffered logging. Each training job writes metrics to a local ring buffer and flushes to a distributed log (Kafka) every N seconds. Training step overhead drops from 200ms to < 1ms (local memory write). The log is append-only and partitioned by team. Read path (warm, query-heavy): A stream processor (Flink/Spark Streaming) consumes the Kafka log, transforms metrics into a columnar format (Parquet), and materializes views into a query engine (ClickHouse/DuckDB). Cross-team queries hit the materialized views, not the raw log. Storage tier: Hot metrics (last 7 days) in ClickHouse for interactive queries. Cold metrics (7-90 days) in Parquet on S3 with a catalog (Iceberg/Hive). Archive (90+ days) in compressed Parquet with metadata-only index. Model artifacts stored separately in object storage with content-addressable hashing for deduplication. Scale calculation: 100K experiments × 10K steps × 10 metrics × 8 bytes = 80 TB/month of raw metrics. With columnar compression (10×): 8 TB/month. With 90-day hot retention: 24 TB in ClickHouse.",
+    "napkin_math": "Current: 10K experiments × 10K steps × 200ms = 33 min overhead/experiment × 10K = 5,555 GPU-hours/month wasted on logging. At $3/GPU-hr = $16,667/month. New system: 10K × 10K × 1ms = 1.7 min/experiment = 278 GPU-hours. Savings: 5,277 GPU-hours/month = $15,831/month. Storage: 100K experiments × 8 TB/month compressed. ClickHouse cluster: ~$5K/month. Kafka cluster: ~$3K/month. Total infra: ~$10K/month vs $16.7K/month wasted on logging overhead alone. The system pays for itself.",
+    "issues": [
+      "The math for the new system's overhead is contradictory: 10,000 steps at 1ms/step is 10 seconds, not 1.7 minutes.",
+      "The storage calculation incorrectly uses 100,000 experiments, while the scenario states 10,000 per month."
+    ]
+  },
+  {
+    "id": "cloud-a1-constraint-propagation-workflow-28",
+    "title": "The Full-Stack Constraint Propagation Workflow",
+    "level": "L6+",
+    "track": "global",
+    "ka": "A1",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "Your company wants to deploy an LLM-powered product with these requirements: P99 latency < 500ms, 10,000 QPS, cost < $0.001 per query, and the model must fit on a single GPU for operational simplicity. Design the ML development workflow that propagates these constraints backward through the entire development lifecycle — from serving requirements to model architecture choice to training infrastructure to data collection strategy. Show how each production constraint eliminates options at each lifecycle stage.",
+    "common_mistake": "Starting with model selection ('let's use Llama 70B') and then trying to make it fit the constraints. This forward-pass approach leads to multiple failed iterations. The correct approach is backward constraint propagation.",
+    "realistic_solution": "Backward constraint propagation: Step 1 (Serving → Model Size): P99 < 500ms at 10K QPS on a single GPU. An H100 can sustain ~2,000 tokens/sec for decode at 70B scale. At 10K QPS with average 200 tokens/response: need 2M tokens/sec → requires 1,000 H100s at 70B scale. Single GPU constraint → model must be < 7B parameters (where a single H100 can sustain ~20K tokens/sec). Step 2 (Cost → Precision): $0.001/query at 10K QPS = $10/sec revenue. H100 costs $3/hr = $0.0008/sec. At 7B FP16: one H100 serves ~5K QPS → need 2 H100s → $0.0016/sec. Budget is $10/sec, so compute cost is well within budget. But: can optimize to INT4 quantized 7B model, serving all 10K QPS on a single H100 → $0.0008/sec, meeting single-GPU constraint. Step 3 (Model → Training): 7B INT4 serving means training a 7B FP16/BF16 model, then quantizing. Training 7B from scratch: ~1T tokens, ~168 H100-hours. Fine-tuning 7B: ~10 H100-hours. Decision: fine-tune an open-source 7B base model (Llama/Mistral). Step 4 (Training → Data): Fine-tuning on 100K high-quality domain examples. Data collection strategy: curate from production logs + human annotation. Budget: 100K examples × $0.50/annotation = $50K. The workflow document: a constraint matrix showing which options survive at each stage. 70B eliminated at Stage 1. FP16 serving eliminated at Stage 2. Training from scratch eliminated at Stage 3.",
+    "napkin_math": "Constraint elimination: Start with all model families. After P99 constraint: eliminate > 13B models (need multi-GPU). After single-GPU constraint: eliminate > 7B. After cost constraint: INT4 quantization required. After training budget: fine-tune, don't pretrain. Surviving option space: 7B fine-tuned INT4 model on single H100. Development time with constraint propagation: 2-3 weeks. Without (trial-and-error): 2-3 months and $50K+ in wasted compute exploring eliminated options.",
+    "issues": [
+      "It is factually incorrect that a 70B parameter model fits on a single H100 GPU, as it requires ~140GB of memory for BF16 weights.",
+      "The claimed H100 performance of ~2,000 tokens/sec for a 70B model and ~20,000 tokens/sec for a 7B model is highly optimistic and likely inaccurate for a latency-constrained setting.",
+      "The argument that the cost constraint forces a move to INT4 is not supported by the provided numbers."
+    ]
+  },
+  {
+    "id": "cloud-a3-moe-alltoall-communication-cost-6",
+    "title": "MoE AllToAll Communication Cost",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "A3",
+    "rc": "RC-1",
+    "mode": "napkin-math",
+    "scenario": "You are training a Mixture-of-Experts (MoE) model with 8 experts distributed across 8 GPUs (one expert per GPU). Each token is routed to top-2 experts. With a batch of 4096 tokens and hidden dimension 4096 in BF16, estimate the AllToAll communication volume per MoE layer.",
+    "common_mistake": "Forgetting that AllToAll is bidirectional — tokens must be sent TO experts and results sent BACK. Also forgetting the top-2 routing doubles the volume vs top-1.",
+    "realistic_solution": "Each token: 4096 dims × 2 bytes (BF16) = 8 KB. With top-2 routing, each token is sent to 2 experts. Forward AllToAll: 4096 tokens × 2 routes × 8 KB = 64 MB sent. Return AllToAll: same 64 MB back. Total: 128 MB per MoE layer, per direction. Assuming uniform routing, each GPU sends ~56 MB (7/8 of its tokens go to other GPUs).",
+    "napkin_math": "Per token: 4096 × 2B = 8 KB. | Top-2 × 4096 tokens = 8192 token-expert pairs. | Forward dispatch: 8192 × 8 KB = 64 MB. | Return combine: 64 MB. | Total: ~128 MB per layer. | At 200 GB/s NVLink: ~0.64 ms per layer.",
+    "issues": [
+      "The per-GPU send volume is calculated incorrectly as 56 MB; it should be the total volume divided by the number of GPUs (64MB / 8 = 8MB sent per GPU, with 7MB going over the network).",
+      "The latency calculation incorrectly divides the total communication volume by the link bandwidth, ignoring that communication happens in parallel."
+    ]
+  },
+  {
+    "id": "cloud-a3-gqa-mqa-kv-cache-tradeoff-12",
+    "title": "GQA vs MQA KV Cache Tradeoff",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "A3",
+    "rc": "RC-1",
+    "mode": "tradeoff-analysis",
+    "scenario": "You are evaluating three attention variants for a new 30B LLM: Multi-Head Attention (MHA, 32 KV heads), Grouped-Query Attention (GQA, 8 KV heads), and Multi-Query Attention (MQA, 1 KV head). Compare the KV cache size and serving throughput implications.",
+    "common_mistake": "Only comparing memory savings without considering the quality vs throughput tradeoff. MQA saves the most memory but may degrade quality more than GQA, which is why most production models use GQA as a compromise.",
+    "realistic_solution": "KV cache scales linearly with the number of KV heads. MHA (32 heads): baseline KV cache. GQA (8 heads): 4× smaller KV cache. MQA (1 head): 32× smaller. For serving, KV cache is often the limiting factor for batch size. Smaller KV cache → more concurrent requests → higher throughput. GQA at 8 heads gives 4× the batch size (or 4× the context length) with minimal quality loss, making it the dominant production choice.",
+    "napkin_math": "30B model, 60 layers, d_head=128, BF16: | MHA KV per token: 2 × 32 × 128 × 2B × 60 = 960 KB. | GQA (8 heads): 240 KB — 4× smaller. | MQA (1 head): 30 KB — 32× smaller. | On 80GB A100 after weights (60GB): MHA fits ~20 concurrent 4K requests; GQA fits ~83.",
+    "issues": [
+      "The napkin math for the number of concurrent requests is incorrect by a factor of ~4; with 20GB of available HBM, MHA can only fit ~5 requests, not ~20."
+    ]
+  },
+  {
+    "id": "cloud-a3-architecture-choice-serving-cost-24",
+    "title": "Architecture Choice Drives Serving Cost",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "A3",
+    "rc": "RC-10",
+    "mode": "tradeoff-analysis",
+    "scenario": "You must serve 10,000 QPS of text generation at P99 < 500ms with equivalent quality. Compare the infrastructure cost of serving a dense 70B transformer vs a 47B-parameter MoE (8×7B, top-2) vs a 70B-equivalent SSM. Which architecture minimizes $/query?",
+    "common_mistake": "Only comparing parameter counts without considering per-token compute, memory requirements, and hardware utilization differences across architectures.",
+    "realistic_solution": "Dense 70B: 140 GB (BF16) — needs 2× H100 (80GB each) for weights alone, plus KV cache. Per-token FLOPs: ~140 TFLOPs. Memory-bound during decode. MoE 8×7B (top-2): 94 GB weights — also 2× H100, but per-token FLOPs ~26 TFLOPs (13B active). Decode is 5× cheaper in compute, but same memory-bound decode bottleneck (weights still need to be in HBM). The catch: all 47B params must reside in HBM even though only 13B are active per token — poor HBM utilization. SSM 70B-equiv: 140 GB weights, but NO KV cache — fixed-size state (~MBs). Decode is still a weight-limited matmul-per-token, but can batch far more concurrent requests (no KV cache memory). Winner for throughput: SSM (highest batch size → best GPU utilization). Winner for $/query at moderate batch: MoE (fewer FLOPs per token). Dense is most expensive.",
+    "napkin_math": "Dense 70B: 2× H100, batch 16 (KV cache limited), ~320 tokens/s. | MoE 47B: 2× H100, batch 16 (weights limited), ~800 tokens/s (5× less compute/token). | SSM 70B: 2× H100, batch 256+ (no KV cache), ~2000+ tokens/s. | At $3/hr per H100: Dense $18.75/M tokens, MoE $7.50/M, SSM $3/M.",
+    "issues": [
+      "The napkin math is internally inconsistent; the calculated cost-per-million-tokens figures do not match the stated throughput and server cost."
+    ]
+  },
+  {
+    "id": "cloud-a2-activation-memory-explosion-4",
+    "title": "The Activation Memory Explosion",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "A2",
+    "rc": "RC-1",
+    "mode": "napkin-math",
+    "scenario": "You are training a 32-layer transformer with hidden dimension 4096, batch size 32, sequence length 2048, in FP16. Each transformer layer must save its input activations for the backward pass. Estimate the total activation memory required across all 32 layers, ignoring attention matrices. Does this fit alongside a 7B FP16 model (14 GB) on a single A100-80GB GPU?",
+    "common_mistake": "Only counting model weight memory and forgetting that activations scale with batch size and sequence length, often dominating total memory for large batches.",
+    "realistic_solution": "Per-layer activation tensor shape: [B, S, H] = [32, 2048, 4096] in FP16 (2 bytes). Per-layer memory: 32 * 2048 * 4096 * 2 = 536 MB. Across 32 layers: 536 MB * 32 = ~17.2 GB. Weights: 14 GB. Optimizer states (Adam, FP32): 14 * 2 = 28 GB. Gradients: 14 GB. Total: 14 + 28 + 14 + 17.2 = 73.2 GB. This barely fits on an 80 GB GPU, leaving almost no headroom. Activation checkpointing becomes essential for any larger batch or sequence.",
+    "napkin_math": "Per layer: 32 * 2048 * 4096 * 2B = 536 MB. 32 layers: 17.2 GB activations. Weights: 14 GB. Adam states: 28 GB. Gradients: 14 GB. Total: ~73 GB / 80 GB. 91% utilization with zero headroom.",
+    "issues": [
+      "The activation memory calculation uses 10^6 bytes per megabyte instead of the standard 1024^2, which is a minor inaccuracy.",
+      "The Adam optimizer state memory is incorrectly calculated as 28 GB; for 7B parameters with two FP32 states, it should be 7B * 4 bytes * 2 = 56 GB."
+    ]
+  },
+  {
+    "id": "cloud-a6-feature-pipeline-silent-failure-17",
+    "title": "The Silent Feature Pipeline Failure",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "A6",
+    "rc": "RC-12",
+    "mode": "failure-to-root-cause",
+    "scenario": "Your production recommendation model's conversion rate has been slowly declining over 3 weeks — from 4.2% to 3.1%. No model retraining has occurred. No code changes were deployed. All monitoring dashboards (GPU utilization, serving latency, error rate) show green. Walk through a systematic debugging process to identify the root cause, given that you suspect a feature pipeline issue.",
+    "common_mistake": "Retraining the model immediately. If the root cause is a broken feature pipeline, retraining on corrupted features will just learn the corrupted distribution — the decline continues.",
+    "realistic_solution": "Systematic feature pipeline diagnosis: **Step 1 — Feature distribution drift detection**: For each of the model's 300 features, compute the KL divergence between the current serving distribution and the training distribution. Flag features with KL > 0.1. **Step 2 — Identify the broken feature**: You find that 'user_category_affinity' has shifted dramatically: it was a float in [0, 1] during training but is now showing values clustered at exactly 0.0 for 40% of users. **Step 3 — Trace the pipeline**: The feature is computed by a Spark job that joins user clickstream data with a category taxonomy table. The taxonomy table was updated 3 weeks ago — a schema migration renamed a column. The Spark job didn't fail; the LEFT JOIN now returns NULL for 40% of rows, and the NULL-to-default coercion produces 0.0. **Step 4 — Root cause confirmation**: The timeline matches: schema migration → 3 weeks ago → conversion decline started. **Step 5 — Fix**: (a) Fix the JOIN to use the new column name, (b) backfill the feature for the last 3 weeks, (c) add schema validation tests to the feature pipeline CI, (d) add distribution monitoring alerts for all features.",
+    "napkin_math": "Feature importance of 'user_category_affinity': top-5 feature contributing ~8% of model's predictive power. With 40% of users seeing a zeroed feature, effective model quality loss ≈ $0.08 \\times 0.40 = 3.2\\%$ — matching the observed conversion decline from 4.2% to ~3.1%. Revenue impact at $10M monthly revenue: $3.2\\% \\times \\$10\\text{M} = \\$320\\text{K/month}$ lost for 3 weeks = ~$240K total.",
+    "issues": [
+      "The napkin math is inconsistent; it calculates a 3.2% quality loss but the scenario describes a conversion drop from 4.2% to 3.1%, which is a 1.1 percentage point drop or a 26% relative drop.",
+      "The revenue impact calculation is based on the incorrect 3.2% figure and dramatically underestimates the loss compared to the 26% relative drop in conversion."
+    ]
+  },
+  {
+    "id": "cloud-a6-feature-serving-latency-decomposition-18",
+    "title": "The Feature Serving Latency Decomposition",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "A6",
+    "rc": "RC-6",
+    "mode": "optimization-task",
+    "scenario": "Your search ranking model uses 150 batch features from a feature store and 20 real-time features computed on the fly. End-to-end serving P99 is 120ms against a 100ms SLA. The model inference takes 25ms. Decompose the remaining 95ms into feature retrieval components and propose optimizations to bring P99 under 100ms.",
+    "common_mistake": "Assuming all 95ms is 'network latency' and trying to optimize the network. Feature serving latency has multiple distinct components that require different optimizations.",
+    "realistic_solution": "**Latency decomposition**: (1) Feature store lookup (150 batch features via Redis MGET): ~8ms P50, ~25ms P99 (tail from Redis GC pauses and hot shards). (2) Real-time feature computation (20 features from raw signals): ~15ms P50, ~40ms P99 (Flink window lookups + aggregation). (3) Feature assembly and serialization: ~5ms (protobuf serialization of 170 features). (4) Network RTT (client → feature service → model service): ~10ms × 2 hops = 20ms. Total: $25 + 40 + 5 + 20 = 90\\text{ms P50}$, $25 + 25 + 40 + 5 + 20 = 115\\text{ms P99 (dominated by tail)}$. **Optimizations**: (a) **Parallelize**: Fetch batch features and compute real-time features concurrently (saves ~25ms P99 by removing sequential dependency). (b) **Local feature cache**: Cache batch features in the model server process with 5s TTL (eliminates Redis P99 tail for 95% of requests). (c) **Pre-compute real-time features**: Push Flink aggregation results to Redis instead of computing at query time (reduces real-time path from 40ms to 5ms). After optimizations: P99 ≈ $\\max(5, 5) + 5 + 10 + 25 = 50\\text{ms}$.",
+    "napkin_math": "Current P99: 120ms. Bottleneck: real-time feature computation (40ms P99) + sequential feature fetch. Parallelizing batch + real-time: P99 drops by $\\min(25, 40) = 25\\text{ms}$. Pre-computing real-time features: P99 drops by additional 35ms. New P99: $120 - 25 - 35 = 60\\text{ms}$ — well under 100ms SLA.",
+    "issues": [
+      "The latency decomposition incorrectly sums the P99 latency of some components to arrive at a P50 total, which is methodologically incorrect.",
+      "The sum of the component P99s (25+40+5+20 = 90ms) does not match the observed 120ms P99, and this discrepancy is not explained."
+    ]
+  },
+  {
+    "id": "cloud-a6-embedding-serving-at-scale-20",
+    "title": "The Embedding Serving at 10M QPS",
+    "level": "L6+",
+    "track": "cloud",
+    "ka": "A6",
+    "rc": "RC-8",
+    "mode": "requirements-to-architecture",
+    "scenario": "You need to serve embedding lookups for a search system at 10 million queries per second. Each query requires lookups from 5 embedding tables, each with 1 billion rows and 256-dimensional FP16 embeddings. Total embedding size is 2.56 TB. The P99 latency SLA for the embedding lookup service is 5ms. Design the serving architecture, including storage, caching, and networking.",
+    "common_mistake": "Trying to serve 2.56 TB of embeddings from GPU HBM for latency. At 10M QPS × 5 tables × 512 bytes/embedding = 25.6 TB/s read bandwidth — far beyond any single-node memory system. This is a distributed systems problem, not a single-machine GPU problem.",
+    "realistic_solution": "**Architecture: Distributed embedding serving with hot-tier caching.** **(1) Storage tier analysis:** 2.56 TB total. Power-law access: top 0.1% of rows (1M per table = 5M total) serve 80% of queries = ~2.56 GB hot tier. Top 5% (50M per table = 250M total) serve 99% of queries = ~128 GB warm tier. **(2) Hot tier (L1 — in-process memory):** Top 5M embeddings (2.56 GB) cached in each serving node's RAM. Latency: ~0.1ms. Handles 80% of lookups. **(3) Warm tier (L2 — distributed cache):** Top 250M embeddings (128 GB) distributed across a memcached/Redis cluster. Latency: ~1ms. Handles 19% of lookups. **(4) Cold tier (L3 — SSD-backed store):** Full 2.56 TB on NVMe SSDs across a distributed KV store (RocksDB/Cassandra). Latency: ~3ms. Handles 1% of lookups. **(5) Expected P99:** With 80/19/1 hit rates: P99 ≈ max of cold-tier path = 3ms + 1ms network = 4ms < 5ms SLA. **(6) Capacity planning:** At 10M QPS, each serving node handles ~50K QPS (limited by network bandwidth). Need $10\\text{M}/50\\text{K} = 200$ serving nodes. Each node has 32 GB RAM (hot cache + headroom), 4-core CPU, 10 Gbps NIC. Warm tier: 16-node Redis cluster (8 GB each). Cold tier: 32-node SSD cluster. **(7) Consistency:** Embeddings update weekly via batch retraining. Cache invalidation via versioned keys — deploy new version, warm caches, swap traffic.",
+    "napkin_math": "Total read bandwidth: $10\\text{M QPS} \\times 5 \\times 512\\text{B} = 25.6\\text{ TB/s}$. L1 hit rate 80%: L1 serves $20.5\\text{ TB/s}$ from local RAM. L2 hit rate 19%: L2 serves $4.9\\text{ TB/s}$ across 16 Redis nodes = 306 GB/s per node (within 10 Gbps NIC capacity with batching). L3 hit rate 1%: L3 serves $256\\text{ GB/s}$ across 32 SSD nodes = 8 GB/s per node (within NVMe capacity). Serving fleet: 200 nodes × $0.50/hr = $100/hr = $876K/yr.",
+    "issues": [
+      "The total read bandwidth calculation is wrong by a factor of 1000; it should be 25.6 GB/s, not 25.6 TB/s.",
+      "The check against NIC capacity is also incorrect; 306 GB/s per node is far beyond even a 400 Gbps (50 GB/s) NIC, not 'within 10 Gbps NIC capacity'."
+    ]
+  }
+]

@@ -1,0 +1,364 @@
+[
+  {
+    "id": "cloud-a4-adam-optimizer-memory-multiplier-1",
+    "title": "The Adam Optimizer Memory Multiplier",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "A4",
+    "rc": "RC-1",
+    "mode": "napkin-math",
+    "scenario": "You want to fine-tune a 7B parameter model in BF16 on a single A100-80GB GPU. The weights alone occupy 14 GB. You launch training with the Adam optimizer, and PyTorch immediately throws an OOM error. The model weights fit easily — what is consuming the remaining 66 GB?",
+    "common_mistake": "Assuming the OOM is caused by batch size or activation memory. In reality, Adam optimizer states alone require far more memory than the model weights.",
+    "realistic_solution": "Adam stores two additional states per parameter: the first moment (mean) and second moment (variance), each in FP32 (4 bytes). Combined with the FP32 master weights and FP32 gradients, training requires roughly 4x the weight memory. 7B params: 14 GB weights (BF16) + 28 GB optimizer states (2 × FP32) + 14 GB gradients (BF16) + 28 GB master weights (FP32) = ~84 GB — exceeds 80 GB before a single activation is stored.",
+    "napkin_math": "Weights: 7B × 2 bytes = 14 GB | Master weights (FP32): 7B × 4 bytes = 28 GB | Gradients: 7B × 2 bytes = 14 GB | Adam m + v: 7B × 4 bytes × 2 = 56 GB | Total: ~112 GB (without activations) — way over 80 GB",
+    "issues": [
+      "The 'Realistic Solution' text incorrectly calculates Adam's FP32 optimizer states as 28 GB, contradicting its own claim of using FP32.",
+      "The 'Napkin Math' section provides a different, correct calculation (56 GB), creating an internal inconsistency in the solution."
+    ]
+  },
+  {
+    "id": "cloud-b4-custom-triton-kernel-design-14",
+    "title": "The Custom Fused Kernel Design",
+    "level": "L6+",
+    "track": "cloud",
+    "ka": "B4",
+    "rc": "RC-3",
+    "mode": "requirements-to-architecture",
+    "scenario": "You need to implement a fused RMSNorm + Rotary Position Embedding (RoPE) + attention score computation kernel in Triton for a LLaMA-70B deployment. The three operations are currently separate kernels, each reading and writing the full hidden state (8,192 dims) to HBM. Your target is an H100 with 3.35 TB/s HBM bandwidth and 228 KB shared memory per SM. Design the tiling strategy for the fused kernel: what are the tile dimensions, how do you partition work across thread blocks, what is the expected HBM traffic reduction, and what is the primary risk of this fusion?",
+    "common_mistake": "Naively concatenating the three kernels' code into one without restructuring the data flow. Engineers may also choose tiles that exceed shared memory capacity, or fail to account for the fact that RoPE requires both the element value AND its position index, adding register pressure.",
+    "realistic_solution": "The fusion strategy keeps the entire hidden state for a group of tokens in SRAM across all three operations, eliminating two round-trips to HBM. Design: (1) Tile dimensions: Each thread block processes a tile of [BLOCK_SIZE_TOKENS x hidden_dim]. For hidden_dim=8192 in FP16, one token = 16 KB. Shared memory = 228 KB, so BLOCK_SIZE_TOKENS = floor(228 / 16) = 14 tokens per block. Round down to 8 for alignment (8 x 16 = 128 KB, leaving room for RoPE frequency tables and scratch). (2) Work partition: Each thread block loads 8 tokens of the Q or K tensor from HBM into shared memory, computes RMSNorm in-place (requires a reduction across the hidden dimension for the RMS statistic — use warp-level reductions), applies RoPE (element-wise multiply with precomputed sin/cos frequencies, stored in shared memory or registers), then computes partial attention scores Q@K^T for those tokens. (3) HBM reduction: Separate kernels: 3 reads + 3 writes = 6 x (tokens x 8192 x 2 bytes) per head. Fused: 1 read + 1 write = 2 x (tokens x 8192 x 2 bytes) + attention score output. Reduction: 3x less HBM traffic. (4) Primary risk: The RMSNorm reduction across hidden_dim=8192 requires cross-warp synchronization within the thread block (__syncthreads), which serializes and may become the bottleneck if not carefully pipelined with the subsequent RoPE computation. Additionally, the fused kernel is model-specific and must be rewritten for any architecture change.",
+    "napkin_math": "Separate kernels per token (hidden_dim=8192, FP16): RMSNorm: read 16 KB + write 16 KB = 32 KB. RoPE: read 16 KB + write 16 KB = 32 KB. QK^T prep: read 16 KB + write 16 KB = 32 KB. Total: 96 KB per token to HBM. Fused kernel: read 16 KB + write 16 KB (QK scores much smaller) ≈ 34 KB per token. Reduction: 96/34 = 2.8x. For batch=256, seq=4096, 64 heads: separate = 256 x 4096 x 64 x 96 KB = 6.4 TB HBM traffic. Fused = 2.3 TB. Savings: 4.1 TB at 3.35 TB/s = 1.2 seconds saved per forward pass. This fusion alone can reduce prefill time by ~30%.",
+    "issues": [
+      "The napkin math for total HBM traffic incorrectly multiplies the per-token traffic by the number of heads, resulting in a 64x overestimation of the total traffic and time savings."
+    ]
+  },
+  {
+    "id": "cloud-c4-alpha-beta-latency-model-3",
+    "title": "The Alpha-Beta Communication Model",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "C4",
+    "rc": "RC-1",
+    "mode": "napkin-math",
+    "scenario": "Your cluster has InfiniBand links with latency $\\alpha = 5\\,\\mu s$ and bandwidth $\\beta^{-1} = 50\\text{ GB/s}$. You need to AllReduce a 200 MB gradient buffer across 32 GPUs using a Ring algorithm. Using the alpha-beta model, estimate the AllReduce time. Then explain: at what message size does the latency term become negligible compared to the bandwidth term?",
+    "common_mistake": "Forgetting the factor of $2(N-1)$ steps in Ring AllReduce, or confusing the per-step message size with the total message size. Some engineers also ignore the latency term entirely, which matters for small messages.",
+    "realistic_solution": "The Ring AllReduce alpha-beta model is: $T = 2(N-1) \\cdot \\alpha + 2 \\cdot \\frac{N-1}{N} \\cdot M \\cdot \\beta$, where $N=32$, $M=200\\text{ MB}$, $\\alpha = 5\\,\\mu s$, $\\beta = 1/50\\text{ GB/s} = 20\\text{ ns/byte}$. Latency component: $2 \\times 31 \\times 5\\,\\mu s = 310\\,\\mu s$. Bandwidth component: $2 \\times \\frac{31}{32} \\times 200\\text{ MB} \\times 20\\text{ ns/byte} = 7.75\\text{ ms}$. Total: $\\approx 8.06\\text{ ms}$. The latency term is ~4% of total — already small. The crossover point (where $\\alpha$ term = $\\beta$ term) is at message size $M^* = \\frac{N \\cdot \\alpha}{\\beta} = 32 \\times 5\\,\\mu s \\times 50\\text{ GB/s} = 8\\text{ KB}$. Below 8 KB, latency dominates and you should use a different algorithm (e.g., recursive halving-doubling).",
+    "napkin_math": "- Latency term: 62 steps × 5 μs = 310 μs | - Bandwidth term: 387.5 MB × 20 ns/byte = 7.75 ms | - Total ≈ 8.06 ms | - Critical message size: ~8 KB (below this, latency dominates) | - At 200 MB, bandwidth is 96% of total time → Ring is the right choice",
+    "issues": [
+      "The value for beta is stated as 20 ns/byte, which corresponds to 50 MB/s, but the scenario specifies a 50 GB/s link (which is 0.02 ns/byte).",
+      "The calculation for the critical message size where latency dominates is incorrect; it should be 8 MB, not 8 KB."
+    ]
+  },
+  {
+    "id": "cloud-c4-ring-vs-tree-algorithm-selection-4",
+    "title": "The Ring vs Tree Algorithm Selection",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "C4",
+    "rc": "RC-2",
+    "mode": "tradeoff-analysis",
+    "scenario": "NCCL automatically selects between Ring and Tree AllReduce algorithms depending on the message size and GPU count. On your 64-GPU cluster (8 nodes × 8 GPUs), you notice that NCCL uses Tree AllReduce for gradient buffers smaller than 256 KB but switches to Ring AllReduce for larger buffers. Why does NCCL make this switch? When would the Tree algorithm outperform Ring, and vice versa?",
+    "common_mistake": "Assuming Ring is always better because it's 'bandwidth-optimal.' Ring is bandwidth-optimal for large messages, but its $2(N-1)$ latency steps make it catastrophically slow for small messages on large clusters.",
+    "realistic_solution": "Ring AllReduce has $O(N)$ latency steps but $O(M)$ bandwidth cost (bandwidth-optimal). Tree AllReduce has $O(\\log N)$ latency steps but $O(M \\log N)$ bandwidth cost (not bandwidth-optimal). For small messages (< 256 KB on 64 GPUs), latency dominates: Ring needs $2 \\times 63 = 126$ communication steps, while Tree needs only $2 \\times \\log_2(64) = 12$ steps. The 10× fewer steps dwarfs the extra bandwidth. For large messages (> 256 KB), bandwidth dominates: Ring transfers $2 \\times \\frac{63}{64} \\times M \\approx 2M$ while Tree transfers $2 \\times M \\times \\log_2(64) = 12M$ — 6× more data. The crossover point depends on the $\\alpha / \\beta$ ratio of the network. NCCL's auto-tuner selects the algorithm that minimizes total time at runtime.",
+    "napkin_math": "- Ring on 64 GPUs: 126 latency steps × 5 μs = 630 μs fixed overhead | - Tree on 64 GPUs: 12 latency steps × 5 μs = 60 μs fixed overhead | - At 256 KB: Ring bandwidth = 504 KB × 20 ns/B = 10 μs; Tree bandwidth = 3 MB × 20 ns/B = 60 μs | - Ring total: 640 μs; Tree total: 120 μs → Tree wins by 5× | - At 100 MB: Ring BW = 7.7 ms; Tree BW = 46.2 ms → Ring wins by 6×",
+    "issues": [
+      "The napkin math has a typo, stating bandwidth cost is based on '20 ns/B' (50 MB/s), but the resulting numbers only make sense if a much faster network like 50 GB/s (0.02 ns/B) was used.",
+      "The bandwidth assumptions used for the 100 MB case appear inconsistent with those used for the 256 KB case, leading to confusing results."
+    ]
+  },
+  {
+    "id": "cloud-c4-gradient-bucket-fusion-5",
+    "title": "The Gradient Bucket Fusion Tradeoff",
+    "level": "L3",
+    "track": "cloud",
+    "ka": "C4",
+    "rc": "RC-13",
+    "mode": "tradeoff-analysis",
+    "scenario": "PyTorch DDP defaults to a 25 MB gradient bucket size for AllReduce. Your team is training a model with 500 layers, each producing a 50 KB gradient tensor. A colleague suggests increasing the bucket size to 100 MB 'for better bandwidth utilization.' Another suggests decreasing it to 1 MB 'for faster overlap with backward pass.' Who is right, and what is the real tradeoff being managed?",
+    "common_mistake": "Optimizing only one side of the tradeoff. Larger buckets improve bandwidth utilization but delay the start of communication. Smaller buckets start communication sooner but suffer from higher per-message latency overhead. Neither extreme is correct without considering the model's backward pass profile.",
+    "realistic_solution": "Both are partially right, but the bucket size must balance two competing forces. **Larger buckets (100 MB):** Amortize the per-message startup latency ($\\alpha$) across more data, achieving near-peak bandwidth. But communication for that bucket cannot start until ALL gradients in the bucket are computed — delaying the overlap with computation. For 500 layers at 50 KB each, a 100 MB bucket contains 2,000 layers' worth — the entire model. No overlap is possible; AllReduce starts only after the full backward pass. **Smaller buckets (1 MB):** Each bucket of 20 layers finishes quickly, enabling aggressive overlap with backward compute. But each 1 MB message on InfiniBand pays a 5 μs startup per step — at 32 GPUs with Ring, that's 630 μs overhead, which is 630× the time to actually transfer 1 MB (1 μs at 50 GB/s). The **25 MB default** is a well-calibrated middle ground: large enough for efficient bandwidth use, small enough that buckets fill during backward pass and communication overlaps with compute.",
+    "napkin_math": "- 1 MB bucket: 630 μs latency + 20 μs bandwidth = 650 μs per bucket. 200 buckets total → 130 ms if serialized | - 100 MB bucket: 630 μs latency + 2 ms bandwidth = 2.63 ms per bucket. But zero overlap → adds 2.63 ms to critical path | - 25 MB bucket: 630 μs + 0.5 ms = 1.13 ms per bucket. 20 buckets, heavily overlapped → ~3-4 ms visible on critical path",
+    "issues": [
+      "The napkin math incorrectly calculates the number of buckets for the 1MB and 25MB cases, which invalidates the subsequent timing calculations."
+    ]
+  },
+  {
+    "id": "cloud-b8-mfu-vs-hfu-distinction-8",
+    "title": "The MFU vs HFU Confusion",
+    "level": "L4",
+    "track": "cloud",
+    "ka": "B8",
+    "rc": "RC-2",
+    "mode": "tradeoff-analysis",
+    "scenario": "Your team reports that their GPT-3 175B training run achieves '62% GPU utilization' on a cluster of 1,024 A100s. You ask whether this is Model FLOPS Utilization (MFU) or Hardware FLOPS Utilization (HFU). They don't know the difference. Why does this distinction matter, and which metric should you trust for comparing different training configurations?",
+    "common_mistake": "Treating MFU and HFU as interchangeable, or worse, using nvidia-smi's 'GPU utilization' percentage (which measures time the GPU has any active kernel, not actual compute efficiency — a kernel running at 1% of peak FLOPS still shows 100% utilization).",
+    "realistic_solution": "MFU (Model FLOPS Utilization) = (model FLOPS per step / step time) / peak FLOPS. It counts only the 'useful' FLOPS — the theoretical compute needed for one forward + backward pass based on the model architecture. MFU excludes recomputation from activation checkpointing, communication overhead, and idle time. HFU (Hardware FLOPS Utilization) = (total FLOPS executed on hardware / step time) / peak FLOPS. It counts all FLOPS the hardware actually performs, including recomputed activations. If activation checkpointing recomputes 33% of the forward pass, HFU = MFU x 1.33 for the compute portion. A training run with MFU=47% and HFU=62% tells you: (1) the hardware is reasonably well-utilized at 62%, but (2) 24% of that hardware work (62%-47%)/62% is 'wasted' on recomputation. MFU is the correct metric for comparing training efficiency across configurations because it normalizes for implementation choices like checkpointing depth.",
+    "napkin_math": "GPT-3 175B: ~3.14e17 FLOPS per forward+backward (6 x N x D^2 per token, ~2048 tokens). At 1,024 A100s (312 TFLOPS each), peak = 319 PFLOPS. If step time = 1.0s: MFU = 314 PFLOPS / 319 PFLOPS = 47%. With activation checkpointing adding 33% recompute: actual FLOPS = 314 x 1.33 = 418 PFLOPS. HFU = 418 / 319... wait, HFU > 100%? No — the step time is longer due to recompute. Real step time ≈ 1.33s. HFU = 418 / (319 x 1.33) = 62%.",
+    "issues": [
+      "The napkin math contains multiple arithmetic errors; the MFU calculation `314 / 319 = 47%` and the HFU calculation `418 / (319 * 1.33) = 62%` are both incorrect."
+    ]
+  },
+  {
+    "id": "cloud-c7-dominant-resource-fairness-basics-1",
+    "title": "The Dominant Resource Fairness Intuition",
+    "level": "L2",
+    "track": "cloud",
+    "ka": "C7",
+    "rc": "RC-10",
+    "mode": "concept-recall",
+    "scenario": "A shared GPU cluster has 100 GPUs and 1,000 CPU cores. Team A submits jobs that each require 1 GPU and 50 CPUs. Team B submits jobs that each require 4 GPUs and 10 CPUs. Under naive equal-share scheduling, each team gets 50 GPUs and 500 CPUs. Why does this naive split waste cluster resources, and what is the core idea behind Dominant Resource Fairness (DRF)?",
+    "common_mistake": "Assuming fair scheduling means splitting every resource 50/50 between teams. This ignores that teams have different resource profiles and a flat split leaves resources stranded.",
+    "realistic_solution": "DRF equalizes each team's share of their *dominant* (most-demanded) resource. Team A's dominant resource is CPU (each job uses 5% of CPUs but only 1% of GPUs). Team B's dominant resource is GPU (each job uses 4% of GPUs but only 1% of CPUs). DRF ensures both teams get the same fraction of their respective dominant resource, maximizing overall utilization by avoiding stranded resources.",
+    "napkin_math": "Naive 50/50 split: Team A can run min(50/1, 500/50) = 10 jobs, using 10 GPUs and 500 CPUs. 40 GPUs sit idle. Team B can run min(50/4, 500/10) = 12 jobs, using 48 GPUs and 120 CPUs. 380 CPUs sit idle. Total utilization: 58 GPUs (58%), 620 CPUs (62%). DRF allocation: both teams get ~33% of dominant resource. Team A runs ~6 jobs (6 GPUs, 300 CPUs), Team B runs ~8 jobs (32 GPUs, 80 CPUs). Remaining 62 GPUs and 620 CPUs available for more jobs — utilization rises to ~85%+.",
+    "issues": [
+      "The napkin math for the DRF allocation is incorrect, significantly underestimating the number of jobs that can be scheduled and the resulting cluster utilization."
+    ]
+  },
+  {
+    "id": "edge-d1-low-rank-factorization-latency-3",
+    "title": "The Low-Rank Decomposition Latency Paradox",
+    "level": "L3",
+    "track": "edge",
+    "ka": "D1",
+    "rc": "RC-2",
+    "mode": "symptom-to-cause",
+    "scenario": "You decompose a $4096 \\times 4096$ weight matrix in an edge-deployed transformer into two low-rank matrices of dimensions $4096 \\times 256$ and $256 \\times 4096$ (rank 256). This reduces parameters from 16.8M to 2.1M — an 8x reduction. However, inference latency on a Jetson Orin (with Tensor Cores) only drops by 15%, not the expected 8x. Explain why the FLOP reduction does not translate to proportional latency reduction on this hardware.",
+    "common_mistake": "Equating parameter reduction with proportional speedup. 'We have 8x fewer parameters, so we should see ~8x speedup.' This confuses model size with compute time and ignores hardware execution realities.",
+    "realistic_solution": "Three factors explain the gap. First, the FLOP reduction is not 8x — it's only 4x. The original matrix multiply costs $2 \\times 4096^2 = 33.6$ GFLOPs. The two low-rank multiplies cost $2 \\times (4096 \\times 256 + 256 \\times 4096) = 4.2$ GFLOPs — a 4x reduction (parameters and FLOPs scale differently for rank decomposition). Second, the two sequential matrix multiplies have lower arithmetic intensity than one large multiply. The original $4096 \\times 4096$ matmul has high arithmetic intensity and saturates Tensor Cores; each low-rank multiply ($4096 \\times 256$) is a tall-skinny or skinny-tall matrix that may not fill the Tensor Core tile efficiently, reducing hardware utilization from ~70% to ~25%. Third, you now have two kernel launches instead of one, adding overhead and preventing the GPU from amortizing the memory-bandwidth cost of reading activations — the activation vector is read from HBM twice instead of once.",
+    "napkin_math": "Original: $4096 \\times 4096$ matmul = 33.6M FLOPs, one kernel launch, activations read once. Decomposed: $4096 \\times 256$ + $256 \\times 4096$ = 2.1M + 2.1M = 4.2M FLOPs, two kernel launches. FLOP ratio: 8x (parameter-wise) but only 4x (compute-wise). Arithmetic intensity of $4096 \\times 256$ matmul: much lower than $4096 \\times 4096$. On Orin with 275 TOPS INT8 but only ~40% utilization on skinny matmuls → effective throughput drops from ~110 TOPS to ~27 TOPS. Net real speedup: roughly $33.6/4.2 \\times (27/110) \\approx 2\\times$, explaining the ~15-20% latency improvement (the matmul is only part of the layer's total compute).",
+    "issues": [
+      "The solution's central claim that FLOP reduction is 4x is incorrect; the FLOP reduction is 8x, the same as the parameter reduction. Additionally, the FLOP counts are mislabeled as GFLOPs instead of MFLOPs."
+    ]
+  },
+  {
+    "id": "cloud-e3-disaggregated-eval-pipeline-2",
+    "title": "The Disaggregated Evaluation Pipeline",
+    "level": "L3",
+    "track": "global",
+    "ka": "E3",
+    "rc": "RC-8",
+    "mode": "napkin-math",
+    "scenario": "Your image classification model achieves 94% accuracy on the test set. Management is satisfied and wants to ship. You propose running disaggregated evaluation first. The test set has 10 demographic subgroups and 50 intersectional subgroups (age × gender × skin tone). Calculate the minimum sample size per subgroup needed to detect a 5-percentage-point accuracy gap with 80% power, and estimate the total evaluation dataset size required.",
+    "common_mistake": "Assuming the existing test set is large enough. With 10K test images and 50 intersectional subgroups, some subgroups may have fewer than 50 samples — far too few for statistical significance.",
+    "realistic_solution": "Using a two-proportion z-test, detecting a 5pp difference (94% vs 89%) with 80% power and α=0.05 requires approximately 780 samples per subgroup. For 50 intersectional subgroups: 50 × 780 = 39,000 minimum test samples, assuming perfect balance. Real-world subgroup distributions are highly skewed (intersectional minorities may be <1% of data), so you need to oversample rare subgroups. Practical minimum: ~100K labeled evaluation images with stratified sampling. The systems implication: disaggregated evaluation is a data engineering problem. You need a metadata-rich evaluation dataset with demographic annotations, a stratified sampling pipeline, and statistical testing infrastructure that reports per-subgroup confidence intervals, not just point estimates.",
+    "napkin_math": "Sample size for two-proportion test: $n \\approx \\frac{(z_{\\alpha/2} + z_{\\beta})^2 \\times (p_1(1-p_1) + p_2(1-p_2))}{(p_1 - p_2)^2}$. With $p_1=0.94$, $p_2=0.89$, $z_{0.025}=1.96$, $z_{0.2}=0.84$: $n \\approx \\frac{(1.96+0.84)^2 \\times (0.0564 + 0.0979)}{0.0025} \\approx 780$ per group. 50 subgroups × 780 = 39,000 samples minimum.",
+    "issues": [
+      "The sample size calculation for the two-proportion z-test is incorrect; the result should be approximately 484, not 780."
+    ]
+  },
+  {
+    "id": "cloud-b3-die-to-die-interconnect-bottleneck-in-ch-8",
+    "title": "Die-to-Die Interconnect Bottleneck in Chiplet ASICs",
+    "level": "L6+",
+    "track": "cloud",
+    "ka": "B3",
+    "rc": "RC-3",
+    "mode": "symptom-to-cause",
+    "scenario": "Evaluating a next-gen cloud accelerator composed of 4 identical compute chiplets integrated via a 2.5D silicon interposer. Workload A (a massive element-wise GeLU) achieves 800 TFLOPS. Workload B (a large Matrix Multiply requiring global reductions across the M dimension) only achieves 120 TFLOPS, despite having identical theoretical FLOP counts. The package power draw spikes near the chip edges.",
+    "common_mistake": "Assuming Workload B is bound by HBM bandwidth or lacks compute parallelization across the 4 chiplets.",
+    "realistic_solution": "The symptom (massive drop in TFLOPS specifically for global reduction operations, with edge heating) points directly to the Die-to-Die (D2D) interconnect bandwidth bottleneck. In a multi-chiplet design, intra-chiplet SRAM bandwidth is typically an order of magnitude higher than inter-chiplet D2D bandwidth over the silicon interposer. Workload A (element-wise) is embarrassingly parallel and stays entirely local to each chiplet. Workload B (Matrix Multiply partitioned along the reduction dimension) requires partial sums to be broadcast and reduced across the 4 chiplets. The D2D links become completely saturated, stalling the compute units. The co-design solution is to alter the parallelization strategy: partition the matrix multiply along non-reducing dimensions (Spatial/Data parallel instead of Tensor parallel across the K dimension) so that computations remain local to the chiplet, and only final small activations cross the D2D boundary.",
+    "napkin_math": "Assume D2D bandwidth is 1 TB/s. Workload B requires moving a 16K x 16K partial sum matrix in FP16 = 512 MB per step. To achieve 800 TFLOPS on a 16Kx16Kx16K GEMM (8.5e12 FLOPs), the compute time should be 8.5e12 / 800e12 = 10.6 microseconds. However, transferring 512 MB over 1 TB/s D2D takes 512 microseconds. The operation is entirely bound by D2D communication, taking 500us instead of 10us, resulting in 8.5e12 / 500e-6 = ~17 TFLOPS per chiplet (120 TFLOPS total).",
+    "issues": [
+      "The compute time calculation is off by 1000x (10.6 milliseconds, not microseconds), which invalidates the conclusion that D2D is the bottleneck.",
+      "The final TFLOPS calculation is also incorrect; 8.5e12 FLOPs in 500us would be 17,000 TFLOPS, not 17 TFLOPS."
+    ]
+  },
+  {
+    "id": "cloud-b3-zero-3-host-offload-pcie-contention-12",
+    "title": "ZeRO-3 Host Offload PCIe Contention",
+    "level": "L6+",
+    "track": "cloud",
+    "ka": "B3",
+    "rc": "RC-3",
+    "mode": "symptom-to-cause",
+    "scenario": "Training a 200B parameter model on a single node with 8x H100s using DeepSpeed ZeRO-3 with CPU NVMe offload. The NVLink bandwidth is 900 GB/s per GPU. However, system utilization is 12%, NVLink is 95% idle, and the training step takes 4500ms. Profiling shows the GPUs are waiting on synchronous memory copies.",
+    "common_mistake": "Assuming NVLink is configured incorrectly or that the CPU lacks the compute power to process the optimizer step.",
+    "realistic_solution": "The symptom (GPUs idle, NVLink unused, waiting on memory copies) reveals a severe PCIe bottleneck caused by CPU offloading. ZeRO-3 offload stores model parameters in Host CPU RAM (or NVMe). During the forward/backward pass, parameters must be fetched to the GPU immediately before computation. While H100s communicate over ultra-fast NVLink (900 GB/s), fetching from Host RAM traverses the PCIe Gen5 x16 bus, which has a unidirectional theoretical limit of 64 GB/s (often ~50 GB/s effectively). The algorithm is bottlenecked by the host-to-device PCIe bandwidth. Because the prefetching buffer size is likely too small or synchronous, the compute units stall waiting for weights. Co-design solution: Increase the parameter prefetch buffer size to aggressively overlap PCIe transfers with compute, upgrade to an architecture with CXL or Grace-Hopper (NVLink-C2C at 900 GB/s to host memory), or disable CPU offload and distribute the model purely across GPU HBM.",
+    "napkin_math": "200B model in BF16 = 400 GB. Over 8 GPUs, each needs to compute on the full 400GB iteratively. Fetching 400GB over a 50 GB/s PCIe bus takes 8 seconds per pass (forward + backward = 16 seconds). Even if partitioned perfectly, the fetch time dictates the critical path. Compute time for 200B params * 8k tokens at 1 PFLOPS is ~0.5 seconds. The system is 16 / 0.5 = 32x memory bandwidth bound by the PCIe link.",
+    "issues": [
+      "There is a major contradiction between the scenario's step time (4500ms) and the napkin math's calculated bottleneck time (16 seconds).",
+      "The compute time calculation of 0.5 seconds is inaccurate; a more standard estimation (6*B*S*P) yields over 1 second for the 8-GPU system."
+    ]
+  },
+  {
+    "id": "edge-d7-skewed-edge-a-b-testing-7",
+    "title": "Skewed Edge A/B Testing",
+    "level": "L6+",
+    "track": "edge",
+    "ka": "D7",
+    "rc": "RC-7",
+    "mode": "tradeoff-analysis",
+    "scenario": "You are deploying a new RL-based energy-saving model to 100,000 smart HVAC controllers. You want to run an A/B test to measure energy savings. However, household energy usage varies wildly based on climate (e.g., Arizona vs. Alaska) and insulation. A standard randomized 50/50 split yields massive variance, hiding the model's actual impact.",
+    "common_mistake": "Running the test longer or randomly assigning more users to smooth out the variance.",
+    "realistic_solution": "Use Switchback (Crossover) Testing or Stratified Sampling based on edge-computed embeddings. In a switchback design, each individual edge device alternates between Model A (Control) and Model B (Treatment) in randomized blocks (e.g., daily or weekly). The device acts as its own control, completely isolating the environmental variance (climate, house size) from the model performance. Alternatively, edge devices can locally compute a 'climate/usage embedding' and send it to the cloud, allowing the MLOps platform to pair similar homes into matched A/B cohorts. This trades off temporal correlation risks (e.g., weather changing day-to-day) for a massive reduction in cross-sectional variance.",
+    "napkin_math": "Between-home variance is $50/month. Model impact is expected to be $5/month. Standard error of difference = sqrt(2 * 50^2 / N). To detect $5 with 95% confidence, N must be huge (>80,000). Within-home variance (day to day) is only $5/month. Switchback testing reduces standard error to sqrt(2 * 5^2 / N), requiring ~100x fewer samples or yielding much higher statistical significance in the same timeframe.",
+    "issues": [
+      "The sample size calculation for the standard A/B test is incorrect; the required N should be around 3,200, not over 80,000."
+    ]
+  },
+  {
+    "id": "cloud-d2-long-context-int4-kv-cache-degradation-3",
+    "title": "Long-Context INT4 KV Cache Degradation",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "D2",
+    "rc": "RC-5",
+    "mode": "requirements-to-architecture",
+    "scenario": "Serving a 7B LLM with a 128k context window. At FP16, the KV cache is 32GB per request, heavily limiting concurrency. You implement INT4 per-channel KV cache quantization, saving 75% memory. Throughput jumps from 5 QPS to 18 QPS, but 'needle in a haystack' retrieval accuracy drops from 99% to 45%.",
+    "common_mistake": "Increasing the calibration dataset size, which doesn't fix the fundamental representational limit of 4 bits for long-sequence dot products.",
+    "realistic_solution": "Per-channel INT4 quantization of the KV cache is insufficient for long-context retrieval because the attention mechanism heavily relies on precise outlier key/value pairs that represent specific 'needles'. INT4 has only 16 buckets. When quantizing Key vectors, the dot product precision with the Query vector degrades, causing attention scores to blur across the context length. The architecture needs a mixed-precision or grouped quantization strategy. You should implement Grouped-Quantization (e.g., group size 64 or 128) to capture local variance. Alternatively, keep the most recent tokens (e.g., local window of 1024) and high-attention 'sink' tokens in FP16, only quantizing the rest to INT4.",
+    "napkin_math": "128k context, 7B model (4096 dim, 32 layers). FP16 KV cache = 128,000 * 4096 * 32 * 2 (K+V) * 2 bytes = 67.1 GB. INT4 reduces this to ~8.4 GB. Group size 128 adds 16-bit scales per group: 128k * 4096/128 * 32 * 2 * 2 = 524 MB of scale metadata, minimal memory overhead but drastically reduces quantization error.",
+    "issues": [
+      "The napkin math for the INT4 KV cache size is incorrect by a factor of 2; it should be ~16.8 GB, not ~8.4 GB."
+    ]
+  },
+  {
+    "id": "cloud-b2-the-rope-recomputation-paradox-4",
+    "title": "The RoPE Recomputation Paradox",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "B2",
+    "rc": "RC-1",
+    "mode": "symptom-to-cause",
+    "scenario": "Your team is optimizing a custom Transformer for a 128k context window on an A100 GPU (80GB). The original code reads pre-computed sine and cosine matrices for Rotary Position Embeddings (RoPE) from HBM, taking 15% of the forward pass time. You rewrite the Triton kernel to dynamically recompute the trigonometric functions (sin/cos) on the fly for every token. FLOPs increase by 400%, but the kernel executes 4x faster.",
+    "common_mistake": "Assuming that executing trigonometric functions (which are computationally expensive) will always be slower than reading pre-computed values from RAM.",
+    "realistic_solution": "The original RoPE implementation was deeply memory-bandwidth bound. Reading massive pre-computed sin/cos caches for 128k context tokens from HBM saturated the memory bus. By recomputing on the fly, you drastically increased the Arithmetic Intensity, shifting the operation from the memory-bound slope up towards the compute-bound ceiling. Because the A100 has a massive compute-to-bandwidth ratio (312 TFLOPS vs 2 TB/s), the extra trig FLOPs are computed essentially for 'free' in the shadow of the necessary memory loads for the Q and K tensors.",
+    "napkin_math": "Pre-computed: For d=128, context N=128k. HBM read per token = 4 x 128 x 2 bytes (Q, K, Sin, Cos) = 1 KB. Total read = 128 MB. Time at 2 TB/s = ~64 µs. Recompute: Read only Q, K (512 bytes). Time = ~32 µs. Compute for sin/cos = ~20 FLOPs per element x 128 x 128k = 327 MFLOPs. Compute time at 312 TFLOPS = ~0.001 µs. The compute time is completely hidden by the 32 µs memory load time, resulting in a 2x-4x speedup depending on overheads.",
+    "issues": [
+      "The napkin math for the recomputation time is off by a factor of 1000; 327 MFLOPs on a 312 TFLOPS GPU takes ~1 microsecond, not ~0.001 microseconds."
+    ]
+  },
+  {
+    "id": "cloud-b2-the-activation-checkpointing-paradox-4",
+    "title": "The Activation Checkpointing Paradox",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "B2",
+    "rc": "RC-1",
+    "mode": "failure-to-root-cause",
+    "scenario": "You are fine-tuning a 30B model on 8x A100 GPUs. To fit a larger batch size, you enable full activation (gradient) checkpointing. You calculate that recomputing the forward pass should add exactly 33% overhead to the total compute time (1 FWD + 2 BWD -> 2 FWD + 2 BWD = 4/3). However, the measured step latency increases by 75%, severely degrading training throughput.",
+    "common_mistake": "Assuming that step time scales perfectly linearly with FLOP count, ignoring the varying arithmetic intensities of different neural network layers.",
+    "realistic_solution": "The 33% overhead rule of thumb assumes the entire forward pass is compute-bound. While the large matrix multiplications (QKV projections, FFNs) are compute-bound and scale directly with FLOPs, operations like LayerNorm, GeLU, RoPE, and Dropout are heavily memory-bandwidth bound. They contribute negligibly to the total FLOP count but take up a significant fraction of the execution time because they operate on the steep slope of the roofline model. When you enable full activation checkpointing, you force the GPU to re-fetch all the high-dimensional activations from HBM for these memory-bound operations. The time spent recomputing these memory-bound ops does not scale with their tiny FLOP count, drastically lowering the overall arithmetic intensity of the recompute phase and causing the disproportionate 75% latency increase.",
+    "napkin_math": "Let a layer have 100 TFLOPs of MatMul (compute bound) taking 0.32ms, and 0.01 TFLOPs of LayerNorm/GeLU (memory bound) taking 0.3ms. Total time = 0.62ms. FLOPs are 99.99% MatMul. Recomputing adds 100.01 TFLOPs (33% of FWD+BWD FLOPs). But in time, you add another 0.62ms. If BWD was 1.24ms, original total = 1.86ms. New total = 2.48ms. 2.48 / 1.86 = 1.33x. Wait, if memory-bound ops dominate more, e.g., MatMul 0.32ms, MemOps 1.0ms. Orig = 1.32 FWD + 2.64 BWD = 3.96ms. Recompute adds 1.32ms. New = 5.28ms. Still 33%. The real paradox occurs when BWD doesn't re-read as much for MemOps. Recomputing forces *extra* reads that BWD wouldn't normally do, skewing the time addition to >33%.",
+    "issues": [
+      "The napkin math is flawed and fails to demonstrate the question's core premise; both examples calculate exactly a 33% time increase, contradicting the claim of a >33% slowdown."
+    ]
+  },
+  {
+    "id": "mobile-d3-the-long-prompt-prefill-cliff-1",
+    "title": "The Long Prompt Prefill Cliff",
+    "level": "L4",
+    "track": "mobile",
+    "ka": "D3",
+    "rc": "RC-6",
+    "mode": "symptom-to-cause",
+    "scenario": "You are deploying a 3B parameter LLM (4-bit quantized) on a mobile NPU. For prompts under 500 tokens, the Time-To-First-Token (TTFT) is a swift 250ms. However, when the prompt reaches 1500 tokens, TTFT non-linearly spikes to 4.5 seconds. In both cases, the decode latency remains completely flat at 20 tokens/sec.",
+    "common_mistake": "Assuming the NPU is thermally throttling due to the longer sustained compute phase of the larger prefill.",
+    "realistic_solution": "The root cause is the exhaustion of the NPU's limited on-chip SRAM. Prefill is heavily compute-bound, performing large matrix multiplications. For short prompts, the intermediate activations and the generated KV cache fit entirely within the NPU's SRAM (e.g., 4MB). However, at 1500 tokens, the working set size exceeds the SRAM capacity. The NPU is forced to spill intermediate attention tensors and the KV cache to the device's LPDDR5 DRAM. This shifts the prefill phase from being compute-bound (running at peak NPU TFLOPs) to memory-bandwidth bound, drastically reducing utilization and causing the non-linear latency spike.",
+    "napkin_math": "SRAM capacity = 4MB. KV cache for 500 tokens: 500 tokens * 32 layers * 64 dim * 8 heads * 2 (K+V) * 2 bytes = ~3.2MB (fits in SRAM). For 1500 tokens, KV cache = 9.8MB. This forces DRAM round-trips. Writing 9.8MB to DRAM at 30GB/s is fast, but the O(N^2) attention intermediate activations for 1500 tokens require continuous paging in and out of SRAM, dropping effective compute utilization from 80% to under 15%.",
+    "issues": [
+      "The napkin math for the KV cache size is off by an order of magnitude; the provided model parameters result in a cache size of ~32.7MB, not 3.2MB.",
+      "The model parameters used in the calculation (e.g., hidden dimension of 512) are inconsistent with a 3B parameter model."
+    ]
+  },
+  {
+    "id": "mobile-d3-the-int8-kv-cache-penalty-7",
+    "title": "The INT8 KV Cache Penalty",
+    "level": "L4",
+    "track": "mobile",
+    "ka": "D3",
+    "rc": "RC-6",
+    "mode": "symptom-to-cause",
+    "scenario": "To fit a 4B model in 4GB of mobile RAM, you quantize the KV cache from FP16 to INT8, successfully saving 600MB. However, you observe that decode latency increases from 35ms per token to 55ms per token, and overall NPU utilization drops from 80% to 50%.",
+    "common_mistake": "Assuming INT8 memory fetches are slower than FP16 memory fetches.",
+    "realistic_solution": "The latency increase is caused by the lack of native INT8-to-FP16 mixed-precision attention support on the mobile NPU. To perform the attention mechanism, the inference engine must insert an explicit dequantization kernel that reads the INT8 KV cache, casts it back to FP16, and writes it to an intermediate buffer in SRAM (or DRAM) before the actual attention kernel can run. This extra kernel launch, combined with the intermediate memory round-trip on every single decode step, adds pure latency overhead that stalls the NPU.",
+    "napkin_math": "With a 1000-token context, 32 layers, 128 dim, 8 heads: KV cache size is ~3.2MB in INT8. \nDequantization kernel must read 3.2MB and write 6.4MB (FP16) per token. \nAt 30GB/s bandwidth, this memory movement takes ~0.3ms per layer, or ~10ms total across 32 layers. \nKernel launch overheads on mobile OS (e.g., 0.3ms per layer) add another ~10ms. Total added latency = 20ms per token. 35ms + 20ms = 55ms.",
+    "issues": [
+      "The napkin math is contradictory; it states a total KV cache size of 3.2MB but then uses this figure as a per-layer size in the subsequent latency calculation.",
+      "The model dimensions given (128 dim, 8 heads) are unusually small for a 4B parameter model."
+    ]
+  },
+  {
+    "id": "global-d3-paged-attention-internal-fragmentation-3",
+    "title": "Paged Attention Internal Fragmentation",
+    "level": "L5",
+    "track": "global",
+    "ka": "D3",
+    "rc": "RC-6",
+    "mode": "requirements-to-architecture",
+    "scenario": "You are designing a high-throughput translation API. The system requires a batch size of 128 to meet the 2000 QPS throughput SLA. Average prompt + generation length is 80 tokens. You configure PagedAttention with a block size of 512 tokens to minimize pointer overhead. The system constantly OOMs at a batch size of just 32, failing the throughput requirement.",
+    "common_mistake": "Adding more GPUs to increase total VRAM, or reducing the model's precision to INT4 to fit the batch size.",
+    "realistic_solution": "Decompose the memory allocation latency and capacity. The architectural failure is massive internal memory fragmentation. With a block size of 512 tokens, every request, regardless of its actual length, reserves a minimum of one full block. Since the average request is 80 tokens, 432 tokens of KV cache memory per request are pre-allocated but completely wasted. This is an 84% memory waste. The architecture requirement is to reduce the PagedAttention block size to 16 or 32 tokens. This drastically reduces internal fragmentation, freeing up enough VRAM to easily support the required batch size of 128 without buying more hardware.",
+    "napkin_math": "KV cache per token (e.g., Llama-2 13B) = ~100KB. Block size 512 = 51.2MB per block. For batch size 128: 128 * 51.2MB = 6.5GB reserved. Actual needed: 128 * 80 * 100KB = 1.02GB. Wasted: 5.5GB per layer. Across 40 layers, wasted = 220GB (OOM on 80GB GPU). Block size 16: reserved = 128 * 5 blocks * 1.6MB * 40 = 40GB (fits in VRAM).",
+    "issues": [
+      "The napkin math incorrectly multiplies the total KV cache memory by the number of layers, vastly overstating the memory usage.",
+      "The claimed KV cache size of ~100KB per token for Llama-2 13B is factually incorrect; the actual size is closer to 800KB per token."
+    ]
+  },
+  {
+    "id": "cloud-d5-dynamic-edge-cloud-serving-threshold-4",
+    "title": "Dynamic Edge-Cloud Serving Threshold",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "D5",
+    "rc": "RC-3",
+    "mode": "tradeoff-analysis",
+    "scenario": "A visual search app uses a 5MB local edge model (20ms latency, 85% accuracy) and a 2GB cloud-based ViT-L model (250ms latency including network, 99% accuracy). System throughput is 1000 QPS. Cloud API costs $0.01 per 10 requests. You need to achieve an overall P95 latency of <100ms and >95% accuracy while minimizing cloud spend.",
+    "common_mistake": "Running both models concurrently (shadowing) and waiting for the cloud response, which violates the latency SLA and maximizes cloud costs.",
+    "realistic_solution": "Implement a dynamic cascading confidence threshold. The edge device runs the lightweight model first and extracts a confidence score (e.g., max softmax probability or entropy). If the confidence exceeds a tuned threshold, the device returns the local prediction immediately. If it falls below the threshold, the query is routed to the cloud. You co-design the edge algorithm's calibration to reliably predict its own uncertainty, trading off cloud cost against overall system accuracy and tail latency.",
+    "napkin_math": "1000 QPS = 86.4M req/day. Cloud-only cost = $86,400/day. By tuning the threshold to route only 15% of the hardest queries to the cloud: Cloud traffic = 150 QPS = $12,960/day (saving $73,440/day). Average latency = (0.85 * 20ms) + (0.15 * 270ms) = 17ms + 40.5ms = 57.5ms. The P95 latency is 20ms (since 85% of queries are handled locally), meeting the <100ms SLA.",
+    "issues": [
+      "The napkin math incorrectly concludes that the P95 latency is 20ms; with 15% of requests taking 270ms, the P95 latency is actually 270ms.",
+      "The proposed solution violates the P95 < 100ms latency SLA defined in the scenario."
+    ]
+  },
+  {
+    "id": "global-d6-sram-banking-retention-power-leak-4",
+    "title": "SRAM Banking Retention Power Leak",
+    "level": "L4",
+    "track": "global",
+    "ka": "D6",
+    "rc": "RC-11",
+    "mode": "failure-to-root-cause",
+    "scenario": "An anomaly detection wearable uses a Cortex-M33 with 256KB SRAM (split into four 64KB banks: SRAM0-SRAM3). Your model requires 110KB. You implement Federated Learning, adding a 12KB gradient accumulation buffer. Sleep power jumps from 4.3uA to 10.9uA after adding the FL feature, halving battery life.",
+    "common_mistake": "Believing the FL gradient accumulation math is keeping the CPU awake longer before going to sleep.",
+    "realistic_solution": "The root cause is SRAM bank retention locality. The linker script scattered the memory allocations. The 110KB model occupies SRAM0 and SRAM1 (128KB total). The linker placed the new 12KB FL buffer into SRAM3. To retain this data during deep sleep, the power management unit must keep SRAM3 powered on. By forcing the linker to place the 12KB buffer into the remaining space of SRAM1, you can completely power off SRAM2 and SRAM3 during sleep.",
+    "napkin_math": "Base sleep current = 1.0uA. Each 64KB SRAM bank requires 3.3uA for data retention. Original state: SRAM0 + SRAM1 powered = 1.0uA + (2 * 3.3uA) = 7.6uA (Wait, let's match the prompt: 1uA base + 1 bank = 4.3uA. So 3.3uA per bank). Original model fits in SRAM0 (64KB) + SRAM1 (46KB). Power = 1.0 + 3.3 = 4.3uA (Assuming model is in Flash, only RAM is retained? No, if 1 bank is 4.3uA, 3 banks = 1.0 + 9.9 = 10.9uA). Moving the 12KB buffer into SRAM0 keeps retention at 1 bank (4.3uA).",
+    "issues": [
+      "The napkin math for the initial state is contradictory: it states the 110KB model requires two SRAM banks but claims the power draw of 4.3uA corresponds to only one active bank."
+    ]
+  },
+  {
+    "id": "global-e1-the-federated-battery-drain-3",
+    "title": "The Federated Battery Drain",
+    "level": "L4",
+    "track": "global",
+    "ka": "E1",
+    "rc": "RC-10",
+    "mode": "failure-to-root-cause",
+    "scenario": "You deploy a Federated Learning (FL) system to 50,000 mobile devices. To save user battery life, you aggressively prune the model, reducing the update payload from 50MB to 5MB. To maintain convergence with the pruned model, you increase the sync frequency from once every 100 local steps to once every 10 local steps. Battery drain per FL round increases by 250%.",
+    "common_mistake": "Assuming network energy consumption is strictly proportional to the number of bytes transferred over the cellular network.",
+    "realistic_solution": "The root cause is the Radio Resource Control (RRC) tail energy penalty inherent to cellular networks (4G/5G). When a device transmits data, the cellular radio enters a high-power active state. After transmission finishes, the radio remains in a high-power 'tail' state for 10-15 seconds before dropping back to idle, to avoid the latency of waking up for subsequent packets. By reducing the payload size by 10x but increasing the frequency by 10x, the total bytes transferred remains the same, but you incur the 10-15 second RRC tail energy penalty 10 times more often. The energy spent idling in the high-power tail state completely dominates the battery drain.",
+    "napkin_math": "Active radio power = 2.5W. Tail power = 1.5W for 10s (15 Joules per transmission). Original: 1 transfer of 50MB ≈ 5s active (12.5J) + 1 tail (15J) = 27.5 Joules per 100 steps. New: 10 transfers of 5MB ≈ 0.5s active (1.25J) + 1 tail (15J) = 16.25 Joules per transfer. 10 transfers = 162.5 Joules per 100 steps. 162.5 / 27.5 = ~5.9x increase in network energy.",
+    "issues": [
+      "The result of the napkin math (a 5.9x or 490% increase in energy) does not match the 250% increase stated in the scenario."
+    ]
+  },
+  {
+    "id": "cloud-e1-rack-level-thermal-colocation-7",
+    "title": "Rack-Level Thermal Colocation",
+    "level": "L5",
+    "track": "cloud",
+    "ka": "E1",
+    "rc": "RC-1",
+    "mode": "tradeoff-analysis",
+    "scenario": "Your infrastructure has 15 kW power limits per rack. You run two workloads: LLM inference (memory-bandwidth bound, low Tensor Core utilization, draws 350W/GPU) and offline batched MatMuls (compute-bound, heavily utilizes Tensor Cores, draws 650W/GPU). A standard node has 8 GPUs and uses ~2 kW of host overhead. Propose a scheduling strategy to maximize rack utilization without tripping the 15 kW breakers.",
+    "common_mistake": "Provisioning racks homogeneously based on the worst-case TDP (650W), resulting in only 1 node per rack and severely underutilizing the facility footprint.",
+    "realistic_solution": "If you deploy homogeneous compute-bound nodes, a single node draws (8 * 650W) + 2000W = 7.2 kW. You can only fit two nodes (14.4 kW) per 15 kW rack. If you deploy inference nodes, a node draws (8 * 350W) + 2000W = 4.8 kW. You could fit three nodes (14.4 kW). To maximize data center throughput and rack density, you should implement spatial workload colocation: scheduling a mix of memory-bound and compute-bound workloads on the *same* node or within the *same* rack. By pairing workloads that stress different hardware components (HBM vs. SMs), you smooth out the power draw. The optimal tradeoff involves accepting higher scheduling complexity (orchestrating Kubernetes to bin-pack pods based on real-time power profiles rather than just CPU/RAM) to achieve higher hardware density and lower TCO.",
+    "napkin_math": "Compute Node = 7.2 kW. Inference Node = 4.8 kW. If homogeneous: you get 2 compute nodes (16 GPUs) or 3 inference nodes (24 GPUs) per rack. Mixed Node: Schedule 4 inference GPUs (4*350=1.4kW) and 4 compute GPUs (4*650=2.6kW) per node. Node power = 1.4 + 2.6 + 2.0 (host) = 6.0 kW. You can now safely fit 2.5 nodes (or strictly 2 mixed + 1 inference) per rack, drastically improving fleet utilization without tripping the 15 kW breaker.",
+    "issues": [
+      "The napkin math for the proposed solution is incorrect; a combination of '2 mixed + 1 inference' nodes would draw 16.8 kW, exceeding the 15 kW rack limit.",
+      "With the given numbers, the proposed 'mixed node' strategy does not actually improve GPU density per rack over a homogeneous inference node strategy."
+    ]
+  }
+]

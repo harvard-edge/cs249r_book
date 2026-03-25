@@ -24,6 +24,8 @@ import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { getQuestionById } from "@/lib/corpus";
 import { getTopicById } from "@/lib/taxonomy";
 import { getDailyQuestions, isDailyCompleted, markDailyCompleted } from "@/lib/daily";
+import { shouldShowGate, incrementReveals, getRemainingReveals, isStarVerified } from "@/lib/star-gate";
+import StarGate from "@/components/StarGate";
 import { Calendar, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
@@ -62,6 +64,7 @@ function PracticePage() {
   const [rubricItems, setRubricItems] = useState<RubricItem[]>([]);
   const [dailyDone, setDailyDone] = useState(false);
   const [sourceTopic, setSourceTopic] = useState<{ id: string; name: string } | null>(null);
+  const [showStarGate, setShowStarGate] = useState(false);
 
   const tracks = getTracks().filter(t => t !== "global");
   const levels = getLevels();
@@ -211,6 +214,13 @@ function PracticePage() {
   }, [pool]);
 
   const handleReveal = () => {
+    // Star gate check
+    if (shouldShowGate()) {
+      setShowStarGate(true);
+      return;
+    }
+    incrementReveals();
+
     // Try napkin math check if the question has napkin_math and user typed something
     if (current?.details.napkin_math && userAnswer.trim()) {
       const userNum = extractFinalNumber(userAnswer);
@@ -529,7 +539,8 @@ function PracticePage() {
         {current ? (
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
             {/* Question */}
-            <div className="flex-1 overflow-y-auto px-8 lg:px-12 py-10">
+            <div className="flex-1 flex flex-col min-h-0">
+              <div className="flex-1 overflow-y-auto px-8 lg:px-12 py-10">
               <div className="max-w-3xl mx-auto">
                 <AnimatePresence mode="wait">
                   <motion.div
@@ -568,16 +579,22 @@ function PracticePage() {
                       </a>
                     )}
 
-                    {/* Next question button — always visible */}
-                    <button
-                      onClick={() => pickRandom()}
-                      className="mt-8 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-textSecondary hover:text-textPrimary bg-surface border border-border rounded-lg transition-colors"
-                    >
-                      <SkipForward className="w-4 h-4" /> Next Question
-                      <span className="text-[10px] text-textMuted ml-1">N</span>
-                    </button>
                   </motion.div>
                 </AnimatePresence>
+              </div>
+              </div>
+              {/* Sticky bottom bar */}
+              <div className="shrink-0 border-t border-border bg-background/80 backdrop-blur-sm px-8 lg:px-12 py-3 flex items-center justify-between">
+                <span className="text-[11px] font-mono text-textTertiary">
+                  {pool.length} in pool
+                </span>
+                <button
+                  onClick={() => pickRandom()}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-textSecondary hover:text-textPrimary bg-surface border border-border rounded-lg transition-colors"
+                >
+                  Next Question <SkipForward className="w-3.5 h-3.5" />
+                  <kbd className="text-[10px] text-textMuted bg-background border border-border px-1.5 py-0.5 rounded ml-1">N</kbd>
+                </button>
               </div>
             </div>
 
@@ -776,6 +793,11 @@ function PracticePage() {
           </div>
         )}
       </div>
+
+      {/* Star gate overlay */}
+      {showStarGate && (
+        <StarGate onVerified={() => setShowStarGate(false)} />
+      )}
     </div>
   );
 }

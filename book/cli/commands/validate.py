@@ -2703,16 +2703,31 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Times product spacing (space before $\times$ when preceded by inline code)
+    # Times product spacing (space around $\times$ in product expressions)
     # ------------------------------------------------------------------
 
-    # Backtick-$\times$-backtick with no spaces — always a product of two
-    # inline values (e.g. `val`$\times$`val`). Multiplier patterns like
-    # `val`$\times$ speedup have a space after and are NOT flagged.
-    TIMES_PRODUCT_PATTERN = re.compile(r"`\$\\times\$`")
+    # Catch tight $\times$ in product expressions involving inline code or
+    # numbers.  Multiplier patterns like `val`$\times$ speedup (space after,
+    # followed by a word) are intentional and NOT flagged.
+    #
+    # Patterns flagged (all need spaces around $\times$):
+    #   `val`$\times$`val`   — inline × inline
+    #   `val`$\times$3       — inline × number
+    #   3$\times$`val`       — number × inline
+    #   `val`$\times$$math$  — inline × math span
+    TIMES_PRODUCT_PATTERNS = [
+        # inline × inline:  `..`$\times$`..`
+        re.compile(r"`\$\\times\$`"),
+        # inline × number:  `..`$\times$<digit>
+        re.compile(r"`\$\\times\$\d"),
+        # number × inline:  <digit>$\times$`..`
+        re.compile(r"\d\$\\times\$`"),
+        # inline × math:    `..`$\times$$..$ (tight dollar after times)
+        re.compile(r"`\$\\times\$\$"),
+    ]
 
     def _run_times_product_spacing(self, root: Path) -> ValidationRunResult:
-        """Flag `val`$\\times$`val` with no space around $\\times$."""
+        """Flag tight $\\times$ in product expressions (should be spaced)."""
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -2727,22 +2742,23 @@ class ValidateCommand:
                     continue
                 if in_code:
                     continue
-                for m in self.TIMES_PRODUCT_PATTERN.finditer(line):
-                    context = line[max(0, m.start() - 10) : min(len(line), m.end() + 10)].strip()
-                    issues.append(
-                        ValidationIssue(
-                            file=self._relative_file(file),
-                            line=idx,
-                            code="times_product_spacing",
-                            message="Add space before $\\times$ after inline code (e.g. ` $\\times$` not `$\\times$`)",
-                            severity="warning",
-                            context=context,
+                for pat in self.TIMES_PRODUCT_PATTERNS:
+                    for m in pat.finditer(line):
+                        context = line[max(0, m.start() - 10) : min(len(line), m.end() + 10)].strip()
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="times_product_spacing",
+                                message="Add space around $\\times$ in product (e.g. ` $\\times$ ` not `$\\times$`)",
+                                severity="warning",
+                                context=context,
+                            )
                         )
-                    )
 
         return ValidationRunResult(
             name="times-product-spacing",
-            description="Space before $\\times$ after inline code (product pattern)",
+            description="Space around $\\times$ in product expressions",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
