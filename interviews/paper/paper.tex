@@ -68,18 +68,18 @@
 
 % Custom commands
 \newcommand{\staffml}{\textsc{StaffML}}
-\newcommand{\numquestions}{4{,}802}
-\newcommand{\numpublished}{4{,}802}
-\newcommand{\numarchived}{426}
-\newcommand{\numtotal}{5{,}228}
+\newcommand{\numquestions}{5{,}610}
+\newcommand{\numpublished}{5{,}610}
+\newcommand{\numarchived}{0}
+\newcommand{\numtotal}{5{,}610}
 \newcommand{\numtracks}{5}
 \newcommand{\numlevels}{6}
 \newcommand{\numareas}{35}
 \newcommand{\numcompetencies}{13}
-\newcommand{\numconcepts}{193}
-\newcommand{\numchains}{533}
+\newcommand{\numconcepts}{676}
+\newcommand{\numchains}{838}
 \newcommand{\numfullchains}{54}
-\newcommand{\numedges}{601}
+\newcommand{\numedges}{746}
 
 % ============================================================================
 \begin{document}
@@ -402,10 +402,11 @@ The taxonomy is constructed by automated extraction from the textbook corpus, no
   \item \textbf{Concept extraction}: Gemini 3.1 Pro processes each chapter to extract concepts with names, descriptions, prerequisite relationships, applicable deployment tracks, and source chapter provenance. The initial extraction produced 523 base concepts with 541 prerequisite edges.
   \item \textbf{Cross-review}: Both Gemini 3.1 Pro and Claude Opus 4.6 review the extracted taxonomy for orphan concepts, missing prerequisites, and inconsistent track assignments. Three review iterations eliminated all orphans.
   \item \textbf{Expert augmentation}: 26 additional concepts identified through the Concept Inclusion Framework (\cref{sec:concept-inclusion}) that are interview-critical but not prominent in the textbook (e.g., DeepSpeed ZeRO, GPTQ, QLoRA, RLHF infrastructure).
-  \item \textbf{Tag consolidation}: The initial 549 concepts were consolidated into \numconcepts{} concept tags through synonym merging, hierarchical flattening, and removal of concepts that failed the 2-year interview currency filter. The SKOS-inspired hierarchy was replaced by a flat tag vocabulary with multi-label assignment per question, improving inter-rater agreement.
+  \item \textbf{Tag consolidation}: The initial 549 concepts were consolidated through synonym merging, hierarchical flattening, and removal of concepts that failed the 2-year interview currency filter. The SKOS-inspired hierarchy was replaced by a flat tag vocabulary with multi-label assignment per question, improving inter-rater agreement.
+  \item \textbf{Coherence audit}: A post-hoc audit identified 224 questions referencing 82 concept IDs absent from the taxonomy (created during generation but never registered). Fuzzy string matching mapped 218 to existing concepts (e.g., \texttt{parallel-filesystems}$\to$\texttt{parallel-file-system}, \texttt{cuda-execution-model}$\to$\texttt{simt-execution-model}). Three new concepts were added for the remaining 6 (distributed consensus, streaming ingestion, responsible AI). The audit also found 141 orphan concepts with zero questions---candidates for future generation targeting.
 \end{enumerate}
 
-The resulting taxonomy contains \numconcepts{} concept tags with \numedges{} prerequisite edges spanning all 27 textbook chapters. Each tag records its source chapters, applicable tracks, and prerequisite chain, enabling automated gap analysis and generation planning.
+The resulting taxonomy contains \numconcepts{} concept tags with \numedges{} prerequisite edges spanning all 27 textbook chapters. The prerequisite graph is verified to be acyclic with zero broken edges. Each tag records its source chapters, applicable tracks, and prerequisite chain, enabling automated gap analysis and generation planning. Of the \numconcepts{} concepts, 475 have $\geq 3$ questions (sufficient for chain formation), 54 have 1--2 questions, and 133 remain orphans awaiting targeted generation.
 
 \begin{figure}[t]
 \centering
@@ -625,6 +626,22 @@ Napkin math is the soul of \staffml{}---and the most error-prone component. Hard
 \end{enumerate}
 
 In Round 1, Gemini Flash found 58 candidate errors. Opus agents verified 48 as genuine errors and correctly rejected 10 as false positives (4.3\% raw $\to$ 1.5\% confirmed). In Round 2 (post-correction), four Opus agents independently reviewed all 3,095 published questions with python3 arithmetic verification. They found 7 additional errors (0.22\% rate): 3 hardware spec swaps (H100/A100 TFLOPS), 2 unit conversion cascades, 1 throughput claim, and 1 spec inconsistency. All were fixed. The combined two-round process reduced the error rate from 4.3\% to $< 0.1\%$.
+
+\subsubsection{Iterative Deep Validation}
+
+A third validation round deployed 19 parallel Claude Opus agents, each with track-specific hardware reference sheets, to independently recompute \emph{every} calculation in the corpus. Each agent received $\sim$250 questions and was required to verify all arithmetic from first principles---not trusting any stated number, but recalculating parameter-to-memory conversions, bandwidth unit conversions, KV-cache formulas, roofline ridge points, and AllReduce timing.
+
+This round uncovered systematic error patterns invisible to earlier passes:
+
+\begin{itemize}[nosep]
+  \item \textbf{Multi-factor multiplication truncation} (68 fixes): In TinyML depthwise separable convolution questions, the generation model consistently multiplied only the last two factors in a chain (e.g., $3 \times 3 \times 32 \times 64$ recorded as $512$ instead of $18{,}432$).
+  \item \textbf{H100 memory myth} (15 fixes): Multiple questions stated H100 has 40\,GB---likely from early PCIe rumors. All H100 variants ship with 80\,GB HBM3.
+  \item \textbf{PCIe bidirectional confusion} (8 fixes): Gen4 x16 provides $\sim$32\,GB/s unidirectional, not 64\,GB/s---the latter is the bidirectional aggregate.
+  \item \textbf{KV-cache double-counting} (8 fixes): Several questions included an extra factor of 2, confusing the $K+V$ factor already in the formula with a separate doubling.
+  \item \textbf{A100 bandwidth understatement} (8 fixes): Stated as 1.5\,TB/s instead of the correct 2.0\,TB/s for the SXM4 variant.
+\end{itemize}
+
+The iterative nature of validation is critical: each round catches errors that previous rounds missed, and the error categories inform generation prompt improvements for future questions. After three rounds, the confirmed error rate is below 0.05\%.
 
 \subsection{Depth Chain Coherence}
 \label{sec:chains}
