@@ -847,6 +847,15 @@ function PracticePage() {
                           );
                         })}
                       </div>
+                      {/* Per-question report — visible right next to score buttons */}
+                      <a
+                        href={`https://github.com/harvard-edge/cs249r_book/issues/new?labels=staffml&title=${encodeURIComponent(`[StaffML] Issue with: ${current.title}`)}&body=${encodeURIComponent(`**Question ID:** \`${current.id}\`\n**Title:** ${current.title}\n**Level:** ${current.level}\n**Track:** ${current.track}\n**Area:** ${current.competency_area}\n\n**What's wrong:**\n\n\n**Expected:**\n\n`)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-[11px] text-textMuted hover:text-accentRed transition-colors mt-3"
+                      >
+                        <Flag className="w-3 h-3" /> Something wrong with this question?
+                      </a>
                     </div>
                   </motion.div>
                 )}
