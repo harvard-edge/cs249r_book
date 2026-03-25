@@ -45,7 +45,8 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+      <div className="flex-1 relative min-h-0">
+        <div className="absolute inset-0 overflow-hidden flex flex-col">
         <AnimatePresence mode="wait">
           {drillLevel ? (
             <motion.div key={`level-${drillLevel}`}
@@ -100,7 +101,8 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
             <motion.div key="overview"
               initial={{ x: -40, opacity: 0 }} animate={{ x: 0, opacity: 1 }}
               exit={{ x: -40, opacity: 0 }} transition={{ duration: 0.15 }}
-              className="p-5 space-y-6 flex-1 overflow-y-auto">
+              className="p-5 space-y-6 flex-1 overflow-y-auto min-h-0"
+              style={{ maxHeight: "100%" }}>
 
               {topic.description && (
                 <p className="text-[14px] text-textSecondary leading-relaxed">{topic.description}</p>
@@ -173,6 +175,7 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
             </motion.div>
           )}
         </AnimatePresence>
+        </div>
       </div>
     </div>
   );
