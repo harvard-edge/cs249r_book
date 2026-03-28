@@ -1,93 +1,125 @@
-# Guidelines for contributing to the project
+# Contributing to the ML Systems Textbook
 
-The Machine Learning Systems with TinyML project welcomes contributions from everyone. This project is maintained by a community of contributors from around the world. We appreciate your help!
+The Machine Learning Systems project welcomes contributions from everyone. This project is maintained by a community of contributors from around the world. We appreciate your help!
 
 Your contributions are welcome and can encompass a variety of tasks, such as:
 
-- Identifying and reporting any bugs in the examples
-- Correcting typographical errors in the documentation
-- Contributing additional examples
-- Authoring a new chapter
-- Suggesting topics for new chapters
+- Identifying and reporting bugs or errors in the text
+- Correcting typographical errors
+- Improving chapter content or explanations
+- Creating or improving figures and diagrams
+- Adding quantitative examples or exercises
 - Enhancing the accessibility of the material
+- Suggesting topics for new content
 
-If you are unsure about whether a contribution is appropriate, feel free to open an [issue](https://github.com/harvard-edge/cs249r_book/issues) and ask.
+Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before contributing.
 
-## How to contribute
+If you are unsure about whether a contribution is appropriate, feel free to open an [issue](https://github.com/harvard-edge/cs249r_book/issues) or start a [discussion](https://github.com/harvard-edge/cs249r_book/discussions).
 
-### Open an issue
+## Repository Structure
 
-If there is an open issue for the contribution you would like to make, please comment on the issue to let us know you are working on it. If there is no open issue, please open one to let us know you are working on the contribution.
+This is a **two-volume textbook** built with [Quarto](https://quarto.org/docs/get-started/):
 
-### Fork the repository
+- **Volume I: Introduction to Machine Learning Systems** — Foundations for single-machine ML systems
+- **Volume II: Machine Learning Systems at Scale** — Distributed systems at production scale
 
-Fork the repository on GitHub and clone your fork to your local machine. We are following GitHub flow for collaboration. Please make sure that your main branch is up to date with the upstream main branch before you start working on your contribution.
+The key directories are:
 
-### Clone the forked repository
+```
+book/quarto/contents/
+├── vol1/          # Volume I chapters (introduction, training, hw_acceleration, etc.)
+├── vol2/          # Volume II chapters (distributed_training, inference, etc.)
+├── core/          # Shared content (dl_primer, frameworks)
+├── frontmatter/   # Preface, acknowledgments
+└── backmatter/    # Appendices, bibliography
+```
+
+Each chapter directory contains:
+- A `.qmd` file (the chapter source)
+- An `images/` folder with `png/` and `svg/` subdirectories
+
+Quarto configuration files are in `book/quarto/config/` with volume-specific variants (e.g., `_quarto-html-vol1.yml`, `_quarto-pdf-vol1.yml`).
+
+## How to Contribute
+
+### 1. Open an Issue
+
+If there is an open issue for the contribution you would like to make, please comment on the issue to let us know you are working on it. If there is no open issue, please open one first.
+
+### 2. Fork and Clone
+
+Fork the repository on GitHub and clone your fork:
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/cs249r_book.git
-```
-
-### Navigate to the repository
-
-```bash
 cd cs249r_book
-```
-
-### Add the upstream remote
-
-```bash
 git remote add upstream https://github.com/harvard-edge/cs249r_book.git
 ```
 
-Please note that the upstream remote is read-only. You will not be able to push to the upstream remote. You will only be able to push to your forked repository (you will use a Pull Request for merging your code to upstream). However, you will be able to pull from the upstream remote to keep your forked repository up to date with the upstream repository.
+The upstream remote is read-only. You will push to your fork and open a Pull Request to merge upstream.
 
-### Create a new branch
+### 3. Create a Branch
 
-Create a branch for your contribution. The branch name should start with issue number and be descriptive of the contribution you are making. For example, if you are fixing a typo in the documentation, the branch name could be `iss14-fix-typo-in-documentation`. If you are adding a new example, the branch name could be `iss5-add-new-example`. Following this naming convention will help us keep track of the ongoing contributions.
-
-### Make your changes
-
-Make your changes to the code or documentation. Please make sure that your changes are consistent with the style of the rest of the code or documentation.
-
-- The `content` directory subfolders that each represent a chapter in the book. Each chapter folder contains the source files and documents to render the book. Any new files should be added to the `content` directory in its appropriate folder. Please create a new folder if needed. Make sure that the path in the `_quarto-html.yml` and `_quarto-pdf.yml` files is updated to include the new folder.
-
-- Each chapter folder also include an images folder. The images folder has 4 subfolders: `png`, `pdf`, `svg`, and `jpg`. Please add your images to the appropriate folder. This is important to keep the images organized and to make sure that the images are rendered correctly in the book.
-
-### Commit your changes
+Always branch from `dev`, not `main`. Use descriptive branch names with the issue number:
 
 ```bash
-git add .
-git commit -m "your commit message"
+git checkout dev
+git pull origin dev
+git checkout -b iss14-fix-typo-in-introduction
 ```
 
-### Render the book
+Examples: `iss5-add-new-example`, `iss42-fix-figure-caption`, `iss100-improve-training-section`.
 
-Please render the book to make sure that your contribution is rendered correctly and do not raise an error or warnings. We are using [quarto](https://quarto.org/docs/get-started/) to render the book.  You can render the book by running the following command in the terminal:
+### 4. Make Your Changes
+
+Please make sure that your changes are consistent with the style of the existing content.
+
+- **Chapter content** lives in `book/quarto/contents/vol1/` or `vol2/`. Each chapter has its own directory.
+- **Images** go in the chapter's `images/png/` (raster) or `images/svg/` (vector) subdirectory.
+- **Editorial standards**: For prose contributions, please review the style conventions in the repository. We follow an academic textbook register (active voice, quantitative claims, no blog-post informality).
+
+### 5. Commit Your Changes
+
+Stage files explicitly (do not use `git add .`):
 
 ```bash
-quarto render
+git add book/quarto/contents/vol1/introduction/introduction.qmd
+git add book/quarto/contents/vol1/introduction/images/svg/new-figure.svg
+git commit -m "Fix caption formatting in introduction chapter (issue #14)"
 ```
 
-### Push your changes to your forked repository
+### 6. Render the Book
+
+Please render the book to verify your contribution does not raise errors or warnings:
+
+```bash
+# Render a specific volume (recommended for faster builds)
+quarto render --profile vol1-html
+quarto render --profile vol2-html
+```
+
+### 7. Push and Open a Pull Request
 
 ```bash
 git push origin your-branch-name
 ```
 
-### Open a Pull Request (PR)
+**Submit PRs to the `dev` branch, not `main`.**
 
-Please submit the PRs to the `dev`  branch, not `main`.
+Open a Pull Request with a brief description and the issue number (e.g., "Fix typo in introduction (issue #14)").
 
-Open a Pull Request (PR) to merge your changes to the upstream repository. Please add a brief description of your contribution to the PR. Please include the issue number in the description. For example, `Fix typo in the documentation (issue #14)`.
+Opening an early PR is encouraged. This will allow us to provide feedback on your contribution and help you improve it. GitHub Actions will run on your PR and generate the book, so you can verify that your contribution renders correctly.
 
-Opening an early PR is encouraged. This will allow us to provide feedback on your contribution and help you improve it. Moreover, GitHub Actions will run on your PR and will generate the book, so you can download the book and make sure that your contribution is rendered correctly.
+- If your PR is a work in progress, please add `[WIP]` to the title.
 
-- If your PR is a work in progress, please add `[WIP]` to the title of the PR. This will let us know that you are still working on your contribution and that you are not ready for a review or merge yet.
+## Bug Reports
 
-For a more detailed guide on the CS249r documentation process and peer review,
-check [here](https://docs.google.com/document/d/1izDoWwFLnV8XK2FYCl23_9KYL_7EQ5OWLo-PCNUGle0).
+When reporting errors or issues, please include:
+
+1. **Which volume and chapter** is affected (e.g., "Vol1, Chapter: Training")
+2. **Section or page** where the issue appears
+3. **Description** of the error (typo, incorrect figure, broken cross-reference, etc.)
+4. **Suggested fix** if you have one
 
 ## Contributor Recognition
 

@@ -18,10 +18,10 @@ TinyTorch is an **educational framework** where every contribution should:
    ```bash
    git clone https://github.com/harvard-edge/cs249r_book.git
    cd cs249r_book/tinytorch
-   python -m venv .venv
+   python3 -m venv .venv
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    pip install -r requirements.txt
-   pip install -e .
+   pip install -e ./
    ```
 
 2. **Verify installation**:
@@ -118,8 +118,8 @@ All contributions must pass:
 
 3. **Milestone Verification** (end-to-end examples):
    ```bash
-   python milestones/02_1969_xor/02_xor_solved.py
-   python milestones/04_1998_cnn/01_lecun_tinydigits.py
+   python3 milestones/02_1969_xor/02_xor_solved.py
+   python3 milestones/04_1998_cnn/01_lecun_tinydigits.py
    ```
 
 ## 📝 Code Standards
@@ -185,7 +185,7 @@ When reporting bugs, include:
 ```bash
 # Always include this information
 tito --version
-python --version
+python3 --version
 echo $VIRTUAL_ENV
 tito system health
 ```
@@ -206,13 +206,6 @@ For new features, please:
 - **Discussions**: GitHub Discussions for questions and ideas
 - **Documentation**: Check `README.md` for project structure and guides
 - **Development**: Follow `CONTRIBUTING.md` for complete standards
-
-## 🏆 Recognition
-
-Contributors who follow these guidelines and make valuable educational improvements will be acknowledged in:
-- Module documentation where appropriate
-- Release notes for significant contributions
-- Course materials when contributions enhance learning
 
 ## 🏷️ Releases (Maintainers Only)
 

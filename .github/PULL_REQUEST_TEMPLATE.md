@@ -1,17 +1,35 @@
-## 💼 New AI Systems Flashcard Submission
+## Summary
 
-Thanks for contributing to the AI Systems Interview Hub! Please follow the steps below to ensure your question is added correctly.
+<!-- What does this PR do? 1-3 sentences. -->
 
-### 📝 Checklist
-- [ ] I have added my question to the correct "Bucket" file (e.g., `01_Foundations.md`).
-- [ ] I have used the `<details>` and `<summary>` format.
-- [ ] My answer includes the "Silicon Realist" logic (math or physical constraints).
+## Area
 
-### 📖 Question Preview
-<!-- Briefly describe the question you added here -->
+<!-- Check the area(s) this PR affects: -->
 
-### 🏗️ Why this question matters?
-<!-- Explain how this tests a physical constraint (e.g. Memory Wall, Tail Latency) -->
+- [ ] Book (textbook content, figures, exercises)
+- [ ] TinyTorch (modules, tests, milestones)
+- [ ] StaffML (interview questions, challenges)
+- [ ] Kits (hardware labs)
+- [ ] Infrastructure (CI/CD, scripts, config)
+
+## Changes
+
+<!-- What changed and why? Bullet points are fine. -->
+
+-
+
+## Testing
+
+<!-- How did you verify this works? -->
+
+- [ ] Rendered the book locally (`quarto render`)
+- [ ] Ran tests (`pytest tests/`)
+- [ ] Ran `tito module test NN` for affected module(s)
+- [ ] Manual verification (describe below)
+
+## Related Issues
+
+<!-- Link any related issues: "Fixes #123" or "Related to #456" -->
 
 ---
-*By submitting this PR, you agree to release your contribution under the project's CC-BY-NC-ND license.*
+*By submitting this PR, you agree to release your contribution under the project's license.*
