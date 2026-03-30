@@ -20,7 +20,8 @@ export default function HomePage() {
   const [mounted, setMounted] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
-  const [expandedArea, setExpandedArea] = useState<string | null>(null);
+  const [selectedAreas, setSelectedAreas] = useState<Set<string>>(new Set());
+  const [showAllAreas, setShowAllAreas] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState<string | null>(null);
   const [isReturning, setIsReturning] = useState(false);
   const [streakCount, setStreakCount] = useState(0);
@@ -62,6 +63,22 @@ export default function HomePage() {
         topicCount: area.topics.length,
       }));
   }, [areas, selectedTrack]);
+
+  // Areas to show in pills: top 8 unless "show all" is toggled
+  const MAX_VISIBLE_AREAS = 8;
+  const visibleAreas = showAllAreas ? filteredAreas : filteredAreas.slice(0, MAX_VISIBLE_AREAS);
+  const hiddenCount = filteredAreas.length - MAX_VISIBLE_AREAS;
+
+  // Areas to display in the main content (filtered by multi-select)
+  const displayAreas = useMemo(() => {
+    if (selectedAreas.size === 0) return filteredAreas;
+    return filteredAreas.filter(a => selectedAreas.has(a.id));
+  }, [filteredAreas, selectedAreas]);
+
+  // For the single-area drill-down when exactly one is selected
+  const singleExpandedArea = selectedAreas.size === 1
+    ? filteredAreas.find(a => a.id === Array.from(selectedAreas)[0]) ?? null
+    : null;
 
   const selectedArea = selectedTopic ? getAreaForTopic(selectedTopic.id) : null;
   const selectedStyle = selectedArea ? getAreaStyle(selectedArea.id) : null;
@@ -185,14 +202,14 @@ export default function HomePage() {
             ))}
           </div>
 
-          {/* Area filter pills — horizontal scroll on mobile, wrap on desktop */}
-          <div className="flex items-center gap-1.5 overflow-x-auto md:flex-wrap mb-5 pb-1 scrollbar-hide snap-x">
+          {/* Area filter pills — show top N with "show more" toggle, multi-select */}
+          <div className="flex items-center gap-1.5 flex-wrap mb-5 pb-1">
             <FilterPill
               label="All"
-              isActive={!expandedArea}
-              onClick={() => setExpandedArea(null)}
+              isActive={selectedAreas.size === 0}
+              onClick={() => { setSelectedAreas(new Set()); setShowAllAreas(false); }}
             />
-            {filteredAreas.map((area) => {
+            {visibleAreas.map((area) => {
               const style = getAreaStyle(area.id);
               const Icon = style.icon;
               return (
@@ -200,13 +217,27 @@ export default function HomePage() {
                   key={area.id}
                   label={area.name}
                   count={area.questionCount}
-                  isActive={expandedArea === area.id}
+                  isActive={selectedAreas.has(area.id)}
                   color={style.primary}
                   icon={<Icon className="w-3 h-3" />}
-                  onClick={() => setExpandedArea(expandedArea === area.id ? null : area.id)}
+                  onClick={() => {
+                    setSelectedAreas(prev => {
+                      const next = new Set(prev);
+                      if (next.has(area.id)) next.delete(area.id);
+                      else next.add(area.id);
+                      return next;
+                    });
+                  }}
                 />
               );
             })}
+            {hiddenCount > 0 && (
+              <FilterPill
+                label={showAllAreas ? "Show less" : `+${hiddenCount} more`}
+                isActive={false}
+                onClick={() => setShowAllAreas(!showAllAreas)}
+              />
+            )}
           </div>
 
           {/* Search */}
@@ -236,11 +267,11 @@ export default function HomePage() {
             {searchResults ? (
               <SearchResults results={searchResults} query={query}
                 selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
-            ) : expandedArea ? (
-              <ExpandedArea area={filteredAreas.find(a => a.id === expandedArea)!}
+            ) : singleExpandedArea ? (
+              <ExpandedArea area={singleExpandedArea}
                 selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
             ) : (
-              <AreaOverview areas={filteredAreas} onExpand={setExpandedArea} onSelectTopic={setSelectedTopic}
+              <AreaOverview areas={displayAreas} onExpand={(id) => setSelectedAreas(new Set([id]))} onSelectTopic={setSelectedTopic}
                 selectedId={selectedTopic?.id ?? null} />
             )}
 
