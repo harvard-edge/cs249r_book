@@ -184,7 +184,7 @@ def fig_corpus_distribution(stats):
 
 # ── Figure 2: Question Format by Level (Stacked Bar) ────────────
 def fig_format_balance(stats):
-    fig, ax = plt.subplots(figsize=(4.5, 3.2))
+    fig, ax = plt.subplots(figsize=(4.5, 3.0))
 
     formats = ["calculation", "design", "conceptual", "optimization", "diagnosis", "tradeoff"]
     data = {fmt: [] for fmt in formats}
@@ -383,7 +383,7 @@ def fig_zone_distribution(stats):
         else:
             zone_colors.append(GREEN)
 
-    fig, ax = plt.subplots(figsize=(4.5, 3.5))
+    fig, ax = plt.subplots(figsize=(4.5, 3.0))
     bars = ax.barh(range(len(labels)), counts, color=zone_colors, alpha=0.85, height=0.7)
     ax.set_yticks(range(len(labels)))
     ax.set_yticklabels([z.capitalize() for z in labels], fontsize=8)
@@ -431,7 +431,7 @@ def fig_zone_level_heatmap(stats):
         for j, l in enumerate(LEVELS):
             matrix[i, j] = zlm.get(z, {}).get(l, 0)
 
-    fig, ax = plt.subplots(figsize=(4.5, 4.5))
+    fig, ax = plt.subplots(figsize=(4.5, 3.0))
     sns.heatmap(
         matrix, ax=ax, annot=True, fmt="d",
         xticklabels=LEVELS,
