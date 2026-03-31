@@ -136,7 +136,8 @@ function cleanStepText(text: string): string {
 
 function FormattedText({ text }: { text: string }) {
   // Split on **bold** markers and inline code `backticks`
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|~[^~]+~)/g);
+  // Match **bold**, `code`, and ~~strikethrough~~ (double tilde only — single ~ means "approximately")
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|~~[^~]+~~)/g);
 
   return (
     <>
@@ -158,10 +159,10 @@ function FormattedText({ text }: { text: string }) {
             </code>
           );
         }
-        if (part.startsWith("~") && part.endsWith("~")) {
+        if (part.startsWith("~~") && part.endsWith("~~")) {
           return (
             <span key={i} className="text-textTertiary line-through">
-              {part.slice(1, -1)}
+              {part.slice(2, -2)}
             </span>
           );
         }
