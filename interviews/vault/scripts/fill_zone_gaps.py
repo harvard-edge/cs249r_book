@@ -34,7 +34,7 @@ CORPUS_PATH = VAULT / "corpus.json"
 TAXONOMY_PATH = VAULT / "schema" / "taxonomy_data.yaml"
 ZONES_PATH = VAULT / "schema" / "zones.py"
 
-MODEL = "gemini-2.5-flash"
+MODEL = "gemini-3.1-pro-preview"
 
 # Zone descriptions for prompting
 ZONE_PROMPTS = {
