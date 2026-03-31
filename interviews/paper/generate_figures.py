@@ -225,15 +225,7 @@ def fig_format_balance(stats):
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=3, fontsize=7)
     ax.set_ylim(0, 105)
 
-    # Annotation
-    ax.annotate(
-        "L1–L2: recall + calculation",
-        xy=(0.5, 85), fontsize=6.5, color="#555", ha="center",
-    )
-    ax.annotate(
-        "L4–L6+: diagnosis, design, synthesis",
-        xy=(4, 85), fontsize=6.5, color="#555", ha="center",
-    )
+    # Annotations removed — caption describes the pattern
 
     fig.savefig(PAPER_DIR / "fig-format-balance.pdf")
     print("  Saved fig-format-balance.pdf")
