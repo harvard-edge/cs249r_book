@@ -26,10 +26,10 @@ $(FIGURES): corpus_stats.json generate_figures.py
 paper: paper.pdf
 
 paper.pdf: paper.tex references.bib $(FIGURES)
-	pdflatex -interaction=nonstopmode paper.tex
+	pdflatex --shell-escape -interaction=nonstopmode paper.tex
 	bibtex paper
-	pdflatex -interaction=nonstopmode paper.tex
-	pdflatex -interaction=nonstopmode paper.tex
+	pdflatex --shell-escape -interaction=nonstopmode paper.tex
+	pdflatex --shell-escape -interaction=nonstopmode paper.tex
 
 # ── Clean all generated artifacts ───────────────────────────────
 clean:
