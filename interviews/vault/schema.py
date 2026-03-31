@@ -1,7 +1,10 @@
 """Pydantic schema for StaffML interview question corpus.
 
-Validates corpus.json against strict rules informed by LeetCode,
-Exercism, freeCodeCamp, and IRT best practices.
+Validates corpus.json against the gold-standard classification system:
+  - 79 curated topics (WHAT concept is tested)
+  - 11 ikigai zones (HOW the concept is tested)
+  - 5 tracks (WHERE it's deployed)
+  - 6 levels (HOW HARD it is)
 """
 
 from __future__ import annotations
@@ -21,26 +24,64 @@ VALID_AREAS = {
 VALID_BLOOM = {"remember", "understand", "apply", "analyze", "evaluate", "create", ""}
 VALID_STATUS = {"published", "draft", "archived", "flagged"}
 
-# --- v5.3 Taxonomy Controlled Vocabularies ---
+# --- v6.0 Gold Standard Classification ---
 
-VALID_REASONING_COMPETENCIES = {
-    "RC-1", "RC-2", "RC-3", "RC-4", "RC-5", "RC-6", "RC-7",
-    "RC-8", "RC-9", "RC-10", "RC-11", "RC-12", "RC-13",
+VALID_ZONES = {
+    # Pure zones (single skill)
+    "recall", "analyze", "design", "implement",
+    # Compound zones (two skills)
+    "diagnosis", "specification", "fluency",
+    "evaluation", "realization", "optimization",
+    # Mastery (all four skills)
+    "mastery",
 }
 
-VALID_KNOWLEDGE_AREAS = {
-    # Domain A: ML Foundations
-    "A1", "A2", "A3", "A4", "A5", "A6", "A7",
-    # Domain B: Hardware & Compute
-    "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8",
-    # Domain C: Systems & Scale
-    "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9",
-    # Domain D: Deployment & Serving
-    "D1", "D2", "D3", "D4", "D5", "D6", "D7",
-    # Domain E: Efficiency & Governance (merged in v5.3)
-    "E1", "E2", "E3",
-    # Domain F: Compound AI Systems (merged in v5.3)
-    "F1",
+VALID_TOPICS = {
+    # compute (6)
+    "roofline-analysis", "gpu-compute-architecture", "accelerator-comparison",
+    "mcu-compute-constraints", "systolic-dataflow", "compute-cost-estimation",
+    # memory (8)
+    "vram-budgeting", "kv-cache-management", "memory-hierarchy-design",
+    "activation-memory", "memory-mapped-inference", "tensor-arena-planning",
+    "dma-data-movement", "memory-pressure-management",
+    # latency (6)
+    "latency-decomposition", "batching-strategies", "tail-latency",
+    "real-time-deadlines", "profiling-bottleneck-analysis", "queueing-theory",
+    # precision (3)
+    "quantization-fundamentals", "mixed-precision-training", "extreme-quantization",
+    # power (5)
+    "power-budgeting", "thermal-management", "energy-per-operation",
+    "duty-cycling", "datacenter-efficiency",
+    # architecture (7)
+    "transformer-systems-cost", "cnn-efficient-design", "attention-scaling",
+    "mixture-of-experts", "model-size-estimation", "neural-architecture-search",
+    "encoder-decoder-tradeoffs",
+    # optimization (7)
+    "pruning-sparsity", "knowledge-distillation", "kernel-fusion",
+    "graph-compilation", "operator-scheduling", "flash-attention",
+    "speculative-decoding",
+    # parallelism (6)
+    "data-parallelism", "model-tensor-parallelism", "pipeline-parallelism",
+    "3d-parallelism", "gradient-synchronization", "scheduling-resource-management",
+    # networking (6)
+    "collective-communication", "interconnect-topology",
+    "network-bandwidth-bottlenecks", "rdma-transport", "load-balancing",
+    "congestion-control",
+    # deployment (7)
+    "model-serving-infrastructure", "mlops-lifecycle", "ota-firmware-updates",
+    "container-orchestration", "model-format-conversion", "ab-rollout-strategies",
+    "compound-ai-systems",
+    # reliability (6)
+    "fault-tolerance-checkpointing", "distribution-drift-detection",
+    "graceful-degradation", "safety-certification", "adversarial-robustness",
+    "monitoring-observability",
+    # data (7)
+    "data-pipeline-engineering", "feature-store-management",
+    "data-quality-validation", "dataset-curation", "streaming-ingestion",
+    "storage-format-selection", "data-efficiency-selection",
+    # cross-cutting (5)
+    "federated-learning", "differential-privacy", "fairness-evaluation",
+    "responsible-ai", "tco-cost-modeling",
 }
 
 VALID_REASONING_MODES = {
@@ -102,45 +143,26 @@ class Question(BaseModel):
     # Identity
     id: str
     track: str
-    scope: str
+    scope: str = ""
     level: str
     title: str
 
-    # Classification
-    topic: str
-    competency_area: str
-    canonical_topic: str = ""
+    # Gold standard classification (v6.0)
+    topic: str                                    # One of 79 curated topic IDs
+    zone: str                                     # One of 11 ikigai zones
+    competency_area: str                          # One of 13 canonical areas
     bloom_level: str = ""
-    tags: list[str] = []
 
     # Content
     scenario: str
     details: QuestionDetails
 
-    # Lifecycle
-    status: str = "published"
-    version: int = 1
-    created_at: str = ""
-    updated_at: str = ""
-
-    # IRT (null until user data)
-    difficulty_empirical: Optional[float] = None
-    discrimination: Optional[float] = None
-    attempt_count: int = 0
-
-    # v5.3 Taxonomy (6-axis classification)
-    reasoning_competency: Optional[str] = None   # RC-1 through RC-13
-    knowledge_area: Optional[str] = None          # A1 through F1 (35 areas)
-    reasoning_mode: Optional[str] = None          # 7 modes (renamed in v5.3)
-    concept_tags: Optional[list[str]] = None      # ~150 tags, multi-label
-    primary_concept: Optional[str] = None         # preserved taxonomy_concept
-
     # Validation (stamped by Gemini review)
-    validated: Optional[bool] = None              # true if passed Gemini review
-    validation_status: Optional[str] = None       # OK, WARN, ERROR
-    validation_issues: Optional[list[str]] = None # issues found
-    validation_model: Optional[str] = None        # model used for validation
-    validation_date: Optional[str] = None         # ISO date of validation
+    validated: Optional[bool] = None
+    validation_status: Optional[str] = None
+    validation_issues: Optional[list[str]] = None
+    validation_model: Optional[str] = None
+    validation_date: Optional[str] = None
 
     # Chains
     chain_ids: Optional[list[str]] = None
@@ -160,6 +182,20 @@ class Question(BaseModel):
             raise ValueError(f"Invalid level '{v}', must be one of {VALID_LEVELS}")
         return v
 
+    @field_validator("topic")
+    @classmethod
+    def valid_topic(cls, v: str) -> str:
+        if v not in VALID_TOPICS:
+            raise ValueError(f"Invalid topic '{v}', must be one of VALID_TOPICS ({len(VALID_TOPICS)} topics)")
+        return v
+
+    @field_validator("zone")
+    @classmethod
+    def valid_zone(cls, v: str) -> str:
+        if v not in VALID_ZONES:
+            raise ValueError(f"Invalid zone '{v}', must be one of {VALID_ZONES}")
+        return v
+
     @field_validator("competency_area")
     @classmethod
     def valid_area(cls, v: str) -> str:
@@ -172,36 +208,6 @@ class Question(BaseModel):
     def valid_bloom(cls, v: str) -> str:
         if v and v not in VALID_BLOOM:
             raise ValueError(f"Invalid bloom_level '{v}', must be one of {VALID_BLOOM}")
-        return v
-
-    @field_validator("reasoning_competency")
-    @classmethod
-    def valid_reasoning_competency(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and v not in VALID_REASONING_COMPETENCIES:
-            raise ValueError(
-                f"Invalid reasoning_competency '{v}', "
-                f"must be one of {sorted(VALID_REASONING_COMPETENCIES)}"
-            )
-        return v
-
-    @field_validator("knowledge_area")
-    @classmethod
-    def valid_knowledge_area(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and v not in VALID_KNOWLEDGE_AREAS:
-            raise ValueError(
-                f"Invalid knowledge_area '{v}', "
-                f"must be one of {sorted(VALID_KNOWLEDGE_AREAS)}"
-            )
-        return v
-
-    @field_validator("reasoning_mode")
-    @classmethod
-    def valid_reasoning_mode(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and v not in VALID_REASONING_MODES:
-            raise ValueError(
-                f"Invalid reasoning_mode '{v}', "
-                f"must be one of {sorted(VALID_REASONING_MODES)}"
-            )
         return v
 
     @field_validator("title")
@@ -221,16 +227,14 @@ class Question(BaseModel):
         return v
 
 
-def validate_corpus(questions: list[dict]) -> tuple[list[Question], list[str]]:
+def validate_corpus(questions: list[dict]) -> tuple[list["Question"], list[str], list[str]]:
     """Validate a list of question dicts against the schema.
 
-    Returns (valid_questions, errors).
-    Errors are strings like "Question 'id': field error message".
+    Returns (valid_questions, errors, warnings).
     """
     valid = []
     errors = []
 
-    # Parse each question
     for i, q_dict in enumerate(questions):
         try:
             q = Question(**q_dict)
@@ -240,29 +244,24 @@ def validate_corpus(questions: list[dict]) -> tuple[list[Question], list[str]]:
             errors.append(f"[{qid}] {e}")
 
     # Cross-question checks
-    ids = [q.id for q in valid]
-    id_counts = {}
-    for qid in ids:
-        id_counts[qid] = id_counts.get(qid, 0) + 1
+    id_counts: dict[str, int] = {}
+    for q in valid:
+        id_counts[q.id] = id_counts.get(q.id, 0) + 1
     for qid, count in id_counts.items():
         if count > 1:
             errors.append(f"Duplicate ID: '{qid}' appears {count} times")
 
-    # Duplicate (track, level, title) — tracked as warnings, not blocking errors
-    # These are real quality issues but shouldn't block validation
-    seen_titles = {}
+    # Duplicate titles — warnings only
+    seen_titles: dict[tuple, str] = {}
     warnings = []
     for q in valid:
-        if q.status == "published":
-            key = (q.track, q.level, q.title)
-            if key in seen_titles:
-                warnings.append(
-                    f"Duplicate title: '{q.title}' in {q.track}/{q.level} "
-                    f"(IDs: {seen_titles[key]}, {q.id})"
-                )
-            else:
-                seen_titles[key] = q.id
+        key = (q.track, q.level, q.title)
+        if key in seen_titles:
+            warnings.append(
+                f"Duplicate title: '{q.title}' in {q.track}/{q.level} "
+                f"(IDs: {seen_titles[key]}, {q.id})"
+            )
+        else:
+            seen_titles[key] = q.id
 
     return valid, errors, warnings
-
-    return valid, errors
