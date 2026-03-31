@@ -67,10 +67,10 @@ FORMAT_EDGES = {
     "tradeoff": "#bbb",
 }
 
-# Matplotlib defaults for paper
+# Matplotlib defaults for paper — Helvetica to match SVG figures
 plt.rcParams.update({
-    "font.family": "serif",
-    "font.serif": ["Palatino", "Times New Roman", "DejaVu Serif"],
+    "font.family": "sans-serif",
+    "font.sans-serif": ["Helvetica", "Helvetica Neue", "Arial", "DejaVu Sans"],
     "font.size": 9,
     "axes.titlesize": 10,
     "axes.labelsize": 9,
