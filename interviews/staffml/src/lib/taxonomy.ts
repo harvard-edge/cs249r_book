@@ -143,7 +143,7 @@ const _areas: CompetencyArea[] = Object.entries(areaTopicQs)
         levels: areaLevels,
       };
   })
-  .sort((a, b) => b.questionCount - a.questionCount);
+  .sort((a, b) => a.name.localeCompare(b.name));
 
 // ─── Area styles ───────────────────────────────────────────────
 
