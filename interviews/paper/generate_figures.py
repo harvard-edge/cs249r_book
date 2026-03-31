@@ -136,7 +136,7 @@ def fig_corpus_distribution(stats):
         cmap="Blues", linewidths=0.5, linecolor="white",
         cbar_kws={"label": "Questions", "shrink": 0.8},
     )
-    ax_heat.set_title("Track × Level Distribution", fontweight="bold")
+    # title in LaTeX caption
 
     # Totals on right
     for i, t in enumerate(TRACKS):
@@ -168,17 +168,14 @@ def fig_corpus_distribution(stats):
     ax_bar.set_yticklabels(labels, fontsize=7.5)
     ax_bar.invert_yaxis()
     ax_bar.set_xlabel("Questions")
-    ax_bar.set_title("Competency Area Distribution", fontweight="bold")
+    # title in LaTeX caption
 
     # Count labels on bars
     for bar, count in zip(bars, counts):
         ax_bar.text(bar.get_width() + 5, bar.get_y() + bar.get_height() / 2,
                     str(count), va="center", fontsize=7, color="#555")
 
-    fig.suptitle(
-        f"Corpus Distribution ({stats['summary']['published']:,} Published Questions)",
-        fontsize=11, fontweight="bold", y=1.02,
-    )
+    # title in LaTeX caption (removed suptitle)
 
     fig.savefig(PAPER_DIR / "fig-corpus-distribution.pdf")
     print("  Saved fig-corpus-distribution.pdf")
@@ -221,7 +218,7 @@ def fig_format_balance(stats):
     xlabels = [f"{l}\n({BLOOM_LABELS[l]})" for l in LEVELS]
     ax.set_xticklabels(xlabels, fontsize=7.5)
     ax.set_ylabel("Percentage of Questions")
-    ax.set_title("Question Format Distribution by Mastery Level", fontweight="bold")
+    # title in LaTeX caption
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=3, fontsize=7)
     ax.set_ylim(0, 105)
 
@@ -289,10 +286,7 @@ def fig_depth_chain(stats, pub):
             ax.annotate("", xy=(0.7, i + 0.4), xytext=(0.7, i + 0.6),
                         arrowprops=dict(arrowstyle="->", color="#555", lw=1))
 
-    ax.set_title(
-        f"Depth Chain: {kv_chain.get('topic', 'kv-cache')} ({kv_chain.get('competency_area', 'memory')})",
-        fontsize=10, fontweight="bold", pad=10,
-    )
+    # title in LaTeX caption (removed set_title)
 
     fig.savefig(PAPER_DIR / "fig-depth-chain.pdf")
     print("  Saved fig-depth-chain.pdf")
@@ -322,7 +316,7 @@ def fig_quality_summary(stats):
     ax.set_yticklabels([l.replace("_", "\n") for l in labels], fontsize=6.5)
     ax.set_xlim(95, 101)
     ax.set_xlabel("Coverage %")
-    ax.set_title("Field Coverage", fontweight="bold", fontsize=9)
+    # title in LaTeX caption
     ax.invert_yaxis()
     for bar, pct in zip(bars, pcts):
         ax.text(bar.get_width() - 0.3, bar.get_y() + bar.get_height() / 2,
@@ -340,7 +334,7 @@ def fig_quality_summary(stats):
     bar_colors = [GREEN, ORANGE, RED]
     bars = ax.bar(categories, values, color=bar_colors, alpha=0.85, width=0.5)
     ax.set_ylabel("Questions")
-    ax.set_title("Validation Status", fontweight="bold", fontsize=9)
+    # title in LaTeX caption
     for bar, val in zip(bars, values):
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 20,
                 f"{val:,}", ha="center", fontsize=7, fontweight="bold")
@@ -353,11 +347,11 @@ def fig_quality_summary(stats):
     ax.bar(["Pass", "Warn", "Fail"], [n_pass, 0, 0],
            color=[GREEN, ORANGE, RED], alpha=0.85, width=0.5)
     ax.set_ylabel("Checks")
-    ax.set_title("19 Invariant Checks", fontweight="bold", fontsize=9)
+    # title in LaTeX caption
     ax.set_ylim(0, 22)
     ax.text(0, n_pass + 0.5, str(n_pass), ha="center", fontsize=9, fontweight="bold", color=GREEN)
 
-    fig.suptitle("Quality Assurance Summary", fontsize=11, fontweight="bold", y=1.05)
+    # title in LaTeX caption
     fig.tight_layout()
     fig.savefig(PAPER_DIR / "fig-quality-summary.pdf")
     print("  Saved fig-quality-summary.pdf")
@@ -395,7 +389,7 @@ def fig_zone_distribution(stats):
     ax.set_yticklabels([z.capitalize() for z in labels], fontsize=8)
     ax.invert_yaxis()
     ax.set_xlabel("Questions")
-    ax.set_title("Zone Distribution", fontweight="bold")
+    # title in LaTeX caption
 
     total = sum(counts)
     for bar, count in zip(bars, counts):
@@ -445,7 +439,7 @@ def fig_zone_level_heatmap(stats):
         cmap="YlOrRd", linewidths=0.5, linecolor="white",
         cbar_kws={"label": "Questions", "shrink": 0.8},
     )
-    ax.set_title("Zone × Level Distribution", fontweight="bold")
+    # title in LaTeX caption
     ax.set_xlabel("Mastery Level")
     ax.set_ylabel("Cognitive Zone")
 
