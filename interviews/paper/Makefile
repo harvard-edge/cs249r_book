@@ -6,14 +6,16 @@ all: paper
 # ── Step 1: Analyze corpus → stats JSON ─────────────────────────
 stats: corpus_stats.json
 
-corpus_stats.json: ../corpus.json ../chains.json analyze_corpus.py
+corpus_stats.json: ../vault/corpus.json ../vault/chains.json analyze_corpus.py
 	python3 analyze_corpus.py
 
 # ── Step 2: Generate data figures from stats ────────────────────
 FIGURES = fig-corpus-distribution.pdf \
           fig-format-balance.pdf \
           fig-depth-chain.pdf \
-          fig-quality-summary.pdf
+          fig-quality-summary.pdf \
+          fig-zone-distribution.pdf \
+          fig-zone-level-heatmap.pdf
 
 figures: $(FIGURES)
 
@@ -37,4 +39,4 @@ clean:
 
 # ── Watch for changes and rebuild ───────────────────────────────
 watch:
-	fswatch -o paper.tex references.bib ../corpus.json ../chains.json | xargs -n1 -I{} make all
+	fswatch -o paper.tex references.bib ../vault/corpus.json ../vault/chains.json | xargs -n1 -I{} make all

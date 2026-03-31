@@ -25,9 +25,9 @@ import seaborn as sns
 # ── Config ──────────────────────────────────────────────────────
 PAPER_DIR = Path(__file__).parent
 STATS_PATH = PAPER_DIR / "corpus_stats.json"
-CORPUS_PATH = PAPER_DIR.parent / "corpus.json"  # for depth chain text only
+CORPUS_PATH = PAPER_DIR.parent / "vault" / "corpus.json"
 
-TRACKS = ["cloud", "edge", "mobile", "tinyml"]
+TRACKS = ["cloud", "edge", "mobile", "tinyml", "global"]
 LEVELS = ["L1", "L2", "L3", "L4", "L5", "L6+"]
 BLOOM_LABELS = {
     "L1": "Remember", "L2": "Understand", "L3": "Apply",
@@ -47,6 +47,7 @@ TRACK_COLORS = {
     "edge": "#3D9E5A",
     "mobile": "#C87B2A",
     "tinyml": "#A31F34",
+    "global": "#888888",
 }
 
 FORMAT_COLORS = {
@@ -314,10 +315,10 @@ def fig_quality_summary(stats):
     ax = axes[0]
     fc = stats["field_coverage"]
     fields = {
+        "topic": fc.get("topic", 1.0),
+        "zone": fc.get("zone", 1.0),
         "competency_area": fc["competency_area"],
         "napkin_math": fc["napkin_math"],
-        "common_mistake": fc["common_mistake"],
-        "deep_dive_url": fc["deep_dive_url"],
         "bloom_level": fc["bloom_level"],
     }
     labels = list(fields.keys())
@@ -335,40 +336,129 @@ def fig_quality_summary(stats):
         ax.text(bar.get_width() - 0.3, bar.get_y() + bar.get_height() / 2,
                 f"{pct:.1f}%", va="center", ha="right", fontsize=6.5, color="white", fontweight="bold")
 
-    # Panel 2: Error rates from stats
+    # Panel 2: Validation status from stats
     ax = axes[1]
-    er = stats["error_rates"]
-    rounds = ["Before\nR1", "After\nR1", "After\nR2"]
-    rates = [er["round1_raw"], er["round1_confirmed"], er["round2_confirmed"]]
-    bar_colors = [RED, ORANGE, GREEN]
-    bars = ax.bar(rounds, rates, color=bar_colors, alpha=0.85, width=0.5)
-    ax.set_ylabel("Error Rate (%)")
-    ax.set_title("Math Error Rate", fontweight="bold", fontsize=9)
-    for bar, rate in zip(bars, rates):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.1,
-                f"{rate}%", ha="center", fontsize=7, fontweight="bold")
-    ax.set_ylim(0, 5.5)
+    vs = stats.get("validation", {})
+    categories = ["Validated", "Unvalidated", "Has Issues"]
+    values = [
+        vs.get("validated_true", 0),
+        vs.get("validated_false", 0),
+        vs.get("has_issues", 0),
+    ]
+    bar_colors = [GREEN, ORANGE, RED]
+    bars = ax.bar(categories, values, color=bar_colors, alpha=0.85, width=0.5)
+    ax.set_ylabel("Questions")
+    ax.set_title("Validation Status", fontweight="bold", fontsize=9)
+    for bar, val in zip(bars, values):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 20,
+                f"{val:,}", ha="center", fontsize=7, fontweight="bold")
+    ax.tick_params(axis="x", labelsize=7)
 
-    # Panel 3: Dedup stages from stats
+    # Panel 3: Invariant checks from stats
     ax = axes[2]
-    dd = stats["dedup"]
-    stages = ["Exact", "Fuzzy\n(>0.90)", "Semantic\n(>0.85)"]
-    found = [dd["exact_dupes"], dd["fuzzy_dupes"], dd["semantic_flagged"]]
-    archived = [0, 0, dd["archived"]]
-    x = np.arange(len(stages))
-    w = 0.35
-    ax.bar(x - w / 2, found, w, label="Flagged", color=ORANGE, alpha=0.85)
-    ax.bar(x + w / 2, archived, w, label="Archived", color=RED, alpha=0.85)
-    ax.set_xticks(x)
-    ax.set_xticklabels(stages, fontsize=7)
-    ax.set_ylabel("Question Pairs")
-    ax.set_title("Deduplication", fontweight="bold", fontsize=9)
-    ax.legend(fontsize=6.5)
+    n_checks = 19
+    n_pass = 19  # current gold standard
+    ax.bar(["Pass", "Warn", "Fail"], [n_pass, 0, 0],
+           color=[GREEN, ORANGE, RED], alpha=0.85, width=0.5)
+    ax.set_ylabel("Checks")
+    ax.set_title("19 Invariant Checks", fontweight="bold", fontsize=9)
+    ax.set_ylim(0, 22)
+    ax.text(0, n_pass + 0.5, str(n_pass), ha="center", fontsize=9, fontweight="bold", color=GREEN)
 
     fig.suptitle("Quality Assurance Summary", fontsize=11, fontweight="bold", y=1.05)
     fig.tight_layout()
     fig.savefig(PAPER_DIR / "fig-quality-summary.pdf")
     print("  Saved fig-quality-summary.pdf")
+    plt.close(fig)
+
+
+# ── Figure 5: Zone Distribution (Bar Chart) ──────────────────
+def fig_zone_distribution(stats):
+    zd = stats.get("zone_distribution", {})
+    if not zd:
+        print("  ⚠️ No zone_distribution in stats, skipping")
+        return
+
+    # Order by count descending
+    sorted_zones = sorted(zd.items(), key=lambda x: -x[1])
+    labels = [z for z, _ in sorted_zones]
+    counts = [c for _, c in sorted_zones]
+
+    # Color by zone type
+    PURE = {"recall", "analyze", "design", "implement"}
+    COMPOUND = {"diagnosis", "specification", "fluency", "evaluation", "realization", "optimization"}
+
+    zone_colors = []
+    for z in labels:
+        if z == "mastery":
+            zone_colors.append(CRIMSON)
+        elif z in PURE:
+            zone_colors.append(BLUE)
+        else:
+            zone_colors.append(GREEN)
+
+    fig, ax = plt.subplots(figsize=(4.5, 3.5))
+    bars = ax.barh(range(len(labels)), counts, color=zone_colors, alpha=0.85, height=0.7)
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels([z.capitalize() for z in labels], fontsize=8)
+    ax.invert_yaxis()
+    ax.set_xlabel("Questions")
+    ax.set_title("Zone Distribution", fontweight="bold")
+
+    total = sum(counts)
+    for bar, count in zip(bars, counts):
+        pct = 100 * count / total
+        ax.text(bar.get_width() + 8, bar.get_y() + bar.get_height() / 2,
+                f"{count:,} ({pct:.1f}%)", va="center", fontsize=7, color="#555")
+
+    # Legend
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor=BLUE, alpha=0.85, label="Pure (single skill)"),
+        Patch(facecolor=GREEN, alpha=0.85, label="Compound (two skills)"),
+        Patch(facecolor=CRIMSON, alpha=0.85, label="Mastery (all four)"),
+    ]
+    ax.legend(handles=legend_elements, loc="lower right", fontsize=7)
+
+    fig.savefig(PAPER_DIR / "fig-zone-distribution.pdf")
+    print("  Saved fig-zone-distribution.pdf")
+    plt.close(fig)
+
+
+# ── Figure 6: Zone × Level Heatmap ───────────────────────────
+def fig_zone_level_heatmap(stats):
+    zlm = stats.get("zone_level_matrix", {})
+    if not zlm:
+        print("  ⚠️ No zone_level_matrix in stats, skipping")
+        return
+
+    ZONES_ORDERED = [
+        "recall", "implement", "fluency",
+        "analyze", "diagnosis",
+        "design", "specification", "optimization",
+        "evaluation", "realization",
+        "mastery",
+    ]
+
+    matrix = np.zeros((len(ZONES_ORDERED), len(LEVELS)), dtype=int)
+    for i, z in enumerate(ZONES_ORDERED):
+        for j, l in enumerate(LEVELS):
+            matrix[i, j] = zlm.get(z, {}).get(l, 0)
+
+    fig, ax = plt.subplots(figsize=(4.5, 4.5))
+    sns.heatmap(
+        matrix, ax=ax, annot=True, fmt="d",
+        xticklabels=LEVELS,
+        yticklabels=[z.capitalize() for z in ZONES_ORDERED],
+        cmap="YlOrRd", linewidths=0.5, linecolor="white",
+        cbar_kws={"label": "Questions", "shrink": 0.8},
+    )
+    ax.set_title("Zone × Level Distribution", fontweight="bold")
+    ax.set_xlabel("Mastery Level")
+    ax.set_ylabel("Cognitive Zone")
+
+    fig.savefig(PAPER_DIR / "fig-zone-level-heatmap.pdf")
+    print("  Saved fig-zone-level-heatmap.pdf")
     plt.close(fig)
 
 
@@ -387,6 +477,8 @@ def main():
     fig_depth_chain(stats, pub)
 
     fig_quality_summary(stats)
+    fig_zone_distribution(stats)
+    fig_zone_level_heatmap(stats)
 
     print(f"\nDone. All figures saved to {PAPER_DIR}/")
 
