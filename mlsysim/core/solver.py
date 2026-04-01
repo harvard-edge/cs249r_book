@@ -518,10 +518,15 @@ class ReliabilityModel(BaseModel):
 
         # Goodput ratio: fraction of rawput that produces useful training progress.
         # Lost compute = P(failure) * (avg_recovery_time / checkpoint_interval)
-        # Source: Narayanan et al. (2021), "Efficient Large-Scale Language Model Training"
+        # Steady-state goodput: fraction of time spent on useful training.
+        # Overhead = checkpoint_write_time / interval + recovery_time / MTBF
+        # Source: Daly (2006), Young (1974)
         interval_s = optimal_interval.m_as(ureg.second)
-        if interval_s > 0:
-            goodput_ratio = max(0.0, 1.0 - prob_fail * (avg_recovery_time_s / interval_s))
+        cluster_mtbf_s = fleet_mtbf.m_as(ureg.second)
+        if interval_s > 0 and cluster_mtbf_s > 0:
+            checkpoint_overhead = ckpt_time_q.m_as(ureg.second) / interval_s
+            recovery_overhead = avg_recovery_time_s / cluster_mtbf_s
+            goodput_ratio = max(0.0, 1.0 - checkpoint_overhead - recovery_overhead)
         else:
             goodput_ratio = 0.0
 
@@ -798,9 +803,10 @@ class ServingModel(BaseModel):
 
         # 5. Speculative Decoding
         if draft_model:
-            # Time to generate 1 token with draft model
+            # Time to generate 1 token with draft model (uses draft model's own KV cache, not target's)
             draft_weights_bytes = draft_model.size_in_bytes(bpp)
-            t_draft_token = ((draft_weights_bytes + kv_cache_bytes) / decode_hw.memory.bandwidth).to("ms")
+            draft_kv_cache = draft_model.get_kv_cache_size(seq_len=seq_len, batch_size=batch_size, precision=bpp)
+            t_draft_token = ((draft_weights_bytes + draft_kv_cache) / decode_hw.memory.bandwidth).to("ms")
             
             # Speculative decoding batches K draft tokens (e.g., K=4)
             K = 4

@@ -363,11 +363,14 @@ def calc_hierarchical_allreduce_time(message_bytes, n_nodes, gpus_per_node,
     Returns:
         Quantity[second]: Estimated communication time
     """
-    # 1. Intra-node Reduce (to one GPU per node)
+    # 1. Intra-node Reduce-Scatter (each GPU gets M/G of the reduced result)
+    # We model the NCCL-style bucket-fused approach where reduce-scatter
+    # partitions the gradient buffer so each GPU holds 1/G of the result.
     t_reduce = calc_ring_allreduce_time(message_bytes, gpus_per_node, intra_node_bw, intra_node_lat)
-    
-    # 2. Inter-node AllReduce (between lead GPUs of each node)
-    # After intra-node reduce, each lead GPU holds message_bytes / gpus_per_node.
+
+    # 2. Inter-node AllReduce (between corresponding shards across nodes)
+    # Each lead GPU holds M/G after reduce-scatter — this is the key bandwidth
+    # optimization of hierarchical collectives (NCCL, Horovod).
     reduced_message = _ensure_unit(message_bytes, ureg.byte, "message_bytes") / gpus_per_node
     t_allreduce_inter = calc_ring_allreduce_time(reduced_message, n_nodes, inter_node_bw, inter_node_lat)
     
