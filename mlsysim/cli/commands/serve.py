@@ -50,9 +50,9 @@ def serve_main(
             efficiency=efficiency,
         )
 
-        # Derive tokens/s from ITL
+        # System throughput: batch_size tokens produced per decode step
         itl_s = result.itl.to("s").magnitude
-        tokens_per_sec = (1.0 / itl_s) if itl_s > 0 else float("inf")
+        tokens_per_sec = (batch_size / itl_s) if itl_s > 0 else float("inf")
 
         if output_format == "json":
             import json

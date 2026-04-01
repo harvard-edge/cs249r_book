@@ -247,7 +247,8 @@ class DistributedModel(BaseModel):
         validate_at_least(ep_size, 1, "ep_size")
         validate_at_least(batch_size, 1, "batch_size")
         validate_at_least(gradient_accumulation_steps, 1, "gradient_accumulation_steps")
-        validate_range(efficiency, 0.0, 1.0, "efficiency")
+        validate_range(efficiency, 1e-9, 1.0, "efficiency")
+        validate_range(overlap_efficiency, 0.0, 1.0, "overlap_efficiency")
 
         # 1. 3D/4D Parallelism Decomposition
         n_accelerators = fleet.total_accelerators
@@ -318,14 +319,21 @@ class DistributedModel(BaseModel):
             hidden_dim = getattr(model, 'hidden_dim', 4096) or 4096
             n_layers = getattr(model, 'layers', 1) or 1
             activation_bytes_per_allreduce = local_batch * seq_len * hidden_dim * bpp.magnitude
-            # 2 AllReduces per layer (attention + MLP), ring AllReduce within node
+            # 2 AllReduces per layer (attention + MLP)
             tp_volume = 2 * n_layers * activation_bytes_per_allreduce * ureg.byte
+            # Select bandwidth: NVLink if TP fits within a node, IB if it spans nodes
+            if tp_size <= fleet.node.accelerators_per_node:
+                tp_bw = fleet.node.intra_node_bw
+                tp_lat = LATENCY_NVLINK
+            else:
+                tp_bw = fleet.fabric.bandwidth / fleet.fabric.oversubscription_ratio
+                tp_lat = fleet.fabric.latency or LATENCY_INFINIBAND
             t_comm_tp = calc_ring_allreduce_time(
-                tp_volume / n_layers,  # per-layer volume (overlapped with compute)
+                tp_volume / n_layers,  # per-layer volume
                 tp_size,
-                fleet.node.intra_node_bw,
-                LATENCY_NVLINK
-            ) * n_layers  # total across all layers (assuming sequential, not overlapped)
+                tp_bw,
+                tp_lat
+            ) * n_layers  # total across all layers (sequential, conservative upper bound)
         else:
             t_comm_tp = Q_("0 ms")
 
@@ -628,7 +636,11 @@ class SustainabilityModel(BaseModel):
         if not region:
              from ..infra.registry import Grids
              region = Grids.US_Avg
-        
+
+        from ._validation import validate_range, validate_nonnegative
+        validate_range(mfu, 0.0, 1.0, "mfu")
+        validate_nonnegative(embodied_carbon_per_device, "embodied_carbon_per_device")
+
         duration_hours = duration_days * 24
         
         # 2. Power
@@ -739,6 +751,10 @@ class ServingModel(BaseModel):
         """
         prec_map = PRECISION_MAP
         bpp = prec_map.get(precision, BYTES_FP16)
+
+        # 0. Input validation
+        if cached_prefix_len >= seq_len:
+            raise ValueError(f"cached_prefix_len ({cached_prefix_len}) must be < seq_len ({seq_len})")
 
         # 1. Pre-fill Phase (with optional prompt caching)
         peak_flops_prefill = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
@@ -1103,7 +1119,7 @@ class TailLatencyModel(BaseModel):
         # SLO headroom: ratio of P99 wait to SLO threshold.
         # Values > 1.0 indicate SLO violation. This is a ratio, not a probability.
         slo_headroom_ratio = 1.0 if not is_stable else (p99_w_ms / slo_threshold if slo_threshold > 0 else 0)
-        slo_headroom_ratio = min(1.0, max(0.0, slo_headroom_ratio))
+        slo_headroom_ratio = max(0.0, slo_headroom_ratio)  # No upper clamp: values > 1.0 indicate SLO violation
 
         return TailLatencyResult(
             p50_latency=Q_(p50_w_ms + service_latency_ms, "ms"),
@@ -1418,6 +1434,9 @@ class CompressionModel(BaseModel):
             Compression metrics including memory savings, inference speedup,
             and estimated accuracy delta.
         """
+        from ._validation import validate_at_least, validate_range
+        validate_at_least(target_bitwidth, 1, "target_bitwidth")
+        validate_range(sparsity, 0.0, 1.0, "sparsity")
         original_size = model.size_in_bytes(Q_("4 byte")) # FP32 baseline
         inference_speedup = 1.0
 

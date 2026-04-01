@@ -128,7 +128,7 @@ class Engine:
             Complete performance characterization of the workload on the hardware.
         """
         # 0. Input validation
-        validate_range(efficiency, 0.0, 1.0, "efficiency")
+        validate_range(efficiency, 1e-9, 1.0, "efficiency")  # >0 to prevent division by zero
         validate_at_least(batch_size, 1, "batch_size")
 
         # 1. Map precision to bytes per parameter

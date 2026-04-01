@@ -560,6 +560,7 @@ def calc_failure_probability(mtbf, job_duration):
     Returns:
         Probability of at least one failure (0.0 to 1.0)
     """
+    validate_positive(mtbf, "mtbf")
     both_qty = isinstance(mtbf, ureg.Quantity) and isinstance(job_duration, ureg.Quantity)
     either_qty = isinstance(mtbf, ureg.Quantity) or isinstance(job_duration, ureg.Quantity)
     if either_qty and not both_qty:
