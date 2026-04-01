@@ -72,21 +72,18 @@ from .core.constants import ureg
 from .viz.plots import plot_evaluation_scorecard, plot_roofline
 
 __all__ = [
-    # Submodules
-    "core", "hardware", "models", "infra", "systems", "sim", "fmt", "show", "viz",
-    # Types
-    "HardwareNode", "Workload", "TransformerWorkload",
-    "Fleet",
-    # Scenarios
-    "Scenario", "Scenarios", "Applications",
+    # Core API (the 5-line happy path)
+    "Engine", "Hardware", "Models", "Scenarios", "ureg",
+    # Types (for type annotations and custom workloads)
+    "HardwareNode", "Workload", "TransformerWorkload", "CNNWorkload",
+    "Fleet", "Node", "NetworkFabric", "PerformanceProfile",
     # Evaluation
     "SystemEvaluator", "SystemEvaluation",
-    # Engine
-    "Engine",
+    "Scenario", "Applications",
     # Registries
-    "Hardware", "Models", "Systems", "Tiers",
-    # Units
-    "ureg",
+    "Systems", "Tiers", "Infra",
+    # Submodules (for advanced use)
+    "core", "hardware", "models", "infra", "systems", "sim", "fmt", "show", "viz",
     # Visualization
     "plot_evaluation_scorecard", "plot_roofline",
 ]
