@@ -19,10 +19,12 @@ V100_MEM_CAPACITY = 32 * GiB
 V100_TDP = 300 * watt                     # SXM2 variant
 
 # NVIDIA A100 (Ampere, 2020) — Source: NVIDIA A100 Data Sheet
-A100_FLOPS_FP16_TENSOR = 312 * TFLOPs / second
-A100_FLOPS_TF32 = 156 * TFLOPs / second
-A100_FLOPS_FP32 = 19.5 * TFLOPs / second  # Standard CUDA cores
-A100_FLOPS_INT8 = 624 * TFLOPs / second   # INT8 Tensor Core
+# NOTE: Dense (without structured sparsity) values. With 2:4 sparsity, double these.
+A100_FLOPS_FP16_TENSOR = 156 * TFLOPs / second   # Dense FP16 Tensor Core (312 with sparsity)
+A100_FLOPS_FP16_SPARSE = 312 * TFLOPs / second   # With 2:4 structured sparsity
+A100_FLOPS_TF32 = 78 * TFLOPs / second            # Dense TF32 (156 with sparsity)
+A100_FLOPS_FP32 = 19.5 * TFLOPs / second          # Standard CUDA cores (no tensor)
+A100_FLOPS_INT8 = 312 * TFLOPs / second            # Dense INT8 Tensor Core (624 with sparsity)
 A100_MEM_BW = 2039 * GB / second           # HBM2e (SXM variant)
 A100_MEM_CAPACITY = 80 * GiB              # SXM variant (also 40 GiB PCIe)
 A100_TDP = 400 * watt                     # SXM variant
@@ -39,7 +41,7 @@ H100_TDP = 700 * watt                     # SXM variant
 # NVIDIA H200 (Hopper, 2023) — Source: NVIDIA H200 Data Sheet
 # H200 shares the Hopper compute die with H100, only memory differs
 H200_MEM_BW = 4.8 * TB / second             # HBM3e
-H200_MEM_CAPACITY = 141 * GiB              # Consistent with A100/H100 GiB convention
+H200_MEM_CAPACITY = 141 * GB               # NVIDIA specifies H200 as 141 GB (decimal)
 H200_TDP = 700 * watt                       # Same as H100 SXM
 
 # NVIDIA B100/B200 (Blackwell, 2024) — Source: NVIDIA Blackwell Architecture
@@ -55,7 +57,8 @@ B200_TDP = 1000 * watt
 # This is a full rack containing 72 Blackwell GPUs and 36 Grace CPUs.
 # We model the aggregate resources of the rack for macro-scale simulation.
 NVL72_GPUs = 72 * count
-NVL72_FLOPS_FP8_TENSOR = 720 * PFLOPs / second  # 72 * 10 PFLOPS (Dense/Sparse vary)
+NVL72_FLOPS_FP4_TENSOR = 720 * PFLOPs / second  # 72 * 10 PFLOPS FP4 dense (NVIDIA marketing headline)
+NVL72_FLOPS_FP8_TENSOR = 324 * PFLOPs / second  # 72 * 4.5 PFLOPS FP8 dense
 NVL72_MEM_CAPACITY = 13.8 * TB                  # 72 * 192 GB
 NVL72_MEM_BW = 576 * TB / second                # 72 * 8 TB/s
 NVL72_NVLINK_BW = 130 * TB / second             # Full bisection (bidirectional)
