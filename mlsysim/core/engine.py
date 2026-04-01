@@ -206,16 +206,18 @@ class Engine:
             )
             effective_bw = min(hardware.memory.bandwidth, pcie_bw)
             offload_bw = effective_bw
-        elif hardware.memory.flash_bandwidth is not None:
-            # TinyML path: weights live in flash, activations in SRAM.
-            # Use flash bandwidth for weight loading (the typical bottleneck).
-            effective_bw = hardware.memory.flash_bandwidth
         elif (hardware.memory.sram_capacity is not None
               and hardware.memory.sram_bandwidth is not None
               and graph.weight_bytes <= hardware.memory.sram_capacity):
             # SRAM-resident path: working set fits in on-chip SRAM.
-            # Captures FlashAttention-style tiled execution on GPUs.
+            # For GPUs: captures FlashAttention-style tiled execution.
+            # For TinyML: small models that fit entirely in SRAM bypass flash.
             effective_bw = hardware.memory.sram_bandwidth
+        elif hardware.memory.flash_bandwidth is not None:
+            # TinyML flash path: weights live in flash, activations in SRAM.
+            # Use flash bandwidth for weight loading (the typical bottleneck
+            # when the model is too large for SRAM).
+            effective_bw = hardware.memory.flash_bandwidth
         else:
             effective_bw = hardware.memory.bandwidth
         batch_ops = base_ops * batch_size
@@ -286,10 +288,10 @@ class Engine:
             latency=latency,
             latency_compute=compute_time,
             latency_memory=memory_time,
-            latency_overhead=dispatch_tax,
+            latency_overhead=dispatch_tax + layer_tax,
             throughput=throughput,
             bottleneck=bottleneck,
-            arithmetic_intensity=graph.arithmetic_intensity,
+            arithmetic_intensity=Q_(roofline["intensity"], "flop/byte"),
             energy=energy,
             memory_footprint=memory_footprint,
             peak_flops_actual=effective_flops,

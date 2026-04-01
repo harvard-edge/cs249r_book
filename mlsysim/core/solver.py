@@ -256,8 +256,7 @@ class DistributedModel(BaseModel):
             raise ValueError(f"Infeasible 4D Parallelism: TP({tp_size}) * PP({pp_size}) * EP({ep_size}) > Total({n_accelerators})")
 
         # 2. Single Node Performance (Computation)
-        local_batch = max(1, batch_size // (dp_size * tp_size * pp_size * ep_size)) # Fix: global batch is divided by DP
-        # Wait, usually global batch size = local_batch_per_dp * dp_size.
+        # Global batch is divided by DP size (TP/PP/EP split the model, not the batch).
         local_batch = max(1, batch_size // dp_size)
         if batch_size < dp_size:
             import warnings
@@ -310,6 +309,9 @@ class DistributedModel(BaseModel):
         # one after the column-parallel MLP, one after the row-parallel attention.
         # Volume per AllReduce = batch_size * seq_len * hidden_dim * precision_bytes
         # Source: Shoeybi et al. (2019), "Megatron-LM"
+        # NOTE: This models TP AllReduces as sequential (conservative upper bound).
+        # Real frameworks pipeline TP communication with the next layer's compute,
+        # reducing exposed latency. For v0.2.0: add tp_overlap_efficiency parameter.
         if tp_size > 1:
             bpp = PRECISION_MAP.get(precision, BYTES_FP16)
             hidden_dim = getattr(model, 'hidden_dim', 4096) or 4096
@@ -362,6 +364,8 @@ class DistributedModel(BaseModel):
         # so amortize DP communication cost across accumulation steps.
         if gradient_accumulation_steps > 1:
             t_comm_dp = t_comm_dp / gradient_accumulation_steps
+            # Update total_comm_latency to reflect the amortized DP cost
+            total_comm_latency = t_comm_dp + t_comm_tp + t_comm_ep
 
         if overlap_comm:
             # Overlap DP communication with backward pass compute.
@@ -746,7 +750,7 @@ class ServingModel(BaseModel):
         n_layers = getattr(model, 'layers', 1) or 1
         n_heads = getattr(model, 'heads', 32) or 32
         head_dim = (getattr(model, 'hidden_dim', 4096) or 4096) // n_heads
-        attention_flops = 2 * n_layers * n_heads * head_dim * new_tokens**2 * batch_size
+        attention_flops = 4 * n_layers * n_heads * head_dim * new_tokens**2 * batch_size
         prefill_ops = (linear_flops + attention_flops) * ureg.flop
         t_prefill = (prefill_ops / (peak_flops_prefill * efficiency)).to("ms") + hardware.dispatch_tax
 
@@ -762,11 +766,11 @@ class ServingModel(BaseModel):
             decode_hw = hardware
 
         # 3. Decode Phase
-        # Weight loading is amortized across the batch: weights are loaded once from HBM
-        # and reused for all requests in the batch. KV cache is per-request.
+        # Per decode step: load weights once (W) + load KV cache for all B requests.
+        # kv_cache_bytes already includes batch_size from get_kv_cache_size().
+        # Per-token ITL = step_time (each step produces 1 token per request).
         model_weights_bytes = model.size_in_bytes(bpp)
-        effective_weight_cost = model_weights_bytes / max(1, batch_size)
-        t_decode_per_token = ((effective_weight_cost + kv_cache_bytes) / decode_hw.memory.bandwidth).to("ms")
+        t_decode_per_token = ((model_weights_bytes + kv_cache_bytes) / decode_hw.memory.bandwidth).to("ms")
         
         # 4. Framework Tax (Per-token decode also incurs launch overhead)
         from .defaults import FRAMEWORK_LAYER_TAX_MS
@@ -847,8 +851,13 @@ class ContinuousBatchingModel(BaseModel):
         bpp = prec_map.get(precision, BYTES_FP16)
         peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
         
-        # Base latency metrics
-        prefill_ops = 2 * model.parameters.to(ureg.count).magnitude * seq_len * max_batch_size * ureg.flop
+        # Base latency metrics (including attention O(S²) term)
+        n_layers = getattr(model, 'layers', 1) or 1
+        n_heads = getattr(model, 'heads', 32) or 32
+        head_dim = (getattr(model, 'hidden_dim', 4096) or 4096) // n_heads
+        linear_flops = 2 * model.parameters.to(ureg.count).magnitude * seq_len * max_batch_size
+        attention_flops = 4 * n_layers * n_heads * head_dim * seq_len**2 * max_batch_size
+        prefill_ops = (linear_flops + attention_flops) * ureg.flop
         t_prefill = (prefill_ops / (peak_flops * efficiency)).to("ms") + hardware.dispatch_tax
         
         model_weights_bytes = model.size_in_bytes(bpp)
@@ -1047,6 +1056,9 @@ class TailLatencyModel(BaseModel):
     produces = TailLatencyResult
 
     def solve(self, arrival_rate_qps: float, service_latency_ms: float, num_replicas: int = 1, service_time_cv: float = 1.0) -> TailLatencyResult:
+        # (validation inserted before docstring parse)
+        from ._validation import validate_nonnegative
+        validate_nonnegative(service_time_cv, "service_time_cv")
         """
         Solves for P50 and P99 tail latencies under variable load.
 
@@ -1387,9 +1399,8 @@ class CompressionModel(BaseModel):
         method : str
             The compression method ('quantization', 'pruning', 'distillation').
         target_bitwidth : int
-            Target numerical precision in bits (e.g., 8 for INT8, 4 for INT4, 16 for FP8).
-            Use 16 for FP8 (half the bits of FP16 but reported as 8-bit; internally
-            we detect FP8 when target_bitwidth == 8 and check hardware support).
+            Target numerical precision in bits (e.g., 8 for INT8/FP8, 4 for INT4).
+            At 8-bit, accuracy delta uses the FP8 estimate (near-lossless) by default.
         sparsity : float
             Target sparsity ratio (0.0 to 1.0) for pruning.
         sparsity_type : str
@@ -1412,11 +1423,12 @@ class CompressionModel(BaseModel):
             # Source: Gholami et al. (2021), "A Survey of Quantization Methods"
             # Conservative estimates: <1% for FP8, <1% for INT8, 2-5% for INT4
             if target_bitwidth >= 16:
-                # FP8 pathway (E4M3/E5M2): near-lossless for most models
+                # FP16/BF16/FP32: no meaningful compression from FP32 baseline
+                accuracy_delta = 0.0
+                compression_ratio = 32 / target_bitwidth  # 2x for FP16, 1x for FP32
+            elif target_bitwidth == 8:
+                # FP8/INT8: use FP8 accuracy delta (near-lossless, -0.2%)
                 accuracy_delta = QUANT_ACCURACY_DELTA_FP8
-                compression_ratio = 32 / 8  # FP8 is 1 byte
-            elif target_bitwidth >= 8:
-                accuracy_delta = QUANT_ACCURACY_DELTA_INT8
             elif target_bitwidth >= 4:
                 accuracy_delta = QUANT_ACCURACY_DELTA_INT4
             else:
