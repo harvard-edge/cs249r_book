@@ -1046,22 +1046,45 @@ class TailLatencyModel(BaseModel):
     requires = ("hardware",)
     produces = TailLatencyResult
 
-    def solve(self, arrival_rate_qps: float, service_latency_ms: float, num_replicas: int = 1) -> TailLatencyResult:
-        """Solves for P50 and P99 tail latencies under variable load."""
+    def solve(self, arrival_rate_qps: float, service_latency_ms: float, num_replicas: int = 1, service_time_cv: float = 1.0) -> TailLatencyResult:
+        """
+        Solves for P50 and P99 tail latencies under variable load.
+
+        Parameters
+        ----------
+        arrival_rate_qps : float
+            Request arrival rate in queries per second.
+        service_latency_ms : float
+            Mean service time per request in milliseconds.
+        num_replicas : int
+            Number of server replicas (c in M/M/c).
+        service_time_cv : float
+            Coefficient of variation of service time (default 1.0 = exponential).
+            When CV != 1, applies Kingman's M/G/1 correction factor
+            (cv^2 + 1) / 2 to queue wait times, approximating M/G/c behavior.
+        """
         from .formulas import calc_queue_latency_mmc
-        
+
         service_rate_hz = 1000.0 / service_latency_ms if service_latency_ms > 0 else 0.0
-        
+
         rho, p50_w, p99_w = calc_queue_latency_mmc(arrival_rate_qps, service_rate_hz, num_replicas)
-        
+
+        # Kingman's formula correction for M/G/c approximation:
+        # W_q(M/G/c) ≈ W_q(M/M/c) * (cv² + 1) / 2
+        # When cv=1 (exponential), the factor is 1.0 (no correction).
+        if service_time_cv != 1.0:
+            kingman_factor = (service_time_cv ** 2 + 1) / 2
+            p50_w = p50_w * kingman_factor
+            p99_w = p99_w * kingman_factor
+
         is_stable = rho < 1.0
-        
+
         # P99 wait time exceeding 5x service latency signifies severe SLA risk
         slo_threshold = service_latency_ms * 5
-        
+
         p99_w_ms = p99_w.m_as(ureg.millisecond)
         p50_w_ms = p50_w.m_as(ureg.millisecond)
-        
+
         # SLO headroom: ratio of P99 wait to SLO threshold.
         # Values > 1.0 indicate SLO violation. This is a ratio, not a probability.
         slo_headroom_ratio = 1.0 if not is_stable else (p99_w_ms / slo_threshold if slo_threshold > 0 else 0)

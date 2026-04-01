@@ -37,6 +37,7 @@ class CloudHardware(Registry):
         interconnect=IOInterconnect(name="PCIe Gen4 x16", bandwidth=PCIE_GEN4_BW),
         tdp=A100_TDP,
         unit_cost=A100_UNIT_COST,
+        embodied_carbon_kg=130.0,  # Gupta et al. 2022 estimate
         dispatch_tax=0.015 * ureg.ms,
         metadata={"source_url": "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf", "last_verified": "2025-03-06"}
     )
@@ -50,6 +51,7 @@ class CloudHardware(Registry):
         interconnect=IOInterconnect(name="PCIe Gen5 x16", bandwidth=PCIE_GEN5_BW),
         tdp=H100_TDP,
         unit_cost=H100_UNIT_COST,
+        embodied_carbon_kg=150.0,  # Gupta et al. 2022 estimate for high-end datacenter GPU
         dispatch_tax=0.01 * ureg.ms,
         metadata={"source_url": "https://resources.nvidia.com/en-us-tensor-core/nvidia-h100-tensor-core-gpu-datasheet", "last_verified": "2025-03-06"}
     )
@@ -249,6 +251,7 @@ class TinyHardware(Registry):
             flash_bandwidth=0.08 * ureg.GB/ureg.s,    # Flash read ~80 MB/s (XIP)
         ),
         tdp=0.4 * ureg.W,              # Inference-only power (not WiFi-on 1.2W)
+        embodied_carbon_kg=5.0,        # Including packaging and PCB assembly
         dispatch_tax=1.0 * ureg.ms     # TFLite Micro interpreter overhead
     )
     ESP32 = ESP32_S3 # Alias for backward compatibility

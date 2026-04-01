@@ -44,6 +44,10 @@ class HardwareNode(BaseModel):
     tdp: Optional[Quantity] = None
     battery_capacity: Optional[Quantity] = None
     unit_cost: Optional[Quantity] = None
+    embodied_carbon_kg: Optional[float] = Field(
+        default=None,
+        description="Embodied CO2e in kg from manufacturing, packaging, and transport (Gupta et al. 2022)."
+    )
     dispatch_tax: Quantity = Field(default_factory=lambda: Q_("0.01 ms"))
     metadata: Metadata = Field(default_factory=Metadata)
 
