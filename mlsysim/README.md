@@ -146,6 +146,21 @@ Several critical production concerns are deliberately **out of scope**:
 Students using this tool should understand that infrastructure physics (what mlsysim models)
 is one dimension of a multi-dimensional engineering challenge.
 
+## 📖 How to Cite
+
+If you use mlsysim in your research or teaching, please cite:
+
+```bibtex
+@software{mlsysim2026,
+  author       = {Janapa Reddi, Vijay},
+  title        = {{MLSysim}: A Composable Analytical Framework for Machine Learning Systems},
+  year         = {2026},
+  url          = {https://mlsysbook.ai/mlsysim},
+  version      = {0.1.0},
+  institution  = {Harvard University}
+}
+```
+
 ## 🛠 Installation
 
 MLSys·im is designed to be highly modular. Install only what you need:
