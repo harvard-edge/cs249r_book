@@ -246,6 +246,7 @@ class DistributedModel(BaseModel):
         validate_at_least(pp_size, 1, "pp_size")
         validate_at_least(ep_size, 1, "ep_size")
         validate_at_least(batch_size, 1, "batch_size")
+        validate_at_least(gradient_accumulation_steps, 1, "gradient_accumulation_steps")
         validate_range(efficiency, 0.0, 1.0, "efficiency")
 
         # 1. 3D/4D Parallelism Decomposition
@@ -750,7 +751,9 @@ class ServingModel(BaseModel):
         n_layers = getattr(model, 'layers', 1) or 1
         n_heads = getattr(model, 'heads', 32) or 32
         head_dim = (getattr(model, 'hidden_dim', 4096) or 4096) // n_heads
-        attention_flops = 4 * n_layers * n_heads * head_dim * new_tokens**2 * batch_size
+        # New tokens attend to ALL tokens (cached + new), not just each other.
+        # When cached_prefix_len=0, new_tokens == seq_len so this simplifies to S^2.
+        attention_flops = 4 * n_layers * n_heads * head_dim * new_tokens * seq_len * batch_size
         prefill_ops = (linear_flops + attention_flops) * ureg.flop
         t_prefill = (prefill_ops / (peak_flops_prefill * efficiency)).to("ms") + hardware.dispatch_tax
 
@@ -1018,7 +1021,9 @@ class WeightStreamingModel(BaseModel):
             layer_time = layer_injection_time
             
         total_token_time = layer_time * model.layers
-        tps = (batch_size / total_token_time).to("1/s").magnitude if total_token_time.magnitude > 0 else 0.0
+        # In prefill, we process batch_size * seq_len tokens; in decode, batch_size tokens per step
+        tokens_produced = batch_size * seq_len if phase == "prefill" else batch_size
+        tps = (tokens_produced / total_token_time).to("1/s").magnitude if total_token_time.magnitude > 0 else 0.0
         
         # 3. Optimal Batch Size Analysis
         # What batch size perfectly overlaps injection and compute?
@@ -1056,11 +1061,7 @@ class TailLatencyModel(BaseModel):
     produces = TailLatencyResult
 
     def solve(self, arrival_rate_qps: float, service_latency_ms: float, num_replicas: int = 1, service_time_cv: float = 1.0) -> TailLatencyResult:
-        # (validation inserted before docstring parse)
-        from ._validation import validate_nonnegative
-        validate_nonnegative(service_time_cv, "service_time_cv")
-        """
-        Solves for P50 and P99 tail latencies under variable load.
+        """Solves for P50 and P99 tail latencies under variable load.
 
         Parameters
         ----------
@@ -1075,6 +1076,8 @@ class TailLatencyModel(BaseModel):
             When CV != 1, applies Kingman's M/G/1 correction factor
             (cv^2 + 1) / 2 to queue wait times, approximating M/G/c behavior.
         """
+        from ._validation import validate_nonnegative
+        validate_nonnegative(service_time_cv, "service_time_cv")
         from .formulas import calc_queue_latency_mmc
 
         service_rate_hz = 1000.0 / service_latency_ms if service_latency_ms > 0 else 0.0
@@ -1286,7 +1289,7 @@ class ScalingModel(BaseModel):
         
         # Convert H100-days to FLOPs if necessary (simplified approximation)
         c_flops = compute_budget
-        if compute_budget.units == ureg.day:
+        if compute_budget.dimensionality == ureg.day.dimensionality:
             # Convert GPU-days to FLOPs using H100 SXM reference
             # Source: NVIDIA H100 datasheet (989 TFLOPs FP16 dense)
             c_flops = (compute_budget * H100_FLOPS_FP16_TENSOR * REFERENCE_MFU_SUSTAINED).to(ureg.flop)
