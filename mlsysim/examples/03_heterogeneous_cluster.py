@@ -1,8 +1,9 @@
 """
-Example 03: Heterogeneous Cluster Modeling
-Demonstrates how to model a cluster with mixed hardware types (e.g., compute nodes and storage nodes).
+Example 03: Cluster Modeling
+Demonstrates how to model a multi-node GPU cluster and evaluate
+distributed training performance + economics.
 """
-from mlsysim.systems.types import Fleet, Node, NodeGroup, NetworkFabric
+from mlsysim.systems.types import Fleet, Node, NetworkFabric
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
 from mlsysim.core.solver import DistributedModel, EconomicsModel
@@ -11,57 +12,44 @@ from mlsysim.core.constants import Q_
 # 1. Define the Workload
 model = Models.Language.Llama3_8B
 
-# 2. Define the Heterogeneous Fleet
-compute_group = NodeGroup(
-    name="Compute Tier",
-    node=Node(
-        name="H100 Node",
-        accelerator=Hardware.H100,
-        accelerators_per_node=8,
-        intra_node_bw=Q_("900 GB/s")
-    ),
-    count=16,
-    role="compute"
-)
-
-storage_group = NodeGroup(
-    name="Storage Tier",
-    node=Node(
-        name="Storage Node",
-        accelerator=Hardware.StorageServer,
-        accelerators_per_node=0,
-        intra_node_bw=Q_("100 GB/s")
-    ),
-    count=4,
-    role="storage"
+# 2. Define the Cluster
+node = Node(
+    name="H100 Node",
+    accelerator=Hardware.H100,
+    accelerators_per_node=8,
+    intra_node_bw=Q_("900 GB/s")  # NVLink 4.0
 )
 
 fleet = Fleet(
-    name="Mixed AI Cluster",
-    node_groups=[compute_group, storage_group],
-    fabric=NetworkFabric(name="400G Fabric", bandwidth=Q_("400 GB/s"))
+    name="Training Cluster",
+    node=node,
+    count=16,  # 16 nodes = 128 GPUs
+    fabric=NetworkFabric(name="InfiniBand NDR", bandwidth=Q_("400 Gbit/s"))
 )
 
-# 3. Evaluate Performance (Only looks at compute tier)
+# 3. Evaluate Distributed Training Performance
 dist_solver = DistributedModel()
-perf_result = dist_solver.solve(
+perf = dist_solver.solve(
     model=model,
     fleet=fleet,
     batch_size=1024,
-    dp_size=16,
-    tp_size=8,
-    pp_size=1
+    tp_size=8,       # Tensor parallelism within each node
+    pp_size=1,
+    efficiency=0.45
 )
 
-print(f"--- Performance (Compute Tier Only) ---")
-print(f"Step Latency: {perf_result.step_latency_total:.2f}")
-print(f"Scaling Efficiency: {perf_result.scaling_efficiency * 100:.1f}%")
+print("--- Distributed Training Performance ---")
+print(f"Step Latency:       {perf.step_latency_total:.2f}")
+print(f"Scaling Efficiency: {perf.scaling_efficiency * 100:.1f}%")
+print(f"DP Communication:   {perf.dp_communication_latency:.2f}")
+print(f"TP Communication:   {perf.tp_communication_latency:.2f}")
 
-# 4. Evaluate Economics (Looks at entire fleet)
+# 4. Evaluate Economics (30-day training run)
 econ_solver = EconomicsModel()
-econ_result = econ_solver.solve(fleet=fleet, duration_days=30)
+econ = econ_solver.solve(fleet=fleet, duration_days=30)
 
-print(f"\n--- Economics (Entire Fleet) ---")
-print(f"Total CapEx: ${econ_result.capex_usd:,.2f}")
-print(f"Total OpEx (30 days): ${econ_result.total_opex_usd:,.2f}")
-print(f"Total TCO: ${econ_result.total_tco_usd:,.2f}")
+print(f"\n--- Economics (30-day run) ---")
+print(f"CapEx (amortized): ${econ.capex_usd:,.0f}")
+print(f"OpEx (energy):     ${econ.opex_energy_usd:,.0f}")
+print(f"Total TCO:         ${econ.tco_usd:,.0f}")
+print(f"Carbon Footprint:  {econ.carbon_footprint_kg:.0f} kg CO₂")
