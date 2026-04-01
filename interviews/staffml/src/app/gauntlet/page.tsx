@@ -13,7 +13,9 @@ import {
   getQuestionsByFilter, Question, cleanScenario
 } from "@/lib/corpus";
 import { getLevelDef } from "@/lib/levels";
-import { saveAttempt, saveGauntletResult, AttemptRecord, recordActivity } from "@/lib/progress";
+import { buildReportUrl } from "@/lib/issue-url";
+import { track } from "@/lib/analytics";
+import { saveAttempt, saveGauntletResult, AttemptRecord, recordActivity, updateSRCard } from "@/lib/progress";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 
 type Phase = "setup" | "active" | "review" | "results";
@@ -92,6 +94,7 @@ export default function GauntletPage() {
             selfScore: 0,
             timestamp: Date.now(),
           });
+          updateSRCard(q.id, 0);
           finalScores.push(0);
         }
       }
@@ -147,6 +150,7 @@ export default function GauntletPage() {
     setScores([]);
     setTimeRemaining(dur.minutes * 60);
     setPhase("active");
+    track({ type: 'gauntlet_started', track: selectedTrack, level: selectedLevel, questionCount: selected.length });
   }, [selectedTrack, selectedLevel, selectedDuration]);
 
   const revealAnswer = () => {
@@ -164,6 +168,7 @@ export default function GauntletPage() {
       timestamp: Date.now(),
     };
     saveAttempt(attempt);
+    updateSRCard(q.id, score);
     recordActivity();
 
     const newScores = [...scores, score];
@@ -552,12 +557,12 @@ export default function GauntletPage() {
                       <p className="text-[11px] text-accentRed/80"><span className="font-bold">Common mistake:</span> {q.details.common_mistake}</p>
                     )}
                     <a
-                      href={`https://github.com/harvard-edge/cs249r_book/issues/new?labels=staffml&title=${encodeURIComponent(`[StaffML] Issue with: ${q.title}`)}&body=${encodeURIComponent(`**Question ID:** \`${q.id}\`\n**Title:** ${q.title}\n**Level:** ${q.level}\n**Track:** ${q.track}\n**Area:** ${q.competency_area}\n\n**What's wrong:**\n\n\n**Expected:**\n\n`)}`}
+                      href={buildReportUrl(q)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-[11px] text-textMuted hover:text-accentRed transition-colors"
+                      className="inline-flex items-center gap-1.5 text-[11px] text-textSecondary hover:text-accentRed transition-colors"
                     >
-                      <AlertTriangle className="w-3 h-3" /> Report issue with this question
+                      <AlertTriangle className="w-3 h-3" /> Report issue
                     </a>
                   </div>
                 </details>

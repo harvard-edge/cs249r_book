@@ -29,8 +29,10 @@ import { shouldShowGate, incrementReveals, getRemainingReveals, isStarVerified }
 import StarGate from "@/components/StarGate";
 import { getChainForQuestion, ChainInfo } from "@/lib/corpus";
 import ChainStrip from "@/components/ChainStrip";
-import { Calendar, ArrowLeft, Flag, LinkIcon } from "lucide-react";
+import { Calendar, ArrowLeft, Flag, LinkIcon, Lightbulb } from "lucide-react";
 import Link from "next/link";
+import { buildReportUrl, buildSuggestUrl } from "@/lib/issue-url";
+import { track } from "@/lib/analytics";
 
 export default function PracticePageWrapper() {
   return (
@@ -279,8 +281,9 @@ function PracticePage() {
         selfScore: finalScore,
         timestamp: Date.now(),
       });
-      // Update spaced repetition card + streak
+      // Update spaced repetition card + streak + analytics
       updateSRCard(current.id, finalScore);
+      track({ type: 'question_scored', topic: current.topic, zone: current.zone, level: current.level, track: current.track, score: finalScore });
       const activity = recordActivity();
       if (activity.newMilestone) {
         showToast({
@@ -610,13 +613,13 @@ function PracticePage() {
                       </button>
                       {/* Report issue */}
                       <a
-                        href={`https://github.com/harvard-edge/cs249r_book/issues/new?labels=staffml&title=${encodeURIComponent(`[StaffML] Issue with: ${current.title}`)}&body=${encodeURIComponent(`**Question ID:** \`${current.id}\`\n**Title:** ${current.title}\n**Level:** ${current.level}\n**Track:** ${current.track}\n**Area:** ${current.competency_area}\n\n**What's wrong:**\n\n\n**Expected:**\n\n`)}`}
+                        href={buildReportUrl(current)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-textMuted hover:text-accentRed transition-colors"
+                        className="inline-flex items-center gap-1 text-[11px] text-textSecondary hover:text-accentRed transition-colors"
                         title="Report an issue with this question"
                       >
-                        <Flag className="w-3.5 h-3.5" />
+                        <Flag className="w-3.5 h-3.5" /> Report
                       </a>
                     </div>
                     <h2 className="text-2xl lg:text-3xl font-bold text-textPrimary mb-6 tracking-tight">
@@ -630,7 +633,7 @@ function PracticePage() {
 
                     {current.details.deep_dive_title && (
                       <a
-                        href={current.details.deep_dive_url}
+                        href={current.details.deep_dive_url?.startsWith('https://') ? current.details.deep_dive_url : '#'}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 mt-6 px-3 py-2 text-[13px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
@@ -767,7 +770,7 @@ function PracticePage() {
                     {/* Deep-dive link to MLSysBook.ai */}
                     {current.details.deep_dive_title && (
                       <a
-                        href={current.details.deep_dive_url}
+                        href={current.details.deep_dive_url?.startsWith('https://') ? current.details.deep_dive_url : '#'}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-2 px-3 py-2.5 text-[12px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
@@ -855,15 +858,25 @@ function PracticePage() {
                           );
                         })}
                       </div>
-                      {/* Per-question report — visible right next to score buttons */}
-                      <a
-                        href={`https://github.com/harvard-edge/cs249r_book/issues/new?labels=staffml&title=${encodeURIComponent(`[StaffML] Issue with: ${current.title}`)}&body=${encodeURIComponent(`**Question ID:** \`${current.id}\`\n**Title:** ${current.title}\n**Level:** ${current.level}\n**Track:** ${current.track}\n**Area:** ${current.competency_area}\n\n**What's wrong:**\n\n\n**Expected:**\n\n`)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 text-[11px] text-textMuted hover:text-accentRed transition-colors mt-3"
-                      >
-                        <Flag className="w-3 h-3" /> Something wrong with this question?
-                      </a>
+                      {/* Feedback actions */}
+                      <div className="flex items-center gap-4 mt-3">
+                        <a
+                          href={buildReportUrl(current)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-[11px] text-textSecondary hover:text-accentRed transition-colors"
+                        >
+                          <Flag className="w-3.5 h-3.5" /> Report issue
+                        </a>
+                        <a
+                          href={buildSuggestUrl(current)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-[11px] text-textSecondary hover:text-accentAmber transition-colors"
+                        >
+                          <Lightbulb className="w-3.5 h-3.5" /> Suggest improvement
+                        </a>
+                      </div>
 
                       {/* Chain navigation — go deeper */}
                       {chainInfo && (

@@ -7,7 +7,7 @@ import clsx from "clsx";
 import Link from "next/link";
 import { STUDY_PLANS, getPlanQuestions, getPlanProgress, markPlanQuestionComplete, StudyPlan } from "@/lib/plans";
 import { Question, cleanScenario, checkNapkinMath, extractFinalNumber, NapkinResult } from "@/lib/corpus";
-import { saveAttempt, recordActivity } from "@/lib/progress";
+import { saveAttempt, recordActivity, updateSRCard } from "@/lib/progress";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { useToast } from "@/components/Toast";
@@ -78,6 +78,7 @@ export default function PlansPage() {
       selfScore: finalScore,
       timestamp: Date.now(),
     });
+    updateSRCard(current.id, finalScore);
     const activity = recordActivity();
     if (activity.newMilestone) {
       showToast({ type: 'badge', title: activity.newMilestone, description: `${activity.streak.currentStreak} day streak!` });
