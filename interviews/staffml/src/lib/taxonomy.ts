@@ -1,5 +1,6 @@
 import taxonomyData from "../data/taxonomy.json";
 import corpusData from "../data/corpus.json";
+import zonesData from "../data/zones.json";
 import chapterUrls from "../data/chapter-urls.json";
 import {
   HardDrive, Cpu, Rocket, Layers, Timer, Shuffle,
@@ -16,17 +17,20 @@ export interface QuestionSummary {
   level: string;
   track: string;
   scenario: string;
+  zone: string;
 }
 
 export interface Topic {
   id: string;
   name: string;
   description: string;
+  area: string;
+  prerequisites: string[];
   questionCount: number;
   levels: Record<string, number>;
   tracks: string[];
+  zones: Record<string, number>;
   questionsByLevel: Record<string, QuestionSummary[]>;
-  chapterName?: string;
   chapterUrl?: string;
 }
 
@@ -36,8 +40,15 @@ export interface CompetencyArea {
   questionCount: number;
   topicCount: number;
   topics: Topic[];
-  /** Aggregate level distribution across all topics */
   levels: Record<string, number>;
+  zones: Record<string, number>;
+}
+
+export interface ZoneDefinition {
+  id: string;
+  skills: string[];
+  description: string;
+  levels: string[];
 }
 
 export interface AreaStyle {
@@ -49,16 +60,15 @@ export interface AreaStyle {
 
 // ─── Internals ─────────────────────────────────────────────────
 
-interface Concept {
+interface RawConcept {
   id: string;
   name: string;
   description: string;
+  area: string;
+  prerequisites: string[];
   tracks: string[];
-  source_chapters: string[];
   question_count: number;
   level_distribution?: Record<string, number>;
-  source_domains?: string[];
-  textbook_url?: string;
 }
 
 interface RawQuestion {
@@ -67,84 +77,98 @@ interface RawQuestion {
   level: string;
   title: string;
   scenario: string;
+  topic: string;
+  zone: string;
   competency_area: string;
-  taxonomy_concept?: string;
   details: { [key: string]: unknown };
 }
 
 const chapterUrlMap = chapterUrls as Record<string, string>;
 
-function formatChapterName(ch: string): string {
-  return ch.replace("vol1_", "").replace("vol2_", "").replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 // ─── Build index ───────────────────────────────────────────────
 
-const concepts = (taxonomyData as unknown as { concepts: Concept[] }).concepts;
+const concepts = (taxonomyData as unknown as { concepts: RawConcept[] }).concepts;
 const questions = corpusData as RawQuestion[];
 const conceptMap = new Map(concepts.map((c) => [c.id, c]));
 
+// Group questions by area → topic
 const areaTopicQs: Record<string, Record<string, RawQuestion[]>> = {};
 for (const q of questions) {
   const area = q.competency_area;
-  const tc = q.taxonomy_concept || "_unmapped";
+  const topic = q.topic;
   if (!areaTopicQs[area]) areaTopicQs[area] = {};
-  if (!areaTopicQs[area][tc]) areaTopicQs[area][tc] = [];
-  areaTopicQs[area][tc].push(q);
+  if (!areaTopicQs[area][topic]) areaTopicQs[area][topic] = [];
+  areaTopicQs[area][topic].push(q);
 }
 
 const _areas: CompetencyArea[] = Object.entries(areaTopicQs)
   .map(([areaId, topicMap]) => {
     const topics: Topic[] = Object.entries(topicMap)
-      .filter(([tc]) => tc !== "_unmapped")
-      .map(([tc, qs]) => {
-        const concept = conceptMap.get(tc);
+      .map(([topicId, qs]) => {
+        const concept = conceptMap.get(topicId);
         const levels: Record<string, number> = {};
+        const zones: Record<string, number> = {};
         const trackSet = new Set<string>();
         const questionsByLevel: Record<string, QuestionSummary[]> = {};
 
         for (const q of qs) {
           levels[q.level] = (levels[q.level] || 0) + 1;
+          zones[q.zone] = (zones[q.zone] || 0) + 1;
           trackSet.add(q.track);
           if (!questionsByLevel[q.level]) questionsByLevel[q.level] = [];
           questionsByLevel[q.level].push({
             id: q.id, title: q.title, level: q.level,
-            track: q.track, scenario: q.scenario,
+            track: q.track, scenario: q.scenario, zone: q.zone,
           });
         }
 
-        const sourceChapter = concept?.source_chapters?.[0];
         return {
-          id: tc,
-          name: concept?.name || tc.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+          id: topicId,
+          name: concept?.name || topicId.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
           description: concept?.description || "",
+          area: areaId,
+          prerequisites: concept?.prerequisites || [],
           questionCount: qs.length,
-          levels, tracks: Array.from(trackSet).sort(), questionsByLevel,
-          chapterName: sourceChapter ? formatChapterName(sourceChapter) : undefined,
-          chapterUrl: sourceChapter ? chapterUrlMap[sourceChapter] : undefined,
+          levels, zones, tracks: Array.from(trackSet).sort(), questionsByLevel,
+          chapterUrl: chapterUrlMap[topicId],
         };
       })
       .sort((a, b) => b.questionCount - a.questionCount);
 
-      // Aggregate level distribution
-      const areaLevels: Record<string, number> = {};
-      for (const t of topics) {
-        for (const [lv, cnt] of Object.entries(t.levels)) {
-          areaLevels[lv] = (areaLevels[lv] || 0) + Number(cnt);
-        }
+    // Aggregate level + zone distribution
+    const areaLevels: Record<string, number> = {};
+    const areaZones: Record<string, number> = {};
+    for (const t of topics) {
+      for (const [lv, cnt] of Object.entries(t.levels)) {
+        areaLevels[lv] = (areaLevels[lv] || 0) + Number(cnt);
       }
+      for (const [z, cnt] of Object.entries(t.zones)) {
+        areaZones[z] = (areaZones[z] || 0) + Number(cnt);
+      }
+    }
 
-      return {
-        id: areaId,
-        name: areaId.charAt(0).toUpperCase() + areaId.slice(1).replace(/-/g, " "),
-        questionCount: topics.reduce((s, t) => s + t.questionCount, 0),
-        topicCount: topics.length,
-        topics,
-        levels: areaLevels,
-      };
+    return {
+      id: areaId,
+      name: areaId.charAt(0).toUpperCase() + areaId.slice(1).replace(/-/g, " "),
+      questionCount: topics.reduce((s, t) => s + t.questionCount, 0),
+      topicCount: topics.length,
+      topics,
+      levels: areaLevels,
+      zones: areaZones,
+    };
   })
   .sort((a, b) => a.name.localeCompare(b.name));
+
+// ─── Zone definitions ─────────────────────────────────────────
+
+const _zones: ZoneDefinition[] = Object.entries(
+  (zonesData as { zones: Record<string, { skills: string[]; description: string; levels: string[] }> }).zones
+).map(([id, def]) => ({
+  id,
+  skills: def.skills,
+  description: def.description,
+  levels: def.levels,
+}));
 
 // ─── Area styles ───────────────────────────────────────────────
 
@@ -175,6 +199,11 @@ export function getAreaForTopic(topicId: string) {
   return _areas.find((a) => a.topics.some((t) => t.id === topicId));
 }
 
+export function getZoneDefinitions(): ZoneDefinition[] { return _zones; }
+export function getZoneDefinition(zoneId: string): ZoneDefinition | undefined {
+  return _zones.find(z => z.id === zoneId);
+}
+
 export function searchTopics(query: string): Topic[] {
   const q = query.toLowerCase().trim();
   if (!q) return _areas.flatMap((a) => a.topics);
@@ -188,9 +217,30 @@ export function getVaultStats() {
     totalQuestions: questions.length,
     totalTopics: _areas.reduce((s, a) => s + a.topicCount, 0),
     totalAreas: _areas.length,
+    totalZones: _zones.length,
   };
 }
 
 export function getAreaStyle(areaId: string): AreaStyle {
   return AREA_STYLES[areaId] || { primary: "#6b7280", bg: "#6b728012", border: "#6b728030", icon: Layers };
+}
+
+/** Get prerequisite chain for a topic (ordered learning path) */
+export function getPrerequisiteChain(topicId: string): Topic[] {
+  const visited = new Set<string>();
+  const chain: Topic[] = [];
+
+  function walk(id: string) {
+    if (visited.has(id)) return;
+    visited.add(id);
+    const topic = getTopicById(id);
+    if (!topic) return;
+    for (const prereq of topic.prerequisites) {
+      walk(prereq);
+    }
+    chain.push(topic);
+  }
+
+  walk(topicId);
+  return chain;
 }

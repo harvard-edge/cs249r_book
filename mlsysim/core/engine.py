@@ -4,6 +4,7 @@ from .constants import ureg, Q_, BYTES_FP32, BYTES_FP16, BYTES_INT8, BYTES_INT4,
 from .defaults import HFU_MFU_RATIO
 from .formulas import calc_bottleneck
 from .exceptions import OOMError
+from ._validation import validate_range, validate_at_least
 from ..models.types import Workload, TransformerWorkload, CNNWorkload
 from ..hardware.types import HardwareNode, Quantity
 
@@ -33,6 +34,17 @@ class PerformanceProfile(BaseModel):
     offload_spill_bytes: Optional[Quantity] = None
     offload_effective_bw: Optional[Quantity] = None
 
+    @property
+    def energy_per_inference(self) -> Quantity:
+        """Energy cost for a single inference pass.
+
+        This is the total energy for the batch-latency window. For per-sample
+        energy, divide by the batch size used in Engine.solve(). The engine
+        does not store batch_size on the profile to keep it hardware-centric,
+        so the caller must apply the division when needed.
+        """
+        return self.energy
+
     def summary(self) -> str:
         """Returns a human-readable summary of the performance profile."""
         lines = [
@@ -57,7 +69,18 @@ class Engine:
     Maps a (Workload, HardwareNode) pair to a PerformanceProfile by applying
     the Roofline model: the workload is "lowered" into a hardware-agnostic
     ComputationGraph, then bounded by the hardware's compute ceiling and
-    memory bandwidth ceiling via the SingleNodeModel.
+    memory bandwidth ceiling.
+
+    The Iron Law of ML Training
+    ---------------------------
+    Every solver in mlsysim ultimately decomposes into this equation:
+
+        Time = FLOPs / (N × Peak_FLOPS × MFU × η_scaling × Goodput)
+
+    where N is device count, MFU is Model FLOPs Utilization, η_scaling is
+    scaling efficiency (communication overhead), and Goodput accounts for
+    failures and checkpointing. This engine evaluates the single-node case
+    (N=1, η_scaling=1, Goodput=1); DistributedModel handles the fleet case.
 
     Source: Williams et al. (2009), "Roofline: An Insightful Visual
     Performance Model for Floating-Point Programs and Multicore Architectures."
@@ -104,13 +127,26 @@ class Engine:
         PerformanceProfile
             Complete performance characterization of the workload on the hardware.
         """
+        # 0. Input validation
+        validate_range(efficiency, 0.0, 1.0, "efficiency")
+        validate_at_least(batch_size, 1, "batch_size")
+
         # 1. Map precision to bytes per parameter
         bpp = PRECISION_MAP.get(precision, BYTES_FP16)
 
         # 2. Resolve peak FLOPS for the requested precision
-        peak_flops = hardware.compute.precision_flops.get(
-            precision, hardware.compute.peak_flops
-        )
+        if precision in hardware.compute.precision_flops:
+            peak_flops = hardware.compute.precision_flops[precision]
+        else:
+            peak_flops = hardware.compute.peak_flops
+            if precision not in ("fp16", "bf16") and hardware.compute.precision_flops:
+                import warnings
+                warnings.warn(
+                    f"Precision '{precision}' not in {hardware.name} precision_flops "
+                    f"(available: {list(hardware.compute.precision_flops.keys())}); "
+                    f"using default peak_flops (FP16). Results may be inaccurate.",
+                    stacklevel=2,
+                )
 
         # 3. Lower the workload to a ComputationGraph
         graph = model.lower(bpp)
@@ -162,8 +198,7 @@ class Engine:
         effective_flops = peak_flops * efficiency
 
         if not feasible:
-            # Offload path: model spills beyond HBM → bandwidth degrades to PCIe
-            # This is Wall 2 (Memory) in its capacity-exceeded regime.
+            # Offload path: model spills beyond primary memory → bandwidth degrades
             offload_spill = memory_footprint - hardware.memory.capacity
             pcie_bw = (
                 getattr(hardware.interconnect, 'bandwidth', Q_("64 GB/s"))
@@ -171,6 +206,16 @@ class Engine:
             )
             effective_bw = min(hardware.memory.bandwidth, pcie_bw)
             offload_bw = effective_bw
+        elif hardware.memory.flash_bandwidth is not None:
+            # TinyML path: weights live in flash, activations in SRAM.
+            # Use flash bandwidth for weight loading (the typical bottleneck).
+            effective_bw = hardware.memory.flash_bandwidth
+        elif (hardware.memory.sram_capacity is not None
+              and hardware.memory.sram_bandwidth is not None
+              and graph.weight_bytes <= hardware.memory.sram_capacity):
+            # SRAM-resident path: working set fits in on-chip SRAM.
+            # Captures FlashAttention-style tiled execution on GPUs.
+            effective_bw = hardware.memory.sram_bandwidth
         else:
             effective_bw = hardware.memory.bandwidth
         batch_ops = base_ops * batch_size
@@ -184,11 +229,16 @@ class Engine:
         if effective_bw.magnitude == 0:
             memory_time = Q_("0 ms")
         else:
-            # Memory time is bottlenecked by loading the memory footprint
-            memory_time = (memory_footprint / effective_bw).to("ms")
+            # Memory traffic for batched workloads: weights are loaded once from HBM,
+            # but activations scale with batch_size. For batch=1, traffic ≈ weight_bytes.
+            # For larger batches, activation I/O becomes significant.
+            # This captures the Roofline regime transition as batch_size grows.
+            activation_bytes = graph.weight_bytes * 0.1 * batch_size  # ~10% of weights per sample (heuristic)
+            actual_memory_traffic = graph.weight_bytes + activation_bytes
+            memory_time = (actual_memory_traffic / effective_bw).to("ms")
 
         roofline = calc_bottleneck(
-            batch_ops, graph.weight_bytes, effective_flops, effective_bw
+            batch_ops, graph.weight_bytes + graph.weight_bytes * 0.1 * batch_size, effective_flops, effective_bw
         )
         bottleneck = roofline["bottleneck"]
 
@@ -211,19 +261,26 @@ class Engine:
         else:
             throughput = Q_(0, "1/s")
 
-        # 8. Energy estimate (TDP * wall-clock time)
-        if hardware.tdp is not None:
-            energy = (hardware.tdp * latency.to("s")).to("J")
-        else:
-            energy = Q_("0 J")
-
-        # 9. MFU and HFU
-        latency_mag = latency.to("ms").magnitude
-        if latency_mag > 0:
-            mfu = compute_time.to("ms").magnitude / latency_mag
+        # 8-9. MFU, HFU, and Energy (energy depends on MFU, so compute MFU first)
+        # MFU = achieved_flops / peak_flops = (model_flops / step_time) / peak_flops
+        # Source: Chowdhery et al. (2022), "PaLM: Scaling Language Modeling with Pathways"
+        latency_s = latency.to("s").magnitude
+        if latency_s > 0 and peak_flops.magnitude > 0:
+            achieved_flops = batch_ops.magnitude / latency_s
+            mfu = achieved_flops / peak_flops.magnitude
+            mfu = min(mfu, 1.0)  # Clamp to [0, 1]
         else:
             mfu = 0.0
         hfu = min(mfu * HFU_MFU_RATIO, 1.0)  # Source: PaLM (Chowdhery et al. 2022)
+
+        # Energy estimate (energy-proportional model)
+        # Consistent with SustainabilityModel: 30% idle + 70% * utilization
+        # Source: Barroso & Hölzle (2007), "The Case for Energy-Proportional Computing"
+        if hardware.tdp is not None:
+            avg_power = hardware.tdp * (0.3 + 0.7 * mfu)
+            energy = (avg_power * latency.to("s")).to("J")
+        else:
+            energy = Q_("0 J")
 
         return PerformanceProfile(
             latency=latency,
@@ -285,7 +342,7 @@ class Engine:
                             "precision": prec,
                             "profile": profile,
                         })
-                    except Exception:
-                        # Skip infeasible configurations silently
+                    except OOMError:
+                        # Skip infeasible configurations (model doesn't fit in memory)
                         pass
         return results

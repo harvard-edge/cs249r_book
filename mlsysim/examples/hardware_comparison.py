@@ -10,8 +10,9 @@ def main():
     scenario = mlsysim.Applications.Doorbell
     
     devices = [
-        mlsysim.Hardware.Tiny.ArduinoNano33,
-        mlsysim.Hardware.Tiny.ESP32_S3
+        mlsysim.Hardware.Tiny.nRF52840,
+        mlsysim.Hardware.Tiny.ESP32_S3,
+        mlsysim.Hardware.Tiny.HimaxWE1,
     ]
     
     for hw in devices:

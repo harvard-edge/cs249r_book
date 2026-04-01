@@ -9,7 +9,8 @@ from ..core.constants import (
     B200_MEM_BW, B200_FLOPS_FP16_TENSOR, B200_MEM_CAPACITY, B200_TDP, B200_FLOPS_FP8_TENSOR, B200_FLOPS_INT4, B200_UNIT_COST,
     NVL72_FLOPS_FP8_TENSOR, NVL72_MEM_CAPACITY, NVL72_MEM_BW, NVL72_NVLINK_BW, NVL72_TDP, NVL72_UNIT_COST,
     MI300X_MEM_BW, MI300X_FLOPS_FP16_TENSOR, MI300X_MEM_CAPACITY, MI300X_TDP, MI300X_UNIT_COST,
-    TPUV5P_MEM_BW, TPUV5P_FLOPS_BF16, TPUV5P_MEM_CAPACITY, TPUV5P_TDP,
+    MI300X_FLOPS_FP8, MI300X_FLOPS_INT8, MI300X_FLOPS_FP32,
+    TPUV5P_MEM_BW, TPUV5P_FLOPS_BF16, TPUV5P_MEM_CAPACITY, TPUV5P_TDP, TPUV5P_FLOPS_INT8,
     T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP, T4_FLOPS_INT8, T4_UNIT_COST,
     WSE3_FLOPS_FP16, WSE3_MEM_CAPACITY, WSE3_MEM_BW, WSE3_TDP, WSE3_CORES, CEREBRAS_CS3_UNIT_COST,
     PCIE_GEN3_BW, PCIE_GEN4_BW, PCIE_GEN5_BW, NVME_SEQUENTIAL_BW
@@ -56,7 +57,7 @@ class CloudHardware(Registry):
     H200 = HardwareNode(
         name="NVIDIA H200",
         release_year=2023,
-        compute=ComputeCore(peak_flops=H100_FLOPS_FP16_TENSOR),
+        compute=ComputeCore(peak_flops=H100_FLOPS_FP16_TENSOR, precision_flops={"tf32": H100_FLOPS_TF32, "fp8": H100_FLOPS_FP8_TENSOR, "int8": H100_FLOPS_INT8}),
         memory=MemoryHierarchy(capacity=H200_MEM_CAPACITY, bandwidth=H200_MEM_BW),
         storage=StorageHierarchy(capacity=4 * ureg.TB, bandwidth=NVME_SEQUENTIAL_BW),
         interconnect=IOInterconnect(name="PCIe Gen5 x16", bandwidth=PCIE_GEN5_BW),
@@ -91,7 +92,7 @@ class CloudHardware(Registry):
     MI300X = HardwareNode(
         name="AMD MI300X",
         release_year=2023,
-        compute=ComputeCore(peak_flops=MI300X_FLOPS_FP16_TENSOR),
+        compute=ComputeCore(peak_flops=MI300X_FLOPS_FP16_TENSOR, precision_flops={"fp8": MI300X_FLOPS_FP8, "int8": MI300X_FLOPS_INT8, "fp32": MI300X_FLOPS_FP32}),
         memory=MemoryHierarchy(capacity=MI300X_MEM_CAPACITY, bandwidth=MI300X_MEM_BW),
         tdp=MI300X_TDP,
         unit_cost=MI300X_UNIT_COST,
@@ -101,7 +102,7 @@ class CloudHardware(Registry):
     TPUv5p = HardwareNode(
         name="Google TPU v5p",
         release_year=2023,
-        compute=ComputeCore(peak_flops=TPUV5P_FLOPS_BF16),
+        compute=ComputeCore(peak_flops=TPUV5P_FLOPS_BF16, precision_flops={"int8": TPUV5P_FLOPS_INT8}),
         memory=MemoryHierarchy(capacity=TPUV5P_MEM_CAPACITY, bandwidth=TPUV5P_MEM_BW),
         tdp=TPUV5P_TDP,
         dispatch_tax=0.04 * ureg.ms
@@ -234,12 +235,41 @@ class TinyHardware(Registry):
     ESP32_S3 = HardwareNode(
         name="ESP32-S3 (AI)",
         release_year=2022,
-        compute=ComputeCore(peak_flops=0.0005 * ureg.TFLOPs/ureg.s),
-        memory=MemoryHierarchy(capacity=512 * ureg.KiB, bandwidth=0.2 * ureg.GB/ureg.s),
-        tdp=1.2 * ureg.W,
-        dispatch_tax=5.0 * ureg.ms
+        # ESP32-S3 has no FP16 hardware; INT8 via vector extensions.
+        # ~2.4 GOPS INT8 (240 MHz dual-core, vector instructions)
+        compute=ComputeCore(
+            peak_flops=0.0005 * ureg.TFLOPs/ureg.s,
+            precision_flops={"int8": 0.0024 * ureg.TFLOPs/ureg.s}
+        ),
+        # 512 KiB SRAM (usable ~256 KiB after RTOS/stack); 8 MB flash for weights
+        memory=MemoryHierarchy(
+            capacity=512 * ureg.KiB,                  # SRAM (activations + runtime)
+            bandwidth=0.96 * ureg.GB/ureg.s,          # SRAM bandwidth @ 240 MHz
+            flash_capacity=8 * ureg.MB,               # SPI flash (weight storage)
+            flash_bandwidth=0.08 * ureg.GB/ureg.s,    # Flash read ~80 MB/s (XIP)
+        ),
+        tdp=0.4 * ureg.W,              # Inference-only power (not WiFi-on 1.2W)
+        dispatch_tax=1.0 * ureg.ms     # TFLite Micro interpreter overhead
     )
     ESP32 = ESP32_S3 # Alias for backward compatibility
+
+    nRF52840 = HardwareNode(
+        name="Nordic nRF52840 (Cortex-M4F)",
+        release_year=2018,
+        # MLPerf Tiny reference platform. Cortex-M4F @ 64 MHz.
+        compute=ComputeCore(
+            peak_flops=0.000064 * ureg.TFLOPs/ureg.s,  # ~64 MFLOPS (single-precision)
+            precision_flops={"int8": 0.000128 * ureg.TFLOPs/ureg.s}  # ~128 MOPS INT8
+        ),
+        memory=MemoryHierarchy(
+            capacity=256 * ureg.KiB,                  # 256 KiB RAM
+            bandwidth=0.256 * ureg.GB/ureg.s,         # SRAM bandwidth @ 64 MHz
+            flash_capacity=1 * ureg.MB,               # 1 MB internal flash
+            flash_bandwidth=0.064 * ureg.GB/ureg.s,   # Flash read ~64 MB/s
+        ),
+        tdp=0.015 * ureg.W,            # ~15 mW active inference
+        dispatch_tax=0.5 * ureg.ms
+    )
 
     HimaxWE1 = HardwareNode(
         name="Himax WE-I Plus",

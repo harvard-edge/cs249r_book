@@ -10,7 +10,12 @@ from .provenance import TraceableConstant
 # --- Reliability (Component MTTF) ---
 # Mean Time To Failure for datacenter-grade components.
 # Source: Meta (2024), Google (2024), Barroso et al. (2018)
-GPU_MTTF_HOURS = 50_000            # Single GPU die (datacenter, steady-state)
+GPU_MTTF_HOURS = TraceableConstant(
+    50_000,
+    name="GPU Mean Time To Failure",
+    description="Steady-state MTTF for datacenter-grade GPU in continuous operation.",
+    citation="Meta (2024), Google (2024), Barroso et al. (2018)"
+)
 NIC_MTTF_HOURS = 150_000           # Network interface card
 PSU_MTTF_HOURS = 100_000           # Power supply unit
 PCIE_SWITCH_MTTF_HOURS = 200_000   # PCIe switch/bridge
@@ -51,9 +56,24 @@ TCP_LATENCY_US = 50                # TCP/IP over Ethernet one-way latency (μs)
 
 # --- Sustainability ---
 # Power Usage Effectiveness (PUE) — total facility power / IT equipment power
-PUE_LIQUID_COOLED = 1.06           # Best-in-class liquid-cooled AI datacenter
-PUE_BEST_AIR = 1.12                # Best-in-class air-cooled hyperscale
-PUE_TYPICAL = 1.40                 # Industry average traditional datacenter
+PUE_LIQUID_COOLED = TraceableConstant(
+    1.06,
+    name="PUE (Liquid-Cooled)",
+    description="Best-in-class liquid-cooled AI datacenter PUE.",
+    citation="Google Sustainability Report (2023)"
+)
+PUE_BEST_AIR = TraceableConstant(
+    1.12,
+    name="PUE (Best Air-Cooled)",
+    description="Best-in-class air-cooled hyperscale datacenter PUE.",
+    citation="Google Sustainability Report (2023)"
+)
+PUE_TYPICAL = TraceableConstant(
+    1.40,
+    name="PUE (Industry Average)",
+    description="Industry average traditional datacenter PUE.",
+    citation="Uptime Institute (2023), Global Data Center Survey"
+)
 PUE_LEGACY = 1.58                  # Older enterprise datacenters
 
 # Water Usage Effectiveness (WUE) — liters per kWh
@@ -62,9 +82,19 @@ WUE_EVAPORATIVE = 1.8              # Evaporative cooling towers
 WUE_LIQUID = 0.0                   # Closed-loop liquid cooling (near zero)
 
 # Regional carbon intensity (gCO2 per kWh) — Source: IEA (2023)
-CARBON_US_AVG_GCO2_KWH = 429       # US national average grid
+CARBON_US_AVG_GCO2_KWH = TraceableConstant(
+    429,
+    name="Carbon Intensity (US Average)",
+    description="US national average grid carbon intensity in gCO2/kWh.",
+    citation="IEA (2023), World Energy Outlook"
+)
 CARBON_EU_AVG_GCO2_KWH = 270       # EU average grid
-CARBON_QUEBEC_GCO2_KWH = 20        # Quebec (hydroelectric dominant)
+CARBON_QUEBEC_GCO2_KWH = TraceableConstant(
+    20,
+    name="Carbon Intensity (Quebec)",
+    description="Quebec grid carbon intensity in gCO2/kWh (hydroelectric dominant).",
+    citation="IEA (2023), World Energy Outlook"
+)
 CARBON_FRANCE_GCO2_KWH = 50        # France (nuclear dominant)
 CARBON_POLAND_GCO2_KWH = 820       # Poland (coal dominant)
 CARBON_NORWAY_GCO2_KWH = 10        # Norway (hydroelectric)
@@ -77,9 +107,24 @@ AIR_COOLING_LIMIT_KW = 30          # Approximate rack power where air cooling fa
 
 # --- MFU and Scaling Efficiency References ---
 # Model FLOPS Utilization (MFU) — actual FLOPS / peak FLOPS
-MFU_TRAINING_LOW = 0.30            # Lower bound for well-optimized training
-MFU_TRAINING_HIGH = 0.50           # Upper bound for excellent training MFU
-MFU_INFERENCE_BATCH1 = 0.05        # Inference at batch size 1 (memory-bound)
+MFU_TRAINING_LOW = TraceableConstant(
+    0.30,
+    name="MFU Training (Lower Bound)",
+    description="Lower bound MFU for well-optimized large-model training.",
+    citation="Chowdhery et al. (2022), PaLM; Narayanan et al. (2021), Megatron-LM"
+)
+MFU_TRAINING_HIGH = TraceableConstant(
+    0.50,
+    name="MFU Training (Upper Bound)",
+    description="Upper bound MFU for excellent large-model training runs.",
+    citation="Chowdhery et al. (2022), PaLM"
+)
+MFU_INFERENCE_BATCH1 = TraceableConstant(
+    0.05,
+    name="MFU Inference (Batch 1)",
+    description="MFU for single-request inference, heavily memory-bandwidth-bound.",
+    citation="Pope et al. (2023), LLM Inference"
+)
 MFU_INFERENCE_BATCHED = 0.40       # Inference at large batch size
 
 # --- Software Tax ---
@@ -92,7 +137,12 @@ FRAMEWORK_LAYER_TAX_MS = 0.01      # 10 μs typical framework tax per model laye
 SCALING_EFF_32GPU = 0.90           # Near-linear regime
 SCALING_EFF_256GPU = 0.70          # Communication starts to bite
 SCALING_EFF_1024GPU = 0.50         # Significant overhead
-SCALING_EFF_8192GPU = 0.35         # Fleet-scale regime
+SCALING_EFF_8192GPU = TraceableConstant(
+    0.35,
+    name="Scaling Efficiency (8192 GPUs)",
+    description="Empirical scaling efficiency at fleet-scale (8192 GPUs).",
+    citation="Empirical reference; varies by workload and network"
+)
 
 # Overhead budgets (fraction of wall time)
 OVERHEAD_PIPELINE_BUBBLE = 0.05    # ~5% for well-tuned pipeline parallelism

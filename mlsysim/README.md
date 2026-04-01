@@ -124,6 +124,26 @@ Use the Tier 3 Engineering Engine to automatically find the optimal configuratio
 ## 🛡 Stability & Integrity
 Because this core powers a printed textbook, we enforce strict **Invariant Verification**. Every physical constant is traceable to a primary source (datasheet or paper), and dimensional integrity is enforced via `pint`.
 
+## ⚠️ What This Tool Does Not Model
+
+MLSysim is an **analytical hardware calculator**, not a production deployment simulator.
+The 22 walls model physical and economic constraints that bound ML system performance.
+Several critical production concerns are deliberately **out of scope**:
+
+| Concern | Why It Matters | Where to Learn More |
+|---------|---------------|-------------------|
+| **Data drift / distribution shift** | The #1 cause of production ML failures — model accuracy degrades silently as input distributions change | Sculley et al. (2015), "Hidden Technical Debt in ML Systems" |
+| **Model versioning & rollback** | Production requires running multiple versions, A/B testing, and safe rollback | Huyen (2022), *Designing Machine Learning Systems* |
+| **Monitoring & observability** | You cannot manage what you cannot measure — prediction distributions, latency percentiles, error rates | Google SRE Book (2016); Huyen (2022) |
+| **Feature store freshness** | Stale features silently degrade real-time models (recommendations, fraud detection) | Uber Michelangelo (2017) |
+| **Software bugs & misconfigurations** | Most outages are caused by software, not hardware | Barroso et al. (2018) |
+| **Human factors** | Team velocity, on-call burden, and organizational alignment often dominate outcomes | Brooks (1975), *The Mythical Man-Month* |
+
+**Passing all 22 walls is necessary but not sufficient for a successful production deployment.**
+
+Students using this tool should understand that infrastructure physics (what mlsysim models)
+is one dimension of a multi-dimensional engineering challenge.
+
 ## 🛠 Installation
 
 MLSys·im is designed to be highly modular. Install only what you need:

@@ -39,7 +39,7 @@ H100_TDP = 700 * watt                     # SXM variant
 # NVIDIA H200 (Hopper, 2023) — Source: NVIDIA H200 Data Sheet
 # H200 shares the Hopper compute die with H100, only memory differs
 H200_MEM_BW = 4.8 * TB / second             # HBM3e
-H200_MEM_CAPACITY = 141 * GB
+H200_MEM_CAPACITY = 141 * GiB              # Consistent with A100/H100 GiB convention
 H200_TDP = 700 * watt                       # Same as H100 SXM
 
 # NVIDIA B100/B200 (Blackwell, 2024) — Source: NVIDIA Blackwell Architecture
@@ -64,6 +64,9 @@ NVL72_UNIT_COST = 3000000 * USD                 # Estimated $3M+ per rack
 
 # AMD Instinct MI300X (CDNA 3, 2023) — Source: AMD Instinct MI300X Data Sheet
 MI300X_FLOPS_FP16_TENSOR = 1307 * TFLOPs / second  # Dense. Sparse is 2614.
+MI300X_FLOPS_FP8 = 2614 * TFLOPs / second          # FP8 dense (same as FP16 sparse)
+MI300X_FLOPS_INT8 = 2614 * TFLOPs / second          # INT8 dense
+MI300X_FLOPS_FP32 = 163.4 * TFLOPs / second         # FP32 (Matrix Core)
 MI300X_MEM_BW = 5.3 * TB / second
 MI300X_MEM_CAPACITY = 192 * GiB
 MI300X_TDP = 750 * watt
@@ -94,6 +97,7 @@ TPUV4_MEM_BW = 1200 * GB / second
 
 # Google TPU v5p — Source: Google Cloud Documentation (2024)
 TPUV5P_FLOPS_BF16 = 459 * TFLOPs / second
+TPUV5P_FLOPS_INT8 = 918 * TFLOPs / second          # INT8 (2x BF16)
 TPUV5P_MEM_BW = 2.76 * TB / second
 TPUV5P_MEM_CAPACITY = 95 * GiB
 TPUV5P_ICI_BW = 1600 * GB / second        # Inter-Chip Interconnect
@@ -166,8 +170,8 @@ NVLINK_A100_BW = 600 * GB / second        # NVLink 3.0 (A100, 12 links × 50 GB/
 NVLINK_H100_BW = 900 * GB / second        # NVLink 4.0 (H100, 18 links × 50 GB/s)
 NVLINK_B200_BW = 1800 * GB / second       # NVLink 5.0 (B200, 72 links × 25 GB/s)
 PCIE_GEN3_BW = 15.75 * GB / second        # PCIe Gen3 x16 (after 128b/130b encoding)
-PCIE_GEN4_BW = 32 * GB / second           # PCIe Gen4 x16 (bidirectional)
-PCIE_GEN5_BW = 64 * GB / second           # PCIe Gen5 x16 (bidirectional)
+PCIE_GEN4_BW = 32 * GB / second           # PCIe Gen4 x16 (unidirectional, per direction)
+PCIE_GEN5_BW = 64 * GB / second           # PCIe Gen5 x16 (unidirectional, per direction)
 
 # Inter-node interconnects
 INFINIBAND_HDR_BW = 200 * Gbps            # HDR InfiniBand (25 GB/s)
@@ -282,6 +286,7 @@ LLAMA2_70B_PARAMS = 70e9 * param
 LLAMA2_70B_LAYERS = 80
 LLAMA2_70B_HIDDEN_DIM = 8192
 LLAMA2_70B_HEADS = 64
+LLAMA2_70B_KV_HEADS = 8                       # Grouped-Query Attention (GQA)
 
 # Llama 3.1
 LLAMA3_8B_PARAMS = 8.03e9 * param
@@ -461,10 +466,13 @@ TPU_POD_POWER = 3 * ureg.megawatt
 # --- Shared Precision Map ---
 # Used by Engine, ServingModel, SynthesisSolver to map precision strings to byte widths.
 PRECISION_MAP = {
-    "fp32": BYTES_FP32,
-    "fp16": BYTES_FP16,
-    "int8": BYTES_INT8,
-    "int4": BYTES_INT4,
+    "fp32": BYTES_FP32,      # 4 bytes
+    "tf32": BYTES_FP32,      # 4 bytes storage, TF32 compute (19-bit effective mantissa)
+    "bf16": BYTES_FP16,      # 2 bytes (Brain Float 16, default training precision)
+    "fp16": BYTES_FP16,      # 2 bytes (IEEE half-precision)
+    "fp8":  BYTES_INT8,      # 1 byte  (E4M3/E5M2, Hopper+ training/inference)
+    "int8": BYTES_INT8,      # 1 byte  (quantized inference)
+    "int4": BYTES_INT4,      # 0.5 bytes (aggressive quantization)
 }
 
 # Fleet-Scale Constants (Volume II)

@@ -2,6 +2,7 @@ import json
 import urllib.request
 import urllib.error
 import time
+import warnings
 from typing import Optional
 import logging
 from .types import TransformerWorkload
@@ -17,7 +18,11 @@ def fetch_hf_config(model_id: str, max_retries: int = 3, timeout: int = 10) -> d
     for attempt in range(max_retries):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as response:
-                return json.loads(response.read().decode('utf-8'))
+                data = response.read().decode('utf-8')
+                try:
+                    return json.loads(data)
+                except json.JSONDecodeError as je:
+                    raise ValueError(f"Invalid JSON in config for '{model_id}': {je}")
         except urllib.error.HTTPError as e:
             if e.code == 429: # Rate limit
                 wait_time = (2 ** attempt) + 1
@@ -31,10 +36,20 @@ def fetch_hf_config(model_id: str, max_retries: int = 3, timeout: int = 10) -> d
         except urllib.error.URLError as e:
             if 'CERTIFICATE_VERIFY_FAILED' in str(e.reason):
                 import ssl
+                warnings.warn(
+                    "SSL verification disabled for HuggingFace API. This is insecure.",
+                    stacklevel=2,
+                )
                 context = ssl._create_unverified_context()
                 try:
                     with urllib.request.urlopen(req, context=context, timeout=timeout) as response:
-                        return json.loads(response.read().decode('utf-8'))
+                        data = response.read().decode('utf-8')
+                        try:
+                            return json.loads(data)
+                        except json.JSONDecodeError as je:
+                            raise ValueError(f"Invalid JSON in config for '{model_id}': {je}")
+                except ValueError:
+                    raise
                 except Exception as inner_e:
                     raise ValueError(f"SSL fallback failed for '{model_id}': {inner_e}")
             

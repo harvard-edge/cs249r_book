@@ -11,8 +11,15 @@ class ComputeCore(BaseModel):
 
 class MemoryHierarchy(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    capacity: Quantity
-    bandwidth: Quantity
+    capacity: Quantity           # Primary memory (HBM for GPUs, SRAM for MCUs)
+    bandwidth: Quantity          # Primary memory bandwidth
+    # On-chip SRAM (optional — for modeling FlashAttention tiling on GPUs,
+    # or the fast scratchpad on microcontrollers)
+    sram_capacity: Optional[Quantity] = None
+    sram_bandwidth: Optional[Quantity] = None
+    # Flash storage (optional — for TinyML devices where weights live in flash)
+    flash_capacity: Optional[Quantity] = None
+    flash_bandwidth: Optional[Quantity] = None
 
 class StorageHierarchy(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -46,42 +53,8 @@ class HardwareNode(BaseModel):
         return self.compute.peak_flops
 
     @property
-    def memory_bw(self) -> Quantity:
-        return self.memory.bandwidth
-
-    @property
-    def memory_capacity(self) -> Quantity:
-        return self.memory.capacity
-
-    @property
     def peak_flops_fp32(self) -> Optional[Quantity]:
         return self.compute.precision_flops.get('fp32')
-
-    @property
-    def tf32_flops(self) -> Optional[Quantity]:
-        return self.compute.precision_flops.get('tf32')
-
-    @property
-    def fp8_flops(self) -> Optional[Quantity]:
-        return self.compute.precision_flops.get('fp8')
-
-    @property
-    def int8_flops(self) -> Optional[Quantity]:
-        return self.compute.precision_flops.get('int8')
-
-    def ridge_point(self) -> Quantity:
-        """Calculates the Roofline ridge point (Intensity threshold)."""
-        return (self.compute.peak_flops / self.memory.bandwidth).to('flop/byte')
-
-    @property
-    def peak_flops(self) -> Quantity:
-        return self.compute.peak_flops
-
-    @property
-    def peak_flops_fp32(self) -> Quantity:
-        if "fp32" in self.compute.precision_flops:
-            return self.compute.precision_flops["fp32"]
-        raise AttributeError(f"{type(self).__name__!r} object has no attribute 'peak_flops_fp32'")
 
     @property
     def memory_bw(self) -> Quantity:
@@ -98,6 +71,10 @@ class HardwareNode(BaseModel):
     @property
     def power_budget(self) -> Optional[Quantity]:
         return self.tdp
+
+    def ridge_point(self) -> Quantity:
+        """Calculates the Roofline ridge point (Intensity threshold)."""
+        return (self.compute.peak_flops / self.memory.bandwidth).to('flop/byte')
 
     def __repr__(self):
         return f"HardwareNode({self.name}, {self.release_year})"

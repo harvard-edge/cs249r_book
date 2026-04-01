@@ -14,7 +14,7 @@ import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import LevelBadge from "@/components/LevelBadge";
 import { useToast } from "@/components/Toast";
 import {
-  getTracks, getLevels, getCompetencyAreas, getArchetypes, getQuestionsByFilter,
+  getTracks, getLevels, getCompetencyAreas, getZones, getQuestionsByFilter,
   getQuestions, getQuestionsByTopic,
   Question, checkNapkinMath, extractFinalNumber, cleanScenario,
   NapkinResult
@@ -51,7 +51,7 @@ function PracticePage() {
   const [selectedTrack, setSelectedTrack] = useState("cloud");
   const [selectedLevel, setSelectedLevel] = useState("L3");
   const [selectedArea, setSelectedArea] = useState<string | null>(null);
-  const [selectedArchetype, setSelectedArchetype] = useState<string | null>(null);
+  const [selectedZone, setSelectedZone] = useState<string | null>(null);
   const [napkinOnly, setNapkinOnly] = useState(false);
 
   const [pool, setPool] = useState<Question[]>([]);
@@ -75,7 +75,7 @@ function PracticePage() {
   const tracks = getTracks().filter(t => t !== "global");
   const levels = getLevels();
   const areas = getCompetencyAreas();
-  const archetypes = getArchetypes();
+  const zones = getZones();
 
   useEffect(() => {
     setMounted(true);
@@ -109,13 +109,13 @@ function PracticePage() {
         setSelectedLevel(directQ.level);
         if (directQ.competency_area) setSelectedArea(directQ.competency_area);
         // Set pool to topic-mates so "next" stays in topic
-        const topicPool = directQ.taxonomy_concept
-          ? getQuestions().filter(q => q.taxonomy_concept === directQ.taxonomy_concept)
+        const topicPool = directQ.topic
+          ? getQuestions().filter(q => q.topic === directQ.topic)
           : [directQ];
         setPool(topicPool);
         // Track source topic for back-navigation
-        if (directQ.taxonomy_concept) {
-          const t = getTopicById(directQ.taxonomy_concept);
+        if (directQ.topic) {
+          const t = getTopicById(directQ.topic);
           if (t) setSourceTopic({ id: t.id, name: t.name });
         }
         return; // Skip other param handling
@@ -127,7 +127,7 @@ function PracticePage() {
     const levelParam = searchParams.get('level');
     if (topicParam) {
       const topicPool = getQuestions().filter(q => {
-        if (q.taxonomy_concept !== topicParam) return false;
+        if (q.topic !== topicParam) return false;
         if (levelParam && q.level !== levelParam) return false;
         return true;
       });
@@ -179,12 +179,12 @@ function PracticePage() {
       skipFilterCount.current--;
       return;
     }
-    const filters: { track?: string; level?: string; competency_area?: string; company_archetype?: string } = {
+    const filters: { track?: string; level?: string; competency_area?: string; zone?: string } = {
       track: selectedTrack,
       level: selectedLevel,
     };
     if (selectedArea) filters.competency_area = selectedArea;
-    if (selectedArchetype) filters.company_archetype = selectedArchetype;
+    if (selectedZone) filters.zone = selectedZone;
     let q = getQuestionsByFilter(filters);
     if (napkinOnly) q = q.filter(question => !!question.details.napkin_math);
     setPool(q);
@@ -196,7 +196,7 @@ function PracticePage() {
     setShowAnswer(false);
     setUserAnswer("");
     setNapkinResult(null);
-  }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedArchetype, napkinOnly]);
+  }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedZone, napkinOnly]);
 
   // Keyboard shortcuts: Enter to reveal, 1-4 for scoring, N to skip
   useEffect(() => {
@@ -521,33 +521,33 @@ function PracticePage() {
           </div>
         </div>
 
-        {/* Company Archetype */}
+        {/* Zone filter */}
         <div>
-          <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Interview Style</label>
+          <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Zone</label>
           <div className="space-y-1 max-h-40 overflow-y-auto">
             <button
-              onClick={() => setSelectedArchetype(null)}
+              onClick={() => setSelectedZone(null)}
               className={clsx(
                 "w-full text-left px-3 py-1.5 rounded text-xs font-medium transition-all",
-                !selectedArchetype
+                !selectedZone
                   ? "bg-accentBlue/10 text-accentBlue"
                   : "text-textSecondary hover:bg-surfaceHover"
               )}
             >
-              All types
+              All zones
             </button>
-            {archetypes.map(a => (
+            {zones.map(z => (
               <button
-                key={a}
-                onClick={() => setSelectedArchetype(a)}
+                key={z}
+                onClick={() => setSelectedZone(z)}
                 className={clsx(
-                  "w-full text-left px-3 py-1.5 rounded text-xs font-medium transition-all",
-                  selectedArchetype === a
+                  "w-full text-left px-3 py-1.5 rounded text-xs font-medium capitalize transition-all",
+                  selectedZone === z
                     ? "bg-accentBlue/10 text-accentBlue"
                     : "text-textSecondary hover:bg-surfaceHover"
                 )}
               >
-                {a}
+                {z}
               </button>
             ))}
           </div>
@@ -588,6 +588,9 @@ function PracticePage() {
                       <LevelBadge level={current.level} />
                       <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-border bg-surface">
                         {current.competency_area}
+                      </span>
+                      <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-accentBlue/20 bg-accentBlue/5">
+                        {current.zone}
                       </span>
                       <span className="text-[10px] font-mono text-textTertiary uppercase">
                         {current.track}
@@ -887,7 +890,7 @@ function PracticePage() {
           </div>
         ) : (
           <div className="flex-1 flex items-center justify-center text-textTertiary">
-            <p className="text-sm">No questions match your filters. Try adjusting track, level, or competency.</p>
+            <p className="text-sm">No questions match your filters. Try adjusting track, level, competency, or zone.</p>
           </div>
         )}
       </div>

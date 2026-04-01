@@ -1,50 +1,34 @@
 """
-Hello World: Ten Minutes to mlsysim
-===================================
-This tutorial demonstrates the end-to-end workflow of mlsysim:
-1. Load a Model and Hardware.
-2. Solve single-node performance.
-3. Scale to a fleet.
-4. Calculate Sustainability and Economics.
+Hello World: Your First mlsysim Analysis
+=========================================
+The simplest possible mlsysim workflow: load a model and hardware,
+run the Roofline engine, and see where the bottleneck is.
+
+    python3 examples/hello_world.py
 """
 
 import mlsysim
-from mlsysim import load_config
 
-def main():
-    print("--- 1. Define Your Simulation ---")
-    user_choice = {
-        "model": "ResNet50",
-        "hardware": "A100",
-        "batch_size": 32,
-        "fleet_size": 128,
-        "region": "Quebec"
-    }
-    
-    # load_config automatically validates physical feasibility!
-    config = load_config(user_choice)
-    print("Config Validated: " + config.model + " on " + config.hardware + " in " + config.region + "\n")
+# 1. Pick a model and hardware from the built-in registries
+model = mlsysim.Models.Language.Llama3_8B
+hardware = mlsysim.Hardware.Cloud.H100
 
-    print("--- 2. Single-Node Performance (The Iron Law) ---")
-    model = getattr(mlsysim.Models, config.model)
-    hardware = getattr(mlsysim.Hardware, config.hardware)
-    
-    perf = mlsysim.Engine.solve(model, hardware, batch_size=config.batch_size)
-    print("Latency:    " + str(perf.latency))
-    print("Throughput: " + str(perf.throughput))
-    print("Bottleneck: " + perf.bottleneck + "\n")
+# 2. Run the Roofline engine
+profile = mlsysim.Engine.solve(model, hardware, batch_size=1)
 
-    print("--- 3. Scenario Evaluation & Visualization ---")
-    # Using a vetted lighthouse scenario
-    scenario = mlsysim.Applications.AutoDrive
-    evaluation = scenario.evaluate()
-    print(evaluation.scorecard())
-    
-    # Visual Scorecard
-    fig, ax = mlsysim.plot_evaluation_scorecard(evaluation)
-    print("\nVisual Scorecard generated.")
+# 3. See the results
+print(f"Model:      {model.name}")
+print(f"Hardware:   {hardware.name}")
+print(f"Bottleneck: {profile.bottleneck}")
+print(f"Latency:    {profile.latency:~P}")
+print(f"Throughput: {profile.throughput:~P}")
+print(f"MFU:        {profile.mfu:.3f}")
+print(f"Feasible:   {profile.feasible}")
 
-    print("\nSimulation Complete. Check mlsysbook.ai for advanced labs!")
-
-if __name__ == "__main__":
-    main()
+# 4. Try a different configuration — just change the inputs
+print("\n--- Batch size 32 ---")
+profile_batched = mlsysim.Engine.solve(model, hardware, batch_size=32)
+print(f"Bottleneck: {profile_batched.bottleneck}")
+print(f"Latency:    {profile_batched.latency:~P}")
+print(f"Throughput: {profile_batched.throughput:~P}")
+print(f"MFU:        {profile_batched.mfu:.3f}")

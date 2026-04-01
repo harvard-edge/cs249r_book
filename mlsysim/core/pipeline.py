@@ -81,8 +81,7 @@ class Pipeline:
             if missing and i > 0:
                 lines.append(f"    ⚠ needs {missing} — must be provided at run()")
 
-            # Update produced set
-            produced_concepts.update(cls.requires)
+            # Update produced set (only add what this stage produces, not what it requires)
             if cls.produces:
                 produced_concepts.add(produces_name)
 

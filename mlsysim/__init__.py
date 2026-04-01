@@ -15,11 +15,6 @@ from . import fmt
 from . import show
 from . import viz
 
-# Explicitly export submodules for documentation and execution
-from . import hardware as hardware_mod
-from . import models as models_mod
-from . import infra as infra_mod
-from . import systems as systems_mod
 from .core.scenarios import Scenarios, Applications, Archetypes
 
 # backward compatibility
@@ -31,9 +26,12 @@ from .hardware.types import HardwareNode
 from .models.types import Workload, TransformerWorkload, CNNWorkload
 from .systems.types import Fleet, Node, NetworkFabric, DeploymentTier
 from .core.evaluation import SystemEvaluator, SystemEvaluation
-from .core.scenarios import Scenario, Scenarios, Applications
+from .core.scenarios import Scenario
 from .core.config import SimulationConfig, load_config
 from .core.engine import PerformanceProfile, Engine
+
+# Solver classes — available as mlsysim.SingleNodeModel etc. for backward compat,
+# but also accessible via the mlsysim.core.solver module directly.
 from .core.solver import (
     SingleNodeModel,
     DistributedModel,
@@ -65,7 +63,7 @@ from .core.solver import (
 from .hardware.registry import Hardware
 from .models.registry import Models
 from .infra.registry import Infra
-from .systems.registry import Systems, Tiers
+from .systems.registry import Systems
 
 # Export unit registry for custom workload definitions
 from .core.constants import ureg
@@ -80,19 +78,12 @@ __all__ = [
     "HardwareNode", "Workload", "TransformerWorkload", "CNNWorkload",
     "Fleet", "Node", "NetworkFabric", "DeploymentTier",
     # Scenarios and config
-    "Scenario", "Scenarios", "Applications",
+    "Scenario", "Scenarios", "Applications", "Archetypes",
     "SimulationConfig", "load_config",
+    # Evaluation
+    "SystemEvaluator", "SystemEvaluation",
     # Engine
     "PerformanceProfile", "Engine",
-    # Solvers
-    "SingleNodeModel", "DistributedModel", "ReliabilityModel",
-    "SustainabilityModel", "EconomicsModel", "ServingModel",
-    "ContinuousBatchingModel", "WeightStreamingModel", "TailLatencyModel",
-    "CheckpointModel", "DataModel", "ScalingModel", "OrchestrationModel",
-    "CompressionModel", "EfficiencyModel", "TransformationModel", "TopologyModel",
-    "InferenceScalingModel", "SensitivitySolver", "SynthesisSolver",
-    "ResponsibleEngineeringModel", "ParallelismOptimizer",
-    "BatchingOptimizer", "PlacementOptimizer",
     # Registries
     "Hardware", "Models", "Infra", "Systems", "Tiers",
     # Units

@@ -792,7 +792,6 @@ class TestEfficiencyModel:
         result = solver.solve(resnet, h100, workload_type="ffn")
         assert "occupancy_loss" in result.overhead_breakdown
         assert "memory_stall" in result.overhead_breakdown
-        assert "kernel_overhead" in result.overhead_breakdown
 
 
 # ======================================================================

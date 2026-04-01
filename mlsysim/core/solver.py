@@ -19,6 +19,7 @@ from .formulas import (
     calc_tree_allreduce_time,
     calc_hierarchical_allreduce_time,
     calc_all_to_all_time,
+    calc_bottleneck,
     calc_mtbf_cluster,
     calc_mtbf_node,
     calc_young_daly_interval,
@@ -37,7 +38,7 @@ from .constants import (
 from .defaults import (
     GPU_UNIT_COST_H100, ANNUAL_MAINTENANCE_RATIO,
     MFU_TRAINING_LOW, MFU_TRAINING_HIGH, MFU_INFERENCE_BATCH1, MFU_INFERENCE_BATCHED,
-    QUANT_ACCURACY_DELTA_INT8, QUANT_ACCURACY_DELTA_INT4,
+    QUANT_ACCURACY_DELTA_INT8, QUANT_ACCURACY_DELTA_INT4, QUANT_ACCURACY_DELTA_FP8,
     PRUNING_ACCURACY_THRESHOLD, PRUNING_MILD_DELTA, PRUNING_STEEP_COEFFICIENT, PRUNING_STEEP_EXPONENT,
     NIC_MTTF_HOURS, PSU_MTTF_HOURS,
     MFU_FLASH_ATTENTION, MFU_FLASH_ATTENTION_CAP, MFU_FFN_CAP, MFU_CONV_CAP, HFU_MFU_RATIO,
@@ -80,14 +81,30 @@ class BaseResolver(ABC):
 
     @classmethod
     def resolver_type(cls) -> str:
-        if issubclass(cls, BaseModel): return "model"
+        if issubclass(cls, ForwardModel): return "model"
         if issubclass(cls, BaseSolver): return "solver"
         if issubclass(cls, BaseOptimizer): return "optimizer"
         return "unknown"
 
-class BaseModel(BaseResolver):
+    # ── Fallacies and Pitfalls (Patterson & Hennessy tradition) ──
+    _fallacies: Dict[str, str] = {}
+
+    @classmethod
+    def fallacies(cls) -> Dict[str, str]:
+        """Return common fallacies and pitfalls for this solver.
+
+        Following the Hennessy & Patterson tradition, each solver declares
+        the misconceptions students most commonly hold about its domain.
+        Call ``solver.fallacies()`` in notebooks for pedagogical discussion.
+        """
+        return cls._fallacies
+
+class ForwardModel(BaseResolver):
     """Forward-evaluating mechanistic engine (Y = f(X))."""
     pass
+
+# Backward-compatible alias (avoid Pydantic BaseModel name collision)
+BaseModel = ForwardModel
 
 class BaseSolver(BaseResolver):
     """Inverse-design or diagnostic engine (X = f^-1(Y) or grad f)."""
@@ -110,6 +127,11 @@ class SingleNodeModel(BaseModel):
     """
     requires = ("workload", "hardware")
     produces = PerformanceProfile
+    _fallacies = {
+        "Peak FLOPS determines training speed": "Reality: most ML workloads are memory-bandwidth-bound at small batch sizes. A GPU with 2x FLOPS but the same memory bandwidth gives < 2x speedup.",
+        "Bigger GPU always means faster inference": "Reality: if the workload is memory-bound (batch=1 LLM decode), memory bandwidth matters more than compute. H100 has 1.7x the bandwidth of A100, not 3.2x the speedup.",
+        "Model fits in memory = it will run well": "Reality: fitting in memory is necessary but not sufficient. The bottleneck may be bandwidth, compute, or framework overhead.",
+    }
 
     def solve(self, model: Workload, hardware: HardwareNode, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5, raise_errors: bool = False, **kwargs) -> PerformanceProfile:
         """
@@ -129,13 +151,18 @@ class DistributedModel(BaseModel):
     Literature Source: 
     1. Shoeybi et al. (2019), "Megatron-LM: Training Multi-Billion Parameter 
        Language Models Using Model Parallelism." (3D Parallelism Framework)
-    2. Narayanan et al. (2019), "PipePipe: Efficient Pipeline Parallelism for 
+    2. Narayanan et al. (2019), "PipeDream: Efficient Pipeline Parallelism for 
        Training Large Models." (1F1B Pipeline Bubble Model)
     3. Patarasuk & Mueller (2009), "Bandwidth-Optimal All-Reduce Algorithms 
        for Clusters of Workstations." (Ring All-Reduce)
     """
     requires = ("workload", "fleet")
     produces = DistributedResult
+    _fallacies = {
+        "Doubling GPUs halves training time": "Reality: communication overhead grows with N. Amdahl's Law always applies — there is a serial fraction (AllReduce, pipeline bubble) that limits speedup.",
+        "Tensor parallelism is free within a node": "Reality: TP requires 2 AllReduce operations per layer on activations over NVLink. At TP=8 on H100, this can consume 10-20% of step time.",
+        "More data parallelism is always better": "Reality: beyond the critical batch size (McCandlish et al. 2018), additional DP provides diminishing returns in convergence per step.",
+    }
 
     def solve(self,
               model: Workload,
@@ -155,6 +182,8 @@ class DistributedModel(BaseModel):
               overlap_comm: bool = False,
               overlap_efficiency: float = 0.85,
               congestion_factor: float = 1.0,
+              straggler_factor: float = 1.0,
+              gradient_accumulation_steps: int = 1,
               seq_len: int = 2048) -> DistributedResult:
         """
         Calculates distributed training performance using the 3D/4D Parallelism model.
@@ -211,6 +240,14 @@ class DistributedModel(BaseModel):
             Metrics including DP/TP/EP latency, the Pipeline Bubble penalty, 
             and the final Scaling Efficiency.
         """
+        # 0. Input validation
+        from ._validation import validate_at_least, validate_range
+        validate_at_least(tp_size, 1, "tp_size")
+        validate_at_least(pp_size, 1, "pp_size")
+        validate_at_least(ep_size, 1, "ep_size")
+        validate_at_least(batch_size, 1, "batch_size")
+        validate_range(efficiency, 0.0, 1.0, "efficiency")
+
         # 1. 3D/4D Parallelism Decomposition
         n_accelerators = fleet.total_accelerators
         dp_size = n_accelerators // (tp_size * pp_size * ep_size)
@@ -268,14 +305,39 @@ class DistributedModel(BaseModel):
         else:
             t_comm_dp = Q_("0 ms")
 
-        # TP Communication (activation exchange, intra-node NVLink)
-        full_model_size = model.size_in_bytes()
-        t_comm_tp = (full_model_size / tp_size / fleet.node.intra_node_bw).to("ms") if tp_size > 1 else Q_("0 ms")
+        # TP Communication (activation AllReduce, intra-node NVLink)
+        # TP requires 2 AllReduce ops per transformer layer on activations:
+        # one after the column-parallel MLP, one after the row-parallel attention.
+        # Volume per AllReduce = batch_size * seq_len * hidden_dim * precision_bytes
+        # Source: Shoeybi et al. (2019), "Megatron-LM"
+        if tp_size > 1:
+            bpp = PRECISION_MAP.get(precision, BYTES_FP16)
+            hidden_dim = getattr(model, 'hidden_dim', 4096) or 4096
+            n_layers = getattr(model, 'layers', 1) or 1
+            activation_bytes_per_allreduce = local_batch * seq_len * hidden_dim * bpp.magnitude
+            # 2 AllReduces per layer (attention + MLP), ring AllReduce within node
+            tp_volume = 2 * n_layers * activation_bytes_per_allreduce * ureg.byte
+            t_comm_tp = calc_ring_allreduce_time(
+                tp_volume / n_layers,  # per-layer volume (overlapped with compute)
+                tp_size,
+                fleet.node.intra_node_bw,
+                LATENCY_NVLINK
+            ) * n_layers  # total across all layers (assuming sequential, not overlapped)
+        else:
+            t_comm_tp = Q_("0 ms")
 
         # EP Communication (All-to-All token routing for MoE)
+        # EP exchanges routed tokens, not the full model. Volume depends on
+        # batch_size, seq_len, hidden_dim, and routing factor (top_k / num_experts).
+        # Source: Fedus et al. (2022), "Switch Transformers"
         if ep_size > 1:
+            bpp = PRECISION_MAP.get(precision, BYTES_FP16)
+            hidden_dim = getattr(model, 'hidden_dim', 4096) or 4096
+            # Each token sends hidden_dim activations to its assigned expert(s)
+            # Approximate: each GPU sends (ep_size-1)/ep_size of its tokens to others
+            token_volume = local_batch * seq_len * hidden_dim * bpp.magnitude * ureg.byte
             t_comm_ep = calc_all_to_all_time(
-                message_bytes=full_model_size,
+                message_bytes=token_volume,
                 n_gpus=ep_size,
                 bandwidth_bytes_s=fleet.fabric.bandwidth / fleet.fabric.oversubscription_ratio,
                 latency_s=fleet.fabric.latency or LATENCY_INFINIBAND
@@ -284,7 +346,7 @@ class DistributedModel(BaseModel):
             t_comm_ep = Q_("0 ms")
 
         # 4. Pipeline Parallelism (PP) Bubble
-        # Source: Narayanan et al. (2019), "PipePipe: Efficient Pipeline Parallelism"
+        # Source: Narayanan et al. (2019), "PipeDream: Efficient Pipeline Parallelism"
         # Supports interleaved 1F1B schedules via v_stages
         bubble_fraction = calc_pipeline_bubble(pp_size, microbatch_count, v_stages=v_stages)
         t_bubble = (node_perf.latency * bubble_fraction) if pp_size > 1 else Q_("0 ms")
@@ -296,6 +358,11 @@ class DistributedModel(BaseModel):
         t_comm_ep = t_comm_ep * congestion_factor
         total_comm_latency = t_comm_dp + t_comm_tp + t_comm_ep
 
+        # Gradient accumulation: communication happens once per N micro-steps,
+        # so amortize DP communication cost across accumulation steps.
+        if gradient_accumulation_steps > 1:
+            t_comm_dp = t_comm_dp / gradient_accumulation_steps
+
         if overlap_comm:
             # Overlap DP communication with backward pass compute.
             # overlap_efficiency=1.0 means perfect overlap (theoretical best).
@@ -304,7 +371,12 @@ class DistributedModel(BaseModel):
             step_latency_total = node_perf.latency + exposed_dp_latency + t_comm_tp + t_comm_ep + t_bubble
         else:
             step_latency_total = node_perf.latency + total_comm_latency + t_bubble
-        
+
+        # Straggler effect: BSP training is gated by the slowest worker.
+        # Source: Dean & Barroso (2013), "The Tail at Scale"
+        if straggler_factor > 1.0:
+            step_latency_total = step_latency_total * straggler_factor
+
         scaling_efficiency = (node_perf.latency / step_latency_total).magnitude
 
         
@@ -400,9 +472,22 @@ class ReliabilityModel(BaseModel):
     requires = ("fleet",)
     produces = ReliabilityResult
 
-    def solve(self, fleet: Fleet, job_duration_hours: float, checkpoint_time_s: float = 60.0) -> ReliabilityResult:
+    def solve(self, fleet: Fleet, job_duration_hours: float, checkpoint_time_s: float = 60.0,
+              avg_recovery_time_s: float = 300.0) -> ReliabilityResult:
         """
         Calculates reliability and checkpointing metrics for a fleet.
+
+        Parameters
+        ----------
+        fleet : Fleet
+            The hardware cluster configuration.
+        job_duration_hours : float
+            Total job duration in hours.
+        checkpoint_time_s : float
+            Time to write one checkpoint in seconds (default 60s).
+        avg_recovery_time_s : float
+            Average time to recover from a failure in seconds (default 300s).
+            Includes checkpoint reload, process restart, and re-warmup.
         """
         # Use compound node MTBF accounting for GPUs, NICs, and PSUs
         node_mtbf = calc_mtbf_node(
@@ -411,18 +496,28 @@ class ReliabilityModel(BaseModel):
             psu_mtbf_h=PSU_MTTF_HOURS, n_psus=fleet.node.psus_per_node,
         )
         fleet_mtbf = calc_mtbf_cluster(node_mtbf, fleet.count)
-        
+
         job_dur_q = Q_(job_duration_hours, "hour")
         prob_fail = calc_failure_probability(fleet_mtbf, job_dur_q)
-        
+
         ckpt_time_q = Q_(checkpoint_time_s, "second")
         optimal_interval = calc_young_daly_interval(ckpt_time_q, fleet_mtbf.to("second"))
-        
+
+        # Goodput ratio: fraction of rawput that produces useful training progress.
+        # Lost compute = P(failure) * (avg_recovery_time / checkpoint_interval)
+        # Source: Narayanan et al. (2021), "Efficient Large-Scale Language Model Training"
+        interval_s = optimal_interval.m_as(ureg.second)
+        if interval_s > 0:
+            goodput_ratio = max(0.0, 1.0 - prob_fail * (avg_recovery_time_s / interval_s))
+        else:
+            goodput_ratio = 0.0
+
         return ReliabilityResult(
             fleet_mtbf=fleet_mtbf,
             failure_probability=prob_fail,
             optimal_checkpoint_interval=optimal_interval,
             expected_failures=(job_dur_q / fleet_mtbf).magnitude,
+            goodput_ratio=goodput_ratio,
         )
 
 class CheckpointModel(BaseModel):
@@ -440,10 +535,22 @@ class CheckpointModel(BaseModel):
     requires = ("workload", "hardware")
     produces = CheckpointResult
 
-    def solve(self, model: Workload, hardware: HardwareNode, optimizer: str = "adam", checkpoint_interval_hours: float = 4.0) -> CheckpointResult:
-        """Solves for checkpoint size, write time, and resulting MFU penalty."""
+    def solve(self, model: Workload, hardware: HardwareNode, optimizer: str = "adam",
+              checkpoint_interval_hours: float = 4.0, n_writers: int = 1,
+              filesystem_limit_gbs: float = 500.0) -> CheckpointResult:
+        """Solves for checkpoint size, write time, and resulting MFU penalty.
+
+        Parameters
+        ----------
+        n_writers : int
+            Number of parallel checkpoint writers (default 1). Distributed
+            checkpointing (e.g., FSDP) shards the write across workers.
+        filesystem_limit_gbs : float
+            Maximum aggregate filesystem write bandwidth in GB/s (default 500).
+            Prevents over-optimistic scaling when n_writers is large.
+        """
         from .formulas import calc_checkpoint_size
-        
+
         # Calculate size based on optimizer states
         # Mixed-precision Adam: 14 bytes/param (FP32 master + FP32 momentum + FP32 variance + FP16 weights)
         # Gradients are ephemeral and not checkpointed.
@@ -451,15 +558,19 @@ class CheckpointModel(BaseModel):
             bytes_per_param = 14
         else:
             bytes_per_param = 4  # e.g., SGD
-            
+
         ckpt_size = calc_checkpoint_size(model.parameters, bytes_per_param=bytes_per_param)
-        
+
         storage_bw = getattr(hardware.storage, 'bandwidth', Q_("0 GB/s")) if hardware.storage else Q_("0 GB/s")
         # Fallback to network or standard disk speed if undefined
         if storage_bw.magnitude == 0:
             storage_bw = Q_("1 GB/s")
-            
-        t_write = (ckpt_size / storage_bw).to("second")
+
+        # Distributed writing: scale bandwidth by n_writers, capped by filesystem limit
+        fs_limit = Q_(filesystem_limit_gbs, "GB/s")
+        effective_write_bw = min(storage_bw * n_writers, fs_limit)
+
+        t_write = (ckpt_size / effective_write_bw).to("second")
         
         # Calculate penalty to MFU
         interval_s = Q_(checkpoint_interval_hours, "hour").to("second")
@@ -495,7 +606,8 @@ class SustainabilityModel(BaseModel):
     requires = ("fleet",)
     produces = SustainabilityResult
 
-    def solve(self, fleet: Fleet, duration_days: float, datacenter: Optional[Datacenter] = None, mfu: float = 1.0) -> SustainabilityResult:
+    def solve(self, fleet: Fleet, duration_days: float, datacenter: Optional[Datacenter] = None,
+              mfu: float = 1.0, embodied_carbon_per_device: float = 0.0) -> SustainabilityResult:
         """
         Calculates energy, carbon, and water footprint for a fleet operation.
         """
@@ -542,14 +654,22 @@ class SustainabilityModel(BaseModel):
             wue = region.wue
             
         water_liters = total_energy_kwh.magnitude * wue
-        
+
+        # 6. Embodied Carbon (manufacturing, shipping, end-of-life)
+        # Source: Gupta et al. (2022), "ACT: Designing Sustainable Computer Systems
+        #         with an Architectural Carbon Modeling Tool"
+        n_devices = fleet.total_accelerators
+        embodied_kg = embodied_carbon_per_device * n_devices
+        total_carbon_kg = carbon_kg + embodied_kg
+
         return SustainabilityResult(
             it_energy_kwh=it_energy_kwh,
             total_energy_kwh=total_energy_kwh,
-            carbon_footprint_kg=carbon_kg,
+            carbon_footprint_kg=total_carbon_kg,
             water_usage_liters=water_liters,
             pue=pue,
             region_name=region.name,
+            embodied_carbon_kg=embodied_kg,
         )
 
 class ServingModel(BaseModel):
@@ -619,7 +739,15 @@ class ServingModel(BaseModel):
         peak_flops_prefill = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
         # Prompt caching: only new tokens need prefill computation
         new_tokens = max(1, seq_len - cached_prefix_len)
-        prefill_ops = 2 * model.parameters.to(ureg.count).magnitude * new_tokens * batch_size * ureg.flop
+        # Linear layer FLOPs: 2 * params * tokens * batch (standard 2P approximation)
+        linear_flops = 2 * model.parameters.to(ureg.count).magnitude * new_tokens * batch_size
+        # Attention FLOPs: 2 * n_layers * n_heads * head_dim * seq_len^2 * batch_size
+        # This captures the O(S^2) self-attention cost, which dominates for long contexts.
+        n_layers = getattr(model, 'layers', 1) or 1
+        n_heads = getattr(model, 'heads', 32) or 32
+        head_dim = (getattr(model, 'hidden_dim', 4096) or 4096) // n_heads
+        attention_flops = 2 * n_layers * n_heads * head_dim * new_tokens**2 * batch_size
+        prefill_ops = (linear_flops + attention_flops) * ureg.flop
         t_prefill = (prefill_ops / (peak_flops_prefill * efficiency)).to("ms") + hardware.dispatch_tax
 
         # KV-cache covers the full sequence (cached prefix + new tokens)
@@ -634,8 +762,11 @@ class ServingModel(BaseModel):
             decode_hw = hardware
 
         # 3. Decode Phase
+        # Weight loading is amortized across the batch: weights are loaded once from HBM
+        # and reused for all requests in the batch. KV cache is per-request.
         model_weights_bytes = model.size_in_bytes(bpp)
-        t_decode_per_token = ((model_weights_bytes + kv_cache_bytes) / decode_hw.memory.bandwidth).to("ms")
+        effective_weight_cost = model_weights_bytes / max(1, batch_size)
+        t_decode_per_token = ((effective_weight_cost + kv_cache_bytes) / decode_hw.memory.bandwidth).to("ms")
         
         # 4. Framework Tax (Per-token decode also incurs launch overhead)
         from .defaults import FRAMEWORK_LAYER_TAX_MS
@@ -763,11 +894,14 @@ class ContinuousBatchingModel(BaseModel):
             speedup = 1.0
         else:
             throughput = (active_requests / t_decode_per_token).to("1/s").magnitude
-            # Traditional static batching assumes ~50% fragmentation and padding waste
-            # meaning effective batch size is roughly halved for varying lengths
-            static_effective_batch = max(1, active_requests // 2)
-            # Static batching reserves contiguous blocks, so cache size is higher
-            static_t_decode = ((model_weights_bytes + (bytes_per_seq * static_effective_batch * 1.5)) / hardware.memory.bandwidth).to("ms")
+            # Static batching comparison:
+            # With contiguous KV allocation, memory fragmentation limits the max batch.
+            # Kwon et al. (2023) measured 20-40% external fragmentation in static allocation.
+            # We model static batching as achieving ~60% of continuous batching's batch size
+            # due to fragmentation waste, with no internal fragmentation savings.
+            static_frag_factor = 0.6  # effective batch = 60% of continuous (Kwon et al. 2023)
+            static_effective_batch = max(1, int(active_requests * static_frag_factor))
+            static_t_decode = ((model_weights_bytes + (bytes_per_seq * static_effective_batch)) / hardware.memory.bandwidth).to("ms")
             static_throughput = (static_effective_batch / static_t_decode).to("1/s").magnitude
             speedup = throughput / static_throughput if static_throughput > 0 else 1.0
             
@@ -801,28 +935,38 @@ class WeightStreamingModel(BaseModel):
     requires = ("workload", "hardware")
     produces = WeightStreamingResult
 
-    def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5) -> WeightStreamingResult:
-        """Simulates Weight Streaming throughput and SRAM feasibility."""
+    def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int,
+              batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5,
+              phase: str = "decode") -> WeightStreamingResult:
+        """Simulates Weight Streaming throughput and SRAM feasibility.
+
+        Parameters
+        ----------
+        phase : str
+            Inference phase: 'prefill' or 'decode' (default 'decode').
+            - prefill: processes all S tokens in parallel (compute-heavy, O(S^2) attention)
+            - decode: processes one token at a time per request (memory-bound)
+        """
         bpp = PRECISION_MAP.get(precision, BYTES_FP16)
         peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
-        
+
         # 1. SRAM Capacity Constraint
         # Entire batch's KV Cache must fit in the 44GB on-wafer SRAM
         # Working set (activations for the current layer) must also fit, but KV cache dominates
         n_heads = model.kv_heads or model.heads or 32
         h_dim = model.hidden_dim or 4096
         head_dim = h_dim // (model.heads or 32)
-        
+
         # KV dimensions per layer per sequence
         bytes_per_seq_per_layer = seq_len * n_heads * head_dim * 2 * bpp.magnitude
         total_kv_bytes = bytes_per_seq_per_layer * model.layers * batch_size * ureg.byte
-        
+
         # Let's add 10% overhead for working memory
         total_memory_required = (total_kv_bytes * 1.1).to("GB")
-        
+
         feasible = total_memory_required <= hardware.memory.capacity
         utilization = (total_memory_required / hardware.memory.capacity).magnitude if hardware.memory.capacity.magnitude > 0 else 1.0
-        
+
         constraint_trace = []
         if feasible:
             constraint_trace.append(f"SRAM Wall: Passed. Required {total_memory_required.to('GB'):~P} (KV + 10% Overhead) <= Available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
@@ -832,17 +976,28 @@ class WeightStreamingModel(BaseModel):
         # 2. Injection Bottleneck vs Compute Bottleneck per Layer
         layer_params = model.parameters / model.layers
         layer_weight_bytes = layer_params.to(ureg.count).magnitude * bpp.magnitude * ureg.byte
-        
+
         # Injection time (MemoryX -> WSE)
         inj_bw = hardware.interconnect.bandwidth if hardware.interconnect else Q_("100 GB/s")
         if inj_bw.magnitude == 0:
             inj_bw = Q_("100 GB/s")
-            
+
         layer_injection_time = (layer_weight_bytes / inj_bw).to("ms")
-        
-        # Compute time (Wafer compute) for one sequence token across the batch
-        # 2 * parameters * batch_size
-        layer_decode_flops = 2 * layer_params.to(ureg.count).magnitude * batch_size * ureg.flop
+
+        # Compute time depends on phase
+        if phase == "prefill":
+            # Prefill: process all S tokens in parallel.
+            # Linear FLOPs: 2 * params * S * batch_size
+            # Attention FLOPs: 2 * n_heads * S^2 * head_dim * n_layers (per layer already factored below)
+            layer_linear_flops = 2 * layer_params.to(ureg.count).magnitude * seq_len * batch_size
+            # Attention for one layer: 2 * n_heads * seq_len^2 * head_dim
+            layer_attn_flops = 2 * n_heads * seq_len * seq_len * head_dim
+            layer_total_flops = (layer_linear_flops + layer_attn_flops * batch_size) * ureg.flop
+            layer_decode_flops = layer_total_flops
+        else:
+            # Decode: one new token per request across the batch
+            # 2 * parameters * batch_size
+            layer_decode_flops = 2 * layer_params.to(ureg.count).magnitude * batch_size * ureg.flop
         layer_compute_time = (layer_decode_flops / (peak_flops * efficiency)).to("ms") + hardware.dispatch_tax
         
         # True layer time is bounded by the slowest process
@@ -907,15 +1062,17 @@ class TailLatencyModel(BaseModel):
         p99_w_ms = p99_w.m_as(ureg.millisecond)
         p50_w_ms = p50_w.m_as(ureg.millisecond)
         
-        violation_prob = 1.0 if not is_stable else (p99_w_ms / slo_threshold if slo_threshold > 0 else 0)
-        violation_prob = min(1.0, max(0.0, violation_prob))
-        
+        # SLO headroom: ratio of P99 wait to SLO threshold.
+        # Values > 1.0 indicate SLO violation. This is a ratio, not a probability.
+        slo_headroom_ratio = 1.0 if not is_stable else (p99_w_ms / slo_threshold if slo_threshold > 0 else 0)
+        slo_headroom_ratio = min(1.0, max(0.0, slo_headroom_ratio))
+
         return TailLatencyResult(
             p50_latency=Q_(p50_w_ms + service_latency_ms, "ms"),
             p99_latency=Q_(p99_w_ms + service_latency_ms, "ms"),
             queue_utilization=rho,
             is_stable=is_stable,
-            slo_violation_probability=violation_prob
+            slo_violation_probability=slo_headroom_ratio  # legacy field name; semantically a ratio
         )
 
 class EconomicsModel(BaseModel):
@@ -933,8 +1090,13 @@ class EconomicsModel(BaseModel):
     """
     requires = ("fleet",)
     produces = EconomicsResult
+    _fallacies = {
+        "Cheaper hardware is always more cost-effective": "Reality: slower hardware may cost more in electricity and total time than expensive hardware. TCO = CapEx + OpEx; a 2x cheaper GPU that takes 3x longer has higher TCO.",
+        "GPU cost is the dominant expense": "Reality: networking, cooling, facility, and staff costs are 50-150% of GPU CapEx. Use infrastructure_multiplier=2.0-2.5 for realistic TCO.",
+        "Cloud is always more expensive than on-prem": "Reality: for bursty or short-duration workloads, cloud spot instances can be 3-10x cheaper than amortized on-prem hardware sitting idle.",
+    }
 
-    def solve(self, fleet: Fleet, duration_days: float, kwh_price: Optional[float] = None, datacenter: Optional[Any] = None, grid: Optional[Any] = None, mfu: float = 1.0) -> EconomicsResult:
+    def solve(self, fleet: Fleet, duration_days: float, kwh_price: Optional[float] = None, datacenter: Optional[Any] = None, grid: Optional[Any] = None, mfu: float = 1.0, amortization_years: float = 3.0, infrastructure_multiplier: float = 1.0) -> EconomicsResult:
         """
         Calculates the TCO for a fleet over a specified duration.
 
@@ -974,18 +1136,23 @@ class EconomicsModel(BaseModel):
         unit_cost = fleet.node.accelerator.unit_cost
         if unit_cost is None:
             unit_cost = GPU_UNIT_COST_H100
-        total_capex = unit_cost.magnitude * fleet.total_accelerators
+        total_capex_hardware = unit_cost.magnitude * fleet.total_accelerators
+        # Apply infrastructure multiplier for networking, cooling, facility, staff costs
+        # Default 1.0 (hardware only). Set 2.0-2.5x for full datacenter TCO.
+        total_capex = total_capex_hardware * infrastructure_multiplier
+        # Amortize CapEx over deployment period (default 3-year depreciation schedule)
+        capex_for_period = (total_capex / amortization_years) * (duration_days / 365.0)
 
         annual_maintenance_ratio = ANNUAL_MAINTENANCE_RATIO
         opex_maintenance = total_capex * annual_maintenance_ratio * (duration_days / 365.0)
-        
+
         # Compose economics + sustainability into single result
         return EconomicsResult(
-            capex_usd=total_capex,
+            capex_usd=capex_for_period,
             opex_energy_usd=opex_energy,
             opex_maintenance_usd=opex_maintenance,
             total_opex_usd=opex_energy + opex_maintenance,
-            tco_usd=total_capex + opex_energy + opex_maintenance,
+            tco_usd=capex_for_period + opex_energy + opex_maintenance,
             it_energy_kwh=energy_result.it_energy_kwh,
             total_energy_kwh=energy_result.total_energy_kwh,
             carbon_footprint_kg=energy_result.carbon_footprint_kg,
@@ -1106,9 +1273,14 @@ class ScalingModel(BaseModel):
 class OrchestrationModel(BaseModel):
     """
     Analyzes Cluster Orchestration and Queueing (Little's Law).
-    
-    This model simulates the 'Wait Wall' in shared research clusters, 
-    calculating job completion times and researcher wait times based on 
+
+    **Caveat:** This model uses an M/D/1 queue (single server, deterministic
+    service) which assumes one job at a time on the entire cluster. For
+    multi-tenant clusters with job packing and preemption, an M/G/c model
+    is more appropriate — planned for v0.2.0.
+
+    This model simulates the 'Wait Wall' in shared research clusters,
+    calculating job completion times and researcher wait times based on
     cluster utilization and arrival rates.
 
     Literature Source:
@@ -1177,7 +1349,9 @@ class CompressionModel(BaseModel):
     requires = ("workload", "hardware")
     produces = CompressionResult
 
-    def solve(self, model: Workload, hardware: HardwareNode, method: str = "quantization", target_bitwidth: int = 8, sparsity: float = 0.0) -> CompressionResult:
+    def solve(self, model: Workload, hardware: HardwareNode, method: str = "quantization",
+              target_bitwidth: int = 8, sparsity: float = 0.0,
+              sparsity_type: str = "unstructured") -> CompressionResult:
         """
         Solves for compression gains and estimated accuracy impact.
 
@@ -1190,28 +1364,60 @@ class CompressionModel(BaseModel):
         method : str
             The compression method ('quantization', 'pruning', 'distillation').
         target_bitwidth : int
-            Target numerical precision in bits (e.g., 8 for INT8, 4 for INT4).
+            Target numerical precision in bits (e.g., 8 for INT8, 4 for INT4, 16 for FP8).
+            Use 16 for FP8 (half the bits of FP16 but reported as 8-bit; internally
+            we detect FP8 when target_bitwidth == 8 and check hardware support).
         sparsity : float
             Target sparsity ratio (0.0 to 1.0) for pruning.
+        sparsity_type : str
+            Type of sparsity pattern: 'unstructured', 'structured', or 'n_m' (2:4).
+            - unstructured: storage savings only, no inference speedup
+            - structured: both storage and compute savings
+            - n_m: hardware 2:4 sparsity with 2x speedup at 50% sparsity (Ampere+)
 
         Returns
         -------
-        Dict[str, Any]
-            Compression metrics including memory savings, latency speedup, 
+        CompressionResult
+            Compression metrics including memory savings, inference speedup,
             and estimated accuracy delta.
         """
         original_size = model.size_in_bytes(Q_("4 byte")) # FP32 baseline
-        
+        inference_speedup = 1.0
+
         if method == "quantization":
             compression_ratio = 32 / target_bitwidth
             # Source: Gholami et al. (2021), "A Survey of Quantization Methods"
-            # Conservative estimates: <1% drop for INT8, 2-5% for INT4
-            if target_bitwidth >= 8:
+            # Conservative estimates: <1% for FP8, <1% for INT8, 2-5% for INT4
+            if target_bitwidth >= 16:
+                # FP8 pathway (E4M3/E5M2): near-lossless for most models
+                accuracy_delta = QUANT_ACCURACY_DELTA_FP8
+                compression_ratio = 32 / 8  # FP8 is 1 byte
+            elif target_bitwidth >= 8:
                 accuracy_delta = QUANT_ACCURACY_DELTA_INT8
             elif target_bitwidth >= 4:
                 accuracy_delta = QUANT_ACCURACY_DELTA_INT4
             else:
                 accuracy_delta = -0.05   # Sub-INT4: significant degradation
+
+            # Inference speedup depends on compute vs memory boundedness
+            # Memory-bound workloads: speedup ≈ compression_ratio (less data to move)
+            # Compute-bound workloads: speedup depends on hardware low-precision support
+            graph = model.lower(Q_("4 byte"))  # FP32 baseline graph
+            roofline = calc_bottleneck(
+                graph.total_ops, graph.weight_bytes,
+                hardware.compute.peak_flops, hardware.memory.bandwidth
+            )
+            if roofline["bottleneck"] == "Memory":
+                inference_speedup = compression_ratio
+            else:
+                # Compute-bound: check if hardware has accelerated low-precision paths
+                prec_key = f"int{target_bitwidth}" if target_bitwidth <= 8 else f"fp{target_bitwidth}"
+                if prec_key in hardware.compute.precision_flops:
+                    hw_speedup = (hardware.compute.precision_flops[prec_key] / hardware.compute.peak_flops).magnitude
+                    inference_speedup = min(hw_speedup, compression_ratio)
+                else:
+                    inference_speedup = 1.0  # No hardware support → no compute speedup
+
         elif method == "pruning":
             compression_ratio = 1.0 / (1.0 - sparsity) if sparsity < 1.0 else 100.0
             # Source: Blalock et al. (2020), "What is the State of Neural Network Pruning?"
@@ -1220,18 +1426,34 @@ class CompressionModel(BaseModel):
                 accuracy_delta = PRUNING_MILD_DELTA
             else:
                 accuracy_delta = -PRUNING_STEEP_COEFFICIENT * math.exp(sparsity * PRUNING_STEEP_EXPONENT)
+
+            # Inference speedup depends on sparsity type
+            if sparsity_type == "structured":
+                # Structured pruning removes entire rows/columns → direct compute savings
+                inference_speedup = compression_ratio
+            elif sparsity_type == "n_m":
+                # N:M sparsity (2:4): hardware-accelerated 2x speedup at exactly 50% sparsity
+                # Source: NVIDIA Ampere Architecture Whitepaper (2020)
+                if abs(sparsity - 0.5) < 0.05:
+                    inference_speedup = 2.0
+                else:
+                    inference_speedup = 1.0  # N:M only works at 50%
+            else:
+                # Unstructured: irregular access patterns → storage savings only
+                inference_speedup = 1.0
         else:
             compression_ratio = 1.0
             accuracy_delta = 0.0
 
         compressed_size = original_size / compression_ratio
-        
+
         return CompressionResult(
             original_size_gb=original_size.to("GB"),
             compressed_size_gb=compressed_size.to("GB"),
             compression_ratio=compression_ratio,
             estimated_accuracy_delta=accuracy_delta,
             memory_savings_pct=(1.0 - 1.0/compression_ratio) * 100,
+            inference_speedup=inference_speedup,
         )
 
 class EfficiencyModel(BaseModel):
@@ -1308,10 +1530,12 @@ class EfficiencyModel(BaseModel):
 
         achievable_flops = peak_flops * eta
 
-        # Overhead breakdown
+        # Overhead breakdown: decompose (1 - eta) into meaningful components.
+        # Total overhead = 1 - eta, split into occupancy loss and memory stall.
+        total_overhead = 1.0 - eta
         occupancy_loss = 1.0 - min(efficiency * HFU_MFU_RATIO, 1.0)  # SM occupancy overhead
-        memory_stall = max(0.0, 1.0 - eta - occupancy_loss) if (1.0 - eta - occupancy_loss) > 0 else 0.0
-        kernel_overhead = max(0.0, 1.0 - eta - occupancy_loss - memory_stall)
+        # Memory stall absorbs the remainder: time spent waiting on data movement.
+        memory_stall = max(0.0, total_overhead - occupancy_loss)
 
         return EfficiencyResult(
             mfu=eta,
@@ -1322,7 +1546,6 @@ class EfficiencyModel(BaseModel):
             overhead_breakdown={
                 "occupancy_loss": occupancy_loss,
                 "memory_stall": memory_stall,
-                "kernel_overhead": kernel_overhead,
             },
         )
 

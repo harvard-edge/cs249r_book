@@ -206,6 +206,7 @@ export default function PlansPage() {
             <motion.div key={current.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
               <div className="flex items-center gap-3 mb-4">
                 <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-border bg-surface">{current.competency_area}</span>
+                <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-accentBlue/20 bg-accentBlue/5">{current.zone}</span>
                 <span className="text-[10px] font-mono text-textTertiary">{current.track} / {current.level}</span>
               </div>
               <h2 className="text-2xl lg:text-3xl font-bold text-textPrimary mb-6 tracking-tight">{current.title}</h2>

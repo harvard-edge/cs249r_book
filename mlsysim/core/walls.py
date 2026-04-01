@@ -13,7 +13,7 @@ hardware resources to global fleet-scale operations:
     Domain 3 — Algorithm  : How much computation the model requires.
     Domain 4 — Fleet      : Consequences of distributed, multi-node coordination.
     Domain 5 — Operations : Economics, sustainability, and safety constraints.
-    Domain 6 — Analysis   : Cross-cutting diagnostic and synthesis tools.
+    Domain 6 — Meta-Analysis : Cross-cutting diagnostic and synthesis tools.
 
 Reference
 ---------
@@ -106,7 +106,7 @@ SOFTWARE = Wall(
     domain=Domain.NODE,
     resolver_name="EfficiencyModel",
     constraint="Gap between peak and achieved FLOPS (kernel fusion, occupancy).",
-    equation="η (MFU adjustment factor)",
+    equation="η_MFU = f(kernel_efficiency, occupancy, memory_coalescing, framework_overhead)",
     sources=[
         "Chowdhery et al. (2022), PaLM",
         "Dao et al. (2022), FlashAttention",
@@ -206,7 +206,7 @@ REASONING = Wall(
     name="Reasoning",
     domain=Domain.ALGORITHM,
     resolver_name="InferenceScalingModel",
-    constraint="Inference-time compute scales with reasoning steps K.",
+    constraint="Inference-time compute scales with reasoning steps K. [Emerging — models evolving rapidly]",
     equation="T = K × T_step",
     sources=[
         "Wei et al. (2022), Chain-of-Thought",
@@ -305,7 +305,7 @@ SAFETY = Wall(
     sources=["Abadi et al. (2016), DP-SGD"],
 )
 
-# Domain 6: Analysis — cross-cutting solvers
+# Domain 6: Meta-Analysis — These are diagnostic methods, not physical constraints.
 SENSITIVITY = Wall(
     number=21,
     name="Sensitivity",
@@ -382,7 +382,7 @@ def taxonomy() -> str:
             Domain.ALGORITHM:  "Domain 3 — Algorithm (Scaling & Compression)",
             Domain.FLEET:      "Domain 4 — Fleet (Multi-Node Coordination)",
             Domain.OPERATIONS: "Domain 5 — Operations (Economics, Sustainability & Safety)",
-            Domain.ANALYSIS:   "Domain 6 — Analysis (Cross-Cutting Solvers)",
+            Domain.ANALYSIS:   "Domain 6 — Meta-Analysis (Cross-Cutting Diagnostic Tools)",
         }[domain]
         lines.append(f"  {label}")
         for w in domain_walls:

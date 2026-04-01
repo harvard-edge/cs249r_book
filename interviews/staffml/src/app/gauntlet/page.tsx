@@ -9,7 +9,7 @@ import {
 import clsx from "clsx";
 import Link from "next/link";
 import {
-  getTracks, getLevels, getCompetencyAreas, selectGauntletQuestions,
+  getTracks, getLevels, selectGauntletQuestions,
   getQuestionsByFilter, Question, cleanScenario
 } from "@/lib/corpus";
 import { getLevelDef } from "@/lib/levels";
@@ -347,7 +347,7 @@ export default function GauntletPage() {
               />
             </div>
             <span className="text-[10px] font-mono text-textTertiary uppercase">
-              {q.competency_area}
+              {q.zone}
             </span>
           </div>
           <div className={clsx(
@@ -471,12 +471,12 @@ export default function GauntletPage() {
     const totalScore = scores.reduce((a, b) => a + b, 0);
     const maxScore = questions.length * 3;
     const pct = Math.round((totalScore / maxScore) * 100);
-    const byArea: Record<string, { total: number; score: number }> = {};
+    const byZone: Record<string, { total: number; score: number }> = {};
     questions.forEach((q, i) => {
-      const area = q.competency_area;
-      if (!byArea[area]) byArea[area] = { total: 0, score: 0 };
-      byArea[area].total += 3;
-      byArea[area].score += scores[i] ?? 0;
+      const zone = q.zone;
+      if (!byZone[zone]) byZone[zone] = { total: 0, score: 0 };
+      byZone[zone].total += 3;
+      byZone[zone].score += scores[i] ?? 0;
     });
 
     return (
@@ -506,23 +506,23 @@ export default function GauntletPage() {
             Completed in {formatTime(DURATIONS[selectedDuration].minutes * 60 - timeRemaining)}
           </p>
 
-          {/* Competency breakdown */}
+          {/* Zone performance profile */}
           <div className="text-left mb-8 space-y-2">
-            {Object.entries(byArea).map(([area, data]) => {
-              const areaPct = Math.round((data.score / data.total) * 100);
+            {Object.entries(byZone).map(([zone, data]) => {
+              const zonePct = Math.round((data.score / data.total) * 100);
               return (
-                <div key={area} className="flex items-center gap-3">
-                  <span className="text-xs text-textSecondary capitalize w-28 truncate">{area}</span>
+                <div key={zone} className="flex items-center gap-3">
+                  <span className="text-xs text-textSecondary capitalize w-28 truncate">{zone}</span>
                   <div className="flex-1 h-2 bg-border rounded-full overflow-hidden">
                     <div
                       className={clsx(
                         "h-full rounded-full transition-all",
-                        areaPct >= 70 ? "bg-accentGreen" : areaPct >= 40 ? "bg-accentAmber" : "bg-accentRed"
+                        zonePct >= 70 ? "bg-accentGreen" : zonePct >= 40 ? "bg-accentAmber" : "bg-accentRed"
                       )}
-                      style={{ width: `${areaPct}%` }}
+                      style={{ width: `${zonePct}%` }}
                     />
                   </div>
-                  <span className="text-xs font-mono text-textTertiary w-10 text-right">{areaPct}%</span>
+                  <span className="text-xs font-mono text-textTertiary w-10 text-right">{zonePct}%</span>
                 </div>
               );
             })}
@@ -568,18 +568,18 @@ export default function GauntletPage() {
           <div className="flex items-center gap-3 justify-center flex-wrap">
             <button
               onClick={() => {
-                const areaLines = Object.entries(byArea)
-                  .map(([area, data]) => {
-                    const ap = Math.round((data.score / data.total) * 100);
-                    const bar = ap >= 70 ? "🟩" : ap >= 40 ? "🟨" : "🟥";
-                    return `${bar} ${area}: ${ap}%`;
+                const zoneLines = Object.entries(byZone)
+                  .map(([zone, data]) => {
+                    const zp = Math.round((data.score / data.total) * 100);
+                    const bar = zp >= 70 ? "🟩" : zp >= 40 ? "🟨" : "🟥";
+                    return `${bar} ${zone}: ${zp}%`;
                   })
                   .join("\n");
                 const text = [
                   `StaffML Gauntlet — ${pct}%`,
                   `${selectedTrack.toUpperCase()} × ${selectedLevel} — ${questions.length} questions`,
                   "",
-                  areaLines,
+                  zoneLines,
                   "",
                   "https://staffml.ai",
                 ].join("\n");

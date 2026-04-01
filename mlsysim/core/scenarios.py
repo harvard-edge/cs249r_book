@@ -215,7 +215,8 @@ class Scenarios:
         description="Identifying humans at the door using a sub-watt microcontroller.",
         workload=Models.Tiny.WakeVision,
         system=Hardware.Tiny.ESP32_S3,
-        sla_latency=Q_("200 ms")
+        sla_latency=Q_("200 ms"),
+        power_budget=Q_("100 mW"),
     )
 
     TinySensor = Scenario(
@@ -223,7 +224,8 @@ class Scenarios:
         description="Low-power vibration monitoring for industrial predictive maintenance.",
         workload=Models.Tiny.AnomalyDetector,
         system=Hardware.Tiny.ESP32_S3,
-        sla_latency=Q_("10 ms")
+        sla_latency=Q_("10 ms"),
+        power_budget=Q_("50 mW"),
     )
 
     # --- EDGE WORLD ---
@@ -270,11 +272,32 @@ class Scenarios:
         sla_latency=Q_("500 ms") # Per-step target
     )
 
+    # --- SERVING WORLD ---
+    ChatbotServing = Scenario(
+        name="Chatbot Serving",
+        description="Serving a Llama-3 8B chatbot on a single H100 with latency SLA.",
+        workload=Models.Language.Llama3_8B,
+        system=Hardware.Cloud.H100,
+        sla_latency=Q_("500 ms"),  # TTFT target
+    )
+
+    # --- TINYML: KEYWORD SPOTTING ---
+    KeywordSpotting = Scenario(
+        name="Keyword Spotting",
+        description="Always-on wake-word detection on a microcontroller (MLPerf Tiny benchmark).",
+        workload=Models.Tiny.DS_CNN,
+        system=Hardware.Tiny.ESP32_S3,
+        sla_latency=Q_("30 ms"),
+        power_budget=Q_("1 mW"),
+    )
+
 class Applications:
     Doorbell = Scenarios.SmartDoorbell
     AutoDrive = Scenarios.AutonomousVehicle
     Workstation = Scenarios.LocalTraining
     Frontier = Scenarios.FrontierTraining
+    Chatbot = Scenarios.ChatbotServing
+    KWS = Scenarios.KeywordSpotting
 
 class Archetypes:
     """

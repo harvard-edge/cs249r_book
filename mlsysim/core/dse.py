@@ -105,8 +105,38 @@ class DSE:
                     
                 obj_val = self._get_metric_value(result, self.objective.metric)
                 
-                # TODO: Implement strict constraint string eval (e.g., "latency < 50")
-                
+                # Evaluate constraints
+                if self.constraints:
+                    skip = False
+                    for constraint in self.constraints:
+                        parts = constraint.expression.split()
+                        if len(parts) == 3:
+                            metric_path, op, threshold_str = parts
+                            try:
+                                threshold = float(threshold_str)
+                            except ValueError:
+                                logger.warning(f"Non-numeric constraint threshold: {threshold_str}")
+                                continue
+                            val = self._get_metric_value(result, metric_path)
+                            if op == '<' and not (val < threshold):
+                                skip = True
+                            elif op == '>' and not (val > threshold):
+                                skip = True
+                            elif op == '<=' and not (val <= threshold):
+                                skip = True
+                            elif op == '>=' and not (val >= threshold):
+                                skip = True
+                            elif op == '==' and not (val == threshold):
+                                skip = True
+                            if skip:
+                                break
+                        else:
+                            raise NotImplementedError(
+                                f"Constraint expression must be '<metric> <op> <threshold>', got: '{constraint.expression}'"
+                            )
+                    if skip:
+                        continue
+
                 valid_candidates.append({
                     "params": params,
                     "objective_value": obj_val,
