@@ -44,3 +44,13 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Expected output (mlsysim v0.1.0):
+# Evaluating a 30-day training run on 256x H100 GPUs...
+#
+# Total Energy Consumed: 125.4 megawatt_hour
+# ----------------------------------------
+# Carbon Footprint (Poland): 102.8 Tonnes
+# Carbon Footprint (Quebec): 1.7 Tonnes
+# ----------------------------------------
+# The exact same training run produces 61.1x more carbon in Poland than Quebec.

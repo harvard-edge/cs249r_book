@@ -44,3 +44,24 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Expected output (mlsysim v0.1.0):
+# Scenario: Autonomous Vehicle Perception on Jetson Orin NX
+# Batch      | Status     | Latency         | Bottleneck
+# ------------------------------------------------------------
+# 1          | PASS       | 1.25 millisecond | Memory
+# 2          | PASS       | 1.36 millisecond | Compute
+# 4          | PASS       | 2.01 millisecond | Compute
+# 8          | PASS       | 3.32 millisecond | Compute
+# 16         | PASS       | 5.95 millisecond | Compute
+# 32         | FAIL       | 11.20 millisecond | Compute
+# 64         | FAIL       | 21.69 millisecond | Compute
+# 128        | FAIL       | 42.68 millisecond | Compute
+#
+# DataFrame Summary (First 5 rows):
+#              scenario f_status              p_latency
+# 0  Autonomous Vehicle     PASS   1.252156862745098 ms
+# 1  Autonomous Vehicle     PASS               1.356 ms
+# 2  Autonomous Vehicle     PASS               2.012 ms
+# 3  Autonomous Vehicle     PASS  3.3240000000000003 ms
+# 4  Autonomous Vehicle     PASS               5.948 ms

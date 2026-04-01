@@ -62,3 +62,19 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Expected output (mlsysim v0.1.0):
+# Evaluating ResNet-50 Training Data Pipeline...
+#
+# Storage Bandwidth: 3.0 GB/s
+# Batch Data Size: 77.07 MB
+#
+# GPU        | Compute Time    | I/O Time        | GPU Utilization
+# -----------------------------------------------------------------
+# NVIDIA V100 | 51.9 ms        | 25.7 ms        | 100.0%
+# NVIDIA A100 | 41.9 ms        | 25.7 ms        | 100.0%
+# NVIDIA H100 | 7.9 ms        | 25.7 ms        | 30.7%
+#
+# Conclusion: As GPUs get faster (V100 -> H100), the compute time drops.
+# But because storage bandwidth is fixed, the GPU spends more time waiting for data,
+# causing utilization to plummet. This is the Data Wall.

@@ -32,3 +32,18 @@ print(f"Bottleneck: {profile_batched.bottleneck}")
 print(f"Latency:    {profile_batched.latency:~P}")
 print(f"Throughput: {profile_batched.throughput:~P}")
 print(f"MFU:        {profile_batched.mfu:.3f}")
+
+# Expected output (mlsysim v0.1.0):
+# Model:      Llama-3.1-8B
+# Hardware:   NVIDIA H100
+# Bottleneck: Memory
+# Latency:    5.603432835820896 ms
+# Throughput: 178.4620302053645 1/s
+# MFU:        0.003
+# Feasible:   True
+#
+# --- Batch size 32 ---
+# Bottleneck: Memory
+# Latency:    20.46492537313433 ms
+# Throughput: 1563.6509499325382 1/s
+# MFU:        0.025

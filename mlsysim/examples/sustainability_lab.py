@@ -37,8 +37,8 @@ def main():
         
         impact = solver.solve(fleet, duration_days=30, datacenter=dc)
         
-        energy_mwh = impact['total_energy_kwh'].m_as('megawatt_hour')
-        carbon_tonnes = impact['carbon_footprint_kg'] / 1000.0
+        energy_mwh = impact.total_energy_kwh.m_as('megawatt_hour')
+        carbon_tonnes = impact.carbon_footprint_kg / 1000.0
         
         print(f"{exp['name']:<25} | {dc.pue:<6.2f} | {energy_mwh:<12.1f} | {carbon_tonnes:<12.1f}")
 
@@ -46,3 +46,13 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Expected output (mlsysim v0.1.0):
+# Scenario: Training Llama-3-70B on 512 H100 GPUs for 30 days
+#
+# Region                    | PUE    | Energy (MWh) | Carbon (Tonnes)
+# -----------------------------------------------------------------
+# Poland (Coal-Heavy)       | 1.06   | 273.5        | 224.3
+# Quebec (Hydro-Clean)      | 1.06   | 273.5        | 5.5
+#
+# Conclusion: Moving the same hardware to a cleaner grid reduces carbon by >90%.

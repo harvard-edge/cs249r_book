@@ -53,3 +53,16 @@ print(f"CapEx (amortized): ${econ.capex_usd:,.0f}")
 print(f"OpEx (energy):     ${econ.opex_energy_usd:,.0f}")
 print(f"Total TCO:         ${econ.tco_usd:,.0f}")
 print(f"Carbon Footprint:  {econ.carbon_footprint_kg:.0f} kg CO₂")
+
+# Expected output (mlsysim v0.1.0):
+# --- Distributed Training Performance ---
+# Step Latency:       2004.60 millisecond
+# Scaling Efficiency: 92.7%
+# DP Communication:   0.01 second
+# TP Communication:   0.13 second
+#
+# --- Economics (30-day run) ---
+# CapEx (amortized): $105,205
+# OpEx (energy):     $8,670
+# Total TCO:         $129,657
+# Carbon Footprint:  30997 kg CO2
