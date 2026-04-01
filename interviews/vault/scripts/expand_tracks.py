@@ -249,36 +249,57 @@ Rules:
 """
 
 
-def call_opus(prompt: str, retries: int = 2) -> str | None:
-    """Call Opus 4.6 via Anthropic API."""
-    import anthropic
-
-    client = anthropic.Anthropic()
-    for attempt in range(retries + 1):
-        try:
-            message = client.messages.create(
-                model="claude-opus-4-6",
-                max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            text = message.content[0].text.strip()
-            # Strip markdown fences
-            if text.startswith("```"):
-                text = re.sub(r"^```\w*\n?", "", text)
-                text = re.sub(r"\n?```$", "", text)
-            return text.strip()
-        except Exception as e:
-            if attempt < retries:
-                time.sleep(2 ** attempt)
-            else:
-                print(f"  Opus error: {e}")
-                return None
+def call_llm(prompt: str, model: str = "gemini-3.1-pro-preview", retries: int = 2) -> str | None:
+    """Call LLM via gemini CLI (default) or Anthropic API."""
+    if model.startswith("claude"):
+        import anthropic
+        client = anthropic.Anthropic()
+        for attempt in range(retries + 1):
+            try:
+                message = client.messages.create(
+                    model=model, max_tokens=4096,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                text = message.content[0].text.strip()
+                if text.startswith("```"):
+                    text = re.sub(r"^```\w*\n?", "", text)
+                    text = re.sub(r"\n?```$", "", text)
+                return text.strip()
+            except Exception as e:
+                if attempt < retries:
+                    time.sleep(2 ** attempt)
+                else:
+                    print(f"  API error: {e}")
+                    return None
+    else:
+        # Gemini CLI
+        for attempt in range(retries + 1):
+            try:
+                result = subprocess.run(
+                    ["gemini", "-m", model, "-o", "text"],
+                    input=prompt, capture_output=True, text=True, timeout=120,
+                )
+                if result.returncode != 0:
+                    if attempt < retries:
+                        time.sleep(2 ** attempt)
+                        continue
+                    return None
+                text = result.stdout.strip()
+                if text.startswith("```"):
+                    text = re.sub(r"^```\w*\n?", "", text)
+                    text = re.sub(r"\n?```$", "", text)
+                return text.strip()
+            except subprocess.TimeoutExpired:
+                if attempt < retries:
+                    time.sleep(2 ** attempt)
+                else:
+                    return None
 
 
 def generate_one(job_idx: int, job: dict) -> dict | None:
     """Generate one question for a specific gap."""
     prompt = build_prompt(job)
-    text = call_opus(prompt)
+    text = call_llm(prompt)
     if not text:
         return None
 
