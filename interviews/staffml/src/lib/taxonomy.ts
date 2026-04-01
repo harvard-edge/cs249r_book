@@ -56,7 +56,8 @@ interface Concept {
   tracks: string[];
   source_chapters: string[];
   question_count: number;
-  level_distribution: Record<string, number>;
+  level_distribution?: Record<string, number>;
+  source_domains?: string[];
   textbook_url?: string;
 }
 
@@ -80,7 +81,7 @@ function formatChapterName(ch: string): string {
 
 // ─── Build index ───────────────────────────────────────────────
 
-const concepts = (taxonomyData as { concepts: Concept[] }).concepts;
+const concepts = (taxonomyData as unknown as { concepts: Concept[] }).concepts;
 const questions = corpusData as RawQuestion[];
 const conceptMap = new Map(concepts.map((c) => [c.id, c]));
 
