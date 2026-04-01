@@ -266,11 +266,12 @@ class Engine:
         # 8-9. MFU, HFU, and Energy (energy depends on MFU, so compute MFU first)
         # MFU = achieved_flops / peak_flops = (model_flops / step_time) / peak_flops
         # Source: Chowdhery et al. (2022), "PaLM: Scaling Language Modeling with Pathways"
-        latency_s = latency.to("s").magnitude
-        if latency_s > 0 and peak_flops.magnitude > 0:
-            achieved_flops = batch_ops.magnitude / latency_s
-            mfu = achieved_flops / peak_flops.magnitude
-            mfu = min(mfu, 1.0)  # Clamp to [0, 1]
+        # IMPORTANT: Use Pint unit-aware division to handle TFLOPS/s vs flop correctly.
+        latency_s = latency.to("s")
+        if latency_s.magnitude > 0 and peak_flops.magnitude > 0:
+            achieved_flops_rate = (batch_ops / latency_s).to(peak_flops.units)
+            mfu = (achieved_flops_rate / peak_flops).to_base_units().magnitude
+            mfu = max(0.0, min(mfu, 1.0))  # Clamp to [0, 1]
         else:
             mfu = 0.0
         hfu = min(mfu * HFU_MFU_RATIO, 1.0)  # Source: PaLM (Chowdhery et al. 2022)
