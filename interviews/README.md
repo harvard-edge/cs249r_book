@@ -1,43 +1,40 @@
-<!-- DEV-BANNER-START -->
 <div align="center">
-<table>
-<tr><td>
-<h3>🚧 Under Active Development</h3>
-<p>This component is being built on the <code>dev</code> branch and is <b>not yet available</b> on the live site.<br>
-Content may be incomplete or change without notice. The published curriculum lives at <a href="https://mlsysbook.ai"><b>mlsysbook.ai</b></a>.</p>
-<p>
-<a href="https://github.com/harvard-edge/cs249r_book/tree/dev"><img src="https://img.shields.io/badge/branch-dev-orange?logo=git&logoColor=white" alt="dev branch"></a>
-<a href="https://mlsysbook.ai"><img src="https://img.shields.io/badge/live_site-mlsysbook.ai-blue?logo=safari&logoColor=white" alt="live site"></a>
-<a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml"><img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml/badge.svg?branch=dev" alt="StaffML Build"></a>
-</p>
-</td></tr>
-</table>
+
+# StaffML
+
+### ML Systems Interview Playbook
+
+**5,700+ physics-grounded systems design questions across Cloud, Edge, Mobile & TinyML.**
+
+*You can generate the code, but you cannot prompt your way out of a silicon bottleneck.*
+
+<br>
+
+<a href="https://mlsysbook.ai/staffml/"><img src="https://img.shields.io/badge/%F0%9F%8E%AF_Launch_StaffML-blue?style=for-the-badge&logoColor=white" alt="Launch StaffML" height="36"></a>
+
+<br><br>
+
+<a href="https://github.com/harvard-edge/cs249r_book"><img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=social" alt="GitHub Stars"></a>
+<a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-publish-live.yml"><img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-publish-live.yml/badge.svg" alt="StaffML Deploy"></a>
+<a href="https://mlsysbook.ai"><img src="https://img.shields.io/badge/part_of-MLSysBook.ai-a31f34" alt="MLSysBook.ai"></a>
+
 </div>
-<!-- DEV-BANNER-END -->
-
-# StaffML: ML Systems Interview Playbook
-
-<p align="center">
-  <b>Physics-grounded systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
-  <i>You can generate the code, but you cannot prompt your way out of a silicon bottleneck.</i>
-</p>
 
 ---
 
-## What is StaffML?
+StaffML is a free, open-source interview prep platform for ML systems engineers. Browse a curated vault of questions organized by competency area, difficulty level (Bloom's Taxonomy L1–L6+), and deployment track. Built by [Prof. Vijay Janapa Reddi](https://github.com/profvjreddi), Harvard University.
 
-StaffML is an interview prep platform for ML systems engineers. It provides a curated vault of questions organized by competency area, difficulty level (Bloom's Taxonomy L1–L6+), and deployment track.
+| Feature | Description |
+|---------|-------------|
+| **Vault** | Browse questions by area, topic, and difficulty |
+| **Practice** | Drill with spaced repetition and daily challenges |
+| **Gauntlet** | Timed mock interview sessions with self-assessment |
+| **Progress** | Track coverage across competency areas and tracks |
+| **Chains** | Deepening sequences from L1 Recall to L6+ Architect |
 
-**Key features:**
-- **Vault** — Browse questions by area, topic, and difficulty
-- **Practice** — Drill with spaced repetition and daily challenges
-- **Mock Interview (Gauntlet)** — Timed sessions with self-assessment
-- **Progress** — Track coverage across competency areas and tracks
-- **Chains** — Deepening question sequences (L1 Recall → L6+ Architect)
+> If StaffML helps your prep, **[give us a star](https://github.com/harvard-edge/cs249r_book)** — it helps others find this resource.
 
-Built on [MLSysBook.ai](https://mlsysbook.ai) by Prof. Vijay Janapa Reddi, Harvard University.
-
-**App:** [staffml/](staffml/) · **Corpus data:** [`vault/corpus.json`](vault/corpus.json) · **Taxonomy:** [`vault/taxonomy.json`](vault/taxonomy.json)
+**Data:** [`vault/corpus.json`](vault/corpus.json) · [`vault/taxonomy.json`](vault/taxonomy.json) · **App source:** [`staffml/`](staffml/)
 
 ---
 
