@@ -34,9 +34,13 @@ def main():
     # Chain stats
     chains: dict[str, list[str]] = {}
     for q in corpus:
-        cid = q.get("chain_ids", "")
-        if cid:
-            chains.setdefault(cid, []).append(q["id"])
+        cids = q.get("chain_ids", "")
+        if isinstance(cids, list):
+            for cid in cids:
+                if cid:
+                    chains.setdefault(cid, []).append(q["id"])
+        elif cids:
+            chains.setdefault(cids, []).append(q["id"])
 
     # Level distribution
     levels: dict[str, int] = {}

@@ -149,9 +149,13 @@ print("\n🔗 Chain integrity...")
 
 chains: dict[str, list] = {}
 for q in corpus:
-    cid = q.get("chain_ids", "")
-    if cid:
-        chains.setdefault(cid, []).append(q)
+    cids = q.get("chain_ids", "")
+    if isinstance(cids, list):
+        for cid in cids:
+            if cid:
+                chains.setdefault(cid, []).append(q)
+    elif cids:
+        chains.setdefault(cids, []).append(q)
 
 solo_chains = sum(1 for c in chains.values() if len(c) <= 1)
 if solo_chains > 0:
@@ -160,7 +164,14 @@ if solo_chains > 0:
 # Check chain positions are sequential
 bad_chains = 0
 for cid, qs in chains.items():
-    positions = sorted(int(q.get("chain_positions", -1)) for q in qs)
+    pos_list = []
+    for q in qs:
+        cp = q.get("chain_positions", -1)
+        if isinstance(cp, dict):
+            pos_list.append(int(cp.get(cid, -1)))
+        else:
+            pos_list.append(int(cp) if cp != "" else -1)
+    positions = sorted(pos_list)
     expected = list(range(len(qs)))
     if positions != expected:
         bad_chains += 1
