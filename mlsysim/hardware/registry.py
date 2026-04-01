@@ -244,11 +244,15 @@ class TinyHardware(Registry):
             precision_flops={"int8": 0.0024 * ureg.TFLOPs/ureg.s}
         ),
         # 512 KiB SRAM (usable ~256 KiB after RTOS/stack); 8 MB flash for weights
+        # capacity/bandwidth = flash (default path for large models)
+        # sram_capacity/bandwidth = on-chip SRAM (used when model fits)
         memory=MemoryHierarchy(
-            capacity=512 * ureg.KiB,                  # SRAM (activations + runtime)
-            bandwidth=0.96 * ureg.GB/ureg.s,          # SRAM bandwidth @ 240 MHz
-            flash_capacity=8 * ureg.MB,               # SPI flash (weight storage)
-            flash_bandwidth=0.08 * ureg.GB/ureg.s,    # Flash read ~80 MB/s (XIP)
+            capacity=8 * ureg.MB,                     # Flash (primary weight storage)
+            bandwidth=0.08 * ureg.GB/ureg.s,          # Flash read ~80 MB/s (XIP)
+            sram_capacity=512 * ureg.KiB,             # On-chip SRAM
+            sram_bandwidth=0.96 * ureg.GB/ureg.s,     # SRAM bandwidth @ 240 MHz
+            flash_capacity=8 * ureg.MB,               # Explicit flash (same as capacity)
+            flash_bandwidth=0.08 * ureg.GB/ureg.s,    # Flash read ~80 MB/s
         ),
         tdp=0.4 * ureg.W,              # Inference-only power (not WiFi-on 1.2W)
         embodied_carbon_kg=5.0,        # Including packaging and PCB assembly
@@ -265,8 +269,10 @@ class TinyHardware(Registry):
             precision_flops={"int8": 0.000128 * ureg.TFLOPs/ureg.s}  # ~128 MOPS INT8
         ),
         memory=MemoryHierarchy(
-            capacity=256 * ureg.KiB,                  # 256 KiB RAM
-            bandwidth=0.256 * ureg.GB/ureg.s,         # SRAM bandwidth @ 64 MHz
+            capacity=1 * ureg.MB,                     # Flash (primary weight storage)
+            bandwidth=0.064 * ureg.GB/ureg.s,         # Flash read ~64 MB/s
+            sram_capacity=256 * ureg.KiB,             # On-chip SRAM
+            sram_bandwidth=0.256 * ureg.GB/ureg.s,    # SRAM bandwidth @ 64 MHz
             flash_capacity=1 * ureg.MB,               # 1 MB internal flash
             flash_bandwidth=0.064 * ureg.GB/ureg.s,   # Flash read ~64 MB/s
         ),
