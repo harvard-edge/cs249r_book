@@ -221,7 +221,7 @@ export default function EcosystemBar() {
         onMouseLeave={() => { if (openMenu !== menu.id) setHoveredLink(null); }}
       >
         {menu.icon && <i className={`bi ${menu.icon}`} />}
-        <span>{menu.label}</span>
+        <span className={menu.alignEnd ? "hidden xl:inline" : ""}>{menu.label}</span>
         <span style={{
           display: 'inline-block', marginLeft: 4,
           borderTop: '4px solid currentColor', borderRight: '4px solid transparent', borderLeft: '4px solid transparent',
@@ -270,7 +270,7 @@ export default function EcosystemBar() {
         </a>
 
         {/* Desktop nav */}
-        <div className="hidden xl:flex" style={{ alignItems: 'center', gap: 0, flex: 1, marginLeft: 16 }}>
+        <div className="hidden lg:flex" style={{ alignItems: 'center', gap: 0, flex: 1, marginLeft: 16 }}>
           {/* Left menus */}
           <div style={{ display: 'flex', alignItems: 'center' }}>
             {LEFT_MENUS.map(renderDropdown)}
@@ -289,7 +289,7 @@ export default function EcosystemBar() {
               onMouseEnter={() => setHoveredLink('support')}
               onMouseLeave={() => setHoveredLink(null)}
             >
-              <i className="bi bi-heart" /> <span>Support</span>
+              <i className="bi bi-heart" /> <span className="hidden xl:inline">Support</span>
             </a>
             <a
               href="https://github.com/harvard-edge/cs249r_book"
@@ -299,7 +299,7 @@ export default function EcosystemBar() {
               onMouseEnter={() => setHoveredLink('star')}
               onMouseLeave={() => setHoveredLink(null)}
             >
-              <i className="bi bi-star" /> <span>Star</span>
+              <i className="bi bi-star" /> <span className="hidden xl:inline">Star</span>
             </a>
             <a
               href="#subscribe"
@@ -307,7 +307,7 @@ export default function EcosystemBar() {
               onMouseEnter={() => setHoveredLink('subscribe')}
               onMouseLeave={() => setHoveredLink(null)}
             >
-              <i className="bi bi-envelope" /> <span>Subscribe</span>
+              <i className="bi bi-envelope" /> <span className="hidden xl:inline">Subscribe</span>
             </a>
             {RIGHT_MENUS.map(renderDropdown)}
           </div>
@@ -316,7 +316,7 @@ export default function EcosystemBar() {
         {/* Mobile hamburger */}
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
-          className="xl:hidden"
+          className="lg:hidden"
           style={{ ...S.navLink, padding: 8 }}
           aria-label="Toggle navigation"
         >
@@ -331,7 +331,7 @@ export default function EcosystemBar() {
 
       {/* Mobile expanded */}
       {mobileOpen && (
-        <div className="xl:hidden" style={{ borderTop: '1px solid #dee2e6', backgroundColor: '#fff', padding: '12px 16px' }}>
+        <div className="lg:hidden" style={{ borderTop: '1px solid #dee2e6', backgroundColor: '#fff', padding: '12px 16px' }}>
           {LEFT_MENUS.map((menu) => (
             <div key={menu.id} style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 10, fontWeight: 600, color: '#adb5bd', textTransform: 'uppercase' as const, letterSpacing: 1, marginBottom: 4 }}>
