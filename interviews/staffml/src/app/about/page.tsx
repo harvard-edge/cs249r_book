@@ -41,17 +41,20 @@ export default function AboutPage() {
           <div className="p-5 rounded-xl border border-borderSubtle bg-surface/50">
             <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
               &ldquo;Every semester, students come to my office hours with the same question:
-              how do I prepare for ML interviews? Machine learning is everywhere now — it&apos;s
-              in the systems, the infrastructure, the hardware decisions — and companies expect
-              engineers to reason about all of it. But most students don&apos;t know where to start.
-              They read paper reviews, take courses that aren&apos;t designed for this, or just hope
-              for the best. The resources simply aren&apos;t there.
+              how do I prepare for ML interviews? ML is in everything now — the systems,
+              the infrastructure, the hardware — and companies expect you to reason quantitatively
+              about all of it. How much memory does a 70B model need? Why did your serving
+              latency just spike? But there&apos;s no good way to practice this. Students read
+              papers, take courses that teach concepts but not interview-ready thinking,
+              or just hope for the best.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
-              I built StaffML because I wanted to give students an honest answer when they ask
-              how to prepare. A structured way to build the systems intuition that interviews
-              actually test — and that your career actually needs.
-              It&apos;s free because interview prep shouldn&apos;t depend on what you can afford.&rdquo;
+              I&apos;ve been writing the Machine Learning Systems textbook to teach these ideas,
+              but I&apos;ve come to realize that reading about systems and being ready to reason
+              under pressure are different things. Sometimes the most valuable thing is discovering
+              what you don&apos;t actually know — that&apos;s what motivates you to go learn it.
+              That&apos;s why I built StaffML. It&apos;s free because interview prep shouldn&apos;t
+              depend on what you can afford.&rdquo;
             </p>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-accentBlue/10 border border-accentBlue/20 flex items-center justify-center shrink-0">
