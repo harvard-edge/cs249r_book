@@ -43,6 +43,30 @@ export default function AboutPage() {
             The platform is 100% client-side. No accounts, no tracking, no backend. Your progress lives in your browser
             and can be exported anytime.
           </p>
+
+          {/* Personal note — high up for trust */}
+          <div className="p-5 rounded-xl border border-borderSubtle bg-surface/50 mt-6">
+            <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
+              &ldquo;Students kept asking me: &lsquo;How do I prepare for ML systems interviews?&rsquo;
+              The existing resources were either pure trivia or too abstract. There was nothing that tested
+              the quantitative, physics-grounded reasoning that real interviews demand — the kind where you
+              need to know that HBM3 is 300x slower than an L1 read, and what that means for your serving architecture.
+            </p>
+            <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
+              StaffML is my answer. Every question comes from the textbook, validated against real hardware specs,
+              and designed to build the mental models that matter. It&apos;s free because interview prep shouldn&apos;t
+              be a luxury.&rdquo;
+            </p>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-accentBlue/10 border border-accentBlue/20 flex items-center justify-center shrink-0">
+                <span className="text-sm font-bold text-accentBlue">VR</span>
+              </div>
+              <div>
+                <span className="text-[13px] font-bold text-textPrimary block">Vijay Janapa Reddi</span>
+                <span className="text-[11px] text-textTertiary">Associate Professor, Harvard University</span>
+              </div>
+            </div>
+          </div>
         </section>
 
         {/* ─── Methodology ─── */}
@@ -168,32 +192,6 @@ export default function AboutPage() {
             Every topic in the question bank links back to its source chapter, so you can learn the concept first and then test yourself.
             The thesis: <em>AI is not magic — it is infrastructure, and infrastructure has laws.</em>
           </p>
-        </section>
-
-        {/* ─── Why I Built This ─── */}
-        <section className="mb-10">
-          <div className="p-5 rounded-xl border border-borderSubtle bg-surface/50">
-            <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
-              &ldquo;Students kept asking me: &lsquo;How do I prepare for ML systems interviews?&rsquo;
-              The existing resources were either pure trivia or too abstract. There was nothing that tested
-              the quantitative, physics-grounded reasoning that real interviews demand — the kind where you
-              need to know that HBM3 is 300x slower than an L1 read, and what that means for your serving architecture.
-            </p>
-            <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
-              StaffML is my answer. Every question comes from the textbook, validated against real hardware specs,
-              and designed to build the mental models that matter. It&apos;s free because interview prep shouldn&apos;t
-              be a luxury.&rdquo;
-            </p>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-accentBlue/10 border border-accentBlue/20 flex items-center justify-center shrink-0">
-                <span className="text-sm font-bold text-accentBlue">VR</span>
-              </div>
-              <div>
-                <span className="text-[13px] font-bold text-textPrimary block">Vijay Janapa Reddi</span>
-                <span className="text-[11px] text-textTertiary">Associate Professor, Harvard University</span>
-              </div>
-            </div>
-          </div>
         </section>
 
         {/* ─── Paper ─── */}
