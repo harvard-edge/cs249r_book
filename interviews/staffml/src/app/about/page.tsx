@@ -43,18 +43,19 @@ export default function AboutPage() {
               &ldquo;Every semester, students come to my office hours with the same question:
               how do I prepare for ML systems interviews? Not the modeling side — the
               infrastructure. The compute, the memory, the hardware, the deployment.
-              Companies expect engineers to reason about all of it, often with numbers,
-              on the spot. People read research papers, take courses that cover the concepts
-              but not the practice, or just hope for the best.
+              These interviews expect you to reason about all of it, often with numbers,
+              on the spot. And most people aren&apos;t ready. They read research papers,
+              take courses that cover the concepts but not the practice, or just hope
+              for the best.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
-              I&apos;ve been writing the Machine Learning Systems textbook to teach how ML
-              infrastructure actually works. But a textbook teaches you concepts. It
-              doesn&apos;t tell you whether you can actually apply them under pressure.
-              That&apos;s why I built StaffML. I wanted to give students and engineers
-              a way to find out what they really know, and what they still need to learn.
-              It&apos;s free because interview prep is just another form of education,
-              and education shouldn&apos;t depend on what you can afford.&rdquo;
+              I&apos;ve been writing the Machine Learning Systems textbook to help with this,
+              but a textbook teaches you concepts. It doesn&apos;t tell you whether you can
+              actually apply them under pressure. That&apos;s why I built StaffML. I wanted
+              to give students and engineers a way to find out what they really know, and
+              what they still need to learn. It&apos;s free because interview prep is just
+              another form of education, and education shouldn&apos;t depend on what you
+              can afford.&rdquo;
             </p>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-accentBlue/10 border border-accentBlue/20 flex items-center justify-center shrink-0">
