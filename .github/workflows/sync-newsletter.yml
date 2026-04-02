@@ -1,7 +1,14 @@
 name: '📬 Newsletter · Sync & Deploy'
 
-# Pulls new published emails from Buttondown API, commits them
-# as markdown files, then renders and deploys the newsletter site.
+# Pulls new published emails from Buttondown API, commits them as
+# markdown files, builds the newsletter, and deploys to BOTH sites.
+#
+# Posts are committed to dev only. The newsletter slice is deployed to:
+#   - Dev preview (SSH to dev repo)
+#   - Live site (newsletter/ directory on gh-pages — no full publish needed)
+#
+# Full site publishes (site-publish-live.yml) sync from Buttondown as
+# their first step, so they never regress the newsletter.
 #
 # The sync script is idempotent: it skips posts that already exist,
 # so it only pulls genuinely new content each run.
@@ -9,7 +16,16 @@ name: '📬 Newsletter · Sync & Deploy'
 on:
   schedule:
     - cron: '0 6 * * *'  # Daily at 6am UTC (1am ET) — syncs before morning traffic
-  workflow_dispatch:       # Manual trigger from Actions UI
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: 'Where to deploy'
+        type: choice
+        options:
+          - both
+          - dev
+          - live
+        default: both
 
 permissions:
   contents: write
@@ -43,7 +59,7 @@ jobs:
           BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
         run: python3 .github/scripts/sync_newsletter.py
 
-      - name: 📦 Commit if new posts
+      - name: 📦 Commit new posts to dev
         id: commit
         run: |
           git config user.name "github-actions[bot]"
@@ -56,81 +72,111 @@ jobs:
           else
             COUNT=$(git diff --staged --name-only | wc -l | tr -d ' ')
             git commit -m "chore: sync $COUNT newsletter post(s) from Buttondown [automated]"
-            git push
-            echo "✅ Committed $COUNT new post(s)"
+            git push origin dev
+            echo "✅ Committed $COUNT new post(s) to dev"
             echo "has_new_posts=true" >> "$GITHUB_OUTPUT"
           fi
+
+      # ── Build ─────────────────────────────────────────────────────────────
 
       - name: 🔧 Setup Quarto
         if: steps.commit.outputs.has_new_posts == 'true'
         uses: quarto-dev/quarto-actions/setup@v2
 
-      - name: 🔨 Build unified site
+      - name: 🔨 Build newsletter
         if: steps.commit.outputs.has_new_posts == 'true'
         working-directory: site
         run: |
           quarto render
           touch _build/.nojekyll
-
-      - name: 🔗 Rewrite URLs for dev site
-        if: steps.commit.outputs.has_new_posts == 'true'
-        run: bash .github/scripts/rewrite-dev-urls.sh newsletter site/_build/newsletter
+          echo "✅ Built: $(find _build/newsletter -name '*.html' | wc -l) newsletter pages"
 
       - name: 🔍 Validate build
         if: steps.commit.outputs.has_new_posts == 'true'
         run: |
           if [ ! -f "site/_build/newsletter/index.html" ]; then
-            echo "❌ CRITICAL: newsletter/index.html missing. Aborting deployment."
-            exit 1
-          fi
-          echo "✅ Site built: $(find site/_build/newsletter -name '*.html' | wc -l) newsletter pages"
-
-      - name: 🚀 Deploy to Dev Site via SSH
-        if: steps.commit.outputs.has_new_posts == 'true'
-        env:
-          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
-        run: |
-          echo "🔐 Starting ssh-agent..."
-          eval "$(ssh-agent -s)"
-          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
-
-          mkdir -p ~/.ssh
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-
-          git config --global user.email "actions@github.com"
-          git config --global user.name "GitHub Actions"
-
-          echo "🔄 Cloning dev preview repository..."
-          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
-          cd target-repo
-
-          echo "🧹 Cleaning newsletter directory..."
-          rm -rf newsletter
-          mkdir -p newsletter
-
-          echo "🚚 Copying newsletter site content..."
-          cp -r "${{ github.workspace }}/site/_build/newsletter/." newsletter/
-
-          # Copy shared site_libs for CSS/JS references
-          cp -r "${{ github.workspace }}/site/_build/site_libs" . 2>/dev/null || true
-
-          if [ ! -f "newsletter/index.html" ]; then
             echo "❌ CRITICAL: newsletter/index.html missing. Aborting."
             exit 1
           fi
 
-          echo "📦 Committing and pushing..."
-          git add .
-          git commit -m "📬 Deploy Newsletter dev to /newsletter/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+      # ── Deploy to Dev Preview ─────────────────────────────────────────────
 
-          # Retry push with rebase to handle concurrent deploys
+      - name: 🚀 Deploy to Dev Site
+        if: >-
+          steps.commit.outputs.has_new_posts == 'true' &&
+          (inputs.deploy_target == 'dev' || inputs.deploy_target == 'both' || inputs.deploy_target == '')
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          # Rewrite URLs for dev site prefix
+          bash .github/scripts/rewrite-dev-urls.sh newsletter site/_build/newsletter
+
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+          mkdir -p ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+          cd target-repo
+
+          rm -rf newsletter && mkdir -p newsletter
+          cp -r "${{ github.workspace }}/site/_build/newsletter/." newsletter/
+          cp -r "${{ github.workspace }}/site/_build/site_libs" . 2>/dev/null || true
+
+          [ -f "newsletter/index.html" ] || { echo "❌ newsletter/index.html missing"; exit 1; }
+
+          git add .
+          git commit -m "📬 Deploy Newsletter dev from ${{ github.sha }}" --allow-empty || true
+
           for i in 1 2 3; do
-            if git push origin main 2>/dev/null; then
-              echo "✅ Push succeeded on attempt $i"
-              break
-            fi
-            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git push origin main 2>/dev/null && break
             git pull --rebase origin main || true
           done
+          echo "✅ Newsletter deployed to dev preview"
 
-          echo "✅ Newsletter site deployed to dev preview"
+      # ── Deploy to Live Site ───────────────────────────────────────────────
+      # Only touches the newsletter/ directory on gh-pages.
+      # All other live content (book, kits, etc.) is untouched.
+
+      - name: 🔨 Rebuild for live (clean URLs)
+        if: >-
+          steps.commit.outputs.has_new_posts == 'true' &&
+          (inputs.deploy_target == 'live' || inputs.deploy_target == 'both' || inputs.deploy_target == '')
+        working-directory: site
+        run: |
+          # Dev deploy rewrites URLs in-place, so re-render for clean live URLs
+          quarto render
+          touch _build/.nojekyll
+
+      - name: 🚀 Deploy to Live Site (gh-pages)
+        if: >-
+          steps.commit.outputs.has_new_posts == 'true' &&
+          (inputs.deploy_target == 'live' || inputs.deploy_target == 'both' || inputs.deploy_target == '')
+        run: |
+          [ -f "site/_build/newsletter/index.html" ] || { echo "❌ newsletter/index.html missing"; exit 1; }
+
+          rm -rf gh-pages-repo
+          git clone --depth=1 --branch=gh-pages \
+            https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
+            gh-pages-repo
+          cd gh-pages-repo
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Only replace the newsletter directory — leave everything else alone
+          rm -rf newsletter
+          cp -r "${{ github.workspace }}/site/_build/newsletter" newsletter
+          cp -r "${{ github.workspace }}/site/_build/site_libs" . 2>/dev/null || true
+          touch .nojekyll
+
+          git add .
+          git commit -m "📬 Auto-sync newsletter to live from ${{ github.sha }}" --allow-empty || true
+
+          for i in 1 2 3; do
+            git push origin gh-pages 2>/dev/null && break
+            git pull --rebase origin gh-pages || true
+          done
+          echo "✅ Newsletter deployed to mlsysbook.ai/newsletter/"
