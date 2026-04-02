@@ -10,6 +10,7 @@ import { Question, cleanScenario, checkNapkinMath, extractFinalNumber, NapkinRes
 import { saveAttempt, recordActivity, updateSRCard } from "@/lib/progress";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
+import { track } from "@/lib/analytics";
 import { useToast } from "@/components/Toast";
 import HardwareRef from "@/components/HardwareRef";
 
@@ -40,6 +41,7 @@ export default function PlansPage() {
     const firstUncompleted = qs.findIndex(q => !progress.completedIds.includes(q.id));
     setCurrentIdx(firstUncompleted >= 0 ? firstUncompleted : 0);
     resetQuestionState();
+    track({ type: 'plan_started', planId: plan.id });
   };
 
   const resetQuestionState = () => {
@@ -97,6 +99,7 @@ export default function PlansPage() {
       resetQuestionState();
     } else {
       showToast({ type: 'success', title: 'Plan Complete!', description: `Finished ${activePlan.title}` });
+      track({ type: 'plan_completed', planId: activePlan.id });
       setActivePlan(null);
     }
   };
