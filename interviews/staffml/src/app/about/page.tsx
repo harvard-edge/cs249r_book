@@ -41,7 +41,7 @@ export default function AboutPage() {
           <div className="p-5 rounded-xl border border-borderSubtle bg-surface/50">
             <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
               &ldquo;Every semester, students come to my office hours with the same question:
-              how do I prepare for ML systems interviews? Not the modeling side — the
+              how do I prepare for ML interviews? Not the modeling side — the
               infrastructure. The compute, the memory, the hardware, the deployment.
               These interviews expect you to reason about all of it, often with numbers,
               on the spot. And most people aren&apos;t ready. They read research papers,
