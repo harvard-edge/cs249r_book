@@ -98,20 +98,25 @@ const RIGHT_MENUS: MenuGroup[] = [
 
 // ─── Styles matching Bootstrap 5 navbar computed values ────
 
+// Colors extracted from Quarto's compiled Bootstrap CSS
+const ACCENT = '#a51c30';       // --bs-navbar-active-color
+const ACCENT_HOVER = 'rgba(165, 28, 48, 0.8)'; // --bs-navbar-hover-color
+const NAV_COLOR = '#545556';    // --bs-navbar-color: rgb(84.32, 84.66, 85)
+const BRAND_COLOR = '#545556';  // --bs-navbar-brand-color
+
 const S = {
   nav: {
     backgroundColor: '#fff',
     borderBottom: '1px solid #dee2e6',
-    padding: '0 16px',
+    padding: '8px 16px',  // --bs-navbar-padding-y: 0.5rem
     position: 'sticky' as const,
     top: 0,
     zIndex: 60,
-    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-    fontSize: 16,
+    fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    fontSize: 16,  // --bs-body-font-size: 1rem
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 62,
     flexWrap: 'wrap' as const,
   },
   brand: {
@@ -119,15 +124,16 @@ const S = {
     alignItems: 'center',
     gap: 8,
     textDecoration: 'none',
-    color: '#333',
-    fontSize: 20,
-    fontWeight: 600,
+    color: BRAND_COLOR,
+    fontSize: 20,  // --bs-navbar-brand-font-size: 1.25rem
+    fontWeight: 400,  // Bootstrap default (no bold on brand)
     whiteSpace: 'nowrap' as const,
+    marginRight: 16,  // --bs-navbar-brand-margin-end: 1rem
   },
   navLink: {
-    color: '#6c757d',
+    color: NAV_COLOR,
     textDecoration: 'none',
-    padding: '8px 12px',
+    padding: '8px 8px',  // --bs-navbar-nav-link-padding-x: 0.5rem
     fontSize: 16,
     fontWeight: 400,
     cursor: 'pointer',
@@ -200,12 +206,12 @@ export default function EcosystemBar() {
 
   const linkStyle = (id: string) => ({
     ...S.navLink,
-    color: openMenu === id || hoveredLink === id ? '#a31f34' : '#6c757d',
+    color: openMenu === id || hoveredLink === id ? ACCENT : NAV_COLOR,
   });
 
   const itemStyle = (key: string, active?: boolean) => ({
     ...S.dropdownItem,
-    color: active ? '#a31f34' : hoveredItem === key ? '#a31f34' : '#212529',
+    color: active ? ACCENT : hoveredItem === key ? ACCENT : '#212529',
     fontWeight: active ? 500 : 400,
     backgroundColor: hoveredItem === key ? '#f8f9fa' : 'transparent',
   });
@@ -338,7 +344,7 @@ export default function EcosystemBar() {
                   style={{
                     display: 'flex', alignItems: 'center', gap: 8,
                     padding: '4px 0', fontSize: 15, textDecoration: 'none',
-                    color: item.active ? '#a31f34' : '#6c757d',
+                    color: item.active ? '#a51c30' : '#6c757d',
                     fontWeight: item.active ? 500 : 400,
                   }}
                   {...(item.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
@@ -351,19 +357,19 @@ export default function EcosystemBar() {
           ))}
           <div style={{ borderTop: '1px solid #dee2e6', paddingTop: 8, display: 'flex', gap: 16 }}>
             <a href="https://opencollective.com/mlsysbook" target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 15, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+              style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
               <i className="bi bi-heart" style={{ fontSize: 14 }} /> Support
             </a>
             <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 15, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+              style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
               <i className="bi bi-star" style={{ fontSize: 14 }} /> Star
             </a>
             <a href="#subscribe"
-              style={{ fontSize: 15, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+              style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
               <i className="bi bi-envelope" style={{ fontSize: 14 }} /> Subscribe
             </a>
             <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 15, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+              style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
               <i className="bi bi-github" style={{ fontSize: 14 }} /> GitHub
             </a>
           </div>
