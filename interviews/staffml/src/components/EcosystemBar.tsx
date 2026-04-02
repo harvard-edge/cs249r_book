@@ -124,9 +124,9 @@ const S = {
     alignItems: 'center',
     gap: 8,
     textDecoration: 'none',
-    color: BRAND_COLOR,
+    color: ACCENT,  // Brand text is accent color in Quarto theme
     fontSize: 20,  // --bs-navbar-brand-font-size: 1.25rem
-    fontWeight: 400,  // Bootstrap default (no bold on brand)
+    fontWeight: 400,  // Bootstrap default
     whiteSpace: 'nowrap' as const,
     marginRight: 16,  // --bs-navbar-brand-margin-end: 1rem
   },
@@ -226,9 +226,11 @@ export default function EcosystemBar() {
       >
         {menu.icon && <i className={`bi ${menu.icon}`} />}
         <span>{menu.label}</span>
-        <svg width="10" height="10" viewBox="0 0 10 10" style={{ marginLeft: 2, opacity: 0.5 }}>
-          <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.2" fill="none" />
-        </svg>
+        <span style={{
+          display: 'inline-block', marginLeft: 4,
+          borderTop: '4px solid currentColor', borderRight: '4px solid transparent', borderLeft: '4px solid transparent',
+          opacity: 0.6, verticalAlign: '1px',
+        }} />
       </button>
       {openMenu === menu.id && (
         <div style={{ ...S.dropdown, ...(menu.alignEnd ? S.dropdownEnd : {}) }}>
