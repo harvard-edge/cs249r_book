@@ -40,17 +40,17 @@ export default function AboutPage() {
         <section className="mb-10">
           <div className="p-5 rounded-xl border border-borderSubtle bg-surface/50">
             <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
-              &ldquo;Every semester, students come to my office hours with the same worry:
-              &lsquo;I&apos;ve been grinding LeetCode for months, but the ML systems interview is next week
-              and I have no idea how to prepare.&rsquo; They&apos;re right to be worried — coding alone
-              won&apos;t cut it. These interviews test whether you can reason about real systems under
-              real constraints. Can you estimate how much memory your model needs?
-              Can you explain why your serving latency just doubled?
+              &ldquo;Every semester, students come to my office hours with the same question:
+              how do I prepare for ML interviews? Machine learning is everywhere now — it&apos;s
+              in the systems, the infrastructure, the hardware decisions — and companies expect
+              engineers to reason about all of it. But most students don&apos;t know where to start.
+              They read paper reviews, take courses that aren&apos;t designed for this, or just hope
+              for the best. The resources simply aren&apos;t there.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
-              I built StaffML because I wanted to give students an honest answer when they ask how to prepare.
-              Not a reading list. Not flashcards. A structured way to build the systems intuition that
-              interviews actually test — and that your career actually needs.
+              I built StaffML because I wanted to give students an honest answer when they ask
+              how to prepare. A structured way to build the systems intuition that interviews
+              actually test — and that your career actually needs.
               It&apos;s free because interview prep shouldn&apos;t depend on what you can afford.&rdquo;
             </p>
             <div className="flex items-center gap-3">
@@ -59,7 +59,7 @@ export default function AboutPage() {
               </div>
               <div>
                 <span className="text-[13px] font-bold text-textPrimary block">Vijay Janapa Reddi</span>
-                <span className="text-[11px] text-textTertiary">Associate Professor, Harvard University</span>
+                <span className="text-[11px] text-textTertiary">Professor, Harvard University</span>
               </div>
             </div>
           </div>
