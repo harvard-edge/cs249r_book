@@ -53,6 +53,8 @@ export default function AboutPage() {
               but I&apos;ve come to realize that reading about systems and being ready to reason
               under pressure are different things. Sometimes the most valuable thing is discovering
               what you don&apos;t actually know — that&apos;s what motivates you to go learn it.
+            </p>
+            <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
               That&apos;s why I built StaffML. It&apos;s free because interview prep is
               just another form of education — and education shouldn&apos;t depend
               on what you can afford.&rdquo;
