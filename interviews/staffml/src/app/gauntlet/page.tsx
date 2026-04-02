@@ -199,6 +199,9 @@ export default function GauntletPage() {
         })),
         completedAt: Date.now(),
       });
+      const totalScore = newScores.reduce((a, b) => a + b, 0);
+      const pctScore = Math.round((totalScore / (questions.length * 3)) * 100);
+      track({ type: 'gauntlet_completed', track: selectedTrack, level: selectedLevel, pct: pctScore, questionCount: questions.length });
       setPhase("results");
     }
   };

@@ -9,6 +9,7 @@ import {
   type Topic,
 } from "@/lib/taxonomy";
 import { getTracks, searchQuestions, type Question } from "@/lib/corpus";
+import { track as trackAnalytics } from "@/lib/analytics";
 import { Cloud, Smartphone, Cpu, CircuitBoard } from "lucide-react";
 import { getAttempts, getStreakData } from "@/lib/progress";
 import { FilterPill, AreaOverview, ExpandedArea, SearchResults, TopicDetail } from "@/components/vault";
@@ -54,6 +55,20 @@ export default function HomePage() {
     if (selectedTrack) results = results.filter(q => q.track === selectedTrack);
     return results;
   }, [query, selectedTrack]);
+
+  // Track search queries (debounced — only fires when query settles for 1s)
+  useEffect(() => {
+    if (!query.trim() || query.trim().length < 2) return;
+    const timer = setTimeout(() => {
+      trackAnalytics({
+        type: 'search_query',
+        query: query.trim().toLowerCase().slice(0, 50),
+        topicResults: searchResults?.length ?? 0,
+        questionResults: questionSearchResults.length,
+      });
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [query, searchResults, questionSearchResults]);
 
   // Filter areas by selected track
   const filteredAreas = useMemo(() => {

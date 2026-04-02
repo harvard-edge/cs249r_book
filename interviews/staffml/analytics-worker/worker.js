@@ -30,13 +30,15 @@ const ALLOWED_ORIGINS = [
 ];
 
 const VALID_EVENT_TYPES = new Set([
+  'session_start',
   'question_scored', 'question_skipped', 'question_reported',
   'question_thumbs', 'question_difficulty_feedback', 'question_contributed',
-  'answer_response_time',
+  'answer_response_time', 'answer_revealed',
   'gauntlet_started', 'gauntlet_completed', 'gauntlet_abandoned',
   'plan_started', 'plan_completed', 'daily_completed',
-  'page_view', 'answer_revealed', 'improvement_suggested',
-  'progress_exported', 'progress_imported',
+  'page_view', 'search_query',
+  'star_gate_shown', 'star_gate_verified',
+  'improvement_suggested', 'progress_exported', 'progress_imported',
 ]);
 
 const MAX_EVENTS_PER_REQUEST = 100;
@@ -114,6 +116,8 @@ async function handleEvents(request, env, corsHeaders) {
       'questionCount', 'pct', 'questionsAnswered', 'planId',
       'page', 'category', '_ts', '_sid',
       'value', 'perceived', 'seconds', 'napkinGrade',
+      'hadUserAnswer', 'isReturning', 'screenWidth',
+      'query', 'topicResults', 'questionResults',
     ];
     for (const field of allowedFields) {
       if (event[field] !== undefined) clean[field] = event[field];

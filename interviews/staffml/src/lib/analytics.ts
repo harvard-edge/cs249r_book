@@ -13,21 +13,32 @@ const ANALYTICS_ENDPOINT = process.env.NEXT_PUBLIC_ANALYTICS_URL || '';
 // ─── Event Types ────────────────────────────────
 
 export type AnalyticsEvent =
-  | { type: 'question_scored'; topic: string; zone: string; level: string; track: string; score: number }
+  // Session
+  | { type: 'session_start'; isReturning: boolean; screenWidth: number }
+  // Question lifecycle
+  | { type: 'question_scored'; questionId: string; topic: string; zone: string; level: string; track: string; score: number }
   | { type: 'question_skipped'; topic: string; level: string }
   | { type: 'question_reported'; questionId: string; category?: string }
   | { type: 'question_thumbs'; questionId: string; topic: string; level: string; value: 'up' | 'down' }
   | { type: 'question_difficulty_feedback'; questionId: string; topic: string; level: string; perceived: 'too_easy' | 'about_right' | 'too_hard' }
   | { type: 'question_contributed'; topic: string; track: string }
-  | { type: 'answer_response_time'; questionId: string; topic: string; level: string; seconds: number; napkinGrade?: string }
+  | { type: 'answer_response_time'; questionId: string; topic: string; level: string; seconds: number; napkinGrade?: string; hadUserAnswer: boolean }
+  | { type: 'answer_revealed'; topic: string; zone: string; hadUserAnswer: boolean }
+  // Gauntlet
   | { type: 'gauntlet_started'; track: string; level: string; questionCount: number }
   | { type: 'gauntlet_completed'; track: string; level: string; pct: number; questionCount: number }
   | { type: 'gauntlet_abandoned'; track: string; level: string; questionsAnswered: number }
+  // Plans
   | { type: 'plan_started'; planId: string }
   | { type: 'plan_completed'; planId: string }
   | { type: 'daily_completed' }
+  // Navigation
   | { type: 'page_view'; page: string }
-  | { type: 'answer_revealed'; topic: string; zone: string }
+  | { type: 'search_query'; query: string; topicResults: number; questionResults: number }
+  // Star gate
+  | { type: 'star_gate_shown' }
+  | { type: 'star_gate_verified' }
+  // Feedback
   | { type: 'improvement_suggested'; questionId: string }
   | { type: 'progress_exported' }
   | { type: 'progress_imported' };

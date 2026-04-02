@@ -244,6 +244,7 @@ function PracticePage() {
     // Star gate check
     if (shouldShowGate()) {
       setShowStarGate(true);
+      track({ type: 'star_gate_shown' });
       return;
     }
     incrementReveals();
@@ -274,8 +275,9 @@ function PracticePage() {
 
     // Track answer reveal with response time and napkin grade
     if (current) {
+      const hadUserAnswer = userAnswer.trim().length > 0;
       const responseTimeSec = Math.round((Date.now() - questionShownAt.current) / 1000);
-      track({ type: 'answer_revealed', topic: current.topic, zone: current.zone });
+      track({ type: 'answer_revealed', topic: current.topic, zone: current.zone, hadUserAnswer });
       if (responseTimeSec > 2) {
         track({
           type: 'answer_response_time',
@@ -284,6 +286,7 @@ function PracticePage() {
           level: current.level,
           seconds: responseTimeSec,
           napkinGrade,
+          hadUserAnswer,
         });
       }
     }
@@ -308,7 +311,7 @@ function PracticePage() {
       });
       // Update spaced repetition card + streak + analytics
       updateSRCard(current.id, finalScore);
-      track({ type: 'question_scored', topic: current.topic, zone: current.zone, level: current.level, track: current.track, score: finalScore });
+      track({ type: 'question_scored', questionId: current.id, topic: current.topic, zone: current.zone, level: current.level, track: current.track, score: finalScore });
       const activity = recordActivity();
       if (activity.newMilestone) {
         showToast({
@@ -943,7 +946,7 @@ function PracticePage() {
 
       {/* Star gate overlay */}
       {showStarGate && (
-        <StarGate onVerified={() => setShowStarGate(false)} />
+        <StarGate onVerified={() => { setShowStarGate(false); track({ type: 'star_gate_verified' }); }} />
       )}
     </div>
   );
