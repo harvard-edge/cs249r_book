@@ -48,9 +48,10 @@ export default function AboutPage() {
               but not the practice, or just hope for the best.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
-              I&apos;ve been writing the Machine Learning Systems textbook to teach these ideas,
-              but I&apos;ve come to realize that reading about systems and helping people
-              prepare to reason about complex systems under pressure are different things. Sometimes the most valuable thing is discovering
+              I&apos;ve been writing the Machine Learning Systems textbook to teach
+              how ML infrastructure actually works, but I&apos;ve come to realize that reading
+              about systems and helping people prepare to reason about complex systems
+              under pressure are different things. Sometimes the most valuable thing is discovering
               what you don&apos;t actually know. That&apos;s what motivates you to go learn it.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
