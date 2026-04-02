@@ -84,6 +84,44 @@ export function getQuestionsByFilter(filters: {
   });
 }
 
+/** Full-text search across question titles, scenarios, answers, and napkin math */
+export function searchQuestions(query: string, limit = 50): Question[] {
+  const q = query.toLowerCase().trim();
+  if (!q) return [];
+
+  const terms = q.split(/\s+/).filter(t => t.length >= 2);
+  if (terms.length === 0) return [];
+
+  const scored: { question: Question; score: number }[] = [];
+
+  for (const question of questions) {
+    let score = 0;
+    const title = question.title.toLowerCase();
+    const scenario = question.scenario.toLowerCase();
+    const answer = question.details.realistic_solution?.toLowerCase() || '';
+    const napkin = question.details.napkin_math?.toLowerCase() || '';
+    const mistake = question.details.common_mistake?.toLowerCase() || '';
+
+    for (const term of terms) {
+      // Title matches are most valuable
+      if (title.includes(term)) score += 10;
+      if (scenario.includes(term)) score += 5;
+      if (answer.includes(term)) score += 3;
+      if (napkin.includes(term)) score += 2;
+      if (mistake.includes(term)) score += 1;
+    }
+
+    if (score > 0) {
+      scored.push({ question, score });
+    }
+  }
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(s => s.question);
+}
+
 export function getQuestionsByTopic(topicId: string, level?: string): Question[] {
   return questions.filter((q) => {
     if (q.topic !== topicId) return false;

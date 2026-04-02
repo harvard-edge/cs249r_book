@@ -8,7 +8,7 @@ import {
   getAreas, getVaultStats, getAreaStyle, getAreaForTopic, searchTopics,
   type Topic,
 } from "@/lib/taxonomy";
-import { getTracks } from "@/lib/corpus";
+import { getTracks, searchQuestions, type Question } from "@/lib/corpus";
 import { Cloud, Smartphone, Cpu, CircuitBoard } from "lucide-react";
 import { getAttempts, getStreakData } from "@/lib/progress";
 import { FilterPill, AreaOverview, ExpandedArea, SearchResults, TopicDetail } from "@/components/vault";
@@ -42,8 +42,16 @@ export default function HomePage() {
 
   const searchResults = useMemo(() => {
     if (!query.trim()) return null;
-    let results = searchTopics(query);
-    if (selectedTrack) results = results.filter(t => t.tracks.includes(selectedTrack));
+    let topicResults = searchTopics(query);
+    if (selectedTrack) topicResults = topicResults.filter(t => t.tracks.includes(selectedTrack));
+    return topicResults;
+  }, [query, selectedTrack]);
+
+  // Full-text search across question content (scenarios, answers, napkin math)
+  const questionSearchResults = useMemo(() => {
+    if (!query.trim() || query.trim().length < 2) return [];
+    let results = searchQuestions(query, 30);
+    if (selectedTrack) results = results.filter(q => q.track === selectedTrack);
     return results;
   }, [query, selectedTrack]);
 
@@ -250,8 +258,38 @@ export default function HomePage() {
         <div className="flex-1 overflow-auto px-6 py-6">
           <div className="max-w-5xl mx-auto">
             {searchResults ? (
-              <SearchResults results={searchResults} query={query}
-                selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
+              <>
+                <SearchResults results={searchResults} query={query}
+                  selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
+                {/* Full-text question matches */}
+                {questionSearchResults.length > 0 && (
+                  <div className="mt-8">
+                    <p className="text-[14px] text-textSecondary mb-4">
+                      {questionSearchResults.length} question{questionSearchResults.length !== 1 ? 's' : ''} mentioning &ldquo;{query}&rdquo;
+                    </p>
+                    <div className="space-y-2">
+                      {questionSearchResults.map(q => (
+                        <Link
+                          key={q.id}
+                          href={`/practice?q=${q.id}`}
+                          className="block p-3 rounded-lg border border-borderSubtle bg-surface/50 hover:border-borderHighlight hover:bg-surfaceHover transition-all group"
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[10px] font-mono text-textTertiary uppercase px-1.5 py-0.5 rounded border border-border bg-background">{q.level}</span>
+                            <span className="text-[10px] font-mono text-textTertiary capitalize">{q.competency_area}</span>
+                            <span className="text-[10px] font-mono text-textMuted">{q.track}</span>
+                          </div>
+                          <p className="text-sm font-medium text-textPrimary group-hover:text-accentBlue transition-colors">{q.title}</p>
+                          <p className="text-[12px] text-textTertiary mt-1 line-clamp-2">{q.scenario.slice(0, 150)}{q.scenario.length > 150 ? '...' : ''}</p>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {searchResults.length === 0 && questionSearchResults.length === 0 && (
+                  <p className="text-sm text-textTertiary py-8 text-center">No topics or questions match &ldquo;{query}&rdquo;</p>
+                )}
+              </>
             ) : singleExpandedArea ? (
               <ExpandedArea area={singleExpandedArea}
                 selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
