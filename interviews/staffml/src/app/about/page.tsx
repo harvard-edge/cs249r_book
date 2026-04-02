@@ -48,14 +48,16 @@ export default function AboutPage() {
               take courses that cover the concepts but not the practice, or just hope
               for the best.
             </p>
-            <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
+            <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
               I&apos;ve been writing the Machine Learning Systems textbook to help with this,
               but a textbook teaches you concepts. It doesn&apos;t tell you whether you can
               actually apply them under pressure. That&apos;s why I built StaffML. I wanted
               to give students and engineers a way to find out what they really know, and
-              what they still need to learn. It&apos;s free because interview prep is just
-              another form of education, and education shouldn&apos;t depend on what you
-              can afford.&rdquo;
+              what they still need to learn.
+            </p>
+            <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
+              It&apos;s free because interview prep is just another form of education,
+              and education shouldn&apos;t depend on what you can afford.&rdquo;
             </p>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-accentBlue/10 border border-accentBlue/20 flex items-center justify-center shrink-0">
