@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Nav from "@/components/Nav";
+import EcosystemBar from "@/components/EcosystemBar";
 import Providers from "@/components/Providers";
 
 export const metadata: Metadata = {
@@ -50,6 +51,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-screen flex flex-col bg-background selection:bg-accentBlue/30 selection:text-textPrimary">
         <Providers>
+          <EcosystemBar />
           <Nav />
           <main className="flex-1 flex flex-col">{children}</main>
         </Providers>
