@@ -89,6 +89,7 @@ const RIGHT_MENUS: MenuGroup[] = [
   {
     id: "github", label: "GitHub", icon: "bi-github", alignEnd: true, items: [
       { icon: "bi-chat", label: "Discussions", href: "https://github.com/harvard-edge/cs249r_book/discussions", external: true },
+      { icon: "bi-pencil", label: "Edit this page", href: "https://github.com/harvard-edge/cs249r_book", external: true },
       { icon: "bi-bug", label: "Report an issue", href: "https://github.com/harvard-edge/cs249r_book/issues/new", external: true },
       { icon: "bi-code", label: "View source", href: "https://github.com/harvard-edge/cs249r_book", external: true },
     ]
@@ -292,6 +293,14 @@ export default function EcosystemBar() {
             >
               <i className="bi bi-star" /> <span>Star</span>
             </a>
+            <a
+              href="#subscribe"
+              style={linkStyle('subscribe')}
+              onMouseEnter={() => setHoveredLink('subscribe')}
+              onMouseLeave={() => setHoveredLink(null)}
+            >
+              <i className="bi bi-envelope" /> <span>Subscribe</span>
+            </a>
             {RIGHT_MENUS.map(renderDropdown)}
           </div>
         </div>
@@ -347,6 +356,10 @@ export default function EcosystemBar() {
             <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer"
               style={{ fontSize: 13, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
               <i className="bi bi-star" style={{ fontSize: 12 }} /> Star
+            </a>
+            <a href="#subscribe"
+              style={{ fontSize: 13, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <i className="bi bi-envelope" style={{ fontSize: 12 }} /> Subscribe
             </a>
             <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer"
               style={{ fontSize: 13, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
