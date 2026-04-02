@@ -170,6 +170,51 @@ export default function AboutPage() {
           </p>
         </section>
 
+        {/* ─── Why I Built This ─── */}
+        <section className="mb-10">
+          <div className="p-5 rounded-xl border border-borderSubtle bg-surface/50">
+            <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
+              &ldquo;Students kept asking me: &lsquo;How do I prepare for ML systems interviews?&rsquo;
+              The existing resources were either pure trivia or too abstract. There was nothing that tested
+              the quantitative, physics-grounded reasoning that real interviews demand — the kind where you
+              need to know that HBM3 is 300x slower than an L1 read, and what that means for your serving architecture.
+            </p>
+            <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
+              StaffML is my answer. Every question comes from the textbook, validated against real hardware specs,
+              and designed to build the mental models that matter. It&apos;s free because interview prep shouldn&apos;t
+              be a luxury.&rdquo;
+            </p>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-accentBlue/10 border border-accentBlue/20 flex items-center justify-center shrink-0">
+                <span className="text-sm font-bold text-accentBlue">VR</span>
+              </div>
+              <div>
+                <span className="text-[13px] font-bold text-textPrimary block">Vijay Janapa Reddi</span>
+                <span className="text-[11px] text-textTertiary">Associate Professor, Harvard University</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ─── Paper ─── */}
+        <section className="mb-10">
+          <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
+            <BookOpen className="w-4.5 h-4.5 text-accentAmber" /> Research
+          </h2>
+          <p className="text-[14px] text-textSecondary leading-relaxed mb-3">
+            The methodology behind StaffML — the ikigai zone model, 79-topic taxonomy, and IRT-based
+            difficulty calibration — is documented in an accompanying research paper.
+          </p>
+          <p className="text-[12px] text-textTertiary font-mono mb-3">
+            Reddi, V.J. (2026). &ldquo;StaffML: A Physics-Grounded Framework for ML Systems Interview Preparation.&rdquo;
+          </p>
+          {/*
+            TODO: Replace with actual paper link when published:
+            <a href="/paper.pdf" className="...">Download Paper (PDF)</a>
+          */}
+          <span className="text-[11px] text-textTertiary italic">Paper link coming soon.</span>
+        </section>
+
         {/* ─── Open Source ─── */}
         <section className="mb-12">
           <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
