@@ -53,8 +53,9 @@ export default function AboutPage() {
               but I&apos;ve come to realize that reading about systems and being ready to reason
               under pressure are different things. Sometimes the most valuable thing is discovering
               what you don&apos;t actually know — that&apos;s what motivates you to go learn it.
-              That&apos;s why I built StaffML. It&apos;s free because interview prep shouldn&apos;t
-              depend on what you can afford.&rdquo;
+              That&apos;s why I built StaffML. It&apos;s free because interview prep is
+              just another form of education — and education shouldn&apos;t depend
+              on what you can afford.&rdquo;
             </p>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-accentBlue/10 border border-accentBlue/20 flex items-center justify-center shrink-0">
