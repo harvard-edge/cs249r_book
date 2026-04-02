@@ -290,3 +290,28 @@ The paper should read as if the methodology was always principled:
 The iterative discovery process becomes the "validation" section,
 not the "methods" section. The reader sees the clean derivation;
 the appendix shows the validation evidence.
+
+---
+
+## Mock NeurIPS Review Feedback (Reviewer 1 — Psychometrics)
+
+### Score: Weak Reject (Novelty 5, Quality 4, Significance 6, Clarity 7)
+
+### Critical fixes needed:
+1. **Bloom critique softened** — ✅ FIXED (now says "complements" not "departs from")
+2. **Internal inconsistencies** — ✅ FIXED (track %, zone count in captions)
+3. **LLM generation transparency** — ✅ FIXED (95% ratio + 4.2% error rate disclosed)
+4. **Scope statement** — ✅ FIXED (abstract now scopes to "technical systems reasoning")
+
+### Still needed:
+- Add MMLU, BIG-Bench, HumanEval, AERA testing standards to references
+- Tone down ikigai framing (from "novel model" to "principled organization")
+- Address three-skill intersection omission with reasoning
+- Reduce self-citation concentration (frame ecosystem as strength not dependency)
+- **Pilot study** — essential for moving from Weak Reject to Accept
+
+### Key quote:
+"With [pilot study + inter-rater reliability + inconsistency fixes], this could be 
+a strong NeurIPS D&B submission. In its current form, it reads as a well-engineered 
+system paper that has not yet produced the empirical evidence that a Datasets & 
+Benchmarks venue demands."
