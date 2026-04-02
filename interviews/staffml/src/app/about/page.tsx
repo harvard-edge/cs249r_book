@@ -47,16 +47,14 @@ export default function AboutPage() {
               on the spot. People read research papers, take courses that cover the concepts
               but not the practice, or just hope for the best.
             </p>
-            <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
-              I&apos;ve been writing the Machine Learning Systems textbook to teach
-              how ML infrastructure actually works. But teaching concepts and helping people
-              prepare to reason about complex systems under pressure are different things. Sometimes the most valuable thing is discovering
-              what you don&apos;t actually know. That&apos;s what motivates you to go learn it.
-            </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
-              That&apos;s why I built StaffML. I wanted to give students and engineers a structured
-              way to find those gaps and prepare. It&apos;s free because interview prep is just another form
-              of education, and education shouldn&apos;t depend on what you can afford.&rdquo;
+              I&apos;ve been writing the Machine Learning Systems textbook to teach how ML
+              infrastructure actually works. But a textbook teaches you concepts. It
+              doesn&apos;t tell you whether you can actually apply them under pressure.
+              That&apos;s why I built StaffML. I wanted to give students and engineers
+              a way to find out what they really know, and what they still need to learn.
+              It&apos;s free because interview prep is just another form of education,
+              and education shouldn&apos;t depend on what you can afford.&rdquo;
             </p>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-accentBlue/10 border border-accentBlue/20 flex items-center justify-center shrink-0">
