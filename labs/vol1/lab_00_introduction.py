@@ -477,6 +477,28 @@ def _(mo, check1, check2):
             {_explanation}
         </div>
         """),
+        mo.callout(mo.md(
+            "**INFEASIBLE — Cloud inference violates physics.**\n\n"
+            "Distance: 2,000 km | Speed in fiber: ~200,000 km/s | "
+            "Round-trip: 2 × 2,000 / 200,000 = **20 ms** | "
+            "AV SLA: 10 ms | **Verdict: physically impossible.** "
+            "No GPU upgrade, no model compression, no software optimization "
+            "can fix this. The model must move to the vehicle."
+        ), kind="danger"),
+        mo.accordion({
+            "Math Peek: Propagation Delay": mo.md("""
+**Formula:**
+$$
+t_{\\text{round-trip}} = \\frac{2d}{c \\cdot n}
+$$
+
+**Variables:**
+- **d**: distance between client and server (km)
+- **c**: speed of light in vacuum (299,792 km/s)
+- **n**: fiber refractive index factor (~0.67)
+- At d = 2,000 km: t = 2 × 2,000 / (299,792 × 0.67) ≈ 20 ms — exceeds 10 ms SLA by 2x
+""")
+        }),
     ])
     return
 
