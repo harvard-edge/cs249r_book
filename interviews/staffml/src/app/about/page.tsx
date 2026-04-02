@@ -41,11 +41,11 @@ export default function AboutPage() {
           <div className="p-5 rounded-xl border border-borderSubtle bg-surface/50">
             <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
               &ldquo;Every semester, students come to my office hours with the same question:
-              how do I prepare for ML interviews? ML is in everything now — the systems,
-              the infrastructure, the hardware — and companies expect you to reason about
-              all of it. But there&apos;s no good way to practice this. Students read papers,
-              take courses that teach concepts but not interview-ready thinking,
-              or just hope for the best.
+              how do I prepare for ML systems interviews? Not the modeling side — the
+              infrastructure. The compute, the memory, the hardware, the deployment.
+              Companies expect engineers to reason about all of it, but there&apos;s no good
+              way to practice. People read papers, take courses that teach concepts but not
+              interview-ready thinking, or just hope for the best.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
               I&apos;ve been writing the Machine Learning Systems textbook to teach these ideas,
