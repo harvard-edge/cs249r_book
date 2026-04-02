@@ -24,6 +24,7 @@ const DURATIONS = [
   { label: "Quick (5 Qs)", questions: 5, minutes: 10 },
   { label: "Standard (10 Qs)", questions: 10, minutes: 20 },
   { label: "Full (15 Qs)", questions: 15, minutes: 35 },
+  { label: "Design (1 deep)", questions: 1, minutes: 15 },
 ];
 
 export default function GauntletPage() {
@@ -139,9 +140,26 @@ export default function GauntletPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [phase, showAnswer]);
 
+  const isDesignMode = selectedDuration === 3; // "Design (1 deep)"
+
   const startGauntlet = useCallback(() => {
     const dur = DURATIONS[selectedDuration];
-    const selected = selectGauntletQuestions(selectedTrack, selectedLevel, dur.questions);
+    let selected: Question[];
+    if (isDesignMode) {
+      // Design challenge: pick 1 question from design/evaluation/realization zones at L5+
+      const designZones = ['design', 'evaluation', 'realization', 'specification', 'mastery'];
+      const designLevels = ['L5', 'L6+'];
+      const pool = getQuestionsByFilter({ track: selectedTrack })
+        .filter(q => designZones.includes(q.zone) && designLevels.includes(q.level));
+      if (pool.length === 0) {
+        // Fallback to any L5+ question
+        selected = selectGauntletQuestions(selectedTrack, 'L5', 1);
+      } else {
+        selected = [pool[Math.floor(Math.random() * pool.length)]];
+      }
+    } else {
+      selected = selectGauntletQuestions(selectedTrack, selectedLevel, dur.questions);
+    }
     if (selected.length === 0) return;
     setQuestions(selected);
     setCurrentIdx(0);
@@ -258,9 +276,11 @@ export default function GauntletPage() {
             </div>
           </div>
 
-          {/* Level selection */}
-          <div className="mb-6">
-            <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-3">Difficulty</label>
+          {/* Level selection — hidden in design mode (always L5+) */}
+          <div className={clsx("mb-6", isDesignMode && "opacity-40 pointer-events-none")}>
+            <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-3">
+              {isDesignMode ? "Difficulty (locked to L5+ for design)" : "Difficulty"}
+            </label>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {levels.map(l => {
                 const def = getLevelDef(l);
@@ -289,8 +309,8 @@ export default function GauntletPage() {
 
           {/* Duration selection */}
           <div className="mb-8">
-            <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-3">Duration</label>
-            <div className="grid grid-cols-3 gap-2">
+            <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-3">Format</label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {DURATIONS.map((d, i) => (
                 <button
                   key={i}
@@ -307,6 +327,11 @@ export default function GauntletPage() {
                 </button>
               ))}
             </div>
+            {isDesignMode && (
+              <p className="text-[11px] text-textTertiary mt-3 leading-relaxed">
+                One deep system design question at L5+ difficulty. Think through architecture, tradeoffs, and constraints — then compare against the model answer.
+              </p>
+            )}
           </div>
 
           {/* Available count + start */}

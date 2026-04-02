@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { computeSummary, getAnalyticsEvents, clearAnalytics, type AnalyticsSummary } from "@/lib/analytics";
-import { getVaultStats } from "@/lib/taxonomy";
+import { getVaultStats, getAreas, getAreaForTopic } from "@/lib/taxonomy";
 
 export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
@@ -72,6 +72,17 @@ export default function DashboardPage() {
           <StatCard label="Issues Reported" value={summary.questionsReported.toString()} icon={Flag} color="red" />
           <StatCard label="Improvements" value={summary.improvementsSuggested.toString()} icon={Lightbulb} color="amber" />
         </div>
+
+        {/* Competency radar chart */}
+        {Object.keys(summary.scoresByTopic).length > 0 && (
+          <div className="mb-8">
+            <SectionLabel icon={Target} label="Competency Radar" />
+            <p className="text-[11px] text-textTertiary mb-3 mt-1">
+              Performance across competency areas. Outer ring = 3/3 (perfect). Inner = 0/3.
+            </p>
+            <CompetencyRadar scoresByTopic={summary.scoresByTopic} />
+          </div>
+        )}
 
         {/* Activity timeline */}
         {recentDays.length > 0 && (
@@ -231,6 +242,101 @@ function SectionLabel({ icon: Icon, label }: { icon: React.ComponentType<{ class
     <div className="flex items-center gap-2">
       <Icon className="w-4 h-4 text-textTertiary" />
       <span className="text-[10px] font-mono text-textTertiary uppercase tracking-widest">{label}</span>
+    </div>
+  );
+}
+
+// ─── Competency Radar ──────────────────────────
+
+const AREA_ORDER = [
+  'compute', 'memory', 'latency', 'architecture', 'optimization',
+  'parallelism', 'networking', 'deployment', 'reliability',
+  'data', 'power', 'precision', 'cross-cutting',
+];
+
+function CompetencyRadar({ scoresByTopic }: {
+  scoresByTopic: Record<string, { total: number; count: number; avg: number }>;
+}) {
+  // Aggregate topics → areas using taxonomy
+  const scoresByArea: Record<string, { total: number; count: number }> = {};
+  for (const [topicId, data] of Object.entries(scoresByTopic)) {
+    const area = getAreaForTopic(topicId);
+    if (!area) continue;
+    if (!scoresByArea[area.id]) scoresByArea[area.id] = { total: 0, count: 0 };
+    scoresByArea[area.id].total += data.total;
+    scoresByArea[area.id].count += data.count;
+  }
+
+  const areas = AREA_ORDER.filter(a => scoresByArea[a]);
+  if (areas.length < 3) return null; // need at least 3 for a polygon
+
+  const cx = 160, cy = 160, maxR = 130;
+  const n = areas.length;
+  const angleStep = (2 * Math.PI) / n;
+
+  // Compute normalized values (0-1, where 1 = score 3/3)
+  const values = areas.map(a => {
+    const d = scoresByArea[a];
+    return d.count > 0 ? d.total / d.count / 3 : 0;
+  });
+
+  // Generate polygon points
+  const toXY = (i: number, r: number) => {
+    const angle = -Math.PI / 2 + i * angleStep;
+    return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+  };
+
+  const dataPoints = values.map((v, i) => toXY(i, v * maxR));
+  const dataPath = dataPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
+
+  // Grid rings at 33%, 66%, 100%
+  const rings = [0.33, 0.66, 1.0];
+
+  return (
+    <div className="flex justify-center">
+      <svg viewBox="0 0 320 320" className="w-full max-w-[320px]">
+        {/* Grid rings */}
+        {rings.map(r => {
+          const pts = Array.from({ length: n }, (_, i) => toXY(i, r * maxR));
+          const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
+          return <path key={r} d={path} fill="none" stroke="var(--border)" strokeWidth="0.5" opacity={0.5} />;
+        })}
+
+        {/* Axis lines */}
+        {areas.map((_, i) => {
+          const outer = toXY(i, maxR);
+          return <line key={i} x1={cx} y1={cy} x2={outer.x} y2={outer.y} stroke="var(--border)" strokeWidth="0.5" opacity={0.3} />;
+        })}
+
+        {/* Data polygon */}
+        <path d={dataPath} fill="var(--accent-blue)" fillOpacity={0.15} stroke="var(--accent-blue)" strokeWidth="2" />
+
+        {/* Data dots + labels */}
+        {areas.map((area, i) => {
+          const p = dataPoints[i];
+          const label = toXY(i, maxR + 16);
+          const avg = scoresByArea[area];
+          const score = avg.count > 0 ? (avg.total / avg.count).toFixed(1) : '–';
+          const pct = values[i];
+          return (
+            <g key={area}>
+              <circle cx={p.x} cy={p.y} r="3.5"
+                fill={pct >= 0.7 ? 'var(--accent-green)' : pct >= 0.4 ? 'var(--accent-amber)' : 'var(--accent-red)'}
+              />
+              <text x={label.x} y={label.y} textAnchor="middle" dominantBaseline="middle"
+                fontSize="8" fontFamily="var(--font-mono, monospace)" fill="var(--text-secondary)"
+              >
+                {area === 'cross-cutting' ? 'x-cutting' : area}
+              </text>
+              <text x={label.x} y={label.y + 10} textAnchor="middle" dominantBaseline="middle"
+                fontSize="7" fontFamily="var(--font-mono, monospace)" fill="var(--text-muted)"
+              >
+                {score}/3
+              </text>
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }
