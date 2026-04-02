@@ -601,7 +601,7 @@ Explanation latency = N_features * base_inference_latency
 ```
 
 Exact SHAP requires 2^N evaluations (infeasible for N > 30).
-LIME uses ~100 samples (fixed). Feature importance is free (~1x).
+Local Interpretable Model-agnostic Explanations (LIME) uses ~100 samples (fixed). Feature importance is free (~1x).
         """))
 
         items.append(partC_pred)
