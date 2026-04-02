@@ -158,7 +158,7 @@ def _(LAB_CSS, mo):
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px;">
                 <span class="badge badge-fail">4-12x memory amplification</span>
-                <span class="badge badge-warn">15% battery drain per CPU session</span>
+                <span class="badge badge-warn">significant battery drain on CPU</span>
                 <span class="badge badge-info">NPU: 50x energy savings</span>
             </div>
         </div>
@@ -223,7 +223,7 @@ def _(COLORS, mo):
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
                 &ldquo;On-device training is 'just inference with a backward pass.' Why does it
-                require 4-12x more memory, drain 15% of the battery per session on CPU, and
+                require 4-12x more memory, significantly drain the battery on CPU, and
                 need 4-8x more communication rounds when data is non-IID?&rdquo;
             </div>
         </div>
@@ -805,7 +805,7 @@ $$
             <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
                         line-height: 1.55; max-width: 700px;">
                 LoRA makes fine-tuning fit in memory. But does it make it practical? A fine-tuning
-                session that drains 15% of the battery is a product-killing feature, not a
+                session that visibly drains the battery is a product-killing feature, not a
                 product feature. The NPU changes the equation entirely.
             </div>
         </div>
@@ -1192,8 +1192,8 @@ $$
                 </div>
                 <div style="margin-bottom: 10px;">
                     <strong>2. The hardware execution target determines viability.</strong>
-                    CPU fine-tuning drains ~15% of battery per session (~6 sessions per charge).
-                    NPU fine-tuning drains ~0.3% (~300 sessions per charge). Same algorithm,
+                    CPU fine-tuning drains measurable battery per session due to thermal throttling.
+                    NPU fine-tuning is 50-100x more energy-efficient. Same algorithm,
                     50x energy difference. The NPU makes on-device training a product feature.
                 </div>
                 <div>

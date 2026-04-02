@@ -56,7 +56,7 @@ async def _():
     # Source: @sec-nn-computation-memory-hierarchy
     TIER_LATENCY_NS = {"L1": 1.0, "L2": 5.0, "HBM": 100.0, "DRAM": 200.0}
     CLOUD_TIERS_KB  = {"L1": 256, "L2": 50_000, "HBM": 80_000_000}
-    MOBILE_TIERS_KB = {"L1": 128, "L2": 32_000, "HBM": 8_000_000}
+    MOBILE_TIERS_KB = {"L1": 128, "L2": 32_000, "HBM": 8_000_000}  # "HBM" = main memory (LPDDR5 on mobile)
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
