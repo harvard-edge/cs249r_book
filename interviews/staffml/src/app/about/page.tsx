@@ -54,8 +54,8 @@ export default function AboutPage() {
               what you don&apos;t actually know. That&apos;s what motivates you to go learn it.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
-              That&apos;s why I built StaffML. I wanted to give students and engineers a structured,
-              honest way to prepare. It&apos;s free because interview prep is just another form
+              That&apos;s why I built StaffML. I wanted to give students and engineers a structured
+              way to find those gaps and prepare. It&apos;s free because interview prep is just another form
               of education, and education shouldn&apos;t depend on what you can afford.&rdquo;
             </p>
             <div className="flex items-center gap-3">
