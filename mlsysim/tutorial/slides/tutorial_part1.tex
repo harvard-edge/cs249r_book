@@ -603,6 +603,53 @@ FlashAttention & 60--75\% \\
 \alert{Improving MFU is often cheaper than buying more GPUs.}
 \end{frame}
 
+% --- Slide 1.8b: What Is Eta? ---
+\begin{frame}{What Is $\eta$? (The Efficiency Parameter)}
+\note{[3 min] CRITICAL — every demo uses eta. Explain it ONCE here, then it's understood for the day.
+ANALOGY: ``eta is to ML systems what CPI is to CPU design --- an empirical constant that bridges peak specs and reality.''}
+
+\small
+\textbf{$\eta$ = Achieved FLOPS / Peak FLOPS} (Model FLOPs Utilization)
+
+\vspace{0.3cm}
+The gap between what your hardware \emph{could} do and what it \emph{actually} does.
+
+\vspace{0.3cm}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\textbf{What reduces $\eta$:}
+\begin{itemize}\setlength\itemsep{1pt}
+\item Kernel launch overhead
+\item SM occupancy limits
+\item Memory coalescing misses
+\item Framework overhead (Python GIL)
+\item Communication stalls
+\end{itemize}
+\end{column}
+\begin{column}{0.48\textwidth}
+\textbf{Typical values:}
+
+\scriptsize
+\begin{tabular}{@{}lr@{}}
+\toprule
+Scenario & $\eta$ \\
+\midrule
+Training (Megatron-LM) & 0.40--0.55 \\
+Training (PyTorch eager) & 0.08--0.15 \\
+Inference decode, bs=1 & 0.01--0.05 \\
+Inference decode, bs=32+ & 0.15--0.35 \\
+Inference prefill & 0.30--0.50 \\
+TinyML (TFLite Micro) & 0.05--0.15 \\
+\bottomrule
+\end{tabular}
+\end{column}
+\end{columns}
+
+\vfill
+\centering
+\small\textcolor{gray}{You do not predict $\eta$ --- you measure it once and use it for what-if analysis.}
+\end{frame}
+
 % --- Slide 1.9: The Iron Law (Full) ---
 \begin{frame}{The Iron Law of ML Systems}
 \note{[3 min] Walk through each denominator term. Point out that every
@@ -1492,6 +1539,34 @@ print(f"Prune: {r2.inference_speedup:.1f}x / "
 \end{lstlisting}
 \end{frame}
 
+% --- Slide 3.7b: Compression Changes Fleet Architecture ---
+\begin{frame}{Compression Changes Fleet Architecture}
+\note{[3 min] This is the ``aha'' that compression is architecture, not optimization.
+The punchline: INT4 halves your GPU count AND your electricity bill.}
+
+\small
+\textbf{Llama-3 70B Serving Fleet:}
+
+\vspace{0.3cm}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Precision & Model Size & GPUs Needed & Annual Cost \\
+\midrule
+FP16 & 140 GB & 4 (TP=4) & \$480K \\
+INT8 & 70 GB & 2 (TP=2) & \$240K \\
+INT4 & 35 GB & 1 & \$120K \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.3cm}
+\textbf{INT4 doesn't just improve latency --- it eliminates 3 GPUs per replica.}\\
+At 100 replicas for 1000 QPS: that's \textbf{300 fewer GPUs} and \textbf{\$36M saved per year}.
+
+\vfill
+\centering
+\small\textcolor{gray}{This is why quantization is a Day 1 architectural decision, not a Day 100 optimization.}
+\end{frame}
+
 % --- Slide 3.8: Part 3 Key Takeaway ---
 \begin{frame}{Part 3: Key Takeaway}
 \note{[1 min] One sentence. Repeat.
@@ -1643,6 +1718,37 @@ BW requirement & Moderate & Very high (NVLink) & Low \\
 Bubble overhead & None & None & $\sim(P{-}1)/(M{+}P{-}1)$ \\
 \bottomrule
 \end{tabular}
+\end{frame}
+
+% --- Slide 4.3b: AllReduce Concrete Example ---
+\begin{frame}[fragile]{AllReduce: A Concrete Example}
+\note{[2 min] NUMBERS FIRST, then formula. Students need to see the magnitude before the algebra.}
+
+\small
+\textbf{Setup:} 8 H100 GPUs, NVLink at 900 GB/s, Llama-3 8B (16 GB gradients)
+
+\vspace{0.3cm}
+\begin{enumerate}
+\item Each GPU computes its local gradient: \textbf{16 GB}
+\item All 8 GPUs must end up with the \textbf{same averaged gradient}
+\item Ring AllReduce passes chunks around the ring\ldots
+\end{enumerate}
+
+\vspace{0.3cm}
+\begin{lstlisting}
+t = mlsysim.core.formulas.calc_ring_allreduce_time(
+    message_bytes=16e9,
+    n_gpus=8,
+    bandwidth_bytes_s=900e9,
+    latency_s=500e-9,
+)
+print(f"AllReduce time: {t.to('ms'):.1f}")
+# -> ~35 ms (bandwidth-dominated, latency is negligible)
+\end{lstlisting}
+
+\vfill
+\centering
+\textbf{35 ms} to synchronize 8 GPUs. Now: what happens at 256 GPUs?
 \end{frame}
 
 % --- Slide 4.4: Data Parallelism + AllReduce ---
