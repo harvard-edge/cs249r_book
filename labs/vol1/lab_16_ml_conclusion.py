@@ -425,6 +425,22 @@ AI           = 2*{_batch} = {_ai} FLOPs/byte  (ridge = {_ridge:.0f})
                 f"**Memory fraction = {_mem_frac:.0f}%.** Even after 15 labs, "
                 "students underestimate the severity of the memory wall."), kind="warn"))
 
+        # MathPeek
+        items.append(mo.accordion({
+            "Math Peek: Amdahl's Law and the Memory Wall": mo.md(f"""
+**Amdahl's Law — speedup limited by the sequential (memory-bound) fraction:**
+
+$$S = \\frac{{1}}{{(1 - p) + \\frac{{p}}{{N}}}}$$
+
+where $p$ = parallelizable fraction, $N$ = speedup factor on that fraction.
+
+At batch=1 autoregressive decoding, arithmetic intensity = 1 FLOP/byte.
+The ridge point of H100 is ~{_ridge:.0f} FLOPs/byte. Since AI (1) << ridge ({_ridge:.0f}),
+**{_mem_frac:.0f}% of token time is pure memory access** — no amount of
+compute optimization can help until you move data faster.
+"""),
+        }))
+
         # Edge comparison: same analysis on Jetson Orin NX
         _edge_t_mem = _w_gb / JETSON_BW_GBS * 1000 if JETSON_BW_GBS > 0 else float('inf')
         _edge_t_comp = _flops / (JETSON_TFLOPS * 1e12 * 0.5) * 1000 if JETSON_TFLOPS > 0 else float('inf')
@@ -537,6 +553,23 @@ Conservation: Delta(Data) + Delta(Algorithm) + Delta(Machine) = 0
                 "**INT8 models drift faster than FP32.** Reduced effective capacity means "
                 "less tolerance for distribution shift. Conservation of Complexity."), kind="warn"))
 
+        # MathPeek
+        items.append(mo.accordion({
+            "Math Peek: Conservation of Complexity": mo.md(f"""
+**The complexity budget is conserved across subsystems:**
+
+$$\\text{{Total\\_complexity}} = \\sum_i \\text{{subsystem\\_cost}}_i$$
+
+$$\\Delta(\\text{{Data}}) + \\Delta(\\text{{Algorithm}}) + \\Delta(\\text{{Machine}}) = 0$$
+
+Quantization reduces Algorithm complexity (fewer bits per weight) but
+shifts burden to Machine complexity (monitoring, drift detection).
+With {_quant.upper()} and monitoring level {['None', 'Basic', 'Comprehensive'][_mon]},
+drift rate = {_drift:.1f} pp/month, yielding **{_acc_loss:.1f} pp accuracy loss**
+over {_months} months. The complexity was not destroyed — it was moved.
+"""),
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -593,6 +626,23 @@ most consistently underweight across all 15 labs?
             "Silent Degradation is consistently the most underestimated "
             "invariant because students conflate infrastructure health "
             "with model health."), kind="info"))
+
+        # MathPeek
+        items.append(mo.accordion({
+            "Math Peek: Prediction Calibration Error": mo.md("""
+**Mean Absolute Prediction Error across labs:**
+
+$$\\text{MAPE} = \\frac{1}{N} \\sum_{i=1}^{N} |\\hat{y}_i - y_i|$$
+
+where $\\hat{y}_i$ = your prediction, $y_i$ = actual measured value.
+
+A well-calibrated engineer has MAPE < 10%. The class median is typically
+30-50% on first encounter with each invariant. Systematic overconfidence
+on "Silent Degradation" (70% error) reveals that students confuse
+**infrastructure uptime** with **model accuracy** — the system stays
+green while the model quietly rots.
+"""),
+        }))
 
         return mo.vstack(items)
 
@@ -704,6 +754,27 @@ The component with the **largest time fraction** has the highest-leverage optimi
             items.append(mo.callout(mo.md(
                 f"**The largest component wins.** {_labels[_best]} at "
                 f"{_norm[_best]*100:.0f}% gives {_all_speedups[_best]:.2f}x."), kind="warn"))
+
+        # MathPeek
+        items.append(mo.accordion({
+            "Math Peek: Amdahl's Ceiling with Component Fractions": mo.md(f"""
+**Amdahl's Law applied to a multi-component pipeline:**
+
+$$S = \\frac{{1}}{{f_{{\\text{{serial}}}} + \\frac{{f_{{\\text{{opt}}}}}}{{N}}}}$$
+
+With your current fractions (normalized to 1.0):
+
+| Component | Fraction | Speedup if optimized {_S}x |
+|-----------|----------|---------------------------|
+| Preprocessing | {_norm['preprocess']*100:.0f}% | {_all_speedups['preprocess']:.2f}x |
+| Inference | {_norm['inference']*100:.0f}% | {_all_speedups['inference']:.2f}x |
+| Postprocessing | {_norm['postprocess']*100:.0f}% | {_all_speedups['postprocess']:.2f}x |
+| Logging | {_norm['logging']*100:.0f}% | {_all_speedups['logging']:.2f}x |
+
+The ceiling: even with $N \\to \\infty$ on {_labels[_best]}, max speedup =
+$1 / (1 - {_norm[_best]:.2f})$ = **{1/(1-_norm[_best]):.2f}x**.
+"""),
+        }))
 
         return mo.vstack(items)
 
@@ -965,9 +1036,9 @@ The architect's job is to choose **which constraint to live with**.
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo, partA_pred, partB_pred, partC_pred, partD_pred):
+def _(COLORS, ledger, mo, partA_pred, partB_pred, partC_pred, partD_pred, partE_pred):
     _track = ledger.get_track()
-    if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None:
+    if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None and partE_pred.value is not None:
         ledger.save(chapter=16, design={
             "chapter": "v1_16",
             "capstone_completed": True,

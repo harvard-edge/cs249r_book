@@ -107,7 +107,7 @@ def _(COLORS, LAB_CSS, mo):
                 <span class="badge badge-info">KV Cache Memory Wall</span>
                 <span class="badge badge-info">Continuous Batching</span>
                 <span class="badge badge-info">Fleet Design Challenge</span>
-                <span class="badge badge-warn">35&ndash;40 minutes &middot; 2 Parts</span>
+                <span class="badge badge-warn">45&ndash;55 minutes &middot; 4 Parts + Synthesis</span>
             </div>
         </div>
     </div>
