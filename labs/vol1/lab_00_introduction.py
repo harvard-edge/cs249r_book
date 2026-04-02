@@ -59,7 +59,7 @@ async def _():
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         await ledger.load_async()
-    return mo, ledger, COLORS, LAB_CSS
+    return mo, ledger, COLORS, LAB_CSS, DecisionLog
 
 
 # ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
@@ -974,7 +974,7 @@ def _(mo, check1, check2, check3):
 # ─── CONTEXT REVEAL + STAKEHOLDER MESSAGE + LEDGER INIT ───────────────────────
 
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, DecisionLog):
     decision_input, decision_ui = DecisionLog()
     return decision_input, decision_ui
 

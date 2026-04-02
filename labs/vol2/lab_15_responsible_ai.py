@@ -355,6 +355,22 @@ def _(
         items = []
 
         items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Chief Compliance Officer, TrueNorth Insurance</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;The regulator just asked us to prove our claims model is simultaneously fair by
+        demographic parity AND equalized odds. My data science team says that is mathematically
+        impossible. Is that true, or are they just pushing back? I need to know exactly what
+        we can and cannot guarantee before our next audit.&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Margaret Liu, Chief Compliance Officer &middot; TrueNorth Insurance</div>
+</div>
+"""))
+
+        items.append(mo.Html(f"""
         <div id="part-a" style="margin: 32px 0 12px 0;">
             <div style="display: flex; align-items: center; gap: 12px;">
                 <div style="background: {COLORS['RedLine']}; color: white; border-radius: 50%;
@@ -516,6 +532,22 @@ This is a **mathematical constraint**, not a training limitation.
         items = []
 
         items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Product Manager, TrueNorth Insurance</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;We applied the fairness constraint compliance asked for, and our overall approval rate
+        model accuracy dropped 4 percentage points. The business team is calling it a &lsquo;fairness tax&rsquo;
+        and wants to roll it back. How do I show them the exact accuracy cost per unit of fairness
+        improvement so we can make a data-driven decision?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Derek Simmons, Product Manager &middot; TrueNorth Insurance</div>
+</div>
+"""))
+
+        items.append(mo.Html(f"""
         <div id="part-b" style="margin: 32px 0 12px 0;">
             <div style="display: flex; align-items: center; gap: 12px;">
                 <div style="background: {COLORS['OrangeLine']}; color: white; border-radius: 50%;
@@ -647,6 +679,22 @@ true positive rates, not the full confusion matrix.
 
     def build_part_c():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Data Scientist, TrueNorth Insurance</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;I noticed something alarming: our model approves fewer claims for a demographic group,
+        which means less training data from that group next quarter, which makes the model even less
+        accurate for them. After how many retraining cycles does this feedback loop become irreversible,
+        and can intervention at any point actually stop the amplification?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Nadia Okafor, Data Scientist &middot; TrueNorth Insurance</div>
+</div>
+"""))
 
         items.append(mo.Html(f"""
         <div id="part-c" style="margin: 32px 0 12px 0;">
@@ -818,6 +866,22 @@ becomes a 40-60% disparity within 10 retraining cycles.
 
     def build_part_d():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; CTO, TrueNorth Insurance</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;The board approved real-time fairness monitoring, but my infrastructure team says
+        computing group-level metrics on every request will add 15&ndash;40ms of latency to our
+        scoring pipeline. We have a 100ms SLA. What is the actual overhead of continuous fairness
+        checks, and can we sample instead of monitoring every request?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Robert Acheson, CTO &middot; TrueNorth Insurance</div>
+</div>
+"""))
 
         items.append(mo.Html(f"""
         <div id="part-d" style="margin: 32px 0 12px 0;">

@@ -545,7 +545,7 @@ With 45% serial overhead, even infinite inference speedup caps at $1/0.45 = 2.2\
             marker=dict(size=12, color=COLORS["RedLine"], symbol="diamond"),
             name="Current", showlegend=False), row=2, col=1)
 
-        _fig.update_layout(height=440, margin=dict(l=50, r=20, t=40, b=40))
+        _fig.update_layout(height=380, margin=dict(l=50, r=20, t=40, b=40))
         _fig.update_xaxes(title_text="Time (seconds)", row=2, col=1)
         _fig.update_yaxes(title_text="Temperature (C)", row=1, col=1)
         _fig.update_yaxes(title_text="FPS", row=2, col=1)

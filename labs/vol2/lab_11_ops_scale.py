@@ -382,6 +382,21 @@ def _(
     def build_part_a():
         items = []
 
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; SRE Lead, Nimbus Health</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;We started with 3 models and 12 alert rules. Now we run 40 models and my team maintains
+        over 600 alerts. Half of them fire every week and nobody reads them anymore. How does operational
+        complexity actually scale with fleet size &mdash; linearly, or is there a combinatorial explosion hiding in there?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; David Okonkwo, SRE Lead &middot; Nimbus Health</div>
+</div>
+"""))
+
         # Part header
         items.append(mo.Html(f"""
         <div id="part-a" style="margin: 32px 0 12px 0;">
@@ -524,6 +539,21 @@ Total        = {_cur_total:,.0f} hrs/yr  (capacity: {TEAM_CAPACITY_HOURS:,})
     def build_part_b():
         items = []
 
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; ML Platform Engineer, Nimbus Health</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;Last quarter a model silently drifted for 11 days before anyone noticed &mdash; the accuracy drop cost us
+        $2.3M in misrouted claims. Our dashboards were all green the entire time. How do we even quantify
+        the cost of failures that never trigger an alert?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Amara Osei, ML Platform Engineer &middot; Nimbus Health</div>
+</div>
+"""))
+
         # Part header
         items.append(mo.Html(f"""
         <div id="part-b" style="margin: 32px 0 12px 0;">
@@ -650,6 +680,21 @@ Detection latency is a {_detect_hrs}x cost multiplier:
     def build_part_c():
         items = []
 
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Platform Architect, Nimbus Health</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;My VP wants to build a full internal MLOps platform. The vendor quotes $480K/year but our
+        custom prototype already took 6 engineer-months. At what fleet size does building our own
+        actually break even, or are we just burning runway on undifferentiated infrastructure?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Raj Patel, Platform Architect &middot; Nimbus Health</div>
+</div>
+"""))
+
         # Part header
         items.append(mo.Html(f"""
         <div id="part-c" style="margin: 32px 0 12px 0;">
@@ -760,6 +805,21 @@ Break-even: ${_plat_cost:,} / ${PER_MODEL_SAVINGS:,} = {_breakeven} models
 
     def build_part_d():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; VP of Finance, Nimbus Health</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;Engineering tells me canary deployments add safety, but every hour in canary is an hour
+        we are running two model versions in parallel. What is the minimum canary duration that
+        actually catches regressions, and how much does each extra hour of caution cost us?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Christine Muller, VP of Finance &middot; Nimbus Health</div>
+</div>
+"""))
 
         # Part header
         items.append(mo.Html(f"""

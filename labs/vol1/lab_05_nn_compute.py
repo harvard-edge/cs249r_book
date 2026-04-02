@@ -436,14 +436,18 @@ ReLU and Sigmoid becomes a **significant fraction** of total inference time.
 
         _fig = go.Figure()
         _fig.add_trace(go.Bar(name="Matrix Multiply", x=["Breakdown"], y=[_total_mm_time],
-                              marker_color=COLORS["BlueLine"], opacity=0.88))
+                              marker_color=COLORS["BlueLine"], opacity=0.88,
+                              hovertemplate="Matrix Multiply: %{y:.2f} ms<extra></extra>"))
         _fig.add_trace(go.Bar(name="Activations", x=["Breakdown"], y=[_total_act_time],
                               marker_color=COLORS["RedLine"] if _act_pct > 10 else COLORS["OrangeLine"],
-                              opacity=0.88))
+                              opacity=0.88,
+                              hovertemplate="Activations: %{y:.2f} ms<extra></extra>"))
         _fig.add_trace(go.Bar(name="Normalization", x=["Breakdown"], y=[_norm_time],
-                              marker_color=COLORS["GreenLine"], opacity=0.88))
+                              marker_color=COLORS["GreenLine"], opacity=0.88,
+                              hovertemplate="Normalization: %{y:.2f} ms<extra></extra>"))
         _fig.add_trace(go.Bar(name="Other", x=["Breakdown"], y=[_other_time],
-                              marker_color=COLORS["Grey"], opacity=0.88))
+                              marker_color=COLORS["Grey"], opacity=0.88,
+                              hovertemplate="Other: %{y:.2f} ms<extra></extra>"))
         _fig.update_layout(barmode="stack", height=320, yaxis_title="Time (ms)",
                            title=f"Inference Time Decomposition -- {_hw_label}",
                            legend=dict(orientation="h", y=1.12, x=0))
@@ -602,12 +606,14 @@ from L2 (5 ns) to HBM (100 ns): a **20x latency jump**, not 2x.
             mode="lines", name="Access Latency",
             line=dict(color=COLORS["BlueLine"], width=2.5),
             fill="tozeroy", fillcolor="rgba(0,99,149,0.1)",
+            hovertemplate="Batch %{x}: %{y:.1f} ns<extra></extra>",
         ))
         _fig.add_trace(go.Scatter(
             x=[_batch], y=[_access_ns],
             mode="markers", name="Current Setting",
             marker=dict(size=14, color=_tier_color, symbol="diamond",
                         line=dict(width=2, color="white")),
+            hovertemplate="Batch %{x}: %{y:.1f} ns<extra></extra>",
         ))
         for _tier_name, _tier_cap in _tiers.items():
             _boundary_batch = max(1, int(_tier_cap / (_width * 4 / 1024)))
@@ -761,7 +767,8 @@ The quadratic term dominates as W grows.
             [COLORS["BlueLine"], COLORS["OrangeLine"], COLORS["GreenLine"]],
         ):
             _fig.add_trace(go.Bar(name=_name, x=["Current Width"], y=[_val],
-                                  marker_color=_col, opacity=0.88))
+                                  marker_color=_col, opacity=0.88,
+                                  hovertemplate="%{fullData.name}: %{y:,.0f} FLOPs<extra></extra>"))
         _fig.update_layout(barmode="stack", height=300, yaxis_title="FLOPs",
                            title=f"Per-Layer FLOPs -- MLP (784->{_w}->{_w}->10)",
                            legend=dict(orientation="h", y=1.12, x=0))
@@ -775,14 +782,17 @@ The quadratic term dominates as W grows.
         _fig2 = go.Figure()
         _fig2.add_trace(go.Scatter(x=_widths.tolist(), y=_total_curve.tolist(),
                                    mode="lines", name="Actual FLOPs (quadratic)",
-                                   line=dict(color=COLORS["RedLine"], width=2.5)))
+                                   line=dict(color=COLORS["RedLine"], width=2.5),
+                                   hovertemplate="Width %{x}: %{y:,.0f} FLOPs<extra></extra>"))
         _fig2.add_trace(go.Scatter(x=_widths.tolist(), y=_linear_ref.tolist(),
                                    mode="lines", name="If linear (2x width = 2x FLOPs)",
-                                   line=dict(color=COLORS["Grey"], width=2, dash="dash")))
+                                   line=dict(color=COLORS["Grey"], width=2, dash="dash"),
+                                   hovertemplate="Width %{x}: %{y:,.0f} FLOPs<extra></extra>"))
         _fig2.add_trace(go.Scatter(x=[_w], y=[float(_total_flops)],
                                    mode="markers", name="Current Width",
                                    marker=dict(size=12, color=COLORS["BlueLine"], symbol="diamond",
-                                               line=dict(width=2, color="white"))))
+                                               line=dict(width=2, color="white")),
+                                   hovertemplate="Width %{x}: %{y:,.0f} FLOPs<extra></extra>"))
         _fig2.update_layout(height=360, xaxis_title="Hidden Width", yaxis_title="Total FLOPs",
                             title="FLOPs Scaling: Actual (Quadratic) vs. Linear Assumption",
                             legend=dict(orientation="h", y=1.12, x=0))
@@ -939,7 +949,8 @@ The training-to-inference ratio grows with depth and batch size.
         for _name, _val, _col in zip(["Weights", "Gradients", "Activations"],
                                       [_weight_mb, _grad_mb, _act_total_mb], _colors_bar):
             _fig.add_trace(go.Bar(name=_name, x=[_phase.capitalize()], y=[_val],
-                                  marker_color=_col, opacity=0.88))
+                                  marker_color=_col, opacity=0.88,
+                                  hovertemplate="%{fullData.name}: %{y:,.1f} MB<extra></extra>"))
         _fig.add_hline(y=80_000, line_dash="dash", line_color=COLORS["BlueLine"],
                        annotation_text="H100 (80 GB)", annotation_position="right")
         _fig.add_hline(y=8_000, line_dash="dash", line_color=COLORS["OrangeLine"],
@@ -961,14 +972,17 @@ The training-to-inference ratio grows with depth and batch size.
         _fig2 = go.Figure()
         _fig2.add_trace(go.Scatter(x=_depths.tolist(), y=_inf_mem.tolist(),
                                    mode="lines", name="Inference",
-                                   line=dict(color=COLORS["GreenLine"], width=2.5)))
+                                   line=dict(color=COLORS["GreenLine"], width=2.5),
+                                   hovertemplate="Depth %{x}: %{y:,.1f} MB<extra></extra>"))
         _fig2.add_trace(go.Scatter(x=_depths.tolist(), y=_train_mem.tolist(),
                                    mode="lines", name="Training",
                                    line=dict(color=COLORS["RedLine"], width=2.5),
-                                   fill="tonexty", fillcolor="rgba(203,32,45,0.1)"))
+                                   fill="tonexty", fillcolor="rgba(203,32,45,0.1)",
+                                   hovertemplate="Depth %{x}: %{y:,.1f} MB<extra></extra>"))
         _fig2.add_trace(go.Scatter(x=[_depth], y=[_total_mb], mode="markers", name="Current",
                                    marker=dict(size=12, color=COLORS["BlueLine"], symbol="diamond",
-                                               line=dict(width=2, color="white"))))
+                                               line=dict(width=2, color="white")),
+                                   hovertemplate="Depth %{x}: %{y:,.1f} MB<extra></extra>"))
         _fig2.update_layout(height=360, xaxis_title="Network Depth (layers)", yaxis_title="Memory (MB)",
                             title=f"Memory vs. Depth (batch={_batch}, width={_w})",
                             legend=dict(orientation="h", y=1.12, x=0))

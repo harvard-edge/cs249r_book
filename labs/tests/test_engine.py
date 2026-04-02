@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+marimo = pytest.importorskip("marimo", reason="marimo not installed — skipping engine tests")
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 

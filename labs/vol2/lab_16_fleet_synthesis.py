@@ -755,7 +755,7 @@ Failure is not an exception at scale -- it is the baseline operating condition.
 
         fig_radar.update_layout(
             polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-            height=420, showlegend=True,
+            height=380, showlegend=True,
             legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"),
         )
         apply_plotly_theme(fig_radar)
@@ -920,7 +920,7 @@ Failure is not an exception at scale -- it is the baseline operating condition.
 
         fig_fleet.update_layout(
             polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-            height=450, showlegend=True,
+            height=380, showlegend=True,
             legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"),
         )
         apply_plotly_theme(fig_fleet)

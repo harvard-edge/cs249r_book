@@ -383,6 +383,22 @@ def _(
         items = []
 
         items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Chief Privacy Officer, Aether Health</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;We promised regulators that our patient data has differential privacy guarantees.
+        But when I ask engineering what epsilon we are actually running at, they say 8.0 &mdash; which
+        our auditor calls &lsquo;privacy theater.&rsquo; How much noise do we really need to add before
+        the guarantee is meaningful, and what does that do to our model?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Dr. Anya Kowalski, Chief Privacy Officer &middot; Aether Health</div>
+</div>
+"""))
+
+        items.append(mo.Html(f"""
         <div id="part-a" style="margin: 32px 0 12px 0;">
             <div style="display: flex; align-items: center; gap: 12px;">
                 <div style="background: {COLORS['BlueLine']}; color: white; border-radius: 50%;
@@ -535,6 +551,22 @@ At $\\varepsilon=1$, $\\Delta f=200K$: noise = $200K$.
         items = []
 
         items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; ML Engineer, Aether Health</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;I implemented DP-SGD on our diagnostic model and accuracy dropped from 94% to 81%.
+        The privacy team says epsilon must stay below 1.0, but the clinical team says anything
+        below 90% accuracy is unsafe to deploy. Is there a clipping norm and noise multiplier
+        combination that threads this needle, or is the privacy-accuracy tradeoff truly this brutal?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; James Oduya, ML Engineer &middot; Aether Health</div>
+</div>
+"""))
+
+        items.append(mo.Html(f"""
         <div id="part-b" style="margin: 32px 0 12px 0;">
             <div style="display: flex; align-items: center; gap: 12px;">
                 <div style="background: {COLORS['GreenLine']}; color: white; border-radius: 50%;
@@ -666,6 +698,22 @@ Simple tasks (MNIST) tolerate lower $\\varepsilon$ because gradient signal is st
 
     def build_part_c():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Security Architect, Aether Health</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;I am stacking input validation, output filtering, model encryption, and adversarial
+        detection on our inference pipeline. Each layer adds latency. Our p99 just crossed 200ms
+        and the product team is furious. How do I quantify the cumulative overhead of defense-in-depth
+        so I can justify which layers to keep and which to cut?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Sofia Lindgren, Security Architect &middot; Aether Health</div>
+</div>
+"""))
 
         items.append(mo.Html(f"""
         <div id="part-c" style="margin: 32px 0 12px 0;">
@@ -831,6 +879,21 @@ Multiplicative: $0.85 \\times 0.93 \\times 0.95 \\times 0.95 = 0.712$ (less seve
 
     def build_part_d():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Compliance Lead, Aether Health</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;Our total privacy budget is epsilon = 10 for the year. We have already spent 4.2 on
+        three model training runs and it is only March. At this burn rate, do we have enough budget
+        left to retrain quarterly, or do we need to shut down experimentation until next fiscal year?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Kenji Watanabe, Compliance Lead &middot; Aether Health</div>
+</div>
+"""))
 
         items.append(mo.Html(f"""
         <div id="part-d" style="margin: 32px 0 12px 0;">

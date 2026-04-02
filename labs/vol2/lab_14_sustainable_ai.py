@@ -910,7 +910,7 @@ of total lifecycle emissions. "Green energy = zero carbon" is a myth.
         ))
 
         fig_jevons.update_layout(
-            height=420,
+            height=380,
             xaxis=dict(title="Efficiency Improvement (x)"),
             yaxis=dict(title="Total Energy (fraction of baseline)", range=[0, max(3, _e_current * 1.3)]),
             legend=dict(orientation="h", y=1.15, x=0.5, xanchor="center"),

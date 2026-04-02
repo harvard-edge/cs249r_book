@@ -345,18 +345,22 @@ P99 = 4.6 * 5 * service_time = **23x service time**.
 
         _fig = go.Figure()
         _fig.add_trace(go.Scatter(x=_rhos, y=_means, mode='lines', name='Mean Latency',
-                                   line=dict(color=COLORS['BlueLine'], width=2)))
+                                   line=dict(color=COLORS['BlueLine'], width=2),
+                                   hovertemplate="rho=%{x:.2f}: %{y:.1f} ms<extra></extra>"))
         _fig.add_trace(go.Scatter(x=_rhos, y=_p99s, mode='lines', name='P99 Latency',
-                                   line=dict(color=COLORS['RedLine'], width=3)))
+                                   line=dict(color=COLORS['RedLine'], width=3),
+                                   hovertemplate="rho=%{x:.2f}: %{y:.1f} ms<extra></extra>"))
         _fig.add_hline(y=_slo, line_dash="dash", line_color=COLORS['GreenLine'],
                        annotation_text=f"SLO = {_slo:.0f} ms")
         if _rho < 1.0:
             _fig.add_trace(go.Scatter(x=[_rho], y=[_p99], mode='markers',
                                        name=f'P99 @ rho={_rho:.2f}',
-                                       marker=dict(color=COLORS['RedLine'], size=14, symbol='diamond')))
+                                       marker=dict(color=COLORS['RedLine'], size=14, symbol='diamond'),
+                                       hovertemplate="rho=%{x:.2f}: %{y:.1f} ms<extra></extra>"))
             _fig.add_trace(go.Scatter(x=[_rho], y=[_mean], mode='markers',
                                        name=f'Mean @ rho={_rho:.2f}',
-                                       marker=dict(color=COLORS['BlueLine'], size=10)))
+                                       marker=dict(color=COLORS['BlueLine'], size=10),
+                                       hovertemplate="rho=%{x:.2f}: %{y:.1f} ms<extra></extra>"))
         _fig.update_layout(height=380, xaxis=dict(title="Utilization (rho)", range=[0, 1]),
                            yaxis=dict(title="Latency (ms)", gridcolor="#f1f5f9"),
                            legend=dict(orientation="h", y=1.12, x=0),
@@ -501,7 +505,8 @@ the GPU fires a single kernel.
             ("Queuing", min(_q_del, 500), COLORS['RedLine']),
         ]:
             _fig.add_trace(go.Bar(name=_name, x=[_name], y=[_val],
-                                   marker_color=_col, opacity=0.88))
+                                   marker_color=_col, opacity=0.88,
+                                   hovertemplate="%{x}: %{y:.1f} ms<extra></extra>"))
         _fig.add_hline(y=_slo, line_dash="dash", line_color=COLORS['GreenLine'],
                        annotation_text=f"SLO = {_slo} ms")
         _fig.update_layout(height=340, yaxis=dict(title="Latency (ms)", gridcolor="#f1f5f9"),
@@ -640,9 +645,11 @@ when memory capacity is the binding constraint.
         _br = list(range(1, min(_max_b + 3, 20)))
         _fig = go.Figure()
         _fig.add_trace(go.Bar(name="Weights", x=[str(b) for b in _br],
-                               y=[_w_gb]*len(_br), marker_color=COLORS['BlueLine'], opacity=0.88))
+                               y=[_w_gb]*len(_br), marker_color=COLORS['BlueLine'], opacity=0.88,
+                               hovertemplate="Batch %{x}: %{y:.1f} GB<extra></extra>"))
         _fig.add_trace(go.Bar(name="KV Cache", x=[str(b) for b in _br],
-                               y=[_kv_gb*b for b in _br], marker_color=COLORS['OrangeLine'], opacity=0.88))
+                               y=[_kv_gb*b for b in _br], marker_color=COLORS['OrangeLine'], opacity=0.88,
+                               hovertemplate="Batch %{x}: %{y:.1f} GB<extra></extra>"))
         _fig.add_hline(y=_hbm, line_dash="dash", line_color=COLORS['RedLine'],
                        annotation_text=f"HBM = {_hbm:.0f} GB")
         _fig.update_layout(barmode="stack", height=380,
@@ -820,7 +827,8 @@ For large models this is seconds to minutes, experienced by real users.
             ("Warmup", _t_warm, COLORS['GreenLine']),
         ]:
             _fig.add_trace(go.Bar(name=_nm, x=[_dur], y=["Cold Start"], orientation='h',
-                                   marker_color=_cl, opacity=0.88, base=_cum))
+                                   marker_color=_cl, opacity=0.88, base=_cum,
+                                   hovertemplate="%{fullData.name}: %{x:.2f} s<extra></extra>"))
             _cum += _dur
         _fig.add_vline(x=_patience, line_dash="dash", line_color=COLORS['RedLine'],
                        annotation_text="User patience (3s)")

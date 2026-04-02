@@ -690,6 +690,7 @@ Algorithm capacity metrics complete the picture.
                 name=_lbl, x=[_lbl], y=[_v],
                 marker_color=_bc, marker_line_color="white",
                 marker_line_width=_bw, opacity=0.88,
+                hovertemplate="%{x}: %{y:.4f} ms<extra></extra>",
             ))
         _fig.update_layout(
             barmode="group", height=320,
@@ -780,10 +781,12 @@ AI = {_ai:.1f} FLOPs/Byte  {'<<' if _ai < _ridge_point else '>>'} Ridge Point ~{
         _fig2.add_trace(go.Scatter(
             x=_batches, y=_data_times, mode="lines+markers",
             name="Data Term (D/BW)", line=dict(color=COLORS["BlueLine"], width=2.5),
+            hovertemplate="Batch %{x}: %{y:.4f} ms<extra></extra>",
         ))
         _fig2.add_trace(go.Scatter(
             x=_batches, y=_comp_times, mode="lines+markers",
             name="Compute Term (O/R*eta)", line=dict(color=COLORS["OrangeLine"], width=2.5),
+            hovertemplate="Batch %{x}: %{y:.4f} ms<extra></extra>",
         ))
         _fig2.update_layout(
             height=280,
@@ -1129,11 +1132,13 @@ Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, th
             name="Compute (TFLOPS)", x=_names, y=_compute,
             marker_color=[COLORS["BlueLine"]] * len(_names),
             opacity=0.85,
+            hovertemplate="%{x}: %{y:,.0f} TFLOPS<extra></extra>",
         ))
         _fig.add_trace(go.Bar(
             name="Memory (GB)", x=_names, y=_memory,
             marker_color=[COLORS["GreenLine"]] * len(_names),
             opacity=0.85,
+            hovertemplate="%{x}: %{y:,.0f} GB<extra></extra>",
         ))
         _fig.update_layout(
             barmode="group", height=380,

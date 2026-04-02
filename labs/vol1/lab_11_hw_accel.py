@@ -319,6 +319,7 @@ def _(mo, pE_pred):
         fig.add_trace(go.Scatter(
             x=_ais.tolist(), y=_roof, mode="lines",
             line=dict(color=color, width=2.5), name=name,
+            hovertemplate="AI %{x:.1f} FLOP/B: %{y:,.0f} GFLOP/s<extra></extra>",
         ))
         fig.add_vline(x=ridge, line_dash="dot", line_color=color,
                       annotation_text=f"Ridge: {ridge:.0f}")
@@ -383,6 +384,7 @@ def _(mo, pE_pred):
             marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond"),
             text=[f"N={_N}"], textposition="top right",
             name=f"GEMM N={_N}",
+            hovertemplate="AI %{x:.1f} FLOP/B: %{y:,.0f} GFLOP/s<extra></extra>",
         ))
         _fig.update_layout(
             height=380,
@@ -533,6 +535,7 @@ When $\\text{AI} < \\text{Ridge}$, the kernel is memory-bound and performance sc
             marker_color=[COLORS["RedLine"], COLORS["GreenLine"]],
             text=[f"{_eager_time:.1f} us", f"{_fused_time:.1f} us"],
             textposition="outside", opacity=0.88,
+            hovertemplate="%{x}: %{y:.1f} us<extra></extra>",
         ))
         _fig.update_layout(
             height=300, yaxis=dict(title="Latency (microseconds)"),
@@ -664,6 +667,7 @@ Fusion eliminates $K-1$ round-trips to HBM, giving up to $K\\times$ speedup for 
             x=[_ai], y=[_attainable], mode="markers",
             marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond"),
             name=f"GEMM N=1024 on {_name}",
+            hovertemplate="AI %{x:.1f} FLOP/B: %{y:,.0f} GFLOP/s<extra></extra>",
         ))
         _fig.update_layout(
             height=400,
@@ -765,6 +769,7 @@ AI grows linearly with $N$. Small matrices are memory-bound; large matrices are 
         _fig.add_trace(go.Scatter(
             x=_ais.tolist(), y=_energy_per_flop, mode="lines",
             line=dict(color=COLORS["RedLine"], width=3), name="Energy per FLOP",
+            hovertemplate="AI %{x:.1f} FLOP/B: %{y:.1f} pJ/FLOP<extra></extra>",
         ))
         _fig.add_hline(y=_e_compute, line_dash="dash", line_color=COLORS["GreenLine"],
                        annotation_text=f"Compute floor: {_e_compute} pJ")
@@ -772,10 +777,12 @@ AI grows linearly with $N$. Small matrices are memory-bound; large matrices are 
         # Mark two operations
         _fig.add_trace(go.Scatter(x=[10], y=[max(_e_dram/10, _e_compute)],
             mode="markers+text", marker=dict(size=12, color=COLORS["OrangeLine"]),
-            text=["Memory-bound (AI=10)"], textposition="top right", name="AI=10"))
+            text=["Memory-bound (AI=10)"], textposition="top right", name="AI=10",
+            hovertemplate="AI %{x}: %{y:.1f} pJ/FLOP<extra></extra>"))
         _fig.add_trace(go.Scatter(x=[500], y=[max(_e_dram/500, _e_compute)],
             mode="markers+text", marker=dict(size=12, color=COLORS["GreenLine"]),
-            text=["Compute-bound (AI=500)"], textposition="top left", name="AI=500"))
+            text=["Compute-bound (AI=500)"], textposition="top left", name="AI=500",
+            hovertemplate="AI %{x}: %{y:.1f} pJ/FLOP<extra></extra>"))
 
         _fig.update_layout(
             height=360,
@@ -907,11 +914,13 @@ At low AI (memory-bound), the $E_{\\text{DRAM}}/\\text{AI}$ term dominates. At A
             x=_tiles_range, y=_speedups, mode="lines+markers",
             line=dict(color=COLORS["GreenLine"], width=2),
             marker=dict(size=8), name="Speedup vs Tile Size",
+            hovertemplate="Tile %{x}: %{y:.2f}x speedup<extra></extra>",
         ))
         _fig.add_trace(go.Scatter(
             x=[_tile], y=[_speedup], mode="markers",
             marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond"),
             name=f"Current: {_tile}",
+            hovertemplate="Tile %{x}: %{y:.2f}x speedup<extra></extra>",
         ))
         _fig.update_layout(
             height=320, xaxis=dict(title="Tile Size (elements)", type="log"),

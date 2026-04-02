@@ -408,9 +408,11 @@ def _(mo, pE_pred):
         # Waterfall chart
         _fig = go.Figure()
         _fig.add_trace(go.Bar(name="Memory (HBM load)", x=["Latency"], y=[_t_mem_ms],
-                              marker_color=COLORS["RedLine"], width=0.4))
+                              marker_color=COLORS["RedLine"], width=0.4,
+                              hovertemplate="Memory: %{y:.2f} ms<extra></extra>"))
         _fig.add_trace(go.Bar(name="Compute (arithmetic)", x=["Latency"], y=[_t_comp_ms],
-                              marker_color=COLORS["BlueLine"], width=0.4))
+                              marker_color=COLORS["BlueLine"], width=0.4,
+                              hovertemplate="Compute: %{y:.2f} ms<extra></extra>"))
         _fig.update_layout(barmode="stack", height=280,
                            yaxis=dict(title="Time (ms)", gridcolor="#f1f5f9"),
                            legend=dict(orientation="h", y=1.12, x=0),
@@ -566,7 +568,8 @@ $$
         _fig = go.Figure()
         _fig.add_trace(go.Scatter(x=_ai_range, y=_perf, mode="lines",
                                   name=f"{_hw_name} Roofline",
-                                  line=dict(color=COLORS["BlueLine"], width=2.5)))
+                                  line=dict(color=COLORS["BlueLine"], width=2.5),
+                                  hovertemplate="AI %{x:.1f} FLOP/B: %{y:,.1f} TFLOPS<extra></extra>"))
         _fig.add_vline(x=_ridge, line_dash="dash", line_color=COLORS["OrangeLine"],
                        annotation_text=f"Ridge: {_ridge:.0f}", annotation_position="top right",
                        annotation_font_size=10)
@@ -578,6 +581,7 @@ $$
                 name=_wname, text=[_wname], textposition="top center",
                 marker=dict(color=_wcolor, size=12, line=dict(color="white", width=2)),
                 textfont=dict(size=9),
+                hovertemplate="AI %{x:.1f} FLOP/B: %{y:,.1f} TFLOPS<extra></extra>",
             ))
 
         _fig.update_layout(height=400,
@@ -681,6 +685,7 @@ $$
         _fig.add_trace(go.Bar(
             x=[n for n, _, _ in _tiers], y=_times_ms,
             marker_color=[c for _, _, c in _tiers], width=0.5,
+            hovertemplate="%{x}: %{y:.2f} ms<extra></extra>",
         ))
         _fig.update_layout(height=320, yaxis=dict(title="Transfer Time (ms)", type="log", gridcolor="#f1f5f9"),
                            margin=dict(l=50, r=20, t=30, b=40))
@@ -829,7 +834,8 @@ $$
         ]
         for _name, _val, _col in _components:
             _fig.add_trace(go.Bar(name=_name, x=["Per-GPU Memory"], y=[_val],
-                                  marker_color=_col, width=0.4))
+                                  marker_color=_col, width=0.4,
+                                  hovertemplate="%{fullData.name}: %{y:.1f} GB<extra></extra>"))
         _fig.add_hline(y=_hbm_per_gpu, line_dash="dash", line_color=COLORS["RedLine"],
                        annotation_text=f"HBM Capacity: {_hbm_per_gpu:.0f} GB",
                        annotation_position="top right")
@@ -961,7 +967,8 @@ $$
         _cols = [COLORS["BlueLine"], COLORS["BlueLine"], COLORS["BlueLine"],
                  COLORS["OrangeLine"], COLORS["OrangeLine"], COLORS["OrangeLine"]]
         _fig.add_trace(go.Bar(x=_labels, y=[v / 1e6 for v in _vals],
-                              marker_color=_cols, width=0.5))
+                              marker_color=_cols, width=0.5,
+                              hovertemplate="%{x}: $%{y:.2f}M<extra></extra>"))
         _fig.update_layout(height=320, yaxis=dict(title="Cost ($M)", gridcolor="#f1f5f9"),
                            margin=dict(l=50, r=20, t=30, b=60))
         apply_plotly_theme(_fig)

@@ -404,6 +404,21 @@ def _(
     def build_part_a():
         items = []
 
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Mobile ML Product Manager, Paxos Devices</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;We want to fine-tune our 350M-parameter language model directly on-device. The phone has 6 GB of RAM,
+        but the OS and apps already consume 4 GB. Can we even fit the training graph in the remaining 2 GB,
+        or does the memory amplification from optimizer states and activations make this impossible?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Priya Ramanathan, Mobile ML Product Manager &middot; Paxos Devices</div>
+</div>
+"""))
+
         # Banner
         items.append(mo.Html(f"""
         <div id="part-a" style="margin: 32px 0 12px 0;">
@@ -601,6 +616,21 @@ $$
     def build_part_b():
         items = []
 
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Embedded Systems Engineer, Paxos Devices</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;I keep hearing that LoRA solves the on-device fine-tuning problem, but nobody tells me
+        the actual memory numbers. For a 350M model, how much storage does LoRA rank-16 really save
+        compared to full fine-tuning? And does bias-only tuning even move the needle on accuracy?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Marcus Chen, Embedded Systems Engineer &middot; Paxos Devices</div>
+</div>
+"""))
+
         # Banner
         items.append(mo.Html(f"""
         <div id="part-b" style="margin: 32px 0 12px 0;">
@@ -739,6 +769,21 @@ $$
 
     def build_part_c():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Battery Team Lead, Paxos Devices</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;Product wants continuous on-device inference, but our 5,000 mAh battery already struggles
+        to last a full day. How many joules does a single forward pass actually cost at different
+        batch sizes, and at what query rate do we start draining faster than the user can charge?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Tomoko Ishida, Battery Systems Lead &middot; Paxos Devices</div>
+</div>
+"""))
 
         # Banner
         items.append(mo.Html(f"""
@@ -916,6 +961,21 @@ yielding $\\sim$50x energy efficiency over CPU for ML workloads.
 
     def build_part_d():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Privacy Officer, Paxos Devices</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;Legal says we cannot send raw user data to the cloud, so we are betting on federated learning.
+        But my engineers warn that with only 50 heterogeneous devices per round, the model may never converge.
+        How many federation rounds does it actually take, and when does communication cost exceed centralized training?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Elena Vasquez, Chief Privacy Officer &middot; Paxos Devices</div>
+</div>
+"""))
 
         # Banner
         items.append(mo.Html(f"""
