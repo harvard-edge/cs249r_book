@@ -255,7 +255,7 @@ export default function EcosystemBar() {
         {/* Brand */}
         <a href={BASE} style={S.brand}>
           <img
-            src="https://mlsysbook.ai/vol1/assets/images/icons/favicon.png"
+            src="/logo-seas-shield.png"
             alt=""
             style={{ height: 28, width: 'auto' }}
           />
