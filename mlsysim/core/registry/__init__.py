@@ -32,13 +32,23 @@ class Registry:
 
             items.append(attr)
 
+        # Deduplicate aliases (e.g., TPUv4 = TPUv5p) by object identity
+        seen_ids = set()
+        unique_items = []
+        for item in items:
+            if id(item) not in seen_ids:
+                seen_ids.add(id(item))
+                unique_items.append(item)
+        items = unique_items
+
         if sort_by:
             def get_deep_attr(obj, path):
                 parts = path.split('.')
                 val = obj
                 for p in parts:
                     val = getattr(val, p, 0)
-                return val
+                # Extract magnitude for Pint Quantities (enables sorting)
+                return getattr(val, 'magnitude', val) if val is not None else 0
 
             items.sort(key=lambda x: get_deep_attr(x, sort_by), reverse=reverse)
 

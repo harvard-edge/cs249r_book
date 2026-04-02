@@ -70,7 +70,9 @@ def render_zoo_table(registry_name: str, items: list, output_format: str):
         table.add_column("Parameters", justify="right", style="green")
         table.add_column("Layers", justify="right")
         for item in items:
-            table.add_row(item.name, item.architecture, f"{item.parameters:~P}", str(item.layers))
+            layers_str = str(getattr(item, 'layers', '-') or '-')
+            params_str = f"{item.parameters:~P}" if hasattr(item.parameters, 'magnitude') else str(item.parameters)
+            table.add_row(item.name, getattr(item, 'architecture', '-'), params_str, layers_str)
 
     console_out.print(table)
 
