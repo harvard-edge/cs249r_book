@@ -357,6 +357,11 @@ def _(mo, pE_pred):
         ```
 
         Below the ridge point: **memory-bound**. Above: **compute-bound**.
+
+        **Intuition:** Think of a factory where workers (compute) process raw materials
+        (data from memory). If raw materials arrive slowly, workers sit idle no matter
+        how fast they are — that is memory-bound. If workers are slow, materials pile
+        up — that is compute-bound. The ridge point is where the two bottlenecks balance.
         """))
         items.append(pA_pred)
         if pA_pred.value is None:
