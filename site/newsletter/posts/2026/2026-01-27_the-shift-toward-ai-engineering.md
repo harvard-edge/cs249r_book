@@ -7,7 +7,7 @@ categories: ["essay"]
 image: "https://assets.buttondown.email/images/7c78f49d-9110-4132-88e9-a049e4176c49.png?w=960&fit=max"
 ---
 
-<!-- buttondown-editor-mode: plaintext -->My dad told me if I didn't study computer science in college, he'd throw me out of the house. So I did. In hindsight, he was right. CS gave me the foundation for everything I've done over the past 25 years, the way of thinking and problem-solving instincts that still matter every day. 
+<!-- buttondown-editor-mode: plaintext -->My dad told me if I didn't study computer science in college, he'd throw me out of the house. So I did. In hindsight, he was right. CS gave me the foundation for everything I've done over the past 25 years, the way of thinking and problem-solving instincts that still matter every day.
 
 My career didn’t stop at CS. I studied computer engineering and electrical engineering, and over time worked across the stack, from hardware and systems to software and machine learning. Seeing the same constraints resurface at every layer is what made the systems gap impossible to ignore.
 
