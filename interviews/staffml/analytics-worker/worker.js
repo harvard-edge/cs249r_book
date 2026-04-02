@@ -31,6 +31,8 @@ const ALLOWED_ORIGINS = [
 
 const VALID_EVENT_TYPES = new Set([
   'question_scored', 'question_skipped', 'question_reported',
+  'question_thumbs', 'question_difficulty_feedback', 'question_contributed',
+  'answer_response_time',
   'gauntlet_started', 'gauntlet_completed', 'gauntlet_abandoned',
   'plan_started', 'plan_completed', 'daily_completed',
   'page_view', 'answer_revealed', 'improvement_suggested',
@@ -111,6 +113,7 @@ async function handleEvents(request, env, corsHeaders) {
       'topic', 'zone', 'level', 'track', 'score', 'questionId',
       'questionCount', 'pct', 'questionsAnswered', 'planId',
       'page', 'category', '_ts', '_sid',
+      'value', 'perceived', 'seconds', 'napkinGrade',
     ];
     for (const field of allowedFields) {
       if (event[field] !== undefined) clean[field] = event[field];

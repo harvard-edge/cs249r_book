@@ -19,6 +19,7 @@ export type AnalyticsEvent =
   | { type: 'question_thumbs'; questionId: string; topic: string; level: string; value: 'up' | 'down' }
   | { type: 'question_difficulty_feedback'; questionId: string; topic: string; level: string; perceived: 'too_easy' | 'about_right' | 'too_hard' }
   | { type: 'question_contributed'; topic: string; track: string }
+  | { type: 'answer_response_time'; questionId: string; topic: string; level: string; seconds: number; napkinGrade?: string }
   | { type: 'gauntlet_started'; track: string; level: string; questionCount: number }
   | { type: 'gauntlet_completed'; track: string; level: string; pct: number; questionCount: number }
   | { type: 'gauntlet_abandoned'; track: string; level: string; questionsAnswered: number }

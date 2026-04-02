@@ -60,6 +60,7 @@ function PracticePage() {
   const [pool, setPool] = useState<Question[]>([]);
   const [current, setCurrent] = useState<Question | null>(null);
   const skipFilterCount = useRef(0);
+  const questionShownAt = useRef(Date.now());
   const [showAnswer, setShowAnswer] = useState(false);
   const [userAnswer, setUserAnswer] = useState("");
   const [napkinResult, setNapkinResult] = useState<(NapkinResult & { userNum: number; modelNum: number }) | null>(null);
@@ -228,6 +229,7 @@ function PracticePage() {
     if (p.length === 0) return;
     const idx = Math.floor(Math.random() * p.length);
     setCurrent(p[idx]);
+    questionShownAt.current = Date.now();
     setShowAnswer(false);
     setUserAnswer("");
     setNapkinResult(null);
@@ -243,12 +245,14 @@ function PracticePage() {
     incrementReveals();
 
     // Try napkin math check if the question has napkin_math and user typed something
+    let napkinGrade: string | undefined;
     if (current?.details.napkin_math && userAnswer.trim()) {
       const userNum = extractFinalNumber(userAnswer);
       const modelNum = extractFinalNumber(current.details.napkin_math);
       if (userNum !== null && modelNum !== null && modelNum > 0) {
         const result = checkNapkinMath(userNum, modelNum, current.track);
         setNapkinResult({ ...result, userNum, modelNum });
+        napkinGrade = result.grade;
       }
     }
 
@@ -263,6 +267,22 @@ function PracticePage() {
     }
 
     setShowAnswer(true);
+
+    // Track answer reveal with response time and napkin grade
+    if (current) {
+      const responseTimeSec = Math.round((Date.now() - questionShownAt.current) / 1000);
+      track({ type: 'answer_revealed', topic: current.topic, zone: current.zone });
+      if (responseTimeSec > 2) {
+        track({
+          type: 'answer_response_time',
+          questionId: current.id,
+          topic: current.topic,
+          level: current.level,
+          seconds: responseTimeSec,
+          napkinGrade,
+        });
+      }
+    }
   };
 
   // Constrain self-assessment: if napkin math was way off, cap the score
