@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { BookOpen, Github, Target, ArrowLeft, Brain, Layers, BarChart3, Package } from "lucide-react";
+import { BookOpen, Github, Target, ArrowLeft, Brain, Layers, BarChart3, Package, Compass } from "lucide-react";
 import { LEVELS } from "@/lib/levels";
-import { getVaultStats } from "@/lib/taxonomy";
+import { getVaultStats, getZoneDefinitions } from "@/lib/taxonomy";
 import manifest from "@/data/vault-manifest.json";
 
 export default function AboutPage() {
   const stats = getVaultStats();
+  const zoneDefs = getZoneDefinitions();
 
   return (
     <div className="flex-1 overflow-auto">
@@ -95,6 +96,34 @@ export default function AboutPage() {
                   </div>
                   <p className="text-[13px] text-textSecondary leading-relaxed">{level.verb}</p>
                   <p className="text-[12px] text-textTertiary italic mt-0.5">&ldquo;{level.example}&rdquo;</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ─── Zones ─── */}
+        <section className="mb-10">
+          <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
+            <Compass className="w-4.5 h-4.5 text-accentBlue" /> Competency Zones
+          </h2>
+          <p className="text-[14px] text-textSecondary leading-relaxed mb-4">
+            Every question exercises one of <strong className="text-textPrimary">11 competency zones</strong> — combinations of four fundamental skills:
+            <strong className="text-textPrimary"> recall</strong> (facts), <strong className="text-textPrimary">analyze</strong> (tradeoffs),
+            <strong className="text-textPrimary"> design</strong> (architecture), and <strong className="text-textPrimary">implement</strong> (napkin math).
+            Zones map to interview round types: a phone screen tests <em>recall</em>, a debugging round tests <em>diagnosis</em>,
+            and a system design round tests <em>evaluation</em> or <em>realization</em>.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {zoneDefs.map((z) => (
+              <div key={z.id} className="flex gap-3 items-start p-3 rounded-lg border border-borderSubtle bg-surface/50">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-accentBlue/10 border border-accentBlue/20">
+                  <span className="text-[9px] font-bold font-mono text-accentBlue">{z.skills.length}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="text-[13px] font-bold text-textPrimary capitalize">{z.id}</span>
+                  <span className="text-[11px] text-textTertiary ml-2">{z.levels.join(', ')}</span>
+                  <p className="text-[12px] text-textSecondary mt-0.5">{z.description}</p>
                 </div>
               </div>
             ))}

@@ -22,7 +22,7 @@ import {
 import { saveAttempt, getAttempts, updateSRCard, getDueQuestionIds, getDueCount, recordActivity } from "@/lib/progress";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { getQuestionById } from "@/lib/corpus";
-import { getTopicById } from "@/lib/taxonomy";
+import { getTopicById, getZoneDefinition } from "@/lib/taxonomy";
 import { getLevelDef } from "@/lib/levels";
 import { getDailyQuestions, isDailyCompleted, markDailyCompleted } from "@/lib/daily";
 import { shouldShowGate, incrementReveals, getRemainingReveals, isStarVerified } from "@/lib/star-gate";
@@ -225,6 +225,10 @@ function PracticePage() {
   }, [showAnswer, current]);
 
   const pickRandom = useCallback((fromPool?: Question[]) => {
+    // Track skip if there was a current question that wasn't scored
+    if (current && !showAnswer) {
+      track({ type: 'question_skipped', topic: current.topic, level: current.level });
+    }
     const p = fromPool || pool;
     if (p.length === 0) return;
     const idx = Math.floor(Math.random() * p.length);
@@ -234,7 +238,7 @@ function PracticePage() {
     setUserAnswer("");
     setNapkinResult(null);
     setRubricItems([]);
-  }, [pool]);
+  }, [pool, current, showAnswer]);
 
   const handleReveal = () => {
     // Star gate check
@@ -564,20 +568,27 @@ function PracticePage() {
             >
               All zones
             </button>
-            {zones.map(z => (
-              <button
-                key={z}
-                onClick={() => setSelectedZone(z)}
-                className={clsx(
-                  "w-full text-left px-3 py-1.5 rounded text-xs font-medium capitalize transition-all",
-                  selectedZone === z
-                    ? "bg-accentBlue/10 text-accentBlue"
-                    : "text-textSecondary hover:bg-surfaceHover"
-                )}
-              >
-                {z}
-              </button>
-            ))}
+            {zones.map(z => {
+              const def = getZoneDefinition(z);
+              return (
+                <button
+                  key={z}
+                  onClick={() => setSelectedZone(z)}
+                  title={def?.description || z}
+                  className={clsx(
+                    "w-full text-left px-3 py-1.5 rounded text-xs font-medium capitalize transition-all",
+                    selectedZone === z
+                      ? "bg-accentBlue/10 text-accentBlue"
+                      : "text-textSecondary hover:bg-surfaceHover"
+                  )}
+                >
+                  {z}
+                  {def && (
+                    <span className="block text-[9px] font-normal text-textMuted mt-0.5 normal-case">{def.description}</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 

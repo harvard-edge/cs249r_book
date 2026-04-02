@@ -315,3 +315,31 @@ the appendix shows the validation evidence.
 a strong NeurIPS D&B submission. In its current form, it reads as a well-engineered 
 system paper that has not yet produced the empirical evidence that a Datasets & 
 Benchmarks venue demands."
+
+## Mock NeurIPS Review Synthesis (3/4 reviewers)
+
+### Scores
+| | Novelty | Quality | Significance | Clarity | Rec |
+|---|:---:|:---:|:---:|:---:|---|
+| R1 (psychometrics) | 5 | 4 | 6 | 7 | Weak Reject |
+| R2 (ML systems) | 6 | 5 | 6 | 7 | Weak Reject |
+| R4 (practitioner) | 6 | 5 | 7 | 7 | Weak Accept |
+| **Average** | **5.7** | **4.7** | **6.3** | **7.0** | **Borderline** |
+
+### Universal feedback:
+1. No empirical validation = fatal for D&B (all 3 reviewers)
+2. Quality score lowest — driven entirely by missing pilot data
+3. Significance acknowledged — the gap is real
+4. Clarity consistently good
+
+### Two-path strategy:
+- **NeurIPS D&B**: Need pilot study (30-50 engineers). Timeline: 4-6 weeks.
+- **Workshop**: Publishable now as methodology paper. Target: NeurIPS ML Systems Workshop.
+
+### Fixes already applied from mock reviews:
+- ✅ Bloom critique softened (R1)
+- ✅ LLM generation transparency added (R1, R4)
+- ✅ Scope statement in abstract (R4)
+- ✅ H100 specs corrected (R2)
+- ✅ Internal inconsistencies fixed (R1, R2)
+- ✅ Track percentages use table reference (R1)
