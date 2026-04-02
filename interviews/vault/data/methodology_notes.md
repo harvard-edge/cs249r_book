@@ -311,9 +311,9 @@ the appendix shows the validation evidence.
 - **Pilot study** — essential for moving from Weak Reject to Accept
 
 ### Key quote:
-"With [pilot study + inter-rater reliability + inconsistency fixes], this could be 
-a strong NeurIPS D&B submission. In its current form, it reads as a well-engineered 
-system paper that has not yet produced the empirical evidence that a Datasets & 
+"With [pilot study + inter-rater reliability + inconsistency fixes], this could be
+a strong NeurIPS D&B submission. In its current form, it reads as a well-engineered
+system paper that has not yet produced the empirical evidence that a Datasets &
 Benchmarks venue demands."
 
 ## Mock NeurIPS Review Synthesis (3/4 reviewers)
