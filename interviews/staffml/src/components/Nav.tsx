@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   Library, Target, Crosshair, BarChart3, BookOpen, Github,
   Menu, X, Sun, Moon, Map, Cpu, Server, ChevronDown, Info,
-  Star, Bug,
+  Star, Bug, Send,
 } from "lucide-react";
 import clsx from "clsx";
 import StreakBadge from "@/components/StreakBadge";
@@ -24,6 +24,7 @@ const primaryLinks = [
 
 const toolLinks = [
   { href: "/plans", label: "Study Plans", icon: Map },
+  { href: "/contribute", label: "Contribute", icon: Send },
   { href: "/roofline", label: "Roofline", icon: Cpu },
   { href: "/simulator", label: "Simulator", icon: Server },
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },

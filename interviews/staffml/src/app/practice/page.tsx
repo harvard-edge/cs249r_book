@@ -29,9 +29,10 @@ import { shouldShowGate, incrementReveals, getRemainingReveals, isStarVerified }
 import StarGate from "@/components/StarGate";
 import { getChainForQuestion, ChainInfo } from "@/lib/corpus";
 import ChainStrip from "@/components/ChainStrip";
-import { Calendar, ArrowLeft, Flag, LinkIcon, Lightbulb } from "lucide-react";
+import { Calendar, ArrowLeft, Flag, LinkIcon } from "lucide-react";
 import Link from "next/link";
-import { buildReportUrl, buildSuggestUrl } from "@/lib/issue-url";
+import { buildReportUrl } from "@/lib/issue-url";
+import QuestionFeedback from "@/components/QuestionFeedback";
 import { track } from "@/lib/analytics";
 
 export default function PracticePageWrapper() {
@@ -876,25 +877,8 @@ function PracticePage() {
                           );
                         })}
                       </div>
-                      {/* Feedback actions */}
-                      <div className="flex items-center gap-4 mt-3">
-                        <a
-                          href={buildReportUrl(current)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-[11px] text-textSecondary hover:text-accentRed transition-colors"
-                        >
-                          <Flag className="w-3.5 h-3.5" /> Report issue
-                        </a>
-                        <a
-                          href={buildSuggestUrl(current)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-[11px] text-textSecondary hover:text-accentAmber transition-colors"
-                        >
-                          <Lightbulb className="w-3.5 h-3.5" /> Suggest improvement
-                        </a>
-                      </div>
+                      {/* Feedback: thumbs, difficulty, report, suggest */}
+                      <QuestionFeedback question={current} />
 
                       {/* Chain navigation — go deeper */}
                       {chainInfo && (
