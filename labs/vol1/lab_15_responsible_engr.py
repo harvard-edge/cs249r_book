@@ -113,7 +113,7 @@ def _(COLORS, mo):
                     &mdash; the first 10pp gap reduction costs 3&ndash;5% accuracy (sweet spot);
                     the last 5pp costs 10%+ (cliff).</div>
                 <div style="margin-bottom: 3px;">3. <strong>Calculate explanation overhead</strong>
-                    &mdash; SHAP with 50 features adds 50x latency to each prediction.</div>
+                    &mdash; SHapley Additive exPlanations (SHAP) with 50 features adds 50x latency to each prediction.</div>
             </div>
         </div>
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
@@ -124,7 +124,7 @@ def _(COLORS, mo):
                     Prerequisites</div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
                     Classification metrics from the Training chapter &middot;
-                    Model serving SLOs from the Model Serving chapter</div>
+                    Model serving Service Level Objectives (SLOs) from the Model Serving chapter</div>
             </div>
             <div style="flex: 0 0 180px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
@@ -180,7 +180,7 @@ def _(COLORS, H100_TDP_W, JETSON_TDP_W, apply_plotly_theme, go, math, mo, np):
             "C) No -- Group B FPR is 3x higher despite equal accuracy": "3x",
             "D) No -- Group A FPR is higher (more positives)": "a_higher",
         },
-        label="Loan model: 92% accuracy for both groups. Group A base rate 30%, Group B 10%. FPR equal?",
+        label="Loan model: 92% accuracy for both groups. Group A base rate 30%, Group B 10%. False Positive Rate (FPR) equal?",
     )
     return (partA_pred,)
 
@@ -287,7 +287,7 @@ def _(mo, partD_pred):
 ## The Chouldechova Impossibility Theorem
 
 When **base rates differ** between groups, a calibrated classifier cannot simultaneously
-satisfy equal FPR, equal FNR, and equal PPV. Equal accuracy does **not** mean equal
+satisfy equal FPR, equal False Negative Rate (FNR), and equal Positive Predictive Value (PPV). Equal accuracy does **not** mean equal
 treatment. This is a mathematical impossibility, not an engineering limitation.
 
 The key: accuracy = (TP + TN) / total. With different base rates, the composition
@@ -586,7 +586,7 @@ $$
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
                 Regulatory Requirement &middot; Compliance Team, EquiLend</div>
             <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Under ECOA, denied applicants must receive an explanation of which factors
+                &ldquo;Under the Equal Credit Opportunity Act (ECOA), denied applicants must receive an explanation of which factors
                 contributed to the decision. How much compute does this cost?&rdquo;</div>
         </div>"""))
 

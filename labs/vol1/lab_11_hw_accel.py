@@ -134,7 +134,7 @@ def _(COLORS, mo):
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
                 <div style="margin-bottom: 3px;">1. <strong>Diagnose the Roofline regime</strong> &mdash;
-                    determine whether a GEMM kernel is memory-bound or compute-bound by comparing
+                    determine whether a General Matrix Multiply (GEMM) kernel is memory-bound or compute-bound by comparing
                     arithmetic intensity to the hardware ridge point.</div>
                 <div style="margin-bottom: 3px;">2. <strong>Quantify kernel fusion speedup</strong> &mdash;
                     fusing LayerNorm + Dropout + ReLU eliminates 2 HBM round-trips, yielding
@@ -406,7 +406,7 @@ def _(mo, pE_pred):
             </div>
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
                         text-align:center; background:white; border-top:3px solid {_regime_color}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">MFU</div>
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Model FLOPs Utilization (MFU)</div>
                 <div style="font-size:1.5rem; font-weight:800; color:{_regime_color};">{_mfu:.1f}%</div>
                 <div style="font-size:0.72rem; color:#94a3b8;">{_regime}</div>
             </div>

@@ -140,7 +140,7 @@ def _(COLORS, mo):
                 <div style="margin-bottom: 3px;">2. <strong>Predict which memory hierarchy tier</strong>
                     a layer's activations land in given batch size and width, and identify the
                     batch size threshold where a 10x latency cliff appears.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Calculate the FLOPs scaling law</strong>
+                <div style="margin-bottom: 3px;">3. <strong>Calculate the Floating Point Operations (FLOPs) scaling law</strong>
                     for dense layers: doubling width yields ~4x FLOPs, not 2x.</div>
                 <div style="margin-bottom: 3px;">4. <strong>Compare forward vs. backward memory</strong>:
                     training stores all layer activations simultaneously, creating a 4-10x
@@ -200,7 +200,7 @@ def _(mo):
       graph of a single neuron, transistor-level implementation of ReLU vs. Sigmoid.
     - **Chapter 5: The Transistor Tax** -- silicon cost table for common activation functions,
       percentage of inference time consumed by activations on Cloud vs. Mobile.
-    - **Chapter 5: Memory Hierarchy** -- cache tiers (L1/L2/HBM/DRAM), tier latencies,
+    - **Chapter 5: Memory Hierarchy** -- cache tiers (L1/L2/High Bandwidth Memory (HBM)/DRAM), tier latencies,
       and the concept of memory cliffs vs. gradual degradation.
     - **Chapter 5: Backpropagation Memory** -- why training must store all intermediate
       activations, and the forward-vs-backward memory multiplier.
@@ -487,7 +487,7 @@ ReLU and Sigmoid becomes a **significant fraction** of total inference time.
             items.append(mo.callout(mo.md(
                 "**Correct.** On a mobile NPU, switching all layers to Sigmoid pushes "
                 "activation compute to ~23% of total inference time. On cloud hardware "
-                "with 16,000+ ALUs, the same switch is barely measurable (<1%). "
+                "with 16,000+ Arithmetic Logic Units (ALUs), the same switch is barely measurable (<1%). "
                 "The deployment context determines whether this design choice has a real cost."
             ), kind="success"))
         elif _pred == "lt1":
