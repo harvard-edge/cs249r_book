@@ -230,10 +230,12 @@ export default function HomePage() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search topics — KV cache, roofline, quantization..."
+                aria-label="Search topics"
                 className="w-full pl-10 pr-10 py-2 bg-surface border border-border rounded-lg text-[13px] font-medium text-textPrimary placeholder:text-textTertiary focus:outline-none focus:border-borderHighlight transition-colors"
               />
               {query && (
                 <button onClick={() => setQuery("")}
+                  aria-label="Clear search"
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-textTertiary hover:text-textPrimary">
                   <X className="w-3.5 h-3.5" />
                 </button>

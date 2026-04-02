@@ -492,9 +492,13 @@ function PracticePage() {
           </div>
         </div>
 
-        {/* Competency Area — hidden on mobile to save space */}
-        <div className="hidden lg:block">
-          <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Competency</label>
+        {/* Competency Area — collapsible on mobile, open on desktop */}
+        <details className="group" open>
+          <summary className="text-[10px] font-mono text-textTertiary uppercase tracking-widest mb-2 cursor-pointer select-none flex items-center gap-1 list-none">
+            Competency
+            <span className="text-[8px] text-textMuted group-open:rotate-90 transition-transform">&#9654;</span>
+            {selectedArea && <span className="ml-auto text-[9px] text-accentBlue capitalize font-medium">{selectedArea}</span>}
+          </summary>
           <div className="space-y-1 max-h-64 overflow-y-auto">
             <button
               onClick={() => setSelectedArea(null)}
@@ -522,7 +526,7 @@ function PracticePage() {
               </button>
             ))}
           </div>
-        </div>
+        </details>
 
         {/* Zone filter */}
         <div>
@@ -706,6 +710,19 @@ function PracticePage() {
                     animate={{ opacity: 1, y: 0 }}
                     className="space-y-5"
                   >
+                    {/* User's answer (preserved for comparison) */}
+                    {userAnswer.trim() && (
+                      <details className="group">
+                        <summary className="text-[10px] font-mono text-textTertiary uppercase cursor-pointer select-none flex items-center gap-1.5">
+                          <span className="group-open:rotate-90 transition-transform text-[8px]">&#9654;</span>
+                          Your answer
+                        </summary>
+                        <div className="mt-2 p-3 bg-background border border-border rounded-md font-mono text-[12px] text-textSecondary whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
+                          {userAnswer}
+                        </div>
+                      </details>
+                    )}
+
                     {/* Napkin math result — gradient feedback */}
                     {napkinResult && (
                       <div className={clsx(
@@ -844,6 +861,7 @@ function PracticePage() {
                               key={score}
                               onClick={() => handleScore(Math.min(score, maxScore))}
                               disabled={disabled}
+                              aria-label={`Rate yourself: ${label} (${score} of 3)`}
                               className={clsx(
                                 "px-3 py-2.5 rounded-lg border text-xs font-medium transition-all",
                                 disabled
