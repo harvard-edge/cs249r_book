@@ -3,95 +3,189 @@
 import { useState, useRef, useEffect } from "react";
 
 /**
- * MLSysBook ecosystem navbar — replicates the Quarto Bootstrap navbar
- * from navbar-common.yml so StaffML looks like part of the same site.
+ * MLSysBook ecosystem navbar — identical structure and appearance to the
+ * Quarto Bootstrap navbar, but rendered with inline styles to avoid
+ * loading Bootstrap CSS (which would conflict with Tailwind).
  *
- * Visual spec (from Quarto + _navbar.scss):
- *   - White background, bottom border #dee2e6
- *   - Logo: SEAS shield + "Machine Learning Systems"
- *   - Nav links: #6c757d, hover: accent (#a31f34)
- *   - Dropdowns: white bg, border, shadow-sm
- *   - Font: Inter, ~14px
- *   - Height: ~56px
- *   - Collapses below xl (1200px)
+ * Matches the exact HTML from harvard-edge.github.io/cs249r_book_dev/
+ * including Bootstrap Icons via CDN.
  */
 
 const BASE = "https://mlsysbook.ai";
 
-interface MenuItem {
+interface DropdownItem {
   icon?: string;
-  label: string;
-  href: string;
+  label?: string;
+  href?: string;
   external?: boolean;
   active?: boolean;
   divider?: boolean;
 }
 
 interface MenuGroup {
+  id: string;
   label: string;
-  items: MenuItem[];
+  icon?: string;
+  items: DropdownItem[];
+  alignEnd?: boolean;
 }
 
 const LEFT_MENUS: MenuGroup[] = [
   {
-    label: "Read",
-    items: [
-      { label: "Volume I: Foundations", href: `${BASE}/vol1/` },
-      { label: "Volume II: At Scale", href: `${BASE}/vol2/` },
-    ],
+    id: "read", label: "Read", items: [
+      { icon: "bi-journal", label: "Volume I: Foundations", href: `${BASE}/vol1/` },
+      { icon: "bi-journal", label: "Volume II: At Scale", href: `${BASE}/vol2/` },
+      { divider: true },
+      { icon: "bi-file-pdf", label: "Volume I PDF", href: `${BASE}/vol1/assets/downloads/Machine-Learning-Systems-Vol1.pdf`, external: true },
+      { icon: "bi-journal-text", label: "Volume I EPUB", href: `${BASE}/vol1/assets/downloads/Machine-Learning-Systems-Vol1.epub`, external: true },
+      { divider: true },
+      { icon: "bi-file-pdf", label: "Volume II PDF", href: `${BASE}/vol2/assets/downloads/Machine-Learning-Systems-Vol2.pdf`, external: true },
+      { icon: "bi-journal-text", label: "Volume II EPUB", href: `${BASE}/vol2/assets/downloads/Machine-Learning-Systems-Vol2.epub`, external: true },
+    ]
   },
   {
-    label: "Build",
-    items: [
-      { label: "Labs", href: `${BASE}/labs/` },
-      { label: "TinyTorch", href: `${BASE}/tinytorch/` },
-      { label: "Hardware Kits", href: `${BASE}/kits/` },
-    ],
+    id: "build", label: "Build", items: [
+      { icon: "bi-sliders", label: "Labs", href: `${BASE}/labs/` },
+      { icon: "bi-fire", label: "TinyTorch", href: `${BASE}/tinytorch/` },
+      { icon: "bi-cpu", label: "Hardware Kits", href: `${BASE}/kits/` },
+      { icon: "bi-calculator", label: "MLSys·IM", href: `${BASE}/mlsysim/` },
+    ]
   },
   {
-    label: "Teach",
-    items: [
-      { label: "Course Map", href: `${BASE}/instructors/course-map.html` },
-      { label: "Lecture Slides", href: `${BASE}/slides/` },
-      { label: "Instructor Hub", href: `${BASE}/instructors/` },
-    ],
+    id: "teach", label: "Teach", items: [
+      { icon: "bi-signpost-split", label: "Course Map", href: `${BASE}/instructors/course-map.html` },
+      { icon: "bi-easel", label: "Lecture Slides", href: `${BASE}/slides/` },
+      { icon: "bi-person-video3", label: "Instructor Hub", href: `${BASE}/instructors/` },
+    ]
   },
   {
-    label: "Prepare",
-    items: [
-      { label: "StaffML", href: "/", active: true },
-      { label: "Study Plans", href: "/plans" },
-      { label: "Gauntlet Mode", href: "/gauntlet" },
-    ],
+    id: "prepare", label: "Prepare", items: [
+      { icon: "bi-mortarboard", label: "StaffML", href: "/", active: true },
+      { icon: "bi-map", label: "Study Plans", href: "/plans" },
+      { icon: "bi-lightning", label: "Gauntlet Mode", href: "/gauntlet" },
+    ]
   },
   {
-    label: "Connect",
-    items: [
-      { label: "Newsletter", href: `${BASE}/newsletter/` },
-      { label: "Global Network", href: `${BASE}/community/` },
-      { label: "Workshops & Events", href: `${BASE}/community/events.html` },
-    ],
+    id: "connect", label: "Connect", items: [
+      { icon: "bi-envelope", label: "Newsletter", href: `${BASE}/newsletter/` },
+      { icon: "bi-globe", label: "Global Network", href: `${BASE}/community/` },
+      { icon: "bi-calendar-event", label: "Workshops & Events", href: `${BASE}/community/events.html` },
+      { icon: "bi-people", label: "Partners & Sponsors", href: `${BASE}/community/partners.html` },
+    ]
   },
   {
-    label: "About",
-    items: [
-      { label: "Our Story", href: `${BASE}/about/` },
-      { label: "People", href: `${BASE}/about/people.html` },
-      { label: "Contributors", href: `${BASE}/about/contributors.html` },
-    ],
+    id: "about", label: "About", items: [
+      { icon: "bi-book", label: "Our Story", href: `${BASE}/about/#story` },
+      { icon: "bi-bullseye", label: "Mission", href: `${BASE}/about/#mission` },
+      { icon: "bi-clock-history", label: "Milestones", href: `${BASE}/about/#milestones` },
+      { divider: true },
+      { icon: "bi-person-lines-fill", label: "People", href: `${BASE}/about/people.html` },
+      { icon: "bi-people", label: "Contributors", href: `${BASE}/about/contributors.html` },
+    ]
   },
 ];
 
-const RIGHT_LINKS = [
-  { label: "Support", href: "https://opencollective.com/mlsysbook", icon: "♥" },
-  { label: "Star", href: "https://github.com/harvard-edge/cs249r_book", icon: "★" },
+const RIGHT_MENUS: MenuGroup[] = [
+  {
+    id: "github", label: "GitHub", icon: "bi-github", alignEnd: true, items: [
+      { icon: "bi-chat", label: "Discussions", href: "https://github.com/harvard-edge/cs249r_book/discussions", external: true },
+      { icon: "bi-bug", label: "Report an issue", href: "https://github.com/harvard-edge/cs249r_book/issues/new", external: true },
+      { icon: "bi-code", label: "View source", href: "https://github.com/harvard-edge/cs249r_book", external: true },
+    ]
+  },
 ];
+
+// ─── Styles matching Bootstrap 5 navbar computed values ────
+
+const S = {
+  nav: {
+    backgroundColor: '#fff',
+    borderBottom: '1px solid #dee2e6',
+    padding: '0 16px',
+    position: 'relative' as const,
+    zIndex: 60,
+    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    fontSize: 14,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 56,
+    flexWrap: 'wrap' as const,
+  },
+  brand: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    textDecoration: 'none',
+    color: '#333',
+    fontSize: 14,
+    fontWeight: 600,
+    whiteSpace: 'nowrap' as const,
+  },
+  navLink: {
+    color: '#6c757d',
+    textDecoration: 'none',
+    padding: '8px 10px',
+    fontSize: 14,
+    fontWeight: 400,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
+    border: 'none',
+    background: 'none',
+    whiteSpace: 'nowrap' as const,
+  },
+  dropdown: {
+    position: 'absolute' as const,
+    top: '100%',
+    left: 0,
+    zIndex: 1000,
+    minWidth: 240,
+    padding: '4px 0',
+    backgroundColor: '#fff',
+    border: '1px solid rgba(0,0,0,0.15)',
+    borderRadius: 4,
+    boxShadow: '0 6px 12px rgba(0,0,0,0.08)',
+  },
+  dropdownEnd: {
+    left: 'auto',
+    right: 0,
+  },
+  dropdownItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '6px 16px',
+    color: '#212529',
+    textDecoration: 'none',
+    fontSize: 13,
+    whiteSpace: 'nowrap' as const,
+  },
+  divider: {
+    margin: '4px 0',
+    borderTop: '1px solid #dee2e6',
+  },
+};
 
 export default function EcosystemBar() {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [hoveredLink, setHoveredLink] = useState<string | null>(null);
+  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
 
+  // Load Bootstrap Icons font
+  useEffect(() => {
+    if (document.getElementById("bi-css")) return;
+    const link = document.createElement("link");
+    link.id = "bi-css";
+    link.rel = "stylesheet";
+    link.href = "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css";
+    document.head.appendChild(link);
+  }, []);
+
+  // Close on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (barRef.current && !barRef.current.contains(e.target as Node)) {
@@ -102,164 +196,165 @@ export default function EcosystemBar() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  return (
-    <nav
-      ref={barRef}
-      className="bg-white border-b border-[#dee2e6] relative z-[60]"
-      style={{ fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}
-    >
-      <div className="flex items-center justify-between px-4 lg:px-6" style={{ height: 50 }}>
-        {/* Brand */}
-        <div className="flex items-center gap-5">
-          <a
-            href={BASE}
-            className="flex items-center gap-2 shrink-0 no-underline"
-          >
-            <img
-              src="https://mlsysbook.ai/vol1/assets/images/icons/favicon.png"
-              alt=""
-              className="h-7 w-auto"
-            />
-            <span className="text-[14px] font-semibold text-[#333] hidden sm:inline">
-              Machine Learning Systems
-            </span>
-          </a>
+  const linkStyle = (id: string) => ({
+    ...S.navLink,
+    color: openMenu === id || hoveredLink === id ? '#a31f34' : '#6c757d',
+  });
 
-          {/* Desktop nav links */}
-          <div className="hidden xl:flex items-center gap-0.5">
-            {LEFT_MENUS.map((menu) => {
-              const isActive = menu.items.some(i => i.active);
-              return (
-                <div key={menu.label} className="relative">
-                  <button
-                    onClick={() => setOpenMenu(openMenu === menu.label ? null : menu.label)}
-                    className="px-2.5 py-1.5 text-[14px] transition-colors rounded"
-                    style={{
-                      color: openMenu === menu.label ? '#a31f34' : '#6c757d',
-                      fontWeight: 400,
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.color = '#a31f34')}
-                    onMouseLeave={(e) => {
-                      if (openMenu !== menu.label) e.currentTarget.style.color = '#6c757d';
-                    }}
-                  >
-                    {menu.label}
-                  </button>
-                  {openMenu === menu.label && (
-                    <div
-                      className="absolute top-full left-0 mt-1 py-1 bg-white rounded-md min-w-[220px]"
-                      style={{
-                        border: '1px solid rgba(0,0,0,0.15)',
-                        boxShadow: '0 6px 12px rgba(0,0,0,0.08)',
-                      }}
-                    >
-                      {menu.items.map((item) => (
-                        <a
-                          key={item.label}
-                          href={item.href}
-                          onClick={() => setOpenMenu(null)}
-                          className="block px-4 py-1.5 text-[13px] no-underline transition-colors"
-                          style={{
-                            color: item.active ? '#a31f34' : '#6c757d',
-                            fontWeight: item.active ? 500 : 400,
-                            backgroundColor: 'transparent',
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.color = '#a31f34';
-                            e.currentTarget.style.backgroundColor = '#f8f9fa';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.color = item.active ? '#a31f34' : '#6c757d';
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                          }}
-                        >
-                          {item.label}
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+  const itemStyle = (key: string, active?: boolean) => ({
+    ...S.dropdownItem,
+    color: active ? '#a31f34' : hoveredItem === key ? '#a31f34' : '#212529',
+    fontWeight: active ? 500 : 400,
+    backgroundColor: hoveredItem === key ? '#f8f9fa' : 'transparent',
+  });
 
-        {/* Right side */}
-        <div className="flex items-center gap-3">
-          <div className="hidden md:flex items-center gap-3">
-            {RIGHT_LINKS.map(({ label, href, icon }) => (
+  const renderDropdown = (menu: MenuGroup) => (
+    <div key={menu.id} style={{ position: 'relative' }}>
+      <button
+        style={linkStyle(menu.id)}
+        onClick={() => setOpenMenu(openMenu === menu.id ? null : menu.id)}
+        onMouseEnter={() => setHoveredLink(menu.id)}
+        onMouseLeave={() => { if (openMenu !== menu.id) setHoveredLink(null); }}
+      >
+        {menu.icon && <i className={`bi ${menu.icon}`} />}
+        <span>{menu.label}</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" style={{ marginLeft: 2, opacity: 0.5 }}>
+          <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.2" fill="none" />
+        </svg>
+      </button>
+      {openMenu === menu.id && (
+        <div style={{ ...S.dropdown, ...(menu.alignEnd ? S.dropdownEnd : {}) }}>
+          {menu.items.map((item, i) =>
+            item.divider ? (
+              <div key={i} style={S.divider} />
+            ) : (
               <a
-                key={label}
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[13px] no-underline transition-colors flex items-center gap-1"
-                style={{ color: '#6c757d' }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = '#a31f34')}
-                onMouseLeave={(e) => (e.currentTarget.style.color = '#6c757d')}
+                key={i}
+                href={item.href}
+                onClick={() => setOpenMenu(null)}
+                style={itemStyle(`${menu.id}-${i}`, item.active)}
+                onMouseEnter={() => setHoveredItem(`${menu.id}-${i}`)}
+                onMouseLeave={() => setHoveredItem(null)}
+                {...(item.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
               >
-                <span className="text-[11px]">{icon}</span> {label}
+                {item.icon && <i className={`bi ${item.icon}`} style={{ fontSize: 13, width: 16, opacity: 0.7 }} />}
+                <span>{item.label}</span>
               </a>
-            ))}
+            )
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div ref={barRef}>
+      <div style={S.nav}>
+        {/* Brand */}
+        <a href={BASE} style={S.brand}>
+          <img
+            src="https://mlsysbook.ai/vol1/assets/images/icons/favicon.png"
+            alt=""
+            style={{ height: 28, width: 'auto' }}
+          />
+          <span className="hidden sm:inline">Machine Learning Systems</span>
+        </a>
+
+        {/* Desktop nav */}
+        <div className="hidden xl:flex" style={{ alignItems: 'center', gap: 0, flex: 1, marginLeft: 16 }}>
+          {/* Left menus */}
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            {LEFT_MENUS.map(renderDropdown)}
           </div>
 
-          {/* Mobile hamburger (xl:hidden) */}
-          <button
-            onClick={() => setMobileOpen(!mobileOpen)}
-            className="xl:hidden p-1.5 text-[#6c757d]"
-            aria-label="Toggle ecosystem navigation"
-          >
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
-              {mobileOpen ? (
-                <path d="M5 5L15 15M15 5L5 15" />
-              ) : (
-                <path d="M3 5h14M3 10h14M3 15h14" />
-              )}
-            </svg>
-          </button>
+          {/* Spacer */}
+          <div style={{ flex: 1 }} />
+
+          {/* Right links + menus */}
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <a
+              href="https://opencollective.com/mlsysbook"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={linkStyle('support')}
+              onMouseEnter={() => setHoveredLink('support')}
+              onMouseLeave={() => setHoveredLink(null)}
+            >
+              <i className="bi bi-heart" /> <span>Support</span>
+            </a>
+            <a
+              href="https://github.com/harvard-edge/cs249r_book"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={linkStyle('star')}
+              onMouseEnter={() => setHoveredLink('star')}
+              onMouseLeave={() => setHoveredLink(null)}
+            >
+              <i className="bi bi-star" /> <span>Star</span>
+            </a>
+            {RIGHT_MENUS.map(renderDropdown)}
+          </div>
         </div>
+
+        {/* Mobile hamburger */}
+        <button
+          onClick={() => setMobileOpen(!mobileOpen)}
+          className="xl:hidden"
+          style={{ ...S.navLink, padding: 8 }}
+          aria-label="Toggle navigation"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6c757d" strokeWidth="2">
+            {mobileOpen
+              ? <path d="M6 6L18 18M18 6L6 18" />
+              : <path d="M3 6h18M3 12h18M3 18h18" />
+            }
+          </svg>
+        </button>
       </div>
 
-      {/* Mobile dropdown */}
+      {/* Mobile expanded */}
       {mobileOpen && (
-        <div className="xl:hidden border-t border-[#dee2e6] bg-white px-4 py-3 space-y-3">
+        <div className="xl:hidden" style={{ borderTop: '1px solid #dee2e6', backgroundColor: '#fff', padding: '12px 16px' }}>
           {LEFT_MENUS.map((menu) => (
-            <div key={menu.label}>
-              <span className="text-[10px] font-semibold text-[#adb5bd] uppercase tracking-wider block mb-1">
+            <div key={menu.id} style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#adb5bd', textTransform: 'uppercase' as const, letterSpacing: 1, marginBottom: 4 }}>
                 {menu.label}
-              </span>
-              {menu.items.map((item) => (
+              </div>
+              {menu.items.filter(i => !i.divider).map((item, i) => (
                 <a
-                  key={item.label}
+                  key={i}
                   href={item.href}
                   onClick={() => setMobileOpen(false)}
-                  className="block py-1 text-[13px] no-underline"
                   style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '4px 0', fontSize: 13, textDecoration: 'none',
                     color: item.active ? '#a31f34' : '#6c757d',
                     fontWeight: item.active ? 500 : 400,
                   }}
+                  {...(item.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
                 >
+                  {item.icon && <i className={`bi ${item.icon}`} style={{ fontSize: 12, width: 16, opacity: 0.6 }} />}
                   {item.label}
                 </a>
               ))}
             </div>
           ))}
-          <div className="border-t border-[#dee2e6] pt-2 flex gap-4">
-            {RIGHT_LINKS.map(({ label, href, icon }) => (
-              <a
-                key={label}
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[13px] no-underline flex items-center gap-1"
-                style={{ color: '#6c757d' }}
-              >
-                <span className="text-[11px]">{icon}</span> {label}
-              </a>
-            ))}
+          <div style={{ borderTop: '1px solid #dee2e6', paddingTop: 8, display: 'flex', gap: 16 }}>
+            <a href="https://opencollective.com/mlsysbook" target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 13, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <i className="bi bi-heart" style={{ fontSize: 12 }} /> Support
+            </a>
+            <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 13, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <i className="bi bi-star" style={{ fontSize: 12 }} /> Star
+            </a>
+            <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 13, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <i className="bi bi-github" style={{ fontSize: 12 }} /> GitHub
+            </a>
           </div>
         </div>
       )}
-    </nav>
+    </div>
   );
 }
