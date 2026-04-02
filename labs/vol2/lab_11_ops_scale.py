@@ -530,6 +530,24 @@ Total        = {_cur_total:,.0f} hrs/yr  (capacity: {TEAM_CAPACITY_HOURS:,})
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
 
+        items.append(mo.accordion({
+            "Math Peek: Alert Complexity Scaling": mo.md("""
+**Formula:**
+$$
+\\text{Alerts} = N_{\\text{models}} \\times M_{\\text{metrics}} \\times K_{\\text{thresholds}}
+$$
+
+**Variables:**
+- **$N_{\\text{models}}$**: number of models in production
+- **$M_{\\text{metrics}}$**: monitored metrics per model (latency, accuracy, drift, etc.)
+- **$K_{\\text{thresholds}}$**: alert thresholds per metric (warn, critical, page)
+
+The combinatorial explosion is why operational load scales superlinearly: each new model
+adds not just its own alerts but also new cross-model dependency checks ($O(N^2)$) and
+coordination overhead ($O(N \\log N)$).
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -671,6 +689,25 @@ Detection latency is a {_detect_hrs}x cost multiplier:
 *Source: @sec-ml-operations-scale-staged-rollout-strategies-2d1f*
 """))
 
+        items.append(mo.accordion({
+            "Math Peek: Silent Failure Cost": mo.md("""
+**Formula:**
+$$
+\\text{Cost} = R_{\\text{hour}} \\times T_{\\text{undetected}} \\times N_{\\text{affected}}
+$$
+
+where $R_{\\text{hour}} = \\text{QPS} \\times 3600 \\times \\Delta\\text{CTR} \\times \\text{Rev}_{\\text{click}}$
+
+**Variables:**
+- **$R_{\\text{hour}}$**: revenue loss per hour from a single degraded model
+- **$T_{\\text{undetected}}$**: hours before detection (the **cost multiplier**)
+- **$N_{\\text{affected}}$**: number of models exhibiting the same silent regression
+
+Detection latency, not regression magnitude, is the dominant cost driver. A 0.5%
+drop detected in 1 hour costs \\$45K; the same drop detected in 24 hours costs \\$1.08M.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -796,6 +833,24 @@ Break-even: ${_plat_cost:,} / ${PER_MODEL_SAVINGS:,} = {_breakeven} models
             _msg = "**Break-even is at 20 models.** Students anchor on the $2M price tag and overestimate the threshold. At $100K savings per model, break-even is simple division: $2M / $100K = 20 models."
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Platform Breakeven": mo.md("""
+**Formula:**
+$$
+N_{\\text{breakeven}} = \\frac{C_{\\text{platform}}}{S_{\\text{model}} \\times N_{\\text{models}}} \\quad \\Rightarrow \\quad N_{\\text{breakeven}} = \\frac{C_{\\text{platform}}}{S_{\\text{model}}}
+$$
+
+**Variables:**
+- **$C_{\\text{platform}}$**: annual platform cost (\\$2M/year)
+- **$S_{\\text{model}}$**: per-model operational savings from centralization (\\$100K/year)
+- **$N_{\\text{models}}$**: number of models on the platform
+
+At $N < N_{\\text{breakeven}}$, the platform is a cost center. At $N > N_{\\text{breakeven}}$,
+savings compound linearly while platform cost stays fixed. The platform also reduces
+dependency scaling from $O(N^2)$ to $O(N \\log N)$.
+""")
+        }))
 
         return mo.vstack(items)
 
@@ -928,6 +983,24 @@ Total 5-stage rollout: {_total_rollout:.1f} hours
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
 
+        items.append(mo.accordion({
+            "Math Peek: Canary Observation Window": mo.md("""
+**Formula:**
+$$
+T_{\\text{canary}} = \\max\\!\\left(T_{\\text{detect}},\\; T_{\\text{confidence}}\\right) = \\max\\!\\left(\\frac{N_{\\text{samples}}}{r_{\\text{req}} \\times p_{\\text{canary}}},\\; T_{\\text{stat}}\\right)
+$$
+
+**Variables:**
+- **$N_{\\text{samples}}$**: minimum samples for statistical significance (e.g., 10,000)
+- **$r_{\\text{req}}$**: total request rate (requests/hour)
+- **$p_{\\text{canary}}$**: fraction of traffic routed to canary (e.g., 0.01 for 1%)
+- **$T_{\\text{stat}}$**: minimum time for statistical test convergence
+
+At 1% canary with 1M req/hour, only 10K req/hour reach the canary. Accumulating 10K
+samples takes exactly 1 hour -- far longer than most engineers expect.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1027,6 +1100,25 @@ False alerts/day     = {_total_monitors:.0f} x {_fpr} x {_checks_per_day:.0f} = 
 ```
 *Source: @eq-false-alert-rate*
 """))
+
+        items.append(mo.accordion({
+            "Math Peek: Alert Fatigue Rate": mo.md("""
+**Formula:**
+$$
+F_{\\text{day}} = N_{\\text{models}} \\times M_{\\text{metrics}} \\times P(\\text{false alarm}) \\times \\frac{1440}{\\Delta t}
+$$
+
+**Variables:**
+- **$N_{\\text{models}}$**: models in the fleet
+- **$M_{\\text{metrics}}$**: monitored metrics per model
+- **$P(\\text{false alarm})$**: per-check false positive rate (0.27% at 3-sigma)
+- **$\\Delta t$**: check interval in minutes (e.g., 5 min)
+
+At 100 models, 10 metrics, 3-sigma, checked every 5 minutes:
+$100 \\times 10 \\times 0.0027 \\times 288 = 778$ false alerts/day -- far exceeding
+the ~50/day human processing capacity.
+""")
+        }))
 
         return mo.vstack(items)
 

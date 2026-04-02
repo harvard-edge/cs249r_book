@@ -853,6 +853,27 @@ ECC and redundancy are not optional at scale; they are mathematically mandatory.
 
         items.append(mo.callout(mo.md(f"**{_msg}**"), kind=_kind))
 
+        # MathPeek
+        items.append(mo.accordion({
+            "Math Peek: Distribution Drift Detection": mo.md(f"""
+**Accuracy under exponential drift (no retraining):**
+
+$$\\text{{Acc}}(t) = \\text{{Acc}}_0 \\times (1 - r)^t$$
+
+where $r$ = monthly drift rate, $t$ = months deployed.
+
+At drift rate {_drift*100:.1f}%/month: Acc(6) = {CLEAN_ACC_BASELINE:.0f}% x
+(1 - {_drift})^6 = **{_acc_6m_unmon:.1f}%**.
+
+**Statistical detection latency** (2pp drop, 95% confidence):
+
+$$N_{{\\text{{samples}}}} = \\frac{{(Z_\\alpha + Z_\\beta)^2 \\cdot (p_1 q_1 + p_2 q_2)}}{{(p_1 - p_2)^2}} = {_n_detect:,.0f}$$
+
+At {partC_sample_rate.value:,} labeled samples/hour, detection takes **{_hours_detect:.1f} hours**.
+Without monitoring, drift is invisible until users complain.
+"""),
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1030,6 +1051,28 @@ ECC and redundancy are not optional at scale; they are mathematically mandatory.
                else "Some targets not met -- adjust your defense configuration above.")
         ), kind="success" if _clean_effective >= 70 and _robust >= 70 and _total_cost <= 2.0 else "info"))
 
+        # MathPeek
+        items.append(mo.accordion({
+            "Math Peek: Defense Stack Overhead": mo.md(f"""
+**Total latency is additive across defense layers:**
+
+$$\\text{{Latency}}_{{\\text{{total}}}} = \\sum_i \\text{{Latency}}_{{\\text{{defense}}_i}}$$
+
+**PGD-K training compute:**
+
+$$\\text{{Cost}}_{{\\text{{PGD}}}} = K \\times \\text{{Cost}}_{{\\text{{fwd+bwd}}}}$$
+
+Your stack overhead breakdown:
+- Training cost: **{_train_cost:.1f}x** {"(PGD-7: 8x)" if _adv_on else "(no adversarial training)"}
+- Inference cost: **{_infer_cost:.2f}x** (feature squeeze: +0.2x, monitoring: +{0.15 if _mon == 'realtime' else 0.05 if _mon == 'hourly' else 0}x)
+- Effective total: **{_total_cost:.1f}x**
+
+The key insight: layered guardrails at ~1.2x inference overhead achieve
+comparable adversarial accuracy to PGD training at 8x training overhead.
+The economics favor guardrails by a factor of ~6x.
+"""),
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1133,6 +1176,30 @@ ECC and redundancy are not optional at scale; they are mathematically mandatory.
             + ("INT8 matches FP32 closely on clean inputs but collapses faster under adversarial perturbation." if _current_eps > 2 else
                "On clean inputs (eps=0), INT8 is within 1-3% of FP32. The gap widens under attack.")
         ), kind="info"))
+
+        # MathPeek
+        items.append(mo.accordion({
+            "Math Peek: Quantization-Robustness Interaction": mo.md(f"""
+**FGSM adversarial perturbation:**
+
+$$x_{{\\text{{adv}}}} = x + \\epsilon \\cdot \\text{{sign}}(\\nabla_x \\mathcal{{L}}(x, y))$$
+
+**Robust accuracy as a function of precision and perturbation:**
+
+$$\\text{{Robust\\_acc}} = f(\\epsilon, \\text{{bits}})$$
+
+At eps={_current_eps}/255:
+- FP32 (32-bit): **{_fp32_at_eps:.1f}%** accuracy
+- INT8 (8-bit): **{_int8_at_eps:.1f}%** accuracy
+- Gap: **{_gap:.1f}pp**
+
+Lower precision amplifies adversarial vulnerability because quantization
+reduces the model's numerical headroom. The gradient signal that FGSM
+exploits is coarser in INT8, but the model's decision boundaries are also
+coarser — and the latter effect dominates. At eps=0 the gap is only
+~{INT8_CLEAN_DELTA}pp, but it widens superlinearly with perturbation strength.
+"""),
+        }))
 
         return mo.vstack(items)
 

@@ -948,6 +948,27 @@ The architect's job is to choose **which constraint to live with**.
                 "**The new binding constraint is KV cache memory.** INT4 weights fit, "
                 f"but KV cache at long context fills HBM."), kind="warn"))
 
+        # MathPeek
+        items.append(mo.accordion({
+            "Math Peek: The Constraint Cascade — Memory Budget": mo.md(f"""
+**Total HBM consumption = weights + KV cache:**
+
+$$\\text{{Memory}} = W_{{\\text{{gb}}}} + KV_{{\\text{{gb}}}}$$
+
+$$KV_{{\\text{{gb}}}} = \\frac{{2 \\times L \\times H_{{\\text{{dim}}}} \\times \\text{{context}} \\times 2}}{{10^9}}$$
+
+With your configuration:
+- Weights: {_w_gb:.1f} GB ({_params:.0f}B params x {_bpp} bytes/param)
+- KV cache: {_kv_gb:.1f} GB ({_layers} layers, {_ctx:,} context, FP16)
+- **Total: {_total_mem:.1f} GB** vs {H100_RAM_GB:.0f} GB HBM
+
+{"OOM: total exceeds HBM capacity." if not _mem_ok else f"Fits with {H100_RAM_GB - _total_mem:.1f} GB headroom."}
+INT4 halved the weight memory — but KV cache is always FP16 and grows
+linearly with context length. At 128K tokens, KV alone would consume
+~{2 * _layers * _heads * _hdim * 131072 * 2 / (1024**3):.0f} GB.
+"""),
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
