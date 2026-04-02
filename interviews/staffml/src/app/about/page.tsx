@@ -41,9 +41,9 @@ export default function AboutPage() {
           <div className="p-5 rounded-xl border border-borderSubtle bg-surface/50">
             <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
               &ldquo;Every semester, students come to my office hours with the same question:
-              how do I prepare for ML systems interviews? Not the modeling side — the
+              how do I prepare for ML systems interviews? Not the modeling side, but the
               infrastructure. The compute, the memory, the hardware, the deployment.
-              Companies expect engineers to reason about all of it — often with numbers,
+              Companies expect engineers to reason about all of it, often with numbers,
               on the spot. But there&apos;s no good way to practice. People read research papers,
               take courses that mostly teach theory, or just hope for the best.
             </p>
@@ -51,10 +51,10 @@ export default function AboutPage() {
               I&apos;ve been writing the Machine Learning Systems textbook to teach these ideas,
               but I&apos;ve come to realize that reading about systems and being ready to reason
               under pressure are different things. Sometimes the most valuable thing is discovering
-              what you don&apos;t actually know — that&apos;s what motivates you to go learn it.
+              what you don&apos;t actually know. That&apos;s what motivates you to go learn it.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
-              That&apos;s why I built StaffML — to give students and engineers a structured,
+              That&apos;s why I built StaffML: to give students and engineers a structured,
               honest way to prepare. It&apos;s free because interview prep is just another form
               of education, and education shouldn&apos;t depend on what you can afford.&rdquo;
             </p>
