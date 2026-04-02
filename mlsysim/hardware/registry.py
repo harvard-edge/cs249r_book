@@ -10,6 +10,11 @@ from ..core.constants import (
     NVL72_FLOPS_FP8_TENSOR, NVL72_FLOPS_FP4_TENSOR, NVL72_MEM_CAPACITY, NVL72_MEM_BW, NVL72_NVLINK_BW, NVL72_TDP, NVL72_UNIT_COST,
     MI300X_MEM_BW, MI300X_FLOPS_FP16_TENSOR, MI300X_MEM_CAPACITY, MI300X_TDP, MI300X_UNIT_COST,
     MI300X_FLOPS_FP8, MI300X_FLOPS_INT8, MI300X_FLOPS_FP32,
+    MI250X_FLOPS_FP16_TENSOR, MI250X_FLOPS_FP32, MI250X_FLOPS_INT8, MI250X_MEM_BW, MI250X_MEM_CAPACITY, MI250X_TDP,
+    GAUDI2_FLOPS_BF16, GAUDI2_FLOPS_FP8, GAUDI2_MEM_BW, GAUDI2_MEM_CAPACITY, GAUDI2_TDP,
+    GAUDI3_FLOPS_BF16, GAUDI3_FLOPS_FP8, GAUDI3_MEM_BW, GAUDI3_MEM_CAPACITY, GAUDI3_TDP,
+    TRAINIUM2_FLOPS_BF16, TRAINIUM2_FLOPS_FP8, TRAINIUM2_MEM_BW, TRAINIUM2_MEM_CAPACITY, TRAINIUM2_TDP,
+    TPUV6_FLOPS_BF16, TPUV6_MEM_BW, TPUV6_MEM_CAPACITY,
     TPUV5P_MEM_BW, TPUV5P_FLOPS_BF16, TPUV5P_MEM_CAPACITY, TPUV5P_TDP, TPUV5P_FLOPS_INT8,
     T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP, T4_FLOPS_INT8, T4_UNIT_COST,
     WSE3_FLOPS_FP16, WSE3_MEM_CAPACITY, WSE3_MEM_BW, WSE3_TDP, WSE3_CORES, CEREBRAS_CS3_UNIT_COST,
@@ -99,6 +104,51 @@ class CloudHardware(Registry):
         tdp=MI300X_TDP,
         unit_cost=MI300X_UNIT_COST,
         dispatch_tax=0.012 * ureg.ms
+    )
+
+    MI250X = HardwareNode(
+        name="AMD MI250X",
+        release_year=2021,
+        compute=ComputeCore(peak_flops=MI250X_FLOPS_FP16_TENSOR, precision_flops={"fp32": MI250X_FLOPS_FP32, "int8": MI250X_FLOPS_INT8}),
+        memory=MemoryHierarchy(capacity=MI250X_MEM_CAPACITY, bandwidth=MI250X_MEM_BW),
+        tdp=MI250X_TDP,
+        dispatch_tax=0.015 * ureg.ms
+    )
+
+    Gaudi2 = HardwareNode(
+        name="Intel Gaudi 2",
+        release_year=2022,
+        compute=ComputeCore(peak_flops=GAUDI2_FLOPS_BF16, precision_flops={"fp8": GAUDI2_FLOPS_FP8}),
+        memory=MemoryHierarchy(capacity=GAUDI2_MEM_CAPACITY, bandwidth=GAUDI2_MEM_BW),
+        tdp=GAUDI2_TDP,
+        dispatch_tax=0.02 * ureg.ms
+    )
+
+    Gaudi3 = HardwareNode(
+        name="Intel Gaudi 3",
+        release_year=2024,
+        compute=ComputeCore(peak_flops=GAUDI3_FLOPS_BF16, precision_flops={"fp8": GAUDI3_FLOPS_FP8}),
+        memory=MemoryHierarchy(capacity=GAUDI3_MEM_CAPACITY, bandwidth=GAUDI3_MEM_BW),
+        tdp=GAUDI3_TDP,
+        dispatch_tax=0.01 * ureg.ms
+    )
+
+    Trainium2 = HardwareNode(
+        name="AWS Trainium 2",
+        release_year=2024,
+        compute=ComputeCore(peak_flops=TRAINIUM2_FLOPS_BF16, precision_flops={"fp8": TRAINIUM2_FLOPS_FP8}),
+        memory=MemoryHierarchy(capacity=TRAINIUM2_MEM_CAPACITY, bandwidth=TRAINIUM2_MEM_BW),
+        tdp=TRAINIUM2_TDP,
+        dispatch_tax=0.02 * ureg.ms
+    )
+
+    TPUv6 = HardwareNode(
+        name="Google TPU v6 (Trillium)",
+        release_year=2024,
+        compute=ComputeCore(peak_flops=TPUV6_FLOPS_BF16),
+        memory=MemoryHierarchy(capacity=TPUV6_MEM_CAPACITY, bandwidth=TPUV6_MEM_BW),
+        tdp=300 * ureg.W,
+        dispatch_tax=0.04 * ureg.ms
     )
 
     TPUv5p = HardwareNode(
@@ -304,6 +354,11 @@ class Hardware(Registry):
     B200 = CloudHardware.B200
     NVL72 = CloudHardware.GB200_NVL72
     MI300X = CloudHardware.MI300X
+    MI250X = CloudHardware.MI250X
+    Gaudi2 = CloudHardware.Gaudi2
+    Gaudi3 = CloudHardware.Gaudi3
+    Trainium2 = CloudHardware.Trainium2
+    TPUv6 = CloudHardware.TPUv6
     TPUv5p = CloudHardware.TPUv5p
     TPUv4 = CloudHardware.TPUv5p
     T4 = CloudHardware.T4

@@ -74,6 +74,35 @@ MI300X_MEM_BW = 5.3 * TB / second
 MI300X_MEM_CAPACITY = 192 * GiB
 MI300X_TDP = 750 * watt
 
+# AMD Instinct MI250X (CDNA 2, 2021) — Source: AMD MI250X Data Sheet
+MI250X_FLOPS_FP16_TENSOR = 383 * TFLOPs / second   # Dense FP16 Matrix Core (per OAM)
+MI250X_FLOPS_FP32 = 47.9 * TFLOPs / second
+MI250X_FLOPS_INT8 = 383 * TFLOPs / second
+MI250X_MEM_BW = 3.2 * TB / second                   # HBM2e (2x 1.6 TB/s per GCD)
+MI250X_MEM_CAPACITY = 128 * GiB                      # 2x 64 GiB HBM2e
+MI250X_TDP = 500 * watt
+
+# Intel Gaudi 2 (2022) — Source: Intel Gaudi 2 White Paper
+GAUDI2_FLOPS_BF16 = 432 * TFLOPs / second           # BF16 Tensor (MME)
+GAUDI2_FLOPS_FP8 = 865 * TFLOPs / second            # FP8
+GAUDI2_MEM_BW = 2.45 * TB / second                   # HBM2e
+GAUDI2_MEM_CAPACITY = 96 * GiB
+GAUDI2_TDP = 600 * watt
+
+# Intel Gaudi 3 (2024) — Source: Intel Gaudi 3 Architecture White Paper
+GAUDI3_FLOPS_BF16 = 1835 * TFLOPs / second          # BF16 Tensor
+GAUDI3_FLOPS_FP8 = 3670 * TFLOPs / second           # FP8
+GAUDI3_MEM_BW = 3.7 * TB / second                    # HBM2e
+GAUDI3_MEM_CAPACITY = 128 * GiB
+GAUDI3_TDP = 900 * watt
+
+# AWS Trainium 2 (2024) — Source: AWS re:Invent 2023 announcements
+TRAINIUM2_FLOPS_BF16 = 380 * TFLOPs / second        # BF16 (estimated from 4x Trainium 1)
+TRAINIUM2_FLOPS_FP8 = 760 * TFLOPs / second         # FP8 (estimated)
+TRAINIUM2_MEM_BW = 2.4 * TB / second                 # HBM (estimated)
+TRAINIUM2_MEM_CAPACITY = 96 * GiB
+TRAINIUM2_TDP = 500 * watt                           # Estimated
+
 # NVIDIA T4 (Turing, 2018) — Source: NVIDIA T4 Data Sheet
 T4_FLOPS_FP16_TENSOR = 65 * TFLOPs / second
 T4_FLOPS_INT8 = 130 * TFLOPs / second
