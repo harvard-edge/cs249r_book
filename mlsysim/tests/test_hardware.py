@@ -7,12 +7,12 @@ def test_hardware_registry():
     a100 = Hardware.A100
     assert a100.name == "NVIDIA A100"
     assert a100.release_year == 2020
-    assert a100.compute.peak_flops.magnitude == 156.0  # Dense FP16 (312 with sparsity)
+    assert a100.compute.peak_flops.magnitude == 312.0  # Dense FP16 Tensor Core
 
     # Check ridge point calculation
     ridge = a100.ridge_point()
     assert "flop/B" in str(ridge.units) or "flop / byte" in str(ridge.units)
-    assert 50 < ridge.magnitude < 120  # ~76 flop/byte (156 TFLOPS / 2.039 TB/s)
+    assert 100 < ridge.magnitude < 200  # ~153 flop/byte (312 TFLOPS / 2.039 TB/s)
 
 def test_hardware_validation():
     # Should raise error on invalid quantity string
@@ -28,4 +28,4 @@ def test_json_serialization():
     a100 = Hardware.A100
     json_data = a100.model_dump_json()
     assert "NVIDIA A100" in json_data
-    assert "156" in json_data  # Dense FP16 peak
+    assert "312" in json_data  # FP16 Tensor Core peak
