@@ -195,8 +195,8 @@ def _(COLORS, ledger, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Iron Law from @sec-introduction-iron-law &middot;
-                    Arithmetic Intensity from @sec-ml-systems &middot;
+                    Iron Law from the Iron Law section (Ch. 1) &middot;
+                    Arithmetic Intensity from the ML Systems chapter &middot;
                     Deployment tiers from Lab 01
                 </div>
             </div>
@@ -238,11 +238,11 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** -- Complete the following before this lab:
 
-    - **@sec-ml-systems** -- Arithmetic Intensity, ridge point,
+    - **The ML Systems chapter** -- Arithmetic Intensity, ridge point,
       and the memory wall. Pay attention to the A100 vs H100 bandwidth comparison.
-    - **@sec-ml-systems-light-barrier** -- The speed of light constraint on cloud
+    - **The Light Barrier section (Ch. 2)** -- The speed of light constraint on cloud
       inference and the autonomous vehicle SLA example.
-    - **@sec-ml-systems-deployment-paradigms** -- Power budgets, thermal throttling,
+    - **The Deployment Paradigms section (Ch. 2)** -- Power budgets, thermal throttling,
       and why Edge/TinyML exist as deployment paradigms.
     """), kind="info")
     return
@@ -893,6 +893,24 @@ $$t_{{\\text{{prop}}}} = \\frac{{2d}}{{c \\cdot n}} = \\frac{{2 \\times 1500}}{{
                 "After 30 seconds, throttling drops FPS to ~25% of peak."
             ), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Thermal Throttle Model": mo.md("""
+**Formula:**
+$$
+R_{\\text{sustained}} = R_{\\text{peak}} \\cdot \\min\\!\\left(1,\\; \\frac{\\text{TDP}}{P_{\\text{workload}}}\\right)
+$$
+
+**Variables:**
+- **$R_{\\text{peak}}$**: peak inference rate (e.g., 60 FPS)
+- **$R_{\\text{sustained}}$**: steady-state rate after thermal equilibrium
+- **TDP**: thermal design power (the heat the chassis can dissipate)
+- **$P_{\\text{workload}}$**: instantaneous power draw of the model
+
+When $P_{\\text{workload}} > \\text{TDP}$, the chip throttles frequency to stay within the thermal envelope.
+On a 5 W mobile device running a workload that wants 20 W, sustained rate drops to ~25% of peak.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1027,6 +1045,24 @@ $$t_{{\\text{{prop}}}} = \\frac{{2d}}{{c \\cdot n}} = \\frac{{2 \\times 1500}}{{
                 f"Cloud battery: {_cloud_days:.1f} days. Local: {min(_local_days,9999):.0f} days."
             ), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Transmission vs. Compute Energy": mo.md("""
+**Formula:**
+$$
+\\frac{E_{\\text{transmit}}}{E_{\\text{local}}} = \\frac{P_{\\text{radio}} \\cdot t_{\\text{tx}}}{P_{\\text{mcu}} \\cdot t_{\\text{infer}}}
+$$
+
+**Variables:**
+- **$P_{\\text{radio}}$**: radio transmit power (e.g., BLE ~40 mW, WiFi ~800 mW, LTE ~2 W)
+- **$t_{\\text{tx}}$**: transmission time = data size / link rate
+- **$P_{\\text{mcu}}$**: MCU power during inference (~20 mW for ESP32)
+- **$t_{\\text{infer}}$**: local inference time (~2 ms for DS-CNN on ESP32)
+
+For a 16 KB audio frame over BLE at 1 Mbps, $t_{\\text{tx}} \\approx 128$ ms while $t_{\\text{infer}} \\approx 2$ ms.
+The energy ratio is often **~1,000x**, making local inference the only viable option for battery-powered devices.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1084,8 +1120,9 @@ $$t_{{\\text{{prop}}}} = \\frac{{2d}}{{c \\cdot n}} = \\frac{{2 \\times 1500}}{{
                         Textbook Connection
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-ml-systems for the Roofline model,
+                        <strong>Read:</strong> the ML Systems chapter for the Roofline model,
                         light barrier, and power wall derivations.
+                        <br/><strong>Build:</strong> TinyTorch Module 02 -- implement a latency profiler that decomposes inference time into compute, memory, and overhead terms.
                     </div>
                 </div>
             </div>
@@ -1113,12 +1150,20 @@ $$t_{{\\text{{prop}}}} = \\frac{{2d}}{{c \\cdot n}} = \\frac{{2 \\times 1500}}{{
 
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, partA_prediction, partB_prediction, partC_prediction, partD_prediction):
     _track = ledger._state.track or "not set"
-    ledger.save(chapter=2, design={
-        "chapter": "v1_02",
-        "completed": True,
-    })
+    if partA_prediction.value is not None and partD_prediction.value is not None:
+        ledger.save(chapter=2, design={
+            "chapter": "v1_02",
+            "memory_wall_prediction": partA_prediction.value,
+            "light_barrier_prediction": partB_prediction.value,
+            "power_wall_prediction": partC_prediction.value,
+            "energy_wall_prediction": partD_prediction.value,
+            "memory_wall_correct": partA_prediction.value == "1.1x",
+            "light_barrier_correct": partB_prediction.value == "no_physics",
+            "power_wall_correct": partC_prediction.value == "15fps",
+            "energy_wall_correct": partD_prediction.value == "1000x",
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

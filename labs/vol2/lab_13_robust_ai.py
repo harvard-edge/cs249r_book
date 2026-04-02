@@ -1229,14 +1229,15 @@ ECC and redundancy are not optional at scale; they are mathematically mandatory.
 # ─── CELL 10: LEDGER HUD ──────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
-def _(mo, ledger, COLORS):
-    ledger.save(chapter=13, design={
-        "chapter": "v2_13",
-        "robustness_tax_pp": 26,
-        "pgd_compute_multiplier": 8,
-        "sdc_probability_10k": 0.63,
-        "defense_strategy": "guardrails",
-    })
+def _(mo, ledger, COLORS, partA_pred):
+    if partA_pred.value is not None:
+        ledger.save(chapter=13, design={
+            "chapter": "v2_13",
+            "robustness_tax_pp": 26,
+            "pgd_compute_multiplier": 8,
+            "sdc_probability_10k": 0.63,
+            "defense_strategy": "guardrails",
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

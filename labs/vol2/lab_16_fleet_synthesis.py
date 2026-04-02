@@ -995,7 +995,7 @@ Failure is not an exception at scale -- it is the baseline operating condition.
                 "the deployment context, the stakeholders, and the consequences of each violation."
             ), kind="info"))
 
-        return mo.vstack(items), _target_met, _effective_gain, _axes
+        return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
     # SYNTHESIS BUILDER
@@ -1109,17 +1109,56 @@ Failure is not an exception at scale -- it is the baseline operating condition.
     # TAB COMPOSITION
     # ─────────────────────────────────────────────────────────────────────
 
-    part_d_result = build_part_d()
-    part_d_content = part_d_result[0]
-    fleet_target_met = part_d_result[1]
-    fleet_effective_gain = part_d_result[2]
-    fleet_axes = part_d_result[3]
+    # ── Compute fleet metrics for LEDGER_HUD (same logic as build_part_d) ──
+    _N = partD_gpus.value
+    _comm = partD_comm_strategy.value
+    _ckpt = partD_ckpt_freq.value
+    _sched = partD_scheduling.value
+
+    _compute_base = 80
+    _carbon_penalty = max(0, (1 - CARBON_CAP) * 30)
+    _compute = max(30, _compute_base - _carbon_penalty)
+
+    _comm_eff = {"ring": 75, "tree": 80, "compress": 92}[_comm]
+    _scale_penalty = min(15, _N / 1000 * 5)
+    _communication = max(30, _comm_eff - _scale_penalty)
+
+    _mtbf_cluster = MTBF_GPU_HOURS / _N
+    _T_ckpt_min = CHECKPOINT_COST_S / 60
+    _ckpt_overhead = _T_ckpt_min / _ckpt if _ckpt > 0 else 1
+    _failure_waste = _ckpt / (2 * _mtbf_cluster * 60) if _mtbf_cluster > 0 else 1
+    _goodput = max(0, 1 - _ckpt_overhead - _failure_waste)
+    _fault_tol = min(95, _goodput * 100)
+    if _comm == "compress":
+        _fault_tol = max(30, _fault_tol - 12)
+
+    _sched_base = 65 if _sched == "static" else 82
+    _fairness_latency_penalty = FAIRNESS_OVERHEAD_MS / 100 * 10
+    _scheduling = max(30, _sched_base - _fairness_latency_penalty)
+
+    _sustainability = min(95, CARBON_CAP * 100 + 10)
+    _fairness = min(90, 60 + (1 - FAIRNESS_THRESHOLD) * 40)
+
+    fleet_axes = {
+        "Compute": _compute,
+        "Communication": _communication,
+        "Fault Tolerance": _fault_tol,
+        "Scheduling": _scheduling,
+        "Sustainability": _sustainability,
+        "Fairness": _fairness,
+    }
+    _eff_product = 1.0
+    for _v in fleet_axes.values():
+        _eff_product *= (_v / 100)
+    fleet_effective_gain = _eff_product * _N
+    _all_green = all(v >= 50 for v in fleet_axes.values())
+    fleet_target_met = fleet_effective_gain >= 50 and _all_green
 
     tabs = mo.ui.tabs({
         "Part A -- The Sensitivity Wall": build_part_a(),
         "Part B -- The Failure Budget": build_part_b(),
         "Part C -- The Principle Interaction Map": build_part_c(),
-        "Part D -- The Fleet Architecture Blueprint": part_d_content,
+        "Part D -- The Fleet Architecture Blueprint": build_part_d(),
         "Synthesis -- Graduation": build_synthesis(),
     })
     tabs

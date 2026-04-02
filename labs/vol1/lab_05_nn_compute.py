@@ -155,9 +155,9 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Activation function definitions from @sec-neural-computation-artificial-neuron
-                    &middot; Memory hierarchy tiers from @sec-neural-computation-transistor-tax
-                    &middot; Iron Law equation from @sec-introduction-iron-law
+                    Activation function definitions from the Neural Computation chapter
+                    &middot; Memory hierarchy tiers from the Neural Computation chapter
+                    &middot; Iron Law equation from the Iron Law section (Ch. 1)
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -1116,7 +1116,7 @@ You are deploying a 10-layer vision model on a mobile NPU (iPhone, 8 GB RAM,
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-nn-computation for transistor costs,
+                    <strong>Read:</strong> the Neural Computation chapter for transistor costs,
                     memory hierarchies, and FLOP scaling.<br/>
                     <strong>Build:</strong> TinyTorch Module 05 -- implement forward and
                     backward passes for dense layers and activation functions.
@@ -1148,12 +1148,17 @@ You are deploying a 10-layer vision model on a mobile NPU (iPhone, 8 GB RAM,
 
 # ─── CELL 5: LEDGER HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, partA_prediction, partD_prediction):
     _track = ledger._state.track or "not set"
-    ledger.save(chapter=5, design={
-        "chapter": "v1_05",
-        "completed": True,
-    })
+    if partA_prediction.value is not None and partD_prediction.value is not None:
+        ledger.save(chapter=5, design={
+            "chapter": "v1_05",
+            "activation_cost_surprise": True,
+            "memory_cliff_discovered": True,
+            "width_scaling_law": "quadratic",
+            "forward_vs_backward_ratio": "4-10x",
+            "completed": True,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

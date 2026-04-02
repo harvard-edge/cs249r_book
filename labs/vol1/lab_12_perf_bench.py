@@ -148,8 +148,8 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Iron Law from @sec-ml-systems &middot;
-                    Roofline model from @sec-hw-acceleration
+                    Iron Law from the ML Systems chapter &middot;
+                    Roofline model from the Hardware Acceleration chapter
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -432,6 +432,26 @@ Asymptote = 1 / {_f:.2f} = {_asymptote:.1f}x (cannot exceed this regardless of S
             items.append(mo.callout(mo.md(f"**The system speedup is only {_system_speedup:.1f}x, not {_S}x.** "
                 f"Amdahl's Law: the {_f*100:.0f}% serial fraction caps the gain at {_asymptote:.1f}x. "
                 "The $30K GPU upgrade delivered 2x, not 10x."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Amdahl's Law": mo.md("""
+**Formula:**
+$$
+\\text{Speedup}_{\\text{system}} = \\frac{1}{(1 - f) + \\frac{f}{S}}
+$$
+
+Asymptotic limit as $S \\to \\infty$:
+$$
+\\text{Speedup}_{\\max} = \\frac{1}{1 - f}
+$$
+
+**Variables:**
+- **$f$**: fraction of execution time that is parallelizable/accelerated
+- **$S$**: speedup of the accelerated portion
+- **$1 - f$**: serial (non-accelerated) fraction
+
+With 45% serial overhead, even infinite inference speedup caps at $1/0.45 = 2.2\\times$ system-level improvement.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -576,6 +596,27 @@ FPS        = {_sustained_fps:.0f} (vendor peak: {_peak_fps:.0f})
             items.append(mo.callout(mo.md("**Sustained FPS drops dramatically.** "
                 "Scrub the time slider forward to 300+ seconds. In fanless enclosures, "
                 "thermal throttling kicks in within minutes."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Thermal Throttling Model": mo.md("""
+**Formula (junction temperature over time):**
+$$
+T_j(t) = T_{\\text{amb}} + \\Delta T_{\\max} \\left(1 - e^{-t/\\tau}\\right)
+$$
+
+Throttling kicks in when $T_j > T_{\\text{throttle}}$:
+$$
+\\text{FPS}_{\\text{sustained}} = \\text{FPS}_{\\text{burst}} \\times \\frac{T_{\\text{throttle}} - T_{\\text{amb}}}{\\Delta T_{\\max}}
+$$
+
+**Variables:**
+- **$T_{\\text{amb}}$**: ambient temperature
+- **$\\Delta T_{\\max}$**: steady-state temperature rise at full power
+- **$\\tau$**: thermal time constant (seconds, depends on heatsink mass)
+- **$T_{\\text{throttle}}$**: junction temperature limit triggering clock reduction
+
+Vendor benchmarks run for $t \\ll \\tau$, never reaching thermal equilibrium. Sustained performance requires $t \\gg \\tau$.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -729,6 +770,26 @@ FPS        = {_sustained_fps:.0f} (vendor peak: {_peak_fps:.0f})
         else:
             items.append(mo.callout(mo.md("**Accuracy alone is not enough.** Try INT8 precision to see "
                 "which configuration passes all four SLO gates simultaneously."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Multi-Metric SLO Gate": mo.md("""
+**Formula (deployment feasibility):**
+$$
+\\text{Deploy} = \\bigwedge_{i=1}^{K} \\left( m_i \\leq \\text{SLO}_i \\right)
+$$
+
+A configuration must pass ALL gates simultaneously:
+$$
+\\text{Accuracy} \\geq A_{\\min} \\;\\wedge\\; \\text{Latency}_{p99} \\leq L_{\\max} \\;\\wedge\\; \\text{Power} \\leq P_{\\max} \\;\\wedge\\; \\text{Memory} \\leq M_{\\max}
+$$
+
+**Variables:**
+- **$m_i$**: measured metric for gate $i$
+- **$\\text{SLO}_i$**: service-level objective threshold for gate $i$
+- **$K$**: number of SLO gates (typically 3-5)
+
+The highest-accuracy configuration often violates latency or power constraints. Production deployment is a conjunction, not a maximization.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -865,6 +926,26 @@ SLO ({_slo} ms): {"PASS" if _slo_ok else "FAIL"} ({_violation_pct:.1f}% violatio
             items.append(mo.callout(mo.md(f"**Average latency is actively misleading.** "
                 f"P99 ({_p99:.0f} ms) is {_p99/_mean:.1f}x the mean ({_mean:.0f} ms). "
                 "Adjust sigma to see how tail heaviness affects SLO compliance."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Log-Normal Tail Latency": mo.md("""
+**Formula (P99 of log-normal distribution):**
+$$
+P_{99} = e^{\\mu + 2.326 \\cdot \\sigma}
+$$
+
+Ratio of P99 to mean:
+$$
+\\frac{P_{99}}{\\text{Mean}} = e^{2.326\\sigma - \\sigma^2/2}
+$$
+
+**Variables:**
+- **$\\mu$**: log-scale location parameter
+- **$\\sigma$**: log-scale shape parameter (tail heaviness)
+- **2.326**: z-score for 99th percentile of standard normal
+
+At $\\sigma = 0.8$ (typical for inference), $P_{99}/\\text{Mean} \\approx 5\\text{-}10\\times$. A 50 ms mean hides a 250-500 ms P99.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -922,7 +1003,7 @@ SLO ({_slo} ms): {"PASS" if _slo_ok else "FAIL"} ({_violation_pct:.1f}% violatio
                         Textbook &amp; TinyTorch
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-perf-benchmarking for Amdahl's Law derivation
+                        <strong>Read:</strong> the Performance Benchmarking chapter for Amdahl's Law derivation
                         and thermal models.<br/>
                         <strong>Build:</strong> TinyTorch Module 12 -- benchmark harness with
                         percentile tracking.
@@ -952,8 +1033,16 @@ SLO ({_slo} ms): {"PASS" if _slo_ok else "FAIL"} ({_violation_pct:.1f}% violatio
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
-    ledger.save(chapter=12, design={"lab": "perf_bench", "completed": True})
+def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred):
+    if pA_pred.value is not None and pB_pred.value is not None and pC_pred.value is not None and pD_pred.value is not None:
+        ledger.save(chapter=12, design={
+            "lab": "perf_bench",
+            "completed": True,
+            "amdahl_speedup_prediction": pA_pred.value,
+            "thermal_sustained_fps": pB_pred.value,
+            "multi_metric_slo_verdict": pC_pred.value,
+            "tail_latency_slo_met": pD_pred.value,
+        })
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>

@@ -331,7 +331,7 @@ def _(mo, check1):
                     The Speed of Light
                 </div>
                 <div style="color: #64748b; font-size: 0.85rem; line-height: 1.5;">
-                    London to New York = 36 ms minimum round-trip, one-way.
+                    London to New York = ~28 ms one-way, ~56 ms round-trip.
                     A self-driving car that needs a 10 ms decision loop
                     <strong>cannot route to a remote datacenter</strong>.
                     Physics sets this floor. No GPU upgrade helps.

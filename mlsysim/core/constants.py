@@ -20,11 +20,11 @@ V100_TDP = 300 * watt                     # SXM2 variant
 
 # NVIDIA A100 (Ampere, 2020) — Source: NVIDIA A100 Data Sheet
 # NOTE: Dense (without structured sparsity) values. With 2:4 sparsity, double these.
-A100_FLOPS_FP16_TENSOR = 156 * TFLOPs / second   # Dense FP16 Tensor Core (312 with sparsity)
-A100_FLOPS_FP16_SPARSE = 312 * TFLOPs / second   # With 2:4 structured sparsity
-A100_FLOPS_TF32 = 78 * TFLOPs / second            # Dense TF32 (156 with sparsity)
+A100_FLOPS_FP16_TENSOR = 312 * TFLOPs / second   # Dense FP16 Tensor Core (624 with sparsity)
+A100_FLOPS_FP16_SPARSE = 624 * TFLOPs / second   # With 2:4 structured sparsity
+A100_FLOPS_TF32 = 156 * TFLOPs / second           # Dense TF32 (312 with sparsity)
 A100_FLOPS_FP32 = 19.5 * TFLOPs / second          # Standard CUDA cores (no tensor)
-A100_FLOPS_INT8 = 312 * TFLOPs / second            # Dense INT8 Tensor Core (624 with sparsity)
+A100_FLOPS_INT8 = 624 * TFLOPs / second            # Dense INT8 Tensor Core (1248 with sparsity)
 A100_MEM_BW = 2039 * GB / second           # HBM2e (SXM variant)
 A100_MEM_CAPACITY = 80 * GiB              # SXM variant (also 40 GiB PCIe)
 A100_TDP = 400 * watt                     # SXM variant

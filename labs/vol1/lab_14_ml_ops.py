@@ -123,9 +123,9 @@ def _(COLORS, mo):
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                     Prerequisites</div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Degradation equation from @sec-introduction &middot;
-                    Model serving from @sec-model-serving &middot;
-                    Training pipeline from @sec-model-training</div>
+                    Degradation equation from the Introduction chapter &middot;
+                    Model serving from the Model Serving chapter &middot;
+                    Training pipeline from the Training chapter</div>
             </div>
             <div style="flex: 0 0 180px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
@@ -161,7 +161,7 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** &mdash; Complete before this lab:
 
-    - **@sec-ml-operations** &mdash; Distribution drift, PSI monitoring, retraining cadence
+    - **The ML Operations chapter** &mdash; Distribution drift, PSI monitoring, retraining cadence
       optimization, deployment cost asymmetry, and technical debt in ML systems.
     """), kind="info")
     return
@@ -197,10 +197,10 @@ def _(mo, partA_pred):
     # ── Part B widgets ────────────────────────────────────────────────────────
     partB_pred = mo.ui.radio(
         options={
-            "A) 7 days (retrain weekly)": "7d",
-            "B) ~6 days (T* = sqrt(2*10000/500))": "6d",
-            "C) 14 days (biweekly)": "14d",
-            "D) 30 days (current cadence is fine)": "30d",
+            "A) ~7 days (weekly)": "7d",
+            "B) ~6 days": "6d",
+            "C) ~14 days (biweekly)": "14d",
+            "D) ~30 days (current cadence is fine)": "30d",
         },
         label="Retraining costs $10K. Drift costs $500/day. Current cadence: 30 days. Optimal?",
     )
@@ -218,10 +218,10 @@ def _(mo, partB_pred):
     # ── Part C widgets ────────────────────────────────────────────────────────
     partC_pred = mo.ui.radio(
         options={
-            "A) 700 days (100x cost = 100x interval)": "700d",
-            "B) 140 days (linear proportion)": "140d",
-            "C) ~70 days (sqrt(100) = 10x interval)": "70d",
-            "D) 14 days (edge needs more frequent updates)": "14d",
+            "A) ~700 days (100x cost means 100x interval)": "700d",
+            "B) ~140 days (proportional to cost)": "140d",
+            "C) ~70 days": "70d",
+            "D) ~14 days (edge needs frequent updates)": "14d",
         },
         label="Cloud retraining: $1K, T*=7 days. Edge: $100K. What is edge T*?",
     )
@@ -440,6 +440,21 @@ Detection gap  = acc_drop_week - PSI_alert_week
                 f"**The key insight: dashboards stay green while accuracy erodes.** "
                 f"At 26 weeks: accuracy = {_acc_t[26]:.1f}% while infrastructure is 100%."), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Population Stability Index (PSI)": mo.md("""
+**Formula:**
+$$
+\\text{PSI} = \\sum_{i=1}^{k} (p_i - q_i) \\cdot \\ln\\!\\left(\\frac{p_i}{q_i}\\right)
+$$
+
+**Variables:**
+- **$p_i$**: proportion in bin $i$ of the reference (training) distribution
+- **$q_i$**: proportion in bin $i$ of the current (production) distribution
+- **$k$**: number of bins
+- **PSI < 0.1**: no significant drift &mdash; **PSI 0.1 &ndash; 0.25**: moderate drift &mdash; **PSI > 0.25**: significant drift requiring retraining
+""")
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -487,7 +502,7 @@ Key insight: 4x more expensive retraining only **doubles** the interval (square 
         # U-curve
         _days = np.linspace(1, 90, 200)
         _retrain_annual = [365 / d * _C for d in _days]  # retrain cost per year
-        _stale_annual = [_Cd * d / 2 * (365 / d) for d in _days]  # avg staleness * retrains/yr
+        _stale_annual = [_Cd * 365 * d / 2 for d in _days]  # annual drift cost scales with interval length
         _total_annual = [r + s for r, s in zip(_retrain_annual, _stale_annual)]
 
         _fig = go.Figure()
@@ -551,6 +566,20 @@ Current cadence (30 days) is {30/_Tstar:.1f}x the optimal interval.
                 f"**T* = {math.sqrt(2*10000/500):.1f} days.** "
                 "The square-root law makes T* more sensitive to drift than students expect."), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Optimal Retraining Interval": mo.md("""
+**Formula:**
+$$
+T^{*} = \\sqrt{\\frac{2\\,C_{\\text{retrain}}}{C_{\\text{drift}}}}
+$$
+
+**Variables:**
+- **$C_{\\text{retrain}}$**: fixed cost of one retraining cycle (compute, data, validation)
+- **$C_{\\text{drift}}$**: cost of drift per unit time (accuracy loss converted to dollars)
+- **$T^{*}$**: optimal interval between retraining runs &mdash; EOQ-inspired square-root law balances fixed retraining cost against continuous drift cost
+""")
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -571,14 +600,25 @@ Current cadence (30 days) is {30/_Tstar:.1f}x the optimal interval.
         </div>"""))
 
         items.append(mo.md("""
-## The Square Root Surprise
+## The Square Root Surprise: Why 100x Cost ≠ 100x Interval
+
+When retraining is expensive, the natural instinct is to retrain proportionally
+less often. If cloud retraining costs $1K and edge costs $100K, most teams assume
+the edge should retrain 100x less frequently. But the optimal interval follows a
+**square root law**, not a linear one:
 
 ```
-T*_edge / T*_cloud = sqrt(C_edge / C_cloud)
+T* = sqrt(2 * C_retrain / C_drift)
+T*_edge / T*_cloud = sqrt(C_edge / C_cloud) = sqrt(100) ≈ 10x
 ```
 
-A **100x cost difference** produces only a **10x cadence difference**.
-This is deeply counterintuitive: students assume linear scaling.
+A **100x cost difference** produces only a **10x cadence difference**. This happens
+because drift cost accumulates *continuously* while retraining cost is *fixed* per
+cycle. The trade-off between the two follows the same square root pattern as the
+classic Economic Order Quantity (EOQ) formula from operations research.
+
+The implication: edge devices cannot simply skip retraining -- they must retrain
+on a 10x longer cadence, not a 100x one. The drift cost of stale models is too high.
         """))
 
         items.append(partC_pred)
@@ -682,6 +722,20 @@ Cadence ratio = {_Te:.1f}/{_Tc:.1f} = {_cadence_ratio:.1f}x = sqrt({_cost_ratio:
             f"Edge retraining is expensive because {_cloud_to_edge_tflops:.0f}x less compute "
             f"means {_cloud_to_edge_tflops:.0f}x longer wall-clock time per training run."
         ), kind="info"))
+
+        items.append(mo.accordion({
+            "Math Peek: Deployment Cost Asymmetry": mo.md("""
+**Formula:**
+$$
+\\text{Cost\\_ratio} = \\frac{C_{\\text{cloud}}}{C_{\\text{edge}}}
+$$
+
+**Variables:**
+- **$C_{\\text{cloud}}$**: cost of one retraining cycle in the cloud (compute + data transfer)
+- **$C_{\\text{edge}}$**: cost of one retraining cycle on edge hardware (longer wall-clock, lower power)
+- **Cost\\_ratio**: how many times cheaper cloud retraining is compared to edge — driven by the TFLOPS gap between tiers
+""")
+        }))
 
         return mo.vstack(items)
 
@@ -804,6 +858,22 @@ Debt multiplier:      {_total_with_cascade:.1f} / {_single_loss:.1f} = {_debt_mu
                 f"**The actual multiplier is {_debt_mult:.1f}x.** Compounding through "
                 "distribution shift + cascade dependencies."), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Technical Debt Cascade": mo.md("""
+**Formula:**
+$$
+\\text{Debt}(N) = \\sum_{k=1}^{N} \\bigl(L_{\\text{base}} \\cdot k^{\\alpha}\\bigr) + C_{\\text{cascade}}
+$$
+
+**Variables:**
+- **$N$**: number of missed retraining cycles
+- **$L_{\\text{base}}$**: base accuracy loss per missed cycle
+- **$\\alpha$**: compounding exponent ($\\alpha > 1$ means superlinear growth)
+- **$C_{\\text{cascade}}$**: additional loss from downstream models consuming stale predictions
+- **Debt$(N)$**: total accumulated loss &mdash; grows superlinearly because each missed cycle increases the drift that subsequent cycles must absorb
+""")
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -827,16 +897,37 @@ Debt multiplier:      {_total_with_cascade:.1f} / {_single_loss:.1f} = {_debt_mu
                 "3 missed retraining cycles produce 5-6x the loss of 1 missed cycle. "
                 "Downstream model dependencies multiply the damage."
             ), kind="info"),
-            mo.md("""
-## Connections
-
-**Textbook:** @sec-ml-operations &mdash; PSI monitoring, retraining cadence,
-deployment cost asymmetry, technical debt in ML systems.
-
-**TinyTorch:** Module 14 &mdash; implement a drift detector with PSI monitoring.
-
-**Next Lab:** Lab 15 explores the costs of responsible engineering &mdash;
-fairness constraints cost accuracy, explanations cost latency, and all of it costs carbon.
+            mo.Html(f"""
+            <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        What's Next
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Lab 15: Responsible Engineering</strong> -- Your pipeline
+                        detects drift and retrains on schedule. Lab 15 reveals the hidden
+                        costs: fairness constraints tax accuracy, explanations tax latency,
+                        and all of it taxes carbon.
+                    </div>
+                </div>
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        Textbook &amp; TinyTorch
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Read:</strong> the ML Operations chapter for PSI monitoring,
+                        retraining cadence, and technical debt in ML systems.<br/>
+                        <strong>Build:</strong> TinyTorch Module 14 -- implement a drift
+                        detector with PSI monitoring.
+                    </div>
+                </div>
+            </div>
             """),
         ])
 
@@ -857,12 +948,17 @@ fairness constraints cost accuracy, explanations cost latency, and all of it cos
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, partA_pred, partB_pred, partC_pred, partD_pred):
     _track = ledger.get_track()
-    ledger.save(chapter=14, design={
-        "chapter": "v1_14",
-        "completed": True,
-    })
+    if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None:
+        ledger.save(chapter=14, design={
+            "chapter": "v1_14",
+            "drift_detection_method": "psi",
+            "optimal_retrain_cadence": "weekly",
+            "cost_asymmetry_discovered": True,
+            "debt_compounds_not_accumulates": True,
+            "completed": True,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

@@ -488,6 +488,29 @@ def _(
                 "because Moore's Law worked for decades. But AI demand grows 7x faster than efficiency.")
         items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: The Exponential Energy Deficit": mo.md("""
+**Demand vs. efficiency growth:**
+$$
+\\text{Gap}(t) = \\frac{2^{t / T_{\\text{demand}}}}{2^{t / T_{\\text{eff}}}}
+= 2^{t \\left(\\frac{1}{T_{\\text{demand}}} - \\frac{1}{T_{\\text{eff}}}\\right)}
+$$
+
+**Where:**
+- **$T_{\\text{demand}}$**: Demand doubling time (~3.4 months for AI compute)
+- **$T_{\\text{eff}}$**: Hardware efficiency doubling time (~24 months)
+- **$t$**: Time in months
+
+**At $t = 84$ months (7 years):**
+$$
+\\text{Gap} = 2^{84 \\times (1/3.4 - 1/24)} = 2^{84 \\times 0.253} = 2^{21.2} \\approx 195{,}000\\times
+$$
+
+Demand grows ~7x faster than efficiency. No amount of hardware improvement
+closes this gap without demand-side intervention.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -602,6 +625,28 @@ def _(
                 "The ratio is ~41x. Students anchor on algorithmic speedup scales (2-5x) and do not "
                 "realize that grid carbon varies by more than an order of magnitude.")
         items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn"))
+
+        items.append(mo.accordion({
+            "Math Peek: Operational Carbon Equation": mo.md("""
+**Operational carbon:**
+$$
+C_{\\text{op}} = E \\times \\text{CI} \\times \\text{PUE}
+$$
+
+**Where:**
+- **$E$**: Energy consumed (kWh) = Power (kW) $\\times$ Time (h)
+- **$\\text{CI}$**: Carbon intensity of the grid (gCO$_2$/kWh)
+- **$\\text{PUE}$**: Power Usage Effectiveness (total facility power / IT power)
+
+**Geographic lever:**
+$$
+\\frac{C_{\\text{Poland}}}{C_{\\text{Quebec}}} = \\frac{820}{20} = 41\\times
+$$
+
+A single site selection decision provides a 41x carbon reduction --
+larger than most algorithmic optimizations combined.
+""")
+        }))
 
         return mo.vstack(items)
 
@@ -722,6 +767,28 @@ def _(
                 "On a 100% renewable grid, embodied carbon represents 30-50%+ of total lifecycle emissions. "
                 "Students assume 'green energy = zero carbon' and forget the physical carbon cost of fabricating silicon.")
         items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn"))
+
+        items.append(mo.accordion({
+            "Math Peek: Lifecycle Carbon (Embodied + Operational)": mo.md("""
+**Total lifecycle carbon:**
+$$
+C_{\\text{total}} = C_{\\text{embodied}} + C_{\\text{operational}}
+$$
+
+**Embodied carbon per GPU-year:**
+$$
+C_{\\text{embodied}} = \\frac{C_{\\text{mfg}}}{L_{\\text{refresh}}} \\times N_{\\text{GPUs}}
+$$
+
+**Where:**
+- **$C_{\\text{mfg}}$**: Manufacturing carbon per GPU (~175 kg CO$_2$eq for H100)
+- **$L_{\\text{refresh}}$**: Hardware refresh cycle (years)
+- **$N_{\\text{GPUs}}$**: Number of GPUs in the fleet
+
+**On clean grids** (CI < 50 gCO$_2$/kWh), embodied carbon can exceed 30-50%
+of total lifecycle emissions. "Green energy = zero carbon" is a myth.
+""")
+        }))
 
         return mo.vstack(items)
 
@@ -1065,6 +1132,32 @@ without caps guarantees increased consumption.
             "reliably hits 50% reduction."
         ), kind="info"))
 
+        items.append(mo.accordion({
+            "Math Peek: Carbon-Aware Fleet Optimization": mo.md("""
+**Fleet carbon with all levers:**
+$$
+C_{\\text{fleet}} = \\sum_{r \\in \\text{regions}} N_r \\times P_r \\times \\text{CI}_r \\times \\text{PUE}_r \\times t_r
++ C_{\\text{embodied}}
+$$
+
+**Carbon cap constraint:**
+$$
+C_{\\text{fleet}} \\leq \\alpha \\times C_{\\text{baseline}}, \\quad \\alpha \\in (0, 1]
+$$
+
+**Temporal scheduling savings:**
+$$
+C_{\\text{temporal}} = C_{\\text{baseline}} \\times \\left(1 - f_{\\text{shift}} \\times \\frac{\\text{CI}_{\\text{peak}} - \\text{CI}_{\\text{off}}}{\\text{CI}_{\\text{peak}}}\\right)
+$$
+
+- **$f_{\\text{shift}}$**: Fraction of jobs shifted to off-peak
+- **$\\alpha$**: Carbon cap as fraction of baseline
+
+Only the combination of geographic + temporal + absolute cap reliably
+achieves 50%+ reduction targets.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1160,11 +1253,22 @@ without caps guarantees increased consumption.
 # ─── CELL 10: LEDGER HUD ─────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
-def _(mo, ledger, COLORS):
+def _(mo, ledger, COLORS, partA_pred, partB_pred, partC_pred, partD_pred, partD_elast_slider, partE_geo, partE_cap):
+    _energy_pred = partA_pred.value if hasattr(partA_pred, 'value') else None
+    _geo_pred = partB_pred.value if hasattr(partB_pred, 'value') else None
+    _lifecycle_pred = partC_pred.value if hasattr(partC_pred, 'value') else None
+    _jevons_pred = partD_pred.value if hasattr(partD_pred, 'value') else None
+    _elasticity = partD_elast_slider.value if hasattr(partD_elast_slider, 'value') else 2.0
+    _geo_choice = partE_geo.value if hasattr(partE_geo, 'value') else "US average"
+    _cap_choice = partE_cap.value if hasattr(partE_cap, 'value') else 1.0
     ledger.save(chapter=14, design={
-        "chapter": "v2_14",
-        "jevons_paradox_demonstrated": True,
-        "geographic_strategy": "quebec",
+        "partA_energy_deficit_prediction": _energy_pred,
+        "partB_geography_prediction": _geo_pred,
+        "partC_lifecycle_prediction": _lifecycle_pred,
+        "partD_jevons_prediction_pct": _jevons_pred,
+        "partD_elasticity_explored": _elasticity,
+        "partE_geographic_choice": _geo_choice,
+        "partE_carbon_cap": _cap_choice,
     })
 
     mo.Html(f"""

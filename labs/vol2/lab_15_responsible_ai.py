@@ -479,6 +479,33 @@ def _(
                 "with unequal base rates, no single threshold (or pair of thresholds) satisfies all three metrics.")
         items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: The Impossibility Theorem": mo.md("""
+**Three fairness metrics (cannot all hold when base rates differ):**
+
+**Demographic Parity (DP):**
+$$
+P(\\hat{Y}=1 | A=a) = P(\\hat{Y}=1 | A=b)
+$$
+
+**Equalized Odds (EO):**
+$$
+P(\\hat{Y}=1 | Y=y, A=a) = P(\\hat{Y}=1 | Y=y, A=b) \\quad \\forall y \\in \\{0,1\\}
+$$
+
+**Calibration:**
+$$
+P(Y=1 | \\hat{Y}=p, A=a) = P(Y=1 | \\hat{Y}=p, A=b) = p
+$$
+
+**Impossibility (Kleinberg 2016, Chouldechova 2017):**
+When $P(Y=1|A=a) \\neq P(Y=1|A=b)$ (unequal base rates),
+no classifier can simultaneously satisfy DP + EO + Calibration.
+
+This is a **mathematical constraint**, not a training limitation.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -589,6 +616,28 @@ def _(
                    "Most students predict 82-84%, expecting a small fixed cost. "
                    "The tax is proportional to the base rate gap."))
         items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _diff < 3 else "warn"))
+
+        items.append(mo.accordion({
+            "Math Peek: The Fairness Tax": mo.md("""
+**Accuracy under fairness constraint:**
+$$
+\\text{Acc}_{\\text{fair}} = \\text{Acc}_{\\text{base}} - \\tau \\times |r_A - r_B|
+$$
+
+**Where:**
+- **$\\text{Acc}_{\\text{base}}$**: Unconstrained classifier accuracy (e.g., 85%)
+- **$\\tau$**: Tax coefficient per unit base rate gap
+  - Demographic Parity: $\\tau \\approx 26$ pp
+  - Equalized Odds: $\\tau \\approx 17$ pp
+  - Equal Opportunity: $\\tau \\approx 10$ pp
+- **$|r_A - r_B|$**: Absolute base rate gap between groups
+
+**Example:** DP at 30% gap: $85 - 26 \\times 0.30 = 77.2\\%$ (7.8 pp cost).
+
+Equal Opportunity imposes the lowest tax because it only constrains
+true positive rates, not the full confusion matrix.
+""")
+        }))
 
         return mo.vstack(items)
 
@@ -736,6 +785,31 @@ def _(
                 "cap it at 40-60%.")
         items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Feedback Loop Amplification": mo.md("""
+**Bias amplification over retraining cycles:**
+$$
+d_t = d_0 \\times \\alpha^t
+$$
+
+**Where:**
+- **$d_0$**: Initial disparity (e.g., 5% = 0.05)
+- **$\\alpha$**: Amplification rate per cycle (empirically ~1.35)
+- **$t$**: Number of retraining cycles
+
+**At $t = 10$:**
+$$
+d_{10} = 0.05 \\times 1.35^{10} = 0.05 \\times 20.1 = 1.005
+$$
+
+In practice, saturation effects cap disparity at 40-60%, but the
+exponential trajectory means bias doubles roughly every 2 cycles.
+
+**Key insight:** Without intervention, even a 5% initial bias
+becomes a 40-60% disparity within 10 retraining cycles.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -869,6 +943,30 @@ def _(
                 "and queuing variance. At 100ms total, zero margin means any spike violates the SLA.")
         items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Latency Budget Allocation": mo.md("""
+**Total latency stack:**
+$$
+L_{\\text{total}} = L_{\\text{inference}} + L_{\\text{monitor}} + L_{\\text{explain}} + L_{\\text{network}}
+$$
+
+**SLA constraint:**
+$$
+L_{\\text{total}} \\leq L_{\\text{SLA}} \\quad (\\text{e.g., 100 ms})
+$$
+
+**Example stack:**
+- Inference: 30 ms
+- Full monitoring: 20 ms
+- SHAP explainability: 50 ms
+- Network overhead: 5 ms
+- **Total: 105 ms > 100 ms SLA** (violation)
+
+**Trade-off:** You must choose between full monitoring (20 ms) vs. basic (10 ms),
+or SHAP (50 ms) vs. LIME (25 ms). No configuration fits all three at full fidelity.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -970,6 +1068,29 @@ def _(
             ), kind="info"),
         ]))
 
+        items.append(mo.accordion({
+            "Math Peek: Audit Compute and Detection Latency": mo.md("""
+**Audit compute cost:**
+$$
+C_{\\text{audit}} = C_{\\text{base}} \\times \\frac{S}{S_{\\text{ref}}} \\times N_{\\text{tests}}
+$$
+
+**Where:**
+- **$C_{\\text{base}}$**: Baseline compute per audit cycle (GPU-hours)
+- **$S / S_{\\text{ref}}$**: Sample size ratio vs. reference
+- **$N_{\\text{tests}}$**: Number of statistical tests (fairness metrics $\\times$ subgroups)
+
+**Fairness debt window:**
+$$
+t_{\\text{debt}} = t_{\\text{detection}} + t_{\\text{remediation}}
+$$
+
+This is the time real users experience biased outcomes before the system
+detects and corrects the violation. Aggressive auditing (large samples,
+low thresholds) shrinks $t_{\\text{debt}}$ but increases $C_{\\text{audit}}$.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1059,13 +1180,24 @@ def _(
 
 # ─── CELL 10: LEDGER HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, ledger, COLORS, partD_metric):
+def _(mo, ledger, COLORS, partA_pred, partB_pred, partC_pred, partD_pred, partD_metric, partD_monitor, partD_explain, partE_threshold):
+    _impossibility_pred = partA_pred.value if hasattr(partA_pred, 'value') else None
+    _tax_pred = partB_pred.value if hasattr(partB_pred, 'value') else None
+    _feedback_pred = partC_pred.value if hasattr(partC_pred, 'value') else None
+    _overhead_pred = partD_pred.value if hasattr(partD_pred, 'value') else None
     _metric_val = partD_metric.value if hasattr(partD_metric, 'value') else "eqop"
+    _monitor_val = partD_monitor.value if hasattr(partD_monitor, 'value') else "basic"
+    _explain_val = partD_explain.value if hasattr(partD_explain, 'value') else "none"
+    _threshold_val = partE_threshold.value if hasattr(partE_threshold, 'value') else 0.05
     ledger.save(chapter=15, design={
-        "chapter": "v2_15",
-        "fairness_metric": _metric_val,
-        "fairness_overhead_ms": 15,
-        "fairness_disparity_threshold": 0.05,
+        "partA_impossibility_prediction": _impossibility_pred,
+        "partB_fairness_tax_prediction": _tax_pred,
+        "partC_feedback_prediction": _feedback_pred,
+        "partD_overhead_prediction": _overhead_pred,
+        "partD_fairness_metric_choice": _metric_val,
+        "partD_monitoring_choice": _monitor_val,
+        "partD_explainability_choice": _explain_val,
+        "partE_disparity_threshold": _threshold_val,
     })
 
     mo.Html(f"""

@@ -412,6 +412,28 @@ def _(mo, pE_pred):
                     "The storage-compute chasm widens every hardware generation.")
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Storage-Compute Utilization": mo.md("""
+**GPU utilization under storage bottleneck:**
+$$
+\\eta_{\\text{GPU}} = \\frac{\\text{BW}_{\\text{storage}} / N}{\\text{Data demand per GPU}}
+$$
+
+**When storage is the bottleneck:**
+$$
+\\eta_{\\text{new}} = \\eta_{\\text{old}} \\times \\frac{\\text{TFLOPS}_{\\text{old}}}{\\text{TFLOPS}_{\\text{new}}}
+$$
+
+**Variables:**
+- **$\\eta_{\\text{GPU}}$**: fraction of time the GPU is actually computing (not waiting for data)
+- **$\\text{BW}_{\\text{storage}}$**: total storage bandwidth available to the cluster
+- **$N$**: number of GPUs sharing that storage bandwidth
+- **$\\text{TFLOPS}_{\\text{new/old}}$**: compute throughput of the new/old GPU generation
+
+**Key insight:** Doubling GPU TFLOPS while keeping storage constant halves utilization. The storage-compute gap has widened ~60x from V100 to B200.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -511,6 +533,27 @@ def _(mo, pE_pred):
             _msg = "**Utilization drops proportionally.** Storage bandwidth is shared; doubling GPUs halves per-GPU BW."
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Pipeline Throughput Equation": mo.md("""
+**Per-GPU data delivery rate:**
+$$
+\\text{BW}_{\\text{per\\_gpu}} = \\frac{\\text{BW}_{\\text{storage}}}{N}
+$$
+
+**GPU utilization (storage-limited):**
+$$
+\\eta = \\min\\left(1,\\; \\frac{\\text{BW}_{\\text{per\\_gpu}}}{\\text{Data demand per GPU}}\\right)
+$$
+
+**Variables:**
+- **$\\text{BW}_{\\text{storage}}$**: total cluster storage bandwidth (shared)
+- **$N$**: number of GPUs competing for storage
+- **$\\eta$**: effective GPU utilization
+
+**Key insight:** Storage bandwidth is a shared resource. Doubling GPUs without upgrading storage halves per-GPU bandwidth and proportionally reduces utilization. The pipeline equation $T_{\\text{step}} = \\max(T_{\\text{compute}}, T_{\\text{IO}})$ means you cannot hide a slower stage.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -609,6 +652,27 @@ def _(mo, pE_pred):
                     f"strikes at sqrt({_N}) = {_birthday_threshold:.0f} workers, far below {_n}.")
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Birthday Problem in Shard Contention": mo.md("""
+**Collision probability (at least one duplicate shard assignment):**
+$$
+P(\\text{collision}) = 1 - \\prod_{i=0}^{n-1}\\frac{N - i}{N} \\approx 1 - e^{-n(n-1)/(2N)}
+$$
+
+**Birthday threshold (50% collision probability):**
+$$
+n_{50\\%} \\approx \\sqrt{2N \\ln 2} \\approx 1.18\\sqrt{N}
+$$
+
+**Variables:**
+- **$n$**: number of workers (GPUs) randomly selecting shards
+- **$N$**: total number of dataset shards
+- **$P(\\text{collision})$**: probability that at least two workers select the same shard
+
+**Key insight:** With 1,000 shards, collisions become likely at just $\\sqrt{1000} \\approx 32$ workers. At 256 workers, collision probability is effectively 100%. Deterministic shard assignment eliminates this entirely.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -723,6 +787,32 @@ def _(mo, pE_pred):
                     "Prefetching converts sequential to pipelined but cannot shrink max().")
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Pipelining and Data Stalls": mo.md("""
+**Sequential (no prefetch):**
+$$
+T_{\\text{step}} = T_{\\text{compute}} + T_{\\text{IO}}
+$$
+
+**Pipelined (with prefetch):**
+$$
+T_{\\text{step}} = \\max(T_{\\text{compute}},\\; T_{\\text{IO}})
+$$
+
+**Residual stall fraction:**
+$$
+\\text{Stall} = \\frac{\\max(T_{\\text{compute}}, T_{\\text{IO}}) - T_{\\text{compute}}}{\\max(T_{\\text{compute}}, T_{\\text{IO}})}
+$$
+
+**Variables:**
+- **$T_{\\text{compute}}$**: time for forward + backward pass
+- **$T_{\\text{IO}}$**: time to load one batch from storage
+- **Stall**: fraction of step time the GPU is idle waiting for data
+
+**Key insight:** When $T_{\\text{IO}} > T_{\\text{compute}}$, perfect pipelining still leaves a stall of $(T_{\\text{IO}} - T_{\\text{compute}})/T_{\\text{IO}}$. Prefetch depth does not help -- only faster storage or smaller data can fix it.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -854,6 +944,33 @@ def _(mo, pE_pred):
                     "Too infrequent wastes compute on rework after failures.")
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Young-Daly Optimal Checkpoint Interval": mo.md("""
+**Optimal checkpoint interval:**
+$$
+\\tau^{*} = \\sqrt{2 \\cdot \\delta \\cdot M} - \\delta
+$$
+
+**For $\\delta \\ll M$ (typical):**
+$$
+\\tau^{*} \\approx \\sqrt{2 \\delta M}
+$$
+
+**Total waste fraction:**
+$$
+W = \\frac{\\delta}{\\tau} + \\frac{\\tau}{2M}
+$$
+
+**Variables:**
+- **$\\tau^{*}$**: optimal interval between checkpoints
+- **$\\delta$**: time to write one checkpoint (e.g., 2 minutes)
+- **$M$**: mean time between failures for the cluster (MTBF)
+- **$W$**: fraction of wall-clock time wasted (checkpoint I/O + expected rework)
+
+**Key insight:** With $\\delta = 2$ min and $M = 5$ hours: $\\tau^{*} = \\sqrt{2 \\times 2 \\times 300} \\approx 27$ min. Too frequent ($\\tau \\ll \\tau^{*}$) wastes time on I/O; too infrequent ($\\tau \\gg \\tau^{*}$) wastes compute on rework.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -914,12 +1031,18 @@ and 3D parallelism maps strategies to the bandwidth hierarchy.
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred):
     _track = ledger._state.track or "not set"
-    ledger.save(chapter=4, design={
-        "chapter": "v2_04",
-        "completed": True,
-    })
+    if pA_pred.value is not None:
+        ledger.save(chapter=4, design={
+            "chapter": "v2_04",
+            "completed": True,
+            "storage_chasm_prediction": pA_pred.value,
+            "pipeline_scaling_prediction": pB_pred.value,
+            "shard_contention_prediction": pC_pred.value,
+            "data_stall_prediction": pD_pred.value,
+            "checkpoint_interval_prediction": pE_pred.value,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

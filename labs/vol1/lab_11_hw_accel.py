@@ -152,8 +152,8 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Iron Law latency decomposition from @sec-ml-systems &middot;
-                    Memory hierarchy from @sec-neural-computation
+                    Iron Law latency decomposition from the ML Systems chapter &middot;
+                    Memory hierarchy from the Neural Computation chapter
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -439,6 +439,26 @@ MFU    = {_mfu:.1f}%
             items.append(mo.callout(mo.md("**Low utilization does not mean broken code.** "
                 f"At N={_N}, AI = {_ai:.0f} is below the ridge point ({H100_RIDGE:.0f}). "
                 "The kernel is correctly hitting the memory bandwidth ceiling."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: The Roofline Model": mo.md("""
+**Formula:**
+$$
+\\text{Attainable Performance} = \\min\\!\\left(\\text{AI} \\times \\text{BW},\\; \\text{Peak FLOPS}\\right)
+$$
+
+Ridge point (transition from memory-bound to compute-bound):
+$$
+\\text{Ridge} = \\frac{\\text{Peak FLOPS}}{\\text{BW}} \\quad \\text{(FLOP/byte)}
+$$
+
+**Variables:**
+- **AI**: arithmetic intensity = FLOPs / bytes transferred (FLOP/byte)
+- **BW**: memory bandwidth (bytes/s)
+- **Peak FLOPS**: theoretical maximum compute throughput
+
+When $\\text{AI} < \\text{Ridge}$, the kernel is memory-bound and performance scales with bandwidth. When $\\text{AI} > \\text{Ridge}$, it is compute-bound and hits the FLOPS ceiling.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -558,6 +578,27 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
             items.append(mo.callout(mo.md(f"**Fusion gives {_speedup:.1f}x speedup.** "
                 "The speedup comes from eliminating memory traffic, not compute. "
                 "Each eliminated HBM write saves bandwidth-limited time."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Kernel Fusion Memory Traffic Reduction": mo.md("""
+**Formula (unfused):**
+$$
+T_{\\text{unfused}} = \\sum_{i=1}^{K} \\frac{2 \\cdot B_{\\text{tensor}}}{\\text{BW}} = K \\cdot \\frac{2 \\cdot B_{\\text{tensor}}}{\\text{BW}}
+$$
+
+**Formula (fused):**
+$$
+T_{\\text{fused}} = \\frac{2 \\cdot B_{\\text{tensor}}}{\\text{BW}} \\qquad \\text{Speedup} = K
+$$
+
+**Variables:**
+- **$K$**: number of elementwise kernels (e.g., 3 for LayerNorm + Dropout + ReLU)
+- **$B_{\\text{tensor}}$**: size of the intermediate tensor in bytes
+- **$\\text{BW}$**: HBM bandwidth
+- Factor of 2: each unfused kernel reads from and writes to HBM
+
+Fusion eliminates $K-1$ round-trips to HBM, giving up to $K\\times$ speedup for memory-bound ops.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -659,6 +700,22 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
             items.append(mo.callout(mo.md("**More powerful does not mean easier to saturate.** "
                 f"The H100 ridge point ({H100_RIDGE:.0f}) is higher because compute grew faster "
                 "than bandwidth. The same kernel changes regime across platforms."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Arithmetic Intensity of GEMM": mo.md("""
+**Formula (square GEMM, N x N):**
+$$
+\\text{AI}_{\\text{GEMM}} = \\frac{2N^3}{3N^2 \\cdot b} = \\frac{2N}{3b} \\quad \\text{(FLOP/byte)}
+$$
+
+**Variables:**
+- **$N$**: matrix dimension
+- **$b$**: bytes per element (4 for FP32, 2 for FP16)
+- **$2N^3$**: FLOPs for matrix multiply (multiply + accumulate)
+- **$3N^2 \\cdot b$**: bytes transferred (read A, read B, write C)
+
+AI grows linearly with $N$. Small matrices are memory-bound; large matrices are compute-bound. The crossover $N$ differs by hardware because ridge points differ.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -762,6 +819,21 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
             items.append(mo.callout(mo.md(f"**Same FLOPs does not mean same energy.** "
                 f"The memory-bound operation wastes {_ratio:.0f}x more energy on data movement. "
                 "This is why hardware architects build larger caches."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Energy per FLOP in Different Roofline Regimes": mo.md("""
+**Formula:**
+$$
+E_{\\text{per FLOP}} = E_{\\text{compute}} + \\frac{E_{\\text{DRAM per byte}}}{\\text{AI}}
+$$
+
+**Variables:**
+- **$E_{\\text{compute}}$**: energy per arithmetic operation (~0.2-3.7 pJ)
+- **$E_{\\text{DRAM per byte}}$**: energy per byte of DRAM access (~20-640 pJ)
+- **$\\text{AI}$**: arithmetic intensity (FLOP/byte)
+
+At low AI (memory-bound), the $E_{\\text{DRAM}}/\\text{AI}$ term dominates. At AI=10, each FLOP costs ~64 pJ in DRAM energy alone. At AI=500, the DRAM cost is negligible.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -875,6 +947,26 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
             items.append(mo.callout(mo.md(f"**Tiling gives {_speedup:.1f}x speedup.** "
                 "Standard attention materializes the full NxN matrix in HBM. Tiling keeps "
                 "hot data in SRAM, dramatically reducing memory traffic."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: FlashAttention Memory Complexity": mo.md("""
+**Standard attention HBM access:**
+$$
+\\text{HBM}_{\\text{standard}} = \\Theta(N^2 \\cdot d) \\quad \\text{(materializes full } N \\times N \\text{ matrix)}
+$$
+
+**Tiled (FlashAttention) HBM access:**
+$$
+\\text{HBM}_{\\text{tiled}} = \\Theta\\!\\left(\\frac{N^2 \\cdot d^2}{M}\\right)
+$$
+
+**Variables:**
+- **$N$**: sequence length
+- **$d$**: head dimension
+- **$M$**: SRAM size (on-chip memory per SM)
+
+Speedup $\\approx M / d$, which is 2-4x at typical dimensions. Tiling keeps Q, K, V blocks in SRAM, avoiding the $N^2$ materialization in HBM.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -933,7 +1025,7 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
                         Textbook &amp; TinyTorch
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-hw-acceleration for Roofline model derivation.<br/>
+                        <strong>Read:</strong> the Hardware Acceleration chapter for Roofline model derivation.<br/>
                         <strong>Build:</strong> TinyTorch Module 11 -- GEMM tiling and FlashAttention.
                     </div>
                 </div>
@@ -962,8 +1054,17 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
-    ledger.save(chapter=11, design={"lab": "hw_accel", "completed": True})
+def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred):
+    if pA_pred.value is not None and pB_pred.value is not None and pC_pred.value is not None and pD_pred.value is not None and pE_pred.value is not None:
+        ledger.save(chapter=11, design={
+            "lab": "hw_accel",
+            "completed": True,
+            "roofline_diagnosis": pA_pred.value,
+            "fusion_speedup_prediction": pB_pred.value,
+            "balance_shift_prediction": pC_pred.value,
+            "energy_regime_prediction": pD_pred.value,
+            "tiling_speedup_prediction": pE_pred.value,
+        })
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>

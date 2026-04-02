@@ -193,7 +193,7 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    ML deployment pipelines from @sec-ml-operations-scale &middot;
+                    ML deployment pipelines from the ML Operations at Scale chapter &middot;
                     Statistical significance and hypothesis testing basics
                 </div>
             </div>
@@ -232,7 +232,7 @@ def _(mo):
     **Recommended Reading** &mdash; Complete before this lab:
 
     - **Operational Complexity Scaling** &mdash; How alerts grow O(N), coordination O(N log N),
-      and dependencies O(N^2) with model count (@sec-ml-operations-scale).
+      and dependencies O(N^2) with model count (the ML Operations at Scale chapter).
     - **Silent Model Regression** &mdash; Why model failures produce no errors or crashes.
     - **Staged Rollout Strategies** &mdash; Canary deployments and observation window math.
     - **Fleet-Scale Monitoring** &mdash; False alarm rates and hierarchical aggregation.
@@ -1030,7 +1030,7 @@ False alerts/day     = {_total_monitors:.0f} x {_fpr} x {_checks_per_day:.0f} = 
                     <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
                                 text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">Textbook &amp; TinyTorch</div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-ml-operations-scale for full derivations.<br/>
+                        <strong>Read:</strong> the ML Operations at Scale chapter for full derivations.<br/>
                         <strong>Build:</strong> TinyTorch monitoring module &mdash; implement canary
                         deployment with statistical significance testing.
                     </div>

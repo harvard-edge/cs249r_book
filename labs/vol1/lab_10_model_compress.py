@@ -157,8 +157,8 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Neural network fundamentals from @sec-neural-computation &middot;
-                    Training and optimization from @sec-model-training
+                    Neural network fundamentals from the Neural Computation chapter &middot;
+                    Training and optimization from the Training chapter
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -466,6 +466,27 @@ Accuracy:  {_acc:.1f}% (loss: {_acc_loss:.1f}%)
         else:
             items.append(mo.callout(mo.md("**INT8 quantization is essentially free.** "
                 "The accuracy loss is under 1%. Try selecting INT4 and INT2 to see the cliff."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Quantization Compression Ratio": mo.md("""
+**Formula:**
+$$
+\\text{Compression Ratio} = \\frac{b_{\\text{original}}}{b_{\\text{quantized}}}
+$$
+
+Quantization error bound (per-tensor, symmetric):
+$$
+\\epsilon_{\\text{quant}} \\leq \\frac{\\Delta}{2} = \\frac{w_{\\max} - w_{\\min}}{2^{b+1}}
+$$
+
+**Variables:**
+- **$b_{\\text{original}}$**: original bit-width (e.g., 32 for FP32)
+- **$b_{\\text{quantized}}$**: target bit-width (e.g., 8 for INT8)
+- **$\\Delta$**: quantization step size
+- **$w_{\\max}, w_{\\min}$**: weight range extremes
+
+FP32 to INT8 = 4x compression. Below 4 bits, $\\Delta$ grows large enough to collapse decision boundaries.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -598,6 +619,26 @@ Accuracy:     {_pruned_acc:.1f}% (loss: {_base_acc - _pruned_acc:.1f}%)
             items.append(mo.callout(mo.md("**The answer is 1.0x -- no speedup at all.** "
                 "Dense GEMM loads and multiplies every element. Try switching to Structured or 2:4 "
                 "to see real speedup."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Pruning Speedup on Dense vs. Sparse Hardware": mo.md("""
+**Formula (theoretical vs. actual):**
+$$
+\\text{Speedup}_{\\text{theoretical}} = \\frac{1}{1 - s} \\qquad \\text{Speedup}_{\\text{dense GPU}} = 1.0
+$$
+
+For structured N:M sparsity (e.g., 2:4):
+$$
+\\text{Speedup}_{\\text{N:M}} = \\frac{M}{M - N} = \\frac{4}{2} = 2\\times
+$$
+
+**Variables:**
+- **$s$**: sparsity fraction (e.g., 0.9 for 90% zeros)
+- **$N$**: zeros per group (e.g., 2 of every 4 elements)
+- **$M$**: group size
+
+Dense GPU kernels cannot skip zero multiplications. Only structured sparsity with hardware support (e.g., Ampere 2:4) delivers real speedup.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -699,6 +740,27 @@ Accuracy:     {_pruned_acc:.1f}% (loss: {_base_acc - _pruned_acc:.1f}%)
         else:
             items.append(mo.callout(mo.md("**INT4 is the answer for 4 GB.** INT8 weights alone consume 8 GB, "
                 "leaving zero room for KV cache and runtime. INT4 halves that to 4 GB."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Model Memory Budget": mo.md("""
+**Formula:**
+$$
+M_{\\text{weights}} = P \\times \\frac{b}{8} \\quad \\text{(bytes)}
+$$
+
+Total deployment memory must satisfy:
+$$
+M_{\\text{weights}} + M_{\\text{KV cache}} + M_{\\text{runtime}} \\leq M_{\\text{device}}
+$$
+
+**Variables:**
+- **$P$**: number of parameters (e.g., 8B for Llama-3 8B)
+- **$b$**: bits per weight (32 for FP32, 8 for INT8, 4 for INT4)
+- **$M_{\\text{KV cache}}$**: key-value cache memory (grows with context length)
+- **$M_{\\text{runtime}}$**: activations, optimizer state, framework overhead
+
+At INT4, Llama-3 8B weighs 4 GB -- just barely fitting a 4 GB device with minimal KV cache headroom.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -817,6 +879,22 @@ Accuracy:     {_pruned_acc:.1f}% (loss: {_base_acc - _pruned_acc:.1f}%)
             items.append(mo.callout(mo.md("**Memory access is essentially all of the energy.** "
                 f"At {_prec.upper()}, memory is {_mem_frac:.0f}% of total energy. "
                 "Every bit you do not move saves Joules."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Energy Cost of Memory Access vs. Compute": mo.md("""
+**Formula:**
+$$
+E_{\\text{total}} = P \\cdot (E_{\\text{mem}} + E_{\\text{comp}}) = P \\cdot \\left(\\frac{b}{8} \\cdot E_{\\text{DRAM}} + E_{\\text{MAC}}\\right)
+$$
+
+**Variables:**
+- **$P$**: number of MAC operations
+- **$E_{\\text{DRAM}}$**: energy per byte of DRAM access (~640 pJ for DDR4)
+- **$E_{\\text{MAC}}$**: energy per multiply-accumulate (~0.2 pJ for INT8, ~3.7 pJ for FP32)
+- **$b$**: bits per weight
+
+At FP32: $E_{\\text{mem}} / E_{\\text{comp}} = (4 \\times 640) / 3.7 \\approx 690\\times$. Memory access dominates energy by 100-1000x.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -935,6 +1013,23 @@ Size ratio:      {_teacher_size/_student_size:.0f}x smaller (INT8 student vs FP3
             items.append(mo.callout(mo.md(f"**The distilled student achieves ~{_student_distill:.0f}%.** "
                 "Soft labels from the teacher carry rich inter-class information that hard labels discard. "
                 "Adjust the temperature slider to see how dark knowledge transfer changes."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Knowledge Distillation Loss": mo.md("""
+**Formula:**
+$$
+\\mathcal{L}_{\\text{KD}} = (1-\\alpha)\\,\\mathcal{L}_{\\text{CE}}(y, \\sigma(z_s)) \\;+\\; \\alpha\\,T^2\\,\\text{KL}\\!\\left(\\sigma\\!\\left(\\frac{z_t}{T}\\right) \\| \\sigma\\!\\left(\\frac{z_s}{T}\\right)\\right)
+$$
+
+**Variables:**
+- **$z_t, z_s$**: teacher and student logits
+- **$T$**: temperature (higher = softer probability distribution)
+- **$\\alpha$**: interpolation weight between hard and soft targets
+- **$\\sigma$**: softmax function
+- **$\\text{KL}$**: Kullback-Leibler divergence
+
+The $T^2$ factor compensates for gradient magnitude reduction at high temperature. Optimal $T$ is typically 3-5.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -992,7 +1087,7 @@ Size ratio:      {_teacher_size/_student_size:.0f}x smaller (INT8 student vs FP3
                         Textbook &amp; TinyTorch
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-model-compression for quantization theory
+                        <strong>Read:</strong> the Model Compression chapter for quantization theory
                         and pruning hardware analysis.<br/>
                         <strong>Build:</strong> TinyTorch Module 10 -- INT8 quantizer and
                         magnitude pruning.
@@ -1023,8 +1118,17 @@ Size ratio:      {_teacher_size/_student_size:.0f}x smaller (INT8 student vs FP3
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
-    ledger.save(chapter=10, design={"lab": "model_compress", "completed": True})
+def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred):
+    if pA_pred.value is not None and pB_pred.value is not None and pC_pred.value is not None and pD_pred.value is not None and pE_pred.value is not None:
+        ledger.save(chapter=10, design={
+            "lab": "model_compress",
+            "completed": True,
+            "quantization_accuracy_loss": pA_pred.value,
+            "pruning_speedup_prediction": pB_pred.value,
+            "deployment_strategy": pC_pred.value,
+            "energy_memory_vs_compute": pD_pred.value,
+            "distillation_accuracy": pE_pred.value,
+        })
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>

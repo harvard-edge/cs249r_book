@@ -147,9 +147,9 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Dense layer FLOPs from @sec-nn-computation-flop-counting &middot;
-                    Memory hierarchy cliffs from @sec-nn-computation-memory-hierarchy &middot;
-                    Iron Law from @sec-introduction-iron-law
+                    Dense layer FLOPs from the Neural Computation chapter &middot;
+                    Memory hierarchy cliffs from the Neural Computation chapter &middot;
+                    Iron Law from the Iron Law section (Ch. 1)
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -1028,7 +1028,7 @@ Using the four analyses from this lab, justify:
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-architectures for inductive bias,
+                    <strong>Read:</strong> the Network Architectures chapter for inductive bias,
                     attention complexity, depth-width trade-offs.<br/>
                     <strong>Build:</strong> TinyTorch Module 06 -- implement CNN
                     convolution and self-attention from scratch.
@@ -1060,12 +1060,16 @@ Using the four analyses from this lab, justify:
 
 # ─── CELL 5: LEDGER HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, partA_prediction, partD_prediction):
     _track = ledger._state.track or "not set"
-    ledger.save(chapter=6, design={
-        "chapter": "v1_06",
-        "completed": True,
-    })
+    if partA_prediction.value is not None and partD_prediction.value is not None:
+        ledger.save(chapter=6, design={
+            "chapter": "v1_06",
+            "attention_complexity": "quadratic",
+            "cnn_vs_mlp_flops_ratio": "100x_less",
+            "depth_vs_width_tradeoff": "depth_more_efficient",
+            "completed": True,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

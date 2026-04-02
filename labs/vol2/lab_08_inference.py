@@ -65,7 +65,7 @@ async def _():
     H100 = Hardware.Cloud.H100
     T4 = Hardware.Cloud.T4
     EDGE = Hardware.Edge.JetsonOrinNX
-    H100_RAM_GB = 80.0
+    H100_RAM_GB = H100.memory.capacity.m_as("GB")
     H100_COST_HR = 3.0
     T4_COST_HR = 0.35
     EDGE_RAM_GB = EDGE.memory.capacity.m_as("GB")
@@ -142,8 +142,8 @@ def _(mo, COLORS):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    KV cache formula from @sec-inference-at-scale &middot;
-                    Queuing theory (Kingman's formula) from @sec-fleet-orchestration
+                    KV cache formula from the Inference at Scale chapter &middot;
+                    Queuing theory (Kingman's formula) from the Fleet Orchestration chapter
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -181,10 +181,10 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** -- Complete before this lab:
 
-    - **@sec-inference-at-scale** -- Serving economics, KV cache scaling, continuous batching
+    - **The Inference at Scale chapter** -- Serving economics, KV cache scaling, continuous batching
     - The KV Cache section -- `KV = 2 * L * H * S * B * P` bytes formula
     - The Continuous Batching section -- Static vs iteration-level scheduling
-    - The Queuing Theory section from @sec-fleet-orchestration -- Kingman's formula
+    - The Queuing Theory section from the Fleet Orchestration chapter -- Kingman's formula
     """), kind="info")
     return
 
@@ -1351,7 +1351,7 @@ def _(
                         Textbook &amp; TinyTorch
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-inference-at-scale for the full KV cache derivation,
+                        <strong>Read:</strong> the Inference at Scale chapter for the full KV cache derivation,
                         continuous batching mechanics, and fleet design principles.<br/>
                         <strong>Build:</strong> TinyTorch inference module &mdash; implement KV cache
                         management and continuous batching in <code>tinytorch/src/inference/</code>.

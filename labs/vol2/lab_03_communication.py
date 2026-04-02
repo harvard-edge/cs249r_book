@@ -441,6 +441,23 @@ BW fraction  = {_bw_pct:.4f}%
                     "InfiniBand's microsecond latency and underestimate by 100-1000x.")
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Ring AllReduce Time (Alpha-Beta Model)": mo.md("""
+**Formula:**
+$$
+T_{\\text{ring}} = 2(N-1) \\cdot \\alpha + 2\\,\\frac{N-1}{N} \\cdot \\frac{M}{\\beta}
+$$
+
+**Variables:**
+- **$\\alpha$**: per-hop latency (IB NDR: ~5 $\\mu$s)
+- **$\\beta$**: per-link bandwidth (IB NDR: ~50 GB/s)
+- **$M$**: message size in bytes (e.g., 70B $\\times$ 4 bytes/FP32 = 280 GB)
+- **$N$**: number of GPUs in the ring
+
+**Key insight:** The latency term $2(N-1) \\cdot \\alpha$ is microseconds. The bandwidth term $2(N-1)/N \\cdot M/\\beta$ is seconds. For LLM-scale gradients, bandwidth dominates by 4--5 orders of magnitude.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -563,6 +580,30 @@ BW fraction  = {_bw_pct:.4f}%
                     "penalty is catastrophic at large GPU counts for small messages.")
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Ring vs Tree AllReduce Crossover": mo.md("""
+**Ring AllReduce:**
+$$
+T_{\\text{ring}} = 2(N-1)\\alpha + 2\\frac{N-1}{N}\\frac{M}{\\beta}
+$$
+
+**Tree AllReduce:**
+$$
+T_{\\text{tree}} = 2\\log_2(N)\\alpha + 2\\frac{\\log_2(N)}{N}\\frac{M}{\\beta} \\cdot N = 2\\log_2(N)\\left(\\alpha + \\frac{M}{\\beta}\\right)
+$$
+
+**Crossover condition (Tree wins when):**
+$$
+M < M^{*} \\quad \\text{where} \\quad \\frac{2(N-1)\\alpha}{2\\frac{N-1}{N}\\frac{1}{\\beta}} \\ll M^{*}
+$$
+
+**Variables:**
+- **Ring latency**: $O(N)$ hops, bandwidth-optimal ($2(N-1)/N \\approx 2$ for large $N$)
+- **Tree latency**: $O(\\log N)$ hops, but each hop transfers full $M$
+- **Crossover**: at small $M$ and large $N$, Tree's $O(\\log N)$ latency wins; at large $M$, Ring's bandwidth-optimality wins
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -658,6 +699,27 @@ BW fraction  = {_bw_pct:.4f}%
             _msg = f"**Hierarchical achieves {_speedup:.1f}x speedup.** Reducing inter-node traffic by {_gpn}x is the key."
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Hierarchical AllReduce": mo.md("""
+**Two-level hierarchical AllReduce (intra-node NVLink + inter-node IB):**
+$$
+T_{\\text{hier}} = T_{\\text{intra}} + T_{\\text{inter}} + T_{\\text{intra,broadcast}}
+$$
+
+$$
+T_{\\text{intra}} = 2\\frac{G-1}{G}\\frac{M}{\\beta_{\\text{NVLink}}} \\qquad T_{\\text{inter}} = 2\\frac{K-1}{K}\\frac{M/G}{\\beta_{\\text{IB}}}
+$$
+
+**Variables:**
+- **$G$**: GPUs per node (typically 8)
+- **$K$**: number of nodes ($N/G$)
+- **$\\beta_{\\text{NVLink}}$**: intra-node bandwidth (~900 GB/s)
+- **$\\beta_{\\text{IB}}$**: inter-node bandwidth (~50 GB/s)
+
+**Key insight:** Hierarchical reduces inter-node traffic by $G\\times$ (only $M/G$ crosses IB instead of $M$). The speedup is $\\approx 5$--$6\\times$ vs flat ring because most bytes stay on the fast NVLink fabric.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -755,6 +817,27 @@ BW fraction  = {_bw_pct:.4f}%
                     "extra steps. On IB NDR, the trade-off is marginal. On slow networks, it wins.")
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Gradient Compression Trade-off": mo.md("""
+**Compressed communication time:**
+$$
+T_{\\text{comm,compressed}} = c \\cdot T_{\\text{comm,baseline}}
+$$
+
+**Total training time with compression:**
+$$
+T_{\\text{total}} = S \\cdot (1 + \\epsilon) \\cdot (T_{\\text{compute}} + c \\cdot T_{\\text{comm}})
+$$
+
+**Variables:**
+- **$c$**: compression ratio (FP16: 0.5, INT8: 0.25, Top-K 1%: 0.01)
+- **$\\epsilon$**: convergence penalty (extra steps needed, typically 5--15%)
+- **$S$**: baseline number of training steps
+
+**Key insight:** Compression is only beneficial when $c \\cdot T_{\\text{comm}}$ savings exceed the $\\epsilon$ penalty in extra steps. On IB NDR (fast), communication is ~30% of step time, so 4x compression saves ~22% per step but costs ~10% more steps -- marginal net benefit.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -886,6 +969,32 @@ BW fraction  = {_bw_pct:.4f}%
                     "All are required to reach <20%.")
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Communication Budget Stacking": mo.md("""
+**Stacked optimization formula:**
+$$
+T_{\\text{comm,final}} = T_{\\text{baseline}} \\times \\frac{1}{\\text{hier}} \\times \\text{precision} \\times (1 - \\text{overlap})
+$$
+
+**Example for 70B on 64 GPUs, IB NDR:**
+
+| Optimization | Factor | Cumulative Time |
+|---|---|---|
+| Baseline Ring AllReduce | 1x | ~11 s |
+| + Hierarchical (8 GPUs/node) | /5.6x | ~2.0 s |
+| + FP16 gradients | /2x | ~1.0 s |
+| + 85% backward overlap | x0.15 | ~0.15 s |
+| + Bucket fusion | ~latency reduction | ~0.12 s |
+
+**Variables:**
+- **hier**: hierarchical speedup factor (~5--6x for 8 GPUs/node)
+- **precision**: FP16 = 0.5, FP32 = 1.0
+- **overlap**: fraction of communication hidden behind backward pass (0.0--0.85)
+
+**Key insight:** No single optimization is sufficient. You must stack 3--4 techniques to reach the <20% communication budget target.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -944,12 +1053,18 @@ shard contention, prefetching limits, and checkpoint economics.
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred):
     _track = ledger._state.track or "not set"
-    ledger.save(chapter=3, design={
-        "chapter": "v2_03",
-        "completed": True,
-    })
+    if pA_pred.value is not None:
+        ledger.save(chapter=3, design={
+            "chapter": "v2_03",
+            "completed": True,
+            "allreduce_time_prediction": pA_pred.value,
+            "ring_vs_tree_crossover": pB_pred.value,
+            "hierarchical_speedup_prediction": pC_pred.value,
+            "compression_tradeoff_prediction": pD_pred.value,
+            "optimization_stack_prediction": pE_pred.value,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

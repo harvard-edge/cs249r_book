@@ -256,9 +256,9 @@ def _(mo, partC_pred):
 
     partD_pred = mo.ui.radio(
         options={
-            "A) Preprocessing (largest non-inference)": "preprocess",
-            "B) Inference (largest overall: 1/(0.6+0.4/5) = 1.47x)": "inference",
-            "C) Postprocessing (low-hanging fruit)": "postprocess",
+            "A) Preprocessing (35% -- largest non-inference)": "preprocess",
+            "B) Inference (40% -- largest single component)": "inference",
+            "C) Postprocessing (15% -- low-hanging fruit)": "postprocess",
             "D) Does not matter -- 5x on any yields same speedup": "same",
         },
         label="4 components: preprocess 35%, inference 40%, postprocess 15%, logging 10%. "
@@ -767,7 +767,7 @@ The architect's job is to choose **which constraint to live with**.
         _w_gb = _params * 1e9 * _bpp / (1024**3)
 
         # KV cache (always FP16 for KV)
-        _layers = {70: 80, 35: 40, 13: 40}.get(int(_params), 80)
+        _layers = {70: 80, 35: 80, 13: 40}.get(int(_params), 80)  # pruning keeps layer count; only distillation changes arch
         _heads = {70: 64, 35: 32, 13: 40}.get(int(_params), 64)
         _hidden = {70: 8192, 35: 4096, 13: 5120}.get(int(_params), 8192)
         _hdim = _hidden // _heads
@@ -901,18 +901,38 @@ The architect's job is to choose **which constraint to live with**.
                 "INT4 solves memory but creates KV cache and accuracy constraints. "
                 "The architect chooses which constraint to live with."
             ), kind="info"),
-            mo.md("""
-## Connections
-
-**Textbook:** This capstone lab integrates every chapter of Volume I. The five invariants
-(Amdahl's Law, Memory Wall, Silent Degradation, Conservation of Complexity,
-No Free Fairness) govern all ML systems design decisions.
-
-**TinyTorch:** You have now completed the conceptual foundation. The 20 TinyTorch modules
-let you build these systems from scratch.
-
-**Volume II:** Distributed systems at scale &mdash; when the constraints of a single machine
-are no longer enough, and you must reason about networks, fault tolerance, and coordination.
+            mo.Html(f"""
+            <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        What's Next
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Volume II: ML Systems at Scale</strong> -- Continue to
+                        Volume II where single-machine constraints become distributed
+                        systems challenges. Networks replace buses, fault tolerance replaces
+                        restarts, and coordination cost dominates everything.
+                    </div>
+                </div>
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        Textbook &amp; TinyTorch
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Review:</strong> The five invariants -- Amdahl's Law,
+                        Memory Wall, Silent Degradation, Conservation of Complexity,
+                        No Free Fairness -- govern all ML systems design.<br/>
+                        <strong>Build:</strong> The 20 TinyTorch modules let you construct
+                        these systems from scratch, component by component.
+                    </div>
+                </div>
+            </div>
             """),
             mo.accordion({
                 "Self-Assessment: Can you answer these from memory?": mo.md("""
@@ -945,12 +965,16 @@ are no longer enough, and you must reason about networks, fault tolerance, and c
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, partA_pred, partB_pred, partC_pred, partD_pred):
     _track = ledger.get_track()
-    ledger.save(chapter=16, design={
-        "chapter": "v1_16",
-        "completed": True,
-    })
+    if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None:
+        ledger.save(chapter=16, design={
+            "chapter": "v1_16",
+            "capstone_completed": True,
+            "invariants_synthesized": 15,
+            "deployment_decision_made": True,
+            "completed": True,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

@@ -201,7 +201,7 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Differential privacy (epsilon-delta) from @sec-security-privacy &middot;
+                    Differential privacy (epsilon-delta) from the Security and Privacy chapter &middot;
                     DP-SGD training mechanics &middot; Basic probability
                 </div>
             </div>
@@ -240,7 +240,7 @@ def _(mo):
     **Recommended Reading** &mdash; Complete before this lab:
 
     - **Differential Privacy** &mdash; The epsilon-delta definition, Laplace mechanism,
-      and sensitivity (@sec-security-privacy).
+      and sensitivity (the Security and Privacy chapter).
     - **DP-SGD** &mdash; Gradient clipping, noise addition, privacy accounting.
     - **Privacy Budget Composition** &mdash; Basic and advanced composition theorems.
     - **Defense Selection Framework** &mdash; MIG isolation, monitoring overhead.
@@ -292,7 +292,7 @@ def _(mo, pA_pred):
             "what accuracy does DP-SGD achieve?"
         ),
     )
-    return (pB_pred,)
+    return (pA_epsilon, pA_N, pB_pred)
 
 
 # ─── WIDGET CELL 3: Part C prediction ────────────────────────────────────────
@@ -335,7 +335,7 @@ def _(mo, pC_pred):
             "(Enter days, e.g., 0.1 for 2.4 hours.)"
         ),
     )
-    return (pD_pred,)
+    return (pC_mig, pC_monitor, pC_output, pC_rate, pC_dpsgd, pD_pred)
 
 
 # ─── WIDGET CELL 5: Part D controls ─────────────────────────────────────────
@@ -361,7 +361,19 @@ def _(mo, pD_pred):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
-def _(mo, pD_queries, pD_eps_q, pD_budget, pD_comp):
+def _(
+    mo, go, np, math, COLORS, apply_plotly_theme,
+    DEFAULT_SENSITIVITY, DEFAULT_DELTA,
+    MNIST_NO_DP, MNIST_EPS1, MNIST_EPS01,
+    CIFAR_NO_DP, CIFAR_EPS8, CIFAR_EPS1,
+    MIG_OVERHEAD, DPSGD_OVERHEAD, MONITORING_OVERHEAD_MS,
+    OUTPUT_PERTURB_MS, RATE_LIMIT_OVERHEAD,
+    BASELINE_THROUGHPUT, SLO_THROUGHPUT,
+    pA_pred, pA_epsilon, pA_N,
+    pB_pred,
+    pC_pred, pC_mig, pC_monitor, pC_output, pC_rate, pC_dpsgd,
+    pD_pred, pD_queries, pD_eps_q, pD_budget, pD_comp,
+):
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A: THE PRIVACY SCALING WALL
@@ -489,6 +501,30 @@ At N=100:   ${_noise_magnitude:,.0f} / 100   = ${_noise_magnitude/100:,.0f}  (10
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
 
+        items.append(mo.accordion({
+            "Math Peek: Laplace Mechanism and Per-Person Error": mo.md("""
+**Laplace mechanism noise:**
+$$
+\\text{noise} \\sim \\text{Lap}\\left(\\frac{\\Delta f}{\\varepsilon}\\right)
+$$
+
+**Where:**
+- **$\\Delta f$**: Sensitivity (max change from one person's data, e.g., $200K salary range)
+- **$\\varepsilon$**: Privacy parameter (lower = more private, more noise)
+
+**Per-person error** when aggregating over $N$ records:
+$$
+\\text{Error}_{\\text{per-person}} = \\frac{\\Delta f / \\varepsilon}{N} = \\frac{\\Delta f}{\\varepsilon \\cdot N}
+$$
+
+At $\\varepsilon=1$, $\\Delta f=200K$: noise = $200K$.
+- $N=1{,}000$: error = \\$200/person
+- $N=100$: error = \\$2,000/person (10x worse)
+
+**Key insight:** Noise is constant; per-person error scales as $1/N$.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -597,6 +633,30 @@ CIFAR-10 collapses because its gradient signal is weaker.
             _msg = f"**CIFAR-10 at epsilon=8 achieves ~{CIFAR_EPS8}%.** Students who predict ~90% expect 'epsilon=8 is weak privacy, so little cost.' But even weak privacy adds noise that degrades complex tasks. At epsilon=1, CIFAR-10 drops to ~65%. The knee region (epsilon 1-3) is the critical design boundary."
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: DP-SGD Noise Multiplier": mo.md("""
+**DP-SGD per-step noise:**
+$$
+\\tilde{g}_t = \\frac{1}{B}\\left(\\sum_{i \\in \\mathcal{B}} \\text{clip}(g_i, C) + \\mathcal{N}(0, \\sigma^2 C^2 \\mathbf{I})\\right)
+$$
+
+**Noise multiplier:**
+$$
+\\sigma = \\frac{c \\cdot \\Delta f}{\\varepsilon}
+$$
+
+**Where:**
+- **$B$**: Batch size (sampling rate $q = B/N$)
+- **$C$**: Gradient clipping norm (bounds per-sample sensitivity)
+- **$\\sigma$**: Noise multiplier (scales with $1/\\varepsilon$)
+- **$c$**: Constant depending on $\\delta$ and composition method
+
+**Privacy-accuracy knee:** At $\\varepsilon \\approx 1$-$3$, DP noise overwhelms
+the gradient signal for complex tasks (CIFAR-10), causing catastrophic accuracy loss.
+Simple tasks (MNIST) tolerate lower $\\varepsilon$ because gradient signal is stronger.
+""")
+        }))
 
         return mo.vstack(items)
 
@@ -740,6 +800,28 @@ T_secure = T_baseline x product(1 - overhead_i)
             _msg = "**Compound overhead is 25-35%, yielding ~700-750 tok/s.** Each defense multiplies the remaining throughput, not the baseline. 0.85 x 0.93 x 0.95 x 0.95 = ~0.72, giving ~720 tok/s from a 1,000 tok/s baseline."
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Compound Defense Overhead": mo.md("""
+**Multiplicative throughput reduction:**
+$$
+T_{\\text{final}} = T_{\\text{baseline}} \\times \\prod_{i=1}^{n} (1 - o_i)
+$$
+
+**Where:**
+- **$T_{\\text{baseline}}$**: Baseline throughput (e.g., 1,000 tok/s)
+- **$o_i$**: Overhead fraction of defense layer $i$
+
+**Example stack:** MIG (15%) + DP-SGD (7%) + Monitoring (5%) + Rate Limit (5%):
+$$
+T = 1000 \\times 0.85 \\times 0.93 \\times 0.95 \\times 0.95 = 712 \\text{ tok/s}
+$$
+
+**Key insight:** Overheads multiply, not add. Linear estimation
+($1 - 0.15 - 0.07 - 0.05 - 0.05 = 0.68$) over-predicts the loss.
+Multiplicative: $0.85 \\times 0.93 \\times 0.95 \\times 0.95 = 0.712$ (less severe).
+""")
+        }))
 
         return mo.vstack(items)
 
@@ -900,6 +982,34 @@ Days = {_total_queries:,.0f} / {_daily_q:,} = {_days:.2f} days ({_hours:.1f} hou
 *Source: @sec-security-privacy-privacy-budget-composition-edbe*
 """))
 
+        items.append(mo.accordion({
+            "Math Peek: Privacy Budget Composition": mo.md("""
+**Basic composition theorem:**
+$$
+\\varepsilon_{\\text{total}} = \\sum_{t=1}^{T} \\varepsilon_t = T \\cdot \\varepsilon_q
+$$
+
+**Advanced composition theorem** (tighter bound):
+$$
+\\varepsilon_{\\text{total}} = \\sqrt{2T \\ln(1/\\delta)} \\cdot \\varepsilon_q + T \\cdot \\varepsilon_q \\cdot (e^{\\varepsilon_q} - 1)
+$$
+
+**Where:**
+- **$T$**: Total number of queries
+- **$\\varepsilon_q$**: Privacy cost per query
+- **$\\delta$**: Failure probability (typically $10^{-5}$)
+
+**Budget exhaustion time:**
+$$
+t_{\\text{exhaust}} = \\frac{\\varepsilon_{\\text{budget}} / \\varepsilon_q}{\\text{queries/day}}
+$$
+
+Basic at $\\varepsilon_q=0.01$, budget=10, 10K queries/day: $10/0.01 = 1{,}000$ queries = 2.4 hours.
+
+Advanced composition extends this to ~3.7 days via the $\\sqrt{T}$ scaling.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -953,7 +1063,7 @@ Days = {_total_queries:,.0f} / {_daily_q:,} = {_days:.2f} days ({_hours:.1f} hou
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">Textbook &amp; TinyTorch</div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-security-privacy for full DP derivations and
+                    <strong>Read:</strong> the Security and Privacy chapter for full DP derivations and
                     the defense selection framework.<br/>
                     <strong>Build:</strong> TinyTorch DP-SGD module &mdash; implement gradient
                     clipping, noise addition, and privacy accounting.
@@ -983,12 +1093,24 @@ Days = {_total_queries:,.0f} / {_daily_q:,} = {_days:.2f} days ({_hours:.1f} hou
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, pA_pred, pA_epsilon, pA_N, pB_pred, pC_pred, pD_pred, pD_comp, pD_budget):
+    _scaling_pred = pA_pred.value if hasattr(pA_pred, 'value') else None
+    _epsilon = pA_epsilon.value if hasattr(pA_epsilon, 'value') else 1.0
+    _dataset_n = pA_N.value if hasattr(pA_N, 'value') else 1000
+    _accuracy_pred = pB_pred.value if hasattr(pB_pred, 'value') else None
+    _defense_pred = pC_pred.value if hasattr(pC_pred, 'value') else None
+    _budget_pred = pD_pred.value if hasattr(pD_pred, 'value') else None
+    _composition = pD_comp.value if hasattr(pD_comp, 'value') else "basic"
+    _budget_eps = pD_budget.value if hasattr(pD_budget, 'value') else 10
     ledger.save(chapter=12, design={
-        "privacy_scaling": "1/N per-person error",
-        "defense_overhead": "25-35% throughput reduction",
-        "budget_basic_hours": 2.4,
-        "budget_advanced_days": 3.7,
+        "partA_scaling_prediction": _scaling_pred,
+        "partA_epsilon_choice": _epsilon,
+        "partA_dataset_size": _dataset_n,
+        "partB_accuracy_prediction": _accuracy_pred,
+        "partC_defense_throughput_prediction": _defense_pred,
+        "partD_budget_hours_prediction": _budget_pred,
+        "partD_composition_method": _composition,
+        "partD_budget_epsilon": _budget_eps,
     })
 
     mo.Html(f"""

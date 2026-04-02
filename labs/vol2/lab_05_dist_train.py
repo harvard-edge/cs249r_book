@@ -82,13 +82,13 @@ async def _():
     A100 = Hardware.Cloud.A100
     EDGE = Hardware.Edge.JetsonOrinNX
 
-    # ── Hardware constants (from registry + specs) ────────────────────────
-    H100_TFLOPS_FP16  = 989.0     # NVIDIA H100 SXM5 spec
-    H100_BW_GBS       = 3350.0    # GB/s HBM3e
-    H100_RAM_GB       = 80.0      # GB HBM3e
-    A100_RAM_GB       = 80.0      # GB HBM2e
+    # ── Hardware constants (from registry) ──────────────────────────────
+    H100_TFLOPS_FP16  = H100.compute.peak_flops.m_as("TFLOPs/s")
+    H100_BW_GBS       = H100.memory.bandwidth.m_as("GB/s")
+    H100_RAM_GB       = H100.memory.capacity.m_as("GB")
+    A100_RAM_GB       = A100.memory.capacity.m_as("GB")
+    # Interconnect specs (from defaults — not in per-device registry)
     NVLINK4_BW_GBS    = 900.0     # GB/s NVLink 4 (DGX H100)
-    IB_NDR_BW_GBS     = 50.0      # GB/s InfiniBand NDR per port
     IB_HDR_BW_GBS     = 25.0      # GB/s InfiniBand HDR per port
     ETH_100G_BW_GBS   = 12.5      # GB/s 100GbE
     GPUS_PER_NODE     = 8
@@ -186,8 +186,8 @@ def _(mo, COLORS):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Ring-AllReduce bandwidth model from @sec-collective-communication &middot;
-                    Data parallelism and scaling efficiency from @sec-distributed-training-systems
+                    Ring-AllReduce bandwidth model from the Communication chapter &middot;
+                    Data parallelism and scaling efficiency from the Distributed Training chapter
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -225,9 +225,9 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** -- Complete the following before this lab:
 
-    - **@sec-distributed-training-systems** -- Data parallelism, the Communication-Computation Ratio,
+    - **The Distributed Training chapter** -- Data parallelism, the Communication-Computation Ratio,
       and the Iron Law of Scale: `T_step(N) = T_compute/N + T_comm(N) - T_overlap`
-    - **@sec-collective-communication** -- Ring-AllReduce bandwidth formula, gradient bucketing
+    - **The Communication chapter** -- Ring-AllReduce bandwidth formula, gradient bucketing
     - The ZeRO section -- Memory sharding stages (ZeRO-1/2/3), activation memory
     - The Pipeline Parallelism section -- Microbatching, bubble fraction `B = (PP-1)/(PP*m)`
     - The 3D Parallelism section -- TP within NVLink, PP across IB, DP for throughput
@@ -927,13 +927,13 @@ def _(
         _pp_range = list(range(1, 33))
         _fig_bubble = go.Figure()
         for _mval, _label, _clr in [(4, "m=4", COLORS["OrangeLine"]), (8, "m=8", COLORS["BlueLine"]),
-                                      (16, "m=16", COLORS["GreenLine"]), (32, "m=32", "#8b5cf6")]:
+                                      (16, "m=16", COLORS["GreenLine"]), (32, "m=32", COLORS["Grey"])]:
             _bvals = [(_p - 1) / (_p * _mval) * 100 for _p in _pp_range]
             _fig_bubble.add_trace(go.Scatter(x=_pp_range, y=_bvals, mode="lines", name=_label,
                                               line=dict(color=_clr, width=2)))
         _fig_bubble.add_trace(go.Scatter(x=[_pp], y=[_bubble_pct], mode="markers", name="Current",
                                           marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond")))
-        _fig_bubble.add_hline(y=10, line=dict(color="#1e293b", width=1.5, dash="dash"),
+        _fig_bubble.add_hline(y=10, line=dict(color=COLORS["Surface1"], width=1.5, dash="dash"),
                               annotation_text="10% ceiling", annotation_position="top right")
         _fig_bubble.update_layout(
             height=260, xaxis=dict(title="Pipeline Stages (PP)"), yaxis=dict(title="Bubble %", range=[0, 55]),
@@ -1337,7 +1337,7 @@ def _(
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-distributed-training-systems for the full 3D parallelism
+                    <strong>Read:</strong> the Distributed Training chapter for the full 3D parallelism
                     derivation and the Conservation of Overhead principle.<br/>
                     <strong>Build:</strong> TinyTorch distributed module &mdash; implement data parallelism
                     with gradient accumulation in <code>tinytorch/src/distributed/</code>.

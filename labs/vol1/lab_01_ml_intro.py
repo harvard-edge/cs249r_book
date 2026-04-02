@@ -188,9 +188,9 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    D-A-M framework from @sec-introduction &middot;
-                    Iron Law equation from @sec-introduction-iron-law &middot;
-                    Deployment spectrum from @sec-introduction-deployment-spectrum
+                    D-A-M framework from the Introduction chapter &middot;
+                    Iron Law equation from the Iron Law section (Ch. 1) &middot;
+                    Deployment spectrum from the Deployment Spectrum section (Ch. 1)
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -230,11 +230,11 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** -- Complete the following before this lab:
 
-    - **@sec-introduction** -- The D-A-M framework (Data, Algorithm, Machine) and
+    - **The Introduction chapter** -- The D-A-M framework (Data, Algorithm, Machine) and
       the three worked examples (recommendation system, vision model, language model).
-    - **@sec-introduction-iron-law** -- The Iron Law `T = D/BW + O/R + L` with
+    - **The Iron Law section (Ch. 1)** -- The Iron Law `T = D/BW + O/R + L` with
       variable definitions and the ResNet-50 worked example.
-    - **@sec-introduction-deployment-spectrum** -- The deployment spectrum table
+    - **The Deployment Spectrum section (Ch. 1)** -- The deployment spectrum table
       showing Cloud, Edge, Mobile, and TinyML hardware tiers.
     """), kind="info")
     return
@@ -1067,6 +1067,26 @@ Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, th
     def build_part_d():
         items = []
 
+        # Stakeholder message
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Strategic Review &middot; CEO, MedVision Health
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We want to deploy our DR screening model everywhere: cloud for hospitals,
+                edge for mobile clinics, and on-device for remote villages with no connectivity.
+                How different are these targets, really? Can we just run the same model at
+                different speeds?&rdquo;
+            </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; James Chen, CEO &middot; MedVision Health
+            </div>
+        </div>
+        """))
+
         items.append(mo.md("""
         ## The Full Deployment Spectrum: 9 Orders of Magnitude
 
@@ -1313,9 +1333,10 @@ Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, th
                         Textbook Connection
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-introduction for the D-A-M framework,
-                        @sec-introduction-iron-law for the full Iron Law derivation,
-                        @sec-introduction-deployment-spectrum for the hardware tier table.
+                        <strong>Read:</strong> the Introduction chapter for the D-A-M framework,
+                        the Iron Law section (Ch. 1) for the full Iron Law derivation,
+                        the Deployment Spectrum section (Ch. 1) for the hardware tier table.
+                        <br/><strong>Build:</strong> TinyTorch Module 01 -- implement the D-A-M diagnostic framework and Iron Law calculator from scratch.
                     </div>
                 </div>
             </div>
