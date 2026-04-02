@@ -146,37 +146,56 @@ export default function HomePage() {
               </div>
             </div>
           ) : (
-            /* New user — compact hero */
-            <div className="mb-3">
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-1">
-                <h1 className="text-2xl font-extrabold text-textPrimary tracking-tight">
-                  StaffML
-                </h1>
-                <span className="text-[13px] text-textSecondary">
-                  {stats.totalQuestions.toLocaleString()} physics-grounded ML systems questions
-                </span>
+            /* New user — welcome with guidance */
+            <div className="mb-4">
+              <h1 className="text-2xl font-extrabold text-textPrimary tracking-tight mb-1">
+                StaffML
+              </h1>
+              <p className="text-[13px] text-textSecondary mb-3">
+                Free, open-source interview prep for ML systems engineers.{" "}
+                {stats.totalQuestions.toLocaleString()} questions across compute, memory, latency, and more.
+              </p>
+
+              {/* Welcome guide */}
+              <div className="p-4 rounded-xl border border-accentBlue/20 bg-accentBlue/5 mb-3">
+                <span className="text-[10px] font-mono text-accentBlue uppercase block mb-2.5">New here? Start with one of these:</span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <Link
+                    href="/practice?daily=1"
+                    className="flex items-start gap-2.5 p-3 rounded-lg bg-background border border-border hover:border-accentBlue/40 transition-colors group"
+                  >
+                    <Calendar className="w-4 h-4 text-accentBlue shrink-0 mt-0.5" />
+                    <div>
+                      <span className="text-sm font-bold text-textPrimary group-hover:text-accentBlue transition-colors block">Daily Challenge</span>
+                      <span className="text-[11px] text-textTertiary">3 questions, same for everyone. Takes 5 min.</span>
+                    </div>
+                  </Link>
+                  <Link
+                    href="/practice?level=L1"
+                    className="flex items-start gap-2.5 p-3 rounded-lg bg-background border border-border hover:border-accentBlue/40 transition-colors group"
+                  >
+                    <Target className="w-4 h-4 text-accentGreen shrink-0 mt-0.5" />
+                    <div>
+                      <span className="text-sm font-bold text-textPrimary group-hover:text-accentGreen transition-colors block">Easy Mode</span>
+                      <span className="text-[11px] text-textTertiary">L1 recall questions to warm up.</span>
+                    </div>
+                  </Link>
+                  <Link
+                    href="/gauntlet"
+                    className="flex items-start gap-2.5 p-3 rounded-lg bg-background border border-border hover:border-accentBlue/40 transition-colors group"
+                  >
+                    <Crosshair className="w-4 h-4 text-accentRed shrink-0 mt-0.5" />
+                    <div>
+                      <span className="text-sm font-bold text-textPrimary group-hover:text-accentRed transition-colors block">Mock Interview</span>
+                      <span className="text-[11px] text-textTertiary">Timed session with scoring.</span>
+                    </div>
+                  </Link>
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2 mb-2">
-                <Link
-                  href="/practice?daily=1"
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-accentBlue text-white font-bold rounded-lg text-xs hover:opacity-90 transition-opacity"
-                >
-                  <Calendar className="w-3 h-3" /> Today&apos;s Challenge
-                </Link>
-                <Link
-                  href="/practice"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-surface border border-border text-textSecondary font-medium rounded-lg text-xs hover:text-textPrimary transition-colors"
-                >
-                  <Target className="w-3 h-3" /> Browse All
-                </Link>
-                <Link
-                  href="/gauntlet"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-surface border border-border text-textSecondary font-medium rounded-lg text-xs hover:text-textPrimary transition-colors"
-                >
-                  <Crosshair className="w-3 h-3" /> Mock Interview
-                </Link>
-                <span className="text-[11px] text-textTertiary hidden sm:inline">
-                  100% client-side &middot; no accounts &middot;{" "}
+
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-[11px] text-textTertiary">
+                  100% client-side &middot; no accounts &middot; your data stays in your browser &middot;{" "}
                   <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer"
                     className="text-accentBlue hover:underline">MLSysBook.ai</a>
                 </span>
