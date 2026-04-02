@@ -37,8 +37,6 @@ Networking, cooling, facility, and staff add 50--150\%.
 
 \column{0.42\textwidth}
 \begin{lstlisting}
-import mlsysim
-
 econ = mlsysim.EconomicsModel()
 r = econ.solve(
   fleet=mlsysim.Systems
@@ -100,8 +98,6 @@ Staff / Operations & 15\% & --- \\
 
 \column{0.42\textwidth}
 \begin{lstlisting}
-import mlsysim
-
 sus = mlsysim.SustainabilityModel()
 r = sus.solve(
   fleet=mlsysim.Systems
@@ -181,39 +177,28 @@ Systems with an Architectural Carbon Modeling Tool''
 % --- 5.7 Live Demo: Economics ---
 \begin{frame}[fragile]{Live Demo: TCO + Carbon Analysis}
 \begin{lstlisting}
-import mlsysim
-
-fleet = mlsysim.Systems.Clusters.Research_256  # 256x H100
+fleet = mlsysim.Systems.Clusters.Research_256
 econ  = mlsysim.EconomicsModel()
-
-# Full TCO with 2.5x infrastructure multiplier
 result = econ.solve(
     fleet=fleet, duration_days=30,
     datacenter=mlsysim.Infra.Grids.Quebec,
     mfu=0.45, infrastructure_multiplier=2.5,
     amortization_years=3.0)
-
-print(f"CapEx (30-day amortized): ${result.capex_usd:,.0f}")
-print(f"OpEx (energy):            ${result.opex_energy_usd:,.0f}")
-print(f"Total TCO:                ${result.tco_usd:,.0f}")
-print(f"Carbon:  {result.carbon_footprint_kg/1000:.1f} tonnes")
+print(f"TCO: ${result.tco_usd:,.0f}")
+print(f"Carbon: {result.carbon_footprint_kg/1000:.1f} t")
 \end{lstlisting}
 \end{frame}
 
 % --- 5.8 Live Demo: Geography Comparison ---
 \begin{frame}[fragile]{Live Demo: The Carbon Geography Experiment}
 \begin{lstlisting}
-import mlsysim
-
-fleet = mlsysim.Systems.Clusters.Research_256
+fleet  = mlsysim.Systems.Clusters.Research_256
 solver = mlsysim.SustainabilityModel()
-
 for region in [mlsysim.Infra.Grids.Poland,
                mlsysim.Infra.Grids.Quebec]:
     r = solver.solve(fleet=fleet, duration_days=30,
                      datacenter=region, mfu=0.45)
     print(f"{r.region_name:>12}: "
-          f"{r.total_energy_kwh/1000:.0f} MWh, "
           f"{r.carbon_footprint_kg/1000:.1f} t CO2")
 \end{lstlisting}
 
@@ -228,30 +213,55 @@ for region in [mlsysim.Infra.Grids.Poland,
 \alert{Same energy. 41$\times$ less carbon. Geography wins.}
 \end{frame}
 
-% --- 5.9 Exercise ---
-\begin{frame}[fragile]{Exercise: Carbon-Aware Placement}
-\begin{alertblock}{Your Task (5 minutes)}
-Using the \texttt{SustainabilityModel}, compare a 30-day training run
-on 512 H100s in \textbf{Poland} vs \textbf{Quebec}. How many tonnes of
-CO$_2$ do you save by choosing Quebec?
+% --- 5.9 Exercise Part A: Carbon-Aware Placement ---
+\begin{frame}[fragile]{Exercise 5a: Carbon-Aware Placement}
+\note{[3 min] Expected answer: $\sim$850 tonnes CO$_2$ saved.
+The energy is identical ($\sim$2{,}100 MWh)---only carbon intensity differs.
+Key insight: the cheapest carbon reduction is a \texttt{git push} to a different region.
+Turn to your neighbor: did you get the same answer? Why or why not? 60 seconds.}
+
+\begin{alertblock}{Your Task (3 minutes)}
+Compare a 30-day training run on 512 H100s:
+\textbf{Poland} vs \textbf{Quebec}. How many tonnes of CO$_2$ saved?
 \end{alertblock}
 
 \begin{lstlisting}
-import mlsysim
-
 fleet = mlsysim.Fleet(
     name="Training Fleet",
     node=mlsysim.Systems.Nodes.DGX_H100,
     count=64,
     fabric=mlsysim.Systems.Fabrics.InfiniBand_NDR)
 solver = mlsysim.SustainabilityModel()
-# YOUR CODE: solve for Poland and Quebec,
-# compute the difference
+# YOUR CODE: solve for Poland and Quebec
+\end{lstlisting}
+\end{frame}
+
+% --- 5.9b Exercise Part B: Multi-Vendor TCO Shootout ---
+\begin{frame}[fragile]{Exercise 5b: Multi-Vendor TCO Shootout}
+\note{[5 min] THE ISCA QUESTION. Which vendor gives the cheapest training?
+Expected: MI300X cluster is cheapest per FLOP (192 GB HBM means fewer
+nodes needed for large models), but H100 has the best software ecosystem.
+Gaudi\,3 is competitive on raw cost. The answer depends on model size.
+Turn to your neighbor: did you get the same answer? Why or why not? 60 seconds.}
+
+\begin{alertblock}{Your Task (5 minutes)}
+Same workload: Llama-3 70B, 30-day training run, 512 accelerators.\\
+Which cluster is cheapest for the \textbf{same throughput}?
+\end{alertblock}
+
+\begin{lstlisting}
+econ = mlsysim.EconomicsModel()
+for cluster_name in ["H100", "MI300X", "Gaudi3"]:
+    hw = getattr(mlsysim.Hardware.Cloud, cluster_name)
+    fleet = mlsysim.Fleet(name=cluster_name, hw=hw,
+                          count=64)
+    r = econ.solve(fleet=fleet, duration_days=30,
+                   infrastructure_multiplier=2.5)
+    print(f"{cluster_name:>8}: TCO=${r.tco_usd:,.0f}")
 \end{lstlisting}
 
-\note{Expected answer: $\sim$850 tonnes CO$_2$ saved.
-The energy is identical ($\sim$2{,}100 MWh)---only carbon intensity differs.
-Key insight: the cheapest carbon reduction is a \texttt{git push} to a different region.}
+\small
+\alert{The cheapest accelerator depends on the workload's binding constraint.}
 \end{frame}
 
 % --- 5.10 Takeaway ---
@@ -352,22 +362,17 @@ improving one metric \emph{must} worsen another.
 % --- 6.4 Live Demo: Engine.sweep ---
 \begin{frame}[fragile]{Live Demo: Design Space Sweep}
 \begin{lstlisting}
-import mlsysim
-
-model = mlsysim.Models.Language.Llama3_8B
-hw_list = [mlsysim.Hardware.A100, mlsysim.Hardware.H100,
-           mlsysim.Hardware.H200, mlsysim.Hardware.B200]
-
+hw_list = [mlsysim.Hardware.Cloud.H100,
+           mlsysim.Hardware.Cloud.MI300X,
+           mlsysim.Hardware.Cloud.Gaudi3,
+           mlsysim.Hardware.Cloud.B200]
 results = mlsysim.Engine.sweep(
-    model, hw_list,
-    batch_sizes=[1, 4, 16, 64],
+    llama, hw_list, batch_sizes=[1, 4, 16, 64],
     precisions=["fp16", "int8"], efficiency=0.5)
-
 for r in sorted(results,
-                key=lambda x: x['profile'].latency.magnitude):
+        key=lambda x: x['profile'].latency.magnitude):
     p = r['profile']
-    print(f"{r['hardware']:>15} bs={r['batch_size']:<3} "
-          f"| {p.latency.to('ms'):>10.2f~P} "
+    print(f"{r['hardware']:>8} bs={r['batch_size']:<3} "
           f"| {p.bottleneck:<8} | MFU={p.mfu:.3f}")
 \end{lstlisting}
 \end{frame}
@@ -376,48 +381,35 @@ for r in sorted(results,
 \begin{frame}[fragile]{Live Demo: DSE with Objective \& Constraints}
 \begin{lstlisting}
 from mlsysim.core.dse import DSE
-import mlsysim
 
 dse = DSE(
     space={"batch_size": [1,4,8,16,32,64],
            "precision": ["fp16", "int8"]},
     objective="maximize: throughput",
     constraints=["latency < 100"])
-
 def evaluate(params):
-    p = mlsysim.Engine.solve(
-        mlsysim.Models.Language.Llama3_8B,
-        mlsysim.Hardware.H100,
+    p = mlsysim.Engine.solve(llama, hw,
         batch_size=params["batch_size"],
         precision=params["precision"])
     return {"throughput": p.throughput.magnitude,
             "latency": p.latency.to("ms").magnitude}
-
 best = dse.search(evaluate)
-print(f"Best: {best['best_params']}, "
-      f"Tput: {best['best_objective']:.1f} seq/s")
+print(f"Best: {best['best_params']}")
 \end{lstlisting}
 \end{frame}
 
 % --- 6.6 Batching Optimizer ---
 \begin{frame}[fragile]{Live Demo: Batching Optimizer (Pareto Front)}
 \begin{lstlisting}
-import mlsysim
-
-optimizer = mlsysim.BatchingOptimizer()
-result = optimizer.solve(
-    model=mlsysim.Models.Language.Llama3_8B,
-    hardware=mlsysim.Hardware.H100,
-    seq_len=128, arrival_rate_qps=10.0,
+opt = mlsysim.BatchingOptimizer()
+result = opt.solve(
+    model=llama, hardware=hw, seq_len=128,
+    arrival_rate_qps=10.0,
     sla_latency_ms=20000.0, precision="fp16")
-
-print(f"Optimal batch size: {result.best_batch_size}")
-print(f"Max throughput:     {result.max_throughput:.1f}")
-
+print(f"Optimal bs: {result.best_batch_size}")
 for pt in result.pareto_front:
     print(f"  bs={pt['batch_size']:<4} "
-          f"lat={pt['p99_latency'].m_as('ms'):.0f} ms "
-          f"tpt={pt['throughput']:.1f} seq/s")
+          f"lat={pt['p99_latency'].m_as('ms'):.0f} ms")
 \end{lstlisting}
 \end{frame}
 
@@ -567,22 +559,15 @@ H100 SXM       & 700\,W  & $\sim$50\,J      & LLM inference \\
 % --- 7.5 Live Demo: Hardware Comparison ---
 \begin{frame}[fragile]{Live Demo: nRF52840 vs ESP32 vs H100}
 \begin{lstlisting}
-import mlsysim
-
-model = mlsysim.Models.Tiny.KeywordSpotting  # ~250 KB
-
+tiny_model = mlsysim.Models.Tiny.KeywordSpotting
 devices = [mlsysim.Hardware.Tiny.nRF52840,
            mlsysim.Hardware.Tiny.ESP32_S3,
            mlsysim.Hardware.Cloud.H100]
-
-for hw in devices:
-    p = mlsysim.Engine.solve(model, hw,
-          batch_size=1, precision="int8",
-          efficiency=0.3)
-    print(f"{hw.name:>15}: "
-          f"{p.latency.to('ms'):>10.2f~P} | "
-          f"{p.bottleneck:<8} | "
-          f"Energy: {p.energy.to('uJ'):.1f~P}")
+for d in devices:
+    p = mlsysim.Engine.solve(tiny_model, d,
+          precision="int8", efficiency=0.3)
+    print(f"{d.name:>15}: {p.latency.to('ms'):.2f~P}"
+          f" | {p.bottleneck:<8}")
 \end{lstlisting}
 
 \vspace{0.3em}
@@ -620,17 +605,14 @@ Overhead  & 0.01\,ms & 1.0\,ms \\
 
 \column{0.47\textwidth}
 \begin{lstlisting}
-import mlsysim
-
 # Same API, different hardware
-for hw in [mlsysim.Hardware.Cloud.H100,
-           mlsysim.Hardware.Tiny.ESP32_S3]:
+for d in [mlsysim.Hardware.Cloud.H100,
+          mlsysim.Hardware.Tiny.ESP32_S3]:
     p = mlsysim.Engine.solve(
         mlsysim.Models.Tiny
           .KeywordSpotting,
-        hw, precision="int8")
-    print(f"{hw.name}: "
-          f"{p.bottleneck}")
+        d, precision="int8")
+    print(f"{d.name}: {p.bottleneck}")
 \end{lstlisting}
 \end{columns}
 
@@ -754,17 +736,11 @@ is a transparent analytical tool.
 % --- 8.4 Sensitivity Analysis ---
 \begin{frame}[fragile]{Wall 21: Sensitivity Analysis}
 \begin{lstlisting}
-import mlsysim
-
 solver = mlsysim.SensitivitySolver()
 result = solver.solve(
-    model=mlsysim.Models.Language.Llama3_8B,
-    hardware=mlsysim.Hardware.H100,
-    precision="fp16",
+    model=llama, hardware=hw, precision="fp16",
     perturbation_pct=10.0, efficiency=0.5)
-
 print(f"Binding: {result.binding_constraint}")
-print(f"Baseline: {result.baseline_latency:~P}")
 for p, s in result.sensitivities.items():
     tag = "<<<" if p == result.binding_constraint else ""
     print(f"  {p:>20}: {s:+.4f}  {tag}")
@@ -779,19 +755,14 @@ Improving a non-binding parameter yields \textbf{zero} measurable gain.
 % --- 8.5 Inverse Roofline (Synthesis) ---
 \begin{frame}[fragile]{Wall 22: Inverse Roofline (SynthesisSolver)}
 \begin{lstlisting}
-import mlsysim
 from mlsysim.core.constants import Q_
 
 solver = mlsysim.SynthesisSolver()
 result = solver.solve(
-    model=mlsysim.Models.Language.Llama3_8B,
-    target_latency=Q_("50 ms"),
+    model=llama, target_latency=Q_("50 ms"),
     precision="fp16", efficiency=0.5)
-
-print(f"To serve Llama-3-8B in <50ms:")
-print(f"  Required BW:    {result.required_bw:.0f~P}")
-print(f"  Required FLOPS: {result.required_flops:.1f~P}")
-print(f"  Required Mem:   {result.required_memory:.1f~P}")
+print(f"Required BW:    {result.required_bw:.0f~P}")
+print(f"Required FLOPS: {result.required_flops:.1f~P}")
 \end{lstlisting}
 
 \vspace{0.5em}
@@ -859,19 +830,12 @@ re-run. Does the binding constraint change?
 \end{alertblock}
 
 \begin{lstlisting}
-import mlsysim
-
 solver = mlsysim.SensitivitySolver()
-
 # Batch size 1
-r1 = solver.solve(mlsysim.Models.Language.Llama3_8B,
-                   mlsysim.Hardware.H100, efficiency=0.5)
+r1 = solver.solve(llama, hw, efficiency=0.5)
 print(f"bs=1:  binding = {r1.binding_constraint}")
-
 # Batch size 64
-p64 = mlsysim.Engine.solve(
-    mlsysim.Models.Language.Llama3_8B,
-    mlsysim.Hardware.H100, batch_size=64)
+p64 = mlsysim.Engine.solve(llama, hw, batch_size=64)
 print(f"bs=64: bottleneck = {p64.bottleneck}")
 \end{lstlisting}
 
