@@ -106,12 +106,8 @@ const BRAND_COLOR = '#545556';  // --bs-navbar-brand-color
 
 const S = {
   nav: {
-    backgroundColor: '#fff',
-    borderBottom: '1px solid #dee2e6',
-    padding: '8px 16px',  // --bs-navbar-padding-y: 0.5rem
-    position: 'sticky' as const,
-    top: 0,
-    zIndex: 60,
+    padding: '0 16px',
+    height: 52,
     fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     fontSize: 16,  // --bs-body-font-size: 1rem
     display: 'flex',
@@ -258,8 +254,11 @@ export default function EcosystemBar() {
   );
 
   return (
-    <div ref={barRef}>
-      <div style={S.nav}>
+    <div ref={barRef} style={{
+      position: 'sticky' as const, top: 0, zIndex: 60,
+      backgroundColor: '#fff', borderBottom: '1px solid #dee2e6',
+    }}>
+      <div style={{ ...S.nav, position: 'relative' as const, borderBottom: 'none' }}>
         {/* Brand */}
         <a href={BASE} style={S.brand}>
           <img
@@ -321,7 +320,7 @@ export default function EcosystemBar() {
           style={{ ...S.navLink, padding: 8 }}
           aria-label="Toggle navigation"
         >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6c757d" strokeWidth="2">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={NAV_COLOR} strokeWidth="2">
             {mobileOpen
               ? <path d="M6 6L18 18M18 6L6 18" />
               : <path d="M3 6h18M3 12h18M3 18h18" />
