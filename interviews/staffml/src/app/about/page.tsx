@@ -44,9 +44,7 @@ export default function AboutPage() {
               how do I prepare for ML interviews? Not the modeling side — the
               infrastructure. The compute, the memory, the hardware, the deployment.
               These interviews expect you to reason about all of it, often with numbers,
-              on the spot. And most people aren&apos;t ready. They read research papers,
-              take courses that cover the concepts but not the practice, or just hope
-              for the best.
+              on the spot. And most people aren&apos;t ready.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
               I&apos;ve been writing the Machine Learning Systems textbook to help with this,
