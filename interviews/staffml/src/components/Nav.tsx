@@ -62,7 +62,7 @@ export default function Nav() {
     href === "/" ? pathname === "/" : pathname.startsWith(href);
 
   return (
-    <nav className="border-b border-border bg-background/80 backdrop-blur-md sticky top-[56px] z-50">
+    <nav className="border-b border-border bg-background/80 backdrop-blur-md sticky top-[62px] z-50">
       <div className="h-14 flex items-center px-4 lg:px-6 justify-between">
         <div className="flex items-center gap-4 lg:gap-6">
           {/* Logo */}

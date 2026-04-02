@@ -107,11 +107,11 @@ const S = {
     top: 0,
     zIndex: 60,
     fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-    fontSize: 14,
+    fontSize: 16,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 56,
+    minHeight: 62,
     flexWrap: 'wrap' as const,
   },
   brand: {
@@ -120,15 +120,15 @@ const S = {
     gap: 8,
     textDecoration: 'none',
     color: '#333',
-    fontSize: 14,
+    fontSize: 20,
     fontWeight: 600,
     whiteSpace: 'nowrap' as const,
   },
   navLink: {
     color: '#6c757d',
     textDecoration: 'none',
-    padding: '8px 10px',
-    fontSize: 14,
+    padding: '8px 12px',
+    fontSize: 16,
     fontWeight: 400,
     cursor: 'pointer',
     display: 'flex',
@@ -161,7 +161,7 @@ const S = {
     padding: '6px 16px',
     color: '#212529',
     textDecoration: 'none',
-    fontSize: 13,
+    fontSize: 16,
     whiteSpace: 'nowrap' as const,
   },
   divider: {
@@ -239,7 +239,7 @@ export default function EcosystemBar() {
                 onMouseLeave={() => setHoveredItem(null)}
                 {...(item.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
               >
-                {item.icon && <i className={`bi ${item.icon}`} style={{ fontSize: 13, width: 16, opacity: 0.7 }} />}
+                {item.icon && <i className={`bi ${item.icon}`} style={{ fontSize: 15, width: 18, opacity: 0.7 }} />}
                 <span>{item.label}</span>
               </a>
             )
@@ -337,13 +337,13 @@ export default function EcosystemBar() {
                   onClick={() => setMobileOpen(false)}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '4px 0', fontSize: 13, textDecoration: 'none',
+                    padding: '4px 0', fontSize: 15, textDecoration: 'none',
                     color: item.active ? '#a31f34' : '#6c757d',
                     fontWeight: item.active ? 500 : 400,
                   }}
                   {...(item.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
                 >
-                  {item.icon && <i className={`bi ${item.icon}`} style={{ fontSize: 12, width: 16, opacity: 0.6 }} />}
+                  {item.icon && <i className={`bi ${item.icon}`} style={{ fontSize: 14, width: 18, opacity: 0.6 }} />}
                   {item.label}
                 </a>
               ))}
@@ -351,20 +351,20 @@ export default function EcosystemBar() {
           ))}
           <div style={{ borderTop: '1px solid #dee2e6', paddingTop: 8, display: 'flex', gap: 16 }}>
             <a href="https://opencollective.com/mlsysbook" target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 13, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <i className="bi bi-heart" style={{ fontSize: 12 }} /> Support
+              style={{ fontSize: 15, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <i className="bi bi-heart" style={{ fontSize: 14 }} /> Support
             </a>
             <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 13, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <i className="bi bi-star" style={{ fontSize: 12 }} /> Star
+              style={{ fontSize: 15, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <i className="bi bi-star" style={{ fontSize: 14 }} /> Star
             </a>
             <a href="#subscribe"
-              style={{ fontSize: 13, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <i className="bi bi-envelope" style={{ fontSize: 12 }} /> Subscribe
+              style={{ fontSize: 15, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <i className="bi bi-envelope" style={{ fontSize: 14 }} /> Subscribe
             </a>
             <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 13, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <i className="bi bi-github" style={{ fontSize: 12 }} /> GitHub
+              style={{ fontSize: 15, color: '#6c757d', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <i className="bi bi-github" style={{ fontSize: 14 }} /> GitHub
             </a>
           </div>
         </div>
