@@ -43,9 +43,9 @@ export default function AboutPage() {
               &ldquo;Every semester, students come to my office hours with the same question:
               how do I prepare for ML systems interviews? Not the modeling side — the
               infrastructure. The compute, the memory, the hardware, the deployment.
-              Companies expect engineers to reason about all of it, but there&apos;s no good
-              way to practice. People read papers, take courses that teach concepts but not
-              interview-ready thinking, or just hope for the best.
+              Companies expect engineers to reason about all of it — often with numbers,
+              on the spot. But there&apos;s no good way to practice. People read research papers,
+              take courses that mostly teach theory, or just hope for the best.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
               I&apos;ve been writing the Machine Learning Systems textbook to teach these ideas,
