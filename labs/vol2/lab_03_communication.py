@@ -363,6 +363,11 @@ def _(mo, pE_pred):
         the time to push 280 GB through a 50 GB/s pipe.
 
         Ring AllReduce transfers **2(N-1)/N x M** bytes total.
+
+        **Systems Bridge:** AllReduce is the ML-specific instance of a collective
+        reduce operation, analogous to `MPI_Allreduce` in HPC. The alpha-beta model
+        is the same LogP/LogGP communication cost model used in parallel computing
+        since the 1990s — `alpha` = startup latency, `beta` = inverse bandwidth.
         """))
 
         items.append(pA_pred)

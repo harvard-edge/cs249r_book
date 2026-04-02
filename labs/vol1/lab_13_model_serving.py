@@ -323,6 +323,13 @@ as rho approaches 1.0. At rho=0.80, the 1/(1-rho) amplifier is 5x, making
 P99 = 4.6 * 5 * service_time = **23x service time**.
         """))
 
+        items.append(mo.callout(mo.md(
+            "**Note:** M/M/1 assumes Poisson arrivals and exponential service times. Production "
+            "serving systems have bursty arrivals, bimodal latencies (cache hits vs misses), and "
+            "multiple servers. The M/M/1 model is a pedagogical lower bound — real P99 latencies "
+            "are typically 2-5x worse due to autocorrelation and load balancer overhead."
+        ), kind="info"))
+
         items.append(partA_pred)
         if partA_pred.value is None:
             items.append(mo.callout(mo.md(

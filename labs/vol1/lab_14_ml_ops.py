@@ -292,6 +292,13 @@ Accuracy(t) = Accuracy_0 - lambda * cumulative_drift(t)
 PSI > 0.1: notable drift. PSI > 0.2: significant drift requiring investigation.
         """))
 
+        items.append(mo.callout(mo.md(
+            "**Production reality:** This model uses smooth linear drift for clarity. In production, "
+            "drift is often spiky and seasonal — a new fraud vector can cause PSI to jump from 0.1 "
+            "to 0.8 overnight. The smooth model illustrates the principle; real monitoring must "
+            "handle sudden regime changes."
+        ), kind="info"))
+
         items.append(partA_pred)
         if partA_pred.value is None:
             items.append(mo.callout(mo.md(

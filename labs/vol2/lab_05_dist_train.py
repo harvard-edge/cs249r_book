@@ -686,6 +686,13 @@ def _(
         """))
 
         # Concept framing
+        items.append(mo.callout(mo.md(
+            "**Systems Bridge:** ZeRO (Zero Redundancy Optimizer) shards optimizer state across GPUs — "
+            "analogous to how a distributed database shards table partitions across nodes. ZeRO Stage 1 "
+            "shards optimizer state, Stage 2 adds gradient sharding, Stage 3 adds parameter sharding. "
+            "Each stage trades communication for memory."
+        ), kind="info"))
+
         items.append(mo.md("""
     The stakeholder computed only **static memory**: parameters + gradients + optimizer states.
     ZeRO-3 shards all three across workers, reducing per-GPU static memory to ~38 GB.

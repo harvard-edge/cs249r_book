@@ -244,7 +244,7 @@ def _(mo, partA_prediction):
         value="Adam (16 B/param)", label="Optimizer",
     )
     partA_precision_a = mo.ui.radio(
-        options={"FP32": "fp32", "BF16": "bf16"},
+        options={"FP32": "fp32", "Mixed BF16 (BF16 compute, FP32 optimizer)": "bf16"},
         value="FP32", label="Precision:", inline=True,
     )
 

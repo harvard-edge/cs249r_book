@@ -399,6 +399,13 @@ def _(
     The optimal 27-minute interval wastes only 2/27 = 7.4% on overhead.
     """))
 
+        items.append(mo.callout(mo.md(
+            "**Caveat:** The MTBF formula assumes independent failures. In practice, failures are often "
+            "correlated: a power supply failure takes down 8 GPUs, a switch failure isolates an entire "
+            "rack (64-128 GPUs). Correlated failures can increase effective failure rates by 2-5x over "
+            "the independent model."
+        ), kind="info"))
+
         # ── Prediction lock ───────────────────────────────────────────
         items.append(mo.md("### Your Prediction"))
         items.append(partA_prediction)

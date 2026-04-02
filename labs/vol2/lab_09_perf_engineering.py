@@ -502,6 +502,13 @@ def _(
         of available compute. The GPU is not slow. It is starving for data.
         """))
 
+        items.append(mo.callout(mo.md(
+            "**Important:** The roofline is an upper bound on attainable performance, not a prediction "
+            "of actual performance. Real workloads achieve 50-70% of theoretical memory bandwidth due "
+            "to strided access patterns, TLB misses, and bank conflicts. The value of the roofline is "
+            "in identifying *which* resource is the bottleneck, not in predicting exact throughput."
+        ), kind="info"))
+
         # Prediction
         items.append(mo.md("### Your Prediction"))
         items.append(mo.md("*Commit before touching the simulator.*"))

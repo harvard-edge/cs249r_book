@@ -744,8 +744,10 @@ AI grows linearly with $N$. Small matrices are memory-bound; large matrices are 
         ## The Energy Roofline
 
         Energy efficiency has its own Roofline. In the memory-bound regime, most
-        Joules go to data movement (640 pJ/DRAM access). In the compute-bound regime,
-        most Joules go to useful arithmetic.
+        Joules go to data movement (~640 pJ/DRAM access at 45nm; ~50-80 pJ at modern
+        7nm nodes). In the compute-bound regime, most Joules go to useful arithmetic.
+        The exact numbers vary with process node, but the ratio between data movement
+        and compute energy remains ~100x — this is the enduring insight.
 
         ```
         Energy/FLOP (memory-bound) = E_dram / AI    (decreases with AI)

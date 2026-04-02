@@ -144,7 +144,7 @@ def _(LAB_CSS, mo):
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <span class="badge badge-info">D-A-M Triad Diagnosis</span>
                 <span class="badge badge-warn">Iron Law T = D/BW + O/R + L</span>
-                <span class="badge badge-fail">200x OOM on ESP32</span>
+                <span class="badge badge-fail">200x Out of Memory (OOM) on ESP32</span>
             </div>
         </div>
         """),
@@ -214,7 +214,7 @@ def _(COLORS, mo):
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                &ldquo;If the same model deployed to an H100, a Jetson, and an ESP32 fails
+                &ldquo;If the same model deployed to an H100 (NVIDIA's flagship datacenter GPU), a Jetson (NVIDIA's edge AI module), and an ESP32 (Espressif's low-power microcontroller, 512 KB SRAM) fails
                 for three different physical reasons &mdash; how do you diagnose which axis
                 to fix before spending the budget?&rdquo;
             </div>
@@ -643,7 +643,7 @@ Algorithm capacity metrics complete the picture.
         the Compute term. If the Data term is larger -- which it is at low batch sizes --
         the speedup is negligible.
 
-        **Arithmetic Intensity** (AI) = O / D_vol (FLOPs per byte).
+        **Arithmetic Intensity (AI)** = O / D_vol (FLOPs per byte). Note: AI here refers to arithmetic intensity, not artificial intelligence.
         Below the Ridge Point (R_peak / BW), the workload is **memory-bound**.
         """))
 
@@ -733,7 +733,7 @@ Algorithm capacity metrics complete the picture.
         <div style="display:flex; gap:12px; flex-wrap:wrap; margin:0 0 16px 0;">
             <div style="padding:12px 20px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         background:white; flex:1; text-align:center;">
-                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">MFU</div>
+                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Model FLOPs Utilization (MFU)</div>
                 <div style="font-size:1.3rem; font-weight:800;
                             color:{'#008F45' if _mfu > 50 else '#CC5500' if _mfu > 20 else '#CB202D'};">
                     {_mfu:.1f}%</div>
@@ -809,7 +809,7 @@ AI = {_ai:.1f} FLOPs/Byte  {'<<' if _ai < _ridge_point else '>>'} Ridge Point ~{
             _rev_msg = (
                 f"**Correct.** At batch=1 on the H100, the Data Term is {_t_data_ref:.4f} ms -- "
                 f"approximately {_t_data_ref/_t_comp_ref:.0f}x the Compute Term ({_t_comp_ref:.4f} ms). "
-                "The H100 is so fast at arithmetic that it spends most time waiting for data from HBM. "
+                "The H100 is so fast at arithmetic that it spends most time waiting for data from High Bandwidth Memory (HBM). "
                 "Buying a 2x faster GPU would yield less than 10% latency improvement."
             )
             _rev_kind = "success"
