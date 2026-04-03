@@ -53,7 +53,8 @@ export default function AboutPage() {
               <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">Machine Learning Systems</a>{' '}
               textbook, but a textbook teaches you concepts one at a time, and quizzes
               test whether you remember them. Interviews challenge you to connect
-              all of those concepts across the entire system stack. StaffML does.
+              all of those concepts across the entire system stack. StaffML does
+              just that.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
               It&apos;s free because interview prep is just another form of education,
