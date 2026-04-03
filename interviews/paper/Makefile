@@ -1,6 +1,6 @@
-.PHONY: all paper figures stats svgs clean watch
+.PHONY: all paper figures stats macros svgs clean watch
 
-# ── Default: analyze → plot → convert SVGs → compile ─────────
+# ── Default: analyze → macros → plot → convert SVGs → compile ─
 all: paper
 
 # ── Step 1: Analyze corpus → stats JSON ──────────────────────
@@ -8,6 +8,12 @@ stats: corpus_stats.json
 
 corpus_stats.json: ../vault/corpus.json ../vault/chains.json analyze_corpus.py
 	python3 analyze_corpus.py
+
+# ── Step 1b: Generate LaTeX macros from stats ────────────────
+macros: macros.tex
+
+macros.tex: corpus_stats.json ../vault/corpus.json generate_macros.py
+	python3 generate_macros.py
 
 # ── Step 2: Generate data figures from stats ─────────────────
 DATA_FIGURES = fig-corpus-distribution.pdf \
@@ -39,12 +45,12 @@ svgs: $(SVG_PDFS)
 %.pdf: %.svg
 	rsvg-convert -f pdf $< -o $@
 
-# ── Step 4: Compile paper (depends on all figures) ───────────
+# ── Step 4: Compile paper (depends on all figures + macros) ──
 ALL_FIGURES = $(DATA_FIGURES) $(SVG_PDFS) fig-prereq-graph.pdf
 
 paper: paper.pdf
 
-paper.pdf: paper.tex references.bib $(ALL_FIGURES)
+paper.pdf: paper.tex references.bib macros.tex $(ALL_FIGURES)
 	pdflatex --shell-escape -interaction=nonstopmode paper.tex
 	bibtex paper
 	pdflatex --shell-escape -interaction=nonstopmode paper.tex
@@ -53,7 +59,7 @@ paper.pdf: paper.tex references.bib $(ALL_FIGURES)
 # ── Clean all generated artifacts ────────────────────────────
 clean:
 	rm -f paper.aux paper.bbl paper.blg paper.log paper.out paper.pdf paper.toc
-	rm -f corpus_stats.json
+	rm -f corpus_stats.json macros.tex
 	rm -f $(DATA_FIGURES) $(SVG_PDFS)
 
 # ── Watch for changes and rebuild ────────────────────────────
