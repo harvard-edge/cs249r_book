@@ -37,7 +37,7 @@ SVG_PDFS = $(SVG_SOURCES:.svg=.pdf)
 svgs: $(SVG_PDFS)
 
 %.pdf: %.svg
-	inkscape $< --export-type=pdf --export-filename=$@ 2>/dev/null
+	rsvg-convert -f pdf $< -o $@
 
 # ── Step 4: Compile paper (depends on all figures) ───────────
 ALL_FIGURES = $(DATA_FIGURES) $(SVG_PDFS) fig-prereq-graph.pdf
