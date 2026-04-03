@@ -2,6 +2,7 @@ import taxonomyData from "../data/taxonomy.json";
 import corpusData from "../data/corpus.json";
 import zonesData from "../data/zones.json";
 import chapterUrls from "../data/chapter-urls.json";
+import { ECOSYSTEM_BASE } from "./env";
 import {
   HardDrive, Cpu, Rocket, Layers, Timer, Shuffle,
   Database, Network, Zap, Gauge, Binary,
@@ -130,7 +131,7 @@ const _areas: CompetencyArea[] = Object.entries(areaTopicQs)
           prerequisites: concept?.prerequisites || [],
           questionCount: qs.length,
           levels, zones, tracks: Array.from(trackSet).sort(), questionsByLevel,
-          chapterUrl: chapterUrlMap[topicId],
+          chapterUrl: chapterUrlMap[topicId] ? `${ECOSYSTEM_BASE}${chapterUrlMap[topicId]}` : undefined,
         };
       })
       .sort((a, b) => b.questionCount - a.questionCount);

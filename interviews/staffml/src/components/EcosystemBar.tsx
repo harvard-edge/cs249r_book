@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { ECOSYSTEM_BASE as BASE } from "../lib/env";
 
 /**
  * MLSysBook ecosystem navbar — identical structure and appearance to the
@@ -10,8 +11,6 @@ import { useState, useRef, useEffect } from "react";
  * Matches the exact HTML from harvard-edge.github.io/cs249r_book_dev/
  * including Bootstrap Icons via CDN.
  */
-
-const BASE = "https://mlsysbook.ai";
 
 interface DropdownItem {
   icon?: string;

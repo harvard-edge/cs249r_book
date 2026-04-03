@@ -13,6 +13,7 @@ import NapkinCalc from "@/components/NapkinCalc";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import LevelBadge from "@/components/LevelBadge";
 import { useToast } from "@/components/Toast";
+import { ECOSYSTEM_BASE } from "@/lib/env";
 import {
   getTracks, getLevels, getCompetencyAreas, getZones, getQuestionsByFilter,
   getQuestions, getQuestionsByTopic,
@@ -672,7 +673,7 @@ function PracticePage() {
 
                     {current.details.deep_dive_title && (
                       <a
-                        href={current.details.deep_dive_url?.startsWith('https://') ? current.details.deep_dive_url : '#'}
+                        href={current.details.deep_dive_url ? current.details.deep_dive_url.replace('https://mlsysbook.ai', ECOSYSTEM_BASE) : '#'}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 mt-6 px-3 py-2 text-[13px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
@@ -822,7 +823,7 @@ function PracticePage() {
                     {/* Deep-dive link to MLSysBook.ai */}
                     {current.details.deep_dive_title && (
                       <a
-                        href={current.details.deep_dive_url?.startsWith('https://') ? current.details.deep_dive_url : '#'}
+                        href={current.details.deep_dive_url ? current.details.deep_dive_url.replace('https://mlsysbook.ai', ECOSYSTEM_BASE) : '#'}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-2 px-3 py-2.5 text-[12px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
