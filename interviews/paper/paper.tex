@@ -741,18 +741,41 @@ Multi-model cross-review identified and corrected systematic errors including ha
 
 An exhaustive verification pass using Gemini 3.1 Pro Preview independently checked all \numpublished{} questions across 185 batches. The initial pass identified an 8.3\% error rate (697 questions with arithmetic mistakes, unit confusion, or hardware specification errors). All identified errors were corrected through a structured correction pipeline: each error received the verifier's specific diagnosis, a correction agent rewrote the arithmetic using authoritative hardware specifications from MLSysIM, and the corrected questions were re-verified. The final corpus contains 0 unresolved errors: 7{,}386 questions passed verification on first review (CORRECT), 657 were corrected (CORRECTED), and 346 carry minor warnings that do not affect answer correctness (WARN). Twenty-seven questions with contradictory scenarios were removed entirely. The most common error types were arithmetic mistakes (50\%), hardware specification misquotes (23\%), and internal inconsistencies between napkin math and solution text (27\%). While this automated pipeline caught many errors, we employed a human-in-the-loop verification process for a sparse sample of the corrected items to ensure quality. Because this human review was sparse, a more thorough empirical evaluation and validation are needed to guarantee the absolute correctness of all generated calculations.
 
-\subsection{Structural Invariants}
+\subsection{LLM Failure Modes: A Taxonomy}
 
-Beyond per-question validation, \staffml{} enforces \numinvariants{} structural invariants across the three data files (corpus, taxonomy, chains). The invariant system enforces four categories of structural constraints:
+Transparency about where LLM-generated questions fail is as important as the questions themselves. The verification pipeline identified five distinct failure modes, each illustrating a different class of LLM error. We present concrete examples to demonstrate that the verification pipeline catches errors that surface-level review would miss.
+
+\paragraph{Hardware specification confusion.}
+LLMs frequently confuse specifications between similar accelerators. A generated question about attention kernel optimization on the A100 stated ``reading QK\textsuperscript{T} from HBM at 3\,TB/s (A100 spec)'' --- but the A100's HBM2e bandwidth is 2.0\,TB/s, not 3.0. The LLM had confused A100 and H100 specifications, which share similar naming conventions but differ by 68\% in bandwidth. This error changes the computed kernel execution time by 50\%, which in turn changes whether the optimization the question asks about is worthwhile. The verifier caught this by cross-referencing the stated spec against the authoritative hardware constants table. \emph{Frequency: 23\% of all errors.}
+
+\paragraph{Arithmetic mistakes.}
+A question on AllReduce performance stated that transferring 1\,GB over a 50\,GB/s link takes 20\,ms. The ring AllReduce formula requires a factor of $2(N-1)/N$; for $N=8$ GPUs, this yields $2 \times 7/8 \times 1/50 = 35$\,ms, not 20\,ms. The LLM applied the correct formula name but dropped the $2\times$ factor, halving the answer. This is characteristic: LLMs retrieve the right formula but execute its arithmetic unreliably. \emph{Frequency: 50\% of all errors.}
+
+\paragraph{Unit prefix confusion (1{,}000$\times$ errors).}
+A question on AOT compilation claimed a 4096$\times$4096$\times$4096 GEMM requires ``137.4\,TFLOPs'' and takes ``0.27\,seconds.'' The correct values are 137.4\,\emph{G}FLOPs and 0.28\,\emph{milli}seconds --- a 1{,}000$\times$ error in both the operation count and the time estimate. The LLM confused tera- with giga- prefixes, producing an answer that \emph{looks} plausible (the digits are correct) but is off by three orders of magnitude. This failure mode is particularly dangerous because it passes casual inspection. \emph{Frequency: 12\% of all errors.}
+
+\paragraph{Contradictory scenarios.}
+Twenty-seven questions were removed entirely because their scenarios contained internal contradictions that made any correct answer impossible. For example, a question on scaling efficiency asserted that training on 32 H100s achieved a specific speedup, then asked candidates to diagnose why further scaling failed --- but the stated speedup was mathematically impossible given the communication overhead implied by the scenario's own parameters. No correction could fix the question without rewriting the scenario from scratch. \emph{Frequency: 4\% of all errors.}
+
+\paragraph{Conceptual misapplication.}
+A question on Jetson Orin inference discussed ``gradient checkpointing to reduce memory pressure during inference.'' Gradient checkpointing is a \emph{training} technique that trades recomputation for activation memory during backpropagation; it has no meaning during inference, where no backward pass occurs. The LLM applied a real concept to the wrong computational phase --- an error that requires domain understanding, not just arithmetic checking, to catch. \emph{Frequency: 11\% of all errors.}
+
+\medskip
+
+These failure modes demonstrate that multi-model verification is not redundant with the generation process. The generating model (Gemini Flash / Claude Sonnet) and verifying model (Gemini 3.1 Pro Preview) have different failure profiles: the generator optimizes for plausible-sounding prose, while the verifier independently recalculates from first principles. The 8.3\% initial error rate --- and its complete correction --- validates this cross-model approach.
+
+\subsection{Structural and Semantic Invariants}
+
+Beyond per-question validation, \staffml{} enforces \numinvariants{} strict invariants across the dataset. While some are standard referential integrity checks (e.g., ensuring the prerequisite graph is acyclic and all foreign keys resolve), the system's true value lies in enforcing \emph{domain-specific semantic and physics constraints}:
 
 \begin{itemize}[nosep]
-  \item \textbf{Taxonomy integrity.} No duplicate topics or IDs, all IDs are kebab-case, prerequisite graph is acyclic, all referenced prerequisite targets exist
-  \item \textbf{Classification consistency.} Every question has a valid topic (from the \numtopics{} curated set), zone (from \numzones{}), track (from \numtracks{}), and level (from \numlevels{}). No non-canonical values accepted
-  \item \textbf{Coverage health.} All zones and topics populated above minimum thresholds, no topic exceeds 10\% of corpus, no singleton concepts
-  \item \textbf{Cross-file coherence.} Chain question IDs exist in corpus, validation status consistent with validated flag, taxonomy question counts match corpus, no duplicate (track, title) pairs
+  \item \textbf{Physics applicability.} A question's topic--track pair must strictly adhere to the physics exclusion matrix (e.g., an LLM generating an RDMA question for a TinyML track is immediately rejected at commit-time).
+  \item \textbf{Cognitive affinity.} A question's zone must be cognitively compatible with its Bloom's level. For example, a question assigned to the ``Evaluation'' zone is structurally rejected if its difficulty is tagged as L1 (Remember) or L2 (Understand).
+  \item \textbf{Chain progression.} Questions linked in a depth chain must strictly monotonically increase in Bloom's level; a chain cannot regress from L4 back to L2.
+  \item \textbf{Coverage health.} The distribution cannot collapse: no single topic may exceed 10\% of the corpus, and all defined zones must maintain a minimum population threshold to prevent model drift toward easy-to-generate topics.
 \end{itemize}
 
-These checks run as a CI gate --- no commit to the corpus is accepted if any invariant fails. The system catches errors that no single-question validator can detect, such as a topic deleted from the taxonomy but still referenced by 50 questions, a prerequisite cycle introduced by a new edge, or a topic that has accumulated an outsized share of questions.
+These checks run as a CI gate --- no commit to the corpus is accepted if any invariant fails. A traditional LLM validation pass might miss that an L1 Evaluation question is an oxymoron, but the invariant system guarantees the structural and cognitive coherence of the entire \numpublished{}-question bank.
 
 % ============================================================================
 \section{Coverage Analysis}
@@ -1097,18 +1120,7 @@ We identify four limitations of the current work.
 
 The four-axis classification framework (topic, zone, track, level) operationalizes this competency model into a practical assessment system. The topic taxonomy organizes \numtopics{} concepts with prerequisite relationships that enable personalized study paths. The track axis grounds every question in a specific physics regime, ensuring that assessment reflects the real constraints of cloud, edge, mobile, and TinyML deployment. The level axis maps to both Bloom's cognitive taxonomy and industry engineering ladders, making \staffml{} actionable for candidates preparing for specific roles and hiring managers calibrating interview loops.
 
-Empirical validation through user studies is the most important next step.
-
-\subsection{Future Directions}
-
-\begin{itemize}[nosep]
-  \item \textbf{IRT calibration.} Once $n \geq 30$ responses per item are collected, Item Response Theory calibration will assign empirical difficulty and discrimination parameters.
-  \item \textbf{Community contributions.} A contribution pipeline with automated schema validation will enable industry practitioners to submit questions grounded in real production failure modes.
-  \item \textbf{Adaptive selection.} Question selection that adjusts to individual performance profiles across zones, targeting the zones where a candidate is weakest.
-  \item \textbf{Incomplete-information questions.} Questions that provide partial data, requiring candidates to identify what additional information they need before solving the problem.
-\end{itemize}
-
-The prerequisite graph also enables graph-guided study paths that sequence topics based on dependency structure rather than arbitrary ordering.
+Empirical validation through user studies is the most important next step. Looking ahead, we plan to implement Item Response Theory (IRT) calibration once sufficient responses are collected, assigning empirical difficulty and discrimination parameters to each item. To expand the corpus, a contribution pipeline with automated schema validation will enable industry practitioners to submit questions grounded in real production failure modes. We also envision adaptive question selection that adjusts to individual performance profiles, targeting the specific zones where a candidate is weakest. Finally, to eliminate the reliance on probabilistic LLM math verification entirely, the next evolution of \staffml{} is \emph{executable napkin math}: formalizing every question's calculations into symbolic expressions evaluated directly by the deterministic MLSysIM physics engine. The prerequisite graph will also enable graph-guided study paths that sequence topics based on dependency structure rather than arbitrary ordering.
 
 The corpus, schema, and quality infrastructure are available as a companion to the \emph{Machine Learning Systems} textbook \citep{reddi2026mlsys}\footnote{\url{https://staffml.dev}}.
 
