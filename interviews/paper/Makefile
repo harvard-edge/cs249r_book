@@ -26,7 +26,11 @@ $(DATA_FIGURES): corpus_stats.json generate_figures.py
 SVG_SOURCES = fig-competency-model.svg \
               fig-four-axes.svg \
               fig-generation-pipeline.svg \
-              fig-quality-pipeline.svg
+              fig-quality-pipeline.svg \
+              fig-backward-design.svg \
+              fig-applicability-matrix.svg \
+              fig-prereq-subset.svg \
+              fig-taxonomy-structure.svg
 
 SVG_PDFS = $(SVG_SOURCES:.svg=.pdf)
 
