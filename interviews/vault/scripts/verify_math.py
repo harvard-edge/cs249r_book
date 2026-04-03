@@ -67,7 +67,7 @@ Output ONLY the JSON array, no markdown, no explanation.
 {batch_text}"""
 
 
-def call_gemini(prompt, timeout=120):
+def call_gemini(prompt, timeout=300):
     """Call gemini CLI and parse JSON response."""
     try:
         r = subprocess.run(
