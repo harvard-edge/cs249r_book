@@ -152,7 +152,7 @@ export default function AboutPage() {
           </p>
         </section>
 
-        {/* ─── How questions are organized (collapsed detail) ─── */}
+        {/* ─── How questions are organized ─── */}
         <section className="mb-10">
           <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
             <Layers className="w-4.5 h-4.5 text-accentAmber" /> How Questions Are Organized
@@ -163,45 +163,37 @@ export default function AboutPage() {
             and <strong className="text-textPrimary"> deployment track</strong> (Cloud, Edge, Mobile, or TinyML).
           </p>
 
-          <details className="group mb-3">
-            <summary className="text-[12px] font-medium text-accentBlue cursor-pointer hover:underline">
-              Show difficulty levels
-            </summary>
-            <div className="space-y-2.5 mt-3 ml-1">
-              {LEVELS.map((level) => (
-                <div key={level.id} className="flex gap-3 items-start">
-                  <div className="w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5"
-                    style={{ backgroundColor: level.color + "20", border: `1px solid ${level.color}40` }}>
-                    <span className="text-[10px] font-bold font-mono" style={{ color: level.color }}>{level.id}</span>
-                  </div>
-                  <div className="flex-1">
-                    <span className="text-[13px] font-bold text-textPrimary">{level.name}</span>
-                    <span className="text-[11px] text-textTertiary ml-2">({level.role})</span>
-                    <p className="text-[12px] text-textTertiary italic mt-0.5">&ldquo;{level.example}&rdquo;</p>
-                  </div>
+          <h3 className="text-[13px] font-bold text-textPrimary mb-3">Difficulty Levels</h3>
+          <div className="space-y-2.5 mb-6 ml-1">
+            {LEVELS.map((level) => (
+              <div key={level.id} className="flex gap-3 items-start">
+                <div className="w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5"
+                  style={{ backgroundColor: level.color + "20", border: `1px solid ${level.color}40` }}>
+                  <span className="text-[10px] font-bold font-mono" style={{ color: level.color }}>{level.id}</span>
                 </div>
-              ))}
-            </div>
-          </details>
+                <div className="flex-1">
+                  <span className="text-[13px] font-bold text-textPrimary">{level.name}</span>
+                  <span className="text-[11px] text-textTertiary ml-2">({level.role})</span>
+                  <p className="text-[12px] text-textTertiary italic mt-0.5">&ldquo;{level.example}&rdquo;</p>
+                </div>
+              </div>
+            ))}
+          </div>
 
-          <details className="group">
-            <summary className="text-[12px] font-medium text-accentBlue cursor-pointer hover:underline">
-              Show deployment tracks
-            </summary>
-            <div className="grid grid-cols-2 gap-2 mt-3">
-              {[
-                { name: "Cloud", desc: "GPU clusters, large-scale training and serving" },
-                { name: "Edge", desc: "On-device inference, real-time constraints" },
-                { name: "Mobile", desc: "Phones, power and thermal budgets" },
-                { name: "TinyML", desc: "Microcontrollers, sub-milliwatt inference" },
-              ].map((track) => (
-                <div key={track.name} className="p-3 bg-surface border border-borderSubtle rounded-lg">
-                  <span className="text-[12px] font-bold text-textPrimary block">{track.name}</span>
-                  <span className="text-[11px] text-textTertiary">{track.desc}</span>
-                </div>
-              ))}
-            </div>
-          </details>
+          <h3 className="text-[13px] font-bold text-textPrimary mb-3">Deployment Tracks</h3>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { name: "Cloud", desc: "GPU clusters, large-scale training and serving" },
+              { name: "Edge", desc: "On-device inference, real-time constraints" },
+              { name: "Mobile", desc: "Phones, power and thermal budgets" },
+              { name: "TinyML", desc: "Microcontrollers, sub-milliwatt inference" },
+            ].map((track) => (
+              <div key={track.name} className="p-3 bg-surface border border-borderSubtle rounded-lg">
+                <span className="text-[12px] font-bold text-textPrimary block">{track.name}</span>
+                <span className="text-[11px] text-textTertiary">{track.desc}</span>
+              </div>
+            ))}
+          </div>
         </section>
 
         {/* ─── Open Source + Research ─── */}
