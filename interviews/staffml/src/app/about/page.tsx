@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BookOpen, Github, Target, ArrowLeft, Layers, Package, Users, Crosshair, Calendar } from "lucide-react";
+import { BookOpen, Github, Target, ArrowLeft, Layers, Package, Users, Crosshair, Calendar, FileText } from "lucide-react";
 import { LEVELS } from "@/lib/levels";
 import { getVaultStats } from "@/lib/taxonomy";
 import { getQuestions } from "@/lib/corpus";
@@ -213,6 +213,14 @@ export default function AboutPage() {
               className="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg text-sm font-medium transition-colors"
             >
               <Github className="w-4 h-4" /> View on GitHub
+            </a>
+            <a
+              href="downloads/StaffML-Paper.pdf"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg text-sm font-medium transition-colors"
+            >
+              <FileText className="w-4 h-4" /> Read the Paper
             </a>
           </div>
           <p className="text-[11px] text-textTertiary font-mono">
