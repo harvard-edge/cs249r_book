@@ -231,6 +231,39 @@ export default function AboutPage() {
           </p>
         </section>
 
+        {/* ─── How Questions Are Built ─── */}
+        <section className="mb-10">
+          <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
+            <Package className="w-4.5 h-4.5 text-accentAmber" /> How Questions Are Built
+          </h2>
+          <p className="text-[14px] text-textSecondary leading-relaxed mb-3">
+            StaffML questions are constructed using LLM-assisted generation with structured
+            prompts grounded in the{' '}
+            <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">Machine Learning Systems</a>{' '}
+            textbook and the{' '}
+            <a href="https://github.com/harvard-edge/cs249r_book/tree/main/mlsysim" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">MLSysIM</a>{' '}
+            physics engine. Every hardware specification traces back to a centralized constants
+            table maintained alongside the textbook.
+          </p>
+          <p className="text-[14px] text-textSecondary leading-relaxed mb-3">
+            Every question undergoes independent math verification by a separate model
+            (Gemini 3.1 Pro) that rechecks all arithmetic and hardware specs. The initial
+            verification pass found an 8.3% error rate across the corpus. All identified
+            errors were corrected. The methodology is described in detail in{' '}
+            <a href="downloads/StaffML-Paper.pdf" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">our research paper</a>.
+          </p>
+          <div className="p-4 rounded-xl border border-accentAmber/20 bg-accentAmber/5">
+            <p className="text-[13px] text-textSecondary leading-relaxed">
+              <strong className="text-textPrimary">Found an error?</strong>{' '}
+              We take correctness seriously. If you spot a wrong number, a broken
+              calculation, or a misleading scenario,{' '}
+              <a href="https://github.com/harvard-edge/cs249r_book/issues/new?labels=staffml,bug&template=staffml-error.md&title=[StaffML]+Math+error+in+question+ID" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline font-medium">
+                open an issue on GitHub
+              </a>. Community verification is how we keep improving.
+            </p>
+          </div>
+        </section>
+
         {/* CTA */}
         <div className="border-t border-border pt-8 pb-4 flex flex-wrap items-center justify-center gap-3">
           <Link
