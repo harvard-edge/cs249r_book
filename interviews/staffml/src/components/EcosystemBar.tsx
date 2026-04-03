@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { ECOSYSTEM_BASE as BASE } from "../lib/env";
 
+const ASSET_PREFIX = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
 /**
  * MLSysBook ecosystem navbar — identical structure and appearance to the
  * Quarto Bootstrap navbar, but rendered with inline styles to avoid
@@ -261,7 +263,7 @@ export default function EcosystemBar() {
         {/* Brand */}
         <a href={BASE} style={S.brand}>
           <img
-            src="/logo-seas-shield.png"
+            src={`${ASSET_PREFIX}/logo-seas-shield.png`}
             alt=""
             style={{ height: 28, width: 'auto' }}
           />
