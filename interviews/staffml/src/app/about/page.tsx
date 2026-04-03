@@ -41,17 +41,24 @@ export default function AboutPage() {
           <div className="p-5 rounded-xl border border-borderSubtle bg-surface/50">
             <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
               &ldquo;Every semester, students come to my office hours with the same question:
-              how do I prepare for ML interviews? Not the modeling side — the
+              how do I prepare for ML interviews? Not the modeling side &mdash; the
               infrastructure. The compute, the memory, the hardware, the deployment.
               These interviews expect you to reason about all of it, often with numbers,
               on the spot. And most people aren&apos;t ready.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
-              I&apos;ve been writing the Machine Learning Systems textbook to help with this,
-              but a textbook teaches you concepts. It doesn&apos;t tell you whether you can
-              actually apply them under pressure. That&apos;s why I built StaffML. I wanted
-              to give students and engineers a way to find out what they really know, and
-              what they still need to learn.
+              I&apos;ve been writing the Machine Learning Systems textbook to help with
+              this, but a textbook teaches you concepts. Quizzes test whether you
+              remember them. Neither tells you whether you can reason through a system
+              under pressure. And that gap exists on both sides of the table: candidates
+              don&apos;t have a way to practice what interviews actually test, and
+              interviewers don&apos;t have a consistent way to evaluate it.
+            </p>
+            <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
+              That&apos;s why I built StaffML. I wanted to give both sides a shared
+              foundation: a place where students and engineers can find out what they
+              really know, and where teams can see what ML systems reasoning actually
+              looks like at every level.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
               It&apos;s free because interview prep is just another form of education,
