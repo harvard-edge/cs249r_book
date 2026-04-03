@@ -21,6 +21,7 @@ import pickle
 import gzip
 import shutil
 import numpy as np
+rng = np.random.default_rng(7)
 from pathlib import Path
 
 # Add project root for TinyTorch imports
@@ -245,13 +246,13 @@ class DatasetManager:
         print("🧮 Generating XOR problem data...")
 
         # Create XOR dataset
-        np.random.seed(42)  # Reproducible
-        X = np.random.randint(0, 2, (num_samples, 2)).astype(np.float32)
+        rng = np.random.default_rng(7)  # Reproducible
+        X = rng.integers(0, 2, (num_samples, 2)).astype(np.float32)
         # XOR: output 1 when inputs differ, 0 when same
         y = (X[:, 0].astype(int) != X[:, 1].astype(int)).astype(np.int64)
 
         # Add some noise to make it more realistic
-        X += np.random.normal(0, 0.1, X.shape)
+        X += rng.normal(0, 0.1, X.shape)
 
         print(f"📊 XOR data generated: {num_samples} samples")
         print("   Classes: [0,0]→0, [0,1]→1, [1,0]→1, [1,1]→0")
@@ -261,17 +262,17 @@ class DatasetManager:
         """Generate linearly separable data for perceptron milestone."""
         print("📏 Generating linearly separable data...")
 
-        np.random.seed(42)
+        rng = np.random.default_rng(7)
 
         # Create two clusters
-        cluster1 = np.random.normal([2, 2], 0.5, (num_samples//2, 2))
-        cluster2 = np.random.normal([-2, -2], 0.5, (num_samples//2, 2))
+        cluster1 = rng.normal([2, 2], 0.5, (num_samples//2, 2))
+        cluster2 = rng.normal([-2, -2], 0.5, (num_samples//2, 2))
 
         X = np.vstack([cluster1, cluster2]).astype(np.float32)
         y = np.hstack([np.ones(num_samples//2), np.zeros(num_samples//2)]).astype(np.int64)
 
         # Shuffle
-        indices = np.random.permutation(num_samples)
+        indices = rng.permutation(num_samples)
         X, y = X[indices], y[indices]
 
         print(f"📊 Perceptron data generated: {num_samples} linearly separable samples")

@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.autograd import enable_autograd
 
@@ -131,7 +132,7 @@ def test_positional_encoding_gradient_flow():
     pos_enc.position_embeddings.requires_grad = True
 
     # Input
-    x = Tensor(np.random.randn(2, 5, embed_dim), requires_grad=True)
+    x = Tensor(rng.standard_normal((2, 5, embed_dim)), requires_grad=True)
 
     # Forward pass
     output = pos_enc.forward(x)
@@ -177,9 +178,9 @@ def test_scaled_dot_product_attention_gradient_flow():
     d_model = 8
 
     # Create Q, K, V
-    Q = Tensor(np.random.randn(batch_size, seq_len, d_model), requires_grad=True)
-    K = Tensor(np.random.randn(batch_size, seq_len, d_model), requires_grad=True)
-    V = Tensor(np.random.randn(batch_size, seq_len, d_model), requires_grad=True)
+    Q = Tensor(rng.standard_normal((batch_size, seq_len, d_model)), requires_grad=True)
+    K = Tensor(rng.standard_normal((batch_size, seq_len, d_model)), requires_grad=True)
+    V = Tensor(rng.standard_normal((batch_size, seq_len, d_model)), requires_grad=True)
 
     # Test without mask
     print("  Testing without mask...")
@@ -200,9 +201,9 @@ def test_scaled_dot_product_attention_gradient_flow():
 
     # Test with causal mask
     print("  Testing with causal mask...")
-    Q2 = Tensor(np.random.randn(batch_size, seq_len, d_model), requires_grad=True)
-    K2 = Tensor(np.random.randn(batch_size, seq_len, d_model), requires_grad=True)
-    V2 = Tensor(np.random.randn(batch_size, seq_len, d_model), requires_grad=True)
+    Q2 = Tensor(rng.standard_normal((batch_size, seq_len, d_model)), requires_grad=True)
+    K2 = Tensor(rng.standard_normal((batch_size, seq_len, d_model)), requires_grad=True)
+    V2 = Tensor(rng.standard_normal((batch_size, seq_len, d_model)), requires_grad=True)
 
     mask = Tensor(np.tril(np.ones((seq_len, seq_len))))  # Lower triangular
     output2, attn_weights2 = scaled_dot_product_attention(Q2, K2, V2, mask=mask)
@@ -245,7 +246,7 @@ def test_multi_head_attention_gradient_flow():
         param.requires_grad = True
 
     # Input
-    x = Tensor(np.random.randn(batch_size, seq_len, embed_dim), requires_grad=True)
+    x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)), requires_grad=True)
     mask = Tensor(np.tril(np.ones((seq_len, seq_len))))
 
     # Forward pass
@@ -310,7 +311,7 @@ def test_layernorm_gradient_flow():
     assert ln.beta.requires_grad, "Beta should have requires_grad=True"
 
     # Input
-    x = Tensor(np.random.randn(batch_size, seq_len, normalized_shape), requires_grad=True)
+    x = Tensor(rng.standard_normal((batch_size, seq_len, normalized_shape)), requires_grad=True)
 
     # Forward pass
     output = ln.forward(x)
@@ -359,7 +360,7 @@ def test_mlp_gradient_flow():
         param.requires_grad = True
 
     # Input
-    x = Tensor(np.random.randn(2, 4, embed_dim), requires_grad=True)
+    x = Tensor(rng.standard_normal((2, 4, embed_dim)), requires_grad=True)
 
     # Forward pass
     output = mlp.forward(x)
@@ -409,7 +410,7 @@ def test_transformer_block_gradient_flow():
         param.requires_grad = True
 
     # Input
-    x = Tensor(np.random.randn(2, 8, embed_dim), requires_grad=True)
+    x = Tensor(rng.standard_normal((2, 8, embed_dim)), requires_grad=True)
     mask = Tensor(np.tril(np.ones((8, 8))))
 
     # Forward pass
@@ -484,7 +485,7 @@ def test_full_gpt_model_gradient_flow():
     print(f"  Model has {total_params} parameters")
 
     # Input
-    x = Tensor(np.random.randint(0, vocab_size, (2, seq_len)))
+    x = Tensor(rng.integers(0, vocab_size, (2, seq_len)))
 
     # Forward pass
     logits = model.forward(x)

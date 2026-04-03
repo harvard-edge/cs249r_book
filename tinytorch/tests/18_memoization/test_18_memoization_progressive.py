@@ -14,6 +14,7 @@ DEPENDENCY CHAIN: 01_tensor → ... → 13_transformers → ... → 17_accelerat
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -125,11 +126,11 @@ class TestMemoizationWithTransformers:
             cache = KVCache(batch_size=1, max_seq_len=100, num_layers=1, num_heads=num_heads, head_dim=head_dim)
             
             # First token
-            x1 = Tensor(np.random.randn(1, 1, embed_dim))  # (batch, seq=1, embed)
+            x1 = Tensor(rng.standard_normal((1, 1, embed_dim)))  # (batch, seq=1, embed)
             out1 = mha(x1)
             
             # Cache should speed up subsequent tokens
-            x2 = Tensor(np.random.randn(1, 1, embed_dim))
+            x2 = Tensor(rng.standard_normal((1, 1, embed_dim)))
             
             # With cache, attention only needs to attend to new token
             if hasattr(mha, 'forward_with_cache'):
@@ -198,7 +199,7 @@ class TestMemoizationPerformance:
             from tinytorch.core.layers import Linear
             
             layer = Linear(100, 100)
-            x = Tensor(np.random.randn(10, 100))
+            x = Tensor(rng.standard_normal((10, 100)))
             
             # Warm-up
             _ = layer(x)
@@ -241,7 +242,7 @@ class TestRegressionPrevention:
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.layers import Linear
         layer = Linear(4, 2)
-        x = Tensor(np.random.randn(2, 4))
+        x = Tensor(rng.standard_normal((2, 4)))
         y = layer(x)
         assert y.shape == (2, 2)
 
@@ -257,7 +258,7 @@ class TestRegressionPrevention:
         """✅ Module 05"""
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.dataloader import TensorDataset, DataLoader
-        data = Tensor(np.random.randn(10, 3))
+        data = Tensor(rng.standard_normal((10, 3)))
         targets = Tensor(np.arange(10).astype(float))
         dataset = TensorDataset(data, targets)
         dataloader = DataLoader(dataset, batch_size=2)
@@ -277,7 +278,7 @@ class TestRegressionPrevention:
             from tinytorch.core.spatial import Conv2d
             from tinytorch.core.tensor import Tensor
             conv = Conv2d(3, 8, kernel_size=3, padding=1)
-            x = Tensor(np.random.randn(2, 3, 8, 8))
+            x = Tensor(rng.standard_normal((2, 3, 8, 8)))
             y = conv(x)
             assert y.shape[0] == 2
         except ImportError:
@@ -289,7 +290,7 @@ class TestRegressionPrevention:
             from tinytorch.core.attention import MultiHeadAttention
             from tinytorch.core.tensor import Tensor
             mha = MultiHeadAttention(32, 4)
-            x = Tensor(np.random.randn(1, 5, 32))
+            x = Tensor(rng.standard_normal((1, 5, 32)))
             out = mha(x)
             assert out.shape == x.shape
         except ImportError:
@@ -301,7 +302,7 @@ class TestRegressionPrevention:
             from tinytorch.core.transformers import TransformerBlock
             from tinytorch.core.tensor import Tensor
             block = TransformerBlock(32, 4, ff_dim=128)
-            x = Tensor(np.random.randn(1, 5, 32))
+            x = Tensor(rng.standard_normal((1, 5, 32)))
             out = block(x)
             assert out.shape == x.shape
         except ImportError:

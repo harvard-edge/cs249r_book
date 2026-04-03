@@ -22,6 +22,7 @@ WHAT STUDENTS LEARN:
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import pytest
 import sys
 from pathlib import Path
@@ -404,7 +405,7 @@ class TestActivationComposition:
         each element. Shape in = shape out (always).
         """
         # Batch of 4 samples, 3 features each
-        x = Tensor(np.random.randn(4, 3))
+        x = Tensor(rng.standard_normal((4, 3)))
 
         for name, activation in [("ReLU", ReLU()), ("Sigmoid", Sigmoid()), ("Tanh", Tanh())]:
             output = activation(x)

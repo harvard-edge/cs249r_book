@@ -21,6 +21,7 @@ WHAT WE TEST:
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -51,7 +52,7 @@ class TestQuantizationBasics:
         range would overflow and produce garbage.
         """
         # Create FP32 tensor
-        fp32_tensor = Tensor(np.random.randn(10, 10).astype(np.float32))
+        fp32_tensor = Tensor(rng.standard_normal((10, 10)).astype(np.float32))
 
         # Quantize
         q_tensor, scale, zero_point = Quantizer.quantize_tensor(fp32_tensor)
@@ -157,7 +158,7 @@ class TestQuantizedLinear:
         q_linear = QuantizedLinear(linear)
 
         # Forward pass
-        input_tensor = Tensor(np.random.randn(2, 4).astype(np.float32))
+        input_tensor = Tensor(rng.standard_normal((2, 4)).astype(np.float32))
         original_output = linear.forward(input_tensor)
         quantized_output = q_linear.forward(input_tensor)
 

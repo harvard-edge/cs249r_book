@@ -6,6 +6,7 @@ Run with pytest for detailed reporting.
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -42,7 +43,7 @@ class TestDenseLayerFunctionality:
 
         # Create input
         batch_size = 32
-        x = Tensor(np.random.randn(batch_size, 10))
+        x = Tensor(rng.standard_normal((batch_size, 10)))
 
         # Forward pass
         output = layer.forward(x)
@@ -60,7 +61,7 @@ class TestDenseLayerFunctionality:
         assert hasattr(layer, 'bias'), "Layer should have bias"
         assert layer.bias is not None, "Bias should be initialized"
 
-        x = Tensor(np.random.randn(1, 10))
+        x = Tensor(rng.standard_normal((1, 10)))
         output = layer(x)
         assert output.shape == (1, 5), "Output shape should be correct with bias"
 
@@ -72,7 +73,7 @@ class TestDenseLayerFunctionality:
         layer = Dense(10, 5, bias=False)
         assert layer.bias is None, "Bias should be None when disabled"
 
-        x = Tensor(np.random.randn(1, 10))
+        x = Tensor(rng.standard_normal((1, 10)))
         output = layer(x)
         assert output.shape == (1, 5), "Output shape should be correct without bias"
 
@@ -82,7 +83,7 @@ class TestDenseLayerFunctionality:
         from tinytorch.core.tensor import Tensor
 
         layer = Dense(10, 5)
-        x = Tensor(np.random.randn(4, 10))
+        x = Tensor(rng.standard_normal((4, 10)))
 
         # Test both forward() and __call__()
         output1 = layer.forward(x)
@@ -112,7 +113,7 @@ class TestNetworkComposition:
         sigmoid = Sigmoid()
 
         # Test forward pass through all layers
-        x = Tensor(np.random.randn(32, 784))
+        x = Tensor(rng.standard_normal((32, 784)))
 
         h1 = layer1(x)
         assert h1.shape == (32, 128), "First layer output shape incorrect"

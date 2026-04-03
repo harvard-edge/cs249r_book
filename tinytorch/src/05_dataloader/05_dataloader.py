@@ -72,6 +72,7 @@ from abc import ABC, abstractmethod
 from typing import Iterator, List, Tuple
 
 import numpy as np
+rng = np.random.default_rng(7)
 
 # Import real Tensor class from tinytorch package
 from tinytorch.core.tensor import Tensor
@@ -1050,11 +1051,11 @@ def _random_crop_region(padded_h, padded_w, target_h, target_w):
     >>> top, left = _random_crop_region(40, 40, 32, 32)
     >>> # top in [0, 8], left in [0, 8]
 
-    HINT: np.random.randint(0, high+1) gives values in [0, high] inclusive
+    HINT: rng.integers(0, high+1) gives values in [0, high] inclusive
     """
     ### BEGIN SOLUTION
-    top = np.random.randint(0, padded_h - target_h + 1)
-    left = np.random.randint(0, padded_w - target_w + 1)
+    top = rng.integers(0, padded_h - target_h + 1)
+    left = rng.integers(0, padded_w - target_w + 1)
     return top, left
     ### END SOLUTION
 
@@ -1186,7 +1187,7 @@ class RandomCrop:
 
         EXAMPLE:
         >>> crop = RandomCrop(32, padding=4)
-        >>> img = np.random.randn(3, 32, 32)
+        >>> img = rng.standard_normal((3, 32, 32))
         >>> out = crop(img)
         >>> print(out.shape)  # (3, 32, 32)
 
@@ -1292,12 +1293,12 @@ def test_unit_augmentation():
     crop = RandomCrop(32, padding=4)
 
     # Test with (C, H, W) format (CIFAR-10 style)
-    img_chw = np.random.randn(3, 32, 32)
+    img_chw = rng.standard_normal((3, 32, 32))
     cropped = crop(img_chw)
     assert cropped.shape == (3, 32, 32), f"CHW crop shape wrong: {cropped.shape}"
 
     # Test with (H, W) format
-    img_hw = np.random.randn(28, 28)
+    img_hw = rng.standard_normal((28, 28))
     crop_hw = RandomCrop(28, padding=4)
     cropped_hw = crop_hw(img_hw)
     assert cropped_hw.shape == (28, 28), f"HW crop shape wrong: {cropped_hw.shape}"
@@ -1309,13 +1310,13 @@ def test_unit_augmentation():
         RandomCrop(32, padding=4)
     ])
 
-    img = np.random.randn(3, 32, 32)
+    img = rng.standard_normal((3, 32, 32))
     augmented = transforms(img)
     assert augmented.shape == (3, 32, 32), f"Compose output shape wrong: {augmented.shape}"
 
     # Test 4: Transforms work with Tensor
     print("  Testing Tensor compatibility...")
-    tensor_img = Tensor(np.random.randn(3, 32, 32))
+    tensor_img = Tensor(rng.standard_normal((3, 32, 32)))
 
     flip_result = RandomHorizontalFlip(p=1.0)(tensor_img)
     assert isinstance(flip_result, Tensor), "Flip should return Tensor when given Tensor"
@@ -1670,8 +1671,8 @@ def analyze_dataloader_performance():
 
     for size in sizes:
         # Create synthetic dataset
-        features = Tensor(np.random.randn(size, 100))  # 100 features
-        labels = Tensor(np.random.randint(0, 10, size))
+        features = Tensor(rng.standard_normal((size, 100)))  # 100 features
+        labels = Tensor(rng.integers(0, 10, size))
         dataset = TensorDataset(features, labels)
 
         print(f"\nDataset size: {size} samples")
@@ -1695,8 +1696,8 @@ def analyze_dataloader_performance():
     print("\n🔄 Shuffle Overhead Analysis:")
 
     dataset_size = 10000
-    features = Tensor(np.random.randn(dataset_size, 50))
-    labels = Tensor(np.random.randint(0, 5, dataset_size))
+    features = Tensor(rng.standard_normal((dataset_size, 50)))
+    labels = Tensor(rng.integers(0, 5, dataset_size))
     dataset = TensorDataset(features, labels)
 
     batch_size = 64
@@ -1756,8 +1757,8 @@ def analyze_memory_usage():
     print("\n🧪 Actual Tensor Memory Usage:")
 
     # Create different sized tensors
-    tensor_small = Tensor(np.random.randn(32, 784))    # Small batch
-    tensor_large = Tensor(np.random.randn(512, 784))   # Large batch
+    tensor_small = Tensor(rng.standard_normal((32, 784)))    # Small batch
+    tensor_large = Tensor(rng.standard_normal((512, 784)))   # Large batch
 
     # Measure actual memory (data array + object overhead)
     small_bytes = tensor_small.data.nbytes
@@ -1788,8 +1789,8 @@ def analyze_collation_overhead():
     # Test different batch sizes to see collation cost
     dataset_size = 1000
     feature_size = 100
-    features = Tensor(np.random.randn(dataset_size, feature_size))
-    labels = Tensor(np.random.randint(0, 10, dataset_size))
+    features = Tensor(rng.standard_normal((dataset_size, feature_size)))
+    labels = Tensor(rng.integers(0, 10, dataset_size))
     dataset = TensorDataset(features, labels)
 
     print("\n⚡ Collation Time by Batch Size:")
@@ -1937,8 +1938,8 @@ def test_unit_training_integration():
     num_classes = 5
 
     # Synthetic classification data
-    features = Tensor(np.random.randn(num_samples, num_features))
-    labels = Tensor(np.random.randint(0, num_classes, num_samples))
+    features = Tensor(rng.standard_normal((num_samples, num_features)))
+    labels = Tensor(rng.integers(0, num_classes, num_samples))
 
     dataset = TensorDataset(features, labels)
 
@@ -2046,8 +2047,8 @@ def test_module():
     ])
 
     # Simulate CIFAR-style images (C, H, W)
-    images = np.random.randn(100, 3, 8, 8)
-    labels = np.random.randint(0, 10, 100)
+    images = rng.standard_normal((100, 3, 8, 8))
+    labels = rng.integers(0, 10, 100)
 
     # Apply augmentation manually (how you'd use in practice)
     augmented_images = np.array([train_transforms(img) for img in images])
@@ -2285,7 +2286,7 @@ def demo_dataloader():
     print("=" * 45)
 
     # Create a dataset
-    X = Tensor(np.random.randn(100, 64))
+    X = Tensor(rng.standard_normal((100, 64)))
     y = Tensor(np.arange(100))
     dataset = TensorDataset(X, y)
 

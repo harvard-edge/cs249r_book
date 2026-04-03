@@ -85,6 +85,7 @@ This milestone shows you WHY training is essential - the model won't work withou
 import sys
 import os
 import numpy as np
+rng = np.random.default_rng(7)
 import argparse
 
 # Add project root to path for correct tinytorch imports
@@ -282,8 +283,8 @@ def main():
     console.print("   [dim]This is a SIMPLE problem - a trained model achieves 95%+ easily[/dim]")
     console.print("   [yellow]⚠️  No random seed - each run will be different![/yellow]")
 
-    cluster1 = np.random.normal([2, 2], 0.5, (5, 2))   # Class 1: top-right
-    cluster2 = np.random.normal([-2, -2], 0.5, (5, 2)) # Class 0: bottom-left
+    cluster1 = rng.normal([2, 2], 0.5, (5, 2))   # Class 1: top-right
+    cluster2 = rng.normal([-2, -2], 0.5, (5, 2)) # Class 0: bottom-left
     X = np.vstack([cluster1, cluster2]).astype(np.float32)
     y = np.array([1, 1, 1, 1, 1, 0, 0, 0, 0, 0], dtype=np.float32)  # True labels
 

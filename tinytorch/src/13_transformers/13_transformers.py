@@ -63,6 +63,7 @@ from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, GPT
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 
 from tinytorch.core.activations import GELU
 from tinytorch.core.attention import MultiHeadAttention
@@ -517,7 +518,7 @@ class LayerNorm:
 
         EXAMPLE:
         >>> ln = LayerNorm(512)  # For 512-dimensional embeddings
-        >>> x = Tensor(np.random.randn(2, 10, 512))  # (batch, seq, features)
+        >>> x = Tensor(rng.standard_normal((2, 10, 512)))  # (batch, seq, features)
         >>> normalized = ln.forward(x)
         >>> # Each (2, 10) sample normalized independently across 512 features
 
@@ -732,7 +733,7 @@ class MLP:
 
         EXAMPLE:
         >>> mlp = MLP(512)  # Will create 512 -> 2048 -> 512 network
-        >>> x = Tensor(np.random.randn(2, 10, 512))
+        >>> x = Tensor(rng.standard_normal((2, 10, 512)))
         >>> output = mlp.forward(x)
         >>> assert output.shape == (2, 10, 512)
 
@@ -813,7 +814,7 @@ def test_unit_mlp():
 
     # Test forward pass
     batch_size, seq_len = 2, 10
-    x = Tensor(np.random.randn(batch_size, seq_len, embed_dim))
+    x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
     output = mlp.forward(x)
 
     # Check shape preservation
@@ -960,7 +961,7 @@ class TransformerBlock:
 
         EXAMPLE:
         >>> block = TransformerBlock(embed_dim=512, num_heads=8)
-        >>> x = Tensor(np.random.randn(2, 10, 512))  # (batch, seq, embed)
+        >>> x = Tensor(rng.standard_normal((2, 10, 512)))  # (batch, seq, embed)
         >>> output = block.forward(x)
         >>> assert output.shape == (2, 10, 512)
 
@@ -1063,7 +1064,7 @@ def test_unit_transformer_block():
 
     # Test forward pass
     batch_size, seq_len = 2, 8
-    x = Tensor(np.random.randn(batch_size, seq_len, embed_dim))
+    x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
     output = block.forward(x)
 
     # Check shape preservation
@@ -1270,7 +1271,7 @@ class GPT:
 
         EXAMPLE:
         >>> model = GPT(vocab_size=1000, embed_dim=256, num_layers=6, num_heads=8)
-        >>> tokens = Tensor(np.random.randint(0, 1000, (2, 10)))  # (batch, seq)
+        >>> tokens = Tensor(rng.integers(0, 1000, (2, 10)))  # (batch, seq)
         >>> logits = model.forward(tokens)
         >>> assert logits.shape == (2, 10, 1000)  # (batch, seq, vocab)
 
@@ -1385,7 +1386,7 @@ class GPT:
         probs = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
 
         # Sample next token from probability distribution
-        next_token = np.random.choice(self.vocab_size, p=probs[0])
+        next_token = rng.choice(self.vocab_size, p=probs[0])
         return next_token
         ### END SOLUTION
 
@@ -1471,7 +1472,7 @@ def test_unit_gpt():
 
     # Test forward pass
     batch_size, seq_len = 2, 8
-    tokens = Tensor(np.random.randint(0, vocab_size, (batch_size, seq_len)))
+    tokens = Tensor(rng.integers(0, vocab_size, (batch_size, seq_len)))
     logits = model.forward(tokens)
 
     # Check output shape
@@ -1479,7 +1480,7 @@ def test_unit_gpt():
     assert logits.shape == expected_shape
 
     # Test generation
-    prompt = Tensor(np.random.randint(0, vocab_size, (1, 5)))
+    prompt = Tensor(rng.integers(0, vocab_size, (1, 5)))
     generated = model.generate(prompt, max_new_tokens=3)
 
     # Check generation shape
@@ -1491,7 +1492,7 @@ def test_unit_gpt():
 
     # Test different model sizes
     larger_model = GPT(vocab_size=200, embed_dim=128, num_layers=4, num_heads=8)
-    test_tokens = Tensor(np.random.randint(0, 200, (1, 10)))
+    test_tokens = Tensor(rng.integers(0, 200, (1, 10)))
     larger_logits = larger_model.forward(test_tokens)
     assert larger_logits.shape == (1, 10, 200)
 
@@ -1518,7 +1519,7 @@ Raw logits: [1.0, 2.0, 3.0]
        |
   probability distribution: [0.09, 0.24, 0.67]
        |
-  np.random.choice -> sampled token index
+  rng.choice -> sampled token index
 ```
 
 **What we're testing**: Temperature scaling, softmax probability output, valid token range
@@ -1541,7 +1542,7 @@ def test_unit_sample_next_token():
     assert 0 <= token < 5, f"Token {token} out of range [0, 5)"
 
     # Test 2: Very low temperature should almost always pick the highest logit
-    np.random.seed(42)
+    rng = np.random.default_rng(7)
     high_logit_idx = 4  # logits[4] = 5.0 is highest
     low_temp_tokens = [model._sample_next_token(logits, temperature=0.01) for _ in range(20)]
     assert all(t == high_logit_idx for t in low_temp_tokens), (
@@ -1557,7 +1558,7 @@ def test_unit_sample_next_token():
     )
 
     # Test 4: High temperature produces more varied tokens
-    np.random.seed(0)
+    rng = np.random.default_rng(7)
     uniform_logits = np.array([[1.0, 1.0, 1.0, 1.0, 1.0]])
     high_temp_tokens = set(model._sample_next_token(uniform_logits, temperature=2.0) for _ in range(50))
     assert len(high_temp_tokens) > 1, "High temperature with uniform logits should produce varied tokens"
@@ -1869,14 +1870,14 @@ def test_module():
     # Test batch processing
     batch_size = 3
     seq_len = 16
-    tokens = Tensor(np.random.randint(0, vocab_size, (batch_size, seq_len)))
+    tokens = Tensor(rng.integers(0, vocab_size, (batch_size, seq_len)))
 
     # Forward pass
     logits = model.forward(tokens)
     assert logits.shape == (batch_size, seq_len, vocab_size)
 
     # Test generation with different temperatures
-    prompt = Tensor(np.random.randint(0, vocab_size, (1, 8)))
+    prompt = Tensor(rng.integers(0, vocab_size, (1, 8)))
 
     # Conservative generation
     conservative = model.generate(prompt, max_new_tokens=5, temperature=0.1)

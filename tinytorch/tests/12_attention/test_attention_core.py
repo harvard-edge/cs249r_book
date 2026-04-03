@@ -29,6 +29,7 @@ CONNECTION TO OTHER MODULES:
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -58,9 +59,9 @@ class TestScaledDotProductAttention:
         """
         batch, seq, dim = 2, 5, 8
 
-        Q = Tensor(np.random.randn(batch, seq, dim))
-        K = Tensor(np.random.randn(batch, seq, dim))
-        V = Tensor(np.random.randn(batch, seq, dim))
+        Q = Tensor(rng.standard_normal((batch, seq, dim)))
+        K = Tensor(rng.standard_normal((batch, seq, dim)))
+        V = Tensor(rng.standard_normal((batch, seq, dim)))
 
         output, weights = scaled_dot_product_attention(Q, K, V)
 
@@ -81,9 +82,9 @@ class TestScaledDotProductAttention:
 
         This ensures the output is a proper weighted average of values.
         """
-        Q = Tensor(np.random.randn(1, 4, 8))
-        K = Tensor(np.random.randn(1, 4, 8))
-        V = Tensor(np.random.randn(1, 4, 8))
+        Q = Tensor(rng.standard_normal((1, 4, 8)))
+        K = Tensor(rng.standard_normal((1, 4, 8)))
+        V = Tensor(rng.standard_normal((1, 4, 8)))
 
         _, weights = scaled_dot_product_attention(Q, K, V)
 
@@ -126,7 +127,7 @@ class TestScaledDotProductAttention:
                               [0.0, 1.0, 0.0, 0.0],
                               [0.0, 0.0, 1.0, 0.0]]]))  # (1, 3, 4)
 
-        V = Tensor(np.random.randn(1, 3, 4))
+        V = Tensor(rng.standard_normal((1, 3, 4)))
 
         _, weights = scaled_dot_product_attention(Q, K, V)
 
@@ -160,7 +161,7 @@ class TestMultiHeadAttention:
         num_heads = 4
 
         mha = MultiHeadAttention(embed_dim, num_heads)
-        x = Tensor(np.random.randn(batch, seq, embed_dim))
+        x = Tensor(rng.standard_normal((batch, seq, embed_dim)))
 
         output = mha.forward(x)
 
@@ -244,7 +245,7 @@ class TestAttentionGradientFlow:
         back through attention to the input embeddings.
         """
         mha = MultiHeadAttention(embed_dim=16, num_heads=2)
-        x = Tensor(np.random.randn(1, 4, 16), requires_grad=True)
+        x = Tensor(rng.standard_normal((1, 4, 16)), requires_grad=True)
 
         output = mha.forward(x)
         loss = output.sum()
@@ -268,7 +269,7 @@ class TestAttentionGradientFlow:
         for param in mha.parameters():
             param.requires_grad = True
 
-        x = Tensor(np.random.randn(1, 4, 16), requires_grad=True)
+        x = Tensor(rng.standard_normal((1, 4, 16)), requires_grad=True)
 
         output = mha.forward(x)
         loss = output.sum()

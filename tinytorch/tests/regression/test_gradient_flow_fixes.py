@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.autograd import enable_autograd
 
@@ -41,8 +42,8 @@ def test_regression_batched_matmul():
     print("Testing regression: batched 3D matmul...")
 
     # This pattern appears in attention: Q @ K.T
-    Q = Tensor(np.random.randn(2, 4, 8), requires_grad=True)
-    K = Tensor(np.random.randn(2, 4, 8), requires_grad=True)
+    Q = Tensor(rng.standard_normal((2, 4, 8)), requires_grad=True)
+    K = Tensor(rng.standard_normal((2, 4, 8)), requires_grad=True)
     K_T = K.transpose()
 
     scores = Q.matmul(K_T)
@@ -65,7 +66,7 @@ def test_regression_transpose_requires_grad():
     """
     print("Testing regression: transpose requires_grad...")
 
-    x = Tensor(np.random.randn(2, 3, 4), requires_grad=True)
+    x = Tensor(rng.standard_normal((2, 3, 4)), requires_grad=True)
     x_T = x.transpose()
 
     # Bug: x_T.requires_grad would be False
@@ -200,7 +201,7 @@ def test_regression_dropout_uses_tensor_ops():
     x = Tensor([[1.0, 2.0, 3.0, 4.0]], requires_grad=True)
 
     # Set seed for reproducibility
-    np.random.seed(42)
+    rng = np.random.default_rng(7)
     output = dropout.forward(x, training=True)
 
     # Bug: output wouldn't have _grad_fn
@@ -220,7 +221,7 @@ def test_regression_transpose_has_backward():
     """
     print("Testing regression: transpose backward...")
 
-    K = Tensor(np.random.randn(2, 4, 8, 64), requires_grad=True)
+    K = Tensor(rng.standard_normal((2, 4, 8, 64)), requires_grad=True)
     K_T = K.transpose()
 
     # Bug: K_T._grad_fn would be None
@@ -229,7 +230,7 @@ def test_regression_transpose_has_backward():
     assert K_T._grad_fn is not None, "Transpose _grad_fn should not be None"
 
     # Verify backward pass (attention pattern: Q @ K.T)
-    Q = Tensor(np.random.randn(2, 4, 8, 64), requires_grad=True)
+    Q = Tensor(rng.standard_normal((2, 4, 8, 64)), requires_grad=True)
     scores = Q.matmul(K_T)
     scores.backward(np.ones_like(scores.data))
 
@@ -250,8 +251,8 @@ def test_regression_matmul_backward_uses_matmul():
     print("Testing regression: MatmulBackward batched operations...")
 
     # Batched 3D matmul
-    a = Tensor(np.random.randn(2, 4, 8), requires_grad=True)
-    b = Tensor(np.random.randn(2, 8, 4), requires_grad=True)
+    a = Tensor(rng.standard_normal((2, 4, 8)), requires_grad=True)
+    b = Tensor(rng.standard_normal((2, 8, 4)), requires_grad=True)
     c = a.matmul(b)
 
     # Backward pass

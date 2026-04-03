@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+rng = np.random.default_rng(7)
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -55,12 +56,12 @@ class TestFoundationStackStillWorks:
             loss_fn = MSELoss()
 
             # Forward pass
-            x = Tensor(np.random.randn(4, 10))
+            x = Tensor(rng.standard_normal((4, 10)))
             h = dense(x)
             output = relu(h)
 
             # Loss computation
-            target = Tensor(np.random.randn(4, 5))
+            target = Tensor(rng.standard_normal((4, 5)))
             loss = loss_fn(output, target)
 
             assert output.shape == (4, 5), f"Expected (4, 5), got {output.shape}"
@@ -86,12 +87,12 @@ class TestFoundationStackStillWorks:
 
             # Forward pass - try with requires_grad if supported
             try:
-                x = Tensor(np.random.randn(2, 4), requires_grad=True)
+                x = Tensor(rng.standard_normal((2, 4)), requires_grad=True)
             except TypeError:
-                x = Tensor(np.random.randn(2, 4))
+                x = Tensor(rng.standard_normal((2, 4)))
 
             output = layer(x)
-            target = Tensor(np.random.randn(2, 2))
+            target = Tensor(rng.standard_normal((2, 2)))
             loss = loss_fn(output, target)
 
             # Backward pass (if supported)
@@ -138,7 +139,7 @@ class TestModule07OptimizersCore:
             from tinytorch.core.tensor import Tensor
 
             # Create test parameters
-            params = [Tensor(np.random.randn(3, 3), requires_grad=True)]
+            params = [Tensor(rng.standard_normal((3, 3)), requires_grad=True)]
 
             # Create optimizer
             optimizer = SGD(params, lr=0.1)
@@ -216,7 +217,7 @@ class TestModule07OptimizersCore:
             from tinytorch.core.tensor import Tensor
 
             # Create test parameters
-            params = [Tensor(np.random.randn(3, 3), requires_grad=True)]
+            params = [Tensor(rng.standard_normal((3, 3)), requires_grad=True)]
 
             # Create Adam optimizer
             optimizer = Adam(params, lr=0.001)
@@ -254,7 +255,7 @@ class TestModule07OptimizersCore:
             from tinytorch.core.tensor import Tensor
 
             # Create parameter with gradient
-            param = Tensor(np.random.randn(2, 2), requires_grad=True)
+            param = Tensor(rng.standard_normal((2, 2)), requires_grad=True)
 
             optimizer = SGD([param], lr=0.1)
             param.grad = Tensor(np.ones((2, 2)))
@@ -308,8 +309,8 @@ class TestOptimizerIntegration:
             optimizer = SGD(layer.parameters(), lr=0.01)
 
             # Training data
-            x = Tensor(np.random.randn(8, 4))
-            target = Tensor(np.random.randn(8, 2))
+            x = Tensor(rng.standard_normal((8, 4)))
+            target = Tensor(rng.standard_normal((8, 2)))
 
             # Get initial loss
             initial_output = layer(x)
@@ -361,8 +362,8 @@ class TestOptimizerIntegration:
             optimizer = SGD(layer.parameters(), lr=0.1)
 
             # Fixed training data
-            np.random.seed(42)
-            x = Tensor(np.random.randn(8, 4))
+            rng = np.random.default_rng(7)
+            x = Tensor(rng.standard_normal((8, 4)))
             target = Tensor(np.zeros((8, 2)))  # Simple target: all zeros
 
             # Record losses over multiple steps
@@ -439,10 +440,10 @@ class TestRegressionPrevention:
             sigmoid = Sigmoid()
             loss_fn = MSELoss()
 
-            x = Tensor(np.random.randn(4, 4))
+            x = Tensor(rng.standard_normal((4, 4)))
             h = relu(layer1(x))
             output = sigmoid(layer2(h))
-            target = Tensor(np.random.randn(4, 2))
+            target = Tensor(rng.standard_normal((4, 2)))
             loss = loss_fn(output, target)
 
             assert loss.data is not None, "Complete pipeline broken"

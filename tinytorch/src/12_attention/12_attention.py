@@ -63,6 +63,7 @@ from tinytorch.core.attention import scaled_dot_product_attention, MultiHeadAtte
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 import math
 import time
 from typing import Optional, Tuple, List
@@ -312,8 +313,8 @@ def _compute_attention_scores(Q: Tensor, K: Tensor) -> Tensor:
     2. Matrix multiply: Q @ K^T gives (batch, seq, seq) scores
 
     EXAMPLE:
-    >>> Q = Tensor(np.random.randn(1, 3, 4))  # 3 tokens, dim=4
-    >>> K = Tensor(np.random.randn(1, 3, 4))
+    >>> Q = Tensor(rng.standard_normal((1, 3, 4)))  # 3 tokens, dim=4
+    >>> K = Tensor(rng.standard_normal((1, 3, 4)))
     >>> scores = _compute_attention_scores(Q, K)
     >>> print(scores.shape)  # (1, 3, 3) -- every token scored against every other
 
@@ -535,9 +536,9 @@ def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Optional
         attention_weights: Attention matrix (batch_size, seq_len, seq_len)
 
     EXAMPLE:
-    >>> Q = Tensor(np.random.randn(2, 4, 64))
-    >>> K = Tensor(np.random.randn(2, 4, 64))
-    >>> V = Tensor(np.random.randn(2, 4, 64))
+    >>> Q = Tensor(rng.standard_normal((2, 4, 64)))
+    >>> K = Tensor(rng.standard_normal((2, 4, 64)))
+    >>> V = Tensor(rng.standard_normal((2, 4, 64)))
     >>> output, weights = scaled_dot_product_attention(Q, K, V)
     >>> print(output.shape)   # (2, 4, 64)
     >>> print(weights.shape)  # (2, 4, 4)
@@ -573,9 +574,9 @@ def test_unit_scaled_dot_product_attention():
 
     # Test basic functionality
     batch_size, seq_len, d_model = 2, 4, 8
-    Q = Tensor(np.random.randn(batch_size, seq_len, d_model))
-    K = Tensor(np.random.randn(batch_size, seq_len, d_model))
-    V = Tensor(np.random.randn(batch_size, seq_len, d_model))
+    Q = Tensor(rng.standard_normal((batch_size, seq_len, d_model)))
+    K = Tensor(rng.standard_normal((batch_size, seq_len, d_model)))
+    V = Tensor(rng.standard_normal((batch_size, seq_len, d_model)))
 
     output, weights = scaled_dot_product_attention(Q, K, V)
 
@@ -756,7 +757,7 @@ class MultiHeadAttention:
 
         EXAMPLE:
         >>> mha = MultiHeadAttention(embed_dim=64, num_heads=8)
-        >>> x = Tensor(np.random.randn(2, 10, 64))  # batch=2, seq=10
+        >>> x = Tensor(rng.standard_normal((2, 10, 64)))  # batch=2, seq=10
         >>> split = mha._split_heads(x, 2, 10)
         >>> print(split.shape)  # (2, 8, 10, 8) -- 8 heads of dim 8
 
@@ -778,7 +779,7 @@ class MultiHeadAttention:
 
         EXAMPLE:
         >>> # After attention with 8 heads of dim 8:
-        >>> attended = Tensor(np.random.randn(2, 8, 10, 8))
+        >>> attended = Tensor(rng.standard_normal((2, 8, 10, 8)))
         >>> merged = mha._merge_heads(attended, 2, 10)
         >>> print(merged.shape)  # (2, 10, 64) -- back to embed_dim
 
@@ -816,7 +817,7 @@ class MultiHeadAttention:
 
         EXAMPLE:
         >>> mha = MultiHeadAttention(embed_dim=64, num_heads=8)
-        >>> x = Tensor(np.random.randn(2, 10, 64))  # batch=2, seq=10, dim=64
+        >>> x = Tensor(rng.standard_normal((2, 10, 64)))  # batch=2, seq=10, dim=64
         >>> output = mha.forward(x)
         >>> print(output.shape)  # (2, 10, 64) - same as input
 
@@ -930,7 +931,7 @@ def test_unit_split_heads():
     """🧪 Test head splitting reshape."""
     print("🧪 Unit Test: Split Heads...")
     mha = MultiHeadAttention(embed_dim=64, num_heads=8)
-    x = Tensor(np.random.randn(2, 10, 64))
+    x = Tensor(rng.standard_normal((2, 10, 64)))
     split = mha._split_heads(x, 2, 10)
     assert split.shape == (2, 8, 10, 8), f"Expected (2,8,10,8), got {split.shape}"
     print("✅ Split heads: correct 4D shape!")
@@ -971,12 +972,12 @@ def test_unit_merge_heads():
     print("🧪 Unit Test: Merge Heads...")
     mha = MultiHeadAttention(embed_dim=64, num_heads=8)
     # Create 4D tensor as if from split_heads
-    x_4d = Tensor(np.random.randn(2, 8, 10, 8))
+    x_4d = Tensor(rng.standard_normal((2, 8, 10, 8)))
     merged = mha._merge_heads(x_4d, 2, 10)
     assert merged.shape == (2, 10, 64), f"Expected (2,10,64), got {merged.shape}"
 
     # Verify round-trip: split then merge recovers original data
-    original = Tensor(np.random.randn(2, 10, 64))
+    original = Tensor(rng.standard_normal((2, 10, 64)))
     split = mha._split_heads(original, 2, 10)
     recovered = mha._merge_heads(split, 2, 10)
     assert np.allclose(original.data, recovered.data), "Split->merge should recover original data"
@@ -1014,7 +1015,7 @@ def test_unit_multihead_attention():
 
     # Test forward pass
     batch_size, seq_len = 2, 6
-    x = Tensor(np.random.randn(batch_size, seq_len, embed_dim))
+    x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
 
     output = mha.forward(x)
 
@@ -1028,7 +1029,7 @@ def test_unit_multihead_attention():
 
     # Test different head configurations
     mha_small = MultiHeadAttention(embed_dim=32, num_heads=4)
-    x_small = Tensor(np.random.randn(1, 5, 32))
+    x_small = Tensor(rng.standard_normal((1, 5, 32)))
     output_small = mha_small.forward(x_small)
     assert output_small.shape == (1, 5, 32)
 
@@ -1121,7 +1122,7 @@ def analyze_attention_timing():
     prev_time = None
     for seq_len in sequence_lengths:
         # Create test input
-        x = Tensor(np.random.randn(1, seq_len, embed_dim))
+        x = Tensor(rng.standard_normal((1, seq_len, embed_dim)))
         mha = MultiHeadAttention(embed_dim, num_heads)
 
         # Time multiple runs for stability
@@ -1265,7 +1266,7 @@ def test_unit_attention_scenarios():
     embed_dim, num_heads, seq_len = 128, 8, 32
 
     # Create embeddings (simulating token embeddings + positional)
-    embeddings = Tensor(np.random.randn(2, seq_len, embed_dim))
+    embeddings = Tensor(rng.standard_normal((2, seq_len, embed_dim)))
 
     # Multi-head attention
     mha = MultiHeadAttention(embed_dim, num_heads)
@@ -1292,7 +1293,7 @@ def test_unit_attention_scenarios():
     print("\n3. Attention Pattern Analysis:")
 
     # Create simple test sequence
-    simple_embed = Tensor(np.random.randn(1, 4, 16))
+    simple_embed = Tensor(rng.standard_normal((1, 4, 16)))
     simple_mha = MultiHeadAttention(16, 4)
 
     # Get attention weights by calling the base function
@@ -1498,9 +1499,9 @@ def demo_attention():
     print("=" * 45)
 
     # Create Q, K, V for 4 tokens with 8-dim embeddings
-    Q = Tensor(np.random.randn(1, 4, 8))
-    K = Tensor(np.random.randn(1, 4, 8))
-    V = Tensor(np.random.randn(1, 4, 8))
+    Q = Tensor(rng.standard_normal((1, 4, 8)))
+    K = Tensor(rng.standard_normal((1, 4, 8)))
+    V = Tensor(rng.standard_normal((1, 4, 8)))
 
     # Compute attention
     output, weights = scaled_dot_product_attention(Q, K, V)

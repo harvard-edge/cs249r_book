@@ -7,6 +7,7 @@ This is where text processing begins for NLP pipelines.
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -34,7 +35,7 @@ class TestPriorStackStillWorking:
             optimizer = SGD(layer.parameters(), lr=0.01)
 
             # Basic functionality should work
-            x = Tensor(np.random.randn(3, 5))
+            x = Tensor(rng.standard_normal((3, 5)))
             output = layer(x)
             assert output.shape == (3, 2), "ML pipeline broken"
 
@@ -77,8 +78,8 @@ class TestModule08TrainingCore:
             # Create simple dataset
             class SimpleDataset(Dataset):
                 def __init__(self):
-                    self.data = np.random.randn(20, 10)
-                    self.targets = np.random.randint(0, 3, 20)
+                    self.data = rng.standard_normal((20, 10))
+                    self.targets = rng.integers(0, 3, 20)
 
                 def __len__(self):
                     return 20
@@ -119,7 +120,7 @@ class TestModule08TrainingCore:
             # Test CrossEntropy loss (if implemented)
             if 'CrossEntropyLoss' in locals():
                 ce = CrossEntropyLoss()
-                logits = Tensor(np.random.randn(4, 3))  # 4 samples, 3 classes
+                logits = Tensor(rng.standard_normal((4, 3)))  # 4 samples, 3 classes
                 targets = Tensor(np.array([0, 1, 2, 1]))  # Class indices as Tensor
 
                 try:
@@ -193,8 +194,8 @@ class TestProgressiveStackIntegration:
             # Create dataset
             class TrainingDataset(Dataset):
                 def __init__(self):
-                    self.data = np.random.randn(50, 10)
-                    self.targets = np.random.randint(0, 3, 50)
+                    self.data = rng.standard_normal((50, 10))
+                    self.targets = rng.integers(0, 3, 50)
 
                 def __len__(self):
                     return 50
@@ -268,8 +269,8 @@ class TestProgressiveStackIntegration:
             # Image dataset
             class ImageDataset(Dataset):
                 def __init__(self):
-                    self.data = np.random.randn(20, 3, 32, 32)
-                    self.targets = np.random.randint(0, 5, 20)
+                    self.data = rng.standard_normal((20, 3, 32, 32))
+                    self.targets = rng.integers(0, 5, 20)
 
                 def __len__(self):
                     return 20
@@ -317,8 +318,8 @@ class TestAdvancedTrainingFeatures:
             # Train and validation datasets
             class Dataset(Dataset):
                 def __init__(self, size):
-                    self.data = np.random.randn(size, 5)
-                    self.targets = np.random.randint(0, 2, size)
+                    self.data = rng.standard_normal((size, 5))
+                    self.targets = rng.integers(0, 2, size)
 
                 def __len__(self):
                     return len(self.data)
@@ -503,7 +504,7 @@ class TestRegressionPrevention:
             layer = Linear(3, 2)
             optimizer = SGD(layer.parameters(), lr=0.01)
 
-            x = Tensor(np.random.randn(1, 3))
+            x = Tensor(rng.standard_normal((1, 3)))
             output = layer(x)
             assert output.shape == (1, 2), "Pipeline regression: Forward pass broken"
 
@@ -567,7 +568,7 @@ class TestRegressionPrevention:
             model = Linear(5, 2)
             optimizer = SGD(model.parameters(), lr=0.01)
 
-            x = Tensor(np.random.randn(3, 5))
+            x = Tensor(rng.standard_normal((3, 5)))
             output = model(x)
             assert output.shape == (3, 2), "ML pipeline level broken"
 

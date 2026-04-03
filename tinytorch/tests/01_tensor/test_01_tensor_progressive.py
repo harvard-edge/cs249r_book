@@ -7,6 +7,7 @@ This ensures students can trace back exactly where issues originate.
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -99,7 +100,7 @@ class TestProgressiveStack:
             from tinytorch.core.tensor import Tensor
 
             # Create tensors using Module 01
-            data = np.random.randn(5, 10)
+            data = rng.standard_normal((5, 10))
             t = Tensor(data)  # Uses tensor from Module 01
 
             # Basic functionality should work

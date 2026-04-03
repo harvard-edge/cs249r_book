@@ -60,6 +60,7 @@ from tinytorch.core.optimizers import SGD, Adam, AdamW
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 from typing import List, Union, Optional, Dict, Any
 
 # Import Tensor from Module 01 (now with gradient support from Module 06)
@@ -1617,20 +1618,20 @@ def analyze_optimizer_memory_usage():
 
     for size in param_sizes:
         # Create parameter
-        param = Tensor(np.random.randn(size), requires_grad=True)
+        param = Tensor(rng.standard_normal(size), requires_grad=True)
 
         # SGD memory (parameter + momentum buffer)
         sgd = SGD([param], momentum=0.9)
         # Set gradient AFTER creating optimizer
-        param.grad = Tensor(np.random.randn(size))
+        param.grad = Tensor(rng.standard_normal(size))
         sgd.step()  # Initialize buffers
         sgd_memory = size * 2  # param + momentum buffer
 
         # Adam memory (parameter + 2 moment buffers)
-        param_adam = Tensor(np.random.randn(size), requires_grad=True)
+        param_adam = Tensor(rng.standard_normal(size), requires_grad=True)
         adam = Adam([param_adam])
         # Set gradient AFTER creating optimizer
-        param_adam.grad = Tensor(np.random.randn(size))
+        param_adam.grad = Tensor(rng.standard_normal(size))
         adam.step()  # Initialize buffers
         adam_memory = size * 3  # param + m_buffer + v_buffer
 
@@ -1757,11 +1758,11 @@ def test_module():
 
     # Create parameters for a 2-layer network
     # Layer 1: 3 inputs -> 4 hidden
-    W1 = Tensor(np.random.randn(3, 4) * 0.1, requires_grad=True)
+    W1 = Tensor(rng.standard_normal((3, 4)) * 0.1, requires_grad=True)
     b1 = Tensor(np.zeros(4), requires_grad=True)
 
     # Layer 2: 4 hidden -> 2 outputs
-    W2 = Tensor(np.random.randn(4, 2) * 0.1, requires_grad=True)
+    W2 = Tensor(rng.standard_normal((4, 2)) * 0.1, requires_grad=True)
     b2 = Tensor(np.zeros(2), requires_grad=True)
 
     params = [W1, b1, W2, b2]
@@ -1775,10 +1776,10 @@ def test_module():
     ]
 
     # Add realistic gradients AFTER creating optimizers
-    W1.grad = Tensor(np.random.randn(3, 4) * 0.01)
-    b1.grad = Tensor(np.random.randn(4) * 0.01)
-    W2.grad = Tensor(np.random.randn(4, 2) * 0.01)
-    b2.grad = Tensor(np.random.randn(2) * 0.01)
+    W1.grad = Tensor(rng.standard_normal((3, 4)) * 0.01)
+    b1.grad = Tensor(rng.standard_normal(4) * 0.01)
+    W2.grad = Tensor(rng.standard_normal((4, 2)) * 0.01)
+    b2.grad = Tensor(rng.standard_normal(2) * 0.01)
 
     # Save original parameter values
     original_params = [p.data.copy() for p in params]
@@ -1792,13 +1793,13 @@ def test_module():
         p.data = original_params[i].copy()
         # Re-add gradients since they may have been modified
         if i == 0:
-            p.grad = Tensor(np.random.randn(3, 4) * 0.01)
+            p.grad = Tensor(rng.standard_normal((3, 4)) * 0.01)
         elif i == 1:
-            p.grad = Tensor(np.random.randn(4) * 0.01)
+            p.grad = Tensor(rng.standard_normal(4) * 0.01)
         elif i == 2:
-            p.grad = Tensor(np.random.randn(4, 2) * 0.01)
+            p.grad = Tensor(rng.standard_normal((4, 2)) * 0.01)
         else:
-            p.grad = Tensor(np.random.randn(2) * 0.01)
+            p.grad = Tensor(rng.standard_normal(2) * 0.01)
 
     # Update parameter references for Adam
     optimizers[1].params = params
@@ -1810,13 +1811,13 @@ def test_module():
         p.data = original_params[i].copy()
         # Re-add gradients
         if i == 0:
-            p.grad = Tensor(np.random.randn(3, 4) * 0.01)
+            p.grad = Tensor(rng.standard_normal((3, 4)) * 0.01)
         elif i == 1:
-            p.grad = Tensor(np.random.randn(4) * 0.01)
+            p.grad = Tensor(rng.standard_normal(4) * 0.01)
         elif i == 2:
-            p.grad = Tensor(np.random.randn(4, 2) * 0.01)
+            p.grad = Tensor(rng.standard_normal((4, 2)) * 0.01)
         else:
-            p.grad = Tensor(np.random.randn(2) * 0.01)
+            p.grad = Tensor(rng.standard_normal(2) * 0.01)
 
     # Update parameter references for AdamW
     optimizers[2].params = params

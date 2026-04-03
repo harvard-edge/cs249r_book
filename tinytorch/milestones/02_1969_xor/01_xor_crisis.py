@@ -75,6 +75,7 @@ The secret? Multi-layer networks can learn NON-LINEAR decision boundaries.
 import sys
 import os
 import numpy as np
+rng = np.random.default_rng(7)
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -297,9 +298,9 @@ def demonstrate_crisis():
 
     random_best = 0
     for _ in range(100):
-        w1 = np.random.randn() * 5
-        w2 = np.random.randn() * 5
-        b = np.random.randn() * 3
+        w1 = rng.standard_normal() * 5
+        w2 = rng.standard_normal() * 5
+        b = rng.standard_normal() * 3
         model.set_weights(w1, w2, b)
         accuracy, _ = evaluate_on_xor(model)
         if accuracy > random_best:

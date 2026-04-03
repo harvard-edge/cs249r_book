@@ -20,6 +20,7 @@ DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 0
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -69,8 +70,8 @@ class TestDataLoaderCore:
             from tinytorch.core.dataloader import TensorDataset
             
             # Create test data
-            data = Tensor(np.random.randn(100, 10))
-            targets = Tensor(np.random.randint(0, 5, 100).astype(float))
+            data = Tensor(rng.standard_normal((100, 10)))
+            targets = Tensor(rng.integers(0, 5, 100).astype(float))
             
             # Create TensorDataset
             dataset = TensorDataset(data, targets)
@@ -94,7 +95,7 @@ class TestDataLoaderCore:
             from tinytorch.core.dataloader import TensorDataset, DataLoader
             
             # Create test data
-            data = Tensor(np.random.randn(20, 5))
+            data = Tensor(rng.standard_normal((20, 5)))
             targets = Tensor(np.arange(20).astype(float))
             
             dataset = TensorDataset(data, targets)
@@ -164,8 +165,8 @@ class TestDataLoaderWithLayers:
             from tinytorch.core.dataloader import TensorDataset, DataLoader
             
             # Create test data
-            data = Tensor(np.random.randn(20, 10))
-            targets = Tensor(np.random.randn(20, 3))
+            data = Tensor(rng.standard_normal((20, 10)))
+            targets = Tensor(rng.standard_normal((20, 3)))
             
             dataset = TensorDataset(data, targets)
             dataloader = DataLoader(dataset, batch_size=4)
@@ -194,8 +195,8 @@ class TestDataLoaderWithLayers:
             from tinytorch.core.dataloader import TensorDataset, DataLoader
             
             # Create test data
-            data = Tensor(np.random.randn(20, 10))
-            targets = Tensor(np.random.randn(20, 5))
+            data = Tensor(rng.standard_normal((20, 10)))
+            targets = Tensor(rng.standard_normal((20, 5)))
             
             dataset = TensorDataset(data, targets)
             dataloader = DataLoader(dataset, batch_size=4)
@@ -235,8 +236,8 @@ class TestDataLoaderWithLayers:
             from tinytorch.core.dataloader import TensorDataset, DataLoader
             
             # Create test data
-            data = Tensor(np.random.randn(20, 10))
-            targets = Tensor(np.random.randn(20, 3))
+            data = Tensor(rng.standard_normal((20, 10)))
+            targets = Tensor(rng.standard_normal((20, 3)))
             
             dataset = TensorDataset(data, targets)
             dataloader = DataLoader(dataset, batch_size=4)
@@ -339,7 +340,7 @@ class TestRegressionPrevention:
             from tinytorch.core.layers import Linear
             
             layer = Linear(10, 5)
-            x = Tensor(np.random.randn(4, 10))
+            x = Tensor(rng.standard_normal((4, 10)))
             
             output = layer(x)
             assert output.shape == (4, 5), f"Linear layer broken: {output.shape}"
@@ -406,8 +407,8 @@ class TestModule05Completion:
             capabilities["Dataset abstraction"] = True
             
             # Test 2: TensorDataset
-            data = Tensor(np.random.randn(20, 5))
-            targets = Tensor(np.random.randn(20, 2))
+            data = Tensor(rng.standard_normal((20, 5)))
+            targets = Tensor(rng.standard_normal((20, 2)))
             dataset = TensorDataset(data, targets)
             assert len(dataset) == 20
             capabilities["TensorDataset works"] = True

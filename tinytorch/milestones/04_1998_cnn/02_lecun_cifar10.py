@@ -80,6 +80,7 @@ CIFAR-10 contains 60,000 32×32 color images in 10 classes:
 import sys
 import os
 import numpy as np
+rng = np.random.default_rng(7)
 import argparse
 import time
 
@@ -676,7 +677,7 @@ def main():
         print("\n🧪 ARCHITECTURE TEST MODE")
         # Create minimal test data for fast architecture validation
         print("   Using minimal dataset for optimization testing framework...")
-        test_data_mini = np.random.randn(2, 3, 32, 32).astype(np.float32)  # Just 2 samples
+        test_data_mini = rng.standard_normal((2, 3, 32, 32)).astype(np.float32)  # Just 2 samples
         test_labels_mini = np.array([0, 1], dtype=np.int64)  # 2 labels
 
         # Create minimal dataset and dataloader

@@ -17,6 +17,7 @@ Modules tested: 01-08 (Tensor → Training)
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -189,7 +190,7 @@ class TestGradientChainNotBroken:
         """Gradients must flow through 5 layers"""
         # Use fixed seed for reproducibility - prevents flaky test due to
         # random initialization that might kill all ReLUs
-        np.random.seed(42)
+        rng = np.random.default_rng(7)
 
         layers = [Linear(4, 4) for _ in range(5)]
 
@@ -201,8 +202,8 @@ class TestGradientChainNotBroken:
 
         relu = ReLU()
 
-        x = Tensor(np.random.randn(1, 4), requires_grad=True)
-        target = Tensor(np.random.randn(1, 4))
+        x = Tensor(rng.standard_normal((1, 4)), requires_grad=True)
+        target = Tensor(rng.standard_normal((1, 4)))
 
         # Forward through all layers
         h = x

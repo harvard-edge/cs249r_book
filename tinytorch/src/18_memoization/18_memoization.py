@@ -61,6 +61,7 @@ from tinytorch.perf.memoization import KVCache, enable_kv_cache
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 import time
 from typing import Tuple, Optional, Dict, List
 
@@ -140,9 +141,9 @@ def profile_naive_generation():
         Without caching, this processes ALL previous tokens every time.
         """
         # Q, K, V for entire sequence
-        q = Tensor(np.random.randn(1, seq_len, hidden_dim))
-        k = Tensor(np.random.randn(1, seq_len, hidden_dim))
-        v = Tensor(np.random.randn(1, seq_len, hidden_dim))
+        q = Tensor(rng.standard_normal((1, seq_len, hidden_dim)))
+        k = Tensor(rng.standard_normal((1, seq_len, hidden_dim)))
+        v = Tensor(rng.standard_normal((1, seq_len, hidden_dim)))
 
         # Attention: Q @ K.T then @ V
         # This is O(seq_len²) in complexity
@@ -516,8 +517,8 @@ class KVCache:
         EXAMPLE:
         >>> cache = KVCache(batch_size=1, max_seq_len=10, num_layers=2,
         ...                 num_heads=4, head_dim=64)
-        >>> new_k = Tensor(np.random.randn(1, 4, 1, 64))
-        >>> new_v = Tensor(np.random.randn(1, 4, 1, 64))
+        >>> new_k = Tensor(rng.standard_normal((1, 4, 1, 64)))
+        >>> new_v = Tensor(rng.standard_normal((1, 4, 1, 64)))
         >>> cache.update(layer_idx=0, key=new_k, value=new_v)
         >>> cache.seq_pos  # Still 0 (update doesn't advance position)
         >>> cache.advance()
@@ -709,8 +710,8 @@ def test_unit_kvcache():
     print(f"   Cache initialized: {mem_usage['total_mb']:.2f} MB")
 
     # Test 2: Single token update and retrieval
-    key1 = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
-    value1 = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
+    key1 = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
+    value1 = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
 
     # Update layer 0 with first token
     cache.update(0, key1, value1)
@@ -728,8 +729,8 @@ def test_unit_kvcache():
     assert cached_v.shape == (batch_size, num_heads, 1, head_dim), f"Expected shape (2,4,1,16), got {cached_v.shape}"
 
     # Test 3: Multi-token sequence
-    key2 = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
-    value2 = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
+    key2 = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
+    value2 = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
     cache.update(0, key2, value2)
     cache.advance()
 
@@ -739,8 +740,8 @@ def test_unit_kvcache():
 
     # Test 4: Multiple layers
     cache.reset()
-    key_test = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
-    value_test = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
+    key_test = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
+    value_test = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
 
     # Update all layers with same token
     cache.update(0, key_test, value_test)  # Layer 0
@@ -1236,7 +1237,7 @@ def test_unit_cached_attention_forward():
 
     # Test PATH 1: Training (seq_len > 1)
     path_taken.clear()
-    x_train = Tensor(np.random.randn(1, 10, 128))  # seq_len=10
+    x_train = Tensor(rng.standard_normal((1, 10, 128)))  # seq_len=10
     result = _cached_attention_forward(block, x_train, cache, 0, mock_original_forward)
     assert "original" in path_taken, "Training path should use original forward"
     assert result.shape == x_train.shape, "Should return same shape"
@@ -1245,7 +1246,7 @@ def test_unit_cached_attention_forward():
     path_taken.clear()
     cache.reset()
     assert cache.seq_pos == 0
-    x_first = Tensor(np.random.randn(1, 1, 128))  # seq_len=1, but cache empty
+    x_first = Tensor(rng.standard_normal((1, 1, 128)))  # seq_len=1, but cache empty
     result = _cached_attention_forward(block, x_first, cache, 0, mock_original_forward)
     assert "original" in path_taken, "First token should use original forward"
 
@@ -1324,7 +1325,7 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
       so the patched attention populates the cache through PATH 3
     - Generation: model.forward(single_token_tensor) processes one token
     - Use temperature scaling: logits / temperature before softmax
-    - Use np.random.choice with softmax probabilities to sample
+    - Use rng.choice with softmax probabilities to sample
     - Advance cache.advance() after each token (both prefill and generation)
     - Stable softmax: subtract max before exp to avoid overflow
 
@@ -1365,7 +1366,7 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
         probs = exp_logits / np.sum(exp_logits)
 
         # Sample next token
-        next_token = int(np.random.choice(len(probs), p=probs))
+        next_token = int(rng.choice(len(probs), p=probs))
         generated.append(next_token)
 
         # Feed single token through model (cache handles history)
@@ -1407,7 +1408,7 @@ def test_unit_cached_generate():
             # Return random logits shaped (batch, seq_len, vocab_size)
             batch_size = x.shape[0]
             seq_len = x.shape[1]
-            return Tensor(np.random.randn(batch_size, seq_len, vocab_size))
+            return Tensor(rng.standard_normal((batch_size, seq_len, vocab_size)))
 
     model = MockModel()
 
@@ -1627,7 +1628,7 @@ def test_unit_noninvasive_integration():
 
     # Test 2: Attention forward still works
     print("   Test 2: Attention forward pass still works")
-    test_input = Tensor(np.random.randn(1, 10, 128))
+    test_input = Tensor(rng.standard_normal((1, 10, 128)))
     for block in model.blocks:
         output = block.attention.forward(test_input)
         assert output.shape == test_input.shape, "Forward pass should preserve shape"
@@ -1843,8 +1844,8 @@ def test_module():
     for _ in range(5):
         for layer_idx in range(num_layers):
             # Simulate new key-value pairs
-            new_key = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
-            new_value = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
+            new_key = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
+            new_value = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
 
             # Update cache
             cache.update(layer_idx, new_key, new_value)
@@ -1984,8 +1985,8 @@ def demo_memoization():
     print("Generating tokens and caching K,V pairs...")
     for token_idx in range(5):
         # For each new token, compute K,V (shape: batch, heads, 1, head_dim)
-        new_k = Tensor(np.random.randn(1, 4, 1, 64))
-        new_v = Tensor(np.random.randn(1, 4, 1, 64))
+        new_k = Tensor(rng.standard_normal((1, 4, 1, 64)))
+        new_v = Tensor(rng.standard_normal((1, 4, 1, 64)))
 
         # Update cache for layer 0
         cache.update(0, new_k, new_v)

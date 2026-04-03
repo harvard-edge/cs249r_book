@@ -12,6 +12,7 @@ Tests that optimizers correctly integrate with:
 import sys
 import os
 import numpy as np
+rng = np.random.default_rng(7)
 import pytest
 
 # Import from tinytorch package
@@ -38,7 +39,7 @@ def test_sgd_with_linear_layer():
     sgd = SGD(parameters, lr=0.1)
 
     # Forward pass
-    x = Tensor(np.random.randn(1, 3), requires_grad=False)
+    x = Tensor(rng.standard_normal((1, 3)), requires_grad=False)
     y = layer(x)
 
     # Create a simple loss (sum of outputs)
@@ -84,7 +85,7 @@ def test_adam_with_multi_layer_network():
     # Training loop simulation
     for step in range(3):
         # Forward pass
-        x = Tensor(np.random.randn(2, 4), requires_grad=True)
+        x = Tensor(rng.standard_normal((2, 4)), requires_grad=True)
         h1 = relu1(layer1(x))
         h2 = relu2(layer2(h1))
         output = layer3(h2)
@@ -113,8 +114,8 @@ def test_optimizer_with_mse_loss():
     loss_fn = MSELoss()
 
     # Forward pass
-    x = Tensor(np.random.randn(4, 3), requires_grad=True)
-    target = Tensor(np.random.randn(4, 1))
+    x = Tensor(rng.standard_normal((4, 3)), requires_grad=True)
+    target = Tensor(rng.standard_normal((4, 1)))
     output = layer(x)
     loss = loss_fn(output, target)
 
@@ -139,7 +140,7 @@ def test_optimizer_with_activations():
     params = layer1.parameters() + layer2.parameters()
     optimizer = Adam(params, lr=0.001)
 
-    x = Tensor(np.random.randn(3, 5), requires_grad=True)
+    x = Tensor(rng.standard_normal((3, 5)), requires_grad=True)
     h = relu(layer1(x))
     output = sigmoid(layer2(h))
 
@@ -190,7 +191,7 @@ def test_optimizer_memory_consistency():
 
     # Do optimization steps
     for _ in range(3):
-        x = Tensor(np.random.randn(1, 3))
+        x = Tensor(rng.standard_normal((1, 3)))
         output = layer(x)
         loss = output.sum()
 
@@ -262,7 +263,7 @@ def test_unit_linear_layer():
     """Test Linear layer forward pass."""
     print("🧪 Unit Test: Linear Layer...")
     layer = Linear(3, 2)
-    x = Tensor(np.random.randn(1, 3))
+    x = Tensor(rng.standard_normal((1, 3)))
     output = layer(x)
     assert output.shape == (1, 2)
     print("✅ Linear layer works!")
@@ -279,7 +280,7 @@ def test_edge_cases_linear():
     assert output.shape == (1, 3)
 
     # Batch
-    x_batch = Tensor(np.random.randn(5, 2))
+    x_batch = Tensor(rng.standard_normal((5, 2)))
     output_batch = layer(x_batch)
     assert output_batch.shape == (5, 3)
 

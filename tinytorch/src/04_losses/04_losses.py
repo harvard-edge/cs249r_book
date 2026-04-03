@@ -97,6 +97,7 @@ If you see import errors, ensure you've run `tito export` after completing previ
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 from typing import Optional
 
 # Import from TinyTorch package (previous modules must be completed and exported)
@@ -498,8 +499,8 @@ def test_unit_mse_loss():
     assert np.allclose(loss.data, expected_loss, atol=1e-6), f"Expected {expected_loss}, got {loss.data}"
 
     # Test that loss is always non-negative
-    random_pred = Tensor(np.random.randn(10))
-    random_target = Tensor(np.random.randn(10))
+    random_pred = Tensor(rng.standard_normal(10))
+    random_target = Tensor(rng.standard_normal(10))
     random_loss = loss_fn.forward(random_pred, random_target)
     assert random_loss.data >= 0, f"MSE loss should be non-negative, got {random_loss.data}"
 

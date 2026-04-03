@@ -4,6 +4,7 @@ Tests that complete training loops work with all system components
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -32,8 +33,8 @@ class TestTrainingLoopIntegration:
             loss_fn = MSELoss()
 
             # Dummy data
-            X = Tensor(np.random.randn(10, 2))
-            y = Tensor(np.random.randn(10, 1))
+            X = Tensor(rng.standard_normal((10, 2)))
+            y = Tensor(rng.standard_normal((10, 1)))
 
             # Forward pass
             h1 = layer1(X)
@@ -68,7 +69,7 @@ class TestTrainingLoopIntegration:
 
             # Simulate gradients (normally from autograd)
             for p in params:
-                p.grad = Tensor(np.random.randn(*p.shape))
+                p.grad = Tensor(rng.standard_normal(p.shape))
 
             # Store old parameter values
             old_params = [p.data.copy() for p in params]
@@ -117,8 +118,8 @@ class TestDataLoaderIntegration:
             from tinytorch.core.dataloader import DataLoader
 
             # Create simple dataset
-            X = np.random.randn(100, 10)
-            y = np.random.randn(100, 1)
+            X = rng.standard_normal((100, 10))
+            y = rng.standard_normal((100, 1))
 
             dataset = list(zip(X, y))
             dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
@@ -152,8 +153,8 @@ class TestDataLoaderIntegration:
             loss_fn = MSELoss()
 
             # Training data
-            X = Tensor(np.random.randn(32, 5))
-            y = Tensor(np.random.randn(32, 1))
+            X = Tensor(rng.standard_normal((32, 5)))
+            y = Tensor(rng.standard_normal((32, 1)))
 
             losses = []
 

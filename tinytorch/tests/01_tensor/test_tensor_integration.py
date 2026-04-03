@@ -4,6 +4,7 @@ Tests that Tensor works as foundation for all other modules
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -39,7 +40,7 @@ class TestTensorFoundation:
         """Test tensor properties work correctly."""
         from tinytorch.core.tensor import Tensor
 
-        data = np.random.randn(3, 4, 5)
+        data = rng.standard_normal((3, 4, 5))
         t = Tensor(data)
 
         assert t.shape == (3, 4, 5)
@@ -52,8 +53,8 @@ class TestTensorFoundation:
         from tinytorch.core.tensor import Tensor
 
         # Weights and inputs
-        weights = Tensor(np.random.randn(10, 20))
-        inputs = Tensor(np.random.randn(32, 10))
+        weights = Tensor(rng.standard_normal((10, 20)))
+        inputs = Tensor(rng.standard_normal((32, 10)))
 
         # Should support matrix multiplication (key for Dense layers)
         # This tests if the tensor data can be used with numpy operations
@@ -107,9 +108,9 @@ class TestTensorIntegrationReadiness:
         from tinytorch.core.tensor import Tensor
 
         # Batch of inputs
-        x = Tensor(np.random.randn(32, 784))  # MNIST-like
-        weights = Tensor(np.random.randn(784, 128))
-        bias = Tensor(np.random.randn(128))
+        x = Tensor(rng.standard_normal((32, 784)))  # MNIST-like
+        weights = Tensor(rng.standard_normal((784, 128)))
+        bias = Tensor(rng.standard_normal(128))
 
         # Dense layer operation: x @ W + b
         output_data = x.data @ weights.data + bias.data
@@ -122,7 +123,7 @@ class TestTensorIntegrationReadiness:
         from tinytorch.core.tensor import Tensor
 
         # Image tensor (batch, height, width, channels)
-        image = Tensor(np.random.randn(8, 32, 32, 3))
+        image = Tensor(rng.standard_normal((8, 32, 32, 3)))
 
         # Should support reshaping for spatial operations
         flattened = Tensor(image.data.reshape(8, -1))

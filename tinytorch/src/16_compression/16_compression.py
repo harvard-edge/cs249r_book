@@ -61,6 +61,7 @@ from tinytorch.perf.compression import magnitude_prune, structured_prune, measur
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 import copy
 from typing import List, Dict, Any, Tuple, Optional
 import time
@@ -133,7 +134,7 @@ def show_weight_distribution_motivation():
 
     # Create a model and analyze its weights
     model = Linear(512, 512)
-    input_data = Tensor(np.random.randn(1, 512))
+    input_data = Tensor(rng.standard_normal((1, 512)))
 
     # Profile basic characteristics
     profile = profiler.profile_forward_pass(model, input_data)
@@ -871,7 +872,7 @@ def low_rank_approximate(weight_matrix, rank_ratio=0.5):
     4. Return decomposed matrices for memory savings
 
     EXAMPLE:
-    >>> weight = np.random.randn(100, 50)
+    >>> weight = rng.standard_normal((100, 50))
     >>> U, S, V = low_rank_approximate(weight, rank_ratio=0.3)
     >>> # Original: 100*50 = 5000 params
     >>> # Compressed: 100*15 + 15*50 = 2250 params (55% reduction)
@@ -916,7 +917,7 @@ def test_unit_low_rank_approximate():
     print("🧪 Unit Test: Low-Rank Approximate...")
 
     # Create test weight matrix
-    original_weight = np.random.randn(20, 15)
+    original_weight = rng.standard_normal((20, 15))
     original_params = original_weight.size
 
     # Apply low-rank approximation
@@ -1187,7 +1188,7 @@ def test_unit_knowledge_distillation():
     kd = KnowledgeDistillation(teacher, student, temperature=3.0, alpha=0.7)
 
     # Create dummy data for testing
-    input_data = Tensor(np.random.randn(8, 10))  # Batch of 8 samples
+    input_data = Tensor(rng.standard_normal((8, 10)))  # Batch of 8 samples
     true_labels = np.array([0, 1, 2, 3, 4, 0, 1, 2])  # Class labels
 
     # Forward passes - students see explicit data flow through each model
@@ -1811,7 +1812,7 @@ def test_module():
     # Test 3: Low-rank approximation
     print("🧪 Integration Test: Low-rank approximation...")
 
-    large_matrix = np.random.randn(200, 150)
+    large_matrix = rng.standard_normal((200, 150))
     U, S, V = low_rank_approximate(large_matrix, rank_ratio=0.3)
 
     original_size = large_matrix.size

@@ -15,6 +15,7 @@ DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 0
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -222,7 +223,7 @@ class TestRegressionPrevention:
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.layers import Linear
         layer = Linear(4, 2)
-        x = Tensor(np.random.randn(2, 4))
+        x = Tensor(rng.standard_normal((2, 4)))
         y = layer(x)
         assert y.shape == (2, 2)
 
@@ -240,7 +241,7 @@ class TestRegressionPrevention:
         """✅ Module 05"""
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.dataloader import TensorDataset, DataLoader
-        data = Tensor(np.random.randn(10, 3))
+        data = Tensor(rng.standard_normal((10, 3)))
         targets = Tensor(np.arange(10).astype(float))
         dataset = TensorDataset(data, targets)
         dataloader = DataLoader(dataset, batch_size=2)
@@ -265,8 +266,8 @@ class TestRegressionPrevention:
         loss_fn = MSELoss()
         opt = SGD(layer.parameters(), lr=0.1)
         
-        x = Tensor(np.random.randn(2, 4))
-        y = Tensor(np.random.randn(2, 2))
+        x = Tensor(rng.standard_normal((2, 4)))
+        y = Tensor(rng.standard_normal((2, 2)))
         
         pred = layer(x)
         loss = loss_fn(pred, y)
@@ -279,7 +280,7 @@ class TestRegressionPrevention:
             from tinytorch.core.tensor import Tensor
             
             conv = Conv2d(3, 8, kernel_size=3, padding=1)
-            x = Tensor(np.random.randn(2, 3, 8, 8))
+            x = Tensor(rng.standard_normal((2, 3, 8, 8)))
             y = conv(x)
             assert y.shape[0] == 2
         except ImportError:

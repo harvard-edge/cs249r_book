@@ -60,6 +60,7 @@ Let's get started!
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
@@ -1340,7 +1341,7 @@ def test_unit_shape_manipulation():
     assert swapped.shape == (2, 2, 2)  # Same shape but data rearranged
 
     # Test common reshape pattern (flatten multi-dimensional data)
-    batch_images = Tensor(np.random.rand(2, 3, 4))  # (batch=2, height=3, width=4)
+    batch_images = Tensor(rng.random((2, 3, 4)))  # (batch=2, height=3, width=4)
     flattened = batch_images.reshape(2, -1)  # (batch=2, features=12)
     assert flattened.shape == (2, 12)
 
@@ -1526,7 +1527,7 @@ def analyze_memory_layout():
 
     # Create a moderately-sized matrix (large enough to show cache effects)
     size = 2000
-    matrix = Tensor(np.random.rand(size, size))
+    matrix = Tensor(rng.random((size, size)))
 
     import time
 

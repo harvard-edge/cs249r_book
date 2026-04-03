@@ -21,6 +21,7 @@ WHAT WE TEST:
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -47,7 +48,7 @@ class TestBenchmarkBasics:
                 return x
 
         models = [DummyModel()]
-        datasets = [[(Tensor(np.random.randn(10, 10)), Tensor(np.zeros(10)))]]
+        datasets = [[(Tensor(rng.standard_normal((10, 10))), Tensor(np.zeros(10)))]]
 
         bench = Benchmark(models, datasets)
         assert bench is not None
@@ -68,7 +69,7 @@ class TestBenchmarkBasics:
 
         model = SimpleModel()
         models = [model]
-        datasets = [[(Tensor(np.random.randn(10, 10)), Tensor(np.zeros(10)))]]
+        datasets = [[(Tensor(rng.standard_normal((10, 10))), Tensor(np.zeros(10)))]]
 
         bench = Benchmark(models, datasets)
         results = bench.run_latency_benchmark(input_shape=(1, 10))
@@ -110,7 +111,7 @@ class TestBenchmarkMetrics:
                 return x * 2
 
         model = SimpleModel()
-        x = Tensor(np.random.randn(10))
+        x = Tensor(rng.standard_normal(10))
         datasets = [[(x, None)]]
 
         bench = Benchmark([model], datasets)
@@ -135,7 +136,7 @@ class TestBenchmarkMetrics:
                 return self.layer.forward(x)
 
         model = SimpleModel()
-        x = Tensor(np.random.randn(1, 10))
+        x = Tensor(rng.standard_normal((1, 10)))
         datasets = [[(x, None)]]
 
         bench = Benchmark([model], datasets, measurement_runs=10)

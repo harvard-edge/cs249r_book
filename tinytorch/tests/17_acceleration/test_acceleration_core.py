@@ -14,6 +14,7 @@ can provide significant speedups. These tests verify:
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -43,8 +44,8 @@ class TestAccelerationBasics:
         WHY: Optimization must not change results. Speed without
         correctness is useless.
         """
-        A = Tensor(np.random.randn(32, 64).astype(np.float32))
-        B = Tensor(np.random.randn(64, 32).astype(np.float32))
+        A = Tensor(rng.standard_normal((32, 64)).astype(np.float32))
+        B = Tensor(rng.standard_normal((64, 32)).astype(np.float32))
 
         # Vectorized matmul
         result = vectorized_matmul(A, B)
@@ -84,8 +85,8 @@ class TestAccelerationBasics:
 
         WHY: Cache-aware tiling must preserve numerical accuracy.
         """
-        A = Tensor(np.random.randn(128, 128).astype(np.float32))
-        B = Tensor(np.random.randn(128, 128).astype(np.float32))
+        A = Tensor(rng.standard_normal((128, 128)).astype(np.float32))
+        B = Tensor(rng.standard_normal((128, 128)).astype(np.float32))
 
         # Tiled matmul
         result_tiled = tiled_matmul(A, B, tile_size=32)
@@ -110,7 +111,7 @@ class TestMemoryOptimization:
         Non-contiguous tensors are slower.
         """
         # Create contiguous tensor
-        contiguous = Tensor(np.random.randn(10, 10))
+        contiguous = Tensor(rng.standard_normal((10, 10)))
         assert contiguous.data.flags['C_CONTIGUOUS'], (
             "Fresh tensor should be contiguous"
         )

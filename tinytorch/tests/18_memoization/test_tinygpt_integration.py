@@ -5,6 +5,7 @@ Tests language model components and GPT-style transformer integration.
 
 import sys
 import numpy as np
+rng = np.random.default_rng(7)
 from pathlib import Path
 
 def run_integration_test():
@@ -55,7 +56,7 @@ def run_integration_test():
         from tinytorch.core.tensor import Tensor
 
         attention = tgpt.MultiHeadAttention(d_model=64, num_heads=8)
-        test_input = Tensor(np.random.randn(1, 10, 64))
+        test_input = Tensor(rng.standard_normal((1, 10, 64)))
         output = attention.forward(test_input, test_input, test_input)
 
         if output.shape == test_input.shape:
@@ -67,7 +68,7 @@ def run_integration_test():
         # Test 5: TransformerBlock functionality
         print("5. TransformerBlock functionality...")
         transformer = tgpt.TransformerBlock(d_model=64, num_heads=8, d_ff=256)
-        test_input = Tensor(np.random.randn(1, 10, 64))
+        test_input = Tensor(rng.standard_normal((1, 10, 64)))
         output = transformer.forward(test_input)
 
         if output.shape == test_input.shape:
@@ -110,7 +111,7 @@ def run_integration_test():
             metric = tgpt.LanguageModelAccuracy()
 
             # Test loss computation
-            logits = Tensor(np.random.randn(1, 5, 50))
+            logits = Tensor(rng.standard_normal((1, 5, 50)))
             targets = Tensor(np.array([[1, 2, 3, 4, 5]]))
 
             loss = loss_fn.forward(logits, targets)

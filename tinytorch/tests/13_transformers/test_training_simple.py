@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+rng = np.random.default_rng(7)
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -87,7 +88,7 @@ def test_transformer_memorization():
 
     for step in range(500):
         # Sample random pattern
-        tokens = encoded[np.random.randint(len(encoded))]
+        tokens = encoded[rng.integers(len(encoded))]
         x = Tensor(np.array([tokens[:-1]], dtype=np.int32))
         y = Tensor(np.array([tokens[1:]], dtype=np.int32))
 
@@ -200,7 +201,7 @@ def test_transformer_convergence_rate():
     print("   Training until loss < 0.1...")
 
     while loss_val > 0.1 and step < 1000:
-        tokens = encoded[np.random.randint(len(encoded))]
+        tokens = encoded[rng.integers(len(encoded))]
         x = Tensor(np.array([tokens[:-1]], dtype=np.int32))
         y = Tensor(np.array([tokens[1:]], dtype=np.int32))
 

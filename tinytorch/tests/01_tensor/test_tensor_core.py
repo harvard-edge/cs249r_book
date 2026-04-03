@@ -21,6 +21,7 @@ WHAT STUDENTS LEARN:
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import pytest
 import sys
 from pathlib import Path
@@ -112,7 +113,7 @@ class TestTensorCreation:
         ]
 
         for shape, description in test_cases:
-            data = np.random.randn(*shape)
+            data = rng.standard_normal(shape)
             t = Tensor(data)
             assert t.shape == shape, (
                 f"Shape mismatch for {description}.\n"
@@ -307,7 +308,7 @@ class TestTensorMemory:
         STUDENT LEARNING: Memory efficiency matters at scale.
         """
         # Create a 1000×1000 tensor (1 million elements)
-        data = np.random.randn(1000, 1000)
+        data = rng.standard_normal((1000, 1000))
         t = Tensor(data)
 
         assert t.shape == (1000, 1000)
@@ -362,7 +363,7 @@ class TestTensorReshaping:
 
         STUDENT LEARNING: flatten() is shorthand for reshape(-1)
         """
-        t = Tensor(np.random.randn(2, 3, 4))  # 2×3×4 = 24 elements
+        t = Tensor(rng.standard_normal((2, 3, 4)))  # 2×3×4 = 24 elements
 
         if hasattr(t, 'flatten'):
             flat = t.flatten()

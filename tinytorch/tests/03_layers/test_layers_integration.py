@@ -4,6 +4,7 @@ Tests that Layer base class enables building neural network components
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -62,7 +63,7 @@ class TestLayerTensorIntegration:
                 return x
 
         layer = IdentityLayer()
-        x = Tensor(np.random.randn(5, 10))
+        x = Tensor(rng.standard_normal((5, 10)))
         output = layer(x)
 
         assert isinstance(output, Tensor)
@@ -177,7 +178,7 @@ class TestLayerParameterManagement:
 
         class ParameterizedLayer(Layer):
             def __init__(self, input_size, output_size):
-                self.weight = Tensor(np.random.randn(input_size, output_size))
+                self.weight = Tensor(rng.standard_normal((input_size, output_size)))
                 self.bias = Tensor(np.zeros(output_size))
 
             def forward(self, x):
@@ -185,7 +186,7 @@ class TestLayerParameterManagement:
                 return Tensor(output)
 
         layer = ParameterizedLayer(10, 5)
-        x = Tensor(np.random.randn(3, 10))
+        x = Tensor(rng.standard_normal((3, 10)))
         output = layer(x)
 
         assert output.shape == (3, 5)
@@ -203,7 +204,7 @@ class TestLayerParameterManagement:
             def __init__(self, in_features, out_features):
                 self.in_features = in_features
                 self.out_features = out_features
-                self.weight = Tensor(np.random.randn(in_features, out_features))
+                self.weight = Tensor(rng.standard_normal((in_features, out_features)))
                 self.bias = Tensor(np.zeros(out_features))
 
             def forward(self, x):
@@ -215,6 +216,6 @@ class TestLayerParameterManagement:
         assert layer.bias.shape == (64,)
 
         # Test with input
-        x = Tensor(np.random.randn(16, 128))
+        x = Tensor(rng.standard_normal((16, 128)))
         output = layer(x)
         assert output.shape == (16, 64)
