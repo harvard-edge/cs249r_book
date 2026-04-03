@@ -47,12 +47,13 @@ export default function AboutPage() {
               on the spot. And most people aren&apos;t ready.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
-              I&apos;ve been writing the Machine Learning Systems textbook to help with
-              this, but a textbook teaches you concepts. Quizzes test whether you
-              remember them. Neither tells you whether you can actually apply them
-              under pressure. That&apos;s why I built StaffML. I wanted to give students
-              and engineers a way to find out what they really know, and what they
-              still need to learn.
+              That&apos;s why I built StaffML. I wanted to give students and engineers
+              a way to find out what they really know, and what they still need to
+              learn. The questions come straight from the{' '}
+              <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">Machine Learning Systems</a>{' '}
+              textbook, but a textbook teaches you concepts one at a time, and quizzes
+              test whether you remember them. Interviews challenge you to connect
+              all of those concepts across the entire system stack. StaffML does.
             </p>
             <p className="text-[14px] text-textSecondary leading-relaxed mb-4 italic">
               It&apos;s free because interview prep is just another form of education,
