@@ -56,7 +56,7 @@ def main():
         f"\\newcommand{{\\numtopics}}{{{s['topics']}}}",
         f"\\newcommand{{\\numareas}}{{{s['areas']}}}",
         f"\\newcommand{{\\numzones}}{{{s['zones']}}}",
-        f"\\newcommand{{\\numedges}}{{{stats.get('taxonomy_graph', {}).get('edges', 57)}}}",
+        f"\\newcommand{{\\numedges}}{{{stats.get('taxonomy_graph', {}).get('total_edges', 123)}}}",
         f"\\newcommand{{\\numchains}}{{{s['chains_total']}}}",
         f"\\newcommand{{\\numfullchains}}{{{s['chains_full']}}}",
         f"\\newcommand{{\\numinvariants}}{{19}}",

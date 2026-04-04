@@ -7,9 +7,8 @@ Run: python3 generate_figures.py
   (or: make figures)
 
 Reads: corpus_stats.json (structured stats from analyze_corpus.py)
-       ../corpus.json (only for depth chain example — needs full question text)
 Writes: fig-corpus-distribution.pdf, fig-format-balance.pdf,
-        fig-depth-chain.pdf, fig-quality-summary.pdf
+        fig-zone-distribution.pdf, fig-zone-level-heatmap.pdf
 """
 
 import json
@@ -25,7 +24,6 @@ import seaborn as sns
 # ── Config ──────────────────────────────────────────────────────
 PAPER_DIR = Path(__file__).parent
 STATS_PATH = PAPER_DIR / "corpus_stats.json"
-CORPUS_PATH = PAPER_DIR.parent / "vault" / "corpus.json"
 
 TRACKS = ["cloud", "edge", "mobile", "tinyml", "global"]
 LEVELS = ["L1", "L2", "L3", "L4", "L5", "L6+"]
@@ -90,12 +88,6 @@ def load_stats():
         print("Error: corpus_stats.json not found. Run: python3 analyze_corpus.py")
         sys.exit(1)
     return json.loads(STATS_PATH.read_text())
-
-
-def load_corpus_for_chains():
-    """Load full corpus (only needed for depth chain question text)."""
-    corpus = json.loads(CORPUS_PATH.read_text())
-    return [q for q in corpus if q.get("status", "published") == "published"]
 
 
 def classify_format(scenario: str) -> list[str]:
@@ -229,136 +221,7 @@ def fig_format_balance(stats):
     plt.close(fig)
 
 
-# ── Figure 3: Depth Chain Example (KV-Cache) ────────────────────
-def fig_depth_chain(stats, pub):
-    # Use pre-computed example chain from stats
-    if "example_chain" not in stats:
-        print("  ⚠️ No example_chain in stats, skipping fig-depth-chain")
-        return
-
-    kv_chain = stats["example_chain"]
-    by_id = {q["id"]: q for q in pub}
-
-    fig, ax = plt.subplots(figsize=(5.5, 3.5))
-    ax.set_xlim(0, 10)
-    ax.set_ylim(-0.5, len(kv_chain["questions"]) - 0.5)
-    ax.invert_yaxis()
-    ax.axis("off")
-
-    level_colors = {
-        "L1": "#d4edda", "L2": "#d4edda", "L3": "#cfe2f3",
-        "L4": "#fdebd0", "L5": "#fdebd0", "L6+": "#f9d6d5",
-    }
-    level_edge = {
-        "L1": "#3d9e5a", "L2": "#3d9e5a", "L3": "#4a90c4",
-        "L4": "#c87b2a", "L5": "#c87b2a", "L6+": "#c44",
-    }
-
-    for i, cq in enumerate(kv_chain["questions"]):
-        level = cq["level"]
-        title = cq["title"]
-        bloom = cq.get("bloom", BLOOM_LABELS.get(level, ""))
-        scenario = cq.get("scenario_preview", "")[:80]
-        if scenario and not scenario.endswith("..."):
-            scenario += "..."
-
-        # Level badge
-        badge = plt.Rectangle((0.2, i - 0.35), 1.0, 0.7, linewidth=1,
-                               edgecolor="white", facecolor=CRIMSON, zorder=3)
-        ax.add_patch(badge)
-        ax.text(0.7, i - 0.08, level, ha="center", va="center",
-                fontsize=9, fontweight="bold", color="white", zorder=4)
-        ax.text(0.7, i + 0.18, bloom, ha="center", va="center",
-                fontsize=5.5, color="white", zorder=4)
-
-        # Question box
-        box = plt.Rectangle((1.4, i - 0.35), 8.2, 0.7, linewidth=1,
-                             edgecolor=level_edge[level],
-                             facecolor=level_colors[level], zorder=2)
-        ax.add_patch(box)
-        ax.text(1.6, i - 0.08, title, fontsize=8, fontweight="bold",
-                color="#333", va="center", zorder=3)
-        ax.text(1.6, i + 0.18, scenario, fontsize=5.5,
-                color="#555", va="center", zorder=3)
-
-        # Arrow to next
-        if i < len(kv_chain["questions"]) - 1:
-            ax.annotate("", xy=(0.7, i + 0.4), xytext=(0.7, i + 0.6),
-                        arrowprops=dict(arrowstyle="->", color="#555", lw=1))
-
-    # title in LaTeX caption (removed set_title)
-
-    fig.savefig(PAPER_DIR / "fig-depth-chain.pdf")
-    print("  Saved fig-depth-chain.pdf")
-    plt.close(fig)
-
-
-# ── Figure 4: Dedup / Quality Pipeline Summary ──────────────────
-def fig_quality_summary(stats):
-    fig, axes = plt.subplots(1, 3, figsize=(7.0, 2.2))
-
-    # Panel 1: Field coverage from stats
-    ax = axes[0]
-    fc = stats["field_coverage"]
-    fields = {
-        "topic": fc.get("topic", 1.0),
-        "zone": fc.get("zone", 1.0),
-        "competency_area": fc["competency_area"],
-        "napkin_math": fc["napkin_math"],
-        "bloom_level": fc["bloom_level"],
-    }
-    labels = list(fields.keys())
-    pcts = [100 * v for v in fields.values()]
-    colors = [GREEN if p >= 99 else ORANGE if p >= 80 else RED for p in pcts]
-
-    bars = ax.barh(range(len(labels)), pcts, color=colors, alpha=0.85, height=0.6)
-    ax.set_yticks(range(len(labels)))
-    ax.set_yticklabels([l.replace("_", "\n") for l in labels], fontsize=6.5)
-    ax.set_xlim(95, 101)
-    ax.set_xlabel("Coverage %")
-    # title in LaTeX caption
-    ax.invert_yaxis()
-    for bar, pct in zip(bars, pcts):
-        ax.text(bar.get_width() - 0.3, bar.get_y() + bar.get_height() / 2,
-                f"{pct:.1f}%", va="center", ha="right", fontsize=6.5, color="white", fontweight="bold")
-
-    # Panel 2: Validation status from stats
-    ax = axes[1]
-    vs = stats.get("validation", {})
-    categories = ["Validated", "Unvalidated", "Has Issues"]
-    values = [
-        vs.get("validated_true", 0),
-        vs.get("validated_false", 0),
-        vs.get("has_issues", 0),
-    ]
-    bar_colors = [GREEN, ORANGE, RED]
-    bars = ax.bar(categories, values, color=bar_colors, alpha=0.85, width=0.5)
-    ax.set_ylabel("Questions")
-    # title in LaTeX caption
-    for bar, val in zip(bars, values):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 20,
-                f"{val:,}", ha="center", fontsize=7, fontweight="bold")
-    ax.tick_params(axis="x", labelsize=7)
-
-    # Panel 3: Invariant checks from stats
-    ax = axes[2]
-    n_checks = 19
-    n_pass = 19  # current gold standard
-    ax.bar(["Pass", "Warn", "Fail"], [n_pass, 0, 0],
-           color=[GREEN, ORANGE, RED], alpha=0.85, width=0.5)
-    ax.set_ylabel("Checks")
-    # title in LaTeX caption
-    ax.set_ylim(0, 22)
-    ax.text(0, n_pass + 0.5, str(n_pass), ha="center", fontsize=9, fontweight="bold", color=GREEN)
-
-    # title in LaTeX caption
-    fig.tight_layout()
-    fig.savefig(PAPER_DIR / "fig-quality-summary.pdf")
-    print("  Saved fig-quality-summary.pdf")
-    plt.close(fig)
-
-
-# ── Figure 5: Zone Distribution (Bar Chart) ──────────────────
+# ── Figure 3: Zone Distribution (Bar Chart) ──────────────────
 def fig_zone_distribution(stats):
     zd = stats.get("zone_distribution", {})
     if not zd:
@@ -411,7 +274,7 @@ def fig_zone_distribution(stats):
     plt.close(fig)
 
 
-# ── Figure 6: Zone × Level Heatmap ───────────────────────────
+# ── Figure 4: Zone × Level Heatmap ───────────────────────────
 def fig_zone_level_heatmap(stats):
     zlm = stats.get("zone_level_matrix", {})
     if not zlm:
@@ -458,11 +321,6 @@ def main():
     fig_corpus_distribution(stats)
     fig_format_balance(stats)
 
-    # Depth chain needs full corpus for question text
-    pub = load_corpus_for_chains()
-    fig_depth_chain(stats, pub)
-
-    fig_quality_summary(stats)
     fig_zone_distribution(stats)
     fig_zone_level_heatmap(stats)
 

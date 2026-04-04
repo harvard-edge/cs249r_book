@@ -1,4 +1,4 @@
-.PHONY: all paper figures stats macros svgs clean watch
+.PHONY: all paper figures stats macros svgs layout-review clean watch
 
 # ── Default: analyze → macros → plot → convert SVGs → compile ─
 all: paper
@@ -16,10 +16,9 @@ macros.tex: corpus_stats.json ../vault/corpus.json generate_macros.py
 	python3 generate_macros.py
 
 # ── Step 2: Generate data figures from stats ─────────────────
+# Only PDFs referenced by paper.tex via \\includegraphics.
 DATA_FIGURES = fig-corpus-distribution.pdf \
                fig-format-balance.pdf \
-               fig-depth-chain.pdf \
-               fig-quality-summary.pdf \
                fig-zone-distribution.pdf \
                fig-zone-level-heatmap.pdf
 
@@ -28,15 +27,18 @@ figures: $(DATA_FIGURES)
 $(DATA_FIGURES): corpus_stats.json generate_figures.py
 	python3 generate_figures.py
 
-# ── Step 3: Convert SVGs to PDFs via inkscape ────────────────
+# ── Step 2b: Applicability matrix as LaTeX (paper \\input, not a PDF figure)
+app_matrix.tex: fig-applicability-matrix.svg generate_matrix_table.py
+	python3 generate_matrix_table.py
+
+# ── Step 3: Convert SVGs to PDFs ─────────────────────────────
+# fig-applicability-matrix.svg is consumed by generate_matrix_table.py only.
 SVG_SOURCES = fig-competency-model.svg \
               fig-four-axes.svg \
               fig-generation-pipeline.svg \
               fig-quality-pipeline.svg \
               fig-backward-design.svg \
-              fig-applicability-matrix.svg \
-              fig-prereq-subset.svg \
-              fig-taxonomy-structure.svg
+              fig-prereq-subset.svg
 
 SVG_PDFS = $(SVG_SOURCES:.svg=.pdf)
 
@@ -46,21 +48,27 @@ svgs: $(SVG_PDFS)
 	rsvg-convert -f pdf $< -o $@
 
 # ── Step 4: Compile paper (depends on all figures + macros) ──
-ALL_FIGURES = $(DATA_FIGURES) $(SVG_PDFS) fig-prereq-graph.pdf
+ALL_FIGURES = $(DATA_FIGURES) $(SVG_PDFS)
 
 paper: paper.pdf
 
-paper.pdf: paper.tex references.bib macros.tex $(ALL_FIGURES)
+paper.pdf: paper.tex references.bib macros.tex app_matrix.tex $(ALL_FIGURES)
 	pdflatex --shell-escape -interaction=nonstopmode paper.tex
 	bibtex paper
 	pdflatex --shell-escape -interaction=nonstopmode paper.tex
 	pdflatex --shell-escape -interaction=nonstopmode paper.tex
 
+# ── Rasterize each PDF page to PNG (layout / float debugging) ─
+layout-review: paper.pdf
+	mkdir -p layout-review
+	pdftoppm -png -r 110 paper.pdf layout-review/p
+
 # ── Clean all generated artifacts ────────────────────────────
 clean:
 	rm -f paper.aux paper.bbl paper.blg paper.log paper.out paper.pdf paper.toc
-	rm -f corpus_stats.json macros.tex
+	rm -f corpus_stats.json macros.tex app_matrix.tex
 	rm -f $(DATA_FIGURES) $(SVG_PDFS)
+	rm -rf layout-review
 
 # ── Watch for changes and rebuild ────────────────────────────
 watch:
