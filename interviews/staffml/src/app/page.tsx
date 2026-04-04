@@ -15,6 +15,7 @@ import { getAttempts, getStreakData } from "@/lib/progress";
 import { FilterPill, AreaOverview, ExpandedArea, SearchResults, TopicDetail } from "@/components/vault";
 import { isDailyCompleted } from "@/lib/daily";
 import manifest from "@/data/vault-manifest.json";
+import { ECOSYSTEM_BASE } from "@/lib/env";
 
 export default function HomePage() {
   const [mounted, setMounted] = useState(false);
@@ -195,13 +196,36 @@ export default function HomePage() {
 
               <div className="flex flex-wrap items-center gap-3">
                 <span className="text-[11px] text-textTertiary">
-                  100% client-side &middot; no accounts &middot; your data stays in your browser &middot;{" "}
-                  <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer"
-                    className="text-accentBlue hover:underline">MLSysBook.ai</a>
+                  100% client-side &middot; no accounts &middot; your data stays in your browser
                 </span>
               </div>
             </div>
           )}
+
+          {/* MLSysBook ecosystem — staffml.ai is the app; book site carries curriculum context */}
+          <p className="text-[11px] text-textSecondary leading-relaxed mt-1 mb-0 max-w-3xl">
+            Part of the{" "}
+            <a
+              href={ECOSYSTEM_BASE}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-accentBlue hover:underline font-medium"
+            >
+              Machine Learning Systems
+            </a>{" "}
+            ecosystem (textbook, labs, tools). This app lives on{" "}
+            <span className="font-mono text-textPrimary">staffml.ai</span>
+            ; for how StaffML fits the book curriculum, see{" "}
+            <a
+              href={`${ECOSYSTEM_BASE}/staffml/`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-accentBlue hover:underline"
+            >
+              mlsysbook.ai/staffml
+            </a>
+            .
+          </p>
 
           {/* Filters row — track + areas + search on one compact strip */}
           <div className="flex flex-col gap-2">
