@@ -87,6 +87,36 @@ def main():
         lines.append("\\newcommand{\\numexcludedpairs}{83}")
         lines.append("\\newcommand{\\numapplicablecells}{2{,}563}")
 
+    # ---------------------------------------------------------
+    # Chain stats (dynamically extracted to prevent text drift)
+    # Extracts the number of depth chains at each length (2-6)
+    # and the total % of the corpus that participates in chains.
+    # ---------------------------------------------------------
+    chains = stats.get("chains", {})
+    by_length = chains.get("by_length", {})
+    lines.append(f"\\newcommand{{\\numchainsTwo}}{{{fmt_num(by_length.get('2', 0))}}}")
+    lines.append(f"\\newcommand{{\\numchainsThree}}{{{fmt_num(by_length.get('3', 0))}}}")
+    lines.append(f"\\newcommand{{\\numchainsFour}}{{{fmt_num(by_length.get('4', 0))}}}")
+    lines.append(f"\\newcommand{{\\numchainsFive}}{{{fmt_num(by_length.get('5', 0))}}}")
+    lines.append(f"\\newcommand{{\\numchainsSix}}{{{fmt_num(by_length.get('6', 0))}}}")
+    lines.append(f"\\newcommand{{\\numchainsQuestions}}{{{fmt_num(chains.get('questions_in_chains', 0))}}}")
+    lines.append("\\newcommand{\\numchainsCoveragePct}{" + str(chains.get('chain_coverage_pct', 0)) + "\\%}")
+
+    # ---------------------------------------------------------
+    # Bloom stats (dynamically extracted to prevent text drift)
+    # Calculates the percentage of the corpus that falls into
+    # each Bloom's Taxonomy level, combining Synthesize -> Create.
+    # ---------------------------------------------------------
+    bloom = stats.get("bloom_distribution", {})
+    total_bloom = sum(bloom.values())
+    for b in ["analyze", "evaluate", "apply", "create", "understand", "remember"]:
+        count = bloom.get(b, 0)
+        if b == "create":
+            count += bloom.get("synthesize", 0) # Combine synthesize into create
+        pct = f"{100 * count / total_bloom:.1f}" if total_bloom > 0 else "0"
+        lines.append(f"\\newcommand{{\\bloom{b.capitalize()}Count}}{{{fmt_num(count)}}}")
+        lines.append("\\newcommand{\\bloom" + b.capitalize() + "Pct}{" + pct + "\\%}")
+
     lines.append("")
 
     with open(OUTPUT_PATH, "w") as f:
