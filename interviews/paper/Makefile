@@ -27,12 +27,8 @@ figures: $(DATA_FIGURES)
 $(DATA_FIGURES): corpus_stats.json generate_figures.py
 	python3 generate_figures.py
 
-# ── Step 2b: Applicability matrix as LaTeX (paper \\input, not a PDF figure)
-app_matrix.tex: fig-applicability-matrix.svg generate_matrix_table.py
-	python3 generate_matrix_table.py
-
 # ── Step 3: Convert SVGs to PDFs ─────────────────────────────
-# fig-applicability-matrix.svg is consumed by generate_matrix_table.py only.
+# Applicability matrix: app_matrix.tex is source-controlled (included from paper.tex).
 SVG_SOURCES = fig-competency-model.svg \
               fig-four-axes.svg \
               fig-generation-pipeline.svg \
@@ -66,7 +62,7 @@ layout-review: paper.pdf
 # ── Clean all generated artifacts ────────────────────────────
 clean:
 	rm -f paper.aux paper.bbl paper.blg paper.log paper.out paper.pdf paper.toc
-	rm -f corpus_stats.json macros.tex app_matrix.tex
+	rm -f corpus_stats.json macros.tex
 	rm -f $(DATA_FIGURES) $(SVG_PDFS)
 	rm -rf layout-review
 
