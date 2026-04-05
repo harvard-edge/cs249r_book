@@ -80,7 +80,7 @@ git checkout -b feature/your-improvement
 pytest tests/
 tito module test 01
 
-# 5. Commit with descriptive messages (NO auto-attribution)
+# 5. Commit with descriptive messages
 git add <specific-files>    # Never use 'git add .' — stage files explicitly
 git commit -m "Fix tensor broadcasting bug in Module 02
 
@@ -97,8 +97,7 @@ git push origin feature/your-improvement
 - ✅ Always use virtual environment (`.venv`)
 - ✅ Always work on feature branches
 - ✅ Always test before committing
-- 🚨 **NEVER add Co-Authored-By, automated attribution, or vendor footers to commit messages**
-- 🚨 **Only project owner adds attribution when needed**
+- 🚨 **Use clear commit messages** — short subject line; add a body when the change needs context beyond the title.
 
 ## 🧪 Testing Requirements
 
