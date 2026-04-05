@@ -196,30 +196,54 @@ export default function AboutPage() {
           </div>
         </section>
 
-        {/* ─── Research ─── */}
+        {/* ─── How Questions Are Built ─── */}
         <section className="mb-10">
           <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
-            <FileText className="w-4.5 h-4.5 text-accentBlue" /> The Science Behind StaffML
+            <Package className="w-4.5 h-4.5 text-accentAmber" /> How Questions Are Built
           </h2>
           <p className="text-[14px] text-textSecondary leading-relaxed mb-3">
-            StaffML is backed by a research paper that describes the question generation methodology,
-            the four-axis taxonomy (competency area, difficulty, zone, deployment track),
-            and the independent math verification pipeline that ensures every hardware spec and
-            calculation is grounded in real silicon.
+            StaffML questions are constructed using LLM-assisted generation with structured
+            prompts grounded in the{' '}
+            <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">Machine Learning Systems</a>{' '}
+            textbook and the{' '}
+            <a href="https://github.com/harvard-edge/cs249r_book/tree/main/mlsysim" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">MLSysIM</a>{' '}
+            physics engine. Every hardware specification traces back to a centralized constants
+            table maintained alongside the textbook.
+          </p>
+          <p className="text-[14px] text-textSecondary leading-relaxed mb-3">
+            Every question undergoes independent math verification by a separate model
+            that rechecks all arithmetic and hardware specs. The initial
+            verification pass found an 8.3% error rate across the corpus. All identified
+            errors were corrected.
           </p>
           <a
             href={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/downloads/StaffML-Paper.pdf`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-5 py-3 bg-accentBlue text-white font-bold rounded-lg text-sm hover:opacity-90 transition-opacity mb-3"
+            className="flex items-start gap-4 p-4 rounded-xl border border-accentBlue/20 bg-accentBlue/5 hover:border-accentBlue/40 transition-colors mb-4 group"
           >
-            <FileText className="w-4 h-4" /> Read the Paper (PDF)
+            <FileText className="w-8 h-8 text-accentBlue shrink-0 mt-0.5" />
+            <div>
+              <span className="text-[14px] font-bold text-textPrimary group-hover:text-accentBlue transition-colors block mb-1">
+                Read the Research Paper
+              </span>
+              <span className="text-[12px] text-textSecondary leading-relaxed block">
+                The full methodology: backward design from textbook chapters, four-axis taxonomy,
+                LLM-assisted generation pipeline, independent math verification, and the ikigai-inspired
+                competency zone framework.
+              </span>
+            </div>
           </a>
-          <p className="text-[12px] text-textTertiary leading-relaxed">
-            Topics include: backward design from textbook chapters, LLM-assisted question generation
-            with structured prompts, cross-model math verification (8.3% initial error rate caught and corrected),
-            and the ikigai-inspired competency zone framework.
-          </p>
+          <div className="p-4 rounded-xl border border-accentAmber/20 bg-accentAmber/5">
+            <p className="text-[13px] text-textSecondary leading-relaxed">
+              <strong className="text-textPrimary">Found an error?</strong>{' '}
+              We take correctness seriously. If you spot a wrong number, a broken
+              calculation, or a misleading scenario,{' '}
+              <a href="https://github.com/harvard-edge/cs249r_book/issues/new?labels=staffml,bug&template=staffml-error.md&title=[StaffML]+Math+error+in+question+ID" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline font-medium">
+                open an issue on GitHub
+              </a>. Community verification is how we keep improving.
+            </p>
+          </div>
         </section>
 
         {/* ─── Open Source ─── */}
@@ -242,56 +266,6 @@ export default function AboutPage() {
           <p className="text-[11px] text-textTertiary font-mono mt-4">
             v{manifest.version} &middot; built {manifest.buildDate.slice(0, 10)}
           </p>
-        </section>
-
-        {/* ─── How Questions Are Built ─── */}
-        <section className="mb-10">
-          <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
-            <Package className="w-4.5 h-4.5 text-accentAmber" /> How Questions Are Built
-          </h2>
-          <p className="text-[14px] text-textSecondary leading-relaxed mb-3">
-            StaffML questions are constructed using LLM-assisted generation with structured
-            prompts grounded in the{' '}
-            <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">Machine Learning Systems</a>{' '}
-            textbook and the{' '}
-            <a href="https://github.com/harvard-edge/cs249r_book/tree/main/mlsysim" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">MLSysIM</a>{' '}
-            physics engine. Every hardware specification traces back to a centralized constants
-            table maintained alongside the textbook.
-          </p>
-          <p className="text-[14px] text-textSecondary leading-relaxed mb-3">
-            Every question undergoes independent math verification by a separate model
-            (Gemini 3.1 Pro) that rechecks all arithmetic and hardware specs. The initial
-            verification pass found an 8.3% error rate across the corpus. All identified
-            errors were corrected.
-          </p>
-          <a
-            href={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/downloads/StaffML-Paper.pdf`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-start gap-4 p-4 rounded-xl border border-accentBlue/20 bg-accentBlue/5 hover:border-accentBlue/40 transition-colors mb-4 group"
-          >
-            <FileText className="w-8 h-8 text-accentBlue shrink-0 mt-0.5" />
-            <div>
-              <span className="text-[14px] font-bold text-textPrimary group-hover:text-accentBlue transition-colors block mb-1">
-                Read the Research Paper
-              </span>
-              <span className="text-[12px] text-textSecondary leading-relaxed block">
-                Covers the full methodology: backward design from textbook chapters, four-axis taxonomy,
-                LLM-assisted generation pipeline, independent math verification, and the ikigai-inspired
-                competency zone framework.
-              </span>
-            </div>
-          </a>
-          <div className="p-4 rounded-xl border border-accentAmber/20 bg-accentAmber/5">
-            <p className="text-[13px] text-textSecondary leading-relaxed">
-              <strong className="text-textPrimary">Found an error?</strong>{' '}
-              We take correctness seriously. If you spot a wrong number, a broken
-              calculation, or a misleading scenario,{' '}
-              <a href="https://github.com/harvard-edge/cs249r_book/issues/new?labels=staffml,bug&template=staffml-error.md&title=[StaffML]+Math+error+in+question+ID" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline font-medium">
-                open an issue on GitHub
-              </a>. Community verification is how we keep improving.
-            </p>
-          </div>
         </section>
 
         {/* CTA */}
