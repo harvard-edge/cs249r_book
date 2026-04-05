@@ -3,13 +3,10 @@
 import Link from "next/link";
 import { BookOpen, Github, Target, ArrowLeft, Layers, Package, Users, Crosshair, Calendar, FileText } from "lucide-react";
 import { LEVELS } from "@/lib/levels";
-import { getVaultStats } from "@/lib/taxonomy";
 import { getQuestions } from "@/lib/corpus";
 import manifest from "@/data/vault-manifest.json";
 
 export default function AboutPage() {
-  const stats = getVaultStats();
-
   // Pick a sample question to show on the page
   const allQs = getQuestions();
   const sampleQ = allQs.find(q => q.id === 'global-0003') // "The Ridge Point Logic" — a good L2 example
@@ -26,7 +23,7 @@ export default function AboutPage() {
         {/* ─── Hero ─── */}
         <h1 className="text-3xl font-extrabold text-textPrimary tracking-tight mb-2">About StaffML</h1>
         <p className="text-[15px] text-textSecondary leading-relaxed mb-3">
-          {stats.totalQuestions.toLocaleString()} questions that test what ML systems interviews actually demand.
+          Questions that test what ML systems interviews actually demand.
           Systems reasoning, napkin math, architectural tradeoffs — not trivia.
         </p>
         <div className="flex flex-wrap items-center gap-3 mb-10">
@@ -199,7 +196,33 @@ export default function AboutPage() {
           </div>
         </section>
 
-        {/* ─── Open Source + Research ─── */}
+        {/* ─── Research ─── */}
+        <section className="mb-10">
+          <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
+            <FileText className="w-4.5 h-4.5 text-accentBlue" /> The Science Behind StaffML
+          </h2>
+          <p className="text-[14px] text-textSecondary leading-relaxed mb-3">
+            StaffML is backed by a research paper that describes the question generation methodology,
+            the four-axis taxonomy (competency area, difficulty, zone, deployment track),
+            and the independent math verification pipeline that ensures every hardware spec and
+            calculation is grounded in real silicon.
+          </p>
+          <a
+            href={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/downloads/StaffML-Paper.pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-5 py-3 bg-accentBlue text-white font-bold rounded-lg text-sm hover:opacity-90 transition-opacity mb-3"
+          >
+            <FileText className="w-4 h-4" /> Read the Paper (PDF)
+          </a>
+          <p className="text-[12px] text-textTertiary leading-relaxed">
+            Topics include: backward design from textbook chapters, LLM-assisted question generation
+            with structured prompts, cross-model math verification (8.3% initial error rate caught and corrected),
+            and the ikigai-inspired competency zone framework.
+          </p>
+        </section>
+
+        {/* ─── Open Source ─── */}
         <section className="mb-10">
           <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
             <Github className="w-4.5 h-4.5 text-textSecondary" /> Open Source
@@ -208,26 +231,16 @@ export default function AboutPage() {
             The entire question corpus, taxonomy, and web application are open source.
             Contributions, feedback, and corrections are welcome.
           </p>
-          <div className="flex flex-wrap items-center gap-3 mb-4">
-            <a
-              href="https://github.com/harvard-edge/cs249r_book"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg text-sm font-medium transition-colors"
-            >
-              <Github className="w-4 h-4" /> View on GitHub
-            </a>
-            <a
-              href="downloads/StaffML-Paper.pdf"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg text-sm font-medium transition-colors"
-            >
-              <FileText className="w-4 h-4" /> Read the Paper
-            </a>
-          </div>
-          <p className="text-[11px] text-textTertiary font-mono">
-            v{manifest.version} &middot; {manifest.questionCount.toLocaleString()} questions &middot; {manifest.conceptCount} topics &middot; built {manifest.buildDate.slice(0, 10)}
+          <a
+            href="https://github.com/harvard-edge/cs249r_book"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg text-sm font-medium transition-colors"
+          >
+            <Github className="w-4 h-4" /> View on GitHub
+          </a>
+          <p className="text-[11px] text-textTertiary font-mono mt-4">
+            v{manifest.version} &middot; built {manifest.buildDate.slice(0, 10)}
           </p>
         </section>
 
@@ -250,7 +263,7 @@ export default function AboutPage() {
             (Gemini 3.1 Pro) that rechecks all arithmetic and hardware specs. The initial
             verification pass found an 8.3% error rate across the corpus. All identified
             errors were corrected. The methodology is described in detail in{' '}
-            <a href="downloads/StaffML-Paper.pdf" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">our research paper</a>.
+            <a href={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/downloads/StaffML-Paper.pdf`} target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">our research paper</a>.
           </p>
           <div className="p-4 rounded-xl border border-accentAmber/20 bg-accentAmber/5">
             <p className="text-[13px] text-textSecondary leading-relaxed">

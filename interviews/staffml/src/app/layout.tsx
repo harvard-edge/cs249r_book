@@ -41,7 +41,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: `
           (function() {
             var t = localStorage.getItem('staffml_theme');
-            if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            if (!t) t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
             document.documentElement.dataset.theme = t;
           })();
         `}} />
