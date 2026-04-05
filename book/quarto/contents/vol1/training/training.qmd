@@ -159,7 +159,7 @@ A training system is not a single loop; it is a **Staged System Pipeline**\index
 
 Any mismatch in the throughput of these stages creates **Accelerator Bubbles**\index{Accelerator Bubbles!pipeline idleness}—intervals of idle silicon where the "Machine" axis of the AI Triad sits at 0 percent utilization while waiting for the "Data" axis to catch up. A systems engineer's primary task during training is to eliminate these bubbles through **asynchronous prefetching** and **pipeline overlapping**, ensuring that the next batch is ready on the PCIe bus before the current backward pass completes. We develop the quantitative tools for measuring and fixing these bubbles in @sec-model-training-identifying-bottlenecks-f57f.
 
-[^fn-checkpointing-training]: **Gradient Checkpointing (Activation Checkpointing)**: The memory pressure described here arises because backpropagation requires every layer's activations from the forward pass. Checkpointing breaks this requirement by saving activations at only $\sqrt{L}$ strategic layers and recomputing the rest during the backward pass, trading roughly 33 percent additional compute for up to 10$\times$ activation memory reduction. For GPT-2's 48 layers, this means storing seven checkpoints instead of 48 full activation tensors. \index{Activation Checkpointing!compute-memory trade-off}
+[^fn-checkpointing-training]: **Gradient Checkpointing (Activation Checkpointing)**: The memory pressure described here arises because backpropagation requires every layer's activations from the forward pass. Checkpointing breaks this requirement by saving activations at only $\sqrt{L}$ strategic layers and recomputing the rest during the backward pass, trading roughly 33 percent additional compute for up to 10$\times$ activation memory reduction. For GPT-2's forty-eight layers, this means storing seven checkpoints instead of forty-eight full activation tensors. \index{Activation Checkpointing!compute-memory trade-off}
 
 [^fn-mixed-precision-training]: **Mixed-Precision Training**: Uses half-precision (FP16 or BF16) for computation while maintaining FP32 "master weights" for accumulation, where rounding errors would otherwise compound. A loss scaling trick prevents gradient underflow in FP16's limited dynamic range, yielding nearly 2$\times$ memory savings and 2--8$\times$ throughput gains on Tensor Cores. BF16 ("Brain Floating Point," from Google Brain, 2018) later eliminated loss scaling by matching FP32's eight-bit exponent range, simplifying the dominant failure mode of half-precision training. \index{Mixed-Precision Training!trade-off}
 
@@ -525,7 +525,7 @@ $$
 - With `{python} GPT2Compute.n_layers_gpt2_str` layers in GPT-2: ~`{python} GPT2Compute.per_step_t_str` trillion FLOPs per training step
 - At `{python} GPT2Compute.training_steps_str` training steps: ~`{python} GPT2Compute.total_peta_str` petaFLOPS total training computation
 
-**System Implication:** A V100 GPU (`{python} TrainingHardware.v100_tflops_fp16_str` TFLOPS peak FP16 with Tensor Cores, `{python} TrainingHardware.v100_tflops_fp32_str` TFLOPS FP32 without) would require `{python} GPT2Compute.v100_time_str` seconds just for the attention computations per step at 100 percent utilization (theoretical peak; practical throughput would be lower). Actual training steps take 180 to 220 ms, requiring eight to 32 GPUs to achieve this throughput depending on utilization and interconnect efficiency.
+**System Implication:** A V100 GPU (`{python} TrainingHardware.v100_tflops_fp16_str` TFLOPS peak FP16 with Tensor Cores, `{python} TrainingHardware.v100_tflops_fp32_str` TFLOPS FP32 without) would require `{python} GPT2Compute.v100_time_str` seconds just for the attention computations per step at 100 percent utilization (theoretical peak; practical throughput would be lower). Actual training steps take 180 to 220 ms, requiring eight to thirty-two GPUs to achieve this throughput depending on utilization and interconnect efficiency.
 
 :::
 
@@ -889,7 +889,7 @@ class ResNetBatchMemory:
 # Note: Use ResNetBatchMemory.resnet50_act_mem_b32_gb_str directly.
 ```
 
-For concrete understanding, consider ResNet-50 training with different batch sizes. At batch size 32, the model requires approximately `{python} ResNetBatchMemory.resnet50_act_mem_b32_gb_str` GB of activation memory, `{python} ResNetBatchMemory.resnet50_grad_mem_b32_gb_str` GB for gradients, and `{python} ResNetBatchMemory.resnet50_param_mem_b32_mb_str` MB for parameters per accelerator. Doubling to batch size 64 doubles these memory requirements to `{python} ResNetBatchMemory.resnet50_act_mem_b64_gb_str` GB activations and `{python} ResNetBatchMemory.resnet50_grad_mem_b64_gb_str` GB gradients. This linear scaling quickly exhausts accelerator memory, with high-end training accelerators typically providing 40--80 GB of HBM (High Bandwidth Memory).
+For concrete understanding, consider ResNet-50 training with different batch sizes. At batch size thirty-two, the model requires approximately `{python} ResNetBatchMemory.resnet50_act_mem_b32_gb_str` GB of activation memory, `{python} ResNetBatchMemory.resnet50_grad_mem_b32_gb_str` GB for gradients, and `{python} ResNetBatchMemory.resnet50_param_mem_b32_mb_str` MB for parameters per accelerator. Doubling to batch size sixty-four doubles these memory requirements to `{python} ResNetBatchMemory.resnet50_act_mem_b64_gb_str` GB activations and `{python} ResNetBatchMemory.resnet50_grad_mem_b64_gb_str` GB gradients. This linear scaling quickly exhausts accelerator memory, with high-end training accelerators typically providing 40--80 GB of HBM (High Bandwidth Memory).
 
 Larger batches enable more efficient computation through improved parallelism and better memory access patterns. Accelerator utilization efficiency demonstrates this trade-off: batch sizes of 256 or higher typically achieve over 90 percent hardware utilization on modern training accelerators, while smaller batches of 16--32 may only achieve 60--70 percent utilization due to insufficient parallelism to saturate the hardware. Linear scaling rules for large-batch training (scale learning rate proportionally to batch size increase) help maintain convergence speed [@goyal2017accurate].
 
@@ -2522,7 +2522,7 @@ Throughout these networks, element-wise operations play a supporting role. Activ
 \index{Warp!GPU execution unit}
 Modern hardware accelerators, particularly GPUs, optimize these diverse computations through massive parallelization. Achieving peak performance requires careful attention to hardware architecture. GPUs process data in fixed-size blocks of threads called warps[^fn-warp-training] (in NVIDIA architectures) or wavefronts (in AMD architectures). Peak efficiency occurs when matrix dimensions align with these hardware-specific sizes. For instance, NVIDIA GPUs typically achieve optimal performance when processing matrices aligned to $32\times32$ dimensions. This fixed-size execution model creates a subtle but consequential effect that practitioners frequently overlook.
 
-[^fn-warp-training]: **Warp**: From textile weaving, where a "warp" is the set of threads held taut on a loom while a shuttle weaves across them. NVIDIA adopted the term because GPU threads within a warp execute the same instruction in lockstep, analogous to parallel threads moving together on the loom. The fixed warp size of 32 threads is a hardware constant that creates the wave quantization effect analyzed below: when matrix dimensions are not multiples of 32, partial warps execute with idle lanes, silently wasting silicon. \index{Warp!etymology and hardware constraint}
+[^fn-warp-training]: **Warp**: From textile weaving, where a "warp" is the set of threads held taut on a loom while a shuttle weaves across them. NVIDIA adopted the term because GPU threads within a warp execute the same instruction in lockstep, analogous to parallel threads moving together on the loom. The fixed warp size of thirty-two threads is a hardware constant that creates the wave quantization effect analyzed below: when matrix dimensions are not multiples of thirty-two, partial warps execute with idle lanes, silently wasting silicon. \index{Warp!etymology and hardware constraint}
 
 \index{Wave Quantization!accelerator utilization}\index{Batch Size!hardware alignment}\index{Wave Quantization!tail effects}
 
@@ -2530,7 +2530,7 @@ Modern hardware accelerators, particularly GPUs, optimize these diverse computat
 
 A common mistake in ML systems is treating batch size as a continuous variable. In reality, GPU execution is **quantized** into "waves" of work.
 
-**The Wave Effect**: An NVIDIA GPU executes work in warps of **32 threads**. With a batch size of 32, all 32 threads are busy. With a batch size of 33, the GPU must launch a second warp to process the single remaining sample. This second warp uses only 1/32 (3 percent) of its potential compute power, but takes just as long to execute as the first.
+**The Wave Effect**: An NVIDIA GPU executes work in warps of **32 threads**. With a batch size of thirty-two, all thirty-two threads are busy. With a batch size of 33, the GPU must launch a second warp to process the single remaining sample. This second warp uses only 1/32 (3 percent) of its potential compute power, but takes just as long to execute as the first.
 
 **Tail Effects at Scale**: On a large GPU like the H100 with 132 Streaming Multiprocessors (SMs), the hardware can process thousands of threads in one "wave." If the total workload is just slightly over a wave boundary (e.g., 1.01 waves), the hardware must wait for a nearly empty wave to finish before the next task begins.
 
@@ -2543,7 +2543,7 @@ A common mistake in ML systems is treating batch size as a continuous variable. 
 | `{python} TrainingDimensions.wave_batch_64_str` |                2 |                                            100% |                                             1.0$\times$ |
 | `{python} TrainingDimensions.wave_batch_65_str` |                3 | `{python} TrainingDimensions.wave_util_65_str`% | ~`{python} TrainingDimensions.wave_time_65_str`$\times$ |
 
-**Engineering Rule**: Always choose batch sizes and hidden dimensions that are powers of two or multiples of 8/32/64 to avoid this "quantization tax." A batch of 32 is often faster than 33, and a batch of 64 is often just as fast as 33.
+**Engineering Rule**: Always choose batch sizes and hidden dimensions that are powers of two or multiples of 8/32/64 to avoid this "quantization tax." A batch of thirty-two is often faster than 33, and a batch of sixty-four is often just as fast as 33.
 
 Understanding these tail effects is the difference between a practitioner who tunes by trial-and-error and an engineer who designs for the hardware.
 
@@ -3922,7 +3922,7 @@ Despite the benefits demonstrated above, mixed-precision training introduces num
 
 Understanding how modern hardware implements reduced-precision arithmetic reveals why mixed-precision achieves substantial speedups beyond mere memory savings. The performance gains from FP16 and BF16 computation stem from specialized hardware units designed explicitly for low-precision tensor operations[^fn-tensor-core-training], with architectural decisions that trade numerical range or precision for dramatic increases in computational throughput.
 
-[^fn-tensor-core-training]: **Tensor Core**: The specialized hardware unit behind the FP16/BF16 speedups described here. Each Tensor Core performs a fused $4 \times 4$ matrix multiply-accumulate in a single cycle, achieving 8--16$\times$ the throughput of standard CUDA cores. The catch: input matrices must align to multiples of eight or 16 for peak utilization, meaning misaligned tensor dimensions in a training workload silently forfeit most of this hardware advantage. \index{Tensor Core!training throughput}
+[^fn-tensor-core-training]: **Tensor Core**: The specialized hardware unit behind the FP16/BF16 speedups described here. Each Tensor Core performs a fused $4 \times 4$ matrix multiply-accumulate in a single cycle, achieving 8--16$\times$ the throughput of standard CUDA cores. The catch: input matrices must align to multiples of eight or sixteen for peak utilization, meaning misaligned tensor dimensions in a training workload silently forfeit most of this hardware advantage. \index{Tensor Core!training throughput}
 
 ##### Tensor Core Architecture {#sec-model-training-tensor-core-architecture-14ee}
 
@@ -4284,7 +4284,7 @@ def flash_attn_2(q, k, v):
 
 #### Benchmark Results {#sec-model-training-benchmark-results-2c3f}
 
-The benefits of Flash Attention become concrete when measured on real hardware. Training a GPT-2 Small-scale transformer on an NVIDIA A100 GPU (12 layers, 768 hidden dim, 12 heads---smaller than our XL lighthouse model to fit benchmarks on a single GPU) with varying sequence lengths reveals dramatic improvements:
+The benefits of Flash Attention become concrete when measured on real hardware. Training a GPT-2 Small-scale transformer on an NVIDIA A100 GPU (twelve layers, 768 hidden dim, 12 heads---smaller than our XL lighthouse model to fit benchmarks on a single GPU) with varying sequence lengths reveals dramatic improvements:
 
 | **Sequence Length** | **Standard Forward** | **Flash Forward** | **Standard Backward** | **Flash Backward** | **Memory (Standard)** | **Memory (Flash)** |
 |:--------------------|:---------------------|------------------:|:----------------------|-------------------:|----------------------:|-------------------:|
@@ -4574,7 +4574,7 @@ For a network with L layers, each storing A bytes of activations, @tbl-checkpoin
 
 Sub-linear checkpointing strategies can reduce memory consumption from $O(L)$ to $O(\sqrt{L})$ with only a fractional increase in total compute time, enabling the training of much deeper models on existing hardware.
 
-Setting the derivative of total memory cost (k x A + (L/k) x A) to zero yields k_optimal = sqrt(L). This minimizes total memory while bounding recomputation overhead to approximately 33 percent additional forward time. For GPT-2 with 48 transformer layers, the contrast is stark: without checkpointing, memory equals 48 x A (full activation storage). Optimal checkpointing (sqrt(48) approximately equals seven checkpoints) requires memory of seven x A + (48/7) x A approximately equals 14 x A, achieving 71 percent memory savings with approximately 33 percent compute overhead.
+Setting the derivative of total memory cost (k x A + (L/k) x A) to zero yields k_optimal = sqrt(L). This minimizes total memory while bounding recomputation overhead to approximately 33 percent additional forward time. For GPT-2 with forty-eight transformer layers, the contrast is stark: without checkpointing, memory equals 48 x A (full activation storage). Optimal checkpointing (sqrt(48) approximately equals seven checkpoints) requires memory of seven x A + (48/7) x A approximately equals 14 x A, achieving 71 percent memory savings with approximately 33 percent compute overhead.
 
 Not all operations are equally expensive to recompute, which motivates *selective checkpointing*. Attention layers with QKV projections have high memory cost (3 x B x S x H) but also high recompute cost (three matrix multiplications). Feed-forward layers have high memory cost (2 x B x S x 4H) but lower recompute cost (two matrix multiplications). LayerNorm has low memory cost and very low recompute cost. A common practical strategy is to checkpoint before attention layers (high memory per compute ratio), skip FFN checkpoints (often fast to recompute), and avoid checkpointing normalization layers. In representative transformer workloads, selective checkpointing achieves 60--80 percent memory savings with 20--25 percent compute overhead, often outperforming uniform checkpoint placement.
 
@@ -4674,15 +4674,15 @@ GPT-2's training configuration demonstrates the essential role of gradient accum
 
 - V100 `{python} TrainingHardware.v100_mem_str` GB GPU with gradient checkpointing: Can fit batch_size=16 (as shown in activation memory example)
 - Desired effective batch_size: 512 (optimal for transformer convergence)
-- Problem: 512 ÷ 16 = `{python} GradientAccumulation.gpus_naive_str` GPUs needed just for batch size
+- Problem: 512 ÷ sixteen = `{python} GradientAccumulation.gpus_naive_str` GPUs needed just for batch size
 
 **Gradient Accumulation Solution**
 
-Instead of 32 GPUs, use eight GPUs with gradient accumulation:
+Instead of thirty-two GPUs, use eight GPUs with gradient accumulation:
 
 Configuration:
 
-- Per-GPU micro-batch: 16
+- Per-GPU micro-batch: sixteen
 - Accumulation steps: 4
 - Effective batch per accelerator: $16\times4$ = `{python} GradientAccumulation.batch_per_gpu_str`
 - Global effective batch: eight GPUs$\times$ `{python} GradientAccumulation.batch_per_gpu_str` = **512** ✓
@@ -4709,7 +4709,7 @@ With Accumulation (actual GPT-2 approach):
 - Compute overhead: 4$\times$ forward passes per update = ~8 percent slower (pipeline overlaps some cost)
 - Memory overhead: Gradient accumulation buffer = negligible (gradients already needed)
 - Communication benefit: Sync frequency reduced by `{python} GradientAccumulation.accum_steps_str`$\times$ → communication time drops by `{python} GradientAccumulation.comm_reduction_pct_str` percent
-- Cost benefit: Training two weeks on eight GPUs = USD `{python} GradientAccumulation.accum_2wk_str` K vs. 32 GPUs = USD `{python} GradientAccumulation.naive_2wk_str` K
+- Cost benefit: Training two weeks on eight GPUs = USD `{python} GradientAccumulation.accum_2wk_str` K vs. Thirty-two GPUs = USD `{python} GradientAccumulation.naive_2wk_str` K
 
 **Convergence Quality**
 
@@ -4866,7 +4866,7 @@ class GPT2WalkthroughCalc:
 **Initial Configuration** (Naive Implementation):
 
 - Model: GPT-2 XL (1.5B parameters)
-- Batch size: 32, Sequence length: 1024
+- Batch size: thirty-two, Sequence length: 1024
 - Precision: FP32 throughout
 - Data loading: Single-threaded, synchronous
 
