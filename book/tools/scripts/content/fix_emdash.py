@@ -23,8 +23,8 @@ def is_protected_line(line: str, in_code_fence: bool, in_yaml: bool) -> bool:
     # Python cell directives
     if stripped.startswith("#|"):
         return True
-    # Table separator lines
-    if stripped.startswith("|") and re.match(r"^\|[\s\-:|]+\|", stripped):
+    # All table lines (data + separator) — pipe table prettifier re-spaces cells
+    if stripped.startswith("|"):
         return True
     return False
 
