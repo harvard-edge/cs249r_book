@@ -559,7 +559,7 @@ The static-vs.-dynamic decision is the first of several architectural choices th
 
 ::: {.callout-perspective title="Looking Ahead: The Rise of Inference-Time Compute (System 2)"}
 
-Traditional serving optimizes for minimizing latency ($L_{\text{lat}} \to 0$). Emerging "Reasoning Models" (like OpenAI o1) invert this goal, deliberately spending more compute cycles ("thinking") to improve answer quality. Individual token generation remains memory-bandwidth-bound, but these models generate far more tokens per request (often 10--100$\times$ more internal reasoning tokens), dramatically increasing the total compute and energy spent per query. The aggregate effect brings "Training-like" compute budgets into the Serving phase, even though each token is still governed by the memory wall.
+Traditional serving optimizes for minimizing latency ($L_{\text{lat}} \to 0$). Emerging "Reasoning Models" (like OpenAI o1) invert this goal, deliberately spending more compute cycles ("thinking") to improve answer quality. Individual token generation remains memory-bandwidth bound, but these models generate far more tokens per request (often 10--100$\times$ more internal reasoning tokens), dramatically increasing the total compute and energy spent per query. The aggregate effect brings "Training-like" compute budgets into the Serving phase, even though each token is still governed by the memory wall.
 
 :::
 
@@ -771,7 +771,7 @@ User requests arrive in unpredictable bursts while accelerators demand steady, u
 
 Model optimization focuses on the mathematical artifact, while model serving requires a specialized software architecture to manage high-frequency request streams and hardware utilization. An inference server\index{Inference Server!architecture}[^fn-inference-server-serving] (such as NVIDIA Triton, TensorFlow Serving\index{TensorFlow Serving}, or TorchServe) is not a simple wrapper around a model script; it is a high-performance scheduler that manages concurrency, memory, and data movement.
 
-[^fn-inference-server-serving]: **Inference Server**: Google's TensorFlow Serving (open-sourced February 2016) pioneered the separation of model logic from serving infrastructure; NVIDIA's Triton (GA March 2019) extended this to multi-framework support. The critical design insight is that dynamic batching within these servers improves GPU utilization by up to 70 percent compared to naive single-request serving, transforming the GPU from an idle-waiting device into a throughput engine. Without this scheduler layer, serving a ResNet-50 at batch size 1 wastes 85 percent of available compute. \index{Inference Server!architecture}
+[^fn-inference-server-serving]: **Inference Server**: Google's TensorFlow Serving (open-sourced February 2016) pioneered the separation of model logic from serving infrastructure; NVIDIA's Triton (GA March 2019) extended this to multi-framework support. The critical design insight is that dynamic batching within these servers improves GPU utilization by up to 70 percent compared to naive single-request serving, transforming the GPU from an idle-waiting device into a throughput engine. Without this scheduler layer, serving a ResNet-50 at batch size one wastes 85 percent of available compute. \index{Inference Server!architecture}
 
 The internal anatomy of these servers reveals *how* they bridge the gap between irregular user traffic and the highly regular, batch-oriented requirements of accelerators. The core challenge is that user requests arrive unpredictably (one millisecond apart, then five seconds of silence), while GPUs perform best with steady streams of uniformly-sized batches.
 
@@ -1081,7 +1081,7 @@ Of these components, the scheduler deserves special attention because it embodie
 
 ### The Scheduler: Where Throughput Meets Latency {#sec-model-serving-scheduler-throughput-meets-latency-d022}
 
-The **Scheduler**\index{Scheduler!inference server} is the "brain" of the inference server. It implements the dynamic batching logic discussed in @sec-model-serving-throughput-optimization-18d1. The scheduler must decide whether to run a single request immediately to minimize its latency or wait 5 milliseconds for a second request and process them together to maximize throughput.
+The **Scheduler**\index{Scheduler!inference server} is the "brain" of the inference server. It implements the dynamic batching logic discussed in @sec-model-serving-throughput-optimization-18d1. The scheduler must decide whether to run a single request immediately to minimize its latency or wait five milliseconds for a second request and process them together to maximize throughput.
 
 Systems designers use the **Batching Window**\index{Batching Window!latency-throughput tradeoff} parameter to tune this trade-off. A window of 0 ms optimizes for pure latency (no batching), while a window of 10–50 ms is common for high-throughput cloud services. This decision determines the "duty cycle" of the GPU, the percentage of time the hardware is actually computing vs. waiting for work.
 
@@ -1212,7 +1212,7 @@ class TailLatencyRatioCalc:
     tail_ratio_str = fmt(tail_ratio_value, precision=0, commas=False)      # e.g. "40" times
 ```
 
-The metrics that matter change from aggregate throughput to latency distributions. Mean latency reveals little about user experience; p50\index{p50 Latency!median response time}, p95\index{p95 Latency!percentile target}, and p99 latencies\index{Latency!percentiles (p50, p95, p99)} reveal *how* the system performs across the full range of requests. If the mean latency is 50 ms but p99 is 2 seconds, one in a hundred users waits `{python} TailLatencyRatioCalc.tail_ratio_str` times longer than average. For consumer-facing applications, these tail latencies often determine user satisfaction and retention.[^fn-tail-latency-serving]
+The metrics that matter change from aggregate throughput to latency distributions. Mean latency reveals little about user experience; p50\index{p50 Latency!median response time}, p95\index{p95 Latency!percentile target}, and p99 latencies\index{Latency!percentiles (p50, p95, p99)} reveal *how* the system performs across the full range of requests. If the mean latency is 50 ms but p99 is two seconds, one in a hundred users waits `{python} TailLatencyRatioCalc.tail_ratio_str` times longer than average. For consumer-facing applications, these tail latencies often determine user satisfaction and retention.[^fn-tail-latency-serving]
 
 [^fn-tail-latency-serving]: **Tail Latency**: Unlike averages, percentile latencies reveal the performance impact of system outliers common in ML serving, such as model cache misses or garbage collection pauses. These rare, high-latency requests disproportionately harm user satisfaction and directly impact revenue. Foundational studies at Google and Amazon quantified this relationship, finding that 100 ms of added latency cost ~1 percent in sales, establishing percentile targets (p95, p99) as the critical metrics for service quality. \index{Tail Latency!revenue impact}
 
@@ -1510,11 +1510,11 @@ Beyond the model execution itself, every request pays a "tax" to the serving inf
 
 Barroso, Patterson, and colleagues identified a critical gap in *how* systems handle latency at different time scales\index{Killer Microseconds!latency gap} [@barroso2017attack]. Operations in the microsecond range are too short for traditional OS scheduling (which operates at millisecond granularity) yet too long to simply spin-wait without wasting CPU cycles. This "killer microseconds" regime dominates modern serving workloads. Consider the compound effect visible in @tbl-serving-tax: serialization at 50 μs, dispatch at 10–50 μs, and data copy at 100–500 μs are each individually negligible, but for a 5 ms inference service, these microsecond-scale overheads collectively consume half the latency budget. No single overhead justifies optimization in isolation, yet together they determine whether the system meets its SLO.
 
-The latency budget framework provides a systematic approach to this compound problem. Measurement comes first: without per-phase instrumentation, engineers cannot distinguish a preprocessing bottleneck from a serialization bottleneck, and optimization effort gets misallocated to the most visible component (the model) rather than the most expensive one. Once measurement reveals the true distribution of time, engineering effort should flow proportionally—a phase consuming 50 percent of latency deserves more attention than one consuming 5 percent, regardless of which feels more tractable. Architectural changes such as GPU-accelerated preprocessing or aggressive batching can shift work between phases entirely, sometimes eliminating a bottleneck rather than merely reducing it.
+The latency budget framework provides a systematic approach to this compound problem. Measurement comes first: without per-phase instrumentation, engineers cannot distinguish a preprocessing bottleneck from a serialization bottleneck, and optimization effort gets misallocated to the most visible component (the model) rather than the most expensive one. Once measurement reveals the true distribution of time, engineering effort should flow proportionally—a phase consuming 50 percent of latency deserves more attention than one consuming five percent, regardless of which feels more tractable. Architectural changes such as GPU-accelerated preprocessing or aggressive batching can shift work between phases entirely, sometimes eliminating a bottleneck rather than merely reducing it.
 
 ### Resolution and Input Size Trade-offs {#sec-model-serving-resolution-input-size-tradeoffs-155d}
 
-Input resolution affects both preprocessing and inference latency, but the relationship differs depending on whether the system is compute-bound\index{Compute-Bound!resolution scaling} (limited by arithmetic throughput) or memory-bound\index{Memory-Bound!activation tensors} (limited by data movement). A compute-bound system slows proportionally to increased computation; a memory-bound system may show minimal slowdown if activation tensors still fit in fast memory. @sec-hardware-acceleration covers this distinction in depth through roofline model analysis; understanding it is essential for making informed resolution decisions.
+Input resolution affects both preprocessing and inference latency, but the relationship differs depending on whether the system is compute bound\index{Compute-Bound!resolution scaling} (limited by arithmetic throughput) or memory-bound\index{Memory-Bound!activation tensors} (limited by data movement). A compute-bound system slows proportionally to increased computation; a memory-bound system may show minimal slowdown if activation tensors still fit in fast memory. @sec-hardware-acceleration covers this distinction in depth through roofline model analysis; understanding it is essential for making informed resolution decisions.
 
 For compute-bound models, @eq-resolution-throughput formalizes how throughput ($X$) scales inversely with resolution squared:
 
@@ -2073,7 +2073,7 @@ Consider designing a ResNet-50 serving system with these requirements:
 
 #### Step 1: Find Safe Utilization {.unnumbered}
 
-From @eq-p99-latency, $W_{p99}$ ≈ `{python} CapacityPlanningCalc.mm1_p99_factor_str`$\times$ service time / (1 − $\rho$). Setting $W_{p99}$ ≤ 50 ms with 5 ms service time gives $\rho$ ≤ 1 − (`{python} CapacityPlanningCalc.mm1_p99_factor_str`$\times$ 5)/50 = 0.54. However, the M/M/1 model is conservative for ML inference, which has near-deterministic service times (closer to M/D/1). For M/D/1 queues, average wait is roughly half of M/M/1 at the same utilization, allowing a higher safe operating point. Using the M/D/1-adjusted threshold yields $\rho$ ≤ `{python} CapacityPlanningCalc.cp_rho_safe_str` (`{python} CapacityPlanningCalc.cp_rho_safe_pct_str` percent maximum utilization).
+From @eq-p99-latency, $W_{p99}$ ≈ `{python} CapacityPlanningCalc.mm1_p99_factor_str`$\times$ service time / (1 − $\rho$). Setting $W_{p99}$ ≤ 50 ms with 5 ms service time gives $\rho$ ≤ one − (`{python} CapacityPlanningCalc.mm1_p99_factor_str`$\times$ 5)/50 = 0.54. However, the M/M/1 model is conservative for ML inference, which has near-deterministic service times (closer to M/D/1). For M/D/1 queues, average wait is roughly half of M/M/1 at the same utilization, allowing a higher safe operating point. Using the M/D/1-adjusted threshold yields $\rho$ ≤ `{python} CapacityPlanningCalc.cp_rho_safe_str` (`{python} CapacityPlanningCalc.cp_rho_safe_pct_str` percent maximum utilization).
 
 #### Step 2: Calculate Required Service Rate {.unnumbered}
 
@@ -2103,7 +2103,7 @@ This remains well below the `{python} CapacityPlanningCalc.cp_rho_safe_pct_str` 
 
 :::
 
-The queuing analysis explains the capacity planning approach detailed in @sec-model-serving-capacity-planning-96a3 and connects directly to the MLPerf Server scenario. @sec-benchmarking explains how MLPerf measures throughput only for requests meeting the latency SLO: a system achieving 10,000 QPS but violating the SLO on 5 percent of requests reports only 9,500 valid QPS.
+The queuing analysis explains the capacity planning approach detailed in @sec-model-serving-capacity-planning-96a3 and connects directly to the MLPerf Server scenario. @sec-benchmarking explains how MLPerf measures throughput only for requests meeting the latency SLO: a system achieving 10,000 QPS but violating the SLO on five percent of requests reports only 9,500 valid QPS.
 
 ### Tail-Tolerant Techniques {#sec-model-serving-tailtolerant-techniques-066e}
 
@@ -2111,11 +2111,11 @@ Eliminating all sources of latency variability is often impractical. Production 
 
 #### Hedged Requests {#sec-model-serving-hedged-requests-b923}
 
-When\index{Hedged Requests!tail tolerance} a request has not completed within the expected time, the system sends a duplicate request to another server.[^fn-hedging-tail-tolerance] The client uses whichever response arrives first and cancels the other. For ML serving, this means maintaining multiple model replicas and routing slow requests to alternative replicas. The overhead is modest: if the system hedges at the 95th percentile, only 5 percent of requests generate duplicates, increasing load by only 5 percent while dramatically reducing tail latency.
+When\index{Hedged Requests!tail tolerance} a request has not completed within the expected time, the system sends a duplicate request to another server.[^fn-hedging-tail-tolerance] The client uses whichever response arrives first and cancels the other. For ML serving, this means maintaining multiple model replicas and routing slow requests to alternative replicas. The overhead is modest: if the system hedges at the 95th percentile, only five percent of requests generate duplicates, increasing load by only five percent while dramatically reducing tail latency.
 
-[^fn-hedging-tail-tolerance]: **Hedging**: The term is borrowed from finance, where an offsetting bet reduces risk; here, the redundant request is a bet against a slow server. This is not free: for ML systems, the losing hedged request still occupies a GPU for one full inference cycle because CUDA kernels cannot be preempted. Thus, the 5 percent load increase from hedging at the 95th percentile translates directly to a 5 percent waste in GPU compute for those requests. \index{Hedging!tail tolerance}
+[^fn-hedging-tail-tolerance]: **Hedging**: The term is borrowed from finance, where an offsetting bet reduces risk; here, the redundant request is a bet against a slow server. This is not free: for ML systems, the losing hedged request still occupies a GPU for one full inference cycle because CUDA kernels cannot be preempted. Thus, the five percent load increase from hedging at the 95th percentile translates directly to a five percent waste in GPU compute for those requests. \index{Hedging!tail tolerance}
 
-CUDA kernels cannot be interrupted mid-execution. When a hedged request completes, the duplicate must be cancelled, but if inference has already begun on the GPU, cancellation approaches include checking a cancellation flag before launching inference, accepting wasted compute for the in-flight kernel, or using request prioritization to deprioritize the duplicate. Since hedging typically applies only to the slowest 5 percent of requests, the overhead from occasional wasted compute remains acceptable.
+CUDA kernels cannot be interrupted mid-execution. When a hedged request completes, the duplicate must be cancelled, but if inference has already begun on the GPU, cancellation approaches include checking a cancellation flag before launching inference, accepting wasted compute for the in-flight kernel, or using request prioritization to deprioritize the duplicate. Since hedging typically applies only to the slowest five percent of requests, the overhead from occasional wasted compute remains acceptable.
 
 #### Tied Requests {#sec-model-serving-tied-requests-961c}
 
@@ -2123,7 +2123,7 @@ Tied requests\index{Tied Requests!latency reduction} send the request to multipl
 
 #### Canary Requests {#sec-model-serving-canary-requests-83b2}
 
-For\index{Canary Requests!fan-out protection} requests that fan out to many backends, first send the request to a small subset of 1 to 2 servers.[^fn-canary-fanout] If these return within expected time, send to the remainder. If the canary is slow, the system can take corrective action by retrying elsewhere or using cached results before committing to the full fan-out. This prevents a single slow backend from stalling an entire distributed inference request.
+For\index{Canary Requests!fan-out protection} requests that fan out to many backends, first send the request to a small subset of one to two servers.[^fn-canary-fanout] If these return within expected time, send to the remainder. If the canary is slow, the system can take corrective action by retrying elsewhere or using cached results before committing to the full fan-out. This prevents a single slow backend from stalling an entire distributed inference request.
 
 \index{Canary!etymology}
 
@@ -2137,7 +2137,7 @@ When\index{Graceful Degradation!overload handling} load exceeds capacity, return
 
 When\index{Admission Control!queue depth threshold} traffic exceeds capacity, accepting all requests can trigger widespread SLO violations. Admission control proactively rejects requests when queue depth exceeds a threshold, returning immediate 503 responses rather than accepting requests that are likely to timeout. This sacrifices throughput to protect latency for admitted requests.
 
-A practical starting point for setting the threshold is 2 to 3 times service time multiplied by the number of workers. For a system with 4 workers and 10 ms service time, this yields a queue depth threshold of 80 to 120 requests. Adaptive admission control adjusts thresholds based on observed p99 latency, tightening when latency increases above target and relaxing when latency remains healthy.
+A practical starting point for setting the threshold is two to three times service time multiplied by the number of workers. For a system with four workers and 10 ms service time, this yields a queue depth threshold of 80 to 120 requests. Adaptive admission control adjusts thresholds based on observed p99 latency, tightening when latency increases above target and relaxing when latency remains healthy.
 
 #### Retry Storm Prevention {#sec-model-serving-retry-storm-prevention-4bf0}
 
@@ -2152,7 +2152,7 @@ The tail-tolerant techniques examined in this section optimize the flow of reque
 Latency SLOs are not enforced by "fast inference" alone; they are enforced by *headroom*.
 
 - [ ] **Little's Law**: Can you use \(L = \lambda W\) to explain why rising queue depth implies rising latency even if per-request compute time is unchanged?
-- [ ] **Utilization cliff**: Can you explain why latency grows non-linearly as utilization \(\rho\) approaches 1, and why production systems target a conservative \(\rho\) rather than "100 percent busy"?
+- [ ] **Utilization cliff**: Can you explain why latency grows non-linearly as utilization \(\rho\) approaches one, and why production systems target a conservative \(\rho\) rather than "100 percent busy"?
 - [ ] **Wait vs. compute**: Given an end-to-end latency budget, can you separate \(L_{\text{lat,compute}}\) from \(L_{\text{lat,wait}}\) and explain which one queuing theory primarily predicts?
 - [ ] **Capacity planning**: Can you explain why a throughput number is only "real" if requests still meet the percentile latency SLO under load?
 
@@ -2160,7 +2160,7 @@ Latency SLOs are not enforced by "fast inference" alone; they are enforced by *h
 
 ## Model Lifecycle Management {#sec-model-serving-model-lifecycle-management-ff2e}
 
-Queuing theory and tail-tolerant techniques optimize the steady-state flow of requests, but they cannot help if the system never reaches steady state. A newly deployed replica that takes 35 seconds to compile its TensorRT engine violates every SLO during that window. A model whose OpenCV-based serving pipeline resizes images differently than the PIL-based training pipeline silently drops 5 percentage points of accuracy—a degradation invisible to latency dashboards. *These lifecycle failures are not edge cases; they occur at every deployment, every scaling event, and every framework migration.* Addressing them requires engineering discipline in two areas: getting models ready to serve (cold start and initialization) and keeping predictions faithful to what was validated (training-serving skew).
+Queuing theory and tail-tolerant techniques optimize the steady-state flow of requests, but they cannot help if the system never reaches steady state. A newly deployed replica that takes 35 seconds to compile its TensorRT engine violates every SLO during that window. A model whose OpenCV-based serving pipeline resizes images differently than the PIL-based training pipeline silently drops five percentage points of accuracy—a degradation invisible to latency dashboards. *These lifecycle failures are not edge cases; they occur at every deployment, every scaling event, and every framework migration.* Addressing them requires engineering discipline in two areas: getting models ready to serve (cold start and initialization) and keeping predictions faithful to what was validated (training-serving skew).
 
 ### Training-Serving Skew {#sec-model-serving-trainingserving-skew-7b99}
 
@@ -2303,7 +2303,7 @@ Three strategies address multi-model memory management. Time-multiplexing\index{
 
 #### Multi-Stream Execution {#sec-model-serving-multistream-execution-1b1f}
 
-When multiple models or multiple instances of the same model must run concurrently on a single GPU, the hardware must partition resources between them. NVIDIA's Multi-Instance GPU[^fn-mig-multimodel]\index{MIG (Multi-Instance GPU)!hardware isolation} technology enables hardware-level isolation, dividing an A100 into up to 7 independent GPU instances, each with dedicated memory and compute resources. MIG is available on A100, A30 (up to 4 instances), H100, H200, and newer data center GPUs. For older GPUs such as V100 or T4, CUDA stream scheduling provides time-multiplexed sharing without hardware isolation.
+When multiple models or multiple instances of the same model must run concurrently on a single GPU, the hardware must partition resources between them. NVIDIA's Multi-Instance GPU[^fn-mig-multimodel]\index{MIG (Multi-Instance GPU)!hardware isolation} technology enables hardware-level isolation, dividing an A100 into up to seven independent GPU instances, each with dedicated memory and compute resources. MIG is available on A100, A30 (up to four instances), H100, H200, and newer data center GPUs. For older GPUs such as V100 or T4, CUDA stream scheduling provides time-multiplexed sharing without hardware isolation.
 
 [^fn-mig-multimodel]: **MIG (Multi-Instance GPU)**: Introduced with NVIDIA's A100 (Ampere, 2020), MIG partitions a single physical GPU into up to seven independent instances, each with dedicated streaming multiprocessors, memory controllers, and L2 cache. Unlike software sharing (MPS or time-slicing), MIG provides hardware-level isolation: a runaway kernel in one partition cannot affect another's performance or memory. The trade-off is granularity---partitions must follow fixed profiles (e.g., 1g.5gb, 2g.10gb on A100), so resources cannot be divided arbitrarily. For multi-model serving, MIG eliminates the "noisy neighbor" problem, enabling per-model SLO guarantees on shared hardware. \index{MIG!hardware isolation}
 
@@ -2358,7 +2358,7 @@ The lifecycle management strategies examined so far ensure models are ready to s
 
 ## Throughput Optimization {#sec-model-serving-throughput-optimization-18d1}
 
-Consider a ResNet-50 classifier running on a V100 GPU at batch size 1: the GPU processes one image, then sits idle while the CPU fetches and preprocesses the next—achieving only 15 percent hardware utilization and 200 images per second. The same GPU processing 32 images at once reaches 95 percent utilization and 1,280 images per second, a 6.4$\times$ throughput improvement on identical hardware. The difference is batching, the core lever for improving serving economics. Batching\index{Batching!training vs serving}\index{Batching!throughput optimization}[^fn-batch-serving-tradeoff] differs sharply between training and serving [@crankshaw2017clipper]. Training batches maximize throughput by processing hundreds or thousands of samples together with no concern for individual sample latency. Serving batches must balance throughput against individual request latency, typically processing single digits of requests together while ensuring no request waits too long. This adaptive approach is called **dynamic batching** because the system adjusts batch composition in real time based on arriving requests.
+Consider a ResNet-50 classifier running on a V100 GPU at batch size one: the GPU processes one image, then sits idle while the CPU fetches and preprocesses the next—achieving only 15 percent hardware utilization and 200 images per second. The same GPU processing 32 images at once reaches 95 percent utilization and 1,280 images per second, a 6.4$\times$ throughput improvement on identical hardware. The difference is batching, the core lever for improving serving economics. Batching\index{Batching!training vs serving}\index{Batching!throughput optimization}[^fn-batch-serving-tradeoff] differs sharply between training and serving [@crankshaw2017clipper]. Training batches maximize throughput by processing hundreds or thousands of samples together with no concern for individual sample latency. Serving batches must balance throughput against individual request latency, typically processing single digits of requests together while ensuring no request waits too long. This adaptive approach is called **dynamic batching** because the system adjusts batch composition in real time based on arriving requests.
 
 [^fn-batch-serving-tradeoff]: **Batch**: From Old French *bache* (a quantity baked at one time), entering computing in the 1950s for jobs processed together without human interaction. The ML serving usage preserves the original trade-off: grouping requests amortizes fixed costs (kernel launch, weight loading) across multiple inputs, but each request must wait for the batch to fill. In training, batches of 256--4096 are routine; in serving, batches above 8--32 typically violate latency SLOs, making the serving batch a fundamentally different optimization target. \index{Batching!etymology}
 
@@ -2376,7 +2376,7 @@ Consider a ResNet-50 classifier running on a V100 GPU at batch size 1: the GPU p
 
 Modern accelerators achieve peak efficiency only at sufficient batch sizes\index{GPU Utilization!batch size dependency} [@shen2019nexus]. A single inference request leaves most compute units idle because GPUs are designed for parallel execution across thousands of threads. Batching amortizes fixed costs across multiple requests and enables parallel execution across the batch dimension.
 
-Two fixed costs dominate at small batch sizes. **Kernel launch overhead**\index{Kernel Launch Overhead!fixed cost}[^fn-kernel-launch-serving] is the time for the CPU to prepare and submit work to the GPU. Each layer in a neural network typically requires a separate kernel launch: the CPU must assemble kernel parameters, copy them to GPU-accessible memory, and signal the GPU to begin execution. This overhead is typically 5–20 μs per kernel, independent of batch size. ResNet-50 has approximately 50 layers, so kernel launch alone adds 250–1000 μs per inference. At batch size 1, this overhead may exceed the actual compute time; at batch size 32, the same overhead is amortized across 32 images. **Weight loading**\index{Weight Loading!memory efficiency} reads model parameters from GPU memory (VRAM) to the compute units. At batch size 1, the GPU reads all weights to process one image; at batch size 32, the same weight read processes 32 images, achieving 32$\times$ better memory efficiency. Measuring *batching efficiency* on a concrete model quantifies how these fixed costs amortize in practice.
+Two fixed costs dominate at small batch sizes. **Kernel launch overhead**\index{Kernel Launch Overhead!fixed cost}[^fn-kernel-launch-serving] is the time for the CPU to prepare and submit work to the GPU. Each layer in a neural network typically requires a separate kernel launch: the CPU must assemble kernel parameters, copy them to GPU-accessible memory, and signal the GPU to begin execution. This overhead is typically 5–20 μs per kernel, independent of batch size. ResNet-50 has approximately 50 layers, so kernel launch alone adds 250–1000 μs per inference. At batch size one, this overhead may exceed the actual compute time; at batch size 32, the same overhead is amortized across 32 images. **Weight loading**\index{Weight Loading!memory efficiency} reads model parameters from GPU memory (VRAM) to the compute units. At batch size one, the GPU reads all weights to process one image; at batch size 32, the same weight read processes 32 images, achieving 32$\times$ better memory efficiency. Measuring *batching efficiency* on a concrete model quantifies how these fixed costs amortize in practice.
 
 [^fn-kernel-launch-serving]: **Kernel (GPU)**: CUDA borrowed this term from operating systems circa 2007 because GPU functions represent the computational "core" of parallel algorithms. Unlike OS kernels that run continuously, GPU kernels are discrete units of parallel work launched by the CPU. Each launch carries 5--20 $\mu$s of overhead independent of batch size---negligible for large training batches but dominant at batch-1 serving, where a 50-layer model accumulates 250--1000 $\mu$s of pure launch overhead per inference. \index{Kernel Launch!serving overhead}
 
@@ -2492,7 +2492,7 @@ class BatchingSweetspotCalc:
     - **Wait Time**: A **`{python} BatchingSweetspotCalc.batch8_wait_ms_str` ms** batching window collects requests.
     - **Inference Time**: Batch 8 inference takes **`{python} BatchingSweetspotCalc.batch8_inference_ms_str` ms**.
     - **User Latency**: `{python} BatchingSweetspotCalc.batch8_wait_ms_str` ms (wait) + `{python} BatchingSweetspotCalc.batch8_inference_ms_str` ms (compute) = **`{python} BatchingSweetspotCalc.batch8_user_latency_str` ms**.
-    - **Throughput**: 8 img / `{python} BatchingSweetspotCalc.batch8_user_latency_str` ms ≈ **`{python} BatchingSweetspotCalc.batch8_throughput_str` img/s**.
+    - **Throughput**: eight img / `{python} BatchingSweetspotCalc.batch8_user_latency_str` ms ≈ **`{python} BatchingSweetspotCalc.batch8_throughput_str` img/s**.
 
 **The Systems Conclusion**: By accepting a **`{python} BatchingSweetspotCalc.latency_increase_str`$\times$ increase in latency** (`{python} BatchingSweetspotCalc.batch1_ms_str` ms → `{python} BatchingSweetspotCalc.batch8_user_latency_str` ms), the system achieves nearly **`{python} BatchingSweetspotCalc.latency_increase_str`$\times$ higher throughput** on the same hardware. As long as `{python} BatchingSweetspotCalc.batch8_user_latency_str` ms remains under the 20 ms budget, this is "free" capacity. This trade-off is the primary lever of serving economics.
 
@@ -2747,7 +2747,7 @@ class BatchingAnalysisCalc:
 | 16             |          14.6 ms |           24.6 ms |      650 img/s | High           |
 | 32             |          24.2 ms |           34.2 ms |      935 img/s | Maximum        |
 
-: **Batching Throughput Analysis**: ResNet-50 throughput on V100 with 10 ms batching window. Throughput increases 14.6$\times$ from batch size 1 to 32 (64 to 935 img/s), but total latency more than doubles (15.6 ms to 34.2 ms). The optimal configuration depends on whether the latency SLO or throughput target is the binding constraint. {#tbl-batching-throughput}
+: **Batching Throughput Analysis**: ResNet-50 throughput on V100 with 10 ms batching window. Throughput increases 14.6$\times$ from batch size one to 32 (64 to 935 img/s), but total latency more than doubles (15.6 ms to 34.2 ms). The optimal configuration depends on whether the latency SLO or throughput target is the binding constraint. {#tbl-batching-throughput}
 
 The throughput gains in @tbl-batching-throughput trace directly back to *the iron law of batching efficiency*, the framework established in @sec-model-training-iron-law-training-performance-a53f, where batching amortizes the fixed overhead term.
 
@@ -2853,14 +2853,14 @@ class BatchingOptimization:
     latency_p99_increase_ms_str = f"{int(s2_window - s1_window)}"
 ```
 
-**Scenario 1: Conservative window (T = `{python} BatchingOptimization.s1_window_ms_str`ms)**
+**Scenario one: Conservative window (T = `{python} BatchingOptimization.s1_window_ms_str`ms)**
 
 - Average wait: `{python} BatchingOptimization.s1_wait_ms_str`ms
 - Latency budget for inference: `{python} BatchingOptimization.s1_budget_ms_str`ms
 - Maximum batch size: `{python} BatchingOptimization.s1_max_batch_str` (but typically capped at 32 for memory)
 - Achieved throughput: ~`{python} BatchingOptimization.s1_throughput_str` img/s (batch=`{python} BatchingOptimization.s1_batch_str`)
 
-**Scenario 2: Aggressive window (T = `{python} BatchingOptimization.s2_window_ms_str`ms)**
+**Scenario two: Aggressive window (T = `{python} BatchingOptimization.s2_window_ms_str`ms)**
 
 - Average wait: `{python} BatchingOptimization.s2_wait_ms_str`ms
 - Latency budget for inference: `{python} BatchingOptimization.s2_budget_ms_str`ms
@@ -3071,7 +3071,7 @@ class PracticalConfigCalc:
 
 ### Continuous Batching {#sec-model-serving-continuous-batching-8bb6}
 
-Autoregressive models\index{Autoregressive Models!token generation} like language models generate outputs token by token—each new token depends on all previously generated tokens, so generation is inherently sequential. The dynamic batching examined in @sec-model-serving-throughput-optimization-18d1 assumes fixed-length outputs. LLMs violate this assumption: if one sequence in a batch of 8 finishes after 10 tokens while others need 100 tokens, 87.5 percent of the compute for that sequence slot is wasted\index{Sequence Length Variability!batch waste} [@yu2022orca].
+Autoregressive models\index{Autoregressive Models!token generation} like language models generate outputs token by token—each new token depends on all previously generated tokens, so generation is inherently sequential. The dynamic batching examined in @sec-model-serving-throughput-optimization-18d1 assumes fixed-length outputs. LLMs violate this assumption: if one sequence in a batch of eight finishes after 10 tokens while others need 100 tokens, 87.5 percent of the compute for that sequence slot is wasted\index{Sequence Length Variability!batch waste} [@yu2022orca].
 
 Continuous batching[^fn-continuous-batching-llm]\index{Continuous Batching!LLM serving} (also called iteration-level batching) addresses this waste by allowing new requests to join a batch between generation steps and completed sequences to exit [@kwon2023vllm]. The system manages batch composition dynamically at each decoding iteration rather than forming static batches that persist for the entire generation process.
 
@@ -3091,7 +3091,7 @@ Memory management adds complexity to continuous batching. As sequences enter and
 
 PagedAttention\index{Continuous Batching!iteration-level}\index{PagedAttention!memory fragmentation solution},[^fn-pagedattention-serving] introduced in vLLM, solves this fragmentation problem by applying operating system virtual memory concepts to GPU memory [@kwon2023vllm]. Instead of allocating one contiguous block per sequence, PagedAttention divides the KV cache into fixed-size *pages* (typically 16 tokens each). A sequence's cache consists of pointers to non-contiguous pages scattered across GPU memory. When a sequence completes, its pages return to a free list and can be reused by any new sequence, regardless of length. This approach achieves near-zero fragmentation: vLLM reports memory utilization above 95 percent compared to 50–60 percent for contiguous allocation schemes. The overhead is modest (one pointer lookup per page during attention computation), making PagedAttention the standard for production LLM serving.
 
-[^fn-pagedattention-serving]: **PagedAttention**: The name directly references OS virtual memory paging, first implemented on the Atlas computer at Manchester (1962) to solve the same problem---programs needed more memory than physically available, and contiguous allocation wasted space. Introduced at SOSP 2023, PagedAttention applies this six-decade-old abstraction to GPU memory: before it, LLM serving systems wasted 60--80 percent of KV cache memory due to fragmentation and over-reservation. PagedAttention reduces waste to under 4 percent, enabling 2--4$\times$ higher throughput on the same hardware. \index{PagedAttention!memory efficiency}
+[^fn-pagedattention-serving]: **PagedAttention**: The name directly references OS virtual memory paging, first implemented on the Atlas computer at Manchester (1962) to solve the same problem---programs needed more memory than physically available, and contiguous allocation wasted space. Introduced at SOSP 2023, PagedAttention applies this six-decade-old abstraction to GPU memory: before it, LLM serving systems wasted 60--80 percent of KV cache memory due to fragmentation and over-reservation. PagedAttention reduces waste to under four percent, enabling 2--4$\times$ higher throughput on the same hardware. \index{PagedAttention!memory efficiency}
 
 The batching and memory techniques covered here establish the foundation for LLM serving, but several advanced topics warrant additional study:
 
@@ -3113,7 +3113,7 @@ Some\index{Batching!when to avoid} scenarios require single-request processing. 
 
 When requests from the same user or session should route to the same replica, batching becomes constrained. Session affinity, also called sticky sessions, matters for three main reasons.
 
-The most impactful case is KV-cache reuse\index{KV Cache!session reuse}\index{KV Cache!multi-turn conversations} in conversational AI, where the key-value cache from previous turns dramatically speeds up multi-turn conversations. Routing a follow-up request to a different replica forfeits this cached context, increasing latency by 2 to 5 times for long conversations.
+The most impactful case is KV-cache reuse\index{KV Cache!session reuse}\index{KV Cache!multi-turn conversations} in conversational AI, where the key-value cache from previous turns dramatically speeds up multi-turn conversations. Routing a follow-up request to a different replica forfeits this cached context, increasing latency by two to five times for long conversations.
 
 A second driver is user-specific models\index{Personalized Models!user adapters}: some systems serve personalized models or adapters per user, and routing requests to the replica that has already loaded that user's adapter avoids repeated loading overhead. Similarly, stateful preprocessing that maintains tokenizer caches or session-specific normalization requires rebuilding state when requests route to a different replica.
 
@@ -3127,11 +3127,11 @@ The optimal batching strategy depends critically on how requests arrive. Differe
 
 Cloud APIs\index{Server Traffic!Poisson process} and web services typically receive requests following a Poisson process,[^fn-poisson-serving] where arrivals are independent and uniformly distributed over time. @eq-poisson-batch expresses the expected batch size for Poisson arrivals with rate $\lambda$ and batching window $T$:
 
-[^fn-poisson-serving]: **Poisson Process**: Named after French mathematician Simeon Denis Poisson (1781--1840), this stochastic model describes events occurring continuously and independently at a constant average rate. The key property for serving: variance equals the mean, so batch sizes fluctuate significantly at moderate traffic---with $\lambda=200$ req/s and a 10 ms window, expected batch size is 2 but 16 percent of windows will be empty (wasted GPU cycles). This variance is why batching windows must be tuned probabilistically rather than set from average traffic alone. \index{Poisson Process!serving arrivals}
+[^fn-poisson-serving]: **Poisson Process**: Named after French mathematician Simeon Denis Poisson (1781--1840), this stochastic model describes events occurring continuously and independently at a constant average rate. The key property for serving: variance equals the mean, so batch sizes fluctuate significantly at moderate traffic---with $\lambda=200$ req/s and a 10 ms window, expected batch size is two but 16 percent of windows will be empty (wasted GPU cycles). This variance is why batching windows must be tuned probabilistically rather than set from average traffic alone. \index{Poisson Process!serving arrivals}
 
 $$E[\text{batch size}] = \lambda \cdot T$$ {#eq-poisson-batch}
 
-The variance equals the mean (a property of Poisson distributions), so batch sizes fluctuate significantly at moderate traffic. With $\lambda = 200$ requests/second and $T = 10$ms, expected batch size is 2, but 16 percent of windows will have zero requests (wasted compute cycles) while others may have 4 or more.
+The variance equals the mean (a property of Poisson distributions), so batch sizes fluctuate significantly at moderate traffic. With $\lambda = 200$ requests/second and $T = 10$ms, expected batch size is two, but 16 percent of windows will have zero requests (wasted compute cycles) while others may have four or more.
 
 The optimal batching window balances waiting cost against throughput benefit. @eq-optimal-window defines this optimum:
 
@@ -3154,7 +3154,7 @@ Autonomous vehicles\index{Streaming Traffic!sensor synchronization}, video analy
 
 ::: {.callout-notebook title="Multi-Camera Autonomous Vehicle Serving"}
 
-Consider a vehicle with 6 cameras capturing at 30 FPS, requiring spatial fusion:
+Consider a vehicle with six cameras capturing at 30 FPS, requiring spatial fusion:
 
 **Timeline for processing frame set N:**
 
@@ -3171,7 +3171,7 @@ Consider a vehicle with 6 cameras capturing at 30 FPS, requiring spatial fusion:
 **Key constraints:**
 
 - Hard deadline: 33 ms per frame set (real-time requirement)
-- Batch size: Fixed at 6 (one per camera)
+- Batch size: Fixed at six (one per camera)
 - Synchronization budget: 12 ms of 33 ms total (36 percent for jitter tolerance)
 - Timeout policy: If camera frame not received by T+20 ms, use previous frame
 
@@ -3257,7 +3257,7 @@ class MobileServingCalc:
 - **NPU vs CPU trade-off**: CPU fallback uses 4.2mJ (1.4$\times$ energy) at 85 ms (1.9$\times$ latency)
 - **Memory footprint**: 150 MB peak (model + activations), competing with app memory
 
-**Critical insight**: Even at batch size 1, the mobile NPU achieves 82 percent utilization because its compute capacity matches single-image workloads. This differs from data center GPUs, which achieve only 15 percent utilization at batch size 1 because their massive parallelism requires larger batches to saturate.
+**Critical insight**: Even at batch size one, the mobile NPU achieves 82 percent utilization because its compute capacity matches single-image workloads. This differs from data center GPUs, which achieve only 15 percent utilization at batch size one because their massive parallelism requires larger batches to saturate.
 
 :::
 
@@ -3288,7 +3288,7 @@ These constraints make mobile serving optimization qualitatively different from 
 
 Batching is the primary lever for serving economics, but the optimal strategy depends on context.
 
-- [ ] **Throughput-latency trade-off**: Can you explain why batch size 32 achieves 6$\times$ higher throughput than batch size 1, yet a production system with a 20 ms SLO might still choose batch size 8?
+- [ ] **Throughput-latency trade-off**: Can you explain why batch size 32 achieves 6$\times$ higher throughput than batch size one, yet a production system with a 20 ms SLO might still choose batch size eight?
 - [ ] **Dynamic vs. static batching**: Can you describe why static batching (waiting for a full batch) fails under variable traffic, and how dynamic batching with a time window solves this?
 - [ ] **Traffic pattern matching**: Given a deployment scenario (e.g., cloud API, autonomous vehicle, mobile app), can you select the appropriate MLPerf scenario and explain why that batching strategy fits?
 - [ ] **Adaptive windows**: Can you explain why the optimal batching window *decreases* as traffic *increases*, even though batch sizes grow?
@@ -3301,7 +3301,7 @@ The batching strategies examined so far share a critical assumption: each reques
 
 Large language models\index{LLM Serving!token generation} introduce three properties absent from traditional serving: *autoregressive generation*[^fn-autoregressive-serving] (each token depends on all previous tokens, making output inherently sequential), *variable-length output* (response length is unknown at request time, invalidating fixed-batch assumptions), and *stateful memory* (the key-value cache grows with each generated token, creating dynamic memory pressure that traditional models never face). Together, these properties create a qualitatively different serving challenge. The p50, p95, and p99 metrics that govern classification serving still matter, but they apply to different *phases* of the request---the initial prompt processing and the subsequent token generation. The foundational principles of queuing theory, batching trade-offs, and latency budgets apply universally; LLM serving adds domain-specific techniques atop this foundation.
 
-[^fn-autoregressive-serving]: **Autoregressive**: From Greek *auto-* (self) and Latin *regressus* (a going back)---the output "regresses" on itself. George Udny Yule introduced autoregressive models in 1927 for analyzing sunspot cycles. In language modeling, each output token conditions on all previously generated tokens, creating a serial dependency that prevents the parallelism exploited during training. This serial bottleneck explains why LLM serving is memory-bandwidth-bound rather than compute-bound: the model weights must be read from memory once per token, regardless of available compute capacity. \index{Autoregressive!serial bottleneck}
+[^fn-autoregressive-serving]: **Autoregressive**: From Greek *auto-* (self) and Latin *regressus* (a going back)---the output "regresses" on itself. George Udny Yule introduced autoregressive models in 1927 for analyzing sunspot cycles. In language modeling, each output token conditions on all previously generated tokens, creating a serial dependency that prevents the parallelism exploited during training. This serial bottleneck explains why LLM serving is memory-bandwidth-bound rather than compute bound: the model weights must be read from memory once per token, regardless of available compute capacity. \index{Autoregressive!serial bottleneck}
 
 ### Performance Metrics: TTFT and TPOT {#sec-model-serving-performance-metrics-ttft-tpot-b009}
 
@@ -3335,9 +3335,9 @@ Generative models require decoding strategies that trade-off quality, diversity,
 
 The simplest approach, greedy decoding\index{Greedy Decoding!LLM generation}, selects the highest-probability token at each step. It is fast but often produces repetitive, low-quality outputs because it cannot recover from early mistakes. Beam search\index{Beam Search!decoding strategy}\index{Beam Search!candidate sequences} improves quality by maintaining multiple candidate sequences and selecting the highest-scoring complete sequence, though it multiplies computation by the beam width. Sampling\index{Sampling!temperature, top-k, top-p} with temperature, top-k, and top-p parameters introduces randomness for diversity [@holtzman2020curious]. Temperature scales logits before softmax. Top-k limits sampling to the k highest-probability tokens. Top-p, also called nucleus sampling\index{Nucleus Sampling!top-p}, limits sampling to tokens comprising probability mass p.
 
-The choice presents latency trade-offs [@meister2020beam]. Beam search with width 5 takes roughly 5$\times$ the compute of greedy decoding. Sampling adds minimal overhead but requires careful parameter tuning to balance quality and coherence.
+The choice presents latency trade-offs [@meister2020beam]. Beam search with width five takes roughly 5$\times$ the compute of greedy decoding. Sampling adds minimal overhead but requires careful parameter tuning to balance quality and coherence.
 
-Production LLM systems\index{Streaming Responses!LLM serving}\index{Chunked HTTP!streaming tokens} return tokens as they are produced rather than waiting for complete generation. This transforms the user experience: a 2-second total generation feels responsive when tokens stream continuously, but feels broken when users stare at a blank screen for 2 seconds. Streaming requires infrastructure support for chunked HTTP responses and client-side incremental rendering. The latency profile shifts accordingly: TTFT determines when output starts appearing (responsiveness), while TPOT determines the perceived generation speed (fluidity).
+Production LLM systems\index{Streaming Responses!LLM serving}\index{Chunked HTTP!streaming tokens} return tokens as they are produced rather than waiting for complete generation. This transforms the user experience: a two-second total generation feels responsive when tokens stream continuously, but feels broken when users stare at a blank screen for two seconds. Streaming requires infrastructure support for chunked HTTP responses and client-side incremental rendering. The latency profile shifts accordingly: TTFT determines when output starts appearing (responsiveness), while TPOT determines the perceived generation speed (fluidity).
 
 ### Memory and KV Cache {#sec-model-serving-memory-kv-cache-d1ea}
 
@@ -3585,7 +3585,7 @@ Performance comparison for ResNet-50 inference on V100 GPU (batch size 1):
 | TensorRT FP16   |    `{python} RuntimeComparisonCalc.rt_trt_fp16_ms_str` ms |    `{python} RuntimeComparisonCalc.rt_trt_fp16_speedup_str`$\times$ | Tensor Core acceleration  |
 | TensorRT INT8   |    `{python} RuntimeComparisonCalc.rt_trt_int8_ms_str` ms |    `{python} RuntimeComparisonCalc.rt_trt_int8_speedup_str`$\times$ | Requires calibration      |
 
-**Key insight**: The `{python} RuntimeComparisonCalc.rt_trt_int8_speedup_str`$\times$ speedup from TensorRT INT8 comes at the cost of: (1) quantization calibration data, (2) potential accuracy loss (<1 percent for ResNet-50), and (3) NVIDIA-specific deployment.
+**Key insight**: The `{python} RuntimeComparisonCalc.rt_trt_int8_speedup_str`$\times$ speedup from TensorRT INT8 comes at the cost of: (1) quantization calibration data, (2) potential accuracy loss (<one percent for ResNet-50), and (3) NVIDIA-specific deployment.
 
 :::
 
@@ -3926,7 +3926,7 @@ The worked example in @sec-model-serving-queuing-theory-tail-latency-29a6 demons
 
 To synthesize the principles of latency budgeting, memory management, and hardware efficiency, we analyze a complete production profile for a modern Large Language Model (LLM) serving workload\index{LLM Serving!8B parameter case study}\index{LLM Serving!production case study}. This case study demonstrates how physical constraints (memory bandwidth and capacity) translate directly into service-level metrics and unit economics.
 
-We begin with the bottleneck that dominates LLM serving costs: KV cache memory. The memory curves in @fig-kv-cache-growth climb steeply, especially for larger batch sizes, illustrating *why* long-context serving is memory-bound even on H100s using typical 70B-class assumptions.
+We begin with the bottleneck that dominates LLM serving costs: KV cache memory. The memory curves in @fig-kv-cache-growth climb steeply, especially for larger batch sizes, illustrating *why* long-context serving is memory bound even on H100s using typical 70B-class assumptions.
 
 ::: {#fig-kv-cache-growth fig-env="figure" fig-pos="htb" fig-cap="**The KV-Cache Explosion**: Memory usage vs. Context Length for a 70B-class model. Assumes 80 layers, d_model=8192, FP16 KV cache, GQA (8x). The linear growth of the Key-Value cache (storing attention history) quickly consumes available GPU memory (red dashed line). For batch size 32 (purple), the system hits the 'OOM Zone' at just 8k context length, forcing a trade-off between batch size (throughput) and context window (capability)." fig-alt="Line chart showing memory usage increasing linearly with context length. Multiple lines for different batch sizes. Red dashed horizontal line marks GPU memory limit. Purple line for batch 32 crosses into OOM zone at 8k context."}
 

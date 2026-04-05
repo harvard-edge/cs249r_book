@@ -129,7 +129,7 @@ This appendix covers the mathematical and computational machinery that powers ne
 Deep learning systems are, at their core, engines for transforming massive matrices. While frameworks like PyTorch abstract away the raw math, understanding the underlying linear algebra is essential for performance engineering. Now that we know how numbers are stored (from @sec-machine-foundations), we must understand how they are manipulated.
 
 ::: {.callout-perspective title="Why This Matters"}
-Every neural network, regardless of architecture, spends most of its time doing matrix multiplication. A single forward pass through a transformer layer executes four large GEMMs (for the Q, K, V projections and the output projection) plus the attention score computation—all matrix multiplies. Understanding GEMM performance characteristics explains why batch size affects throughput, why certain layer dimensions are "better" than others, and how to interpret profiler output. If you can reason about matrix dimensions and arithmetic intensity, you can predict whether a workload is compute-bound or memory-bound *before* running a single profiler trace.
+Every neural network, regardless of architecture, spends most of its time doing matrix multiplication. A single forward pass through a transformer layer executes four large GEMMs (for the Q, K, V projections and the output projection) plus the attention score computation—all matrix multiplies. Understanding GEMM performance characteristics explains why batch size affects throughput, why certain layer dimensions are "better" than others, and how to interpret profiler output. If you can reason about matrix dimensions and arithmetic intensity, you can predict whether a workload is compute bound or memory-bound *before* running a single profiler trace.
 :::
 
 ### Tensor Operations and Notation {#sec-algorithm-foundations-tensor-operations-notation-2758}
@@ -176,23 +176,23 @@ When most elements in a matrix are zero, specialized storage formats avoid wasti
 
 The **Compressed Sparse Row (CSR)** format uses three arrays:
 
-- `Values`: The non-zero elements, stored in row order
-- `Col_Idx`: The column index of each non-zero element
+- `Values`: The nonzero elements, stored in row order
+- `Col_Idx`: The column index of each nonzero element
 - `Row_Ptr`: The starting position in `Values` for each row (length = num_rows + 1)
 
-CSR is essential for recommendation systems (sparse embedding tables) and pruned models. For a matrix with $N$ elements and $K$ non-zeros, CSR uses $O(K)$ storage instead of $O(N)$.
+CSR is essential for recommendation systems (sparse embedding tables) and pruned models. For a matrix with $N$ elements and $K$ nonzeros, CSR uses $O(K)$ storage instead of $O(N)$.
 
 To see the trade-off concretely, consider a vocabulary embedding matrix of size `{python} AlgorithmFoundations.vocab_size_str` $\times$ `{python} AlgorithmFoundations.embed_dim_str` (`{python} AlgorithmFoundations.total_elements_str` billion parameters):
 
 *   **Dense (FP32)**: `{python} AlgorithmFoundations.total_elements_str` $\times$ $10^{9}$ $\times$ `{python} AlgorithmFoundations.bytes_fp32_str` bytes = **`{python} AlgorithmFoundations.dense_gb_str` GB**.
-*   **Sparse (`{python} AlgorithmFoundations.sparsity_pct_str` percent density)**: Storing only non-zeros requires roughly `{python} AlgorithmFoundations.nonzeros_str` $\times$ $10^{6}$ $\times$ (`{python} AlgorithmFoundations.bytes_fp32_str` bytes value + `{python} AlgorithmFoundations.bytes_int32_str` bytes index) ≈ **`{python} AlgorithmFoundations.sparse_mb_str` MB**.
+*   **Sparse (`{python} AlgorithmFoundations.sparsity_pct_str` percent density)**: Storing only nonzeros requires roughly `{python} AlgorithmFoundations.nonzeros_str` $\times$ $10^{6}$ $\times$ (`{python} AlgorithmFoundations.bytes_fp32_str` bytes value + `{python} AlgorithmFoundations.bytes_int32_str` bytes index) ≈ **`{python} AlgorithmFoundations.sparse_mb_str` MB**.
 *   *Result*: A `{python} AlgorithmFoundations.reduction_factor_str`$\times$ reduction in memory footprint, fitting a model that would otherwise OOM (Out of Memory).
 
 Linear algebra tells us *what* to compute; the next question is *how* to express those computations in code. Tensor programming primitives—shapes, strides, and broadcasting—bridge the gap between mathematical notation and the array operations that actually execute on hardware.
 
 ## Tensor Programming Primitives {#sec-algorithm-foundations-tensor-programming-primitives-1400}
 
-A shape mismatch crash, a silently wrong broadcast, a kernel running at 5 percent of peak because of a non-contiguous tensor—these common ML engineering failures all trace back to the same layer of abstraction. *Tensor programming* translates the abstract math of linear algebra into concrete array manipulations that run on hardware.
+A shape mismatch crash, a silently wrong broadcast, a kernel running at five percent of peak because of a non-contiguous tensor—these common ML engineering failures all trace back to the same layer of abstraction. *Tensor programming* translates the abstract math of linear algebra into concrete array manipulations that run on hardware.
 
 ::: {.callout-perspective title="Why This Matters"}
 Your logic is correct, but your code crashes with a shape mismatch error. Or worse, it runs but produces garbage because you broadcasted dimensions incorrectly. Mastering tensor shapes, strides, and broadcasting is the literacy of ML engineering.
@@ -227,13 +227,13 @@ Broadcasting allows arithmetic operations on tensors of different shapes. The ru
 1.  They are equal.
 2.  One of them is 1.
 
-The dimension with size 1 is "stretched" to match the other, as illustrated in @fig-broadcasting-rules. Note that this stretching is **virtual**: the data is not copied in memory. Instead, the stride for that dimension is set to 0, allowing the hardware to read the same value repeatedly with $O(1)$ memory overhead.
+The dimension with size one is "stretched" to match the other, as illustrated in @fig-broadcasting-rules. Note that this stretching is **virtual**: the data is not copied in memory. Instead, the stride for that dimension is set to 0, allowing the hardware to read the same value repeatedly with $O(1)$ memory overhead.
 
 ::: {#fig-broadcasting-rules fig-env="figure" fig-pos="htb" fig-cap="**Tensor Broadcasting Rules**: Visualization of how tensors (3,1) and (1,4) expand to a shared (3,4) result. This stretching is a virtual operation that modifies strides without allocating new memory." fig-alt="Diagram showing two tensors (3,1) and (1,4) expanding to a shared (3,4) grid."}
 ![](images/svg/broadcasting_rules.svg)
 :::
 
-Consider a concrete case: tensor A has shape `(32, 1, 64)` and tensor B has shape `(1, 128, 64)`. Comparing dimensions right to left, 64 matches 64, then 1 stretches to 128, then 1 stretches to 32, yielding result shape `(32, 128, 64)`. Visualizing this expansion prevents silent logic bugs where you accidentally create a massive tensor (e.g., a `(Batch, Batch)` matrix instead of an element-wise `(Batch,)` vector).
+Consider a concrete case: tensor A has shape `(32, 1, 64)` and tensor B has shape `(1, 128, 64)`. Comparing dimensions right to left, 64 matches 64, then one stretches to 128, then one stretches to 32, yielding result shape `(32, 128, 64)`. Visualizing this expansion prevents silent logic bugs where you accidentally create a massive tensor (e.g., a `(Batch, Batch)` matrix instead of an element-wise `(Batch,)` vector).
 
 Shapes, strides, and broadcasting govern how tensors flow through a model's forward pass. However, training a model requires more than forward computation—it requires *learning from errors*. The next section examines the algorithm that makes learning possible: backpropagation, along with the memory costs it imposes.
 
@@ -439,7 +439,7 @@ While weights are fixed ($O(P)$), activations grow linearly with batch size and 
 
 ::: {.callout-checkpoint title="Training Memory Estimation"}
 
-1. A model has 1 billion parameters and is trained with Adam in mixed precision (FP16 weights, FP32 optimizer states). Without activations, how many GB of memory do the weights, gradients, and optimizer states require?
+1. A model has one billion parameters and is trained with Adam in mixed precision (FP16 weights, FP32 optimizer states). Without activations, how many GB of memory do the weights, gradients, and optimizer states require?
 2. If the same model processes batch size 32 with sequence length 2048 and 24 layers of hidden dimension 1024, would you expect activations to be larger or smaller than the non-activation memory? Why?
 3. How does gradient checkpointing reduce activation memory, and what is the trade-off?
 
@@ -455,7 +455,7 @@ Compilers transform graphs into Static Single Assignment (SSA) form, where each 
 
 #### Operator Fusion {#sec-algorithm-foundations-operator-fusion-5d73}
 
-Without fusion, each operation in a chain like `MatMul → Add (bias) → ReLU` produces an intermediate tensor that is written to High Bandwidth Memory (HBM) and then read back for the next operation. For elementwise operations like `Add` and `ReLU`, the compute is trivial (one FLOP per element) but the memory traffic is not (read the tensor, write it back). The arithmetic intensity of unfused elementwise operations is therefore close to zero—deeply memory-bound.
+Without fusion, each operation in a chain like `MatMul → Add (bias) → ReLU` produces an intermediate tensor that is written to High Bandwidth Memory (HBM) and then read back for the next operation. For elementwise operations like `Add` and `ReLU`, the compute is trivial (one FLOP per element) but the memory traffic is not (read the tensor, write it back). The arithmetic intensity of unfused elementwise operations is therefore close to zero—deeply memory bound.
 
 Fusion combines consecutive operations into a single kernel that reads the input once, applies all operations in registers or shared memory, and writes the final result once. For a sequence of $k$ elementwise operations on a tensor of size $N$ bytes, fusion reduces memory traffic from $2kN$ bytes (each op reads and writes) to $2N$ bytes (one read, one write)—a $k\times$ reduction.
 
@@ -475,14 +475,14 @@ As shown in @sec-algorithm-foundations-true-cost-training-memory-e54e, training 
 
 **Pitfall:** *Ignoring tensor layout when optimizing performance.*
 
-A matrix multiplication can run at 80 percent of peak throughput or 5 percent of peak depending entirely on whether the input tensors are contiguous in memory and aligned to the hardware's tile dimensions. Calling `.contiguous()` or transposing before a hot loop seems trivial, but neglecting it is one of the most common causes of unexplained slowdowns in custom model code.
+A matrix multiplication can run at 80 percent of peak throughput or five percent of peak depending entirely on whether the input tensors are contiguous in memory and aligned to the hardware's tile dimensions. Calling `.contiguous()` or transposing before a hot loop seems trivial, but neglecting it is one of the most common causes of unexplained slowdowns in custom model code.
 
 ## Summary {.unnumbered}
 
 ::: {.callout-takeaways title="When 'Hardware-Bound' Is Really Algorithm-Bound"}
 
-- GEMM arithmetic intensity scales as $n/3$ for square $n \times n$ matrices: small matrices are memory-bound and waste most of the hardware's compute capability. Increasing batch size or aligning dimensions to hardware tile sizes are the primary levers for improving throughput.
-- Sparse storage formats only reduce memory when sparsity exceeds roughly 90–95 percent, because index metadata consumes space proportional to the number of non-zeros.
+- GEMM arithmetic intensity scales as $n/3$ for square $n \times n$ matrices: small matrices are memory bound and waste most of the hardware's compute capability. Increasing batch size or aligning dimensions to hardware tile sizes are the primary levers for improving throughput.
+- Sparse storage formats only reduce memory when sparsity exceeds roughly 90–95 percent, because index metadata consumes space proportional to the number of nonzeros.
 - Tensor shapes, strides, and broadcasting are the source of many subtle bugs: a non-contiguous tensor can silently degrade kernel performance by orders of magnitude, and an incorrect broadcast can produce a result of the wrong shape without raising an error.
 - Training memory is dominated by four components—weights, gradients, optimizer states, and activations—and the last of these grows with batch size and sequence length, often exceeding the model's weight footprint by 10--50$\times$.
 - Backpropagation's efficiency comes from computing all parameter gradients in a single backward pass, but it requires caching forward-pass activations, creating a fundamental memory–compute trade-off that gradient checkpointing partially resolves.
