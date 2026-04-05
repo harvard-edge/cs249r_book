@@ -6,6 +6,8 @@ import { LEVELS } from "@/lib/levels";
 import { getQuestions } from "@/lib/corpus";
 import manifest from "@/data/vault-manifest.json";
 
+const PAPER_URL = "https://mlsysbook.ai/staffml/downloads/StaffML-Paper.pdf";
+
 export default function AboutPage() {
   // Pick a sample question to show on the page
   const allQs = getQuestions();
@@ -217,7 +219,7 @@ export default function AboutPage() {
             errors were corrected.
           </p>
           <a
-            href={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/downloads/StaffML-Paper.pdf`}
+            href={PAPER_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-start gap-4 p-4 rounded-xl border border-accentBlue/20 bg-accentBlue/5 hover:border-accentBlue/40 transition-colors mb-4 group"
