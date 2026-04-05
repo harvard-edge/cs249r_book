@@ -97,8 +97,7 @@ git push origin feature/your-improvement
 - ✅ Always use virtual environment (`.venv`)
 - ✅ Always work on feature branches
 - ✅ Always test before committing
-- 🚨 **NEVER add Co-Authored-By or automated attribution**
-- 🚨 **NEVER add "Generated with Claude Code"**
+- 🚨 **NEVER add Co-Authored-By, automated attribution, or vendor footers to commit messages**
 - 🚨 **Only project owner adds attribution when needed**
 
 ## 🧪 Testing Requirements
