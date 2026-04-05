@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { Suspense, useState, useEffect, useMemo } from "react";
 import { Search, X, Target, Crosshair, Flame, Calendar } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   getAreas, getVaultStats, getAreaStyle, getAreaForTopic, searchTopics,
   type Topic,
@@ -17,13 +18,44 @@ import { isDailyCompleted } from "@/lib/daily";
 import manifest from "@/data/vault-manifest.json";
 import { ECOSYSTEM_BASE } from "@/lib/env";
 
-export default function HomePage() {
+function formatTrackLabel(t: string) {
+  return t === "tinyml" ? "TinyML" : t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+export default function HomePageWrapper() {
+  return (
+    <Suspense fallback={
+      <div className="flex-1 flex items-center justify-center">
+        <Search className="w-6 h-6 text-textTertiary animate-pulse" />
+      </div>
+    }>
+      <HomePage />
+    </Suspense>
+  );
+}
+
+function HomePage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [selectedAreas, setSelectedAreas] = useState<Set<string>>(new Set());
   const [showAllAreas, setShowAllAreas] = useState(false);
-  const [selectedTrack, setSelectedTrack] = useState<string | null>(null);
+
+  // Initialize track from URL param, sync changes back to URL
+  const validTracks = getTracks();
+  const initialTrack = searchParams.get("track");
+  const [selectedTrack, setSelectedTrackState] = useState<string | null>(
+    initialTrack && validTracks.includes(initialTrack) ? initialTrack : null
+  );
+  const setSelectedTrack = (track: string | null) => {
+    setSelectedTrackState(track);
+    const params = new URLSearchParams(searchParams.toString());
+    if (track) { params.set("track", track); } else { params.delete("track"); }
+    const qs = params.toString();
+    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+  };
   const [isReturning, setIsReturning] = useState(false);
   const [streakCount, setStreakCount] = useState(0);
   const [attemptCount, setAttemptCount] = useState(0);
@@ -154,7 +186,15 @@ export default function HomePage() {
               </h1>
               <p className="text-[13px] text-textSecondary mb-3">
                 Free, open-source interview prep for ML systems engineers.{" "}
-                {stats.totalQuestions.toLocaleString()} questions across compute, memory, latency, and more.
+                {selectedTrack ? (
+                  <>
+                    <span className="font-semibold">{formatTrackLabel(selectedTrack)}</span> track:{" "}
+                    {filteredAreas.reduce((s, a) => s + a.questionCount, 0).toLocaleString()} of{" "}
+                    {stats.totalQuestions.toLocaleString()} questions.
+                  </>
+                ) : (
+                  <>{stats.totalQuestions.toLocaleString()} questions across compute, memory, latency, and more.</>
+                )}
               </p>
 
               {/* Welcome guide */}
@@ -384,6 +424,7 @@ export default function HomePage() {
             >
               <TopicDetail topic={selectedTopic}
                 areaName={selectedArea?.name || ""} style={selectedStyle}
+                selectedTrack={selectedTrack}
                 onClose={() => setSelectedTopic(null)} />
             </motion.div>
           )}
@@ -416,6 +457,7 @@ export default function HomePage() {
               </div>
               <TopicDetail topic={selectedTopic}
                 areaName={selectedArea?.name || ""} style={selectedStyle}
+                selectedTrack={selectedTrack}
                 onClose={() => setSelectedTopic(null)} />
             </motion.div>
           </>

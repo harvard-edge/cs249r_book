@@ -12,14 +12,21 @@ import SectionDivider from "./SectionDivider";
 
 const LEVEL_IDS = LEVEL_DEFS.map(l => l.id);
 
-export default function TopicDetail({ topic, areaName, style, onClose }: {
-  topic: Topic; areaName: string; style: AreaStyle; onClose: () => void;
+function formatTrackName(t: string) {
+  return t === "tinyml" ? "TinyML" : t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+export default function TopicDetail({ topic, areaName, style, onClose, selectedTrack }: {
+  topic: Topic; areaName: string; style: AreaStyle; onClose: () => void; selectedTrack?: string | null;
 }) {
   const [drillLevel, setDrillLevel] = useState<string | null>(null);
   const Icon = style.icon;
 
   const [prevId, setPrevId] = useState(topic.id);
   if (topic.id !== prevId) { setPrevId(topic.id); setDrillLevel(null); }
+
+  // Build track-aware query params for drill links
+  const trackParam = selectedTrack ? `&track=${selectedTrack}` : "";
 
   const levelQs = drillLevel ? topic.questionsByLevel[drillLevel] || [] : [];
 
@@ -66,7 +73,7 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
                       {levelQs.length} question{levelQs.length !== 1 ? "s" : ""}
                     </p>
                   </div>
-                  <Link href={`/practice?topic=${topic.id}&level=${drillLevel}`}
+                  <Link href={`/practice?topic=${topic.id}&level=${drillLevel}${trackParam}`}
                     className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold rounded-lg transition-all"
                     style={{ backgroundColor: style.primary, color: "#101014" }}>
                     <Target className="w-4 h-4" /> Drill
@@ -151,7 +158,7 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
               )}
 
               {/* Drill all CTA */}
-              <Link href={`/practice?topic=${topic.id}`}
+              <Link href={`/practice?topic=${topic.id}${trackParam}`}
                 className="flex items-center justify-center gap-2 w-full py-3.5 font-bold rounded-xl text-[14px] transition-all hover:opacity-90"
                 style={{ backgroundColor: style.primary, color: "#101014" }}>
                 <Target className="w-4 h-4" />
@@ -163,8 +170,13 @@ export default function TopicDetail({ topic, areaName, style, onClose }: {
                 <SectionDivider label="Available In" />
                 <div className="flex gap-2 flex-wrap mt-3">
                   {topic.tracks.map((t) => (
-                    <span key={t} className="px-3 py-1.5 rounded-lg bg-surface border border-borderSubtle text-[13px] text-textPrimary font-medium">
-                      {t === "tinyml" ? "TinyML" : t.charAt(0).toUpperCase() + t.slice(1)}
+                    <span key={t} className={clsx(
+                      "px-3 py-1.5 rounded-lg text-[13px] font-medium transition-colors",
+                      selectedTrack === t
+                        ? "bg-accentBlue/15 border-2 border-accentBlue text-accentBlue font-bold"
+                        : "bg-surface border border-borderSubtle text-textPrimary"
+                    )}>
+                      {formatTrackName(t)}
                     </span>
                   ))}
                 </div>
