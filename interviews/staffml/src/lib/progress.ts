@@ -306,6 +306,7 @@ export function exportProgress(): string {
     streak: getStorage(STREAK_KEY, {}),
     daily: getStorage('staffml_daily', {}),
     planProgress: getStorage('staffml_plan_progress', {}),
+    analytics: getStorage('staffml_analytics', []),
     exportedAt: new Date().toISOString(),
     version: 1,
   };
@@ -340,6 +341,9 @@ export function importProgress(json: string): boolean {
     if (data.daily) setStorage('staffml_daily', data.daily);
     if (data.planProgress && typeof data.planProgress === 'object') {
       setStorage('staffml_plan_progress', data.planProgress);
+    }
+    if (data.analytics && Array.isArray(data.analytics)) {
+      setStorage('staffml_analytics', data.analytics);
     }
     return true;
   } catch {

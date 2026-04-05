@@ -210,6 +210,9 @@ export interface AnalyticsSummary {
   gauntletsAbandoned: number;
   dailyCompletions: number;
   improvementsSuggested: number;
+  thumbsUp: number;
+  thumbsDown: number;
+  difficultyDistribution: Record<'too_easy' | 'about_right' | 'too_hard', number>;
   scoresByZone: Record<string, { total: number; count: number; avg: number }>;
   scoresByTopic: Record<string, { total: number; count: number; avg: number }>;
   scoresByLevel: Record<string, { total: number; count: number; avg: number }>;
@@ -227,6 +230,14 @@ export function computeSummary(events?: StoredEvent[]): AnalyticsSummary {
   let gauntletsAbandoned = 0;
   let dailyCompletions = 0;
   let improvementsSuggested = 0;
+  let thumbsUp = 0;
+  let thumbsDown = 0;
+  const difficultyDistribution: Record<'too_easy' | 'about_right' | 'too_hard', number> = {
+    too_easy: 0, about_right: 0, too_hard: 0,
+  };
+  // Dedup feedback: only count latest per (questionId, sessionId)
+  const latestThumbs = new Map<string, 'up' | 'down'>();
+  const latestDifficulty = new Map<string, 'too_easy' | 'about_right' | 'too_hard'>();
 
   const scoresByZone: Record<string, { total: number; count: number; avg: number }> = {};
   const scoresByTopic: Record<string, { total: number; count: number; avg: number }> = {};
@@ -272,8 +283,22 @@ export function computeSummary(events?: StoredEvent[]): AnalyticsSummary {
       case 'improvement_suggested':
         improvementsSuggested++;
         break;
+      case 'question_thumbs':
+        latestThumbs.set(`${event.questionId}:${sessionId}`, event.value);
+        break;
+      case 'question_difficulty_feedback':
+        latestDifficulty.set(`${event.questionId}:${sessionId}`, event.perceived);
+        break;
     }
   }
+
+  // Aggregate deduplicated feedback (last-write-wins per question+session)
+  Array.from(latestThumbs.values()).forEach(value => {
+    if (value === 'up') thumbsUp++; else thumbsDown++;
+  });
+  Array.from(latestDifficulty.values()).forEach(perceived => {
+    difficultyDistribution[perceived]++;
+  });
 
   // Compute averages
   for (const v of Object.values(scoresByZone)) v.avg = v.count > 0 ? v.total / v.count : 0;
@@ -295,6 +320,9 @@ export function computeSummary(events?: StoredEvent[]): AnalyticsSummary {
     gauntletsAbandoned,
     dailyCompletions,
     improvementsSuggested,
+    thumbsUp,
+    thumbsDown,
+    difficultyDistribution,
     scoresByZone,
     scoresByTopic,
     scoresByLevel,

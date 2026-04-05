@@ -17,6 +17,7 @@ import { buildReportUrl } from "@/lib/issue-url";
 import { track } from "@/lib/analytics";
 import { saveAttempt, saveGauntletResult, AttemptRecord, recordActivity, updateSRCard } from "@/lib/progress";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
+import QuestionFeedback from "@/components/QuestionFeedback";
 
 type Phase = "setup" | "active" | "review" | "results";
 
@@ -584,14 +585,11 @@ export default function GauntletPage() {
                     {q.details.common_mistake && (
                       <p className="text-[11px] text-accentRed/80"><span className="font-bold">Common mistake:</span> {q.details.common_mistake}</p>
                     )}
-                    <a
-                      href={buildReportUrl(q)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 text-[11px] text-textSecondary hover:text-accentRed transition-colors"
-                    >
-                      <AlertTriangle className="w-3 h-3" /> Report issue
-                    </a>
+                    <QuestionFeedback question={{
+                      id: q.id, title: q.title, level: q.level,
+                      track: q.track, topic: q.topic, zone: q.zone,
+                      competency_area: q.competency_area,
+                    }} />
                   </div>
                 </details>
               );

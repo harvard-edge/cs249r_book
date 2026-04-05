@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import {
   BarChart3, Terminal, Activity, Users, Target, Crosshair,
-  Flag, Lightbulb, Calendar, TrendingUp, Trash2,
+  Flag, Lightbulb, Calendar, TrendingUp, Trash2, ThumbsUp, ThumbsDown, Gauge,
 } from "lucide-react";
 import clsx from "clsx";
 import { computeSummary, getAnalyticsEvents, clearAnalytics, type AnalyticsSummary } from "@/lib/analytics";
@@ -72,6 +72,77 @@ export default function DashboardPage() {
           <StatCard label="Issues Reported" value={summary.questionsReported.toString()} icon={Flag} color="red" />
           <StatCard label="Improvements" value={summary.improvementsSuggested.toString()} icon={Lightbulb} color="amber" />
         </div>
+
+        {/* Feedback summary */}
+        {(summary.thumbsUp + summary.thumbsDown > 0 ||
+          summary.difficultyDistribution.too_easy + summary.difficultyDistribution.about_right + summary.difficultyDistribution.too_hard > 0) && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
+            {/* Thumbs ratio */}
+            {(summary.thumbsUp + summary.thumbsDown > 0) && (
+              <div className="p-4 rounded-xl border border-borderSubtle bg-surface/50">
+                <div className="flex items-center gap-2 mb-3">
+                  <ThumbsUp className="w-3.5 h-3.5 text-textTertiary" />
+                  <span className="text-[10px] font-mono text-textTertiary uppercase">Question Usefulness</span>
+                </div>
+                <div className="flex items-center gap-4 mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <ThumbsUp className="w-4 h-4 text-accentGreen" />
+                    <span className="text-lg font-bold font-mono text-accentGreen">{summary.thumbsUp}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <ThumbsDown className="w-4 h-4 text-accentRed" />
+                    <span className="text-lg font-bold font-mono text-accentRed">{summary.thumbsDown}</span>
+                  </div>
+                </div>
+                <div className="h-2 bg-border rounded-full overflow-hidden flex">
+                  <div
+                    className="h-full bg-accentGreen rounded-l-full"
+                    style={{ width: `${(summary.thumbsUp / (summary.thumbsUp + summary.thumbsDown)) * 100}%` }}
+                  />
+                  <div
+                    className="h-full bg-accentRed rounded-r-full"
+                    style={{ width: `${(summary.thumbsDown / (summary.thumbsUp + summary.thumbsDown)) * 100}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-textMuted mt-1.5">
+                  {Math.round((summary.thumbsUp / (summary.thumbsUp + summary.thumbsDown)) * 100)}% found useful (deduplicated per question)
+                </p>
+              </div>
+            )}
+
+            {/* Difficulty distribution */}
+            {(summary.difficultyDistribution.too_easy + summary.difficultyDistribution.about_right + summary.difficultyDistribution.too_hard > 0) && (() => {
+              const { too_easy, about_right, too_hard } = summary.difficultyDistribution;
+              const total = too_easy + about_right + too_hard;
+              return (
+                <div className="p-4 rounded-xl border border-borderSubtle bg-surface/50">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Gauge className="w-3.5 h-3.5 text-textTertiary" />
+                    <span className="text-[10px] font-mono text-textTertiary uppercase">Perceived Difficulty</span>
+                  </div>
+                  <div className="space-y-2">
+                    {[
+                      { label: '😌 Too Easy', count: too_easy, color: 'bg-accentGreen' },
+                      { label: '👌 About Right', count: about_right, color: 'bg-accentBlue' },
+                      { label: '🤯 Too Hard', count: too_hard, color: 'bg-accentRed' },
+                    ].map(({ label, count, color }) => (
+                      <div key={label} className="flex items-center gap-2">
+                        <span className="text-[11px] text-textSecondary w-24 shrink-0">{label}</span>
+                        <div className="flex-1 h-2 bg-border rounded-full overflow-hidden">
+                          <div className={clsx("h-full rounded-full", color)} style={{ width: `${total > 0 ? (count / total) * 100 : 0}%` }} />
+                        </div>
+                        <span className="text-[10px] font-mono text-textTertiary w-8 text-right">{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-textMuted mt-2">
+                    {total} rating{total !== 1 ? 's' : ''} (deduplicated per question)
+                  </p>
+                </div>
+              );
+            })()}
+          </div>
+        )}
 
         {/* Competency radar chart */}
         {Object.keys(summary.scoresByTopic).length > 0 && (

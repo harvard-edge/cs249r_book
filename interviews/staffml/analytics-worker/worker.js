@@ -180,7 +180,11 @@ async function handleSummary(env, corsHeaders) {
     let questionsScored = 0;
     let gauntletsCompleted = 0;
     let questionsReported = 0;
+    let improvementsSuggested = 0;
     const scoresByLevel = {};
+    // Dedup feedback: last-write-wins per (questionId, sessionId)
+    const latestThumbs = new Map();
+    const latestDifficulty = new Map();
 
     for (const event of recentEvents) {
       if (event._sid) sessions.add(event._sid);
@@ -200,7 +204,30 @@ async function handleSummary(env, corsHeaders) {
         case 'question_reported':
           questionsReported++;
           break;
+        case 'improvement_suggested':
+          improvementsSuggested++;
+          break;
+        case 'question_thumbs':
+          if (event.questionId && event._sid) {
+            latestThumbs.set(`${event.questionId}:${event._sid}`, event.value);
+          }
+          break;
+        case 'question_difficulty_feedback':
+          if (event.questionId && event._sid) {
+            latestDifficulty.set(`${event.questionId}:${event._sid}`, event.perceived);
+          }
+          break;
       }
+    }
+
+    // Aggregate deduplicated feedback
+    let thumbsUp = 0, thumbsDown = 0;
+    for (const v of latestThumbs.values()) {
+      if (v === 'up') thumbsUp++; else thumbsDown++;
+    }
+    const difficultyDistribution = { too_easy: 0, about_right: 0, too_hard: 0 };
+    for (const v of latestDifficulty.values()) {
+      if (difficultyDistribution[v] !== undefined) difficultyDistribution[v]++;
     }
 
     // Compute averages
@@ -215,6 +242,10 @@ async function handleSummary(env, corsHeaders) {
         questionsScored,
         gauntletsCompleted,
         questionsReported,
+        improvementsSuggested,
+        thumbsUp,
+        thumbsDown,
+        difficultyDistribution,
         eventsByDay,
         scoresByLevel,
       },
