@@ -318,13 +318,13 @@ If you use TinyTalks in your work, please cite:
   author={TinyTorch Contributors},
   year={2025},
   publisher={GitHub},
-  url={https://github.com/VJ/TinyTorch/tree/main/datasets/tinytalks},
+  url={https://github.com/harvard-edge/cs249r_book/tree/main/tinytorch/datasets/tinytalks},
   version={1.0.0}
 }
 ```
 
 **Text citation:**
-TinyTorch Contributors. (2025). TinyTalks: A Conversational Q&A Dataset for Educational Transformers (Version 1.0.0). https://github.com/VJ/TinyTorch
+TinyTorch Contributors. (2025). TinyTalks: A Conversational Q&A Dataset for Educational Transformers (Version 1.0.0). https://github.com/harvard-edge/cs249r_book/tree/main/tinytorch/datasets/tinytalks
 
 ---
 
@@ -366,9 +366,9 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md) for details.
 
 ## 📞 Contact & Support
 
-- **Issues:** [GitHub Issues](https://github.com/VJ/TinyTorch/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/VJ/TinyTorch/discussions)
-- **Email:** tinytorch@example.com (for sensitive issues)
+- **Issues:** [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)
+- **Email:** [info@mlsysbook.ai](mailto:info@mlsysbook.ai) (for sensitive issues)
 
 ---
 

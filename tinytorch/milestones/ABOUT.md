@@ -8,7 +8,7 @@ You've been building TinyTorch components for weeks. But does your code actually
 
 There's only one way to find out: **rebuild history**.
 
-These six milestones are your proof - not just that you understand the theory, but that you built something real. Every line of code executing in these milestones is YOURS. When the Perceptron learns, it's using YOUR gradient descent. When the transformer generates text, it's YOUR attention mechanism routing information. When you hit 75% on CIFAR-10, those are YOUR convolutional layers extracting features.
+These six milestones are your proof—not just that you understand the theory, but that you built something real. Every line of code executing in these milestones is YOURS. When the Perceptron learns, it's using YOUR gradient descent. When attention solves structured sequence tasks in Milestone 05, it's YOUR multi-head attention and transformer stack. When you hit 75% on CIFAR-10, those are YOUR convolutional layers extracting features.
 
 This isn't a demo - it's proof that you understand ML systems engineering from the ground up.
 
@@ -20,7 +20,7 @@ This isn't a demo - it's proof that you understand ML systems engineering from t
 | **1969** | XOR Crisis | Experience the AI Winter trigger | 01-03 |
 | **1986** | MLP Revival | Backprop solves XOR + digit recognition | 01-08 |
 | **1998** | CNN Revolution | Convolutions (70%+ CIFAR-10) | 01-09 |
-| **2017** | Transformers | Language generation with attention | 01-08, 11-13 |
+| **2017** | Transformers | Sequence tasks proving attention (reversal, copy, mixed) | 01-08, 11-13 |
 | **2018** | MLPerf | Production optimization pipeline | 01-08, 14-19 |
 
 ## Why Milestones Transform Learning
@@ -42,7 +42,7 @@ tito milestone run 01
 
 # Or run directly
 cd milestones/01_1958_perceptron
-python 02_rosenblatt_trained.py
+python 01_rosenblatt_forward.py
 ```
 
 Each milestone folder contains:

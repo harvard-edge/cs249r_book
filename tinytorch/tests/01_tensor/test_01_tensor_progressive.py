@@ -21,7 +21,7 @@ class TestModule01Prerequisites:
     def test_environment_setup_working(self):
         """Verify setup module functionality is still working."""
         # Python version detection
-        assert sys.version_info >= (3, 8), "Python 3.8+ required"
+        assert sys.version_info >= (3, 10), "Python 3.10+ required"
 
         # Project structure - check directories that exist in student install
         project_root = Path(__file__).parent.parent.parent

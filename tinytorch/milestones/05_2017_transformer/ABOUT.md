@@ -14,14 +14,12 @@ That's essentially what RNNs do. No matter how long the input—a sentence, a pa
 
 In 2017, Vaswani et al. asked: *what if we just... didn't?* Their paper "Attention Is All You Need" proved that attention mechanisms alone could achieve state-of-the-art results. No sequential bottleneck. No information loss. Any token can directly attend to any other token.
 
-This launched the era of GPT, BERT, ChatGPT, and every modern LLM. This milestone builds a character-level transformer using YOUR TinyTorch implementations.
+This launched the era of GPT, BERT, ChatGPT, and every modern LLM. This milestone validates YOUR attention and transformer code on **synthetic sequence tasks** in `01_vaswani_attention.py`. Separately, the repo ships **TinyTalks** under `datasets/tinytalks/` for conversational Q&A-style text—see that README if you want to experiment with that corpus.
 
 ## What You'll Build
 
-Transformer models for text generation:
-1. **Attention Proof**: Verify your attention works on sequence reversal
-2. **Q&A Generation**: Train on TinyTalks conversational dataset
-3. **Dialogue**: Multi-turn conversation generation
+1. **Attention proof (milestone script):** Sequence reversal, copying, and mixed prefix tasks—hard to fake without working self-attention.
+2. **Optional corpus:** TinyTalks in `datasets/tinytalks/` for Q&A-style transformer experiments (independent of `tito milestone run 05`).
 
 ```
 Tokens --> Embeddings --> [Attention --> FFN] x N --> Output
@@ -46,57 +44,39 @@ tito module status
 ```
 
 ```bash
-cd milestones/05_2017_transformer
-
-# Step 0: Prove attention works
-python 00_vaswani_attention_proof.py
-# Expected: 95%+ on sequence reversal
-
-# Step 1: Q&A generation
-python 01_vaswani_generation.py --epochs 5
-# Expected: Loss < 1.5, coherent responses
-
-# Step 2: Dialogue generation
-python 02_vaswani_dialogue.py --epochs 5
-# Expected: Context-aware responses
+tito milestone run 05
 ```
 
-:::{admonition} Why Start with Script 00?
+Or:
+
+```bash
+cd milestones/05_2017_transformer
+python 01_vaswani_attention.py
+```
+
+:::{admonition} Synthetic vs TinyTalks
 :class: note
-Script 00 is the critical validation. Sequence reversal is practically impossible without working attention, gives instant feedback (30 seconds), and is binary pass/fail (95%+ or broken). If 00 fails, debug your attention. If 00 passes, 01-02 will work.
+The milestone entrypoint uses **synthetic** sequences so attention can be verified quickly with no extra files. **TinyTalks** remains available under `datasets/tinytalks/` for teaching and follow-on work.
 :::
 
 ## Expected Results
 
 | Script | Task | Success Criteria | Time |
 |--------|------|------------------|------|
-| 00 (Attention Proof) | Reverse sequences | 95%+ accuracy | 30 sec |
-| 01 (Q&A) | Answer questions | Loss < 1.5, sensible words | 3-5 min |
-| 02 (Dialogue) | Multi-turn chat | Topic coherence | 3-5 min |
+| `01_vaswani_attention.py` | Reversal / copy / mixed | See script thresholds (~95% / ~95% / ~90%) | Minutes |
 
 ## The Aha Moment: Direct Access Everywhere
 
-**Watch Script 00 prove attention works—in 30 seconds.**
+**Sequence reversal** is practically impossible for models without real cross-position attention. **Copying** forces a different attention pattern. **Mixed prefixes** mirror context-conditioned behavior in decoder-style models.
 
-Sequence reversal is practically impossible for simple sequential models. To output the first character, you need to remember the last character of input. To output the second character, you need the second-to-last. The entire sequence must be held in memory simultaneously.
-
-RNNs struggle with this. Attention makes it trivial:
+RNNs struggle with these patterns. Attention makes the dependencies learnable:
 
 ```
 RNN:       h[t] = f(h[t-1], x[t])          # Sequential, lossy
 Attention: out[i] = sum(attn[i,j] * v[j])  # Parallel, direct
 ```
 
-**The moment you realize**: YOUR attention mechanism lets any position directly access any other position. No bottleneck. No forgetting. This is why transformers can handle entire documents, codebases, even books.
-
-This solves the fundamental RNN problems:
-- Sequential processing → Parallel (faster training)
-- Vanishing gradients → Direct connections (better long-range)
-- Fixed hidden state → Dynamic attention (no bottleneck)
-
 ## YOUR Code Powers This
-
-This is the capstone of the Architecture Tier. Every component comes from YOUR implementations:
 
 | Component | Your Module | What It Does |
 |-----------|-------------|--------------|
@@ -107,17 +87,11 @@ This is the capstone of the Architecture Tier. Every component comes from YOUR i
 | `TransformerBlock` | Module 13 | YOUR attention + feedforward blocks |
 | `LayerNorm` | Module 13 | YOUR normalization layers |
 
-**No PyTorch. No HuggingFace. Just YOUR code generating coherent text.**
+**No PyTorch. No HuggingFace. Just YOUR code.**
 
 ## Historical Context
 
-The original "Attention Is All You Need" paper used sequence-to-sequence tasks like translation. TinyTalks provides a similar Q&A format at character level.
-
-This architecture (with scaling) powers:
-- GPT-2, GPT-3, GPT-4, ChatGPT
-- BERT, RoBERTa, T5
-- Vision Transformers (ViT)
-- Multimodal models (CLIP, Flamingo)
+The original "Attention Is All You Need" paper used sequence-to-sequence tasks like translation. This milestone uses small synthetic tasks for fast feedback; **TinyTalks** provides a similar Q&A-style format at character level in `datasets/tinytalks/` when you want that data.
 
 ## Systems Insights
 
@@ -128,9 +102,3 @@ This architecture (with scaling) powers:
 ## What's Next
 
 You can BUILD transformers, but can you OPTIMIZE them? Milestone 06 (MLPerf) teaches systematic optimization: profiling, compression, and acceleration for production deployment.
-
-## Further Reading
-
-- **The Paper**: Vaswani et al. (2017). "Attention Is All You Need"
-- **Illustrated Guide**: http://jalammar.github.io/illustrated-transformer/
-- **GPT-2**: Radford, A. et al. (2019). "Language Models are Unsupervised Multitask Learners"

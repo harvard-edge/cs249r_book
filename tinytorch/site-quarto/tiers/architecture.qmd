@@ -204,10 +204,11 @@ python 02_lecun_cifar10.py # 75%+ accuracy on CIFAR-10
 
 ```bash
 cd milestones/05_2017_transformer
-python 01_vaswani_generation.py # Text generation with YOUR transformer
+python 01_vaswani_attention.py   # Reversal, copy, and mixed sequence tasks
+# or: tito milestone run 05
 ```
 
-**What makes this special**: Your attention implementation powers the same architecture behind GPT, ChatGPT, and modern LLMs.
+**What makes this special**: Structured sequence tasks stress-test YOUR attention and transformer stack—the same core pattern behind GPT-style models.
 
 
 ## Two Parallel Tracks

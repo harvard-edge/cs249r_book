@@ -7,8 +7,8 @@ This directory contains datasets for TinyTorch milestone examples.
 ```
 datasets/
 ├── tinydigits/     ← 8×8 handwritten digits (ships with repo, ~310KB)
-├── tinytalks/      ← Q&A dataset for transformers (ships with repo, ~40KB)
-└── README.md       ← This file
+├── tinytalks/    ← conversational Q&A text for transformers (~40KB)
+└── README.md     ← This file
 ```
 
 ## Shipped Datasets (No Download Required)
@@ -21,11 +21,11 @@ datasets/
 - **Purpose:** Fast iteration on real image classification
 
 ### TinyTalks
-- **Used by:** Milestone 05 (Transformer/GPT examples)
+- **Used by:** Transformer / language teaching (e.g. Milestone 05 materials and extensions)
 - **Contents:** 350 Q&A pairs across 5 difficulty levels
-- **Format:** Plain text (Q: ... A: ... format)
+- **Format:** Plain text (`Q:` / `A:` lines), character-level friendly
 - **Size:** ~40 KB
-- **Purpose:** Character-level conversational AI training
+- **Purpose:** Fast, offline conversational text for attention and GPT-style experiments
 
 ## Downloaded Datasets (On-Demand)
 
@@ -63,7 +63,7 @@ The milestones automatically download larger datasets when needed:
 
 ## Total Repository Size
 
-- **Shipped data:** ~350 KB (tinydigits + tinytalks)
+- **Shipped data:** ~350 KB (TinyDigits + TinyTalks combined)
 - **USB-friendly:** Entire repo fits on any device
 - **Offline-capable:** Core milestones work without internet
 - **Git-friendly:** No large binary files in version control

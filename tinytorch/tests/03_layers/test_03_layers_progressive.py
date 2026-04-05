@@ -40,7 +40,7 @@ class TestPriorModulesStillWork:
         ✅ TEST: Module 01 (Tensor) - Environment should still work
 
         📋 CHECKS:
-        - Python 3.8+ available
+        - Python 3.10+ available
         - NumPy working correctly
         - Project structure intact
 
@@ -50,7 +50,7 @@ class TestPriorModulesStillWork:
         try:
             # Environment checks
             assert sys.version_info >= (3, 8), \
-                "❌ Python 3.8+ required. Current: Python {}.{}".format(
+                "❌ Python 3.10+ required. Current: Python {}.{}".format(
                     sys.version_info.major, sys.version_info.minor)
 
             # NumPy functionality
@@ -71,7 +71,7 @@ class TestPriorModulesStillWork:
             🔍 ERROR: {str(e)}
 
             🔧 HOW TO FIX:
-            1. Check Python version: python --version (need 3.8+)
+            1. Check Python version: python --version (need 3.10+)
             2. Reinstall NumPy: pip install numpy
             3. Verify project structure exists
             4. Run Module 01 tests separately: python tests/run_all_modules.py --module module_01

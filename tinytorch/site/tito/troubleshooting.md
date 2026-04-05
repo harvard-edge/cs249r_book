@@ -127,7 +127,7 @@ tito setup
 source .venv/bin/activate
 
 # 4. Verify
-python --version # Should be 3.8+
+python --version # Should be 3.10+
 which pip # Should show tinytorch/.venv/bin/pip
 ```
 
@@ -947,9 +947,9 @@ source .venv/Scripts/activate
 
 <div style="background: #fff5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #e74c3c; margin: 1.5rem 0;">
 
-**Solution**: Specify Python 3.8+ explicitly:
+**Solution**: Specify Python 3.10+ explicitly:
 ```bash
-python3.8 -m venv venv
+python3.10 -m venv venv
 source .venv/bin/activate
 python --version # Verify
 ```

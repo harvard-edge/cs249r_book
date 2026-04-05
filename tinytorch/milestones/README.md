@@ -56,7 +56,7 @@ After completing a set of modules, you unlock the ability to run a milestone. Ea
       <td><b>Transformer Era</b></td>
       <td>2017</td>
       <td>01-08, 11-13</td>
-      <td>Build attention and generate text</td>
+      <td>Prove attention with reversal, copy, and mixed sequence tasks</td>
     </tr>
     <tr>
       <td>06</td>
