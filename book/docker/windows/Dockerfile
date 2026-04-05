@@ -340,15 +340,23 @@ RUN Write-Host '=== STARTING CLEANUP AND ENVIRONMENT SETUP ===' ; `
     Write-Host 'Cleaning temporary files and setting up environment...' ; `
     Write-Host 'Removing temporary files...' ; `
     Remove-Item C:/temp/requirements.txt -ErrorAction SilentlyContinue ; `
-    Write-Host '🗑️ requirements.txt removed' ; `
     Remove-Item C:/temp/install_packages.R -ErrorAction SilentlyContinue ; `
-    Write-Host '🗑️ install_packages.R removed' ; `
     Remove-Item C:/temp/verify_r_packages.R -ErrorAction SilentlyContinue ; `
-    Write-Host '🗑️ verify_r_packages.R removed' ; `
     Remove-Item C:/temp/tl_packages -ErrorAction SilentlyContinue ; `
-    Write-Host '🗑️ tl_packages removed' ; `
     Remove-Item C:/temp/requirements/ -Recurse -Force -ErrorAction SilentlyContinue ; `
-    Write-Host '🗑️ requirements/ directory removed' ; `
+    Remove-Item C:/temp/install_texlive.ps1 -ErrorAction SilentlyContinue ; `
+    Write-Host '🗑️ temp files removed' ; `
+    Write-Host 'Cleaning Scoop caches...' ; `
+    scoop cache rm * 2>$null ; `
+    Remove-Item -Recurse -Force "$env:USERPROFILE\scoop\cache\*" -ErrorAction SilentlyContinue ; `
+    Write-Host '🗑️ Scoop cache cleared' ; `
+    Write-Host 'Cleaning Chocolatey caches...' ; `
+    Remove-Item -Recurse -Force 'C:\ProgramData\chocolatey\lib\*.nupkg' -ErrorAction SilentlyContinue ; `
+    Remove-Item -Recurse -Force "$env:TEMP\chocolatey" -ErrorAction SilentlyContinue ; `
+    Write-Host '🗑️ Chocolatey cache cleared' ; `
+    Write-Host 'Cleaning pip cache...' ; `
+    python -m pip cache purge 2>$null ; `
+    Write-Host '🗑️ pip cache cleared' ; `
     Write-Host 'Setting up environment variables for Quarto...' ; `
     $env:QUARTO_LOG_LEVEL = 'DEBUG' ; `
     [Environment]::SetEnvironmentVariable('QUARTO_LOG_LEVEL', 'DEBUG', 'Machine') ; `

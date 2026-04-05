@@ -140,6 +140,35 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host '✅ tlmgr updated'
 }
 
+# ── Disk space cleanup (must happen in same RUN/layer to reclaim space) ──
+Write-Host '🧹 Cleaning TeX Live caches and unnecessary files...'
+# Remove TeX Live installer leftovers
+Remove-Item "$TexLiveRoot\install-tl.log" -ErrorAction SilentlyContinue
+# Remove backup directory created by tlmgr update
+$backupDir = Get-ChildItem "$TexLiveRoot" -Recurse -Directory -Filter 'tlpkg' -ErrorAction SilentlyContinue |
+    ForEach-Object { Join-Path $_.FullName 'backups' }
+foreach ($bd in $backupDir) {
+    if (Test-Path $bd) {
+        Write-Host "  Removing backups: $bd"
+        Remove-Item $bd -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+# Remove documentation (saves ~1 GB) — not needed in a build container
+$docDirs = Get-ChildItem "$TexLiveRoot" -Recurse -Directory -Filter 'doc' -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -match 'texmf-dist[\\/]doc' }
+foreach ($dd in $docDirs) {
+    Write-Host "  Removing docs: $($dd.FullName)"
+    Remove-Item $dd.FullName -Recurse -Force -ErrorAction SilentlyContinue
+}
+# Remove source files (not needed for builds)
+$srcDirs = Get-ChildItem "$TexLiveRoot" -Recurse -Directory -Filter 'source' -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -match 'texmf-dist[\\/]source' }
+foreach ($sd in $srcDirs) {
+    Write-Host "  Removing sources: $($sd.FullName)"
+    Remove-Item $sd.FullName -Recurse -Force -ErrorAction SilentlyContinue
+}
+Write-Host '✅ TeX Live cleanup complete'
+
 Write-Host '🔍 Verifying lualatex installation...'
 $lualatexPath = Join-Path $texLiveBin 'lualatex.exe'
 if (-not (Test-Path $lualatexPath)) {
