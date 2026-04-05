@@ -8,7 +8,7 @@ Complete LaTeX source for the TinyTorch research paper.
 
 - **[paper.tex](paper.tex)** - Main paper (~12-15 pages, two-column format)
 - **[references.bib](references.bib)** - Bibliography (22 references)
-- **[compile_paper.sh](compile_paper.sh)** - Build script (requires LaTeX installation)
+- **[Makefile](Makefile)** - Build rules (requires LaTeX installation)
 
 ---
 
@@ -25,7 +25,7 @@ Complete LaTeX source for the TinyTorch research paper.
 ### Option 2: Local Compilation
 
 ```bash
-./compile_paper.sh
+make
 ```
 
 Requires LaTeX installation (MacTeX or BasicTeX).

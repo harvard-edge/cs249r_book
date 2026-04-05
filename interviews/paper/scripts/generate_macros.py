@@ -12,7 +12,8 @@ Writes: macros.tex (auto-generated, do not edit)
 import json
 from pathlib import Path
 
-PAPER_DIR = Path(__file__).parent
+SCRIPTS_DIR = Path(__file__).parent
+PAPER_DIR = SCRIPTS_DIR.parent
 STATS_PATH = PAPER_DIR / "corpus_stats.json"
 CORPUS_PATH = PAPER_DIR.parent / "vault" / "corpus.json"
 OUTPUT_PATH = PAPER_DIR / "macros.tex"
