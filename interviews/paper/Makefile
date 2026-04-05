@@ -28,7 +28,10 @@ $(DATA_FIGURES): corpus_stats.json generate_figures.py
 	python3 generate_figures.py
 
 # ── Step 3: Convert SVGs to PDFs ─────────────────────────────
-# Applicability matrix: app_matrix.tex is source-controlled (included from paper.tex).
+# Applicability matrix: canonical data is applicability_matrix.yaml → app_matrix.tex.
+app_matrix.tex: applicability_matrix.yaml generate_app_matrix_from_yaml.py
+	python3 generate_app_matrix_from_yaml.py
+
 SVG_SOURCES = fig-competency-model.svg \
               fig-four-axes.svg \
               fig-generation-pipeline.svg \
