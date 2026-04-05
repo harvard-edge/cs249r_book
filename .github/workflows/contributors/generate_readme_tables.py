@@ -138,10 +138,11 @@ def process_project(project_name: str, project_path: str, update: bool = False) 
     print(f"\n=== {project_name} ({len(contributors)} contributors) ===")
     
     if update:
+        readme_display = Path(project_path) / "README.md"
         if update_readme(project_path, table_html):
-            print(f"Updated {project_path}README.md")
+            print(f"Updated {readme_display}")
         else:
-            print(f"Failed to update {project_path}README.md")
+            print(f"Failed to update {readme_display}")
     else:
         print(table_html)
 
