@@ -103,20 +103,47 @@ function HomePage() {
     return () => clearTimeout(timer);
   }, [query, searchResults, questionSearchResults]);
 
-  // Filter areas by selected track
+  // Filter areas by selected track — transform Topic objects so downstream
+  // components (TopicCard, TopicDetail) see track-accurate counts & questions
   const filteredAreas = useMemo(() => {
     if (!selectedTrack) return areas;
     return areas
       .map(area => ({
         ...area,
-        topics: area.topics.filter(t => t.tracks.includes(selectedTrack)),
+        topics: area.topics
+          .filter(t => t.tracks.includes(selectedTrack))
+          .map(t => {
+            // Rebuild questionsByLevel with only this track's questions
+            const filteredByLevel: Record<string, typeof t.questionsByLevel[string]> = {};
+            const filteredLevels: Record<string, number> = {};
+            let count = 0;
+            for (const [level, qs] of Object.entries(t.questionsByLevel)) {
+              const trackQs = qs.filter(q => q.track === selectedTrack);
+              if (trackQs.length > 0) {
+                filteredByLevel[level] = trackQs;
+                filteredLevels[level] = trackQs.length;
+                count += trackQs.length;
+              }
+            }
+            return { ...t, questionsByLevel: filteredByLevel, levels: filteredLevels, questionCount: count };
+          }),
       }))
       .filter(area => area.topics.length > 0)
-      .map(area => ({
-        ...area,
-        questionCount: area.topics.reduce((s, t) => s + t.questionCount, 0),
-        topicCount: area.topics.length,
-      }));
+      .map(area => {
+        // Reaggregate area-level stats from the now-filtered topics
+        const areaLevels: Record<string, number> = {};
+        for (const t of area.topics) {
+          for (const [lv, cnt] of Object.entries(t.levels)) {
+            areaLevels[lv] = (areaLevels[lv] || 0) + cnt;
+          }
+        }
+        return {
+          ...area,
+          questionCount: area.topics.reduce((s, t) => s + t.questionCount, 0),
+          topicCount: area.topics.length,
+          levels: areaLevels,
+        };
+      });
   }, [areas, selectedTrack]);
 
   // Areas to show in pills: top 8 unless "show all" is toggled
