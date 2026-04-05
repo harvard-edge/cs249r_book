@@ -2179,7 +2179,7 @@ class ValidateCommand:
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
 
-        img_pat = re.compile(r"!\[(?:[^\]]|\[[^\]]*\])*\]\(([^)]+)\)(?:\{[^}]*\})?")
+        img_pat = re.compile(r"!\[[^\]]{0,1000}\]\(([^)]+)\)(?:\{[^}]*\})?")
         valid_exts = {".png", ".jpg", ".jpeg", ".gif", ".svg"}
 
         for file in files:
