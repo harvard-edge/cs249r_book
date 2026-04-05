@@ -2,7 +2,7 @@
 
 *Hands-on Embedded ML Labs for Real Devices*
 
-[![Build](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-publish-dev.yml?branch=dev&label=Build&logo=githubactions)](https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-publish-dev.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-validate-dev.yml?branch=dev&label=Build&logo=githubactions)](https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-validate-dev.yml)
 [![Website](https://img.shields.io/badge/Read-mlsysbook.ai/kits-blue)](https://mlsysbook.ai/kits)
 [![PDF](https://img.shields.io/badge/Download-PDF-red)](https://mlsysbook.ai/kits/assets/downloads/Hardware-Kits.pdf)
 
