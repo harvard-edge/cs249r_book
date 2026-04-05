@@ -22,7 +22,9 @@ import numpy as np
 import seaborn as sns
 
 # ── Config ──────────────────────────────────────────────────────
-PAPER_DIR = Path(__file__).parent
+SCRIPTS_DIR = Path(__file__).parent
+PAPER_DIR = SCRIPTS_DIR.parent
+FIGURES_DIR = PAPER_DIR / "figures"
 STATS_PATH = PAPER_DIR / "corpus_stats.json"
 
 TRACKS = ["cloud", "edge", "mobile", "tinyml", "global"]
@@ -169,8 +171,8 @@ def fig_corpus_distribution(stats):
 
     # title in LaTeX caption (removed suptitle)
 
-    fig.savefig(PAPER_DIR / "fig-corpus-distribution.pdf")
-    print("  Saved fig-corpus-distribution.pdf")
+    fig.savefig(FIGURES_DIR / "fig-corpus-distribution.pdf")
+    print("  Saved figures/fig-corpus-distribution.pdf")
     plt.close(fig)
 
 
@@ -216,8 +218,8 @@ def fig_format_balance(stats):
 
     # Annotations removed — caption describes the pattern
 
-    fig.savefig(PAPER_DIR / "fig-format-balance.pdf")
-    print("  Saved fig-format-balance.pdf")
+    fig.savefig(FIGURES_DIR / "fig-format-balance.pdf")
+    print("  Saved figures/fig-format-balance.pdf")
     plt.close(fig)
 
 
@@ -269,8 +271,8 @@ def fig_zone_distribution(stats):
     ]
     ax.legend(handles=legend_elements, loc="lower right", fontsize=7)
 
-    fig.savefig(PAPER_DIR / "fig-zone-distribution.pdf")
-    print("  Saved fig-zone-distribution.pdf")
+    fig.savefig(FIGURES_DIR / "fig-zone-distribution.pdf")
+    print("  Saved figures/fig-zone-distribution.pdf")
     plt.close(fig)
 
 
@@ -306,8 +308,8 @@ def fig_zone_level_heatmap(stats):
     ax.set_xlabel("Mastery Level")
     ax.set_ylabel("Cognitive Zone")
 
-    fig.savefig(PAPER_DIR / "fig-zone-level-heatmap.pdf")
-    print("  Saved fig-zone-level-heatmap.pdf")
+    fig.savefig(FIGURES_DIR / "fig-zone-level-heatmap.pdf")
+    print("  Saved figures/fig-zone-level-heatmap.pdf")
     plt.close(fig)
 
 
@@ -324,7 +326,7 @@ def main():
     fig_zone_distribution(stats)
     fig_zone_level_heatmap(stats)
 
-    print(f"\nDone. All figures saved to {PAPER_DIR}/")
+    print(f"\nDone. All figures saved to {FIGURES_DIR}/")
 
 
 if __name__ == "__main__":

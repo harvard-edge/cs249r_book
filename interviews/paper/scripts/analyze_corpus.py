@@ -15,7 +15,8 @@ from pathlib import Path
 
 import yaml
 
-PAPER_DIR = Path(__file__).parent
+SCRIPTS_DIR = Path(__file__).parent
+PAPER_DIR = SCRIPTS_DIR.parent
 VAULT_DIR = PAPER_DIR.parent / "vault"
 CORPUS_PATH = VAULT_DIR / "corpus.json"
 CHAINS_PATH = VAULT_DIR / "chains.json"
