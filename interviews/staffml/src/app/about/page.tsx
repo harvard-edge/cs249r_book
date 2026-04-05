@@ -262,9 +262,26 @@ export default function AboutPage() {
             Every question undergoes independent math verification by a separate model
             (Gemini 3.1 Pro) that rechecks all arithmetic and hardware specs. The initial
             verification pass found an 8.3% error rate across the corpus. All identified
-            errors were corrected. The methodology is described in detail in{' '}
-            <a href={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/downloads/StaffML-Paper.pdf`} target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">our research paper</a>.
+            errors were corrected.
           </p>
+          <a
+            href={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/downloads/StaffML-Paper.pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-start gap-4 p-4 rounded-xl border border-accentBlue/20 bg-accentBlue/5 hover:border-accentBlue/40 transition-colors mb-4 group"
+          >
+            <FileText className="w-8 h-8 text-accentBlue shrink-0 mt-0.5" />
+            <div>
+              <span className="text-[14px] font-bold text-textPrimary group-hover:text-accentBlue transition-colors block mb-1">
+                Read the Research Paper
+              </span>
+              <span className="text-[12px] text-textSecondary leading-relaxed block">
+                Covers the full methodology: backward design from textbook chapters, four-axis taxonomy,
+                LLM-assisted generation pipeline, independent math verification, and the ikigai-inspired
+                competency zone framework.
+              </span>
+            </div>
+          </a>
           <div className="p-4 rounded-xl border border-accentAmber/20 bg-accentAmber/5">
             <p className="text-[13px] text-textSecondary leading-relaxed">
               <strong className="text-textPrimary">Found an error?</strong>{' '}
