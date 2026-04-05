@@ -37,18 +37,24 @@ def ComparisonRow(label, current, target, unit=""):
     </div>
     """
 
-def PredictionLock(task_id, question):
-    prediction = mo.ui.text_area(
+def PredictionLock(task_id, question, options=None):
+    """Structured prediction lock. Options must be a dict mapping labels to values.
+
+    Protocol requires structured predictions (radio or numeric), never free text.
+    Use mo.ui.radio for multiple choice or mo.ui.number for numeric estimates.
+    """
+    if options is None:
+        options = {"A) Option A": "a", "B) Option B": "b", "C) Option C": "c", "D) Option D": "d"}
+    prediction = mo.ui.radio(
+        options=options,
         label=f"PREDICT: {question}",
-        placeholder="Type your quantitative hypothesis...",
-        full_width=True
     )
     ui = mo.vstack([
         prediction,
         mo.Html(f"""
         <div class="prediction-box">
             <span style="font-weight:700;">⚠️ TASK {task_id} LOCKED</span><br/>
-            Analyze the textbook math and enter a prediction to unlock the instruments.
+            Select your prediction to unlock the instruments.
         </div>
         """)
     ])

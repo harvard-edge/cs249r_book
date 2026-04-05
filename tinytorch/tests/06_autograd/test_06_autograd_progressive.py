@@ -20,6 +20,7 @@ DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 0
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -175,7 +176,7 @@ class TestAutogradWithLayers:
             layer = Linear(4, 2)
             
             # Input with gradient tracking
-            x = Tensor(np.random.randn(2, 4), requires_grad=True)
+            x = Tensor(rng.standard_normal((2, 4)), requires_grad=True)
             
             # Forward pass
             output = layer(x)
@@ -289,8 +290,8 @@ class TestAutogradWithDataLoader:
             from tinytorch.core.losses import MSELoss
             
             # Create dataset
-            data = Tensor(np.random.randn(20, 4))
-            targets = Tensor(np.random.randn(20, 2))
+            data = Tensor(rng.standard_normal((20, 4)))
+            targets = Tensor(rng.standard_normal((20, 2)))
             dataset = TensorDataset(data, targets)
             dataloader = DataLoader(dataset, batch_size=4)
             
@@ -378,7 +379,7 @@ class TestRegressionPrevention:
             from tinytorch.core.layers import Linear
             
             layer = Linear(5, 3)
-            x = Tensor(np.random.randn(2, 5))
+            x = Tensor(rng.standard_normal((2, 5)))
             output = layer(x)
             
             assert output.shape == (2, 3), f"Linear broken: {output.shape}"
@@ -413,7 +414,7 @@ class TestRegressionPrevention:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.dataloader import TensorDataset, DataLoader
             
-            data = Tensor(np.random.randn(10, 4))
+            data = Tensor(rng.standard_normal((10, 4)))
             targets = Tensor(np.arange(10).astype(float))
             
             dataset = TensorDataset(data, targets)
@@ -487,7 +488,7 @@ class TestModule06Completion:
             try:
                 from tinytorch.core.layers import Linear
                 layer = Linear(2, 1)
-                x = Tensor(np.random.randn(1, 2), requires_grad=True)
+                x = Tensor(rng.standard_normal((1, 2)), requires_grad=True)
                 out = layer(x)
                 if hasattr(out, 'backward'):
                     out.backward(Tensor([[1.0]]))

@@ -10,6 +10,7 @@ Prevents regression of gradient flow issues discovered in milestone testing.
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -106,7 +107,7 @@ def test_embedding_batch_gradient_flow():
     # Batched input
     batch_size = 4
     seq_len = 8
-    indices = Tensor(np.random.randint(0, 20, size=(batch_size, seq_len)))
+    indices = Tensor(rng.integers(0, 20, size=(batch_size, seq_len)))
 
     # Forward
     output = embed(indices)

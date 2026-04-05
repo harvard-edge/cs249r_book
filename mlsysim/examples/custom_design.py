@@ -48,3 +48,20 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Expected output (mlsysim v0.1.0):
+# --- Designing a Hypothetical 'Generic Drone' ---
+# Evaluating Generic Drone Vision...
+# +============================================================+
+# | MLSys-im SYSTEM EVALUATION
+# | Scenario: Generic Drone Vision
+# +============================================================+
+# | Level 1: Feasibility [PASS]
+# |   Model fits in memory (100.0 MB / 2000.0 MB)
+# +------------------------------------------------------------+
+# | Level 2: Performance [PASS]
+# |   Latency: 2.71 millisecond (Target: 30 ms)
+# +------------------------------------------------------------+
+# | Level 3: Macro/Economics [PASS]
+# |   Annual Carbon: 42.1 kg | TCO: $11,512
+# +============================================================+

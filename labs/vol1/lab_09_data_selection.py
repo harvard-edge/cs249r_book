@@ -149,8 +149,8 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Data engineering pipeline from @sec-data-engineering &middot;
-                    Training fundamentals from @sec-model-training
+                    Data engineering pipeline from the Data Engineering chapter &middot;
+                    Training fundamentals from the Training chapter
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -244,9 +244,9 @@ def _(mo, partA_pred):
     # ── Part B widgets ────────────────────────────────────────────────────
     partB_pred = mo.ui.radio(
         options={
-            "A) Yes, you save 1.0 hours (8.0 - 2.8 - 4.2)": "yes_large",
-            "B) Yes, but barely -- only 12.5% time reduction": "yes_barely",
-            "C) No, you lose time (scoring + subset > full)": "no_loss",
+            "A) Yes, significant time savings overall": "yes_large",
+            "B) Yes, but barely worth it": "yes_barely",
+            "C) No, the scoring overhead costs more than training savings": "no_loss",
             "D) It depends on the proxy model cost": "depends",
         },
         label="ResNet-50 scores 1M images on A100 (2.8 hrs). Full training: 8.0 hrs. "
@@ -502,6 +502,22 @@ Time saved:  {_full_train_hrs:.1f} - {_subset_train_hrs:.1f} = {_time_saved:.1f}
                     "massive redundancy, especially natural image datasets with near-duplicates.")
             _kind = "warn"
         items.append(mo.callout(mo.md(_rev), kind=_kind))
+        items.append(mo.accordion({
+            "Math Peek: Informativeness-Coverage-Redundancy (ICR) Curve": mo.md("""
+**Formula:**
+$$
+\\text{Accuracy}(k) \\approx A_{\\max} \\left(1 - e^{-\\alpha \\cdot k / N}\\right)
+$$
+
+**Variables:**
+- **$k$**: number of selected samples
+- **$N$**: total dataset size
+- **$A_{\\max}$**: full-dataset accuracy (asymptote)
+- **$\\alpha$**: informativeness decay rate (higher = faster saturation, more redundancy)
+
+The exponential saturation means the last 50% of data contributes almost nothing to accuracy -- the cost of labeling/storing it is pure waste.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -668,6 +684,26 @@ Savings:      {_savings:+.1f} hrs  {"(HOLDS)" if _inequality_holds else "(VIOLAT
                     "because scoring is 10x slower. Try switching the deployment context.")
             _kind = "warn"
         items.append(mo.callout(mo.md(_rev), kind=_kind))
+        items.append(mo.accordion({
+            "Math Peek: The Selection Inequality": mo.md("""
+**Formula:**
+$$
+T_{\\text{select}} + T_{\\text{train}}(\\text{subset}) < T_{\\text{train}}(\\text{full})
+$$
+
+Rearranging, selection is worthwhile only when:
+$$
+T_{\\text{select}} < T_{\\text{train}}(\\text{full}) - T_{\\text{train}}(\\text{subset})
+$$
+
+**Variables:**
+- **$T_{\\text{select}}$**: time to score and rank all $N$ samples (proxy model inference)
+- **$T_{\\text{train}}(\\text{subset})$**: training time on the selected coreset ($k$ samples)
+- **$T_{\\text{train}}(\\text{full})$**: training time on the full dataset ($N$ samples)
+
+On edge hardware, $T_{\\text{select}}$ grows 10x due to lower throughput, breaking the inequality even when the coreset is small.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -834,6 +870,25 @@ GPU idle     = max(0, {_t_preprocess:.1f} - {_t_gpu:.1f}) = {_gpu_idle:.1f} ms p
                     "the cheap CPUs. This is the preprocessing tax.")
             _kind = "warn"
         items.append(mo.callout(mo.md(_rev), kind=_kind))
+        items.append(mo.accordion({
+            "Math Peek: GPU Utilization Under Preprocessing Bottleneck": mo.md("""
+**Formula:**
+$$
+\\text{GPU Utilization} = \\frac{T_{\\text{GPU}}}{T_{\\text{GPU}} + \\max(0,\\; T_{\\text{CPU}} - T_{\\text{GPU}})}
+$$
+
+When CPU preprocessing overlaps with GPU compute, the step time is $\\max(T_{\\text{CPU}}, T_{\\text{GPU}})$:
+$$
+T_{\\text{step}} = \\max\\!\\left(\\frac{T_{\\text{aug}} \\cdot B}{W},\\; T_{\\text{GPU}}\\right)
+$$
+
+**Variables:**
+- **$T_{\\text{aug}}$**: per-sample augmentation time on one CPU core
+- **$B$**: batch size
+- **$W$**: number of CPU workers (data-loading parallelism)
+- **$T_{\\text{GPU}}$**: forward + backward pass time on accelerator
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1003,6 +1058,28 @@ Regime:    {_regime} (D/20N = {_ratio:.2f})
                     f"~{_D_opt:.0f}B tokens. Most teams over-allocate to model size.")
             _kind = "warn"
         items.append(mo.callout(mo.md(_rev), kind=_kind))
+        items.append(mo.accordion({
+            "Math Peek: Chinchilla Scaling Law": mo.md("""
+**Formula:**
+$$
+L(N, D) = \\frac{A}{N^{\\alpha}} + \\frac{B}{D^{\\beta}} + L_{\\infty}
+$$
+
+For compute-optimal allocation under budget $C \\approx 6ND$:
+$$
+N^{*} = \\sqrt{\\frac{C}{120}}, \\qquad D^{*} = 20\\,N^{*}
+$$
+
+**Variables:**
+- **$N$**: number of model parameters
+- **$D$**: number of training tokens
+- **$C$**: total compute budget (FLOPs)
+- **$\\alpha, \\beta$**: scaling exponents ($\\approx 0.34, 0.28$)
+- **$L_{\\infty}$**: irreducible loss
+
+The optimal ratio is $D/N \\approx 20$ -- most teams over-allocate to model size and under-allocate to data.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1061,7 +1138,7 @@ Regime:    {_regime} (D/20N = {_ratio:.2f})
                         Textbook &amp; TinyTorch
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-data-selection for the full ICR derivation.<br/>
+                        <strong>Read:</strong> the Data Selection chapter for the full ICR derivation.<br/>
                         <strong>Build:</strong> TinyTorch Module 09 -- coreset selection.
                     </div>
                 </div>
@@ -1089,8 +1166,16 @@ Regime:    {_regime} (D/20N = {_ratio:.2f})
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
-    ledger.save(chapter=9, design={"lab": "data_selection", "completed": True})
+def _(COLORS, ledger, mo, partA_pred, partB_pred, partC_pred, partD_pred):
+    if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None:
+        ledger.save(chapter=9, design={
+            "lab": "data_selection",
+            "completed": True,
+            "icr_discard_fraction": partA_pred.value,
+            "selection_inequality_verdict": partB_pred.value,
+            "gpu_utilization_prediction": partC_pred.value,
+            "chinchilla_optimal_config": partD_pred.value,
+        })
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>

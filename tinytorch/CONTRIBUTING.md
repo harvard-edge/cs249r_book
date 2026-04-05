@@ -18,10 +18,10 @@ TinyTorch is an **educational framework** where every contribution should:
    ```bash
    git clone https://github.com/harvard-edge/cs249r_book.git
    cd cs249r_book/tinytorch
-   python -m venv .venv
+   python3 -m venv .venv
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    pip install -r requirements.txt
-   pip install -e .
+   pip install -e ./
    ```
 
 2. **Verify installation**:
@@ -80,7 +80,7 @@ git checkout -b feature/your-improvement
 pytest tests/
 tito module test 01
 
-# 5. Commit with descriptive messages (NO auto-attribution)
+# 5. Commit with descriptive messages
 git add <specific-files>    # Never use 'git add .' — stage files explicitly
 git commit -m "Fix tensor broadcasting bug in Module 02
 
@@ -97,9 +97,7 @@ git push origin feature/your-improvement
 - ✅ Always use virtual environment (`.venv`)
 - ✅ Always work on feature branches
 - ✅ Always test before committing
-- 🚨 **NEVER add Co-Authored-By or automated attribution**
-- 🚨 **NEVER add "Generated with Claude Code"**
-- 🚨 **Only project owner adds attribution when needed**
+- 🚨 **Use clear commit messages** — short subject line; add a body when the change needs context beyond the title.
 
 ## 🧪 Testing Requirements
 
@@ -118,8 +116,8 @@ All contributions must pass:
 
 3. **Milestone Verification** (end-to-end examples):
    ```bash
-   python milestones/02_1969_xor/02_xor_solved.py
-   python milestones/04_1998_cnn/01_lecun_tinydigits.py
+   python3 milestones/02_1969_xor/02_xor_solved.py
+   python3 milestones/04_1998_cnn/01_lecun_tinydigits.py
    ```
 
 ## 📝 Code Standards
@@ -185,7 +183,7 @@ When reporting bugs, include:
 ```bash
 # Always include this information
 tito --version
-python --version
+python3 --version
 echo $VIRTUAL_ENV
 tito system health
 ```
@@ -206,13 +204,6 @@ For new features, please:
 - **Discussions**: GitHub Discussions for questions and ideas
 - **Documentation**: Check `README.md` for project structure and guides
 - **Development**: Follow `CONTRIBUTING.md` for complete standards
-
-## 🏆 Recognition
-
-Contributors who follow these guidelines and make valuable educational improvements will be acknowledged in:
-- Module documentation where appropriate
-- Release notes for significant contributions
-- Course materials when contributions enhance learning
 
 ## 🏷️ Releases (Maintainers Only)
 

@@ -9,12 +9,15 @@ import {
 import clsx from "clsx";
 import Link from "next/link";
 import {
-  getTracks, getLevels, getCompetencyAreas, selectGauntletQuestions,
+  getTracks, getLevels, selectGauntletQuestions,
   getQuestionsByFilter, Question, cleanScenario
 } from "@/lib/corpus";
 import { getLevelDef } from "@/lib/levels";
-import { saveAttempt, saveGauntletResult, AttemptRecord, recordActivity } from "@/lib/progress";
+import { buildReportUrl } from "@/lib/issue-url";
+import { track } from "@/lib/analytics";
+import { saveAttempt, saveGauntletResult, AttemptRecord, recordActivity, updateSRCard } from "@/lib/progress";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
+import QuestionFeedback from "@/components/QuestionFeedback";
 
 type Phase = "setup" | "active" | "review" | "results";
 
@@ -22,6 +25,7 @@ const DURATIONS = [
   { label: "Quick (5 Qs)", questions: 5, minutes: 10 },
   { label: "Standard (10 Qs)", questions: 10, minutes: 20 },
   { label: "Full (15 Qs)", questions: 15, minutes: 35 },
+  { label: "Design (1 deep)", questions: 1, minutes: 15 },
 ];
 
 export default function GauntletPage() {
@@ -92,6 +96,7 @@ export default function GauntletPage() {
             selfScore: 0,
             timestamp: Date.now(),
           });
+          updateSRCard(q.id, 0);
           finalScores.push(0);
         }
       }
@@ -136,9 +141,26 @@ export default function GauntletPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [phase, showAnswer]);
 
+  const isDesignMode = selectedDuration === 3; // "Design (1 deep)"
+
   const startGauntlet = useCallback(() => {
     const dur = DURATIONS[selectedDuration];
-    const selected = selectGauntletQuestions(selectedTrack, selectedLevel, dur.questions);
+    let selected: Question[];
+    if (isDesignMode) {
+      // Design challenge: pick 1 question from design/evaluation/realization zones at L5+
+      const designZones = ['design', 'evaluation', 'realization', 'specification', 'mastery'];
+      const designLevels = ['L5', 'L6+'];
+      const pool = getQuestionsByFilter({ track: selectedTrack })
+        .filter(q => designZones.includes(q.zone) && designLevels.includes(q.level));
+      if (pool.length === 0) {
+        // Fallback to any L5+ question
+        selected = selectGauntletQuestions(selectedTrack, 'L5', 1);
+      } else {
+        selected = [pool[Math.floor(Math.random() * pool.length)]];
+      }
+    } else {
+      selected = selectGauntletQuestions(selectedTrack, selectedLevel, dur.questions);
+    }
     if (selected.length === 0) return;
     setQuestions(selected);
     setCurrentIdx(0);
@@ -147,6 +169,7 @@ export default function GauntletPage() {
     setScores([]);
     setTimeRemaining(dur.minutes * 60);
     setPhase("active");
+    track({ type: 'gauntlet_started', track: selectedTrack, level: selectedLevel, questionCount: selected.length });
   }, [selectedTrack, selectedLevel, selectedDuration]);
 
   const revealAnswer = () => {
@@ -164,6 +187,7 @@ export default function GauntletPage() {
       timestamp: Date.now(),
     };
     saveAttempt(attempt);
+    updateSRCard(q.id, score);
     recordActivity();
 
     const newScores = [...scores, score];
@@ -194,6 +218,9 @@ export default function GauntletPage() {
         })),
         completedAt: Date.now(),
       });
+      const totalScore = newScores.reduce((a, b) => a + b, 0);
+      const pctScore = Math.round((totalScore / (questions.length * 3)) * 100);
+      track({ type: 'gauntlet_completed', track: selectedTrack, level: selectedLevel, pct: pctScore, questionCount: questions.length });
       setPhase("results");
     }
   };
@@ -250,9 +277,11 @@ export default function GauntletPage() {
             </div>
           </div>
 
-          {/* Level selection */}
-          <div className="mb-6">
-            <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-3">Difficulty</label>
+          {/* Level selection — hidden in design mode (always L5+) */}
+          <div className={clsx("mb-6", isDesignMode && "opacity-40 pointer-events-none")}>
+            <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-3">
+              {isDesignMode ? "Difficulty (locked to L5+ for design)" : "Difficulty"}
+            </label>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {levels.map(l => {
                 const def = getLevelDef(l);
@@ -281,8 +310,8 @@ export default function GauntletPage() {
 
           {/* Duration selection */}
           <div className="mb-8">
-            <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-3">Duration</label>
-            <div className="grid grid-cols-3 gap-2">
+            <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-3">Format</label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {DURATIONS.map((d, i) => (
                 <button
                   key={i}
@@ -299,6 +328,11 @@ export default function GauntletPage() {
                 </button>
               ))}
             </div>
+            {isDesignMode && (
+              <p className="text-[11px] text-textTertiary mt-3 leading-relaxed">
+                One deep system design question at L5+ difficulty. Think through architecture, tradeoffs, and constraints — then compare against the model answer.
+              </p>
+            )}
           </div>
 
           {/* Available count + start */}
@@ -347,7 +381,7 @@ export default function GauntletPage() {
               />
             </div>
             <span className="text-[10px] font-mono text-textTertiary uppercase">
-              {q.competency_area}
+              {q.zone}
             </span>
           </div>
           <div className={clsx(
@@ -471,12 +505,12 @@ export default function GauntletPage() {
     const totalScore = scores.reduce((a, b) => a + b, 0);
     const maxScore = questions.length * 3;
     const pct = Math.round((totalScore / maxScore) * 100);
-    const byArea: Record<string, { total: number; score: number }> = {};
+    const byZone: Record<string, { total: number; score: number }> = {};
     questions.forEach((q, i) => {
-      const area = q.competency_area;
-      if (!byArea[area]) byArea[area] = { total: 0, score: 0 };
-      byArea[area].total += 3;
-      byArea[area].score += scores[i] ?? 0;
+      const zone = q.zone;
+      if (!byZone[zone]) byZone[zone] = { total: 0, score: 0 };
+      byZone[zone].total += 3;
+      byZone[zone].score += scores[i] ?? 0;
     });
 
     return (
@@ -506,23 +540,23 @@ export default function GauntletPage() {
             Completed in {formatTime(DURATIONS[selectedDuration].minutes * 60 - timeRemaining)}
           </p>
 
-          {/* Competency breakdown */}
+          {/* Zone performance profile */}
           <div className="text-left mb-8 space-y-2">
-            {Object.entries(byArea).map(([area, data]) => {
-              const areaPct = Math.round((data.score / data.total) * 100);
+            {Object.entries(byZone).map(([zone, data]) => {
+              const zonePct = Math.round((data.score / data.total) * 100);
               return (
-                <div key={area} className="flex items-center gap-3">
-                  <span className="text-xs text-textSecondary capitalize w-28 truncate">{area}</span>
+                <div key={zone} className="flex items-center gap-3">
+                  <span className="text-xs text-textSecondary capitalize w-28 truncate">{zone}</span>
                   <div className="flex-1 h-2 bg-border rounded-full overflow-hidden">
                     <div
                       className={clsx(
                         "h-full rounded-full transition-all",
-                        areaPct >= 70 ? "bg-accentGreen" : areaPct >= 40 ? "bg-accentAmber" : "bg-accentRed"
+                        zonePct >= 70 ? "bg-accentGreen" : zonePct >= 40 ? "bg-accentAmber" : "bg-accentRed"
                       )}
-                      style={{ width: `${areaPct}%` }}
+                      style={{ width: `${zonePct}%` }}
                     />
                   </div>
-                  <span className="text-xs font-mono text-textTertiary w-10 text-right">{areaPct}%</span>
+                  <span className="text-xs font-mono text-textTertiary w-10 text-right">{zonePct}%</span>
                 </div>
               );
             })}
@@ -551,14 +585,11 @@ export default function GauntletPage() {
                     {q.details.common_mistake && (
                       <p className="text-[11px] text-accentRed/80"><span className="font-bold">Common mistake:</span> {q.details.common_mistake}</p>
                     )}
-                    <a
-                      href={`https://github.com/harvard-edge/cs249r_book/issues/new?labels=staffml&title=${encodeURIComponent(`[StaffML] Issue with: ${q.title}`)}&body=${encodeURIComponent(`**Question ID:** \`${q.id}\`\n**Title:** ${q.title}\n**Level:** ${q.level}\n**Track:** ${q.track}\n**Area:** ${q.competency_area}\n\n**What's wrong:**\n\n\n**Expected:**\n\n`)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-[11px] text-textMuted hover:text-accentRed transition-colors"
-                    >
-                      <AlertTriangle className="w-3 h-3" /> Report issue with this question
-                    </a>
+                    <QuestionFeedback question={{
+                      id: q.id, title: q.title, level: q.level,
+                      track: q.track, topic: q.topic, zone: q.zone,
+                      competency_area: q.competency_area,
+                    }} />
                   </div>
                 </details>
               );
@@ -568,18 +599,18 @@ export default function GauntletPage() {
           <div className="flex items-center gap-3 justify-center flex-wrap">
             <button
               onClick={() => {
-                const areaLines = Object.entries(byArea)
-                  .map(([area, data]) => {
-                    const ap = Math.round((data.score / data.total) * 100);
-                    const bar = ap >= 70 ? "🟩" : ap >= 40 ? "🟨" : "🟥";
-                    return `${bar} ${area}: ${ap}%`;
+                const zoneLines = Object.entries(byZone)
+                  .map(([zone, data]) => {
+                    const zp = Math.round((data.score / data.total) * 100);
+                    const bar = zp >= 70 ? "🟩" : zp >= 40 ? "🟨" : "🟥";
+                    return `${bar} ${zone}: ${zp}%`;
                   })
                   .join("\n");
                 const text = [
                   `StaffML Gauntlet — ${pct}%`,
                   `${selectedTrack.toUpperCase()} × ${selectedLevel} — ${questions.length} questions`,
                   "",
-                  areaLines,
+                  zoneLines,
                   "",
                   "https://staffml.ai",
                 ].join("\n");

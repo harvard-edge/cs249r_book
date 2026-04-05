@@ -13,8 +13,9 @@ import NapkinCalc from "@/components/NapkinCalc";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import LevelBadge from "@/components/LevelBadge";
 import { useToast } from "@/components/Toast";
+import { ECOSYSTEM_BASE } from "@/lib/env";
 import {
-  getTracks, getLevels, getCompetencyAreas, getArchetypes, getQuestionsByFilter,
+  getTracks, getLevels, getCompetencyAreas, getZones, getQuestionsByFilter,
   getQuestions, getQuestionsByTopic,
   Question, checkNapkinMath, extractFinalNumber, cleanScenario,
   NapkinResult
@@ -22,7 +23,7 @@ import {
 import { saveAttempt, getAttempts, updateSRCard, getDueQuestionIds, getDueCount, recordActivity } from "@/lib/progress";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { getQuestionById } from "@/lib/corpus";
-import { getTopicById } from "@/lib/taxonomy";
+import { getTopicById, getZoneDefinition } from "@/lib/taxonomy";
 import { getLevelDef } from "@/lib/levels";
 import { getDailyQuestions, isDailyCompleted, markDailyCompleted } from "@/lib/daily";
 import { shouldShowGate, incrementReveals, getRemainingReveals, isStarVerified } from "@/lib/star-gate";
@@ -31,6 +32,9 @@ import { getChainForQuestion, ChainInfo } from "@/lib/corpus";
 import ChainStrip from "@/components/ChainStrip";
 import { Calendar, ArrowLeft, Flag, LinkIcon } from "lucide-react";
 import Link from "next/link";
+import { buildReportUrl } from "@/lib/issue-url";
+import QuestionFeedback from "@/components/QuestionFeedback";
+import { track } from "@/lib/analytics";
 
 export default function PracticePageWrapper() {
   return (
@@ -51,12 +55,13 @@ function PracticePage() {
   const [selectedTrack, setSelectedTrack] = useState("cloud");
   const [selectedLevel, setSelectedLevel] = useState("L3");
   const [selectedArea, setSelectedArea] = useState<string | null>(null);
-  const [selectedArchetype, setSelectedArchetype] = useState<string | null>(null);
+  const [selectedZone, setSelectedZone] = useState<string | null>(null);
   const [napkinOnly, setNapkinOnly] = useState(false);
 
   const [pool, setPool] = useState<Question[]>([]);
   const [current, setCurrent] = useState<Question | null>(null);
   const skipFilterCount = useRef(0);
+  const questionShownAt = useRef(Date.now());
   const [showAnswer, setShowAnswer] = useState(false);
   const [userAnswer, setUserAnswer] = useState("");
   const [napkinResult, setNapkinResult] = useState<(NapkinResult & { userNum: number; modelNum: number }) | null>(null);
@@ -75,7 +80,7 @@ function PracticePage() {
   const tracks = getTracks().filter(t => t !== "global");
   const levels = getLevels();
   const areas = getCompetencyAreas();
-  const archetypes = getArchetypes();
+  const zones = getZones();
 
   useEffect(() => {
     setMounted(true);
@@ -109,13 +114,13 @@ function PracticePage() {
         setSelectedLevel(directQ.level);
         if (directQ.competency_area) setSelectedArea(directQ.competency_area);
         // Set pool to topic-mates so "next" stays in topic
-        const topicPool = directQ.taxonomy_concept
-          ? getQuestions().filter(q => q.taxonomy_concept === directQ.taxonomy_concept)
+        const topicPool = directQ.topic
+          ? getQuestions().filter(q => q.topic === directQ.topic)
           : [directQ];
         setPool(topicPool);
         // Track source topic for back-navigation
-        if (directQ.taxonomy_concept) {
-          const t = getTopicById(directQ.taxonomy_concept);
+        if (directQ.topic) {
+          const t = getTopicById(directQ.topic);
           if (t) setSourceTopic({ id: t.id, name: t.name });
         }
         return; // Skip other param handling
@@ -127,7 +132,7 @@ function PracticePage() {
     const levelParam = searchParams.get('level');
     if (topicParam) {
       const topicPool = getQuestions().filter(q => {
-        if (q.taxonomy_concept !== topicParam) return false;
+        if (q.topic !== topicParam) return false;
         if (levelParam && q.level !== levelParam) return false;
         return true;
       });
@@ -179,12 +184,12 @@ function PracticePage() {
       skipFilterCount.current--;
       return;
     }
-    const filters: { track?: string; level?: string; competency_area?: string; company_archetype?: string } = {
+    const filters: { track?: string; level?: string; competency_area?: string; zone?: string } = {
       track: selectedTrack,
       level: selectedLevel,
     };
     if (selectedArea) filters.competency_area = selectedArea;
-    if (selectedArchetype) filters.company_archetype = selectedArchetype;
+    if (selectedZone) filters.zone = selectedZone;
     let q = getQuestionsByFilter(filters);
     if (napkinOnly) q = q.filter(question => !!question.details.napkin_math);
     setPool(q);
@@ -196,7 +201,7 @@ function PracticePage() {
     setShowAnswer(false);
     setUserAnswer("");
     setNapkinResult(null);
-  }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedArchetype, napkinOnly]);
+  }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedZone, napkinOnly]);
 
   // Keyboard shortcuts: Enter to reveal, 1-4 for scoring, N to skip
   useEffect(() => {
@@ -221,31 +226,39 @@ function PracticePage() {
   }, [showAnswer, current]);
 
   const pickRandom = useCallback((fromPool?: Question[]) => {
+    // Track skip if there was a current question that wasn't scored
+    if (current && !showAnswer) {
+      track({ type: 'question_skipped', topic: current.topic, level: current.level });
+    }
     const p = fromPool || pool;
     if (p.length === 0) return;
     const idx = Math.floor(Math.random() * p.length);
     setCurrent(p[idx]);
+    questionShownAt.current = Date.now();
     setShowAnswer(false);
     setUserAnswer("");
     setNapkinResult(null);
     setRubricItems([]);
-  }, [pool]);
+  }, [pool, current, showAnswer]);
 
   const handleReveal = () => {
     // Star gate check
     if (shouldShowGate()) {
       setShowStarGate(true);
+      track({ type: 'star_gate_shown' });
       return;
     }
     incrementReveals();
 
     // Try napkin math check if the question has napkin_math and user typed something
+    let napkinGrade: string | undefined;
     if (current?.details.napkin_math && userAnswer.trim()) {
       const userNum = extractFinalNumber(userAnswer);
       const modelNum = extractFinalNumber(current.details.napkin_math);
       if (userNum !== null && modelNum !== null && modelNum > 0) {
         const result = checkNapkinMath(userNum, modelNum, current.track);
         setNapkinResult({ ...result, userNum, modelNum });
+        napkinGrade = result.grade;
       }
     }
 
@@ -260,6 +273,24 @@ function PracticePage() {
     }
 
     setShowAnswer(true);
+
+    // Track answer reveal with response time and napkin grade
+    if (current) {
+      const hadUserAnswer = userAnswer.trim().length > 0;
+      const responseTimeSec = Math.round((Date.now() - questionShownAt.current) / 1000);
+      track({ type: 'answer_revealed', topic: current.topic, zone: current.zone, hadUserAnswer });
+      if (responseTimeSec > 2) {
+        track({
+          type: 'answer_response_time',
+          questionId: current.id,
+          topic: current.topic,
+          level: current.level,
+          seconds: responseTimeSec,
+          napkinGrade,
+          hadUserAnswer,
+        });
+      }
+    }
   };
 
   // Constrain self-assessment: if napkin math was way off, cap the score
@@ -279,8 +310,9 @@ function PracticePage() {
         selfScore: finalScore,
         timestamp: Date.now(),
       });
-      // Update spaced repetition card + streak
+      // Update spaced repetition card + streak + analytics
       updateSRCard(current.id, finalScore);
+      track({ type: 'question_scored', questionId: current.id, topic: current.topic, zone: current.zone, level: current.level, track: current.track, score: finalScore });
       const activity = recordActivity();
       if (activity.newMilestone) {
         showToast({
@@ -489,9 +521,13 @@ function PracticePage() {
           </div>
         </div>
 
-        {/* Competency Area — hidden on mobile to save space */}
-        <div className="hidden lg:block">
-          <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Competency</label>
+        {/* Competency Area — collapsible on mobile, open on desktop */}
+        <details className="group" open>
+          <summary className="text-[10px] font-mono text-textTertiary uppercase tracking-widest mb-2 cursor-pointer select-none flex items-center gap-1 list-none">
+            Competency
+            <span className="text-[8px] text-textMuted group-open:rotate-90 transition-transform">&#9654;</span>
+            {selectedArea && <span className="ml-auto text-[9px] text-accentBlue capitalize font-medium">{selectedArea}</span>}
+          </summary>
           <div className="space-y-1 max-h-64 overflow-y-auto">
             <button
               onClick={() => setSelectedArea(null)}
@@ -519,37 +555,44 @@ function PracticePage() {
               </button>
             ))}
           </div>
-        </div>
+        </details>
 
-        {/* Company Archetype */}
+        {/* Zone filter */}
         <div>
-          <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Interview Style</label>
+          <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Zone</label>
           <div className="space-y-1 max-h-40 overflow-y-auto">
             <button
-              onClick={() => setSelectedArchetype(null)}
+              onClick={() => setSelectedZone(null)}
               className={clsx(
                 "w-full text-left px-3 py-1.5 rounded text-xs font-medium transition-all",
-                !selectedArchetype
+                !selectedZone
                   ? "bg-accentBlue/10 text-accentBlue"
                   : "text-textSecondary hover:bg-surfaceHover"
               )}
             >
-              All types
+              All zones
             </button>
-            {archetypes.map(a => (
-              <button
-                key={a}
-                onClick={() => setSelectedArchetype(a)}
-                className={clsx(
-                  "w-full text-left px-3 py-1.5 rounded text-xs font-medium transition-all",
-                  selectedArchetype === a
-                    ? "bg-accentBlue/10 text-accentBlue"
-                    : "text-textSecondary hover:bg-surfaceHover"
-                )}
-              >
-                {a}
-              </button>
-            ))}
+            {zones.map(z => {
+              const def = getZoneDefinition(z);
+              return (
+                <button
+                  key={z}
+                  onClick={() => setSelectedZone(z)}
+                  title={def?.description || z}
+                  className={clsx(
+                    "w-full text-left px-3 py-1.5 rounded text-xs font-medium capitalize transition-all",
+                    selectedZone === z
+                      ? "bg-accentBlue/10 text-accentBlue"
+                      : "text-textSecondary hover:bg-surfaceHover"
+                  )}
+                >
+                  {z}
+                  {def && (
+                    <span className="block text-[9px] font-normal text-textMuted mt-0.5 normal-case">{def.description}</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -589,6 +632,9 @@ function PracticePage() {
                       <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-border bg-surface">
                         {current.competency_area}
                       </span>
+                      <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-accentBlue/20 bg-accentBlue/5">
+                        {current.zone}
+                      </span>
                       <span className="text-[10px] font-mono text-textTertiary uppercase">
                         {current.track}
                       </span>
@@ -607,13 +653,13 @@ function PracticePage() {
                       </button>
                       {/* Report issue */}
                       <a
-                        href={`https://github.com/harvard-edge/cs249r_book/issues/new?labels=staffml&title=${encodeURIComponent(`[StaffML] Issue with: ${current.title}`)}&body=${encodeURIComponent(`**Question ID:** \`${current.id}\`\n**Title:** ${current.title}\n**Level:** ${current.level}\n**Track:** ${current.track}\n**Area:** ${current.competency_area}\n\n**What's wrong:**\n\n\n**Expected:**\n\n`)}`}
+                        href={buildReportUrl(current)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-textMuted hover:text-accentRed transition-colors"
+                        className="inline-flex items-center gap-1 text-[11px] text-textSecondary hover:text-accentRed transition-colors"
                         title="Report an issue with this question"
                       >
-                        <Flag className="w-3.5 h-3.5" />
+                        <Flag className="w-3.5 h-3.5" /> Report
                       </a>
                     </div>
                     <h2 className="text-2xl lg:text-3xl font-bold text-textPrimary mb-6 tracking-tight">
@@ -627,7 +673,7 @@ function PracticePage() {
 
                     {current.details.deep_dive_title && (
                       <a
-                        href={current.details.deep_dive_url}
+                        href={current.details.deep_dive_url ? current.details.deep_dive_url.replace('https://mlsysbook.ai', ECOSYSTEM_BASE) : '#'}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 mt-6 px-3 py-2 text-[13px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
@@ -700,6 +746,19 @@ function PracticePage() {
                     animate={{ opacity: 1, y: 0 }}
                     className="space-y-5"
                   >
+                    {/* User's answer (preserved for comparison) */}
+                    {userAnswer.trim() && (
+                      <details className="group">
+                        <summary className="text-[10px] font-mono text-textTertiary uppercase cursor-pointer select-none flex items-center gap-1.5">
+                          <span className="group-open:rotate-90 transition-transform text-[8px]">&#9654;</span>
+                          Your answer
+                        </summary>
+                        <div className="mt-2 p-3 bg-background border border-border rounded-md font-mono text-[12px] text-textSecondary whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
+                          {userAnswer}
+                        </div>
+                      </details>
+                    )}
+
                     {/* Napkin math result — gradient feedback */}
                     {napkinResult && (
                       <div className={clsx(
@@ -764,7 +823,7 @@ function PracticePage() {
                     {/* Deep-dive link to MLSysBook.ai */}
                     {current.details.deep_dive_title && (
                       <a
-                        href={current.details.deep_dive_url}
+                        href={current.details.deep_dive_url ? current.details.deep_dive_url.replace('https://mlsysbook.ai', ECOSYSTEM_BASE) : '#'}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-2 px-3 py-2.5 text-[12px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
@@ -838,6 +897,7 @@ function PracticePage() {
                               key={score}
                               onClick={() => handleScore(Math.min(score, maxScore))}
                               disabled={disabled}
+                              aria-label={`Rate yourself: ${label} (${score} of 3)`}
                               className={clsx(
                                 "px-3 py-2.5 rounded-lg border text-xs font-medium transition-all",
                                 disabled
@@ -852,15 +912,8 @@ function PracticePage() {
                           );
                         })}
                       </div>
-                      {/* Per-question report — visible right next to score buttons */}
-                      <a
-                        href={`https://github.com/harvard-edge/cs249r_book/issues/new?labels=staffml&title=${encodeURIComponent(`[StaffML] Issue with: ${current.title}`)}&body=${encodeURIComponent(`**Question ID:** \`${current.id}\`\n**Title:** ${current.title}\n**Level:** ${current.level}\n**Track:** ${current.track}\n**Area:** ${current.competency_area}\n\n**What's wrong:**\n\n\n**Expected:**\n\n`)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 text-[11px] text-textMuted hover:text-accentRed transition-colors mt-3"
-                      >
-                        <Flag className="w-3 h-3" /> Something wrong with this question?
-                      </a>
+                      {/* Feedback: thumbs, difficulty, report, suggest */}
+                      <QuestionFeedback question={current} />
 
                       {/* Chain navigation — go deeper */}
                       {chainInfo && (
@@ -887,14 +940,14 @@ function PracticePage() {
           </div>
         ) : (
           <div className="flex-1 flex items-center justify-center text-textTertiary">
-            <p className="text-sm">No questions match your filters. Try adjusting track, level, or competency.</p>
+            <p className="text-sm">No questions match your filters. Try adjusting track, level, competency, or zone.</p>
           </div>
         )}
       </div>
 
       {/* Star gate overlay */}
       {showStarGate && (
-        <StarGate onVerified={() => setShowStarGate(false)} />
+        <StarGate onVerified={() => { setShowStarGate(false); track({ type: 'star_gate_verified' }); }} />
       )}
     </div>
   );

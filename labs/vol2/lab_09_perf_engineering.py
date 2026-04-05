@@ -229,7 +229,7 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Roofline model and arithmetic intensity from @sec-performance-engineering
+                    Roofline model and arithmetic intensity from the Performance Engineering chapter
                     &middot; Iron Law of ML Performance &middot; Lab V2-08 (inference at scale)
                 </div>
             </div>
@@ -269,7 +269,7 @@ def _(mo):
     **Recommended Reading** &mdash; Complete the following before this lab:
 
     - **The Roofline Model** &mdash; Arithmetic intensity, ridge point formula,
-      workload placement on the roofline (@sec-performance-engineering).
+      workload placement on the roofline (the Performance Engineering chapter).
     - **FlashAttention: Tiled Attention as a System Primitive** &mdash; How tiling
       reduces HBM traffic from O(N^2) to O(N).
     - **Operator Fusion** &mdash; Elementwise fusion vs full attention block fusion
@@ -501,6 +501,13 @@ def _(
         decode at batch=1 sits 295x below the H100 ridge point -- using only 0.34%
         of available compute. The GPU is not slow. It is starving for data.
         """))
+
+        items.append(mo.callout(mo.md(
+            "**Important:** The roofline is an upper bound on attainable performance, not a prediction "
+            "of actual performance. Real workloads achieve 50-70% of theoretical memory bandwidth due "
+            "to strided access patterns, TLB misses, and bank conflicts. The value of the roofline is "
+            "in identifying *which* resource is the bottleneck, not in predicting exact throughput."
+        ), kind="info"))
 
         # Prediction
         items.append(mo.md("### Your Prediction"))
@@ -1382,7 +1389,7 @@ Ratio      = N / (2d) = 32768 / 256 = {_actual_ratio:.0f}x
                         Textbook &amp; TinyTorch
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-performance-engineering for the full roofline derivation
+                        <strong>Read:</strong> the Performance Engineering chapter for the full roofline derivation
                         and FlashAttention tiling analysis.<br/>
                         <strong>Build:</strong> TinyTorch attention module &mdash; implement tiled attention
                         and measure HBM traffic reduction.
@@ -1413,12 +1420,13 @@ Ratio      = N / (2d) = 32768 / 256 = {_actual_ratio:.0f}x
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
-    ledger.save(chapter=9, design={
-        "roofline_diagnostic": "memory-bound",
-        "flash_savings_ratio_32k": 256,
-        "optimization_methodology": "profile-diagnose-treat",
-    })
+def _(COLORS, ledger, mo, pA_pred):
+    if pA_pred.value is not None:
+        ledger.save(chapter=9, design={
+            "roofline_diagnostic": "memory-bound",
+            "flash_savings_ratio_32k": 256,
+            "optimization_methodology": "profile-diagnose-treat",
+        })
 
     mo.Html(f"""
     <div style="background: #0f172a; border-radius: 10px; padding: 18px 24px;

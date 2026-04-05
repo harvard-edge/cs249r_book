@@ -7,6 +7,7 @@ This is the FOUNDATION MILESTONE - everything should work together for neural ne
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -40,7 +41,7 @@ class TestEntireFoundationStack:
             assert t.shape == (3,), "Foundation broken: Tensor creation"
 
             # Multi-dimensional tensors
-            t2 = Tensor(np.random.randn(4, 5))
+            t2 = Tensor(rng.standard_normal((4, 5)))
             assert t2.shape == (4, 5), "Foundation broken: Multi-dim tensors"
 
         except ImportError:
@@ -98,7 +99,7 @@ class TestDenseNetworkCapability:
             assert layer.weight.shape == (10, 5), "Dense broken: Wrong weight shape"
 
             # Should work with tensor input
-            x = Tensor(np.random.randn(32, 10))
+            x = Tensor(rng.standard_normal((32, 10)))
             output = layer(x)
 
             assert output.shape == (32, 5), "Dense broken: Wrong output shape"
@@ -226,7 +227,7 @@ class TestFoundationMilestoneReadiness:
             softmax = Softmax()
 
             # Simulated MNIST batch
-            x = Tensor(np.random.randn(32, 784))  # 32 images, flattened
+            x = Tensor(rng.standard_normal((32, 784)))  # 32 images, flattened
 
             # Forward pass through MLP
             h1 = relu(layer1(x))     # 32 x 128
@@ -257,7 +258,7 @@ class TestFoundationMilestoneReadiness:
             softmax = Softmax()
 
             # Batch of features
-            features = Tensor(np.random.randn(16, 20))
+            features = Tensor(rng.standard_normal((16, 20)))
 
             # Classification pipeline
             h = relu(feature_layer(features))
@@ -286,8 +287,8 @@ class TestCompleteStackValidation:
             # End-to-end test: Build and run a complete neural network
 
             # 1. Data (from setup/tensor foundation)
-            np.random.seed(42)  # Reproducible
-            X = Tensor(np.random.randn(10, 5))
+            rng = np.random.default_rng(7)  # Reproducible
+            X = Tensor(rng.standard_normal((10, 5)))
 
             # 2. Network architecture (from layers foundation)
             layer1 = Linear(5, 8)
@@ -330,7 +331,7 @@ class TestCompleteStackValidation:
             relu = ReLU()
 
             # Large batch
-            X = Tensor(np.random.randn(256, 100))
+            X = Tensor(rng.standard_normal((256, 100)))
 
             # Multiple forward passes
             for i in range(5):

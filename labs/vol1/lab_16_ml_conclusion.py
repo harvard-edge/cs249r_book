@@ -256,9 +256,9 @@ def _(mo, partC_pred):
 
     partD_pred = mo.ui.radio(
         options={
-            "A) Preprocessing (largest non-inference)": "preprocess",
-            "B) Inference (largest overall: 1/(0.6+0.4/5) = 1.47x)": "inference",
-            "C) Postprocessing (low-hanging fruit)": "postprocess",
+            "A) Preprocessing (35% -- largest non-inference)": "preprocess",
+            "B) Inference (40% -- largest single component)": "inference",
+            "C) Postprocessing (15% -- low-hanging fruit)": "postprocess",
             "D) Does not matter -- 5x on any yields same speedup": "same",
         },
         label="4 components: preprocess 35%, inference 40%, postprocess 15%, logging 10%. "
@@ -425,6 +425,22 @@ AI           = 2*{_batch} = {_ai} FLOPs/byte  (ridge = {_ridge:.0f})
                 f"**Memory fraction = {_mem_frac:.0f}%.** Even after 15 labs, "
                 "students underestimate the severity of the memory wall."), kind="warn"))
 
+        # MathPeek
+        items.append(mo.accordion({
+            "Math Peek: Amdahl's Law and the Memory Wall": mo.md(f"""
+**Amdahl's Law — speedup limited by the sequential (memory-bound) fraction:**
+
+$$S = \\frac{{1}}{{(1 - p) + \\frac{{p}}{{N}}}}$$
+
+where $p$ = parallelizable fraction, $N$ = speedup factor on that fraction.
+
+At batch=1 autoregressive decoding, arithmetic intensity = 1 FLOP/byte.
+The ridge point of H100 is ~{_ridge:.0f} FLOPs/byte. Since AI (1) << ridge ({_ridge:.0f}),
+**{_mem_frac:.0f}% of token time is pure memory access** — no amount of
+compute optimization can help until you move data faster.
+"""),
+        }))
+
         # Edge comparison: same analysis on Jetson Orin NX
         _edge_t_mem = _w_gb / JETSON_BW_GBS * 1000 if JETSON_BW_GBS > 0 else float('inf')
         _edge_t_comp = _flops / (JETSON_TFLOPS * 1e12 * 0.5) * 1000 if JETSON_TFLOPS > 0 else float('inf')
@@ -537,6 +553,23 @@ Conservation: Delta(Data) + Delta(Algorithm) + Delta(Machine) = 0
                 "**INT8 models drift faster than FP32.** Reduced effective capacity means "
                 "less tolerance for distribution shift. Conservation of Complexity."), kind="warn"))
 
+        # MathPeek
+        items.append(mo.accordion({
+            "Math Peek: Conservation of Complexity": mo.md(f"""
+**The complexity budget is conserved across subsystems:**
+
+$$\\text{{Total\\_complexity}} = \\sum_i \\text{{subsystem\\_cost}}_i$$
+
+$$\\Delta(\\text{{Data}}) + \\Delta(\\text{{Algorithm}}) + \\Delta(\\text{{Machine}}) = 0$$
+
+Quantization reduces Algorithm complexity (fewer bits per weight) but
+shifts burden to Machine complexity (monitoring, drift detection).
+With {_quant.upper()} and monitoring level {['None', 'Basic', 'Comprehensive'][_mon]},
+drift rate = {_drift:.1f} pp/month, yielding **{_acc_loss:.1f} pp accuracy loss**
+over {_months} months. The complexity was not destroyed — it was moved.
+"""),
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -593,6 +626,23 @@ most consistently underweight across all 15 labs?
             "Silent Degradation is consistently the most underestimated "
             "invariant because students conflate infrastructure health "
             "with model health."), kind="info"))
+
+        # MathPeek
+        items.append(mo.accordion({
+            "Math Peek: Prediction Calibration Error": mo.md("""
+**Mean Absolute Prediction Error across labs:**
+
+$$\\text{MAPE} = \\frac{1}{N} \\sum_{i=1}^{N} |\\hat{y}_i - y_i|$$
+
+where $\\hat{y}_i$ = your prediction, $y_i$ = actual measured value.
+
+A well-calibrated engineer has MAPE < 10%. The class median is typically
+30-50% on first encounter with each invariant. Systematic overconfidence
+on "Silent Degradation" (70% error) reveals that students confuse
+**infrastructure uptime** with **model accuracy** — the system stays
+green while the model quietly rots.
+"""),
+        }))
 
         return mo.vstack(items)
 
@@ -705,6 +755,27 @@ The component with the **largest time fraction** has the highest-leverage optimi
                 f"**The largest component wins.** {_labels[_best]} at "
                 f"{_norm[_best]*100:.0f}% gives {_all_speedups[_best]:.2f}x."), kind="warn"))
 
+        # MathPeek
+        items.append(mo.accordion({
+            "Math Peek: Amdahl's Ceiling with Component Fractions": mo.md(f"""
+**Amdahl's Law applied to a multi-component pipeline:**
+
+$$S = \\frac{{1}}{{f_{{\\text{{serial}}}} + \\frac{{f_{{\\text{{opt}}}}}}{{N}}}}$$
+
+With your current fractions (normalized to 1.0):
+
+| Component | Fraction | Speedup if optimized {_S}x |
+|-----------|----------|---------------------------|
+| Preprocessing | {_norm['preprocess']*100:.0f}% | {_all_speedups['preprocess']:.2f}x |
+| Inference | {_norm['inference']*100:.0f}% | {_all_speedups['inference']:.2f}x |
+| Postprocessing | {_norm['postprocess']*100:.0f}% | {_all_speedups['postprocess']:.2f}x |
+| Logging | {_norm['logging']*100:.0f}% | {_all_speedups['logging']:.2f}x |
+
+The ceiling: even with $N \\to \\infty$ on {_labels[_best]}, max speedup =
+$1 / (1 - {_norm[_best]:.2f})$ = **{1/(1-_norm[_best]):.2f}x**.
+"""),
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -767,7 +838,7 @@ The architect's job is to choose **which constraint to live with**.
         _w_gb = _params * 1e9 * _bpp / (1024**3)
 
         # KV cache (always FP16 for KV)
-        _layers = {70: 80, 35: 40, 13: 40}.get(int(_params), 80)
+        _layers = {70: 80, 35: 80, 13: 40}.get(int(_params), 80)  # pruning keeps layer count; only distillation changes arch
         _heads = {70: 64, 35: 32, 13: 40}.get(int(_params), 64)
         _hidden = {70: 8192, 35: 4096, 13: 5120}.get(int(_params), 8192)
         _hdim = _hidden // _heads
@@ -877,6 +948,27 @@ The architect's job is to choose **which constraint to live with**.
                 "**The new binding constraint is KV cache memory.** INT4 weights fit, "
                 f"but KV cache at long context fills HBM."), kind="warn"))
 
+        # MathPeek
+        items.append(mo.accordion({
+            "Math Peek: The Constraint Cascade — Memory Budget": mo.md(f"""
+**Total HBM consumption = weights + KV cache:**
+
+$$\\text{{Memory}} = W_{{\\text{{gb}}}} + KV_{{\\text{{gb}}}}$$
+
+$$KV_{{\\text{{gb}}}} = \\frac{{2 \\times L \\times H_{{\\text{{dim}}}} \\times \\text{{context}} \\times 2}}{{10^9}}$$
+
+With your configuration:
+- Weights: {_w_gb:.1f} GB ({_params:.0f}B params x {_bpp} bytes/param)
+- KV cache: {_kv_gb:.1f} GB ({_layers} layers, {_ctx:,} context, FP16)
+- **Total: {_total_mem:.1f} GB** vs {H100_RAM_GB:.0f} GB HBM
+
+{"OOM: total exceeds HBM capacity." if not _mem_ok else f"Fits with {H100_RAM_GB - _total_mem:.1f} GB headroom."}
+INT4 halved the weight memory — but KV cache is always FP16 and grows
+linearly with context length. At 128K tokens, KV alone would consume
+~{2 * _layers * _heads * _hdim * 131072 * 2 / (1024**3):.0f} GB.
+"""),
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -901,18 +993,38 @@ The architect's job is to choose **which constraint to live with**.
                 "INT4 solves memory but creates KV cache and accuracy constraints. "
                 "The architect chooses which constraint to live with."
             ), kind="info"),
-            mo.md("""
-## Connections
-
-**Textbook:** This capstone lab integrates every chapter of Volume I. The five invariants
-(Amdahl's Law, Memory Wall, Silent Degradation, Conservation of Complexity,
-No Free Fairness) govern all ML systems design decisions.
-
-**TinyTorch:** You have now completed the conceptual foundation. The 20 TinyTorch modules
-let you build these systems from scratch.
-
-**Volume II:** Distributed systems at scale &mdash; when the constraints of a single machine
-are no longer enough, and you must reason about networks, fault tolerance, and coordination.
+            mo.Html(f"""
+            <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        What's Next
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Volume II: ML Systems at Scale</strong> -- Continue to
+                        Volume II where single-machine constraints become distributed
+                        systems challenges. Networks replace buses, fault tolerance replaces
+                        restarts, and coordination cost dominates everything.
+                    </div>
+                </div>
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        Textbook &amp; TinyTorch
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Review:</strong> The five invariants -- Amdahl's Law,
+                        Memory Wall, Silent Degradation, Conservation of Complexity,
+                        No Free Fairness -- govern all ML systems design.<br/>
+                        <strong>Build:</strong> The 20 TinyTorch modules let you construct
+                        these systems from scratch, component by component.
+                    </div>
+                </div>
+            </div>
             """),
             mo.accordion({
                 "Self-Assessment: Can you answer these from memory?": mo.md("""
@@ -945,12 +1057,16 @@ are no longer enough, and you must reason about networks, fault tolerance, and c
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, partA_pred, partB_pred, partC_pred, partD_pred, partE_pred):
     _track = ledger.get_track()
-    ledger.save(chapter=16, design={
-        "chapter": "v1_16",
-        "completed": True,
-    })
+    if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None and partE_pred.value is not None:
+        ledger.save(chapter=16, design={
+            "chapter": "v1_16",
+            "capstone_completed": True,
+            "invariants_synthesized": 15,
+            "deployment_decision_made": True,
+            "completed": True,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

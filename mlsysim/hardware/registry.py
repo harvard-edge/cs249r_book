@@ -7,9 +7,15 @@ from ..core.constants import (
     H100_MEM_BW, H100_FLOPS_FP16_TENSOR, H100_MEM_CAPACITY, H100_TDP, H100_FLOPS_TF32, H100_FLOPS_FP8_TENSOR, H100_FLOPS_INT8, H100_UNIT_COST,
     H200_MEM_BW, H200_MEM_CAPACITY, H200_TDP, H200_UNIT_COST,
     B200_MEM_BW, B200_FLOPS_FP16_TENSOR, B200_MEM_CAPACITY, B200_TDP, B200_FLOPS_FP8_TENSOR, B200_FLOPS_INT4, B200_UNIT_COST,
-    NVL72_FLOPS_FP8_TENSOR, NVL72_MEM_CAPACITY, NVL72_MEM_BW, NVL72_NVLINK_BW, NVL72_TDP, NVL72_UNIT_COST,
+    NVL72_FLOPS_FP8_TENSOR, NVL72_FLOPS_FP4_TENSOR, NVL72_MEM_CAPACITY, NVL72_MEM_BW, NVL72_NVLINK_BW, NVL72_TDP, NVL72_UNIT_COST,
     MI300X_MEM_BW, MI300X_FLOPS_FP16_TENSOR, MI300X_MEM_CAPACITY, MI300X_TDP, MI300X_UNIT_COST,
-    TPUV5P_MEM_BW, TPUV5P_FLOPS_BF16, TPUV5P_MEM_CAPACITY, TPUV5P_TDP,
+    MI300X_FLOPS_FP8, MI300X_FLOPS_INT8, MI300X_FLOPS_FP32,
+    MI250X_FLOPS_FP16_TENSOR, MI250X_FLOPS_FP32, MI250X_FLOPS_INT8, MI250X_MEM_BW, MI250X_MEM_CAPACITY, MI250X_TDP,
+    GAUDI2_FLOPS_BF16, GAUDI2_FLOPS_FP8, GAUDI2_MEM_BW, GAUDI2_MEM_CAPACITY, GAUDI2_TDP,
+    GAUDI3_FLOPS_BF16, GAUDI3_FLOPS_FP8, GAUDI3_MEM_BW, GAUDI3_MEM_CAPACITY, GAUDI3_TDP,
+    TRAINIUM2_FLOPS_BF16, TRAINIUM2_FLOPS_FP8, TRAINIUM2_MEM_BW, TRAINIUM2_MEM_CAPACITY, TRAINIUM2_TDP,
+    TPUV6_FLOPS_BF16, TPUV6_MEM_BW, TPUV6_MEM_CAPACITY,
+    TPUV5P_MEM_BW, TPUV5P_FLOPS_BF16, TPUV5P_MEM_CAPACITY, TPUV5P_TDP, TPUV5P_FLOPS_INT8,
     T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP, T4_FLOPS_INT8, T4_UNIT_COST,
     WSE3_FLOPS_FP16, WSE3_MEM_CAPACITY, WSE3_MEM_BW, WSE3_TDP, WSE3_CORES, CEREBRAS_CS3_UNIT_COST,
     PCIE_GEN3_BW, PCIE_GEN4_BW, PCIE_GEN5_BW, NVME_SEQUENTIAL_BW
@@ -36,6 +42,7 @@ class CloudHardware(Registry):
         interconnect=IOInterconnect(name="PCIe Gen4 x16", bandwidth=PCIE_GEN4_BW),
         tdp=A100_TDP,
         unit_cost=A100_UNIT_COST,
+        embodied_carbon_kg=130.0,  # Gupta et al. 2022 estimate
         dispatch_tax=0.015 * ureg.ms,
         metadata={"source_url": "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf", "last_verified": "2025-03-06"}
     )
@@ -49,6 +56,7 @@ class CloudHardware(Registry):
         interconnect=IOInterconnect(name="PCIe Gen5 x16", bandwidth=PCIE_GEN5_BW),
         tdp=H100_TDP,
         unit_cost=H100_UNIT_COST,
+        embodied_carbon_kg=150.0,  # Gupta et al. 2022 estimate for high-end datacenter GPU
         dispatch_tax=0.01 * ureg.ms,
         metadata={"source_url": "https://resources.nvidia.com/en-us-tensor-core/nvidia-h100-tensor-core-gpu-datasheet", "last_verified": "2025-03-06"}
     )
@@ -56,7 +64,7 @@ class CloudHardware(Registry):
     H200 = HardwareNode(
         name="NVIDIA H200",
         release_year=2023,
-        compute=ComputeCore(peak_flops=H100_FLOPS_FP16_TENSOR),
+        compute=ComputeCore(peak_flops=H100_FLOPS_FP16_TENSOR, precision_flops={"tf32": H100_FLOPS_TF32, "fp8": H100_FLOPS_FP8_TENSOR, "int8": H100_FLOPS_INT8}),
         memory=MemoryHierarchy(capacity=H200_MEM_CAPACITY, bandwidth=H200_MEM_BW),
         storage=StorageHierarchy(capacity=4 * ureg.TB, bandwidth=NVME_SEQUENTIAL_BW),
         interconnect=IOInterconnect(name="PCIe Gen5 x16", bandwidth=PCIE_GEN5_BW),
@@ -79,7 +87,7 @@ class CloudHardware(Registry):
     GB200_NVL72 = HardwareNode(
         name="NVIDIA GB200 NVL72",
         release_year=2024,
-        compute=ComputeCore(peak_flops=NVL72_FLOPS_FP8_TENSOR),
+        compute=ComputeCore(peak_flops=NVL72_FLOPS_FP8_TENSOR, precision_flops={"fp4": NVL72_FLOPS_FP4_TENSOR}),
         memory=MemoryHierarchy(capacity=NVL72_MEM_CAPACITY, bandwidth=NVL72_MEM_BW),
         interconnect=IOInterconnect(name="NVLink Switch (Bisection)", bandwidth=NVL72_NVLINK_BW),
         tdp=NVL72_TDP,
@@ -91,17 +99,62 @@ class CloudHardware(Registry):
     MI300X = HardwareNode(
         name="AMD MI300X",
         release_year=2023,
-        compute=ComputeCore(peak_flops=MI300X_FLOPS_FP16_TENSOR),
+        compute=ComputeCore(peak_flops=MI300X_FLOPS_FP16_TENSOR, precision_flops={"fp8": MI300X_FLOPS_FP8, "int8": MI300X_FLOPS_INT8, "fp32": MI300X_FLOPS_FP32}),
         memory=MemoryHierarchy(capacity=MI300X_MEM_CAPACITY, bandwidth=MI300X_MEM_BW),
         tdp=MI300X_TDP,
         unit_cost=MI300X_UNIT_COST,
         dispatch_tax=0.012 * ureg.ms
     )
 
+    MI250X = HardwareNode(
+        name="AMD MI250X",
+        release_year=2021,
+        compute=ComputeCore(peak_flops=MI250X_FLOPS_FP16_TENSOR, precision_flops={"fp32": MI250X_FLOPS_FP32, "int8": MI250X_FLOPS_INT8}),
+        memory=MemoryHierarchy(capacity=MI250X_MEM_CAPACITY, bandwidth=MI250X_MEM_BW),
+        tdp=MI250X_TDP,
+        dispatch_tax=0.015 * ureg.ms
+    )
+
+    Gaudi2 = HardwareNode(
+        name="Intel Gaudi 2",
+        release_year=2022,
+        compute=ComputeCore(peak_flops=GAUDI2_FLOPS_BF16, precision_flops={"fp8": GAUDI2_FLOPS_FP8}),
+        memory=MemoryHierarchy(capacity=GAUDI2_MEM_CAPACITY, bandwidth=GAUDI2_MEM_BW),
+        tdp=GAUDI2_TDP,
+        dispatch_tax=0.02 * ureg.ms
+    )
+
+    Gaudi3 = HardwareNode(
+        name="Intel Gaudi 3",
+        release_year=2024,
+        compute=ComputeCore(peak_flops=GAUDI3_FLOPS_BF16, precision_flops={"fp8": GAUDI3_FLOPS_FP8}),
+        memory=MemoryHierarchy(capacity=GAUDI3_MEM_CAPACITY, bandwidth=GAUDI3_MEM_BW),
+        tdp=GAUDI3_TDP,
+        dispatch_tax=0.01 * ureg.ms
+    )
+
+    Trainium2 = HardwareNode(
+        name="AWS Trainium 2",
+        release_year=2024,
+        compute=ComputeCore(peak_flops=TRAINIUM2_FLOPS_BF16, precision_flops={"fp8": TRAINIUM2_FLOPS_FP8}),
+        memory=MemoryHierarchy(capacity=TRAINIUM2_MEM_CAPACITY, bandwidth=TRAINIUM2_MEM_BW),
+        tdp=TRAINIUM2_TDP,
+        dispatch_tax=0.02 * ureg.ms
+    )
+
+    TPUv6 = HardwareNode(
+        name="Google TPU v6 (Trillium)",
+        release_year=2024,
+        compute=ComputeCore(peak_flops=TPUV6_FLOPS_BF16),
+        memory=MemoryHierarchy(capacity=TPUV6_MEM_CAPACITY, bandwidth=TPUV6_MEM_BW),
+        tdp=300 * ureg.W,
+        dispatch_tax=0.04 * ureg.ms
+    )
+
     TPUv5p = HardwareNode(
         name="Google TPU v5p",
         release_year=2023,
-        compute=ComputeCore(peak_flops=TPUV5P_FLOPS_BF16),
+        compute=ComputeCore(peak_flops=TPUV5P_FLOPS_BF16, precision_flops={"int8": TPUV5P_FLOPS_INT8}),
         memory=MemoryHierarchy(capacity=TPUV5P_MEM_CAPACITY, bandwidth=TPUV5P_MEM_BW),
         tdp=TPUV5P_TDP,
         dispatch_tax=0.04 * ureg.ms
@@ -234,12 +287,48 @@ class TinyHardware(Registry):
     ESP32_S3 = HardwareNode(
         name="ESP32-S3 (AI)",
         release_year=2022,
-        compute=ComputeCore(peak_flops=0.0005 * ureg.TFLOPs/ureg.s),
-        memory=MemoryHierarchy(capacity=512 * ureg.KiB, bandwidth=0.2 * ureg.GB/ureg.s),
-        tdp=1.2 * ureg.W,
-        dispatch_tax=5.0 * ureg.ms
+        # ESP32-S3 has no FP16 hardware; INT8 via vector extensions.
+        # ~2.4 GOPS INT8 (240 MHz dual-core, vector instructions)
+        compute=ComputeCore(
+            peak_flops=0.0005 * ureg.TFLOPs/ureg.s,
+            precision_flops={"int8": 0.0024 * ureg.TFLOPs/ureg.s}
+        ),
+        # 512 KiB SRAM (usable ~256 KiB after RTOS/stack); 8 MB flash for weights
+        # capacity/bandwidth = flash (default path for large models)
+        # sram_capacity/bandwidth = on-chip SRAM (used when model fits)
+        memory=MemoryHierarchy(
+            capacity=8 * ureg.MB,                     # Flash (primary weight storage)
+            bandwidth=0.08 * ureg.GB/ureg.s,          # Flash read ~80 MB/s (XIP)
+            sram_capacity=512 * ureg.KiB,             # On-chip SRAM
+            sram_bandwidth=0.96 * ureg.GB/ureg.s,     # SRAM bandwidth @ 240 MHz
+            flash_capacity=8 * ureg.MB,               # Explicit flash (same as capacity)
+            flash_bandwidth=0.08 * ureg.GB/ureg.s,    # Flash read ~80 MB/s
+        ),
+        tdp=0.4 * ureg.W,              # Inference-only power (not WiFi-on 1.2W)
+        embodied_carbon_kg=5.0,        # Including packaging and PCB assembly
+        dispatch_tax=1.0 * ureg.ms     # TFLite Micro interpreter overhead
     )
     ESP32 = ESP32_S3 # Alias for backward compatibility
+
+    nRF52840 = HardwareNode(
+        name="Nordic nRF52840 (Cortex-M4F)",
+        release_year=2018,
+        # MLPerf Tiny reference platform. Cortex-M4F @ 64 MHz.
+        compute=ComputeCore(
+            peak_flops=0.000064 * ureg.TFLOPs/ureg.s,  # ~64 MFLOPS (single-precision)
+            precision_flops={"int8": 0.000128 * ureg.TFLOPs/ureg.s}  # ~128 MOPS INT8
+        ),
+        memory=MemoryHierarchy(
+            capacity=1 * ureg.MB,                     # Flash (primary weight storage)
+            bandwidth=0.064 * ureg.GB/ureg.s,         # Flash read ~64 MB/s
+            sram_capacity=256 * ureg.KiB,             # On-chip SRAM
+            sram_bandwidth=0.256 * ureg.GB/ureg.s,    # SRAM bandwidth @ 64 MHz
+            flash_capacity=1 * ureg.MB,               # 1 MB internal flash
+            flash_bandwidth=0.064 * ureg.GB/ureg.s,   # Flash read ~64 MB/s
+        ),
+        tdp=0.015 * ureg.W,            # ~15 mW active inference
+        dispatch_tax=0.5 * ureg.ms
+    )
 
     HimaxWE1 = HardwareNode(
         name="Himax WE-I Plus",
@@ -265,6 +354,11 @@ class Hardware(Registry):
     B200 = CloudHardware.B200
     NVL72 = CloudHardware.GB200_NVL72
     MI300X = CloudHardware.MI300X
+    MI250X = CloudHardware.MI250X
+    Gaudi2 = CloudHardware.Gaudi2
+    Gaudi3 = CloudHardware.Gaudi3
+    Trainium2 = CloudHardware.Trainium2
+    TPUv6 = CloudHardware.TPUv6
     TPUv5p = CloudHardware.TPUv5p
     TPUv4 = CloudHardware.TPUv5p
     T4 = CloudHardware.T4

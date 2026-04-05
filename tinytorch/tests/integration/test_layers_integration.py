@@ -10,6 +10,7 @@ how layers work together with other modules and complete system behaviors.
 import sys
 import os
 import numpy as np
+rng = np.random.default_rng(7)
 import pytest
 
 from tinytorch.core.tensor import Tensor
@@ -56,7 +57,7 @@ def test_complete_neural_networks():
     ])
 
     # Test with batch of "images"
-    batch_images = Tensor(np.random.randn(32, 28, 28))  # 32 MNIST-like images
+    batch_images = Tensor(rng.standard_normal((32, 28, 28)))  # 32 MNIST-like images
     mlp_output = mlp(batch_images)
     print(f"   Input: {batch_images.shape} (batch of 28x28 images)")
     print(f"   Output: {mlp_output.shape} (class logits for 32 images)")
@@ -77,7 +78,7 @@ def test_complete_neural_networks():
     ])
 
     # Test with simulated conv output
-    conv_features = Tensor(np.random.randn(16, 8, 8, 8))  # Simulated (B,C,H,W)
+    conv_features = Tensor(rng.standard_normal((16, 8, 8, 8)))  # Simulated (B,C,H,W)
     cnn_output = cnn_style(conv_features)
     print(f"   Input: {conv_features.shape} (simulated conv features)")
     print(f"   Output: {cnn_output.shape} (class predictions)")
@@ -97,7 +98,7 @@ def test_complete_neural_networks():
         print(f"   Added layer: {layer_sizes[i]} -> {layer_sizes[i+1]}")
 
     # Test deep network
-    deep_input = Tensor(np.random.randn(8, 100))
+    deep_input = Tensor(rng.standard_normal((8, 100)))
     deep_output = deep_net(deep_input)
     print(f"   Deep network: {deep_input.shape} -> {deep_output.shape}")
     print(f"   Total parameters: {len(deep_net.parameters())} tensors")
@@ -133,7 +134,7 @@ def test_cross_module_compatibility():
     layer = Linear(5, 3)
 
     # From numpy array
-    numpy_input = Tensor(np.random.randn(2, 5))
+    numpy_input = Tensor(rng.standard_normal((2, 5)))
     numpy_output = layer(numpy_input)
     assert numpy_output.shape == (2, 3), "Numpy tensor compatibility failed"
     print("   ✅ Numpy array input compatibility")
@@ -151,7 +152,7 @@ def test_cross_module_compatibility():
         Linear(8, 5)
     ])
 
-    test_input = Tensor(np.random.randn(3, 10))
+    test_input = Tensor(rng.standard_normal((3, 10)))
     complex_output = complex_net(test_input)
     assert complex_output.shape == (3, 5), "Complex network compatibility failed"
     print("   ✅ Mixed operations compatibility")
@@ -174,7 +175,7 @@ def run_performance_benchmarks():
         Linear(100, 10)
     ])
 
-    large_batch = Tensor(np.random.randn(1000, 1000))  # 1000 samples, 1000 features
+    large_batch = Tensor(rng.standard_normal((1000, 1000)))  # 1000 samples, 1000 features
 
     # Warm up
     _ = large_mlp(large_batch)

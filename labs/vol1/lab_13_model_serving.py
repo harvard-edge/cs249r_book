@@ -144,9 +144,9 @@ def _(COLORS, mo):
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                     Prerequisites</div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Iron Law equation from @sec-introduction &middot;
-                    Memory wall from @sec-hw-acceleration &middot;
-                    Transformer architecture from @sec-nn-architectures</div>
+                    Iron Law equation from the Introduction chapter &middot;
+                    Memory wall from the Hardware Acceleration chapter &middot;
+                    Transformer architecture from the Network Architectures chapter</div>
             </div>
             <div style="flex: 0 0 180px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
@@ -183,7 +183,7 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** &mdash; Complete before this lab:
 
-    - **@sec-model-serving** &mdash; Queuing theory for inference, M/M/1 model,
+    - **The Model Serving chapter** &mdash; Queuing theory for inference, M/M/1 model,
       batching strategies, KV cache management, and cold start latency.
     """), kind="info")
     return
@@ -323,6 +323,13 @@ as rho approaches 1.0. At rho=0.80, the 1/(1-rho) amplifier is 5x, making
 P99 = 4.6 * 5 * service_time = **23x service time**.
         """))
 
+        items.append(mo.callout(mo.md(
+            "**Note:** M/M/1 assumes Poisson arrivals and exponential service times. Production "
+            "serving systems have bursty arrivals, bimodal latencies (cache hits vs misses), and "
+            "multiple servers. The M/M/1 model is a pedagogical lower bound — real P99 latencies "
+            "are typically 2-5x worse due to autocorrelation and load balancer overhead."
+        ), kind="info"))
+
         items.append(partA_pred)
         if partA_pred.value is None:
             items.append(mo.callout(mo.md(
@@ -345,18 +352,22 @@ P99 = 4.6 * 5 * service_time = **23x service time**.
 
         _fig = go.Figure()
         _fig.add_trace(go.Scatter(x=_rhos, y=_means, mode='lines', name='Mean Latency',
-                                   line=dict(color=COLORS['BlueLine'], width=2)))
+                                   line=dict(color=COLORS['BlueLine'], width=2),
+                                   hovertemplate="rho=%{x:.2f}: %{y:.1f} ms<extra></extra>"))
         _fig.add_trace(go.Scatter(x=_rhos, y=_p99s, mode='lines', name='P99 Latency',
-                                   line=dict(color=COLORS['RedLine'], width=3)))
+                                   line=dict(color=COLORS['RedLine'], width=3),
+                                   hovertemplate="rho=%{x:.2f}: %{y:.1f} ms<extra></extra>"))
         _fig.add_hline(y=_slo, line_dash="dash", line_color=COLORS['GreenLine'],
                        annotation_text=f"SLO = {_slo:.0f} ms")
         if _rho < 1.0:
             _fig.add_trace(go.Scatter(x=[_rho], y=[_p99], mode='markers',
                                        name=f'P99 @ rho={_rho:.2f}',
-                                       marker=dict(color=COLORS['RedLine'], size=14, symbol='diamond')))
+                                       marker=dict(color=COLORS['RedLine'], size=14, symbol='diamond'),
+                                       hovertemplate="rho=%{x:.2f}: %{y:.1f} ms<extra></extra>"))
             _fig.add_trace(go.Scatter(x=[_rho], y=[_mean], mode='markers',
                                        name=f'Mean @ rho={_rho:.2f}',
-                                       marker=dict(color=COLORS['BlueLine'], size=10)))
+                                       marker=dict(color=COLORS['BlueLine'], size=10),
+                                       hovertemplate="rho=%{x:.2f}: %{y:.1f} ms<extra></extra>"))
         _fig.update_layout(height=380, xaxis=dict(title="Utilization (rho)", range=[0, 1]),
                            yaxis=dict(title="Latency (ms)", gridcolor="#f1f5f9"),
                            legend=dict(orientation="h", y=1.12, x=0),
@@ -420,6 +431,27 @@ P99  = 4.6 * {_svc:.1f} / {1-_rho:.2f} = {_p99:.1f} ms  ({_p99_ratio:.1f}x servi
                 f"**Actual P99 is {_actual_p99:.0f} ms** &mdash; 23x service time. "
                 "The 1/(1-rho) amplifier at 0.80 is 5x, times ln(100)=4.6."), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: M/M/1 Queue Latency": mo.md("""
+**Formula (mean sojourn time):**
+$$
+W = \\frac{1}{\\mu - \\lambda} = \\frac{1}{\\mu} \\cdot \\frac{1}{1 - \\rho}
+$$
+
+**P99 approximation (exponential tail):**
+$$
+P_{99} \\approx \\frac{\\ln(100)}{\\mu(1 - \\rho)} = \\frac{4.6}{\\mu(1 - \\rho)}
+$$
+
+**Variables:**
+- **$\\lambda$**: arrival rate (requests/s)
+- **$\\mu$**: service rate ($1/T_{\\text{service}}$)
+- **$\\rho = \\lambda / \\mu$**: server utilization
+- **$W$**: mean time in system (wait + service)
+
+At $\\rho = 0.80$: mean wait = $5\\times$ service time, P99 = $23\\times$ service time. The nonlinear $1/(1-\\rho)$ amplifier is why 80% utilization feels like a crisis.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -480,7 +512,8 @@ the GPU fires a single kernel.
             ("Queuing", min(_q_del, 500), COLORS['RedLine']),
         ]:
             _fig.add_trace(go.Bar(name=_name, x=[_name], y=[_val],
-                                   marker_color=_col, opacity=0.88))
+                                   marker_color=_col, opacity=0.88,
+                                   hovertemplate="%{x}: %{y:.1f} ms<extra></extra>"))
         _fig.add_hline(y=_slo, line_dash="dash", line_color=COLORS['GreenLine'],
                        annotation_text=f"SLO = {_slo} ms")
         _fig.update_layout(height=340, yaxis=dict(title="Latency (ms)", gridcolor="#f1f5f9"),
@@ -541,6 +574,26 @@ Total           = {min(_total,999):.1f} ms
                 f"**Formation delay kills the SLO.** B=32 at 500 QPS: {_ref_form:.0f} ms "
                 "of waiting before the GPU fires."), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Batch Formation Delay": mo.md("""
+**Formula (expected wait for batch to fill):**
+$$
+T_{\\text{formation}} = \\frac{B - 1}{2\\lambda}
+$$
+
+**Throughput gain vs. latency cost:**
+$$
+\\text{Throughput} = \\frac{B \\cdot \\mu}{1 + B \\cdot \\mu \\cdot T_{\\text{formation}}}
+$$
+
+**Variables:**
+- **$B$**: batch size
+- **$\\lambda$**: arrival rate (requests/s)
+- **$T_{\\text{formation}}$**: expected time for the last request in a batch to arrive
+
+At $B=32$ and $\\lambda=500$ QPS, the average request waits $(32-1)/(2 \\times 500) = 31$ ms just for the batch to fill -- 62% of a 50 ms SLO budget consumed before inference starts.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -599,9 +652,11 @@ when memory capacity is the binding constraint.
         _br = list(range(1, min(_max_b + 3, 20)))
         _fig = go.Figure()
         _fig.add_trace(go.Bar(name="Weights", x=[str(b) for b in _br],
-                               y=[_w_gb]*len(_br), marker_color=COLORS['BlueLine'], opacity=0.88))
+                               y=[_w_gb]*len(_br), marker_color=COLORS['BlueLine'], opacity=0.88,
+                               hovertemplate="Batch %{x}: %{y:.1f} GB<extra></extra>"))
         _fig.add_trace(go.Bar(name="KV Cache", x=[str(b) for b in _br],
-                               y=[_kv_gb*b for b in _br], marker_color=COLORS['OrangeLine'], opacity=0.88))
+                               y=[_kv_gb*b for b in _br], marker_color=COLORS['OrangeLine'], opacity=0.88,
+                               hovertemplate="Batch %{x}: %{y:.1f} GB<extra></extra>"))
         _fig.add_hline(y=_hbm, line_dash="dash", line_color=COLORS['RedLine'],
                        annotation_text=f"HBM = {_hbm:.0f} GB")
         _fig.update_layout(barmode="stack", height=380,
@@ -692,6 +747,30 @@ T_token      = ({_w_gb:.0f}+{_kv_gb:.1f}) / {_bw:.0f} GB/s = {_tok_ms:.1f} ms
                 "**KV cache at 128K is ~320 GB per request.** Only 1 fits "
                 "after model weights in 640 GB HBM."), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: KV Cache Memory per Request": mo.md("""
+**Formula:**
+$$
+M_{\\text{KV}} = 2 \\times L \\times H \\times d_h \\times S \\times b_{\\text{kv}}
+$$
+
+Total HBM budget:
+$$
+M_{\\text{weights}} + n \\times M_{\\text{KV}} \\leq M_{\\text{HBM}}
+$$
+
+**Variables:**
+- **$L$**: number of transformer layers
+- **$H$**: number of attention heads
+- **$d_h$**: head dimension ($d_{\\text{model}} / H$)
+- **$S$**: sequence length (context window)
+- **$b_{\\text{kv}}$**: bytes per KV element (2 for FP16)
+- **$n$**: concurrent batch size (requests in flight)
+- Factor of 2: one K tensor + one V tensor per layer
+
+At 128K context, Llama-2 70B KV cache = $2 \\times 80 \\times 64 \\times 128 \\times 131072 \\times 2 \\approx 320$ GB per request.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -755,11 +834,12 @@ For large models this is seconds to minutes, experienced by real users.
             ("Warmup", _t_warm, COLORS['GreenLine']),
         ]:
             _fig.add_trace(go.Bar(name=_nm, x=[_dur], y=["Cold Start"], orientation='h',
-                                   marker_color=_cl, opacity=0.88, base=_cum))
+                                   marker_color=_cl, opacity=0.88, base=_cum,
+                                   hovertemplate="%{fullData.name}: %{x:.2f} s<extra></extra>"))
             _cum += _dur
         _fig.add_vline(x=_patience, line_dash="dash", line_color=COLORS['RedLine'],
                        annotation_text="User patience (3s)")
-        _fig.update_layout(height=200, barmode="stack",
+        _fig.update_layout(height=240, barmode="stack",
                            xaxis=dict(title="Time (seconds)", gridcolor="#f1f5f9"),
                            legend=dict(orientation="h", y=1.3, x=0),
                            margin=dict(l=80, r=20, t=50, b=40))
@@ -819,6 +899,23 @@ Total        = {_t_total:.1f} s
                 f"**Cold start dominated by data movement.** 140 GB at 7 GB/s "
                 f"= ~{130/7:.0f}s transfer alone. Total: ~{_ref:.0f}s."), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Cold Start Latency Decomposition": mo.md("""
+**Formula:**
+$$
+T_{\\text{cold}} = \\frac{M_{\\text{weights}}}{\\text{BW}_{\\text{storage}}} + \\frac{M_{\\text{weights}}}{\\text{BW}_{\\text{deser}}} + T_{\\text{CUDA}} + T_{\\text{warmup}}
+$$
+
+**Variables:**
+- **$M_{\\text{weights}}$**: model size in bytes (e.g., 140 GB for 70B FP16)
+- **$\\text{BW}_{\\text{storage}}$**: storage read bandwidth (NVMe ~7 GB/s, network FS ~1.25 GB/s)
+- **$\\text{BW}_{\\text{deser}}$**: deserialization throughput (~20 GB/s)
+- **$T_{\\text{CUDA}}$**: CUDA context initialization (~0.8s)
+- **$T_{\\text{warmup}}$**: first-inference JIT warmup (~0.5s)
+
+Cold start is dominated by data movement: 140 GB / 7 GB/s = 20s from NVMe alone. Pre-warming and model caching are essential for auto-scaling.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -842,15 +939,36 @@ Total        = {_t_total:.1f} s
                 "At 128K context, 70B needs ~320 GB KV per request. On 8xH100, "
                 "max concurrency = 1."
             ), kind="info"),
-            mo.md("""
-## Connections
-
-**Textbook:** @sec-model-serving &mdash; queuing theory, batching, KV cache, cold start.
-
-**TinyTorch:** Module 13 &mdash; build a batched inference server with dynamic batching.
-
-**Next Lab:** Lab 14 asks what happens after deployment &mdash; when the model silently
-degrades while all infrastructure metrics stay green.
+            mo.Html(f"""
+            <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        What's Next
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Lab 14: ML Operations</strong> -- Your model shipped. Lab 14
+                        reveals why it silently loses 3 accuracy points by Friday and 7 by
+                        month six -- while your dashboard stays green the entire time.
+                    </div>
+                </div>
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        Textbook &amp; TinyTorch
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Read:</strong> the Model Serving chapter for queuing theory,
+                        KV cache management, and cold start mitigation.<br/>
+                        <strong>Build:</strong> TinyTorch Module 13 -- implement a basic
+                        model server with batching and latency tracking.
+                    </div>
+                </div>
+            </div>
             """),
         ])
 
@@ -871,13 +989,18 @@ degrades while all infrastructure metrics stay green.
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, partA_pred, partB_pred, partC_pred, partD_pred):
     _ch = ledger._state.history.get(13, {})
     _track = ledger.get_track()
-    ledger.save(chapter=13, design={
-        "chapter": "v1_13",
-        "completed": True,
-    })
+    if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None:
+        ledger.save(chapter=13, design={
+            "chapter": "v1_13",
+            "completed": True,
+            "p99_latency_prediction": partA_pred.value,
+            "batching_tax_prediction": partB_pred.value,
+            "kv_cache_max_batch": partC_pred.value,
+            "cold_start_prediction": partD_pred.value,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

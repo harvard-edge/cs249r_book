@@ -3,13 +3,16 @@
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ECOSYSTEM_BASE } from "../lib/env";
 import {
   Library, Target, Crosshair, BarChart3, BookOpen, Github,
   Menu, X, Sun, Moon, Map, Cpu, Server, ChevronDown, Info,
-  Star, Bug,
+  Star, Bug, Send,
 } from "lucide-react";
 import clsx from "clsx";
 import StreakBadge from "@/components/StreakBadge";
+import { buildSiteIssueUrl } from "@/lib/issue-url";
+import { getDueCount } from "@/lib/progress";
 import { useTheme } from "@/components/ThemeProvider";
 
 const primaryLinks = [
@@ -22,16 +25,28 @@ const primaryLinks = [
 
 const toolLinks = [
   { href: "/plans", label: "Study Plans", icon: Map },
+  { href: "/contribute", label: "Contribute", icon: Send },
   { href: "/roofline", label: "Roofline", icon: Cpu },
   { href: "/simulator", label: "Simulator", icon: Server },
+  { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
 ];
 
 export default function Nav() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [dueCount, setDueCount] = useState(0);
   const { theme, toggleTheme } = useTheme();
   const toolsRef = useRef<HTMLDivElement>(null);
+
+  // Check for due SR cards periodically
+  useEffect(() => {
+    try { setDueCount(getDueCount()); } catch {}
+    const interval = setInterval(() => {
+      try { setDueCount(getDueCount()); } catch {}
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Close tools dropdown on outside click
   useEffect(() => {
@@ -48,7 +63,7 @@ export default function Nav() {
     href === "/" ? pathname === "/" : pathname.startsWith(href);
 
   return (
-    <nav className="border-b border-border bg-background/80 backdrop-blur-md sticky top-0 z-50">
+    <nav className="border-b border-border bg-background/80 backdrop-blur-md sticky top-[52px] z-50">
       <div className="h-14 flex items-center px-4 lg:px-6 justify-between">
         <div className="flex items-center gap-4 lg:gap-6">
           {/* Logo */}
@@ -78,6 +93,11 @@ export default function Nav() {
               >
                 <Icon className="w-3.5 h-3.5" />
                 {label}
+                {href === "/practice" && dueCount > 0 && (
+                  <span className="ml-0.5 px-1.5 py-0.5 text-[9px] font-bold bg-accentAmber/20 text-accentAmber rounded-full leading-none">
+                    {dueCount}
+                  </span>
+                )}
               </Link>
             ))}
 
@@ -130,10 +150,10 @@ export default function Nav() {
             {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
           <a
-            href="https://github.com/harvard-edge/cs249r_book/issues/new?template=blank&title=%5BStaffML%5D+&labels=staffml"
+            href={buildSiteIssueUrl()}
             target="_blank"
             rel="noopener noreferrer"
-            className="hidden lg:flex text-textTertiary hover:text-textSecondary items-center gap-1.5 text-xs transition-colors"
+            className="hidden md:flex text-textTertiary hover:text-textSecondary items-center gap-1.5 text-xs transition-colors"
             title="Report an issue"
           >
             <Bug className="w-3.5 h-3.5" />
@@ -198,13 +218,13 @@ export default function Nav() {
             ))}
           </div>
           <div className="border-t border-border pt-2 mt-2 flex flex-wrap items-center gap-4">
-            <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-textTertiary hover:text-textSecondary text-xs flex items-center gap-1.5">
+            <a href={ECOSYSTEM_BASE} target="_blank" rel="noopener noreferrer" className="text-textTertiary hover:text-textSecondary text-xs flex items-center gap-1.5">
               <BookOpen className="w-3.5 h-3.5" /> MLSysBook.ai
             </a>
             <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer" className="text-textTertiary hover:text-textSecondary text-xs flex items-center gap-1.5">
               <Star className="w-3.5 h-3.5" /> Star on GitHub
             </a>
-            <a href="https://github.com/harvard-edge/cs249r_book/issues/new?template=blank&title=%5BStaffML%5D+&labels=staffml" target="_blank" rel="noopener noreferrer" className="text-textTertiary hover:text-textSecondary text-xs flex items-center gap-1.5">
+            <a href={buildSiteIssueUrl()} target="_blank" rel="noopener noreferrer" className="text-textTertiary hover:text-textSecondary text-xs flex items-center gap-1.5">
               <Bug className="w-3.5 h-3.5" /> Report Issue
             </a>
           </div>

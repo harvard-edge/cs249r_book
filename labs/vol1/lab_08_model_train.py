@@ -149,9 +149,9 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Forward vs. backward memory from @sec-nn-computation-backprop-memory &middot;
-                    Iron Law from @sec-introduction-iron-law &middot;
-                    Dispatch overhead from @sec-frameworks-dispatch-overhead
+                    Forward vs. backward memory from the Neural Computation chapter &middot;
+                    Iron Law from the Iron Law section (Ch. 1) &middot;
+                    Dispatch overhead from the ML Frameworks chapter
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -244,7 +244,7 @@ def _(mo, partA_prediction):
         value="Adam (16 B/param)", label="Optimizer",
     )
     partA_precision_a = mo.ui.radio(
-        options={"FP32": "fp32", "BF16": "bf16"},
+        options={"FP32": "fp32", "Mixed BF16 (BF16 compute, FP32 optimizer)": "bf16"},
         value="FP32", label="Precision:", inline=True,
     )
 
@@ -584,7 +584,7 @@ Most training runs are **not** compute-bound.
             _x_pos += _time
 
         _fig.update_layout(
-            barmode="stack", height=200,
+            barmode="stack", height=240,
             xaxis_title="Time (ms)", showlegend=True,
             title=f"Training Step Pipeline (bottleneck: {_bottleneck_stage})",
             legend=dict(orientation="h", y=1.2, x=0),
@@ -754,7 +754,7 @@ The FP32 "tail" is identical in both modes.
         _components = ["Weights", "Gradients", "Momentum", "Variance", "Activations"]
         _vals = [_w_gb, _g_gb, _m_gb, _v_gb, _act_gb]
         _cols = [COLORS["BlueLine"], COLORS["GreenLine"], COLORS["OrangeLine"],
-                 "#CC5500", COLORS["RedLine"]]
+                 COLORS["OrangeLine"], COLORS["RedLine"]]
 
         # Show FP32 baseline for comparison
         _fp32_vals = [_params_b * 4 / 1.074] * 4 + [(_params_b * 4 / 1.074) * _act_multiplier]
@@ -1067,7 +1067,7 @@ You must train a 7B parameter model on H100 GPUs. Using numbers from this lab:
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-training for the full training memory
+                    <strong>Read:</strong> the Training chapter for the full training memory
                     model, pipeline analysis, and scaling formulas.<br/>
                     <strong>Build:</strong> TinyTorch Module 08 -- implement a training
                     loop with gradient accumulation and mixed precision.
@@ -1099,12 +1099,17 @@ You must train a 7B parameter model on H100 GPUs. Using numbers from this lab:
 
 # ─── CELL 5: LEDGER HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, partA_prediction, partD_prediction):
     _track = ledger._state.track or "not set"
-    ledger.save(chapter=8, design={
-        "chapter": "v1_08",
-        "completed": True,
-    })
+    if partA_prediction.value is not None and partD_prediction.value is not None:
+        ledger.save(chapter=8, design={
+            "chapter": "v1_08",
+            "memory_budget_surprise": True,
+            "optimizer_state_dominant": True,
+            "mixed_precision_savings": "2x_memory",
+            "gradient_accumulation_used": True,
+            "completed": True,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

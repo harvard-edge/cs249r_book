@@ -7,6 +7,7 @@ Students can trace back exactly where issues originate.
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -117,7 +118,7 @@ class TestProgressiveStackIntegration:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.activations import ReLU, Sigmoid, Tanh
 
-            x = Tensor(np.random.randn(5, 10))
+            x = Tensor(rng.standard_normal((5, 10)))
 
             # Chain multiple activations
             relu = ReLU()

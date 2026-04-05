@@ -7,9 +7,10 @@ import clsx from "clsx";
 import Link from "next/link";
 import { STUDY_PLANS, getPlanQuestions, getPlanProgress, markPlanQuestionComplete, StudyPlan } from "@/lib/plans";
 import { Question, cleanScenario, checkNapkinMath, extractFinalNumber, NapkinResult } from "@/lib/corpus";
-import { saveAttempt, recordActivity } from "@/lib/progress";
+import { saveAttempt, recordActivity, updateSRCard } from "@/lib/progress";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
+import { track } from "@/lib/analytics";
 import { useToast } from "@/components/Toast";
 import HardwareRef from "@/components/HardwareRef";
 
@@ -40,6 +41,7 @@ export default function PlansPage() {
     const firstUncompleted = qs.findIndex(q => !progress.completedIds.includes(q.id));
     setCurrentIdx(firstUncompleted >= 0 ? firstUncompleted : 0);
     resetQuestionState();
+    track({ type: 'plan_started', planId: plan.id });
   };
 
   const resetQuestionState = () => {
@@ -78,6 +80,7 @@ export default function PlansPage() {
       selfScore: finalScore,
       timestamp: Date.now(),
     });
+    updateSRCard(current.id, finalScore);
     const activity = recordActivity();
     if (activity.newMilestone) {
       showToast({ type: 'badge', title: activity.newMilestone, description: `${activity.streak.currentStreak} day streak!` });
@@ -96,6 +99,7 @@ export default function PlansPage() {
       resetQuestionState();
     } else {
       showToast({ type: 'success', title: 'Plan Complete!', description: `Finished ${activePlan.title}` });
+      track({ type: 'plan_completed', planId: activePlan.id });
       setActivePlan(null);
     }
   };
@@ -206,6 +210,7 @@ export default function PlansPage() {
             <motion.div key={current.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
               <div className="flex items-center gap-3 mb-4">
                 <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-border bg-surface">{current.competency_area}</span>
+                <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-accentBlue/20 bg-accentBlue/5">{current.zone}</span>
                 <span className="text-[10px] font-mono text-textTertiary">{current.track} / {current.level}</span>
               </div>
               <h2 className="text-2xl lg:text-3xl font-bold text-textPrimary mb-6 tracking-tight">{current.title}</h2>

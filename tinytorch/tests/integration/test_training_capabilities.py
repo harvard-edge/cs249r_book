@@ -9,6 +9,7 @@ Validates gradient flow, parameter updates, and convergence.
 import sys
 import os
 import numpy as np
+rng = np.random.default_rng(7)
 
 # Add project root to path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
@@ -73,9 +74,9 @@ class TrainingTester:
 def test_linear_regression():
     """Test if we can learn a simple linear function."""
     # Generate linear data: y = 2x + 1
-    np.random.seed(42)
-    X = np.random.randn(100, 1).astype(np.float32)
-    y_true = 2 * X + 1 + 0.1 * np.random.randn(100, 1).astype(np.float32)
+    rng = np.random.default_rng(7)
+    X = rng.standard_normal((100, 1)).astype(np.float32)
+    y_true = 2 * X + 1 + 0.1 * rng.standard_normal((100, 1)).astype(np.float32)
 
     X_tensor = Tensor(X)
     y_tensor = Tensor(y_true)
@@ -166,7 +167,7 @@ def test_xor_learning():
 def test_multiclass_classification():
     """Test multiclass classification learning."""
     # Generate 3-class dataset
-    np.random.seed(42)
+    rng = np.random.default_rng(7)
     n_samples = 150
     n_features = 2
     n_classes = 3
@@ -177,7 +178,7 @@ def test_multiclass_classification():
     for i in range(n_classes):
         center = np.array([np.cos(2 * np.pi * i / n_classes),
                           np.sin(2 * np.pi * i / n_classes)]) * 2
-        cluster = np.random.randn(n_samples // n_classes, n_features) * 0.5 + center
+        cluster = rng.standard_normal((n_samples // n_classes, n_features)) * 0.5 + center
         X.append(cluster)
         y.extend([i] * (n_samples // n_classes))
 
@@ -247,8 +248,8 @@ def test_gradient_flow():
     model = Sequential(layers)
 
     # Test data
-    X = Tensor(np.random.randn(10, 2).astype(np.float32))
-    y = Tensor(np.random.randn(10, 1).astype(np.float32))
+    X = Tensor(rng.standard_normal((10, 2)).astype(np.float32))
+    y = Tensor(rng.standard_normal((10, 1)).astype(np.float32))
 
     criterion = MeanSquaredError()
 
@@ -280,8 +281,8 @@ def test_optimizer_updates():
     initial_weights = model.weight.data.copy()
 
     # Dummy forward pass
-    X = Tensor(np.random.randn(2, 5).astype(np.float32))
-    y_true = Tensor(np.random.randn(2, 3).astype(np.float32))
+    X = Tensor(rng.standard_normal((2, 5)).astype(np.float32))
+    y_true = Tensor(rng.standard_normal((2, 3)).astype(np.float32))
 
     criterion = MeanSquaredError()
 
@@ -342,7 +343,7 @@ def test_adam_vs_sgd():
     """Test that Adam converges faster than SGD on non-convex problems."""
     def train_with_optimizer(opt_class):
         # Non-convex problem (XOR-like)
-        X = Tensor(np.random.randn(20, 2).astype(np.float32))
+        X = Tensor(rng.standard_normal((20, 2)).astype(np.float32))
         y = Tensor((np.sum(X.data, axis=1, keepdims=True) > 0).astype(np.float32))
 
         model = Sequential([

@@ -361,9 +361,13 @@ export async function handleAuth(e) {
             closeModal(); // Always close modal on success
 
             if (nextParam) {
-                // Ensure nextParam is a clean path if it was encoded
+                // Validate redirect target is a safe relative path (no protocol, no external URLs)
                 const cleanNext = decodeURIComponent(nextParam).split('?')[0];
-                window.location.href = cleanNext;
+                if (cleanNext.startsWith('/') && !cleanNext.startsWith('//') && !/^\/.*:/.test(cleanNext)) {
+                    window.location.href = cleanNext;
+                } else {
+                    window.location.href = basePath + '/dashboard.html';
+                }
                 return;
             }
 

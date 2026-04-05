@@ -3,22 +3,16 @@ import corpusData from '../data/corpus.json';
 export interface Question {
   id: string;
   track: string;
-  scope: string;
+  scope?: string;
   level: string;
   title: string;
-  topic: string;
+  topic: string;            // one of 79 curated topic IDs
+  zone: string;             // one of 11 ikigai zones
+  competency_area: string;  // one of 13 canonical areas
+  bloom_level?: string;     // remember | understand | apply | analyze | evaluate | create
   scenario: string;
-  competency_area: string;
-  company_archetype?: string;
-  taxonomy_concept?: string;
-  // v5.3 Taxonomy (6-axis classification)
-  reasoning_competency?: string;   // RC-1 through RC-13
-  knowledge_area?: string;          // A1 through F1 (35 areas)
-  reasoning_mode?: string;          // 7 modes
-  concept_tags?: string[];          // ~132 tags, multi-label
-  primary_concept?: string;         // preserved taxonomy_concept
-  chain_ids?: string;           // chain this question belongs to
-  chain_positions?: string;     // position in chain (as string number)
+  chain_ids?: string[];
+  chain_positions?: Record<string, number>;
   details: {
     common_mistake: string;
     realistic_solution: string;
@@ -30,7 +24,7 @@ export interface Question {
   };
 }
 
-const questions = corpusData as Question[];
+const questions = corpusData as unknown as Question[];
 
 export function getQuestions(): Question[] {
   return questions;
@@ -56,62 +50,88 @@ export function getCompetencyAreas(): string[] {
   return Array.from(areas).sort();
 }
 
-export function getArchetypes(): string[] {
-  const archetypes = new Set(questions.map((q) => q.company_archetype).filter((a): a is string => !!a));
-  return Array.from(archetypes).sort();
+export function getZones(): string[] {
+  const zones = new Set(questions.map((q) => q.zone));
+  return Array.from(zones).sort();
+}
+
+export function getTopics(): string[] {
+  const topics = new Set(questions.map((q) => q.topic));
+  return Array.from(topics).sort();
+}
+
+export function getTopicsByArea(area: string): string[] {
+  const topics = new Set(
+    questions.filter(q => q.competency_area === area).map(q => q.topic)
+  );
+  return Array.from(topics).sort();
 }
 
 export function getQuestionsByFilter(filters: {
   track?: string;
   level?: string;
   competency_area?: string;
-  company_archetype?: string;
-  // v5.3 faceted filters
-  reasoning_competency?: string;
-  knowledge_area?: string;
-  reasoning_mode?: string;
-  concept_tag?: string;
+  topic?: string;
+  zone?: string;
 }): Question[] {
   return questions.filter((q) => {
     if (filters.track && q.track !== filters.track) return false;
     if (filters.level && q.level !== filters.level) return false;
     if (filters.competency_area && q.competency_area !== filters.competency_area) return false;
-    if (filters.company_archetype && q.company_archetype !== filters.company_archetype) return false;
-    if (filters.reasoning_competency && q.reasoning_competency !== filters.reasoning_competency) return false;
-    if (filters.knowledge_area && q.knowledge_area !== filters.knowledge_area) return false;
-    if (filters.reasoning_mode && q.reasoning_mode !== filters.reasoning_mode) return false;
-    if (filters.concept_tag && !(q.concept_tags || []).includes(filters.concept_tag)) return false;
+    if (filters.topic && q.topic !== filters.topic) return false;
+    if (filters.zone && q.zone !== filters.zone) return false;
     return true;
   });
 }
 
-// v5.3 Taxonomy getters
-export function getReasoningCompetencies(): string[] {
-  const rcs = new Set(questions.map((q) => q.reasoning_competency).filter((v): v is string => !!v));
-  return Array.from(rcs).sort();
-}
+/** Full-text search across question titles, scenarios, answers, and napkin math */
+export function searchQuestions(query: string, limit = 50): Question[] {
+  const q = query.toLowerCase().trim();
+  if (!q) return [];
 
-export function getKnowledgeAreas(): string[] {
-  const kas = new Set(questions.map((q) => q.knowledge_area).filter((v): v is string => !!v));
-  return Array.from(kas).sort();
-}
+  const terms = q.split(/\s+/).filter(t => t.length >= 2);
+  if (terms.length === 0) return [];
 
-export function getReasoningModes(): string[] {
-  const modes = new Set(questions.map((q) => q.reasoning_mode).filter((v): v is string => !!v));
-  return Array.from(modes).sort();
-}
+  const scored: { question: Question; score: number }[] = [];
 
-export function getConceptTags(): string[] {
-  const tags = new Set(questions.flatMap((q) => q.concept_tags || []));
-  return Array.from(tags).sort();
+  for (const question of questions) {
+    let score = 0;
+    const title = question.title.toLowerCase();
+    const scenario = question.scenario.toLowerCase();
+    const answer = question.details.realistic_solution?.toLowerCase() || '';
+    const napkin = question.details.napkin_math?.toLowerCase() || '';
+    const mistake = question.details.common_mistake?.toLowerCase() || '';
+
+    for (const term of terms) {
+      // Title matches are most valuable
+      if (title.includes(term)) score += 10;
+      if (scenario.includes(term)) score += 5;
+      if (answer.includes(term)) score += 3;
+      if (napkin.includes(term)) score += 2;
+      if (mistake.includes(term)) score += 1;
+    }
+
+    if (score > 0) {
+      scored.push({ question, score });
+    }
+  }
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(s => s.question);
 }
 
 export function getQuestionsByTopic(topicId: string, level?: string): Question[] {
   return questions.filter((q) => {
-    if (q.taxonomy_concept !== topicId) return false;
+    if (q.topic !== topicId) return false;
     if (level && q.level !== level) return false;
     return true;
   });
+}
+
+export function getQuestionsByZone(zone: string): Question[] {
+  return questions.filter(q => q.zone === zone);
 }
 
 // Gauntlet: select N questions ensuring competency breadth, with warm-up
@@ -134,31 +154,30 @@ export function selectGauntletQuestions(
     }
   }
 
-  // Group by competency area
-  const byArea: Record<string, Question[]> = {};
+  // Group by zone for breadth across competency zones
+  const byZone: Record<string, Question[]> = {};
   pool.forEach(q => {
-    const area = q.competency_area || 'general';
-    if (!byArea[area]) byArea[area] = [];
-    byArea[area].push(q);
+    const zone = q.zone || 'recall';
+    if (!byZone[zone]) byZone[zone] = [];
+    byZone[zone].push(q);
   });
 
-  const areas = Object.keys(byArea);
+  const zones = Object.keys(byZone);
   const selected: Question[] = [];
   const usedIds = new Set<string>();
 
-  // Round-robin across competency areas
-  let areaIdx = 0;
+  // Round-robin across zones
+  let zoneIdx = 0;
   while (selected.length < count && selected.length < pool.length) {
-    const area = areas[areaIdx % areas.length];
-    const available = byArea[area].filter(q => !usedIds.has(q.id));
+    const zone = zones[zoneIdx % zones.length];
+    const available = byZone[zone].filter(q => !usedIds.has(q.id));
     if (available.length > 0) {
       const pick = available[Math.floor(Math.random() * available.length)];
       selected.push(pick);
       usedIds.add(pick.id);
     }
-    areaIdx++;
-    // Safety: if we've gone through all areas without adding, break
-    if (areaIdx > areas.length * count) break;
+    zoneIdx++;
+    if (zoneIdx > zones.length * count) break;
   }
 
   // Shuffle the main selection
@@ -167,10 +186,9 @@ export function selectGauntletQuestions(
     [selected[i], selected[j]] = [selected[j], selected[i]];
   }
 
-  // Prepend warm-up question (easier level) at position 0
+  // Prepend warm-up question at position 0
   if (warmUp && !usedIds.has(warmUp.id)) {
     selected.unshift(warmUp);
-    // Trim to maintain requested count
     if (selected.length > count) selected.pop();
   }
 
@@ -227,16 +245,13 @@ export function cleanScenario(text: string): string {
 }
 
 // Extract the user's final answer number
-// Priority: lines starting with => or "answer:" or "final:", then last number
 export function extractFinalNumber(text: string): number | null {
-  // Check for explicit answer markers: => 83.6 or "answer: 83.6" or "final: 83.6"
   const markerMatch = text.match(/(?:^|\n)\s*(?:=>|answer:|final:)\s*([\d,]+(?:\.\d+)?)/im);
   if (markerMatch) {
     const num = Number(markerMatch[1].replace(/,/g, ''));
     if (!isNaN(num) && isFinite(num)) return num;
   }
 
-  // Fallback: last number in the text
   const numbers = text.match(/[\d,]+(?:\.\d+)?/g)?.map(s => Number(s.replace(/,/g, ''))) || [];
   const valid = numbers.filter(n => !isNaN(n) && isFinite(n));
   return valid.length > 0 ? valid[valid.length - 1] : null;
@@ -255,15 +270,16 @@ export interface ChainInfo {
 // Build chain index once
 const _chainIndex = new Map<string, { id: string; title: string; level: string; position: number }[]>();
 for (const q of questions) {
-  const chainId = q.chain_ids;
-  const chainPos = q.chain_positions;
-  if (chainId && chainPos !== undefined) {
+  if (!q.chain_ids || !q.chain_positions) continue;
+  for (const chainId of q.chain_ids) {
+    const pos = q.chain_positions[chainId];
+    if (pos === undefined) continue;
     if (!_chainIndex.has(chainId)) _chainIndex.set(chainId, []);
     _chainIndex.get(chainId)!.push({
       id: q.id,
       title: q.title,
       level: q.level,
-      position: parseInt(chainPos, 10),
+      position: pos,
     });
   }
 }
@@ -275,15 +291,20 @@ _chainIndex.forEach((qs) => {
 /** Get chain info for a question, or null if not in a chain */
 export function getChainForQuestion(questionId: string): ChainInfo | null {
   const q = questions.find(x => x.id === questionId);
-  if (!q) return null;
-  const chainId = q.chain_ids;
-  const chainPos = q.chain_positions;
-  if (!chainId || chainPos === undefined) return null;
+  if (!q || !q.chain_ids || !q.chain_positions) return null;
+
+  // Use the first chain this question belongs to
+  const chainId = q.chain_ids[0];
+  if (!chainId) return null;
+  const pos = q.chain_positions[chainId];
+  if (pos === undefined) return null;
+
   const chain = _chainIndex.get(chainId);
-  if (!chain || chain.length <= 1) return null; // skip single-question "chains"
+  if (!chain || chain.length <= 1) return null;
+
   return {
     chainId,
-    position: parseInt(chainPos, 10),
+    position: pos,
     total: chain.length,
     questions: chain,
   };

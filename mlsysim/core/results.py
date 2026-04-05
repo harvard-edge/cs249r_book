@@ -45,6 +45,7 @@ class ReliabilityResult(SolverResult):
     failure_probability: float
     optimal_checkpoint_interval: Quantity
     expected_failures: float
+    goodput_ratio: float = 1.0
 
 
 class CheckpointResult(SolverResult):
@@ -64,6 +65,7 @@ class SustainabilityResult(SolverResult):
     water_usage_liters: float
     pue: float
     region_name: str
+    embodied_carbon_kg: float = 0.0
 
 
 class ServingResult(SolverResult):
@@ -196,6 +198,7 @@ class CompressionResult(SolverResult):
     compression_ratio: float
     estimated_accuracy_delta: float
     memory_savings_pct: float
+    inference_speedup: float = 1.0
 
 
 class SynthesisResult(SolverResult):

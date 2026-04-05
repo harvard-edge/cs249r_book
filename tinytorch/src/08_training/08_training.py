@@ -61,6 +61,7 @@ from tinytorch.core.training import Trainer, CosineSchedule, clip_grad_norm
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 import pickle
 import time
 from typing import Dict, List, Optional, Tuple, Any, Callable
@@ -1536,9 +1537,9 @@ def demonstrate_complete_training_pipeline():
 
     # Step 6: Create synthetic training data
     train_data = [
-        (Tensor(np.random.randn(4, 3)), Tensor(np.random.randn(4, 2))),
-        (Tensor(np.random.randn(4, 3)), Tensor(np.random.randn(4, 2))),
-        (Tensor(np.random.randn(4, 3)), Tensor(np.random.randn(4, 2)))
+        (Tensor(rng.standard_normal((4, 3))), Tensor(rng.standard_normal((4, 2)))),
+        (Tensor(rng.standard_normal((4, 3))), Tensor(rng.standard_normal((4, 2)))),
+        (Tensor(rng.standard_normal((4, 3))), Tensor(rng.standard_normal((4, 2))))
     ]
     print("✓ Training data: 3 batches of 4 samples")
 
@@ -1952,8 +1953,8 @@ def demo_training():
     print("=" * 45)
 
     # Simple linear regression: learn y = 2x + 1
-    np.random.seed(42)
-    X = Tensor(np.random.randn(20, 1))
+    rng = np.random.default_rng(7)
+    X = Tensor(rng.standard_normal((20, 1)))
     y = Tensor(X.data * 2 + 1)  # True relationship
 
     # Simple model: one weight, one bias

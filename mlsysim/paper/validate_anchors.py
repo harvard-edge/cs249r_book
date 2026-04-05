@@ -67,11 +67,11 @@ def _fleet_16k_h100():
 def anchor1_resnet():
     """MLPerf ResNet-50 on DGX A100 (8x A100, batch=2048).
 
-    ResNet-50 achieves ~19% of peak FP16 tensor FLOPS on A100 because
-    its small convolution kernels cannot saturate the tensor cores the
-    way large GEMM-dominated Transformer layers can. This is consistent
-    with published MLPerf submissions showing ~58 TFLOP/s per A100 out
-    of 312 TFLOP/s peak.
+    ResNet-50 achieves ~37% of peak dense FP16 Tensor Core FLOPS on A100
+    because its small convolution kernels cannot saturate the tensor
+    cores the way large GEMM-dominated Transformer layers can. This is
+    consistent with published MLPerf submissions showing ~115 TFLOP/s
+    per A100 out of 312 TFLOP/s dense FP16 Tensor Core peak (624 with sparsity).
     """
     model = mlsysim.Models.Vision.ResNet50
     hardware = mlsysim.Hardware.Cloud.A100
@@ -79,7 +79,7 @@ def anchor1_resnet():
 
     per_gpu_batch = 2048 // 8
     res = solver.solve(model, hardware, batch_size=per_gpu_batch,
-                       precision="fp16", efficiency=0.19, is_training=True)
+                       precision="fp16", efficiency=0.37, is_training=True)
 
     # Scale by 8 for ideal DP within one DGX node (NVLink makes DP overhead negligible)
     fleet_throughput = res.throughput.magnitude * 8

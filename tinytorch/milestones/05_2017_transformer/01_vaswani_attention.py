@@ -103,6 +103,7 @@ by passing THREE increasingly difficult challenges.
 import sys
 import os
 import numpy as np
+rng = np.random.default_rng(7)
 import time
 from pathlib import Path
 
@@ -315,7 +316,7 @@ def generate_reversal_data(num_samples, seq_len=6):
     """Generate sequence reversal dataset."""
     dataset = []
     for _ in range(num_samples):
-        seq = np.random.randint(1, 27, size=seq_len)
+        seq = rng.integers(1, 27, size=seq_len)
         reversed_seq = seq[::-1].copy()
         dataset.append((seq, reversed_seq))
     return dataset
@@ -325,7 +326,7 @@ def generate_copy_data(num_samples, seq_len=6):
     """Generate sequence copying dataset."""
     dataset = []
     for _ in range(num_samples):
-        seq = np.random.randint(1, 27, size=seq_len)
+        seq = rng.integers(1, 27, size=seq_len)
         dataset.append((seq, seq.copy()))
     return dataset
 
@@ -334,7 +335,7 @@ def generate_mixed_data(num_samples, seq_len=6):
     """Generate mixed task dataset with prefix tokens."""
     dataset = []
     for _ in range(num_samples):
-        seq = np.random.randint(1, 27, size=seq_len)
+        seq = rng.integers(1, 27, size=seq_len)
 
         if np.random.random() < 0.5:
             # Reverse task

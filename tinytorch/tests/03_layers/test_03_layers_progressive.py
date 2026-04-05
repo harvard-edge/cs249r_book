@@ -19,6 +19,7 @@ This is where we create reusable building blocks for neural networks.
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -39,7 +40,7 @@ class TestPriorModulesStillWork:
         ✅ TEST: Module 01 (Tensor) - Environment should still work
 
         📋 CHECKS:
-        - Python 3.8+ available
+        - Python 3.10+ available
         - NumPy working correctly
         - Project structure intact
 
@@ -49,7 +50,7 @@ class TestPriorModulesStillWork:
         try:
             # Environment checks
             assert sys.version_info >= (3, 8), \
-                "❌ Python 3.8+ required. Current: Python {}.{}".format(
+                "❌ Python 3.10+ required. Current: Python {}.{}".format(
                     sys.version_info.major, sys.version_info.minor)
 
             # NumPy functionality
@@ -70,7 +71,7 @@ class TestPriorModulesStillWork:
             🔍 ERROR: {str(e)}
 
             🔧 HOW TO FIX:
-            1. Check Python version: python --version (need 3.8+)
+            1. Check Python version: python --version (need 3.10+)
             2. Reinstall NumPy: pip install numpy
             3. Verify project structure exists
             4. Run Module 01 tests separately: python tests/run_all_modules.py --module module_01
@@ -97,7 +98,7 @@ class TestPriorModulesStillWork:
                 f"❌ Tensor shape broken. Expected (3,), got {t.shape}"
 
             # Multi-dimensional tensors
-            t2 = Tensor(np.random.randn(4, 5))
+            t2 = Tensor(rng.standard_normal((4, 5)))
             assert t2.shape == (4, 5), \
                 f"❌ Multi-dim tensor broken. Expected (4, 5), got {t2.shape}"
 
@@ -435,7 +436,7 @@ class TestProgressiveStackIntegration:
             test_cases = [
                 ([1, 2, 3], (3,)),
                 ([[1, 2], [3, 4]], (2, 2)),
-                (np.random.randn(5, 10), (5, 10))
+                (rng.standard_normal((5, 10)), (5, 10))
             ]
 
             for input_data, expected_shape in test_cases:
@@ -646,8 +647,8 @@ class TestNeuralNetworkReadiness:
             class ParameterizedLayer(Layer):
                 def __init__(self, input_size, output_size):
                     # Neural network parameters
-                    self.weight = Tensor(np.random.randn(input_size, output_size))
-                    self.bias = Tensor(np.random.randn(output_size))
+                    self.weight = Tensor(rng.standard_normal((input_size, output_size)))
+                    self.bias = Tensor(rng.standard_normal(output_size))
 
                 def forward(self, x):
                     # Simple linear transformation: y = x @ W + b
@@ -717,7 +718,7 @@ class TestNeuralNetworkReadiness:
             feature_dim = 10
 
             # Create batch of data
-            batch_data = Tensor(np.random.randn(batch_size, feature_dim))
+            batch_data = Tensor(rng.standard_normal((batch_size, feature_dim)))
 
             # Test batch processing through activation
             relu = ReLU()
@@ -733,7 +734,7 @@ class TestNeuralNetworkReadiness:
 
             # Test that we can process different batch sizes
             for test_batch_size in [1, 16, 64]:
-                test_batch = Tensor(np.random.randn(test_batch_size, feature_dim))
+                test_batch = Tensor(rng.standard_normal((test_batch_size, feature_dim)))
                 test_output = relu(test_batch)
                 assert test_output.shape == (test_batch_size, feature_dim), \
                     f"❌ Batch size {test_batch_size} processing broken"
@@ -756,7 +757,7 @@ class TestNeuralNetworkReadiness:
             - Essential for modern deep learning
 
             🧪 DEBUG TEST:
-            batch = Tensor(np.random.randn(4, 3))  # 4 samples, 3 features
+            batch = Tensor(rng.standard_normal((4, 3)))  # 4 samples, 3 features
             print(f"Batch shape: {{batch.shape}}")
             relu = ReLU()
             output = relu(batch)
@@ -783,8 +784,8 @@ class TestNeuralNetworkReadiness:
             # Simulate complete neural network workflow
             class MockDenseLayer(Layer):
                 def __init__(self, in_features, out_features):
-                    self.weight = Tensor(np.random.randn(in_features, out_features) * 0.1)
-                    self.bias = Tensor(np.random.randn(out_features) * 0.1)
+                    self.weight = Tensor(rng.standard_normal((in_features, out_features)) * 0.1)
+                    self.bias = Tensor(rng.standard_normal(out_features) * 0.1)
 
                 def forward(self, x):
                     # Dense layer: y = x @ W + b
@@ -800,7 +801,7 @@ class TestNeuralNetworkReadiness:
 
             # Simulate MNIST-like input
             batch_size = 32
-            x = Tensor(np.random.randn(batch_size, 784))  # Flattened 28x28 images
+            x = Tensor(rng.standard_normal((batch_size, 784)))  # Flattened 28x28 images
 
             # Forward pass through network
             h1 = relu(layer1(x))      # 32 x 128
@@ -931,7 +932,7 @@ class TestModuleCompletionReadiness:
             completion_checklist["Foundation supports parameters"] = True
 
             # Check 7: supports batches
-            batch_x = Tensor(np.random.randn(4, 3))
+            batch_x = Tensor(rng.standard_normal((4, 3)))
             batch_output = test_layer(batch_x)
             assert batch_output.shape == (4, 3)
             completion_checklist["Foundation supports batches"] = True

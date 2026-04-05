@@ -363,6 +363,22 @@ def _(
         items = []
 
         items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; VP Infrastructure, Titan AI</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;We are scaling from 64 GPUs to 4,000. My team insists we need 10% more FLOPS per chip,
+        but our network team says bandwidth is the real bottleneck. I need data &mdash; which 10%
+        improvement actually moves the needle most at fleet scale, and does the answer change
+        depending on fleet size?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Priya Nair, VP Infrastructure &middot; Titan AI</div>
+</div>
+"""))
+
+        items.append(mo.Html(f"""
         <div id="part-a" style="margin: 32px 0 12px 0;">
             <div style="display: flex; align-items: center; gap: 12px;">
                 <div style="background: #6366f1; color: white; border-radius: 50%;
@@ -477,6 +493,24 @@ def _(
                 "irreducible floor.")
         items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Sensitivity Analysis": mo.md("""
+**Formula:**
+$$
+S_i = \\frac{\\partial\\, \\text{Throughput}}{\\partial\\, x_i} \\bigg|_{\\Delta x_i = 10\\%}
+$$
+
+**Variables:**
+- **$S_i$**: sensitivity of throughput to dimension $i$ (compute, communication, fault tolerance, etc.)
+- **$x_i$**: the $i$-th system dimension (as a fraction of theoretical maximum)
+
+At small scale ($N \\leq 8$), compute dominates ($S_{\\text{compute}} > S_{\\text{comm}}$).
+At fleet scale ($N \\geq 1000$), communication dominates because the AllReduce cost
+$\\frac{2(N-1)}{N} \\cdot \\frac{G}{BW}$ approaches $\\frac{2G}{BW}$ -- an irreducible floor
+set by bandwidth.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -485,6 +519,22 @@ def _(
 
     def build_part_b():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; CTO, Titan AI</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;We lost 18 hours of training last week when a single GPU failed and took the whole job
+        down. With 10,000 GPUs, what is our actual mean time between failures? And how much useful
+        work are we really getting out of the cluster after accounting for checkpointing overhead
+        and recovery time?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Marcus Chen, CTO &middot; Titan AI</div>
+</div>
+"""))
 
         items.append(mo.Html(f"""
         <div id="part-b" style="margin: 32px 0 12px 0;">
@@ -652,6 +702,22 @@ Failure is not an exception at scale -- it is the baseline operating condition.
         items = []
 
         items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Board of Directors, Titan AI</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;The engineering team tells me they have optimized communication to 99% efficiency, but
+        reliability has gotten worse. I thought optimizing one subsystem would not affect others.
+        Can someone explain why these systems are coupled and what the actual interaction effects
+        are across our six principle axes?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Dr. Elena Vasquez, Board Member &middot; Titan AI</div>
+</div>
+"""))
+
+        items.append(mo.Html(f"""
         <div id="part-c" style="margin: 32px 0 12px 0;">
             <div style="display: flex; align-items: center; gap: 12px;">
                 <div style="background: {COLORS['GreenLine']}; color: white; border-radius: 50%;
@@ -755,7 +821,7 @@ Failure is not an exception at scale -- it is the baseline operating condition.
 
         fig_radar.update_layout(
             polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-            height=420, showlegend=True,
+            height=380, showlegend=True,
             legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"),
         )
         apply_plotly_theme(fig_radar)
@@ -806,6 +872,25 @@ Failure is not an exception at scale -- it is the baseline operating condition.
                 "and lossy compression amplifies the impact of any bit flip.")
         items.append(mo.callout(mo.md(f"**{_msg}**"), kind="success" if _correct else "warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Coupled System Gain": mo.md("""
+**Formula:**
+$$
+G_{\\text{effective}} = N_{\\text{GPUs}} \\times \\prod_{i=1}^{6} \\eta_i
+$$
+
+where $\\eta_i$ are the effective efficiencies of each principle axis **after coupling**.
+
+**Coupling Rules:**
+- Communication > 85% $\\Rightarrow$ Fault Tolerance degrades by $1.5 \\times (\\eta_{\\text{comm}} - 85)$
+- Sustainability > 80% $\\Rightarrow$ Compute degrades by $0.8 \\times (\\eta_{\\text{sust}} - 80)$
+- Fairness > 80% $\\Rightarrow$ Scheduling degrades by $0.5 \\times (\\eta_{\\text{fair}} - 80)$
+
+No configuration achieves 100% on all six axes simultaneously. The effective gain is
+**multiplicative** -- a single axis at 50% halves the entire product.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -816,6 +901,22 @@ Failure is not an exception at scale -- it is the baseline operating condition.
         items = []
 
         _metric_display = {"dp": "Demographic Parity", "eo": "Equalized Odds", "eqop": "Equal Opportunity"}.get(FAIRNESS_METRIC, "Equal Opportunity")
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; CEO, Titan AI</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;The board wants a go/no-go on our production fleet by Friday. We need at least 50x
+        effective gain over a single GPU, all six principle axes in the green zone, and our carbon
+        and fairness commitments honored. Can you design a fleet configuration that meets all
+        constraints simultaneously, or do we need to renegotiate our targets?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; James Okoro, CEO &middot; Titan AI</div>
+</div>
+"""))
 
         items.append(mo.Html(f"""
         <div id="part-d" style="margin: 32px 0 12px 0;">
@@ -920,7 +1021,7 @@ Failure is not an exception at scale -- it is the baseline operating condition.
 
         fig_fleet.update_layout(
             polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-            height=450, showlegend=True,
+            height=380, showlegend=True,
             legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"),
         )
         apply_plotly_theme(fig_fleet)
@@ -995,7 +1096,27 @@ Failure is not an exception at scale -- it is the baseline operating condition.
                 "the deployment context, the stakeholders, and the consequences of each violation."
             ), kind="info"))
 
-        return mo.vstack(items), _target_met, _effective_gain, _axes
+        items.append(mo.accordion({
+            "Math Peek: Fleet Production Readiness": mo.md("""
+**Production Readiness Criteria:**
+$$
+\\text{Ready} = \\bigl(G_{\\text{eff}} \\geq 50\\bigr) \\;\\wedge\\; \\bigl(\\forall\\, i:\\; \\eta_i \\geq 50\\%\\bigr)
+$$
+
+where $G_{\\text{eff}} = N \\times \\prod \\eta_i$ and each $\\eta_i$ incorporates coupling penalties.
+
+**Key Relationships:**
+- **Goodput** (Young-Daly): $\\mathcal{G} = 1 - \\frac{T_{\\text{ckpt}}}{\\delta} - \\frac{\\delta}{2 \\cdot \\text{MTBF}_{\\text{cluster}}}$
+- **Optimal checkpoint**: $\\delta^* = \\sqrt{2 \\cdot T_{\\text{ckpt}} \\cdot \\text{MTBF}_{\\text{cluster}}}$
+- **Carbon constraint**: reduces effective compute by $(1 - C_{\\text{cap}}) \\times 30\\%$
+- **Fairness overhead**: reduces scheduling headroom by $\\frac{T_{\\text{fair}}}{100} \\times 10\\%$
+
+The fleet is viable only when **all** constraints are satisfied simultaneously. Optimizing
+any single axis while ignoring coupling effects will push another axis into the red zone.
+""")
+        }))
+
+        return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
     # SYNTHESIS BUILDER
@@ -1109,17 +1230,56 @@ Failure is not an exception at scale -- it is the baseline operating condition.
     # TAB COMPOSITION
     # ─────────────────────────────────────────────────────────────────────
 
-    part_d_result = build_part_d()
-    part_d_content = part_d_result[0]
-    fleet_target_met = part_d_result[1]
-    fleet_effective_gain = part_d_result[2]
-    fleet_axes = part_d_result[3]
+    # ── Compute fleet metrics for LEDGER_HUD (same logic as build_part_d) ──
+    _N = partD_gpus.value
+    _comm = partD_comm_strategy.value
+    _ckpt = partD_ckpt_freq.value
+    _sched = partD_scheduling.value
+
+    _compute_base = 80
+    _carbon_penalty = max(0, (1 - CARBON_CAP) * 30)
+    _compute = max(30, _compute_base - _carbon_penalty)
+
+    _comm_eff = {"ring": 75, "tree": 80, "compress": 92}[_comm]
+    _scale_penalty = min(15, _N / 1000 * 5)
+    _communication = max(30, _comm_eff - _scale_penalty)
+
+    _mtbf_cluster = MTBF_GPU_HOURS / _N
+    _T_ckpt_min = CHECKPOINT_COST_S / 60
+    _ckpt_overhead = _T_ckpt_min / _ckpt if _ckpt > 0 else 1
+    _failure_waste = _ckpt / (2 * _mtbf_cluster * 60) if _mtbf_cluster > 0 else 1
+    _goodput = max(0, 1 - _ckpt_overhead - _failure_waste)
+    _fault_tol = min(95, _goodput * 100)
+    if _comm == "compress":
+        _fault_tol = max(30, _fault_tol - 12)
+
+    _sched_base = 65 if _sched == "static" else 82
+    _fairness_latency_penalty = FAIRNESS_OVERHEAD_MS / 100 * 10
+    _scheduling = max(30, _sched_base - _fairness_latency_penalty)
+
+    _sustainability = min(95, CARBON_CAP * 100 + 10)
+    _fairness = min(90, 60 + (1 - FAIRNESS_THRESHOLD) * 40)
+
+    fleet_axes = {
+        "Compute": _compute,
+        "Communication": _communication,
+        "Fault Tolerance": _fault_tol,
+        "Scheduling": _scheduling,
+        "Sustainability": _sustainability,
+        "Fairness": _fairness,
+    }
+    _eff_product = 1.0
+    for _v in fleet_axes.values():
+        _eff_product *= (_v / 100)
+    fleet_effective_gain = _eff_product * _N
+    _all_green = all(v >= 50 for v in fleet_axes.values())
+    fleet_target_met = fleet_effective_gain >= 50 and _all_green
 
     tabs = mo.ui.tabs({
         "Part A -- The Sensitivity Wall": build_part_a(),
         "Part B -- The Failure Budget": build_part_b(),
         "Part C -- The Principle Interaction Map": build_part_c(),
-        "Part D -- The Fleet Architecture Blueprint": part_d_content,
+        "Part D -- The Fleet Architecture Blueprint": build_part_d(),
         "Synthesis -- Graduation": build_synthesis(),
     })
     tabs

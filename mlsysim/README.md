@@ -69,7 +69,9 @@ Content may be incomplete or change without notice. The published curriculum liv
 
 ## 🚀 Quick Usage: The Agent-Ready CLI
 
-`mlsysim` is designed as an **Infrastructure-as-Code (IaC) Compiler** for ML systems. It features a stunning terminal UI for humans and a strict JSON API for CI/CD pipelines and AI agents.
+`mlsysim` is a **first-principles analytical calculator** for ML systems. It provides a terminal UI for humans and a strict JSON API for CI/CD pipelines and AI agents.
+
+> **Accuracy note:** mlsysim predictions are typically within 2–5× of measured performance for well-characterized workloads. For production capacity planning, always validate with benchmarks. This tool formalizes the back-of-envelope math that senior engineers do intuitively — it is not a substitute for profiling or load testing.
 
 ### 1. Explore the Registry (The Zoo)
 Discover built-in hardware, models, and infrastructure without reading source code:
@@ -124,6 +126,41 @@ Use the Tier 3 Engineering Engine to automatically find the optimal configuratio
 ## 🛡 Stability & Integrity
 Because this core powers a printed textbook, we enforce strict **Invariant Verification**. Every physical constant is traceable to a primary source (datasheet or paper), and dimensional integrity is enforced via `pint`.
 
+## ⚠️ What This Tool Does Not Model
+
+MLSysim is an **analytical hardware calculator**, not a production deployment simulator.
+The 22 walls model physical and economic constraints that bound ML system performance.
+Several critical production concerns are deliberately **out of scope**:
+
+| Concern | Why It Matters | Where to Learn More |
+|---------|---------------|-------------------|
+| **Data drift / distribution shift** | The #1 cause of production ML failures — model accuracy degrades silently as input distributions change | Sculley et al. (2015), "Hidden Technical Debt in ML Systems" |
+| **Model versioning & rollback** | Production requires running multiple versions, A/B testing, and safe rollback | Huyen (2022), *Designing Machine Learning Systems* |
+| **Monitoring & observability** | You cannot manage what you cannot measure — prediction distributions, latency percentiles, error rates | Google SRE Book (2016); Huyen (2022) |
+| **Feature store freshness** | Stale features silently degrade real-time models (recommendations, fraud detection) | Uber Michelangelo (2017) |
+| **Software bugs & misconfigurations** | Most outages are caused by software, not hardware | Barroso et al. (2018) |
+| **Human factors** | Team velocity, on-call burden, and organizational alignment often dominate outcomes | Brooks (1975), *The Mythical Man-Month* |
+
+**Passing all 22 walls is necessary but not sufficient for a successful production deployment.**
+
+Students using this tool should understand that infrastructure physics (what mlsysim models)
+is one dimension of a multi-dimensional engineering challenge.
+
+## 📖 How to Cite
+
+If you use mlsysim in your research or teaching, please cite:
+
+```bibtex
+@software{mlsysim2026,
+  author       = {Janapa Reddi, Vijay},
+  title        = {{MLSysim}: A Composable Analytical Framework for Machine Learning Systems},
+  year         = {2026},
+  url          = {https://mlsysbook.ai/mlsysim},
+  version      = {0.1.0},
+  institution  = {Harvard University}
+}
+```
+
 ## 🛠 Installation
 
 MLSys·im is designed to be highly modular. Install only what you need:
@@ -163,3 +200,16 @@ evaluation = mlsysim.SystemEvaluator.evaluate(
 # 3. View the beautifully formatted scorecard
 print(evaluation.scorecard())
 ```
+
+### Efficiency Parameter Guide
+
+The `efficiency` parameter (0.0–1.0) captures the gap between peak hardware performance and what your software stack actually achieves. Use these guidelines:
+
+| Scenario | Efficiency | Rationale |
+|----------|-----------|-----------|
+| Training (Megatron-LM, large Transformer) | 0.40–0.55 | Well-optimized GEMM + FlashAttention |
+| Training (PyTorch eager, small model) | 0.08–0.15 | Kernel launch overhead dominates |
+| Inference decode, batch=1 | 0.01–0.05 | Memory-bound; compute nearly idle |
+| Inference decode, batch=32+ | 0.15–0.35 | Batch amortizes weight loading |
+| Inference prefill, long context | 0.30–0.50 | Compute-bound GEMM + attention |
+| TinyML (TFLite Micro on ESP32) | 0.05–0.15 | Interpreter overhead, no tensor cores |

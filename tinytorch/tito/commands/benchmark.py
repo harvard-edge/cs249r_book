@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
+rng = np.random.default_rng(7)
 
 from rich.panel import Panel
 from rich.table import Table
@@ -400,8 +401,8 @@ class BenchmarkCommand(BaseCommand):
         import time
 
         # Create tensors
-        a = np.random.randn(100, 100).astype(np.float32)
-        b = np.random.randn(100, 100).astype(np.float32)
+        a = rng.standard_normal((100, 100)).astype(np.float32)
+        b = rng.standard_normal((100, 100)).astype(np.float32)
 
         # Warmup
         for _ in range(5):
@@ -422,8 +423,8 @@ class BenchmarkCommand(BaseCommand):
         """Benchmark matrix multiplication."""
         import time
 
-        a = np.random.randn(100, 100).astype(np.float32)
-        b = np.random.randn(100, 100).astype(np.float32)
+        a = rng.standard_normal((100, 100)).astype(np.float32)
+        b = rng.standard_normal((100, 100)).astype(np.float32)
 
         # Warmup
         for _ in range(5):
@@ -442,9 +443,9 @@ class BenchmarkCommand(BaseCommand):
         import time
 
         # Simulate a simple forward pass
-        x = np.random.randn(1, 784).astype(np.float32)
-        w1 = np.random.randn(784, 128).astype(np.float32)
-        w2 = np.random.randn(128, 10).astype(np.float32)
+        x = rng.standard_normal((1, 784)).astype(np.float32)
+        w1 = rng.standard_normal((784, 128)).astype(np.float32)
+        w2 = rng.standard_normal((128, 10)).astype(np.float32)
 
         # Warmup
         for _ in range(5):

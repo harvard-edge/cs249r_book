@@ -144,7 +144,7 @@ def _(LAB_CSS, mo):
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <span class="badge badge-info">D-A-M Triad Diagnosis</span>
                 <span class="badge badge-warn">Iron Law T = D/BW + O/R + L</span>
-                <span class="badge badge-fail">200x OOM on ESP32</span>
+                <span class="badge badge-fail">200x Out of Memory (OOM) on ESP32</span>
             </div>
         </div>
         """),
@@ -188,9 +188,9 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    D-A-M framework from @sec-introduction &middot;
-                    Iron Law equation from @sec-introduction-iron-law &middot;
-                    Deployment spectrum from @sec-introduction-deployment-spectrum
+                    D-A-M framework from the Introduction chapter &middot;
+                    Iron Law equation from the Iron Law section (Ch. 1) &middot;
+                    Deployment spectrum from the Deployment Spectrum section (Ch. 1)
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -214,7 +214,7 @@ def _(COLORS, mo):
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                &ldquo;If the same model deployed to an H100, a Jetson, and an ESP32 fails
+                &ldquo;If the same model deployed to an H100 (NVIDIA's flagship datacenter GPU), a Jetson (NVIDIA's edge AI module), and an ESP32 (Espressif's low-power microcontroller, 512 KB SRAM) fails
                 for three different physical reasons &mdash; how do you diagnose which axis
                 to fix before spending the budget?&rdquo;
             </div>
@@ -230,11 +230,11 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** -- Complete the following before this lab:
 
-    - **@sec-introduction** -- The D-A-M framework (Data, Algorithm, Machine) and
+    - **The Introduction chapter** -- The D-A-M framework (Data, Algorithm, Machine) and
       the three worked examples (recommendation system, vision model, language model).
-    - **@sec-introduction-iron-law** -- The Iron Law `T = D/BW + O/R + L` with
+    - **The Iron Law section (Ch. 1)** -- The Iron Law `T = D/BW + O/R + L` with
       variable definitions and the ResNet-50 worked example.
-    - **@sec-introduction-deployment-spectrum** -- The deployment spectrum table
+    - **The Deployment Spectrum section (Ch. 1)** -- The deployment spectrum table
       showing Cloud, Edge, Mobile, and TinyML hardware tiers.
     """), kind="info")
     return
@@ -643,7 +643,7 @@ Algorithm capacity metrics complete the picture.
         the Compute term. If the Data term is larger -- which it is at low batch sizes --
         the speedup is negligible.
 
-        **Arithmetic Intensity** (AI) = O / D_vol (FLOPs per byte).
+        **Arithmetic Intensity (AI)** = O / D_vol (FLOPs per byte). Note: AI here refers to arithmetic intensity, not artificial intelligence.
         Below the Ridge Point (R_peak / BW), the workload is **memory-bound**.
         """))
 
@@ -690,6 +690,7 @@ Algorithm capacity metrics complete the picture.
                 name=_lbl, x=[_lbl], y=[_v],
                 marker_color=_bc, marker_line_color="white",
                 marker_line_width=_bw, opacity=0.88,
+                hovertemplate="%{x}: %{y:.4f} ms<extra></extra>",
             ))
         _fig.update_layout(
             barmode="group", height=320,
@@ -732,7 +733,7 @@ Algorithm capacity metrics complete the picture.
         <div style="display:flex; gap:12px; flex-wrap:wrap; margin:0 0 16px 0;">
             <div style="padding:12px 20px; border:1px solid {COLORS['Border']}; border-radius:10px;
                         background:white; flex:1; text-align:center;">
-                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">MFU</div>
+                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Model FLOPs Utilization (MFU)</div>
                 <div style="font-size:1.3rem; font-weight:800;
                             color:{'#008F45' if _mfu > 50 else '#CC5500' if _mfu > 20 else '#CB202D'};">
                     {_mfu:.1f}%</div>
@@ -780,10 +781,12 @@ AI = {_ai:.1f} FLOPs/Byte  {'<<' if _ai < _ridge_point else '>>'} Ridge Point ~{
         _fig2.add_trace(go.Scatter(
             x=_batches, y=_data_times, mode="lines+markers",
             name="Data Term (D/BW)", line=dict(color=COLORS["BlueLine"], width=2.5),
+            hovertemplate="Batch %{x}: %{y:.4f} ms<extra></extra>",
         ))
         _fig2.add_trace(go.Scatter(
             x=_batches, y=_comp_times, mode="lines+markers",
             name="Compute Term (O/R*eta)", line=dict(color=COLORS["OrangeLine"], width=2.5),
+            hovertemplate="Batch %{x}: %{y:.4f} ms<extra></extra>",
         ))
         _fig2.update_layout(
             height=280,
@@ -806,7 +809,7 @@ AI = {_ai:.1f} FLOPs/Byte  {'<<' if _ai < _ridge_point else '>>'} Ridge Point ~{
             _rev_msg = (
                 f"**Correct.** At batch=1 on the H100, the Data Term is {_t_data_ref:.4f} ms -- "
                 f"approximately {_t_data_ref/_t_comp_ref:.0f}x the Compute Term ({_t_comp_ref:.4f} ms). "
-                "The H100 is so fast at arithmetic that it spends most time waiting for data from HBM. "
+                "The H100 is so fast at arithmetic that it spends most time waiting for data from High Bandwidth Memory (HBM). "
                 "Buying a 2x faster GPU would yield less than 10% latency improvement."
             )
             _rev_kind = "success"
@@ -1067,6 +1070,26 @@ Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, th
     def build_part_d():
         items = []
 
+        # Stakeholder message
+        items.append(mo.Html(f"""
+        <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                Strategic Review &middot; CEO, MedVision Health
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                &ldquo;We want to deploy our DR screening model everywhere: cloud for hospitals,
+                edge for mobile clinics, and on-device for remote villages with no connectivity.
+                How different are these targets, really? Can we just run the same model at
+                different speeds?&rdquo;
+            </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                &mdash; James Chen, CEO &middot; MedVision Health
+            </div>
+        </div>
+        """))
+
         items.append(mo.md("""
         ## The Full Deployment Spectrum: 9 Orders of Magnitude
 
@@ -1109,11 +1132,13 @@ Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, th
             name="Compute (TFLOPS)", x=_names, y=_compute,
             marker_color=[COLORS["BlueLine"]] * len(_names),
             opacity=0.85,
+            hovertemplate="%{x}: %{y:,.0f} TFLOPS<extra></extra>",
         ))
         _fig.add_trace(go.Bar(
             name="Memory (GB)", x=_names, y=_memory,
             marker_color=[COLORS["GreenLine"]] * len(_names),
             opacity=0.85,
+            hovertemplate="%{x}: %{y:,.0f} GB<extra></extra>",
         ))
         _fig.update_layout(
             barmode="group", height=380,
@@ -1313,9 +1338,10 @@ Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, th
                         Textbook Connection
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-introduction for the D-A-M framework,
-                        @sec-introduction-iron-law for the full Iron Law derivation,
-                        @sec-introduction-deployment-spectrum for the hardware tier table.
+                        <strong>Read:</strong> the Introduction chapter for the D-A-M framework,
+                        the Iron Law section (Ch. 1) for the full Iron Law derivation,
+                        the Deployment Spectrum section (Ch. 1) for the hardware tier table.
+                        <br/><strong>Build:</strong> TinyTorch Module 01 -- implement the D-A-M diagnostic framework and Iron Law calculator from scratch.
                     </div>
                 </div>
             </div>

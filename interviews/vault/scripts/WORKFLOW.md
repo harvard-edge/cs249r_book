@@ -128,10 +128,39 @@ All prompts include specs from `mlsysim/core/constants.py`:
 
 Never hardcode specs in prompts — always derive from constants.py.
 
+## Step 6: INVARIANT GATE (before commit)
+
+```bash
+python3 staffml/vault/scripts/vault_invariants.py
+```
+
+This runs 14 structural checks across corpus, taxonomy, and chains:
+- No duplicate concept names or IDs
+- All IDs are kebab-case (no Title Case stubs from LLM extraction)
+- `question_count` matches actual corpus counts (auto-fixable with `--fix`)
+- All `competency_area` and `level` values are canonical
+- No orphan prerequisites or graph cycles
+- All chain question IDs exist in corpus
+- No duplicate question IDs
+
+**The commit MUST NOT proceed if any check is FAIL.** Run `--fix` first
+for auto-fixable issues (checks 4 and 9).
+
+For pipeline scripts, use the gate module:
+```python
+from gate import InvariantGate
+with InvariantGate():
+    # ... modify corpus/taxonomy ...
+# automatically blocks if new FAILs appear
+```
+
 ## Commit Protocol
 
 After each successful loop iteration:
 ```bash
+# Verify invariants pass
+python3 staffml/vault/scripts/vault_invariants.py
+# Then commit
 git add corpus.json chains.json staffml/src/data/corpus.json taxonomy.json
 git commit -m "staffml: QA loop round N — OK X% → Y%, N fixes applied"
 git push origin dev

@@ -34,8 +34,28 @@ class Workload(BaseModel):
     data_rate: Optional[Quantity] = None # e.g., TB/hour for autonomous driving
 
     def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
-        """Lowers the workload into a hardware-agnostic computation graph."""
-        raise NotImplementedError
+        """
+        Lowers the workload into a hardware-agnostic computation graph.
+
+        Default implementation uses ``parameters`` and ``inference_flops``
+        directly.  Subclasses (Transformer, CNN, etc.) override this with
+        architecture-specific lowering.
+        """
+        if self.parameters is None:
+            raise NotImplementedError(
+                f"{type(self).__name__} has no 'parameters'; override lower() or set parameters."
+            )
+        bpp = precision.to(ureg.byte).magnitude
+        param_count = self.parameters.to(ureg.count).magnitude
+        weight_bytes = (param_count * bpp * ureg.byte).to(ureg.byte)
+        ops = self.inference_flops if self.inference_flops else (2 * param_count * ureg.flop)
+        return ComputationGraph(
+            name=self.name,
+            total_ops=ops,
+            parameter_count=self.parameters,
+            weight_bytes=weight_bytes,
+            arithmetic_intensity=(ops / weight_bytes).to("flop/byte"),
+        )
 
     def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
         if self.model_size is not None:

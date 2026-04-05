@@ -1,0 +1,12 @@
+---
+title: "Calling for Kit Applications - XIAOML for Applied AI Engineering"
+date: "2026-02-03"
+author: "Vijay Janapa Reddi"
+description: "Dear Educator, We’re reaching out to invite university educators teaching (or planning to teach) TinyML and edge AI to apply to receive TinyML hardware kits for use in their courses. These kits are..."
+categories: ["update"]
+image: "https://assets.buttondown.email/images/895020d4-8862-4711-9677-c95289d59122.png"
+---
+
+```{=html}
+<p>Dear Educator,</p><p>We’re reaching out to invite university educators teaching (or planning to teach) <strong>TinyML and edge AI</strong> to apply to receive <strong>TinyML hardware kits</strong> for use in their courses.</p><p class="isSelectedEnd">These kits are designed to support <strong>underfunded or resource-constrained institutions</strong> that want to offer students meaningful, hands-on experience building AI systems that run in the real world—not just in theory.</p><p class="isSelectedEnd">If this sounds relevant for your classroom, we invite you to apply using this short form:<br>👉 <a target="_blank" rel="noopener noreferrer nofollow" href="https://forms.gle/JFM4hBARfqCsUPN59"><strong>Apply here by March 15th</strong></a></p><p class="isSelectedEnd">The application helps us understand your teaching context, how the kits will be used, and the potential for long-term student impact. Selected educators will receive kits at no cost, along with access to open-source TinyML learning resources and a global educator community.</p><p class="isSelectedEnd">This initiative is made possible through a generous collaboration: <strong>Seeed Studio</strong> developed the kits and offered them at a reduced cost, the <strong>Edge AI Foundation</strong> funded them, and <strong>ICTP</strong> will support distribution to universities across the Global South. We’re deeply grateful for partners who share a commitment to expanding access to hands-on AI education.</p><figure><img src="https://assets.buttondown.email/images/af5e7867-27b2-4fd2-be11-b3988d134d6e.png?w=960&amp;fit=max" draggable="false"><figcaption>XIAOML Kit &amp; Components</figcaption></figure><p>Thank you for the work you do to support and inspire students. We’d love to learn more about what you’re building.</p><p><br>Kari Janapareddi</p><p>Director of Partnerships and Strategic Operations<br><a target="_blank" rel="noopener noreferrer nofollow" href="http://MLSysbook.ai"><span style="color: rgb(34, 34, 34)">MLSysbook.ai</span></a><span style="color: rgb(34, 34, 34)"> Community</span></p><p></p>
+```

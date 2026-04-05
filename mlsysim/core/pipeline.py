@@ -81,8 +81,7 @@ class Pipeline:
             if missing and i > 0:
                 lines.append(f"    ⚠ needs {missing} — must be provided at run()")
 
-            # Update produced set
-            produced_concepts.update(cls.requires)
+            # Update produced set (only add what this stage produces, not what it requires)
             if cls.produces:
                 produced_concepts.add(produces_name)
 
@@ -149,8 +148,9 @@ class Pipeline:
                     callback.on_stage_end(stage_name=stage_name, result=result)
 
             # Make result fields available to subsequent stages
-            if hasattr(result, "model_fields"):
-                for field_name in result.model_fields:
+            result_type = type(result)
+            if hasattr(result_type, "model_fields"):
+                for field_name in result_type.model_fields:
                     accumulated[field_name] = getattr(result, field_name)
 
         return stage_results

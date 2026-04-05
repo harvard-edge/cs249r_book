@@ -27,9 +27,9 @@ from pathlib import Path
 
 import subprocess
 
-BASE = Path(__file__).parent
+BASE = Path(__file__).parent.parent  # vault root (scripts/ is one level down)
 CORPUS_PATH = BASE / "corpus.json"
-RESULTS_DIR = BASE / "_validation_results"
+RESULTS_DIR = BASE / "scripts" / "_validation_results"
 
 MODEL = "gemini-2.5-flash"
 

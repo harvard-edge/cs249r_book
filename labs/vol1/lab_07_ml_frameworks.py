@@ -159,9 +159,9 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Dispatch overhead from @sec-frameworks-dispatch-overhead &middot;
-                    Kernel fusion from @sec-frameworks-kernel-fusion &middot;
-                    Memory hierarchy from @sec-nn-computation-memory-hierarchy
+                    Dispatch overhead from the ML Frameworks chapter &middot;
+                    Kernel fusion from the ML Frameworks chapter &middot;
+                    Memory hierarchy from the Neural Computation chapter
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -988,7 +988,7 @@ Justify each choice with specific numbers from the lab.
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-frameworks for dispatch overhead,
+                    <strong>Read:</strong> the ML Frameworks chapter for dispatch overhead,
                     kernel fusion, and compilation trade-offs.<br/>
                     <strong>Build:</strong> TinyTorch Module 07 -- implement a simple
                     computation graph executor with eager and compiled modes.
@@ -1020,12 +1020,17 @@ Justify each choice with specific numbers from the lab.
 
 # ─── CELL 5: LEDGER HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, partA_prediction, partD_prediction):
     _track = ledger._state.track or "not set"
-    ledger.save(chapter=7, design={
-        "chapter": "v1_07",
-        "completed": True,
-    })
+    if partA_prediction.value is not None and partD_prediction.value is not None:
+        ledger.save(chapter=7, design={
+            "chapter": "v1_07",
+            "dispatch_overhead_discovered": True,
+            "fusion_speedup_ratio": "17x",
+            "compilation_breakeven_batches": 50,
+            "eager_vs_compiled_tradeoff": "compile_for_production",
+            "completed": True,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

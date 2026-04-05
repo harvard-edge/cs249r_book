@@ -1,6 +1,31 @@
 name: '🎯 StaffML · 🚀 Publish (Live)'
 
-# Builds and deploys StaffML to mlsysbook.ai/staffml/ (or staffml.ai)
+# =============================================================================
+# StaffML — Production Deploy
+# =============================================================================
+#
+# Builds the StaffML Next.js app, runs vault validation and smoke tests,
+# and deploys to production. Also deploys a redirect at /interviews/ for
+# backward compatibility with the old URL.
+#
+# Flow:
+#   1. SYNC_VAULT  — Sync vault data into StaffML src
+#   2. BUILD       — npm ci + Next.js static export
+#   3. VALIDATE    — Build output + vault integrity + smoke tests
+#   4. DEPLOY      — Push to gh-pages/staffml/ + /interviews/ redirect
+#
+# Triggers:
+#   - workflow_dispatch: manual only
+#
+# Deploys to: mlsysbook.ai/staffml/ (+ /interviews/ redirect)
+# Secrets:    GITHUB_TOKEN
+#
+# Related:
+#   - staffml-preview-dev.yml — Dev preview deploy
+#   - staffml-auto-pr.yml    — Auto-PR from community question issues
+#   - staffml-welcome.yml    — Welcome comment on contributor PRs
+#
+# =============================================================================
 
 on:
   workflow_dispatch:
@@ -33,14 +58,39 @@ jobs:
         working-directory: interviews/staffml
         run: npm ci
 
+      - name: 🔍 Type check
+        working-directory: interviews/staffml
+        run: npx tsc --noEmit
+
+      - name: 🧪 Run tests
+        working-directory: interviews/staffml
+        run: npm test
+
       - name: 🔄 Sync vault data to StaffML
         run: python3 interviews/staffml/scripts/sync-vault.py
 
       - name: 🔨 Build StaffML
         working-directory: interviews/staffml
         env:
-          NEXT_PUBLIC_BASE_PATH: /interviews
+          NEXT_PUBLIC_BASE_PATH: /staffml
+          NEXT_PUBLIC_ANALYTICS_URL: https://mlsysbook.ai/api/staffml-analytics
         run: npm run build
+
+      - name: 📁 Inject paper and figures into build
+        run: |
+          echo "📁 Injecting paper assets into built site..."
+          mkdir -p interviews/staffml/out/downloads
+
+          if [ -f interviews/paper/paper.pdf ]; then
+            cp interviews/paper/paper.pdf interviews/staffml/out/downloads/StaffML-Paper.pdf
+            echo "✅ Injected StaffML-Paper.pdf"
+          else
+            echo "⚠️ Paper PDF not found"
+          fi
+
+          echo ""
+          echo "📦 Downloads folder contents:"
+          ls -la interviews/staffml/out/downloads/ || echo "No downloads folder"
 
       - name: 🔍 Validate build
         run: |
@@ -77,7 +127,7 @@ jobs:
           assert len(corpus) >= 4000, f'Corpus too small: {len(corpus)}'
           print(f'✅ Corpus: {len(corpus)} questions')
 
-          required = ['id', 'title', 'level', 'track', 'scenario', 'competency_area', 'details']
+          required = ['id', 'title', 'level', 'track', 'scenario', 'competency_area', 'topic', 'zone', 'details']
           for q in corpus:
               for f in required:
                   assert q.get(f), f'{q.get(\"id\", \"???\")} missing {f}'
@@ -88,10 +138,18 @@ jobs:
               assert q['level'] in valid_levels, f'{q[\"id\"]} invalid level {q[\"level\"]}'
           print('✅ All levels valid')
 
+          areas = set(q['competency_area'] for q in corpus)
+          assert len(areas) == 13, f'Expected 13 competency areas, got {len(areas)}'
+          print(f'✅ Competency areas: {len(areas)}')
+
+          zones = set(q['zone'] for q in corpus)
+          assert len(zones) == 11, f'Expected 11 zones, got {len(zones)}'
+          print(f'✅ Zones: {len(zones)}')
+
           with open('interviews/staffml/src/data/taxonomy.json') as f:
               taxonomy = json.load(f)
-          assert len(taxonomy.get('concepts', [])) >= 100
-          print(f'✅ Taxonomy: {len(taxonomy[\"concepts\"])} concepts')
+          assert len(taxonomy.get('concepts', [])) >= 70
+          print(f'✅ Taxonomy: {len(taxonomy[\"concepts\"])} topics')
 
           with open('interviews/staffml/src/data/vault-manifest.json') as f:
               manifest = json.load(f)
@@ -101,12 +159,41 @@ jobs:
           print('🎯 All smoke tests passed')
           "
 
-      - name: 🚀 Deploy to GitHub Pages
+      - name: 📁 Prepare redirect from /interviews/ → /staffml/
+        run: |
+          mkdir -p interviews-redirect
+          cat > interviews-redirect/index.html << 'REDIRECT_EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <title>StaffML — Redirecting</title>
+            <link rel="canonical" href="https://mlsysbook.ai/staffml/">
+            <meta http-equiv="refresh" content="0; url=/staffml/">
+          </head>
+          <body>
+            <p>Redirecting to <a href="/staffml/">StaffML</a>...</p>
+            <script>window.location.replace("/staffml/");</script>
+          </body>
+          </html>
+          REDIRECT_EOF
+
+      - name: 🚀 Deploy StaffML to /staffml/
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./interviews/staffml/out
-          destination_dir: interviews
+          destination_dir: staffml
           publish_branch: gh-pages
           keep_files: true
           commit_message: '🎯 Deploy StaffML live v${{ github.run_number }} - ${{ github.sha }}'
+
+      - name: 🔀 Deploy /interviews/ redirect
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./interviews-redirect
+          destination_dir: interviews
+          publish_branch: gh-pages
+          keep_files: false
+          commit_message: '🔀 Update /interviews/ redirect to /staffml/'

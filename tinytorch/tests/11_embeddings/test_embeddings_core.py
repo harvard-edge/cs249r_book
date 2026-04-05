@@ -17,6 +17,7 @@ WHAT STUDENTS LEARN:
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import pytest
 import sys
 from pathlib import Path
@@ -71,7 +72,7 @@ class TestEmbeddingLayer:
         embed = Embedding(vocab_size=100, embed_dim=32)
 
         # Batch of 4 sequences, each length 10
-        tokens = Tensor(np.random.randint(0, 100, (4, 10)))
+        tokens = Tensor(rng.integers(0, 100, (4, 10)))
 
         output = embed(tokens)
 
@@ -102,7 +103,7 @@ class TestPositionalEncoding:
         pos_enc = PositionalEncoding(max_len, embed_dim)
 
         # Sequence of embeddings
-        x = Tensor(np.random.randn(2, 50, 64))  # (batch, seq, embed)
+        x = Tensor(rng.standard_normal((2, 50, 64)))  # (batch, seq, embed)
 
         output = pos_enc(x)
 

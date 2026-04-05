@@ -96,7 +96,7 @@ def extract_tito_commands(filepath: Path) -> List[Tuple[int, str]]:
 
     for i, line in enumerate(content.split('\n'), 1):
         # Skip lines that are clearly URLs or links
-        if 'http' in line.lower() or 'github.com' in line.lower():
+        if re.search(r'https?://|github\.com/', line, re.IGNORECASE):
             continue
 
         # Skip header lines (prose)

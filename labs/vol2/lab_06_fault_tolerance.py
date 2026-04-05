@@ -67,7 +67,7 @@ async def _():
     H100 = Hardware.Cloud.H100
     A100 = Hardware.Cloud.A100
     EDGE = Hardware.Edge.JetsonOrinNX
-    H100_RAM_GB = 80.0    # GB HBM3e
+    H100_RAM_GB = H100.memory.capacity.m_as("GB")
     EDGE_RAM_GB = EDGE.memory.capacity.m_as("GB")
     GPU_COST_HR = 3.0     # $/GPU-hour cloud pricing
     ledger = DesignLedger()
@@ -105,7 +105,7 @@ def _(COLORS, LAB_CSS, mo):
                 <span class="badge badge-info">MTBF Scaling</span>
                 <span class="badge badge-info">Young-Daly U-Curve</span>
                 <span class="badge badge-info">Checkpoint Storm</span>
-                <span class="badge badge-warn">35&ndash;40 minutes &middot; 2 Parts + Synthesis</span>
+                <span class="badge badge-warn">45&ndash;55 minutes &middot; 4 Parts + Synthesis</span>
             </div>
         </div>
     </div>
@@ -141,8 +141,8 @@ def _(mo, COLORS):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Reliability collapse from @sec-scale-illusion &middot;
-                    MTBF_system = MTBF_component / N from @sec-fault-tolerance
+                    Reliability collapse from the Scale chapter &middot;
+                    MTBF_system = MTBF_component / N from the Fault Tolerance chapter
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -180,8 +180,8 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** -- Complete before this lab:
 
-    - **@sec-fault-tolerance** -- MTBF scaling, Young-Daly checkpoint model
-    - **@sec-scale-illusion** -- Fleet reliability collapse (V2-01 recap)
+    - **The Fault Tolerance chapter** -- MTBF scaling, Young-Daly checkpoint model
+    - **The Scale chapter** -- Fleet reliability collapse (V2-01 recap)
     - The Checkpoint Storm section -- Storage bandwidth saturation at scale
     - The Serving Fault Tolerance section -- KV cache state and replica failover
     """), kind="info")
@@ -398,6 +398,13 @@ def _(
     The engineer's 10-minute interval wastes 2/10 = 20% of time on checkpoint overhead alone.
     The optimal 27-minute interval wastes only 2/27 = 7.4% on overhead.
     """))
+
+        items.append(mo.callout(mo.md(
+            "**Caveat:** The MTBF formula assumes independent failures. In practice, failures are often "
+            "correlated: a power supply failure takes down 8 GPUs, a switch failure isolates an entire "
+            "rack (64-128 GPUs). Correlated failures can increase effective failure rates by 2-5x over "
+            "the independent model."
+        ), kind="info"))
 
         # ── Prediction lock ───────────────────────────────────────────
         items.append(mo.md("### Your Prediction"))
@@ -1390,7 +1397,7 @@ def _(
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-fault-tolerance for the Young-Daly derivation and
+                    <strong>Read:</strong> the Fault Tolerance chapter for the Young-Daly derivation and
                     checkpoint storm analysis.<br/>
                     <strong>Build:</strong> TinyTorch checkpoint module &mdash; implement async
                     checkpoint write and restore in <code>tinytorch/src/checkpoint/</code>.

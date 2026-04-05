@@ -24,7 +24,7 @@ tito system health --verbose
 
 Tests 50+ environment checks:
 
-- **Python Environment**: Version (3.8+), virtual environment, pip
+- **Python Environment**: Version (3.10+), virtual environment, pip
 - **Core Dependencies**: NumPy, Matplotlib, pytest, PyYAML, Rich
 - **Jupyter Environment**: Jupyter, JupyterLab, kernels, Jupytext
 - **TinyTorch Package**: Import, core modules, version

@@ -512,6 +512,22 @@ Failures/day = 24 / MTBF = 24 / {_mtbf_hours:.1f} = {_failures_per_day:.1f}
             mo.md(f"**You predicted:** ~{_pred}%  |  **Actual:** {_ref*100:.1f}%"),
             mo.callout(mo.md(_msg), kind=_kind),
         ]))
+
+        items.append(mo.accordion({
+            "Math Peek: Fleet Reliability Decay": mo.md("""
+**Formula:**
+$$
+P_{\\text{fleet}} = P_{\\text{node}}^{N}
+$$
+
+**Variables:**
+- **$P_{\\text{fleet}}$**: probability that the entire cluster is healthy (all nodes up simultaneously)
+- **$P_{\\text{node}}$**: per-node reliability (e.g., 0.999 for 99.9% uptime)
+- **$N$**: number of nodes in the fleet
+
+**Key insight:** At $P_{\\text{node}} = 0.999$ and $N = 1{,}000$: $P_{\\text{fleet}} = 0.999^{1000} \\approx 0.368$ (36.8%). This is $1/e$ -- the exponential decay threshold.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -643,6 +659,25 @@ T_step    = {_t_step_ms:.0f} ms       Efficiency = {_t_compute_ms:.0f}/{_t_step_
             mo.md(f"**You predicted:** ~{_pred}%  |  **Simulated:** {_efficiency:.1f}%"),
             mo.callout(mo.md(_msg), kind=_kind),
         ]))
+
+        items.append(mo.accordion({
+            "Math Peek: The Fleet Law": mo.md("""
+**Formula:**
+$$
+T_{\\text{step}} = T_{\\text{compute}} + T_{\\text{comm}} + T_{\\text{coord}}
+$$
+
+$$
+\\eta_{\\text{fleet}} = \\frac{T_{\\text{compute}}}{T_{\\text{step}}} = \\frac{T_{\\text{compute}}}{T_{\\text{compute}} + T_{\\text{comm}} + T_{\\text{coord}}}
+$$
+
+**Variables:**
+- **$T_{\\text{compute}}$**: time for forward + backward pass (scales as $\\text{FLOPs} / (N \\times \\text{peak\\_TFLOPS})$)
+- **$T_{\\text{comm}}$**: gradient synchronization time (Ring AllReduce: $2(N-1)/N \\times M / BW$)
+- **$T_{\\text{coord}}$**: barrier synchronization, straggler waits, scheduling overhead
+- **$\\eta_{\\text{fleet}}$**: fleet efficiency (fraction of ideal linear speedup actually achieved)
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -786,6 +821,29 @@ T_step    = {_t_step_ms:.0f} ms       Efficiency = {_t_compute_ms:.0f}/{_t_step_
             mo.md(f"**You predicted:** {_pred}"),
             mo.callout(mo.md(_msg), kind=_kind),
         ]))
+
+        items.append(mo.accordion({
+            "Math Peek: Chinchilla Scaling Law": mo.md("""
+**Formula:**
+$$
+L(N, D) = \\frac{A}{N^{\\alpha}} + \\frac{B}{D^{\\beta}} + L_0
+$$
+
+**Compute-optimal allocation (Chinchilla):**
+$$
+D^{*} \\approx 20 \\times N
+$$
+
+**Variables:**
+- **$L$**: training loss
+- **$N$**: number of model parameters
+- **$D$**: number of training tokens
+- **$A, B, L_0$**: fitted constants ($\\alpha \\approx 0.34$, $\\beta \\approx 0.28$)
+- **$D^{*}$**: compute-optimal token count for a given $N$
+
+**Key insight:** For a fixed compute budget $C \\approx 6ND$, allocating tokens as $D = 20N$ minimizes loss. Most pre-2022 LLMs were severely under-trained.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -933,6 +991,33 @@ T_step    = {_t_step_ms:.0f} ms       Efficiency = {_t_compute_ms:.0f}/{_t_step_
             mo.md(f"**You predicted:** ~{_pred} GPUs  |  **Actual:** N = {_eff_50_n}"),
             mo.callout(mo.md(_msg), kind=_kind),
         ]))
+
+        items.append(mo.accordion({
+            "Math Peek: Extended Amdahl's Law for Distributed Training": mo.md("""
+**Formula:**
+$$
+\\eta(N) = \\frac{1}{1 + r \\cdot (N - 1)}
+$$
+
+**50% efficiency threshold:**
+$$
+N_{50\\%} = \\frac{1}{r} + 1 - \\frac{1}{r \\cdot N} \\approx \\frac{1}{r}
+$$
+
+**With overlap:**
+$$
+\\eta(N) = \\frac{1}{1 + r \\cdot (1 - o) \\cdot (N - 1)}
+$$
+
+**Variables:**
+- **$\\eta(N)$**: scaling efficiency at $N$ GPUs (1.0 = perfect linear scaling)
+- **$r$**: communication fraction (ratio of communication time to compute time per step)
+- **$N$**: number of GPUs
+- **$o$**: overlap fraction (0 = no overlap, 1 = perfect overlap of backward + AllReduce)
+
+**Key insight:** At $r = 0.20$, efficiency drops below 50% at just $N \\approx 1/0.20 = 5$ equivalent serial overheads, which in practice is ~32-64 GPUs depending on model size.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -1015,6 +1100,27 @@ T_step    = {_t_step_ms:.0f} ms       Efficiency = {_t_compute_ms:.0f}/{_t_step_
             f"**Score: {_score}/3.** The Conservation of Overhead means every workload has "
             "a dominant bottleneck -- often not the one you expect."
         ), kind="info"))
+
+        items.append(mo.accordion({
+            "Math Peek: Conservation of Overhead": mo.md("""
+**Formula (The Fleet Law as a conservation equation):**
+$$
+T_{\\text{step}} = T_{\\text{compute}} + T_{\\text{comm}} + T_{\\text{coord}} = \\text{const}
+$$
+
+**Bottleneck classification:**
+$$
+\\text{Dominant} = \\arg\\max(T_{\\text{compute}},\\; T_{\\text{comm}},\\; T_{\\text{coord}})
+$$
+
+**Variables:**
+- **$T_{\\text{compute}}$**: forward + backward pass time (proportional to FLOPs per GPU)
+- **$T_{\\text{comm}}$**: gradient synchronization, AllReduce, All-to-All
+- **$T_{\\text{coord}}$**: barrier syncs, straggler waits, scheduling, privacy overhead
+
+**Key insight:** Reducing one term shifts the bottleneck to another. LLM training is communication-bound; DLRM is coordination-bound (irregular All-to-All); federated learning is coordination-bound (straggler + privacy).
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -1075,12 +1181,20 @@ at fleet scale, the bandwidth staircase, and the hidden cost of ownership.
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, partA_prediction, partB_prediction, partC_prediction, partD_prediction, partE_llm, partE_dlrm, partE_fed):
     _track = ledger._state.track or "not set"
-    ledger.save(chapter=1, design={
-        "chapter": "v2_01",
-        "completed": True,
-    })
+    if partA_prediction.value is not None:
+        ledger.save(chapter=1, design={
+            "chapter": "v2_01",
+            "completed": True,
+            "fleet_reliability_prediction": partA_prediction.value,
+            "fleet_efficiency_prediction": partB_prediction.value,
+            "scaling_law_allocation": partC_prediction.value,
+            "amdahl_gpu_threshold": partD_prediction.value,
+            "bottleneck_llm": partE_llm.value,
+            "bottleneck_dlrm": partE_dlrm.value,
+            "bottleneck_federated": partE_fed.value,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

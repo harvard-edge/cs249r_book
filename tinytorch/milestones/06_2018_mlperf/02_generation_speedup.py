@@ -56,6 +56,7 @@ import sys
 import os
 import time
 import numpy as np
+rng = np.random.default_rng(7)
 from pathlib import Path
 
 # Add project root
@@ -212,7 +213,7 @@ def main():
 
     for token_idx in range(seq_len):
         # Create sequence up to current position
-        tokens = Tensor(np.random.randint(1, vocab_size, (1, token_idx + 1)))
+        tokens = Tensor(rng.integers(1, vocab_size, (1, token_idx + 1)))
 
         start = time.time()
         _ = forward_no_cache(tokens)
@@ -258,7 +259,7 @@ def main():
 
     for token_idx in range(seq_len):
         # Only process the NEW token (not the whole sequence!)
-        new_token = Tensor(np.random.randint(1, vocab_size, (1, 1)))
+        new_token = Tensor(rng.integers(1, vocab_size, (1, 1)))
 
         start = time.time()
         # Simplified: just embed the new token

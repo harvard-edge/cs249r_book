@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+rng = np.random.default_rng(7)
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -47,7 +48,7 @@ class TestTransformerBlock:
         block = TransformerBlock(embed_dim=256, num_heads=8)
 
         # Sequence of embeddings
-        x = Tensor(np.random.randn(2, 20, 256))  # (batch, seq, embed)
+        x = Tensor(rng.standard_normal((2, 20, 256)))  # (batch, seq, embed)
 
         output = block(x)
 
@@ -69,7 +70,7 @@ class TestTransformerBlock:
         # Stack of 4 blocks
         blocks = [TransformerBlock(embed_dim=128, num_heads=4) for _ in range(4)]
 
-        x = Tensor(np.random.randn(2, 10, 128))
+        x = Tensor(rng.standard_normal((2, 10, 128)))
 
         for block in blocks:
             x = block(x)
@@ -96,7 +97,7 @@ class TestTransformerGradients:
         enable_autograd()
 
         block = TransformerBlock(embed_dim=64, num_heads=4)
-        x = Tensor(np.random.randn(1, 5, 64), requires_grad=True)
+        x = Tensor(rng.standard_normal((1, 5, 64)), requires_grad=True)
 
         output = block(x)
         loss = output.sum()

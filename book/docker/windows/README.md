@@ -40,20 +40,20 @@ This directory contains the Windows Server 2022 container configuration for buil
 - 20GB+ free disk space
 
 ## Local Build
-To build the Windows container locally, run the following command from the repository root:
+To build the Windows container locally, run the following command from the repository root (context is the repo root, same as CI):
 ```powershell
-docker build -f docker/windows/Dockerfile -t mlsysbook-windows .
+docker build -f book/docker/windows/Dockerfile -t mlsysbook-windows .
 ```
 
 ### Testing
-To test the Dockerfile before building, you can use the provided PowerShell script:
+After a successful build, a quick smoke test:
 ```powershell
-./docker/windows/test_dockerfile.ps1
+docker run --rm mlsysbook-windows pwsh -NoProfile -Command "quarto --version; python --version"
 ```
 
 ## Workflow
-The container is built and pushed to the GitHub Container Registry via the [`.github/workflows/build-windows-container.yml`](../../.github/workflows/build-windows-container.yml) workflow.
-This workflow is triggered manually or on a weekly schedule.
+The container is built and pushed to the GitHub Container Registry via the [`infra-container-windows.yml`](../../../.github/workflows/infra-container-windows.yml) workflow.
+This workflow is triggered manually or on a schedule.
 
 ## Notes
 - Building the Windows container can take a significant amount of time (often over 2 hours).

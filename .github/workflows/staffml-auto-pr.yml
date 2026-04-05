@@ -1,0 +1,75 @@
+name: '🎯 StaffML · 🤖 Auto-PR Question'
+
+# =============================================================================
+# StaffML — Auto-PR Community Questions
+# =============================================================================
+#
+# When an issue is labeled "action: auto-pr", automatically generates a
+# flashcard from the issue body and creates a pull request to add it.
+#
+# Flow:
+#   1. GENERATE   — Run generate_interview_flashcard.py on issue body
+#   2. CREATE_PR  — Branch, commit, and open PR against dev
+#
+# Triggers:
+#   - issues: labeled with "action: auto-pr"
+#
+# Deploys to: N/A (creates PR only)
+# Secrets:    GITHUB_TOKEN
+#
+# Related:
+#   - staffml-welcome.yml     — Welcome comment on contributor PRs
+#   - staffml-preview-dev.yml — Dev preview deploy
+#   - staffml-publish-live.yml — Production deploy
+#
+# =============================================================================
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  create-pr:
+    if: "github.event.label.name == 'action: auto-pr'"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate Flashcard
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          python .github/scripts/generate_interview_flashcard.py
+
+      - name: Create Pull Request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          BRANCH_NAME="add-staffml-q-${{ github.event.issue.number }}"
+          git checkout -b $BRANCH_NAME
+          git add interviews/
+          git commit -m "docs: add community StaffML question #${{ github.event.issue.number }}"
+          git push origin $BRANCH_NAME
+
+          gh pr create \
+            --title "docs: Add StaffML Question from @${{ github.event.issue.user.login }}" \
+            --body "This PR automatically formats and adds the StaffML question submitted in #${{ github.event.issue.number }}." \
+            --base dev \
+            --head $BRANCH_NAME

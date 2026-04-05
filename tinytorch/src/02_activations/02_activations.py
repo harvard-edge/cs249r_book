@@ -90,6 +90,7 @@ If you see import errors, ensure you've run `tito export` after completing Modul
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 from typing import Optional
 import warnings
 
@@ -1045,7 +1046,7 @@ def analyze_activation_performance():
 
     # Create test data (realistic hidden layer size)
     size = 1000000  # 1 million elements (like a large hidden layer)
-    test_data = Tensor(np.random.randn(size).astype(np.float32))
+    test_data = Tensor(rng.standard_normal(size).astype(np.float32))
 
     print(f"\nTesting with {size:,} elements (simulating large hidden layer)")
     print("-" * 60)

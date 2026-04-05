@@ -85,6 +85,34 @@ export const STUDY_PLANS: StudyPlan[] = [
       'optimization',
     ],
   },
+  {
+    id: 'gpu-systems',
+    title: 'GPU Systems Engineer',
+    description: 'CUDA, memory hierarchy, kernel optimization, multi-GPU scaling. For roles building on accelerated hardware.',
+    duration: '3 weeks',
+    questionCount: 80,
+    icon: '🎮',
+    track: 'cloud',
+    levels: ['L4', 'L5', 'L6+'],
+    competencySequence: [
+      'compute', 'memory', 'optimization', 'parallelism',
+      'architecture', 'latency', 'precision', 'networking',
+    ],
+  },
+  {
+    id: 'llm-inference',
+    title: 'LLM Inference Engineer',
+    description: 'KV-cache, batching, quantization, serving at scale. For roles deploying large language models.',
+    duration: '2 weeks',
+    questionCount: 60,
+    icon: '🧠',
+    track: 'cloud',
+    levels: ['L4', 'L5', 'L6+'],
+    competencySequence: [
+      'memory', 'latency', 'compute', 'optimization', 'architecture',
+      'deployment', 'precision', 'reliability',
+    ],
+  },
 ];
 
 // Generate the ordered question list for a study plan
@@ -102,11 +130,8 @@ export function getPlanQuestions(plan: StudyPlan): Question[] {
       }).filter(q => !usedIds.has(q.id));
 
       const take = Math.min(pool.length, perArea - result.filter(q => q.competency_area === area).length);
-      // Shuffle pool to avoid always picking same questions
-      for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [pool[i], pool[j]] = [pool[j], pool[i]];
-      }
+      // Sort by topic for conceptual grouping (deterministic ordering)
+      pool.sort((a, b) => a.topic.localeCompare(b.topic) || a.id.localeCompare(b.id));
       const selected = pool.slice(0, take);
       selected.forEach(q => {
         result.push(q);

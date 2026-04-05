@@ -1,7 +1,34 @@
 name: '🔧 Infra · 🐳 Container (Windows)'
 
-# This workflow builds the Windows Quarto build container
-# Windows containers are more complex but provide performance benefits
+# =============================================================================
+# 🐳 Windows Container — Build and push the Windows Quarto build container
+# =============================================================================
+#
+# Builds the Windows Docker image using native Docker (not Buildx, which has
+# compatibility issues with Windows containers on GitHub Actions).
+#
+# Flow:
+#   1. CHECKOUT & LOGIN — Authenticate to GHCR
+#   2. BUILD            — Native Docker build with optional cache bypass
+#   3. PUSH             — Push image to GHCR and extract digest
+#   4. SUMMARY          — Report build status and image metadata
+#
+# Triggers:
+#   - push (dev): Changes to book/tools/dependencies/ or book/docker/windows/
+#   - schedule: Weekly rebuild (Sunday 2am UTC, after Linux container)
+#   - workflow_dispatch: Manual with force_rebuild, no_cache options
+#   - workflow_call: Reusable by other workflows
+#
+# Deploys to: ghcr.io/harvard-edge/mlsysbook/quarto-windows:latest
+# Secrets:    GITHUB_TOKEN (automatic)
+# Vars:       BOOK_DOCKER
+#
+# Related:
+#   - infra-container-linux.yml — Linux container build (runs 2h before)
+#   - infra-health-check.yml    — Daily validation of built containers
+#   - infra-cleanup-caches.yml  — Weekly GHA cache cleanup
+#
+# =============================================================================
 
 # Prevent multiple builds running simultaneously
 concurrency:
@@ -131,6 +158,34 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🧹 Free runner disk space
+        shell: pwsh
+        run: |
+          Write-Host "📊 Disk space BEFORE cleanup:"
+          Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -gt 0 } | Format-Table Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,1)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,1)}}
+
+          # Remove pre-installed tools we don't need
+          $paths = @(
+            "C:\hostedtoolcache",
+            "C:\mingw64",
+            "C:\ghcup",
+            "C:\cabal",
+            "C:\Strawberry",
+            "$env:LOCALAPPDATA\Temp\*"
+          )
+          foreach ($p in $paths) {
+            if (Test-Path $p) {
+              Write-Host "Removing $p ..."
+              Remove-Item -Recurse -Force $p -ErrorAction SilentlyContinue
+            }
+          }
+
+          # Prune any stale Docker data
+          docker system prune -af 2>$null
+
+          Write-Host "📊 Disk space AFTER cleanup:"
+          Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -gt 0 } | Format-Table Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,1)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,1)}}
 
       - name: 🏷️ Extract metadata
         id: meta

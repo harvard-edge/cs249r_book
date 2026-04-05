@@ -136,7 +136,7 @@ def _(COLORS, mo):
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
                     Iron Law D_vol/BW term from Lab 01-02 &middot;
                     ML lifecycle from Lab 03 &middot;
-                    @sec-data-engineering
+                    the Data Engineering chapter
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -179,9 +179,9 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** -- Complete the following before this lab:
 
-    - **@sec-data-engineering** -- Data pipelines, I/O bottlenecks, and the feeding tax.
-    - **@sec-data-engineering-data-gravity** -- Egress costs and data gravity economics.
-    - **@sec-data-engineering-data-cascades** -- Error amplification and data contracts.
+    - **The Data Engineering chapter** -- Data pipelines, I/O bottlenecks, and the feeding tax.
+    - **The Data Gravity section (Ch. 4)** -- Egress costs and data gravity economics.
+    - **The Data Cascades section (Ch. 4)** -- Error amplification and data contracts.
     """), kind="info")
     return
 
@@ -425,6 +425,15 @@ def _(mo, partD_prediction):
         </div>
         """))
 
+        # Failure state: GPU effectively idle
+        if _gpu_util < 10:
+            items.append(mo.callout(mo.md(
+                f"**GPU STARVING — {_gpu_util:.1f}% utilization.** "
+                f"The A100 is idle {100 - _gpu_util:.0f}% of the time, waiting for data. "
+                f"At ${32:.0f}/hr, you are paying ${32 * (1 - _gpu_util/100):.0f}/hr for nothing. "
+                "Increase storage bandwidth or add workers to recover."
+            ), kind="danger"))
+
         _pred = partA_prediction.value
         if _pred == "5":
             items.append(mo.callout(mo.md(
@@ -438,6 +447,27 @@ def _(mo, partD_prediction):
                 "The A100 finishes compute in milliseconds but waits for data. "
                 "Try NVMe + 8 workers to see utilization improve."
             ), kind="warn"))
+
+        items.append(mo.accordion({
+            "Math Peek: GPU Utilization (The Feeding Tax)": mo.md("""
+**Formula:**
+$$
+\\eta_{\\text{GPU}} = \\frac{t_{\\text{compute}}}{t_{\\text{compute}} + t_{\\text{IO}}}
+\\quad\\text{where}\\quad
+t_{\\text{IO}} = \\frac{D_{\\text{batch}}}{\\text{BW}_{\\text{storage}} \\cdot W}
+$$
+
+**Variables:**
+- **$\\eta_{\\text{GPU}}$**: GPU utilization (fraction of wall-clock time spent computing)
+- **$t_{\\text{compute}}$**: forward + backward pass time = $3 \\cdot \\text{FLOPs} \\cdot B / (R_{\\text{peak}} \\cdot \\eta)$
+- **$t_{\\text{IO}}$**: I/O time per batch
+- **$D_{\\text{batch}}$**: batch data size in bytes (e.g., 32 images x 224x224x3x4 = ~19 MB)
+- **$\\text{BW}_{\\text{storage}}$**: storage bandwidth (SSD ~250 MB/s, NVMe ~3,000 MB/s)
+- **$W$**: number of DataLoader workers (diminishing returns above ~8)
+
+When $t_{\\text{IO}} \\gg t_{\\text{compute}}$, the GPU starves regardless of its TFLOPS rating.
+""")
+        }))
 
         return mo.vstack(items)
 
@@ -576,6 +606,28 @@ def _(mo, partD_prediction):
                 f"**50 TB / 10 Gbps = {_ref_hours:.1f} hours.** "
                 "Most students dramatically underestimate because they think in small-file terms."
             ), kind="warn"))
+
+        items.append(mo.accordion({
+            "Math Peek: Data Transfer Time & Egress Cost": mo.md("""
+**Formulas:**
+$$
+t_{\\text{transfer}} = \\frac{D_{\\text{dataset}}}{\\text{BW}_{\\text{net}}}
+\\qquad
+C_{\\text{egress}} = D_{\\text{dataset}} \\times p_{\\text{egress}}
+$$
+
+**Variables:**
+- **$D_{\\text{dataset}}$**: dataset size (bytes); convert TB to bits: $\\times 8 \\times 10^{12}$
+- **$\\text{BW}_{\\text{net}}$**: network bandwidth (bits/s); 10 Gbps = $10 \\times 10^9$ bps
+- **$t_{\\text{transfer}}$**: wall-clock transfer time (seconds)
+- **$p_{\\text{egress}}$**: cloud egress price (~\\$0.08/GB for major providers)
+- **$C_{\\text{egress}}$**: total egress cost
+
+For 50 TB at 10 Gbps: $t = 50 \\times 10^{12} \\times 8 / (10 \\times 10^9) \\approx 11.1$ hours.
+Egress cost: $50,000 \\text{ GB} \\times \\$0.08 = \\$4,000$. Above ~5 TB, moving compute to
+data is cheaper than moving data to compute.
+""")
+        }))
 
         return mo.vstack(items)
 
@@ -726,6 +778,29 @@ def _(mo, partD_prediction):
                 "Data contracts and schema validation prevent this."
             ), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Error Cascade Amplification": mo.md("""
+**Formula:**
+$$
+\\epsilon_{\\text{out}} = 1 - (1 - \\epsilon_{\\text{in}})^{k}
+$$
+
+**Variables:**
+- **$\\epsilon_{\\text{in}}$**: ingestion error rate (fraction, e.g., 0.02 for 2%)
+- **$k$**: number of pipeline stages (each stage compounds the error)
+- **$\\epsilon_{\\text{out}}$**: output error rate after all stages
+
+**Amplification factor:**
+$$
+A = \\frac{\\epsilon_{\\text{out}}}{\\epsilon_{\\text{in}}} = \\frac{1 - (1 - \\epsilon_{\\text{in}})^{k}}{\\epsilon_{\\text{in}}}
+$$
+
+For $\\epsilon_{\\text{in}} = 0.02$ and $k = 5$: $\\epsilon_{\\text{out}} = 1 - 0.98^5 \\approx 0.096$ (9.6%),
+with an amplification factor of ~4.8x. Combined with downstream model sensitivity,
+a 2% ingestion error can degrade accuracy by ~15%.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════
@@ -852,6 +927,25 @@ def _(mo, partD_prediction):
                 f"You need ~{_nines:.1f} nines for {_tolerance} false wake(s)/month."
             ), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Required Rejection Rate (Nines)": mo.md("""
+**Formula:**
+$$
+\\text{Nines} = -\\log_{10}\\!\\left(\\frac{F_{\\text{tol}}}{N_{\\text{windows}}}\\right)
+$$
+
+**Variables:**
+- **$N_{\\text{windows}}$**: total classification windows per month = $\\frac{3600}{t_{\\text{window}}} \\times H_{\\text{duty}} \\times 30$
+- **$F_{\\text{tol}}$**: acceptable false activations per month (e.g., 1)
+- **$t_{\\text{window}}$**: audio window duration (typically 1 second for keyword spotting)
+- **$H_{\\text{duty}}$**: duty cycle (hours per day)
+
+For a 24/7 device with 1-second windows: $N = 3600 \\times 24 \\times 30 = 2,592,000$ windows/month.
+To achieve $\\leq 1$ false wake: Nines $= -\\log_{10}(1/2{,}592{,}000) \\approx 6.4$.
+That is **six nines** of rejection -- far beyond typical "99% accuracy" claims.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════
@@ -912,8 +1006,9 @@ def _(mo, partD_prediction):
                         Textbook Connection
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-data-engineering for the full treatment
+                        <strong>Read:</strong> the Data Engineering chapter for the full treatment
                         of data pipelines, I/O bottlenecks, egress costs, and data cascades.
+                        <br/><strong>Build:</strong> TinyTorch Module 04 -- implement a data loader with prefetching and pipeline profiling.
                     </div>
                 </div>
             </div>
@@ -938,12 +1033,20 @@ def _(mo, partD_prediction):
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, partA_prediction, partB_prediction, partC_prediction, partD_prediction):
     _track = ledger._state.track or "not set"
-    ledger.save(chapter=4, design={
-        "chapter": "v1_04",
-        "completed": True,
-    })
+    if partA_prediction.value is not None and partD_prediction.value is not None:
+        ledger.save(chapter=4, design={
+            "chapter": "v1_04",
+            "feeding_tax_prediction": partA_prediction.value,
+            "data_gravity_prediction": partB_prediction.value,
+            "data_cascade_prediction": partC_prediction.value,
+            "false_positive_prediction": partD_prediction.value,
+            "feeding_tax_correct": partA_prediction.value == "5",
+            "data_gravity_correct": partB_prediction.value == "11hr",
+            "data_cascade_correct": partC_prediction.value == "15",
+            "false_positive_correct": partD_prediction.value == "999999",
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

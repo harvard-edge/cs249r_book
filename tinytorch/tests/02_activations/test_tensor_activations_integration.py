@@ -7,6 +7,7 @@ Focuses on integration, not re-testing individual module functionality.
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 from test_utils import setup_integration_test
 
 # Ensure proper setup before importing
@@ -250,7 +251,7 @@ class TestActivationInterfaceCompatibility:
         batch_size = 3
         feature_size = 4
 
-        batch_tensor = Tensor(np.random.randn(batch_size, feature_size))
+        batch_tensor = Tensor(rng.standard_normal((batch_size, feature_size)))
         batch_result = relu(batch_tensor)
 
         # Verify batch compatibility

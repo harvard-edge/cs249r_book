@@ -76,6 +76,7 @@ proved that YOUR autograd can train hidden layers to learn useful features.
 import sys
 import os
 import numpy as np
+rng = np.random.default_rng(7)
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -147,26 +148,26 @@ def generate_xor_data(n_samples=100):
     samples_per_case = n_samples // 4
 
     # Case 1: (0,0) → 0
-    x1 = np.random.randn(samples_per_case, 2) * 0.1 + np.array([0.0, 0.0])
+    x1 = rng.standard_normal((samples_per_case, 2)) * 0.1 + np.array([0.0, 0.0])
     y1 = np.zeros((samples_per_case, 1))
 
     # Case 2: (0,1) → 1
-    x2 = np.random.randn(samples_per_case, 2) * 0.1 + np.array([0.0, 1.0])
+    x2 = rng.standard_normal((samples_per_case, 2)) * 0.1 + np.array([0.0, 1.0])
     y2 = np.ones((samples_per_case, 1))
 
     # Case 3: (1,0) → 1
-    x3 = np.random.randn(samples_per_case, 2) * 0.1 + np.array([1.0, 0.0])
+    x3 = rng.standard_normal((samples_per_case, 2)) * 0.1 + np.array([1.0, 0.0])
     y3 = np.ones((samples_per_case, 1))
 
     # Case 4: (1,1) → 0
-    x4 = np.random.randn(samples_per_case, 2) * 0.1 + np.array([1.0, 1.0])
+    x4 = rng.standard_normal((samples_per_case, 2)) * 0.1 + np.array([1.0, 1.0])
     y4 = np.zeros((samples_per_case, 1))
 
     # Combine and shuffle
     X = np.vstack([x1, x2, x3, x4])
     y = np.vstack([y1, y2, y3, y4])
 
-    indices = np.random.permutation(n_samples)
+    indices = rng.permutation(n_samples)
     X = X[indices]
     y = y[indices]
 
@@ -412,7 +413,7 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════
 
     # Set seed before model creation to guarantee reproducible 100% convergence
-    np.random.seed(1986)  # The year backprop was published!
+    rng = np.random.default_rng(7)  # The year backprop was published!
 
     model = XORNetwork(hidden_size=4)
     initial_preds = model(X)

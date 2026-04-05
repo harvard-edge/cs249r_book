@@ -139,8 +139,10 @@ The workflow will automatically:
 ### Method 2: Manual Edit
 
 1. Edit the appropriate `.all-contributorsrc` file
-2. Add entry with: login, name, avatar_url, contributions
+2. Add entry with: login, name, avatar_url, profile, contributions
 3. Push to dev/main to trigger the update workflow
+
+**Avatar URLs:** For anyone with a GitHub account, set `avatar_url` to `https://avatars.githubusercontent.com/{login}` (and `profile` to `https://github.com/{login}`). Do **not** use `gravatar.com/...?d=identicon` for GitHub users—that shows a generic pattern, not their GitHub profile photo. Gravatar fallbacks are only for contributors who have no GitHub username.
 
 ## Contribution Types
 

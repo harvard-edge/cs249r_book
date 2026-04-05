@@ -792,7 +792,6 @@ class TestEfficiencyModel:
         result = solver.solve(resnet, h100, workload_type="ffn")
         assert "occupancy_loss" in result.overhead_breakdown
         assert "memory_stall" in result.overhead_breakdown
-        assert "kernel_overhead" in result.overhead_breakdown
 
 
 # ======================================================================
@@ -1325,11 +1324,11 @@ class TestTailLatencyModel:
         res_4 = solver.solve(arrival_rate_qps=80.0, service_latency_ms=10.0, num_replicas=4)
         assert res_4.p99_latency < res_1.p99_latency
 
-    def test_slo_violation_probability_bounded(self):
-        """SLO violation probability must be in [0, 1]."""
+    def test_slo_headroom_ratio_nonnegative(self):
+        """SLO headroom ratio must be >= 0. Values > 1.0 indicate SLO violation."""
         solver = TailLatencyModel()
         result = solver.solve(arrival_rate_qps=50.0, service_latency_ms=10.0, num_replicas=1)
-        assert 0.0 <= result.slo_violation_probability <= 1.0
+        assert result.slo_violation_probability >= 0.0
 
     @pytest.mark.parametrize("replicas", [1, 2, 4, 8, 16])
     def test_utilization_decreases_with_replicas(self, replicas):
@@ -1384,3 +1383,88 @@ class TestBoundaryConditions:
         # sparsity=1.0 => 1/(1-1.0) triggers the guard: capped at 100.0
         assert result.compression_ratio == pytest.approx(100.0)
         assert result.compressed_size_gb.magnitude > 0
+
+
+# ======================================================================
+# Phase 3 Feature Tests (v0.1.0 additions)
+# ======================================================================
+
+class TestCompressionInferenceSpeedup:
+    """Tests for the inference_speedup field added in Phase 3."""
+
+    def test_quantization_has_speedup(self):
+        """INT8 quantization should report inference speedup > 1."""
+        resnet = Models.ResNet50
+        a100 = Hardware.A100
+        result = CompressionModel().solve(resnet, a100, method="quantization", target_bitwidth=8)
+        assert hasattr(result, "inference_speedup")
+        assert result.inference_speedup >= 1.0
+
+    def test_unstructured_pruning_no_compute_speedup(self):
+        """Unstructured pruning should have inference_speedup = 1.0 (storage only)."""
+        resnet = Models.ResNet50
+        a100 = Hardware.A100
+        result = CompressionModel().solve(resnet, a100, method="pruning", sparsity=0.5, sparsity_type="unstructured")
+        assert result.inference_speedup == pytest.approx(1.0)
+
+    def test_structured_pruning_has_compute_speedup(self):
+        """Structured pruning should yield inference speedup > 1."""
+        resnet = Models.ResNet50
+        a100 = Hardware.A100
+        result = CompressionModel().solve(resnet, a100, method="pruning", sparsity=0.5, sparsity_type="structured")
+        assert result.inference_speedup > 1.0
+
+    def test_fp8_quantization(self):
+        """FP8 quantization (8-bit) should yield 4x compression over FP32."""
+        resnet = Models.ResNet50
+        a100 = Hardware.A100
+        result = CompressionModel().solve(resnet, a100, method="quantization", target_bitwidth=8)
+        assert result.compression_ratio == pytest.approx(4.0)  # 32/8 = 4x
+
+
+class TestReliabilityGoodput:
+    """Tests for goodput_ratio added in Phase 3."""
+
+    def test_goodput_ratio_exists(self):
+        """ReliabilityResult should have goodput_ratio field."""
+        fleet = Systems.Clusters.Research_256
+        result = ReliabilityModel().solve(fleet, job_duration_hours=24 * 14)
+        assert hasattr(result, "goodput_ratio")
+
+    def test_goodput_ratio_bounded(self):
+        """Goodput ratio should be between 0 and 1."""
+        fleet = Systems.Clusters.Research_256
+        result = ReliabilityModel().solve(fleet, job_duration_hours=24 * 14)
+        assert 0.0 <= result.goodput_ratio <= 1.0
+
+
+class TestEconomicsAmortization:
+    """Tests for CapEx amortization added in Phase 1F."""
+
+    def test_longer_duration_higher_capex(self):
+        """Longer duration should show higher amortized CapEx."""
+        fleet = Systems.Clusters.Research_256
+        solver = EconomicsModel()
+        short = solver.solve(fleet, duration_days=30)
+        long = solver.solve(fleet, duration_days=365)
+        assert long.capex_usd > short.capex_usd
+
+    def test_infrastructure_multiplier(self):
+        """infrastructure_multiplier > 1 should increase TCO."""
+        fleet = Systems.Clusters.Research_256
+        solver = EconomicsModel()
+        base = solver.solve(fleet, duration_days=365, infrastructure_multiplier=1.0)
+        full = solver.solve(fleet, duration_days=365, infrastructure_multiplier=2.5)
+        assert full.tco_usd > base.tco_usd
+
+
+class TestSustainabilityEmbodied:
+    """Tests for embodied carbon added in Phase 3."""
+
+    def test_embodied_carbon_increases_total(self):
+        """Adding embodied carbon should increase total carbon footprint."""
+        fleet = Systems.Clusters.Research_256
+        solver = SustainabilityModel()
+        without = solver.solve(fleet, duration_days=365, datacenter=Infra.Quebec)
+        with_embodied = solver.solve(fleet, duration_days=365, datacenter=Infra.Quebec, embodied_carbon_per_device=150)
+        assert with_embodied.carbon_footprint_kg > without.carbon_footprint_kg

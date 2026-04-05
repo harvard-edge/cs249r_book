@@ -403,14 +403,16 @@ def _(mo, pE_pred):
         _t_total = _t_mem_ms + _t_comp_ms
         _idle_pct = (_t_mem_ms / _t_total) * 100 if _t_total > 0 else 0
         _mfu = (_t_comp_ms / _t_total) * 100 if _t_total > 0 else 0
-        _ai = (2 * _batch)  # FLOPs per byte = 2*batch / 2 bytes = batch
+        _ai = _batch  # AI = (2 * batch * params) / (2 bytes * params) = batch FLOPs/Byte
 
         # Waterfall chart
         _fig = go.Figure()
         _fig.add_trace(go.Bar(name="Memory (HBM load)", x=["Latency"], y=[_t_mem_ms],
-                              marker_color=COLORS["RedLine"], width=0.4))
+                              marker_color=COLORS["RedLine"], width=0.4,
+                              hovertemplate="Memory: %{y:.2f} ms<extra></extra>"))
         _fig.add_trace(go.Bar(name="Compute (arithmetic)", x=["Latency"], y=[_t_comp_ms],
-                              marker_color=COLORS["BlueLine"], width=0.4))
+                              marker_color=COLORS["BlueLine"], width=0.4,
+                              hovertemplate="Compute: %{y:.2f} ms<extra></extra>"))
         _fig.update_layout(barmode="stack", height=280,
                            yaxis=dict(title="Time (ms)", gridcolor="#f1f5f9"),
                            legend=dict(orientation="h", y=1.12, x=0),
@@ -472,6 +474,31 @@ AI           = {_ai:.0f} FLOPs/Byte  (ridge = {H100_RIDGE:.0f})
             mo.md(f"**You predicted:** ~{_pred}% idle  |  **Actual:** {_idle_pct:.1f}% idle"),
             mo.callout(mo.md(_msg), kind=_kind),
         ]))
+
+        items.append(mo.accordion({
+            "Math Peek: MFU and the Memory Wall": mo.md("""
+**Model FLOPs Utilization (MFU):**
+$$
+\\text{MFU} = \\frac{\\text{Actual FLOPS}}{\\text{Peak FLOPS}}
+$$
+
+**At batch=1 (decode), memory-bound regime:**
+$$
+T_{\\text{mem}} = \\frac{\\text{Weights (bytes)}}{\\text{HBM BW}} \\qquad T_{\\text{compute}} = \\frac{\\text{FLOPs}}{\\text{Peak FLOPS}}
+$$
+
+$$
+\\text{MFU}_{\\text{decode}} = \\frac{T_{\\text{compute}}}{T_{\\text{mem}}} = \\frac{\\text{AI}}{\\text{Ridge Point}}
+$$
+
+**Variables:**
+- **MFU**: fraction of peak FLOPS actually used (0 to 1)
+- **AI**: arithmetic intensity (FLOPs / Byte loaded) -- at batch=1, AI $\\approx$ 1
+- **Ridge Point**: peak FLOPS / HBM BW (H100: ~297 FLOPs/Byte)
+
+**Key insight:** At batch=1, MFU $\\approx 1/297 \\approx 0.3\\%$. The GPU is 99.7% idle, waiting for HBM.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -541,7 +568,8 @@ AI           = {_ai:.0f} FLOPs/Byte  (ridge = {H100_RIDGE:.0f})
         _fig = go.Figure()
         _fig.add_trace(go.Scatter(x=_ai_range, y=_perf, mode="lines",
                                   name=f"{_hw_name} Roofline",
-                                  line=dict(color=COLORS["BlueLine"], width=2.5)))
+                                  line=dict(color=COLORS["BlueLine"], width=2.5),
+                                  hovertemplate="AI %{x:.1f} FLOP/B: %{y:,.1f} TFLOPS<extra></extra>"))
         _fig.add_vline(x=_ridge, line_dash="dash", line_color=COLORS["OrangeLine"],
                        annotation_text=f"Ridge: {_ridge:.0f}", annotation_position="top right",
                        annotation_font_size=10)
@@ -553,6 +581,7 @@ AI           = {_ai:.0f} FLOPs/Byte  (ridge = {H100_RIDGE:.0f})
                 name=_wname, text=[_wname], textposition="top center",
                 marker=dict(color=_wcolor, size=12, line=dict(color="white", width=2)),
                 textfont=dict(size=9),
+                hovertemplate="AI %{x:.1f} FLOP/B: %{y:,.1f} TFLOPS<extra></extra>",
             ))
 
         _fig.update_layout(height=400,
@@ -575,6 +604,28 @@ AI           = {_ai:.0f} FLOPs/Byte  (ridge = {H100_RIDGE:.0f})
                     "'Large model' does not mean 'compute-bound.'")
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Roofline Model": mo.md("""
+**Attainable performance:**
+$$
+\\text{Perf}(\\text{AI}) = \\min(\\text{Peak FLOPS},\\; \\text{AI} \\times \\text{BW}_{\\text{mem}})
+$$
+
+**Ridge point (crossover):**
+$$
+\\text{Ridge} = \\frac{\\text{Peak FLOPS}}{\\text{BW}_{\\text{mem}}}
+$$
+
+**Variables:**
+- **AI**: arithmetic intensity (FLOPs per byte loaded from memory)
+- **Peak FLOPS**: theoretical maximum compute throughput
+- **$\\text{BW}_{\\text{mem}}$**: HBM bandwidth (GB/s)
+- **Ridge**: the AI value where compute and memory rooflines intersect
+
+**Key insight:** Workloads with AI < Ridge are memory-bound (the vast majority of LLM inference). Workloads with AI > Ridge are compute-bound (large-batch training, prefill).
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -634,6 +685,7 @@ AI           = {_ai:.0f} FLOPs/Byte  (ridge = {H100_RIDGE:.0f})
         _fig.add_trace(go.Bar(
             x=[n for n, _, _ in _tiers], y=_times_ms,
             marker_color=[c for _, _, c in _tiers], width=0.5,
+            hovertemplate="%{x}: %{y:.2f} ms<extra></extra>",
         ))
         _fig.update_layout(height=320, yaxis=dict(title="Transfer Time (ms)", type="log", gridcolor="#f1f5f9"),
                            margin=dict(l=50, r=20, t=30, b=40))
@@ -671,6 +723,30 @@ AI           = {_ai:.0f} FLOPs/Byte  (ridge = {H100_RIDGE:.0f})
             _msg = f"**The ratio is {NVLINK_GBS/IB_NDR_GBS:.0f}x.** This cliff dictates that TP stays within a node."
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Bandwidth Staircase Transfer Time": mo.md("""
+**Transfer time at each level:**
+$$
+T_{\\text{transfer}} = \\frac{M}{\\text{BW}_{\\text{level}}}
+$$
+
+**Bandwidth staircase (H100 DGX):**
+$$
+\\text{NVLink 4.0} = 900\\;\\text{GB/s} \\quad \\gg \\quad \\text{IB NDR} = 50\\;\\text{GB/s}
+$$
+
+$$
+\\text{Ratio} = \\frac{900}{50} = 18\\times
+$$
+
+**Variables:**
+- **$M$**: message size in bytes
+- **$\\text{BW}_{\\text{level}}$**: bandwidth at the interconnect level (NVLink, PCIe, IB, Ethernet)
+
+**Key insight:** The 18x NVLink-to-IB cliff means tensor parallelism (which requires high-bandwidth all-to-all) must stay within a single node. Only data parallelism (which tolerates higher latency) can cross node boundaries.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -758,7 +834,8 @@ AI           = {_ai:.0f} FLOPs/Byte  (ridge = {H100_RIDGE:.0f})
         ]
         for _name, _val, _col in _components:
             _fig.add_trace(go.Bar(name=_name, x=["Per-GPU Memory"], y=[_val],
-                                  marker_color=_col, width=0.4))
+                                  marker_color=_col, width=0.4,
+                                  hovertemplate="%{fullData.name}: %{y:.1f} GB<extra></extra>"))
         _fig.add_hline(y=_hbm_per_gpu, line_dash="dash", line_color=COLORS["RedLine"],
                        annotation_text=f"HBM Capacity: {_hbm_per_gpu:.0f} GB",
                        annotation_position="top right")
@@ -793,6 +870,34 @@ AI           = {_ai:.0f} FLOPs/Byte  (ridge = {H100_RIDGE:.0f})
                     "(350 GB) and Adam states (2,100 GB at FP32).")
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Training Memory Budget": mo.md("""
+**Static memory per parameter (mixed-precision Adam):**
+$$
+M_{\\text{static}} = N \\times (2 + 2 + 12) = 16N \\;\\text{bytes}
+$$
+
+**Breakdown:**
+- Weights (FP16): $2N$ bytes
+- Gradients (FP16): $2N$ bytes
+- Adam optimizer states (FP32 master + momentum + variance): $12N$ bytes
+
+**With ZeRO-$k$ sharding across $G$ GPUs:**
+$$
+M_{\\text{per\\_gpu}} = \\frac{M_{\\text{shard}(k)}}{G} + M_{\\text{unshard}}
+$$
+
+**Variables:**
+- **$N$**: number of model parameters
+- **$G$**: number of GPUs
+- **ZeRO-1**: shards optimizer states only ($12N/G + 4N$)
+- **ZeRO-2**: shards optimizer + gradients ($14N/G + 2N$)
+- **ZeRO-3**: shards everything ($16N/G$)
+
+**Key insight:** For 175B params: $M_{\\text{static}} = 175 \\times 10^9 \\times 16 = 2{,}800$ GB. An 8-GPU node has 640 GB. ZeRO-3 is mandatory.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -862,7 +967,8 @@ AI           = {_ai:.0f} FLOPs/Byte  (ridge = {H100_RIDGE:.0f})
         _cols = [COLORS["BlueLine"], COLORS["BlueLine"], COLORS["BlueLine"],
                  COLORS["OrangeLine"], COLORS["OrangeLine"], COLORS["OrangeLine"]]
         _fig.add_trace(go.Bar(x=_labels, y=[v / 1e6 for v in _vals],
-                              marker_color=_cols, width=0.5))
+                              marker_color=_cols, width=0.5,
+                              hovertemplate="%{x}: $%{y:.2f}M<extra></extra>"))
         _fig.update_layout(height=320, yaxis=dict(title="Cost ($M)", gridcolor="#f1f5f9"),
                            margin=dict(l=50, r=20, t=30, b=60))
         apply_plotly_theme(_fig)
@@ -905,6 +1011,29 @@ AI           = {_ai:.0f} FLOPs/Byte  (ridge = {H100_RIDGE:.0f})
                     "wastes 70% of its power budget on idle GPUs.")
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
+
+        items.append(mo.accordion({
+            "Math Peek: Total Cost of Ownership": mo.md("""
+**3-year TCO:**
+$$
+\\text{TCO} = \\text{CapEx}_{\\text{GPU}} + \\text{OpEx}_{\\text{power}} + \\text{OpEx}_{\\text{maintenance}}
+$$
+
+**Power cost:**
+$$
+\\text{OpEx}_{\\text{power}} = N \\times \\text{TDP} \\times \\text{PUE} \\times 8760\\;\\text{h/yr} \\times Y \\times \\text{price}_{\\text{kWh}}
+$$
+
+**Variables:**
+- **$N$**: number of GPUs
+- **TDP**: thermal design power per GPU (H100: 700W)
+- **PUE**: power usage effectiveness (best-in-class air: ~1.12)
+- **$Y$**: years of operation
+- **$\\text{price}_{\\text{kWh}}$**: electricity cost (typically \\$0.06--\\$0.12/kWh)
+
+**Key insight:** For 1,000 H100s over 3 years, electricity reaches ~30% of TCO. Utilization is a multiplier: a cluster at 30% utilization effectively pays 3.3x per useful FLOP.
+""")
+        }))
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -960,12 +1089,18 @@ AllReduce, hierarchical communication, and gradient compression.
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred):
     _track = ledger._state.track or "not set"
-    ledger.save(chapter=2, design={
-        "chapter": "v2_02",
-        "completed": True,
-    })
+    if pA_pred.value is not None:
+        ledger.save(chapter=2, design={
+            "chapter": "v2_02",
+            "completed": True,
+            "memory_wall_prediction": pA_pred.value,
+            "roofline_workload_prediction": pB_pred.value,
+            "bandwidth_staircase_ratio": pC_pred.value,
+            "node_memory_budget_prediction": pD_pred.value,
+            "tco_cost_prediction": pE_pred.value,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

@@ -7,9 +7,8 @@ Run: python3 generate_figures.py
   (or: make figures)
 
 Reads: corpus_stats.json (structured stats from analyze_corpus.py)
-       ../corpus.json (only for depth chain example — needs full question text)
 Writes: fig-corpus-distribution.pdf, fig-format-balance.pdf,
-        fig-depth-chain.pdf, fig-quality-summary.pdf
+        fig-zone-distribution.pdf, fig-zone-level-heatmap.pdf
 """
 
 import json
@@ -25,9 +24,8 @@ import seaborn as sns
 # ── Config ──────────────────────────────────────────────────────
 PAPER_DIR = Path(__file__).parent
 STATS_PATH = PAPER_DIR / "corpus_stats.json"
-CORPUS_PATH = PAPER_DIR.parent / "corpus.json"  # for depth chain text only
 
-TRACKS = ["cloud", "edge", "mobile", "tinyml"]
+TRACKS = ["cloud", "edge", "mobile", "tinyml", "global"]
 LEVELS = ["L1", "L2", "L3", "L4", "L5", "L6+"]
 BLOOM_LABELS = {
     "L1": "Remember", "L2": "Understand", "L3": "Apply",
@@ -47,6 +45,7 @@ TRACK_COLORS = {
     "edge": "#3D9E5A",
     "mobile": "#C87B2A",
     "tinyml": "#A31F34",
+    "global": "#888888",
 }
 
 FORMAT_COLORS = {
@@ -66,10 +65,10 @@ FORMAT_EDGES = {
     "tradeoff": "#bbb",
 }
 
-# Matplotlib defaults for paper
+# Matplotlib defaults for paper — Helvetica to match SVG figures
 plt.rcParams.update({
-    "font.family": "serif",
-    "font.serif": ["Palatino", "Times New Roman", "DejaVu Serif"],
+    "font.family": "sans-serif",
+    "font.sans-serif": ["Helvetica", "Helvetica Neue", "Arial", "DejaVu Sans"],
     "font.size": 9,
     "axes.titlesize": 10,
     "axes.labelsize": 9,
@@ -89,12 +88,6 @@ def load_stats():
         print("Error: corpus_stats.json not found. Run: python3 analyze_corpus.py")
         sys.exit(1)
     return json.loads(STATS_PATH.read_text())
-
-
-def load_corpus_for_chains():
-    """Load full corpus (only needed for depth chain question text)."""
-    corpus = json.loads(CORPUS_PATH.read_text())
-    return [q for q in corpus if q.get("status", "published") == "published"]
 
 
 def classify_format(scenario: str) -> list[str]:
@@ -135,7 +128,7 @@ def fig_corpus_distribution(stats):
         cmap="Blues", linewidths=0.5, linecolor="white",
         cbar_kws={"label": "Questions", "shrink": 0.8},
     )
-    ax_heat.set_title("Track × Level Distribution", fontweight="bold")
+    # title in LaTeX caption
 
     # Totals on right
     for i, t in enumerate(TRACKS):
@@ -167,17 +160,14 @@ def fig_corpus_distribution(stats):
     ax_bar.set_yticklabels(labels, fontsize=7.5)
     ax_bar.invert_yaxis()
     ax_bar.set_xlabel("Questions")
-    ax_bar.set_title("Competency Area Distribution", fontweight="bold")
+    # title in LaTeX caption
 
     # Count labels on bars
     for bar, count in zip(bars, counts):
         ax_bar.text(bar.get_width() + 5, bar.get_y() + bar.get_height() / 2,
                     str(count), va="center", fontsize=7, color="#555")
 
-    fig.suptitle(
-        f"Corpus Distribution ({stats['summary']['published']:,} Published Questions)",
-        fontsize=11, fontweight="bold", y=1.02,
-    )
+    # title in LaTeX caption (removed suptitle)
 
     fig.savefig(PAPER_DIR / "fig-corpus-distribution.pdf")
     print("  Saved fig-corpus-distribution.pdf")
@@ -186,7 +176,7 @@ def fig_corpus_distribution(stats):
 
 # ── Figure 2: Question Format by Level (Stacked Bar) ────────────
 def fig_format_balance(stats):
-    fig, ax = plt.subplots(figsize=(4.5, 3.2))
+    fig, ax = plt.subplots(figsize=(4.5, 3.0))
 
     formats = ["calculation", "design", "conceptual", "optimization", "diagnosis", "tradeoff"]
     data = {fmt: [] for fmt in formats}
@@ -220,155 +210,104 @@ def fig_format_balance(stats):
     xlabels = [f"{l}\n({BLOOM_LABELS[l]})" for l in LEVELS]
     ax.set_xticklabels(xlabels, fontsize=7.5)
     ax.set_ylabel("Percentage of Questions")
-    ax.set_title("Question Format Distribution by Mastery Level", fontweight="bold")
+    # title in LaTeX caption
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=3, fontsize=7)
     ax.set_ylim(0, 105)
 
-    # Annotation
-    ax.annotate(
-        "L1–L2: recall + calculation",
-        xy=(0.5, 85), fontsize=6.5, color="#555", ha="center",
-    )
-    ax.annotate(
-        "L4–L6+: diagnosis, design, synthesis",
-        xy=(4, 85), fontsize=6.5, color="#555", ha="center",
-    )
+    # Annotations removed — caption describes the pattern
 
     fig.savefig(PAPER_DIR / "fig-format-balance.pdf")
     print("  Saved fig-format-balance.pdf")
     plt.close(fig)
 
 
-# ── Figure 3: Depth Chain Example (KV-Cache) ────────────────────
-def fig_depth_chain(stats, pub):
-    # Use pre-computed example chain from stats
-    if "example_chain" not in stats:
-        print("  ⚠️ No example_chain in stats, skipping fig-depth-chain")
+# ── Figure 3: Zone Distribution (Bar Chart) ──────────────────
+def fig_zone_distribution(stats):
+    zd = stats.get("zone_distribution", {})
+    if not zd:
+        print("  ⚠️ No zone_distribution in stats, skipping")
         return
 
-    kv_chain = stats["example_chain"]
-    by_id = {q["id"]: q for q in pub}
+    # Order by count descending
+    sorted_zones = sorted(zd.items(), key=lambda x: -x[1])
+    labels = [z for z, _ in sorted_zones]
+    counts = [c for _, c in sorted_zones]
 
-    fig, ax = plt.subplots(figsize=(5.5, 3.5))
-    ax.set_xlim(0, 10)
-    ax.set_ylim(-0.5, len(kv_chain["questions"]) - 0.5)
+    # Color by zone type
+    PURE = {"recall", "analyze", "design", "implement"}
+    COMPOUND = {"diagnosis", "specification", "fluency", "evaluation", "realization", "optimization"}
+
+    zone_colors = []
+    for z in labels:
+        if z == "mastery":
+            zone_colors.append(CRIMSON)
+        elif z in PURE:
+            zone_colors.append(BLUE)
+        else:
+            zone_colors.append(GREEN)
+
+    fig, ax = plt.subplots(figsize=(4.5, 3.0))
+    bars = ax.barh(range(len(labels)), counts, color=zone_colors, alpha=0.85, height=0.7)
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels([z.capitalize() for z in labels], fontsize=8)
     ax.invert_yaxis()
-    ax.axis("off")
+    ax.set_xlabel("Questions")
+    # title in LaTeX caption
 
-    level_colors = {
-        "L1": "#d4edda", "L2": "#d4edda", "L3": "#cfe2f3",
-        "L4": "#fdebd0", "L5": "#fdebd0", "L6+": "#f9d6d5",
-    }
-    level_edge = {
-        "L1": "#3d9e5a", "L2": "#3d9e5a", "L3": "#4a90c4",
-        "L4": "#c87b2a", "L5": "#c87b2a", "L6+": "#c44",
-    }
+    total = sum(counts)
+    for bar, count in zip(bars, counts):
+        pct = 100 * count / total
+        ax.text(bar.get_width() + 8, bar.get_y() + bar.get_height() / 2,
+                f"{count:,} ({pct:.1f}%)", va="center", fontsize=7, color="#555")
 
-    for i, cq in enumerate(kv_chain["questions"]):
-        level = cq["level"]
-        title = cq["title"]
-        bloom = cq.get("bloom", BLOOM_LABELS.get(level, ""))
-        scenario = cq.get("scenario_preview", "")[:80]
-        if scenario and not scenario.endswith("..."):
-            scenario += "..."
+    # Legend
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor=BLUE, alpha=0.85, label="Pure (single skill)"),
+        Patch(facecolor=GREEN, alpha=0.85, label="Compound (two skills)"),
+        Patch(facecolor=CRIMSON, alpha=0.85, label="Mastery (all four)"),
+    ]
+    ax.legend(handles=legend_elements, loc="lower right", fontsize=7)
 
-        # Level badge
-        badge = plt.Rectangle((0.2, i - 0.35), 1.0, 0.7, linewidth=1,
-                               edgecolor="white", facecolor=CRIMSON, zorder=3)
-        ax.add_patch(badge)
-        ax.text(0.7, i - 0.08, level, ha="center", va="center",
-                fontsize=9, fontweight="bold", color="white", zorder=4)
-        ax.text(0.7, i + 0.18, bloom, ha="center", va="center",
-                fontsize=5.5, color="white", zorder=4)
-
-        # Question box
-        box = plt.Rectangle((1.4, i - 0.35), 8.2, 0.7, linewidth=1,
-                             edgecolor=level_edge[level],
-                             facecolor=level_colors[level], zorder=2)
-        ax.add_patch(box)
-        ax.text(1.6, i - 0.08, title, fontsize=8, fontweight="bold",
-                color="#333", va="center", zorder=3)
-        ax.text(1.6, i + 0.18, scenario, fontsize=5.5,
-                color="#555", va="center", zorder=3)
-
-        # Arrow to next
-        if i < len(kv_chain["questions"]) - 1:
-            ax.annotate("", xy=(0.7, i + 0.4), xytext=(0.7, i + 0.6),
-                        arrowprops=dict(arrowstyle="->", color="#555", lw=1))
-
-    ax.set_title(
-        f"Depth Chain: {kv_chain.get('topic', 'kv-cache')} ({kv_chain.get('competency_area', 'memory')})",
-        fontsize=10, fontweight="bold", pad=10,
-    )
-
-    fig.savefig(PAPER_DIR / "fig-depth-chain.pdf")
-    print("  Saved fig-depth-chain.pdf")
+    fig.savefig(PAPER_DIR / "fig-zone-distribution.pdf")
+    print("  Saved fig-zone-distribution.pdf")
     plt.close(fig)
 
 
-# ── Figure 4: Dedup / Quality Pipeline Summary ──────────────────
-def fig_quality_summary(stats):
-    fig, axes = plt.subplots(1, 3, figsize=(7.0, 2.2))
+# ── Figure 4: Zone × Level Heatmap ───────────────────────────
+def fig_zone_level_heatmap(stats):
+    zlm = stats.get("zone_level_matrix", {})
+    if not zlm:
+        print("  ⚠️ No zone_level_matrix in stats, skipping")
+        return
 
-    # Panel 1: Field coverage from stats
-    ax = axes[0]
-    fc = stats["field_coverage"]
-    fields = {
-        "competency_area": fc["competency_area"],
-        "napkin_math": fc["napkin_math"],
-        "common_mistake": fc["common_mistake"],
-        "deep_dive_url": fc["deep_dive_url"],
-        "bloom_level": fc["bloom_level"],
-    }
-    labels = list(fields.keys())
-    pcts = [100 * v for v in fields.values()]
-    colors = [GREEN if p >= 99 else ORANGE if p >= 80 else RED for p in pcts]
+    ZONES_ORDERED = [
+        "recall", "implement", "fluency",
+        "analyze", "diagnosis",
+        "design", "specification", "optimization",
+        "evaluation", "realization",
+        "mastery",
+    ]
 
-    bars = ax.barh(range(len(labels)), pcts, color=colors, alpha=0.85, height=0.6)
-    ax.set_yticks(range(len(labels)))
-    ax.set_yticklabels([l.replace("_", "\n") for l in labels], fontsize=6.5)
-    ax.set_xlim(95, 101)
-    ax.set_xlabel("Coverage %")
-    ax.set_title("Field Coverage", fontweight="bold", fontsize=9)
-    ax.invert_yaxis()
-    for bar, pct in zip(bars, pcts):
-        ax.text(bar.get_width() - 0.3, bar.get_y() + bar.get_height() / 2,
-                f"{pct:.1f}%", va="center", ha="right", fontsize=6.5, color="white", fontweight="bold")
+    matrix = np.zeros((len(ZONES_ORDERED), len(LEVELS)), dtype=int)
+    for i, z in enumerate(ZONES_ORDERED):
+        for j, l in enumerate(LEVELS):
+            matrix[i, j] = zlm.get(z, {}).get(l, 0)
 
-    # Panel 2: Error rates from stats
-    ax = axes[1]
-    er = stats["error_rates"]
-    rounds = ["Before\nR1", "After\nR1", "After\nR2"]
-    rates = [er["round1_raw"], er["round1_confirmed"], er["round2_confirmed"]]
-    bar_colors = [RED, ORANGE, GREEN]
-    bars = ax.bar(rounds, rates, color=bar_colors, alpha=0.85, width=0.5)
-    ax.set_ylabel("Error Rate (%)")
-    ax.set_title("Math Error Rate", fontweight="bold", fontsize=9)
-    for bar, rate in zip(bars, rates):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.1,
-                f"{rate}%", ha="center", fontsize=7, fontweight="bold")
-    ax.set_ylim(0, 5.5)
+    fig, ax = plt.subplots(figsize=(4.5, 3.0))
+    sns.heatmap(
+        matrix, ax=ax, annot=True, fmt="d",
+        xticklabels=LEVELS,
+        yticklabels=[z.capitalize() for z in ZONES_ORDERED],
+        cmap="YlOrRd", linewidths=0.5, linecolor="white",
+        cbar_kws={"label": "Questions", "shrink": 0.8},
+    )
+    # title in LaTeX caption
+    ax.set_xlabel("Mastery Level")
+    ax.set_ylabel("Cognitive Zone")
 
-    # Panel 3: Dedup stages from stats
-    ax = axes[2]
-    dd = stats["dedup"]
-    stages = ["Exact", "Fuzzy\n(>0.90)", "Semantic\n(>0.85)"]
-    found = [dd["exact_dupes"], dd["fuzzy_dupes"], dd["semantic_flagged"]]
-    archived = [0, 0, dd["archived"]]
-    x = np.arange(len(stages))
-    w = 0.35
-    ax.bar(x - w / 2, found, w, label="Flagged", color=ORANGE, alpha=0.85)
-    ax.bar(x + w / 2, archived, w, label="Archived", color=RED, alpha=0.85)
-    ax.set_xticks(x)
-    ax.set_xticklabels(stages, fontsize=7)
-    ax.set_ylabel("Question Pairs")
-    ax.set_title("Deduplication", fontweight="bold", fontsize=9)
-    ax.legend(fontsize=6.5)
-
-    fig.suptitle("Quality Assurance Summary", fontsize=11, fontweight="bold", y=1.05)
-    fig.tight_layout()
-    fig.savefig(PAPER_DIR / "fig-quality-summary.pdf")
-    print("  Saved fig-quality-summary.pdf")
+    fig.savefig(PAPER_DIR / "fig-zone-level-heatmap.pdf")
+    print("  Saved fig-zone-level-heatmap.pdf")
     plt.close(fig)
 
 
@@ -382,11 +321,8 @@ def main():
     fig_corpus_distribution(stats)
     fig_format_balance(stats)
 
-    # Depth chain needs full corpus for question text
-    pub = load_corpus_for_chains()
-    fig_depth_chain(stats, pub)
-
-    fig_quality_summary(stats)
+    fig_zone_distribution(stats)
+    fig_zone_level_heatmap(stats)
 
     print(f"\nDone. All figures saved to {PAPER_DIR}/")
 

@@ -56,8 +56,8 @@ export function getAttempts(): AttemptRecord[] {
   return getStorage<AttemptRecord[]>(STORAGE_KEY, []);
 }
 
-const MAX_ATTEMPTS = 500;
-const MAX_GAUNTLETS = 50;
+const MAX_ATTEMPTS = 5000;
+const MAX_GAUNTLETS = 200;
 
 export function saveAttempt(attempt: AttemptRecord): void {
   const attempts = getAttempts();
@@ -306,6 +306,7 @@ export function exportProgress(): string {
     streak: getStorage(STREAK_KEY, {}),
     daily: getStorage('staffml_daily', {}),
     planProgress: getStorage('staffml_plan_progress', {}),
+    analytics: getStorage('staffml_analytics', []),
     exportedAt: new Date().toISOString(),
     version: 1,
   };
@@ -315,13 +316,35 @@ export function exportProgress(): string {
 export function importProgress(json: string): boolean {
   try {
     const data = JSON.parse(json);
-    if (!data.version) return false;
-    if (data.attempts) setStorage(STORAGE_KEY, data.attempts);
-    if (data.gauntlets) setStorage(GAUNTLET_KEY, data.gauntlets);
-    if (data.sr) setStorage(SR_KEY, data.sr);
-    if (data.streak) setStorage(STREAK_KEY, data.streak);
+    if (!data.version || typeof data.version !== 'number') return false;
+
+    // Validate shapes before writing
+    if (data.attempts) {
+      if (!Array.isArray(data.attempts)) return false;
+      // Verify first item has expected shape (if array is non-empty)
+      if (data.attempts.length > 0) {
+        const first = data.attempts[0];
+        if (typeof first.questionId !== 'string' || typeof first.selfScore !== 'number') return false;
+      }
+      setStorage(STORAGE_KEY, data.attempts);
+    }
+    if (data.gauntlets) {
+      if (!Array.isArray(data.gauntlets)) return false;
+      setStorage(GAUNTLET_KEY, data.gauntlets);
+    }
+    if (data.sr && typeof data.sr === 'object' && !Array.isArray(data.sr)) {
+      setStorage(SR_KEY, data.sr);
+    }
+    if (data.streak && typeof data.streak === 'object' && !Array.isArray(data.streak)) {
+      setStorage(STREAK_KEY, data.streak);
+    }
     if (data.daily) setStorage('staffml_daily', data.daily);
-    if (data.planProgress) setStorage('staffml_plan_progress', data.planProgress);
+    if (data.planProgress && typeof data.planProgress === 'object') {
+      setStorage('staffml_plan_progress', data.planProgress);
+    }
+    if (data.analytics && Array.isArray(data.analytics)) {
+      setStorage('staffml_analytics', data.analytics);
+    }
     return true;
   } catch {
     return false;
@@ -336,5 +359,7 @@ export function clearProgress(): void {
     window.localStorage.removeItem(GAUNTLET_KEY);
     window.localStorage.removeItem(SR_KEY);
     window.localStorage.removeItem(STREAK_KEY);
+    window.localStorage.removeItem('staffml_daily');
+    window.localStorage.removeItem('staffml_plan_progress');
   } catch {}
 }

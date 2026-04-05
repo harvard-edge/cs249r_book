@@ -56,7 +56,7 @@ async def _():
     # Source: @sec-nn-computation-memory-hierarchy
     TIER_LATENCY_NS = {"L1": 1.0, "L2": 5.0, "HBM": 100.0, "DRAM": 200.0}
     CLOUD_TIERS_KB  = {"L1": 256, "L2": 50_000, "HBM": 80_000_000}
-    MOBILE_TIERS_KB = {"L1": 128, "L2": 32_000, "HBM": 8_000_000}
+    MOBILE_TIERS_KB = {"L1": 128, "L2": 32_000, "HBM": 8_000_000}  # "HBM" = main memory (LPDDR5 on mobile)
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
@@ -140,7 +140,7 @@ def _(COLORS, mo):
                 <div style="margin-bottom: 3px;">2. <strong>Predict which memory hierarchy tier</strong>
                     a layer's activations land in given batch size and width, and identify the
                     batch size threshold where a 10x latency cliff appears.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Calculate the FLOPs scaling law</strong>
+                <div style="margin-bottom: 3px;">3. <strong>Calculate the Floating Point Operations (FLOPs) scaling law</strong>
                     for dense layers: doubling width yields ~4x FLOPs, not 2x.</div>
                 <div style="margin-bottom: 3px;">4. <strong>Compare forward vs. backward memory</strong>:
                     training stores all layer activations simultaneously, creating a 4-10x
@@ -155,9 +155,9 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Activation function definitions from @sec-neural-computation-artificial-neuron
-                    &middot; Memory hierarchy tiers from @sec-neural-computation-transistor-tax
-                    &middot; Iron Law equation from @sec-introduction-iron-law
+                    Activation function definitions from the Neural Computation chapter
+                    &middot; Memory hierarchy tiers from the Neural Computation chapter
+                    &middot; Iron Law equation from the Iron Law section (Ch. 1)
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -200,7 +200,7 @@ def _(mo):
       graph of a single neuron, transistor-level implementation of ReLU vs. Sigmoid.
     - **Chapter 5: The Transistor Tax** -- silicon cost table for common activation functions,
       percentage of inference time consumed by activations on Cloud vs. Mobile.
-    - **Chapter 5: Memory Hierarchy** -- cache tiers (L1/L2/HBM/DRAM), tier latencies,
+    - **Chapter 5: Memory Hierarchy** -- cache tiers (L1/L2/High Bandwidth Memory (HBM)/DRAM), tier latencies,
       and the concept of memory cliffs vs. gradual degradation.
     - **Chapter 5: Backpropagation Memory** -- why training must store all intermediate
       activations, and the forward-vs-backward memory multiplier.
@@ -436,14 +436,18 @@ ReLU and Sigmoid becomes a **significant fraction** of total inference time.
 
         _fig = go.Figure()
         _fig.add_trace(go.Bar(name="Matrix Multiply", x=["Breakdown"], y=[_total_mm_time],
-                              marker_color=COLORS["BlueLine"], opacity=0.88))
+                              marker_color=COLORS["BlueLine"], opacity=0.88,
+                              hovertemplate="Matrix Multiply: %{y:.2f} ms<extra></extra>"))
         _fig.add_trace(go.Bar(name="Activations", x=["Breakdown"], y=[_total_act_time],
                               marker_color=COLORS["RedLine"] if _act_pct > 10 else COLORS["OrangeLine"],
-                              opacity=0.88))
+                              opacity=0.88,
+                              hovertemplate="Activations: %{y:.2f} ms<extra></extra>"))
         _fig.add_trace(go.Bar(name="Normalization", x=["Breakdown"], y=[_norm_time],
-                              marker_color=COLORS["GreenLine"], opacity=0.88))
+                              marker_color=COLORS["GreenLine"], opacity=0.88,
+                              hovertemplate="Normalization: %{y:.2f} ms<extra></extra>"))
         _fig.add_trace(go.Bar(name="Other", x=["Breakdown"], y=[_other_time],
-                              marker_color=COLORS["Grey"], opacity=0.88))
+                              marker_color=COLORS["Grey"], opacity=0.88,
+                              hovertemplate="Other: %{y:.2f} ms<extra></extra>"))
         _fig.update_layout(barmode="stack", height=320, yaxis_title="Time (ms)",
                            title=f"Inference Time Decomposition -- {_hw_label}",
                            legend=dict(orientation="h", y=1.12, x=0))
@@ -483,7 +487,7 @@ ReLU and Sigmoid becomes a **significant fraction** of total inference time.
             items.append(mo.callout(mo.md(
                 "**Correct.** On a mobile NPU, switching all layers to Sigmoid pushes "
                 "activation compute to ~23% of total inference time. On cloud hardware "
-                "with 16,000+ ALUs, the same switch is barely measurable (<1%). "
+                "with 16,000+ Arithmetic Logic Units (ALUs), the same switch is barely measurable (<1%). "
                 "The deployment context determines whether this design choice has a real cost."
             ), kind="success"))
         elif _pred == "lt1":
@@ -602,12 +606,14 @@ from L2 (5 ns) to HBM (100 ns): a **20x latency jump**, not 2x.
             mode="lines", name="Access Latency",
             line=dict(color=COLORS["BlueLine"], width=2.5),
             fill="tozeroy", fillcolor="rgba(0,99,149,0.1)",
+            hovertemplate="Batch %{x}: %{y:.1f} ns<extra></extra>",
         ))
         _fig.add_trace(go.Scatter(
             x=[_batch], y=[_access_ns],
             mode="markers", name="Current Setting",
             marker=dict(size=14, color=_tier_color, symbol="diamond",
                         line=dict(width=2, color="white")),
+            hovertemplate="Batch %{x}: %{y:.1f} ns<extra></extra>",
         ))
         for _tier_name, _tier_cap in _tiers.items():
             _boundary_batch = max(1, int(_tier_cap / (_width * 4 / 1024)))
@@ -761,7 +767,8 @@ The quadratic term dominates as W grows.
             [COLORS["BlueLine"], COLORS["OrangeLine"], COLORS["GreenLine"]],
         ):
             _fig.add_trace(go.Bar(name=_name, x=["Current Width"], y=[_val],
-                                  marker_color=_col, opacity=0.88))
+                                  marker_color=_col, opacity=0.88,
+                                  hovertemplate="%{fullData.name}: %{y:,.0f} FLOPs<extra></extra>"))
         _fig.update_layout(barmode="stack", height=300, yaxis_title="FLOPs",
                            title=f"Per-Layer FLOPs -- MLP (784->{_w}->{_w}->10)",
                            legend=dict(orientation="h", y=1.12, x=0))
@@ -775,14 +782,17 @@ The quadratic term dominates as W grows.
         _fig2 = go.Figure()
         _fig2.add_trace(go.Scatter(x=_widths.tolist(), y=_total_curve.tolist(),
                                    mode="lines", name="Actual FLOPs (quadratic)",
-                                   line=dict(color=COLORS["RedLine"], width=2.5)))
+                                   line=dict(color=COLORS["RedLine"], width=2.5),
+                                   hovertemplate="Width %{x}: %{y:,.0f} FLOPs<extra></extra>"))
         _fig2.add_trace(go.Scatter(x=_widths.tolist(), y=_linear_ref.tolist(),
                                    mode="lines", name="If linear (2x width = 2x FLOPs)",
-                                   line=dict(color=COLORS["Grey"], width=2, dash="dash")))
+                                   line=dict(color=COLORS["Grey"], width=2, dash="dash"),
+                                   hovertemplate="Width %{x}: %{y:,.0f} FLOPs<extra></extra>"))
         _fig2.add_trace(go.Scatter(x=[_w], y=[float(_total_flops)],
                                    mode="markers", name="Current Width",
                                    marker=dict(size=12, color=COLORS["BlueLine"], symbol="diamond",
-                                               line=dict(width=2, color="white"))))
+                                               line=dict(width=2, color="white")),
+                                   hovertemplate="Width %{x}: %{y:,.0f} FLOPs<extra></extra>"))
         _fig2.update_layout(height=360, xaxis_title="Hidden Width", yaxis_title="Total FLOPs",
                             title="FLOPs Scaling: Actual (Quadratic) vs. Linear Assumption",
                             legend=dict(orientation="h", y=1.12, x=0))
@@ -939,7 +949,8 @@ The training-to-inference ratio grows with depth and batch size.
         for _name, _val, _col in zip(["Weights", "Gradients", "Activations"],
                                       [_weight_mb, _grad_mb, _act_total_mb], _colors_bar):
             _fig.add_trace(go.Bar(name=_name, x=[_phase.capitalize()], y=[_val],
-                                  marker_color=_col, opacity=0.88))
+                                  marker_color=_col, opacity=0.88,
+                                  hovertemplate="%{fullData.name}: %{y:,.1f} MB<extra></extra>"))
         _fig.add_hline(y=80_000, line_dash="dash", line_color=COLORS["BlueLine"],
                        annotation_text="H100 (80 GB)", annotation_position="right")
         _fig.add_hline(y=8_000, line_dash="dash", line_color=COLORS["OrangeLine"],
@@ -961,14 +972,17 @@ The training-to-inference ratio grows with depth and batch size.
         _fig2 = go.Figure()
         _fig2.add_trace(go.Scatter(x=_depths.tolist(), y=_inf_mem.tolist(),
                                    mode="lines", name="Inference",
-                                   line=dict(color=COLORS["GreenLine"], width=2.5)))
+                                   line=dict(color=COLORS["GreenLine"], width=2.5),
+                                   hovertemplate="Depth %{x}: %{y:,.1f} MB<extra></extra>"))
         _fig2.add_trace(go.Scatter(x=_depths.tolist(), y=_train_mem.tolist(),
                                    mode="lines", name="Training",
                                    line=dict(color=COLORS["RedLine"], width=2.5),
-                                   fill="tonexty", fillcolor="rgba(203,32,45,0.1)"))
+                                   fill="tonexty", fillcolor="rgba(203,32,45,0.1)",
+                                   hovertemplate="Depth %{x}: %{y:,.1f} MB<extra></extra>"))
         _fig2.add_trace(go.Scatter(x=[_depth], y=[_total_mb], mode="markers", name="Current",
                                    marker=dict(size=12, color=COLORS["BlueLine"], symbol="diamond",
-                                               line=dict(width=2, color="white"))))
+                                               line=dict(width=2, color="white")),
+                                   hovertemplate="Depth %{x}: %{y:,.1f} MB<extra></extra>"))
         _fig2.update_layout(height=360, xaxis_title="Network Depth (layers)", yaxis_title="Memory (MB)",
                             title=f"Memory vs. Depth (batch={_batch}, width={_w})",
                             legend=dict(orientation="h", y=1.12, x=0))
@@ -1116,7 +1130,7 @@ You are deploying a 10-layer vision model on a mobile NPU (iPhone, 8 GB RAM,
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-nn-computation for transistor costs,
+                    <strong>Read:</strong> the Neural Computation chapter for transistor costs,
                     memory hierarchies, and FLOP scaling.<br/>
                     <strong>Build:</strong> TinyTorch Module 05 -- implement forward and
                     backward passes for dense layers and activation functions.
@@ -1148,12 +1162,17 @@ You are deploying a 10-layer vision model on a mobile NPU (iPhone, 8 GB RAM,
 
 # ─── CELL 5: LEDGER HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, partA_prediction, partD_prediction):
     _track = ledger._state.track or "not set"
-    ledger.save(chapter=5, design={
-        "chapter": "v1_05",
-        "completed": True,
-    })
+    if partA_prediction.value is not None and partD_prediction.value is not None:
+        ledger.save(chapter=5, design={
+            "chapter": "v1_05",
+            "activation_cost_surprise": True,
+            "memory_cliff_discovered": True,
+            "width_scaling_law": "quadratic",
+            "forward_vs_backward_ratio": "4-10x",
+            "completed": True,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

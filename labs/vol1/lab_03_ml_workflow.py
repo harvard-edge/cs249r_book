@@ -135,7 +135,7 @@ def _(COLORS, mo):
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
                     Engine.solve() from Lab 01-02 &middot;
                     Physical walls from Lab 02 &middot;
-                    ML lifecycle stages from @sec-ml-workflow
+                    ML lifecycle stages from the ML Workflow chapter
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -178,9 +178,9 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** -- Complete the following before this lab:
 
-    - **@sec-ml-workflow** -- The 6-stage ML lifecycle and the cost of late constraint discovery.
-    - **@sec-ml-workflow-iteration** -- Iteration velocity vs starting accuracy trade-offs.
-    - **@sec-ml-workflow-effort** -- Effort distribution in production ML projects.
+    - **The ML Workflow chapter** -- The 6-stage ML lifecycle and the cost of late constraint discovery.
+    - **The Iteration Velocity section (Ch. 3)** -- Iteration velocity vs starting accuracy trade-offs.
+    - **The Effort Distribution section (Ch. 3)** -- Effort distribution in production ML projects.
     """), kind="info")
     return
 
@@ -612,6 +612,26 @@ where $C_0$ is the base cost at Stage 1 and $N$ is the discovery stage.
                 "Adjust the cycle time sliders to find the crossover point."
             ), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Logarithmic Improvement Model": mo.md("""
+**Formula:**
+$$
+A(t) = A_0 + \\alpha \\cdot \\ln\\!\\left(1 + \\frac{t}{\\tau}\\right)
+$$
+
+**Variables:**
+- **$A_0$**: starting accuracy (%)
+- **$\\alpha$**: improvement rate per log-experiment (~2-3% typical)
+- **$t$**: elapsed time (hours or weeks)
+- **$\\tau$**: iteration cycle time (hours)
+- **$t / \\tau$**: number of experiments run
+
+The key insight: accuracy improves *logarithmically* with experiments, so the team
+running 100 experiments (1-hour cycles) gains far more than the team running 26
+experiments (1-week cycles), even starting 5% behind.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════
@@ -723,6 +743,28 @@ where $C_0$ is the base cost at Stage 1 and $N$ is the discovery stage.
                 "Data collection + labeling + validation consume 60-80%. "
                 "Compare your allocation to the industry average above."
             ), kind="warn"))
+
+        items.append(mo.accordion({
+            "Math Peek: Effort Distribution": mo.md("""
+**Formula:**
+$$
+E_{\\text{total}} = E_{\\text{data}} + E_{\\text{model}} + E_{\\text{deploy}} + E_{\\text{monitor}}
+$$
+
+**Industry averages (from Google, Meta production ML studies):**
+
+| Activity | Share of $E_{\\text{total}}$ |
+|----------|---------------------------|
+| Data collection + labeling | 25-35% |
+| Data validation + cleaning | 20-30% |
+| Model development | 10-20% |
+| Deployment + infrastructure | 10-15% |
+| Monitoring + maintenance | 10-15% |
+
+The critical implication: under-investing in data activities creates idle engineers
+downstream, while under-investing in deployment recreates the DR clinic disaster.
+""")
+        }))
 
         return mo.vstack(items)
 
@@ -873,6 +915,26 @@ where $C_0$ is the base cost at Stage 1 and $N$ is the discovery stage.
                 "shift each trigger a complete lifecycle iteration. Budget 4-8 cycles."
             ), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Feedback Event Rate": mo.md("""
+**Formula:**
+$$
+N_{\\text{events}}(t) \\approx \\lambda \\cdot t + \\beta \\cdot \\ln(S)
+$$
+
+**Variables:**
+- **$N_{\\text{events}}$**: cumulative feedback events requiring lifecycle re-entry
+- **$\\lambda$**: base event rate (~0.3 events/month from distribution shift, regulatory changes)
+- **$t$**: months since production launch
+- **$\\beta$**: scale sensitivity coefficient (~1.5)
+- **$S$**: number of deployment sites (e.g., clinics)
+
+Scaling from 5 to 200 sites increases $\\ln(S)$ from 1.6 to 5.3, exposing rare subgroups
+and equipment variations invisible at pilot scale. Budget 4-8 complete lifecycle iterations
+in the first 24 months of production deployment.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════
@@ -932,8 +994,9 @@ where $C_0$ is the base cost at Stage 1 and $N$ is the discovery stage.
                         Textbook Connection
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-ml-workflow for the full lifecycle model,
+                        <strong>Read:</strong> the ML Workflow chapter for the full lifecycle model,
                         iteration velocity analysis, and effort distribution data.
+                        <br/><strong>Build:</strong> TinyTorch Module 03 -- implement an experiment tracker with iteration velocity metrics.
                     </div>
                 </div>
             </div>
@@ -958,12 +1021,20 @@ where $C_0$ is the base cost at Stage 1 and $N$ is the discovery stage.
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, partA_prediction, partB_prediction, partC_prediction, partD_prediction):
     _track = ledger._state.track or "not set"
-    ledger.save(chapter=3, design={
-        "chapter": "v1_03",
-        "completed": True,
-    })
+    if partA_prediction.value is not None and partD_prediction.value is not None:
+        ledger.save(chapter=3, design={
+            "chapter": "v1_03",
+            "constraint_discovery_prediction": partA_prediction.value,
+            "iteration_velocity_prediction": partB_prediction.value,
+            "effort_distribution_prediction": partC_prediction.value,
+            "feedback_loops_prediction": partD_prediction.value,
+            "constraint_discovery_correct": partA_prediction.value == "stage2",
+            "iteration_velocity_correct": partB_prediction.value == "team_b",
+            "effort_model_dev_correct": partC_prediction.value == "10",
+            "feedback_loops_correct": partD_prediction.value == "many",
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

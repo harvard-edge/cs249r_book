@@ -2,25 +2,34 @@
 """Analyze corpus.json and write structured stats to corpus_stats.json.
 
 This is the "analyze" step in the pipeline:
-  corpus.json → analyze_corpus.py → corpus_stats.json → generate_figures.py → PDFs
+  vault/corpus.json → analyze_corpus.py → corpus_stats.json → generate_figures.py → PDFs
 
 Run: python3 analyze_corpus.py
-Reads: ../corpus.json, ../chains.json
+Reads: ../vault/corpus.json, ../vault/chains.json, ../vault/schema/taxonomy_data.yaml
 Writes: corpus_stats.json
 """
 
 import json
-import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
+import yaml
+
 PAPER_DIR = Path(__file__).parent
-CORPUS_PATH = PAPER_DIR.parent / "corpus.json"
-CHAINS_PATH = PAPER_DIR.parent / "chains.json"
+VAULT_DIR = PAPER_DIR.parent / "vault"
+CORPUS_PATH = VAULT_DIR / "corpus.json"
+CHAINS_PATH = VAULT_DIR / "chains.json"
+TAXONOMY_PATH = VAULT_DIR / "schema" / "taxonomy_data.yaml"
 OUTPUT_PATH = PAPER_DIR / "corpus_stats.json"
 
-TRACKS = ["cloud", "edge", "mobile", "tinyml"]
+TRACKS = ["cloud", "edge", "mobile", "tinyml", "global"]
 LEVELS = ["L1", "L2", "L3", "L4", "L5", "L6+"]
+ZONES = [
+    "recall", "analyze", "design", "implement",
+    "diagnosis", "specification", "fluency",
+    "evaluation", "realization", "optimization",
+    "mastery",
+]
 BLOOM_LABELS = {
     "L1": "Remember", "L2": "Understand", "L3": "Apply",
     "L4": "Analyze", "L5": "Evaluate", "L6+": "Create",
@@ -49,28 +58,43 @@ def main():
     corpus = json.loads(CORPUS_PATH.read_text())
     chains = json.loads(CHAINS_PATH.read_text()) if CHAINS_PATH.exists() else []
 
-    all_qs = corpus
+    # Load taxonomy for graph stats
+    taxonomy = None
+    if TAXONOMY_PATH.exists():
+        taxonomy = yaml.safe_load(TAXONOMY_PATH.read_text())
+
     pub = [q for q in corpus if q.get("status", "published") == "published"]
     archived = [q for q in corpus if q.get("status") == "archived"]
 
     stats = {}
 
-    # ── Summary ──
+    # ── Summary ──────────────────────────────────────────────
+    topic_set = set(q.get("topic", "") for q in pub if q.get("topic"))
+    zone_set = set(q.get("zone", "") for q in pub if q.get("zone"))
+    area_set = set(q.get("competency_area", "") for q in pub if q.get("competency_area"))
+
+    full_chains = sum(
+        1 for ch in chains
+        if set(ch.get("levels", [])) >= {"L1", "L2", "L3", "L4", "L5", "L6+"}
+    )
+
     stats["summary"] = {
-        "total": len(all_qs),
+        "total": len(pub),
         "published": len(pub),
         "archived": len(archived),
-        "tracks": len(TRACKS),
+        "tracks": len(set(q.get("track") for q in pub)),
         "levels": len(LEVELS),
+        "topics": len(topic_set),
+        "zones": len(zone_set),
+        "areas": len(area_set),
         "chains_total": len(chains),
-        "chains_full": sum(1 for ch in chains if len(ch.get("levels", [])) >= 6),
+        "chains_full": full_chains,
     }
 
-    # ── Track × Level matrix ──
+    # ── Track × Level matrix ─────────────────────────────────
     matrix = defaultdict(lambda: defaultdict(int))
     for q in pub:
-        if q["track"] in TRACKS:
-            matrix[q["track"]][q["level"]] += 1
+        matrix[q["track"]][q["level"]] += 1
 
     stats["track_level_matrix"] = {
         "tracks": TRACKS,
@@ -79,24 +103,51 @@ def main():
         "track_totals": {t: sum(matrix[t][l] for l in LEVELS) for t in TRACKS},
     }
 
-    # ── Competency areas ──
+    # ── Competency areas ─────────────────────────────────────
     areas = Counter(q["competency_area"] for q in pub)
     stats["competency_areas"] = {a: c for a, c in areas.most_common()}
 
-    # ── Field coverage ──
+    # ── Zone distribution ────────────────────────────────────
+    zone_counts = Counter(q.get("zone", "") for q in pub)
+    stats["zone_distribution"] = {z: zone_counts.get(z, 0) for z in ZONES}
+
+    # ── Zone × Level matrix ──────────────────────────────────
+    zl_matrix = defaultdict(lambda: defaultdict(int))
+    for q in pub:
+        zl_matrix[q.get("zone", "")][q["level"]] += 1
+    stats["zone_level_matrix"] = {
+        z: {l: zl_matrix[z][l] for l in LEVELS} for z in ZONES
+    }
+
+    # ── Zone × Track matrix ──────────────────────────────────
+    zt_matrix = defaultdict(lambda: defaultdict(int))
+    for q in pub:
+        zt_matrix[q.get("zone", "")][q["track"]] += 1
+    stats["zone_track_matrix"] = {
+        z: {t: zt_matrix[z][t] for t in TRACKS} for z in ZONES
+    }
+
+    # ── Topic distribution ───────────────────────────────────
+    topic_counts = Counter(q.get("topic", "") for q in pub)
+    stats["topic_distribution"] = {t: c for t, c in topic_counts.most_common()}
+
+    # ── Bloom distribution ───────────────────────────────────
+    bloom_counts = Counter(q.get("bloom_level", "") for q in pub)
+    stats["bloom_distribution"] = dict(bloom_counts.most_common())
+
+    # ── Field coverage ───────────────────────────────────────
     total = len(pub)
     stats["field_coverage"] = {
+        "topic": sum(1 for q in pub if q.get("topic", "").strip()) / total,
+        "zone": sum(1 for q in pub if q.get("zone", "").strip()) / total,
         "competency_area": sum(1 for q in pub if q.get("competency_area", "").strip()) / total,
         "napkin_math": sum(1 for q in pub if q.get("details", {}).get("napkin_math", "").strip()) / total,
         "common_mistake": sum(1 for q in pub if q.get("details", {}).get("common_mistake", "").strip()) / total,
         "realistic_solution": sum(1 for q in pub if q.get("details", {}).get("realistic_solution", "").strip()) / total,
-        "deep_dive_url": sum(1 for q in pub if q.get("details", {}).get("deep_dive_url", "").strip()) / total,
         "bloom_level": sum(1 for q in pub if q.get("bloom_level", "").strip()) / total,
-        "canonical_topic": sum(1 for q in pub if q.get("canonical_topic", "").strip()) / total,
-        "mcq_options": sum(1 for q in pub if q.get("details", {}).get("options")) / total,
     }
 
-    # ── Format distribution by level ──
+    # ── Format distribution by level ─────────────────────────
     formats = ["calculation", "design", "conceptual", "optimization", "diagnosis", "tradeoff"]
     format_by_level = {}
     for level in LEVELS:
@@ -113,11 +164,11 @@ def main():
         }
     stats["format_by_level"] = format_by_level
 
-    # ── Coverage cube ──
+    # ── Coverage cube (track × level × area) ─────────────────
     cube = defaultdict(int)
     area_list = sorted(set(q["competency_area"] for q in pub if q["competency_area"]))
     for q in pub:
-        if q["track"] in TRACKS and q.get("competency_area"):
+        if q.get("competency_area"):
             cube[(q["track"], q["level"], q["competency_area"])] += 1
 
     empty = sum(1 for t in TRACKS for l in LEVELS for a in area_list if cube.get((t, l, a), 0) == 0)
@@ -131,66 +182,100 @@ def main():
         "total_cells": empty + underfilled + healthy,
     }
 
-    # ── Level distribution percentages ──
+    # ── Level distribution percentages ───────────────────────
     level_dist = {}
     for t in TRACKS:
         t_total = sum(matrix[t][l] for l in LEVELS) or 1
         level_dist[t] = {l: round(100 * matrix[t][l] / t_total) for l in LEVELS}
     stats["level_distribution_pct"] = level_dist
 
-    # ── Error rates ──
-    stats["error_rates"] = {
-        "round1_raw": 4.3,
-        "round1_confirmed": 1.5,
-        "round2_confirmed": 0.22,
-        "round1_errors": 48,
-        "round1_false_positives": 10,
-        "round2_errors": 7,
+    # ── Validation stats (computed from data, not hardcoded) ─
+    validated_true = sum(1 for q in pub if q.get("validated") is True)
+    validated_false = sum(1 for q in pub if q.get("validated") is False)
+    has_issues = sum(1 for q in pub if q.get("validation_issues"))
+
+    stats["validation"] = {
+        "validated_true": validated_true,
+        "validated_false": validated_false,
+        "validated_null": total - validated_true - validated_false,
+        "has_issues": has_issues,
+        "validated_pct": round(100 * validated_true / total, 1),
     }
 
-    # ── Dedup stats ──
-    stats["dedup"] = {
-        "exact_dupes": 0,
-        "fuzzy_dupes": 0,
-        "semantic_flagged": 502,
-        "archived": len(archived),
-    }
-
-    # ── Chain stats ──
+    # ── Chain stats ──────────────────────────────────────────
     chain_levels = Counter()
     for ch in chains:
-        n = len(ch.get("levels", ch.get("questions", [])))
+        n = len(ch.get("questions", []))
         chain_levels[n] += 1
+
+    chained_qids = set()
+    for ch in chains:
+        for entry in ch.get("questions", []):
+            qid = entry["id"] if isinstance(entry, dict) else entry
+            chained_qids.add(qid)
 
     stats["chains"] = {
         "total": len(chains),
-        "by_span": {str(k): v for k, v in sorted(chain_levels.items())},
-        "full_chains_6_levels": sum(1 for ch in chains if len(ch.get("levels", [])) >= 6),
-        "missing_foundation": sum(
-            1 for ch in chains
-            if set(ch.get("levels", [])) & {"L5", "L6+"}
-            and not set(ch.get("levels", [])) & {"L1", "L2"}
-        ),
-        "missing_depth": sum(
-            1 for ch in chains
-            if set(ch.get("levels", [])) & {"L1", "L2"}
-            and not set(ch.get("levels", [])) & {"L4", "L5", "L6+"}
-        ),
+        "by_length": {str(k): v for k, v in sorted(chain_levels.items())},
+        "full_chains": full_chains,
+        "questions_in_chains": len(chained_qids),
+        "chain_coverage_pct": round(100 * len(chained_qids) / total, 1),
     }
 
-    # ── Taxonomy stats ──
-    topics = set(q.get("canonical_topic", q["topic"]) for q in pub)
-    singleton_topics = sum(
-        1 for t in topics
-        if sum(1 for q in pub if q.get("canonical_topic", q["topic"]) == t) == 1
-    )
-    stats["taxonomy"] = {
-        "raw_topics": len(set(q["topic"] for q in pub)),
-        "canonical_topics": len(topics),
-        "singleton_topics": singleton_topics,
+    # ── Taxonomy graph stats ─────────────────────────────────
+    if taxonomy:
+        topics_data = taxonomy.get("topics", [])
+        edge_types = Counter()
+        for t in topics_data:
+            for e in t.get("edges", []):
+                edge_types[e["edge_type"]] += 1
+
+        # Compute prerequisite depth
+        prereq_adj = defaultdict(list)
+        for t in topics_data:
+            for e in t.get("edges", []):
+                if e["edge_type"] == "prerequisite":
+                    prereq_adj[t["id"]].append(e["target"])
+
+        def depth(tid, visited=None):
+            if visited is None:
+                visited = set()
+            if tid in visited:
+                return 0
+            visited.add(tid)
+            children = prereq_adj.get(tid, [])
+            if not children:
+                return 0
+            return 1 + max(depth(c, visited) for c in children)
+
+        max_depth = max((depth(t["id"]) for t in topics_data), default=0)
+
+        # Root topics (no prerequisites)
+        has_prereqs = set()
+        for t in topics_data:
+            for e in t.get("edges", []):
+                if e["edge_type"] == "prerequisite":
+                    has_prereqs.add(t["id"])
+
+        stats["taxonomy_graph"] = {
+            "total_topics": len(topics_data),
+            "total_edges": sum(edge_types.values()),
+            "by_type": dict(edge_types),
+            "max_prerequisite_depth": max_depth,
+            "root_topics": len(topics_data) - len(has_prereqs),
+            "topics_per_area": dict(Counter(t["area"] for t in topics_data).most_common()),
+        }
+
+    # ── Cross-track topic coverage ───────────────────────────
+    topic_tracks = defaultdict(set)
+    for q in pub:
+        if q.get("topic"):
+            topic_tracks[q["topic"]].add(q["track"])
+    stats["cross_track_coverage"] = {
+        t: sorted(tracks) for t, tracks in sorted(topic_tracks.items())
     }
 
-    # ── Depth chain example (KV-cache) ──
+    # ── Depth chain example (KV-cache) ───────────────────────
     kv_chain = next((ch for ch in chains if "kv-cache" in ch.get("topic", "")), None)
     if kv_chain:
         by_id = {q["id"]: q for q in corpus}
@@ -199,24 +284,28 @@ def main():
             "competency_area": kv_chain.get("competency_area", "memory"),
             "questions": [
                 {
-                    "level": cq["level"],
-                    "bloom": BLOOM_LABELS.get(cq["level"], ""),
-                    "title": cq["title"],
-                    "scenario_preview": by_id.get(cq["id"], {}).get("scenario", "")[:100],
+                    "level": cq.get("level", by_id.get(cq.get("id", cq if isinstance(cq, str) else ""), {}).get("level", "?")),
+                    "bloom": cq.get("bloom", ""),
+                    "title": cq.get("title", by_id.get(cq.get("id", ""), {}).get("title", "?")),
+                    "scenario_preview": by_id.get(
+                        cq["id"] if isinstance(cq, dict) else cq, {}
+                    ).get("scenario", "")[:100],
                 }
                 for cq in kv_chain["questions"]
             ],
         }
 
-    # ── Write ──
+    # ── Write ────────────────────────────────────────────────
     OUTPUT_PATH.write_text(json.dumps(stats, indent=2))
+    s = stats["summary"]
     print(f"Wrote {OUTPUT_PATH} ({len(stats)} sections)")
-    print(f"  Published: {stats['summary']['published']}")
-    print(f"  Archived: {stats['summary']['archived']}")
-    print(f"  Chains: {stats['summary']['chains_total']} ({stats['summary']['chains_full']} full)")
-    print(f"  Coverage: {stats['coverage_cube']['healthy_cells']} healthy, "
-          f"{stats['coverage_cube']['underfilled_cells']} underfilled, "
-          f"{stats['coverage_cube']['empty_cells']} empty")
+    print(f"  Questions: {s['total']}")
+    print(f"  Topics: {s['topics']}, Zones: {s['zones']}, Areas: {s['areas']}")
+    print(f"  Chains: {s['chains_total']} ({s['chains_full']} full L1→L6+)")
+    print(f"  Validated: {stats['validation']['validated_pct']}%")
+    cc = stats["coverage_cube"]
+    print(f"  Coverage: {cc['healthy_cells']} healthy, "
+          f"{cc['underfilled_cells']} underfilled, {cc['empty_cells']} empty")
 
 
 if __name__ == "__main__":

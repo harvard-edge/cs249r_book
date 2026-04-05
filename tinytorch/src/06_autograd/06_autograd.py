@@ -63,6 +63,7 @@ Let's get started!
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 from typing import Optional, List, Tuple
 import sys
 import os
@@ -1468,7 +1469,7 @@ def test_unit_broadcast_gradients():
     
     # Scenario 1: Bias-like broadcasting (most common case)
     # Shape: (batch, features) + (features,) → (batch, features)
-    x = Tensor(np.random.randn(4, 3), requires_grad=True)
+    x = Tensor(rng.standard_normal((4, 3)), requires_grad=True)
     bias = Tensor(np.ones(3), requires_grad=True)
     
     add_func = AddBackward(x, bias)
@@ -1490,7 +1491,7 @@ def test_unit_broadcast_gradients():
     
     # Scenario 2: Scalar broadcasting
     # Shape: (3, 4) + scalar → (3, 4)
-    x = Tensor(np.random.randn(3, 4), requires_grad=True)
+    x = Tensor(rng.standard_normal((3, 4)), requires_grad=True)
     scalar_val = 5.0
     
     add_func = AddBackward(x, scalar_val)
@@ -1505,8 +1506,8 @@ def test_unit_broadcast_gradients():
     
     # Scenario 3: Multiple dimension broadcasting
     # Shape: (32, 10, 5) + (10, 1) → (32, 10, 5)
-    x = Tensor(np.random.randn(32, 10, 5), requires_grad=True)
-    y = Tensor(np.random.randn(10, 1), requires_grad=True)
+    x = Tensor(rng.standard_normal((32, 10, 5)), requires_grad=True)
+    y = Tensor(rng.standard_normal((10, 1)), requires_grad=True)
     
     mul_func = MulBackward(x, y)
     grad_output = np.ones((32, 10, 5))
@@ -1520,8 +1521,8 @@ def test_unit_broadcast_gradients():
     print("  ✓ Multi-dimension broadcasting works")
     
     # Scenario 4: Test all operations (Add, Mul, Sub, Div)
-    a = Tensor(np.random.randn(8, 16), requires_grad=True)
-    b = Tensor(np.random.randn(16), requires_grad=True)
+    a = Tensor(rng.standard_normal((8, 16)), requires_grad=True)
+    b = Tensor(rng.standard_normal(16), requires_grad=True)
     
     # Test Addition
     add_func = AddBackward(a, b)
@@ -1549,7 +1550,7 @@ def test_unit_broadcast_gradients():
     # Simulates: output = input @ weight + bias
     # where bias is (out_features,) and output is (batch, out_features)
     batch_size, out_features = 32, 128
-    output_grad = np.random.randn(batch_size, out_features)
+    output_grad = rng.standard_normal((batch_size, out_features))
     bias = Tensor(np.zeros(out_features), requires_grad=True)
     
     # In real Linear layer, bias gradient comes from output gradient
@@ -3066,11 +3067,11 @@ def analyze_computation_graph_memory():
 
     for shape in sizes:
         # Without gradient tracking
-        x_no_grad = Tensor(np.random.randn(*shape))
+        x_no_grad = Tensor(rng.standard_normal(shape))
         base_memory = x_no_grad.data.nbytes
 
         # With gradient tracking
-        x_with_grad = Tensor(np.random.randn(*shape), requires_grad=True)
+        x_with_grad = Tensor(rng.standard_normal(shape), requires_grad=True)
         y = x_with_grad * 2  # Simple operation that builds graph
         z = y + 1
 

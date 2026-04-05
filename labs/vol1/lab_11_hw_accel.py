@@ -134,7 +134,7 @@ def _(COLORS, mo):
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
                 <div style="margin-bottom: 3px;">1. <strong>Diagnose the Roofline regime</strong> &mdash;
-                    determine whether a GEMM kernel is memory-bound or compute-bound by comparing
+                    determine whether a General Matrix Multiply (GEMM) kernel is memory-bound or compute-bound by comparing
                     arithmetic intensity to the hardware ridge point.</div>
                 <div style="margin-bottom: 3px;">2. <strong>Quantify kernel fusion speedup</strong> &mdash;
                     fusing LayerNorm + Dropout + ReLU eliminates 2 HBM round-trips, yielding
@@ -152,8 +152,8 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Iron Law latency decomposition from @sec-ml-systems &middot;
-                    Memory hierarchy from @sec-neural-computation
+                    Iron Law latency decomposition from the ML Systems chapter &middot;
+                    Memory hierarchy from the Neural Computation chapter
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -319,6 +319,7 @@ def _(mo, pE_pred):
         fig.add_trace(go.Scatter(
             x=_ais.tolist(), y=_roof, mode="lines",
             line=dict(color=color, width=2.5), name=name,
+            hovertemplate="AI %{x:.1f} FLOP/B: %{y:,.0f} GFLOP/s<extra></extra>",
         ))
         fig.add_vline(x=ridge, line_dash="dot", line_color=color,
                       annotation_text=f"Ridge: {ridge:.0f}")
@@ -356,6 +357,11 @@ def _(mo, pE_pred):
         ```
 
         Below the ridge point: **memory-bound**. Above: **compute-bound**.
+
+        **Intuition:** Think of a factory where workers (compute) process raw materials
+        (data from memory). If raw materials arrive slowly, workers sit idle no matter
+        how fast they are — that is memory-bound. If workers are slow, materials pile
+        up — that is compute-bound. The ridge point is where the two bottlenecks balance.
         """))
         items.append(pA_pred)
         if pA_pred.value is None:
@@ -383,6 +389,7 @@ def _(mo, pE_pred):
             marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond"),
             text=[f"N={_N}"], textposition="top right",
             name=f"GEMM N={_N}",
+            hovertemplate="AI %{x:.1f} FLOP/B: %{y:,.0f} GFLOP/s<extra></extra>",
         ))
         _fig.update_layout(
             height=380,
@@ -404,7 +411,7 @@ def _(mo, pE_pred):
             </div>
             <div style="padding:16px; border:1px solid #e2e8f0; border-radius:10px;
                         text-align:center; background:white; border-top:3px solid {_regime_color}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">MFU</div>
+                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Model FLOPs Utilization (MFU)</div>
                 <div style="font-size:1.5rem; font-weight:800; color:{_regime_color};">{_mfu:.1f}%</div>
                 <div style="font-size:0.72rem; color:#94a3b8;">{_regime}</div>
             </div>
@@ -439,6 +446,26 @@ MFU    = {_mfu:.1f}%
             items.append(mo.callout(mo.md("**Low utilization does not mean broken code.** "
                 f"At N={_N}, AI = {_ai:.0f} is below the ridge point ({H100_RIDGE:.0f}). "
                 "The kernel is correctly hitting the memory bandwidth ceiling."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: The Roofline Model": mo.md("""
+**Formula:**
+$$
+\\text{Attainable Performance} = \\min\\!\\left(\\text{AI} \\times \\text{BW},\\; \\text{Peak FLOPS}\\right)
+$$
+
+Ridge point (transition from memory-bound to compute-bound):
+$$
+\\text{Ridge} = \\frac{\\text{Peak FLOPS}}{\\text{BW}} \\quad \\text{(FLOP/byte)}
+$$
+
+**Variables:**
+- **AI**: arithmetic intensity = FLOPs / bytes transferred (FLOP/byte)
+- **BW**: memory bandwidth (bytes/s)
+- **Peak FLOPS**: theoretical maximum compute throughput
+
+When $\\text{AI} < \\text{Ridge}$, the kernel is memory-bound and performance scales with bandwidth. When $\\text{AI} > \\text{Ridge}$, it is compute-bound and hits the FLOPS ceiling.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -513,6 +540,7 @@ MFU    = {_mfu:.1f}%
             marker_color=[COLORS["RedLine"], COLORS["GreenLine"]],
             text=[f"{_eager_time:.1f} us", f"{_fused_time:.1f} us"],
             textposition="outside", opacity=0.88,
+            hovertemplate="%{x}: %{y:.1f} us<extra></extra>",
         ))
         _fig.update_layout(
             height=300, yaxis=dict(title="Latency (microseconds)"),
@@ -558,6 +586,27 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
             items.append(mo.callout(mo.md(f"**Fusion gives {_speedup:.1f}x speedup.** "
                 "The speedup comes from eliminating memory traffic, not compute. "
                 "Each eliminated HBM write saves bandwidth-limited time."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Kernel Fusion Memory Traffic Reduction": mo.md("""
+**Formula (unfused):**
+$$
+T_{\\text{unfused}} = \\sum_{i=1}^{K} \\frac{2 \\cdot B_{\\text{tensor}}}{\\text{BW}} = K \\cdot \\frac{2 \\cdot B_{\\text{tensor}}}{\\text{BW}}
+$$
+
+**Formula (fused):**
+$$
+T_{\\text{fused}} = \\frac{2 \\cdot B_{\\text{tensor}}}{\\text{BW}} \\qquad \\text{Speedup} = K
+$$
+
+**Variables:**
+- **$K$**: number of elementwise kernels (e.g., 3 for LayerNorm + Dropout + ReLU)
+- **$B_{\\text{tensor}}$**: size of the intermediate tensor in bytes
+- **$\\text{BW}$**: HBM bandwidth
+- Factor of 2: each unfused kernel reads from and writes to HBM
+
+Fusion eliminates $K-1$ round-trips to HBM, giving up to $K\\times$ speedup for memory-bound ops.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -623,6 +672,7 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
             x=[_ai], y=[_attainable], mode="markers",
             marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond"),
             name=f"GEMM N=1024 on {_name}",
+            hovertemplate="AI %{x:.1f} FLOP/B: %{y:,.0f} GFLOP/s<extra></extra>",
         ))
         _fig.update_layout(
             height=400,
@@ -659,6 +709,22 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
             items.append(mo.callout(mo.md("**More powerful does not mean easier to saturate.** "
                 f"The H100 ridge point ({H100_RIDGE:.0f}) is higher because compute grew faster "
                 "than bandwidth. The same kernel changes regime across platforms."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Arithmetic Intensity of GEMM": mo.md("""
+**Formula (square GEMM, N x N):**
+$$
+\\text{AI}_{\\text{GEMM}} = \\frac{2N^3}{3N^2 \\cdot b} = \\frac{2N}{3b} \\quad \\text{(FLOP/byte)}
+$$
+
+**Variables:**
+- **$N$**: matrix dimension
+- **$b$**: bytes per element (4 for FP32, 2 for FP16)
+- **$2N^3$**: FLOPs for matrix multiply (multiply + accumulate)
+- **$3N^2 \\cdot b$**: bytes transferred (read A, read B, write C)
+
+AI grows linearly with $N$. Small matrices are memory-bound; large matrices are compute-bound. The crossover $N$ differs by hardware because ridge points differ.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -683,8 +749,10 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
         ## The Energy Roofline
 
         Energy efficiency has its own Roofline. In the memory-bound regime, most
-        Joules go to data movement (640 pJ/DRAM access). In the compute-bound regime,
-        most Joules go to useful arithmetic.
+        Joules go to data movement (~640 pJ/DRAM access at 45nm; ~50-80 pJ at modern
+        7nm nodes). In the compute-bound regime, most Joules go to useful arithmetic.
+        The exact numbers vary with process node, but the ratio between data movement
+        and compute energy remains ~100x — this is the enduring insight.
 
         ```
         Energy/FLOP (memory-bound) = E_dram / AI    (decreases with AI)
@@ -708,6 +776,7 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
         _fig.add_trace(go.Scatter(
             x=_ais.tolist(), y=_energy_per_flop, mode="lines",
             line=dict(color=COLORS["RedLine"], width=3), name="Energy per FLOP",
+            hovertemplate="AI %{x:.1f} FLOP/B: %{y:.1f} pJ/FLOP<extra></extra>",
         ))
         _fig.add_hline(y=_e_compute, line_dash="dash", line_color=COLORS["GreenLine"],
                        annotation_text=f"Compute floor: {_e_compute} pJ")
@@ -715,10 +784,12 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
         # Mark two operations
         _fig.add_trace(go.Scatter(x=[10], y=[max(_e_dram/10, _e_compute)],
             mode="markers+text", marker=dict(size=12, color=COLORS["OrangeLine"]),
-            text=["Memory-bound (AI=10)"], textposition="top right", name="AI=10"))
+            text=["Memory-bound (AI=10)"], textposition="top right", name="AI=10",
+            hovertemplate="AI %{x}: %{y:.1f} pJ/FLOP<extra></extra>"))
         _fig.add_trace(go.Scatter(x=[500], y=[max(_e_dram/500, _e_compute)],
             mode="markers+text", marker=dict(size=12, color=COLORS["GreenLine"]),
-            text=["Compute-bound (AI=500)"], textposition="top left", name="AI=500"))
+            text=["Compute-bound (AI=500)"], textposition="top left", name="AI=500",
+            hovertemplate="AI %{x}: %{y:.1f} pJ/FLOP<extra></extra>"))
 
         _fig.update_layout(
             height=360,
@@ -762,6 +833,21 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
             items.append(mo.callout(mo.md(f"**Same FLOPs does not mean same energy.** "
                 f"The memory-bound operation wastes {_ratio:.0f}x more energy on data movement. "
                 "This is why hardware architects build larger caches."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: Energy per FLOP in Different Roofline Regimes": mo.md("""
+**Formula:**
+$$
+E_{\\text{per FLOP}} = E_{\\text{compute}} + \\frac{E_{\\text{DRAM per byte}}}{\\text{AI}}
+$$
+
+**Variables:**
+- **$E_{\\text{compute}}$**: energy per arithmetic operation (~0.2-3.7 pJ)
+- **$E_{\\text{DRAM per byte}}$**: energy per byte of DRAM access (~20-640 pJ)
+- **$\\text{AI}$**: arithmetic intensity (FLOP/byte)
+
+At low AI (memory-bound), the $E_{\\text{DRAM}}/\\text{AI}$ term dominates. At AI=10, each FLOP costs ~64 pJ in DRAM energy alone. At AI=500, the DRAM cost is negligible.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -835,11 +921,13 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
             x=_tiles_range, y=_speedups, mode="lines+markers",
             line=dict(color=COLORS["GreenLine"], width=2),
             marker=dict(size=8), name="Speedup vs Tile Size",
+            hovertemplate="Tile %{x}: %{y:.2f}x speedup<extra></extra>",
         ))
         _fig.add_trace(go.Scatter(
             x=[_tile], y=[_speedup], mode="markers",
             marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond"),
             name=f"Current: {_tile}",
+            hovertemplate="Tile %{x}: %{y:.2f}x speedup<extra></extra>",
         ))
         _fig.update_layout(
             height=320, xaxis=dict(title="Tile Size (elements)", type="log"),
@@ -875,6 +963,26 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
             items.append(mo.callout(mo.md(f"**Tiling gives {_speedup:.1f}x speedup.** "
                 "Standard attention materializes the full NxN matrix in HBM. Tiling keeps "
                 "hot data in SRAM, dramatically reducing memory traffic."), kind="warn"))
+        items.append(mo.accordion({
+            "Math Peek: FlashAttention Memory Complexity": mo.md("""
+**Standard attention HBM access:**
+$$
+\\text{HBM}_{\\text{standard}} = \\Theta(N^2 \\cdot d) \\quad \\text{(materializes full } N \\times N \\text{ matrix)}
+$$
+
+**Tiled (FlashAttention) HBM access:**
+$$
+\\text{HBM}_{\\text{tiled}} = \\Theta\\!\\left(\\frac{N^2 \\cdot d^2}{M}\\right)
+$$
+
+**Variables:**
+- **$N$**: sequence length
+- **$d$**: head dimension
+- **$M$**: SRAM size (on-chip memory per SM)
+
+Speedup $\\approx M / d$, which is 2-4x at typical dimensions. Tiling keeps Q, K, V blocks in SRAM, avoiding the $N^2$ materialization in HBM.
+""")
+        }))
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -933,7 +1041,7 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
                         Textbook &amp; TinyTorch
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-hw-acceleration for Roofline model derivation.<br/>
+                        <strong>Read:</strong> the Hardware Acceleration chapter for Roofline model derivation.<br/>
                         <strong>Build:</strong> TinyTorch Module 11 -- GEMM tiling and FlashAttention.
                     </div>
                 </div>
@@ -962,8 +1070,17 @@ Speedup:       {_eager_bytes:,} / {_fused_bytes:,} = {_speedup:.1f}x
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
-    ledger.save(chapter=11, design={"lab": "hw_accel", "completed": True})
+def _(COLORS, ledger, mo, pA_pred, pB_pred, pC_pred, pD_pred, pE_pred):
+    if pA_pred.value is not None and pB_pred.value is not None and pC_pred.value is not None and pD_pred.value is not None and pE_pred.value is not None:
+        ledger.save(chapter=11, design={
+            "lab": "hw_accel",
+            "completed": True,
+            "roofline_diagnosis": pA_pred.value,
+            "fusion_speedup_prediction": pB_pred.value,
+            "balance_shift_prediction": pC_pred.value,
+            "energy_regime_prediction": pD_pred.value,
+            "tiling_speedup_prediction": pE_pred.value,
+        })
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>

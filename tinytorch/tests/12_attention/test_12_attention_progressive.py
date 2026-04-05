@@ -14,6 +14,7 @@ DEPENDENCY CHAIN: 01_tensor → ... → 10_tokenization → 11_embeddings → 12
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -48,9 +49,9 @@ class TestAttentionCore:
             
             seq_len, d_k = 10, 16
             
-            Q = Tensor(np.random.randn(seq_len, d_k))
-            K = Tensor(np.random.randn(seq_len, d_k))
-            V = Tensor(np.random.randn(seq_len, d_k))
+            Q = Tensor(rng.standard_normal((seq_len, d_k)))
+            K = Tensor(rng.standard_normal((seq_len, d_k)))
+            V = Tensor(rng.standard_normal((seq_len, d_k)))
             
             output, weights = scaled_dot_product_attention(Q, K, V)
             
@@ -109,7 +110,7 @@ class TestAttentionCore:
             mha = MultiHeadAttention(embed_dim, num_heads)
             
             # Input: (batch, seq_len, embed_dim) or (seq_len, batch, embed_dim)
-            x = Tensor(np.random.randn(batch_size, seq_len, embed_dim))
+            x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
             
             output = mha(x)
             
@@ -189,8 +190,8 @@ class TestAttentionWithTraining:
             optimizer = SGD(params, lr=0.01)
             
             # Forward
-            x = Tensor(np.random.randn(2, 5, embed_dim))  # (batch, seq, embed)
-            target = Tensor(np.random.randn(2, 1))
+            x = Tensor(rng.standard_normal((2, 5, embed_dim)))  # (batch, seq, embed)
+            target = Tensor(rng.standard_normal((2, 1)))
             
             attn_out = attention(x)
             pooled = Tensor(attn_out.data.mean(axis=1))  # (batch, embed)
@@ -234,7 +235,7 @@ class TestRegressionPrevention:
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.layers import Linear
         layer = Linear(4, 2)
-        x = Tensor(np.random.randn(2, 4))
+        x = Tensor(rng.standard_normal((2, 4)))
         y = layer(x)
         assert y.shape == (2, 2)
 
@@ -252,7 +253,7 @@ class TestRegressionPrevention:
         """✅ Module 05"""
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.dataloader import TensorDataset, DataLoader
-        data = Tensor(np.random.randn(10, 3))
+        data = Tensor(rng.standard_normal((10, 3)))
         targets = Tensor(np.arange(10).astype(float))
         dataset = TensorDataset(data, targets)
         dataloader = DataLoader(dataset, batch_size=2)
@@ -277,8 +278,8 @@ class TestRegressionPrevention:
         loss_fn = MSELoss()
         opt = SGD(layer.parameters(), lr=0.1)
         
-        x = Tensor(np.random.randn(2, 4))
-        y = Tensor(np.random.randn(2, 2))
+        x = Tensor(rng.standard_normal((2, 4)))
+        y = Tensor(rng.standard_normal((2, 2)))
         
         pred = layer(x)
         loss = loss_fn(pred, y)
@@ -291,7 +292,7 @@ class TestRegressionPrevention:
             from tinytorch.core.tensor import Tensor
             
             conv = Conv2d(3, 8, kernel_size=3, padding=1)
-            x = Tensor(np.random.randn(2, 3, 8, 8))
+            x = Tensor(rng.standard_normal((2, 3, 8, 8)))
             y = conv(x)
             assert y.shape[0] == 2
         except ImportError:
@@ -340,7 +341,7 @@ class TestModule12Completion:
             
             # Test 3: MHA forward
             mha = MultiHeadAttention(32, 4)
-            x = Tensor(np.random.randn(1, 5, 32))
+            x = Tensor(rng.standard_normal((1, 5, 32)))
             out = mha(x)
             if out.shape == x.shape:
                 capabilities["MHA forward works"] = True

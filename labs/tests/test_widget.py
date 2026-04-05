@@ -58,15 +58,15 @@ def extract_slider_ranges(source: str) -> list[dict]:
     # Match mo.ui.slider(start=X, stop=Y, ...) or mo.ui.slider(X, Y, ...)
     pattern = re.compile(
         r"mo\.ui\.slider\s*\("
-        r"(?:start\s*=\s*)?([0-9.e+-]+)"
-        r"\s*,\s*(?:stop\s*=\s*)?([0-9.e+-]+)",
+        r"(?:start\s*=\s*)?([0-9._e+-]+)"
+        r"\s*,\s*(?:stop\s*=\s*)?([0-9._e+-]+)",
         re.MULTILINE,
     )
     for m in pattern.finditer(source):
         try:
             results.append({
-                "start": float(m.group(1)),
-                "stop": float(m.group(2)),
+                "start": float(m.group(1).replace("_", "")),
+                "stop": float(m.group(2).replace("_", "")),
             })
         except ValueError:
             pass
@@ -101,13 +101,16 @@ class TestWidgetStructure:
             )
 
     @pytest.mark.widget
-    def test_slider_count_reasonable(self, lab_path):
-        """Labs should have interactive elements (sliders)."""
+    def test_interactive_controls_reasonable(self, lab_path):
+        """Labs should have interactive elements (sliders, dropdowns, or radios)."""
         if "lab_00" in lab_path:
             pytest.skip("Lab 00 is orientation")
         source = Path(lab_path).read_text()
         slider_count = source.count("mo.ui.slider")
-        assert slider_count >= 2, f"Only {slider_count} sliders — labs need interactivity"
+        dropdown_count = source.count("mo.ui.dropdown")
+        radio_count = source.count("mo.ui.radio")
+        total = slider_count + dropdown_count + radio_count
+        assert total >= 4, f"Only {total} interactive controls (need ≥4 for engagement)"
 
     @pytest.mark.widget
     def test_no_free_text_predictions(self, lab_path):

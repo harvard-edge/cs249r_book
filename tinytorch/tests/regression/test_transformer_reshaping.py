@@ -36,6 +36,7 @@ for vocabulary projection in language models.
 import sys
 import os
 import numpy as np
+rng = np.random.default_rng(7)
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -71,7 +72,7 @@ def test_transformer_to_linear_3d_to_2d():
     output_proj = Linear(embed_dim, vocab_size)
 
     # Create dummy input (batch, seq, embed)
-    x = Tensor(np.random.randn(batch_size, seq_length, embed_dim))
+    x = Tensor(rng.standard_normal((batch_size, seq_length, embed_dim)))
     print(f"Input shape: {x.shape}")
 
     # Transformer maintains 3D shape
@@ -133,7 +134,7 @@ def test_full_gpt_architecture_shapes():
     num_layers = 4
 
     # Input: token indices
-    input_ids = Tensor(np.random.randint(0, vocab_size, (batch_size, seq_length)))
+    input_ids = Tensor(rng.integers(0, vocab_size, (batch_size, seq_length)))
     print(f"Input tokens shape: {input_ids.shape}")
 
     # Embedding layer
@@ -193,7 +194,7 @@ def test_attention_kv_cache_shapes():
     mha = MultiHeadAttention(embed_dim, num_heads)
 
     # Initial forward pass
-    x = Tensor(np.random.randn(batch_size, seq_length, embed_dim))
+    x = Tensor(rng.standard_normal((batch_size, seq_length, embed_dim)))
 
     # Self-attention (Q, K, V all derived from x)
     output = mha(x)
@@ -224,7 +225,7 @@ def test_embedding_dimension_compatibility():
     transformer = TransformerBlock(embed_dim, num_heads=8)
 
     # Token indices
-    tokens = Tensor(np.random.randint(0, vocab_size, (batch_size, seq_length)))
+    tokens = Tensor(rng.integers(0, vocab_size, (batch_size, seq_length)))
 
     # Embed tokens
     embedded = embedding(tokens)

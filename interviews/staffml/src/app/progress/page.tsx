@@ -7,8 +7,11 @@ import clsx from "clsx";
 import Link from "next/link";
 import { getCompetencyAreas, getTracks, getQuestionsByFilter } from "@/lib/corpus";
 import { getAttempts, getGauntletResults, clearProgress, exportProgress, importProgress } from "@/lib/progress";
+import { useToast } from "@/components/Toast";
+import { track } from "@/lib/analytics";
 
 export default function ProgressPage() {
+  const { show: showToast } = useToast();
   const [mounted, setMounted] = useState(false);
   const [heatData, setHeatData] = useState<Record<string, Record<string, { attempted: number; correct: number }>>>({});
   const [gauntletCount, setGauntletCount] = useState(0);
@@ -355,6 +358,7 @@ export default function ProgressPage() {
                     a.download = `staffml-progress-${new Date().toISOString().slice(0, 10)}.json`;
                     a.click();
                     URL.revokeObjectURL(url);
+                    track({ type: 'progress_exported' });
                   }}
                   className="text-xs text-textTertiary hover:text-accentBlue transition-colors flex items-center gap-1"
                 >
@@ -372,7 +376,13 @@ export default function ProgressPage() {
                       const reader = new FileReader();
                       reader.onload = () => {
                         const ok = importProgress(reader.result as string);
-                        if (ok) { loadData(); }
+                        if (ok) {
+                          loadData();
+                          track({ type: 'progress_imported' });
+                          showToast({ type: 'success', title: 'Progress imported', description: 'Your data has been restored.' });
+                        } else {
+                          showToast({ type: 'info', title: 'Import failed', description: 'Invalid file format. Please use an exported StaffML JSON file.' });
+                        }
                       };
                       reader.readAsText(file);
                     }}

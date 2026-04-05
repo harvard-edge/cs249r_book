@@ -16,6 +16,7 @@ Test Categories:
 import sys
 import os
 import numpy as np
+rng = np.random.default_rng(7)
 import pytest
 
 # Add project root to path
@@ -71,8 +72,8 @@ def test_gradient_exists_single_layer():
     # Create optimizer to enable requires_grad on layer parameters (real usage pattern)
     optimizer = SGD(layer.parameters(), lr=0.01)
 
-    x = Tensor(np.random.randn(3, 10))
-    y_true = Tensor(np.random.randn(3, 5))
+    x = Tensor(rng.standard_normal((3, 10)))
+    y_true = Tensor(rng.standard_normal((3, 5)))
 
     y_pred = layer(x)
     loss = MSELoss()(y_pred, y_true)
@@ -99,8 +100,8 @@ def test_gradient_exists_deep_network():
     # Create optimizer to enable requires_grad on layer parameters
     optimizer = SGD(model.parameters(), lr=0.01)
 
-    x = Tensor(np.random.randn(4, 10))
-    y_true = Tensor(np.random.randn(4, 5))
+    x = Tensor(rng.standard_normal((4, 10)))
+    y_true = Tensor(rng.standard_normal((4, 5)))
 
     y_pred = model(x)
     loss = MSELoss()(y_pred, y_true)
@@ -140,8 +141,8 @@ def test_gradient_exists_cnn():
     # Create optimizer to enable requires_grad on layer parameters
     optimizer = SGD(model.parameters(), lr=0.01)
 
-    x = Tensor(np.random.randn(2, 1, 28, 28))
-    y_true = Tensor(np.random.randn(2, 10))
+    x = Tensor(rng.standard_normal((2, 1, 28, 28)))
+    y_true = Tensor(rng.standard_normal((2, 10)))
 
     y_pred = model.forward(x)
     loss = MSELoss()(y_pred, y_true)
@@ -166,8 +167,8 @@ def test_gradient_not_vanishing():
     # Create optimizer to enable requires_grad on layer parameters
     optimizer = SGD(model.parameters(), lr=0.01)
 
-    x = Tensor(np.random.randn(5, 20))
-    y_true = Tensor(np.random.randn(5, 1))
+    x = Tensor(rng.standard_normal((5, 20)))
+    y_true = Tensor(rng.standard_normal((5, 1)))
 
     y_pred = model(x)
     loss = MSELoss()(y_pred, y_true)
@@ -182,7 +183,7 @@ def test_gradient_not_vanishing():
 def test_gradient_not_exploding():
     """Gradients don't explode in deep network."""
     # Use fixed seed for reproducibility
-    np.random.seed(123)
+    rng = np.random.default_rng(7)
 
     # Build network that could have exploding gradients
     layers = []
@@ -200,10 +201,10 @@ def test_gradient_not_exploding():
     for layer in model.layers:
         if hasattr(layer, 'weight'):
             scale = np.sqrt(2.0 / layer.weight.shape[0])  # He initialization
-            layer.weight.data = np.random.randn(*layer.weight.shape) * scale
+            layer.weight.data = rng.standard_normal(layer.weight.shape) * scale
 
-    x = Tensor(np.random.randn(5, 20))
-    y_true = Tensor(np.random.randn(5, 1))
+    x = Tensor(rng.standard_normal((5, 20)))
+    y_true = Tensor(rng.standard_normal((5, 1)))
 
     y_pred = model(x)
     loss = MSELoss()(y_pred, y_true)
@@ -225,8 +226,8 @@ def test_gradient_reasonable_magnitude():
     # Create optimizer to enable requires_grad on layer parameters
     optimizer = SGD(model.parameters(), lr=0.01)
 
-    x = Tensor(np.random.randn(8, 10))
-    y_true = Tensor(np.random.randn(8, 5))
+    x = Tensor(rng.standard_normal((8, 10)))
+    y_true = Tensor(rng.standard_normal((8, 5)))
 
     y_pred = model(x)
     loss = MSELoss()(y_pred, y_true)
@@ -248,8 +249,8 @@ def test_chain_rule_linear_relu():
     # Create optimizer to enable requires_grad on layer parameters
     optimizer = SGD(linear.parameters(), lr=0.01)
 
-    x = Tensor(np.random.randn(2, 5))
-    y_true = Tensor(np.random.randn(2, 3))
+    x = Tensor(rng.standard_normal((2, 5)))
+    y_true = Tensor(rng.standard_normal((2, 3)))
 
     # Forward
     z = linear(x)
@@ -271,8 +272,8 @@ def test_chain_rule_multiple_paths():
     # Create optimizer to enable requires_grad on layer parameters
     optimizer = SGD(linear1.parameters() + linear2.parameters(), lr=0.01)
 
-    x = Tensor(np.random.randn(4, 10))
-    y_true = Tensor(np.random.randn(4, 10))
+    x = Tensor(rng.standard_normal((4, 10)))
+    y_true = Tensor(rng.standard_normal((4, 10)))
 
     # Forward with residual connection
     z1 = linear1(x)
@@ -294,11 +295,11 @@ def test_gradient_accumulation():
     model = Linear(5, 3)
     optimizer = SGD(model.parameters(), lr=0.01)
 
-    x1 = Tensor(np.random.randn(2, 5))
-    y1 = Tensor(np.random.randn(2, 3))
+    x1 = Tensor(rng.standard_normal((2, 5)))
+    y1 = Tensor(rng.standard_normal((2, 3)))
 
-    x2 = Tensor(np.random.randn(2, 5))
-    y2 = Tensor(np.random.randn(2, 3))
+    x2 = Tensor(rng.standard_normal((2, 5)))
+    y2 = Tensor(rng.standard_normal((2, 3)))
 
     # First backward
     loss1 = MSELoss()(model(x1), y1)
@@ -321,8 +322,8 @@ def test_zero_grad():
     model = Linear(5, 3)
     optimizer = SGD(model.parameters(), lr=0.01)
 
-    x = Tensor(np.random.randn(2, 5))
-    y = Tensor(np.random.randn(2, 3))
+    x = Tensor(rng.standard_normal((2, 5)))
+    y = Tensor(rng.standard_normal((2, 3)))
 
     # Accumulate gradient
     loss = MSELoss()(model(x), y)
@@ -349,8 +350,8 @@ def test_sgd_updates_parameters():
     # Save initial weights
     initial_weights = np.array(model.weight.data).copy()
 
-    x = Tensor(np.random.randn(4, 5))
-    y_true = Tensor(np.random.randn(4, 3))
+    x = Tensor(rng.standard_normal((4, 5)))
+    y_true = Tensor(rng.standard_normal((4, 3)))
 
     # Forward and backward
     y_pred = model(x)
@@ -377,8 +378,8 @@ def test_adam_updates_parameters():
 
     initial_weights = np.array(model.weight.data).copy()
 
-    x = Tensor(np.random.randn(4, 5))
-    y_true = Tensor(np.random.randn(4, 3))
+    x = Tensor(rng.standard_normal((4, 5)))
+    y_true = Tensor(rng.standard_normal((4, 3)))
 
     # Multiple steps to see momentum effect
     for _ in range(3):
@@ -402,8 +403,8 @@ def test_transformer_gradient_flow():
     # Create optimizer to enable requires_grad on layer parameters
     optimizer = SGD(block.parameters(), lr=0.01)
 
-    x = Tensor(np.random.randn(2, 10, 64))  # (batch, seq, embed)
-    y_true = Tensor(np.random.randn(2, 10, 64))
+    x = Tensor(rng.standard_normal((2, 10, 64)))  # (batch, seq, embed)
+    y_true = Tensor(rng.standard_normal((2, 10, 64)))
 
     y_pred = block(x)
     loss = MSELoss()(y_pred, y_true)
@@ -457,8 +458,8 @@ def test_dead_relu_detection():
     if hasattr(first_layer, 'bias'):
         first_layer.bias.data = np.ones(20) * -10
 
-    x = Tensor(np.random.randn(4, 10) * 0.1)  # Small inputs
-    y_true = Tensor(np.random.randn(4, 5))
+    x = Tensor(rng.standard_normal((4, 10)) * 0.1)  # Small inputs
+    y_true = Tensor(rng.standard_normal((4, 5)))
 
     y_pred = model(x)
     loss = MSELoss()(y_pred, y_true)
@@ -479,8 +480,8 @@ def test_gradient_clipping():
     optimizer = SGD(model.parameters(), lr=0.01)
 
     # Create artificially large gradient scenario
-    x = Tensor(np.random.randn(2, 10) * 100)
-    y_true = Tensor(np.random.randn(2, 10) * 100)
+    x = Tensor(rng.standard_normal((2, 10)) * 100)
+    y_true = Tensor(rng.standard_normal((2, 10)) * 100)
 
     y_pred = model(x)
     loss = MSELoss()(y_pred, y_true)

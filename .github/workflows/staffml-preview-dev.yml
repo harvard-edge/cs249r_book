@@ -1,6 +1,31 @@
 name: '🎯 StaffML · 👁️ Preview (Dev)'
 
-# Builds and deploys StaffML interview prep app to dev preview
+# =============================================================================
+# StaffML — Dev Preview Deploy
+# =============================================================================
+#
+# Builds the StaffML Next.js interview prep app and deploys to the dev
+# preview site via SSH. Includes vault validation and smoke tests.
+#
+# Flow:
+#   1. BUILD       — npm ci + Next.js static export
+#   2. VALIDATE    — Build output + vault integrity + smoke tests
+#   3. DEPLOY      — Push to dev preview repo via SSH
+#
+# Triggers:
+#   - push: dev branch, interviews/staffml/** paths
+#   - workflow_dispatch: manual
+#
+# Deploys to: harvard-edge.github.io/{DEV_REPO}/staffml/
+# Secrets:    SSH_DEPLOY_KEY
+# Vars:       DEV_REPO_URL
+#
+# Related:
+#   - staffml-publish-live.yml — Production deploy to mlsysbook.ai/staffml/
+#   - staffml-auto-pr.yml     — Auto-PR from community question issues
+#   - staffml-welcome.yml     — Welcome comment on contributor PRs
+#
+# =============================================================================
 
 on:
   workflow_dispatch:
@@ -37,11 +62,40 @@ jobs:
         working-directory: interviews/staffml
         run: npm ci
 
+      - name: 🔍 Type check
+        working-directory: interviews/staffml
+        run: npx tsc --noEmit
+
+      - name: 🧪 Run tests
+        working-directory: interviews/staffml
+        run: npm test
+
       - name: 🔨 Build StaffML
         working-directory: interviews/staffml
         env:
-          NEXT_PUBLIC_BASE_PATH: /interviews
+          NEXT_PUBLIC_BASE_PATH: /cs249r_book_dev/staffml
+          NEXT_PUBLIC_ECOSYSTEM_BASE: https://harvard-edge.github.io/cs249r_book_dev
+          NEXT_PUBLIC_ANALYTICS_URL: https://mlsysbook.ai/api/staffml-analytics
         run: npm run build
+
+      - name: 📁 Inject paper and figures into build
+        run: |
+          echo "📁 Injecting paper assets into built site..."
+          mkdir -p interviews/staffml/out/downloads
+
+          if [ -f interviews/paper/paper.pdf ]; then
+            cp interviews/paper/paper.pdf interviews/staffml/out/downloads/StaffML-Paper.pdf
+            echo "✅ Injected StaffML-Paper.pdf"
+          else
+            echo "⚠️ Paper PDF not found"
+          fi
+
+          echo ""
+          echo "📦 Downloads folder contents:"
+          ls -la interviews/staffml/out/downloads/ || echo "No downloads folder"
+
+      - name: 🔗 Rewrite URLs for dev site
+        run: bash .github/scripts/rewrite-dev-urls.sh staffml interviews/staffml/out
 
       - name: 🔍 Validate build
         run: |
@@ -87,7 +141,7 @@ jobs:
           print(f'✅ Corpus: {len(corpus)} questions')
 
           # Test 2: Every question has required fields
-          required = ['id', 'title', 'level', 'track', 'scenario', 'competency_area', 'details']
+          required = ['id', 'title', 'level', 'track', 'scenario', 'competency_area', 'topic', 'zone', 'details']
           missing = []
           for q in corpus:
               for field in required:
@@ -112,8 +166,8 @@ jobs:
           with open('interviews/staffml/src/data/taxonomy.json') as f:
               taxonomy = json.load(f)
           concepts = taxonomy.get('concepts', [])
-          assert len(concepts) >= 100, f'Taxonomy too small: {len(concepts)} concepts'
-          print(f'✅ Taxonomy: {len(concepts)} concepts')
+          assert len(concepts) >= 70, f'Taxonomy too small: {len(concepts)} topics'
+          print(f'✅ Taxonomy: {len(concepts)} topics')
 
           # Test 5: Manifest exists and is valid
           with open('interviews/staffml/src/data/vault-manifest.json') as f:
@@ -150,21 +204,21 @@ jobs:
           git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
           cd target-repo
 
-          echo "🧹 Cleaning interviews directory..."
-          rm -rf interviews
-          mkdir -p interviews
+          echo "🧹 Cleaning staffml directory..."
+          rm -rf staffml
+          mkdir -p staffml
 
           echo "🚚 Copying StaffML build..."
-          cp -r "${{ github.workspace }}/interviews/staffml/out/." interviews/
+          cp -r "${{ github.workspace }}/interviews/staffml/out/." staffml/
 
-          if [ ! -f "interviews/index.html" ]; then
-            echo "❌ CRITICAL: interviews/index.html missing. Aborting."
+          if [ ! -f "staffml/index.html" ]; then
+            echo "❌ CRITICAL: staffml/index.html missing. Aborting."
             exit 1
           fi
 
           echo "📦 Committing and pushing..."
           git add .
-          git commit -m "🎯 Deploy StaffML dev to /interviews/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+          git commit -m "🎯 Deploy StaffML dev to /staffml/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
 
           # Retry push with rebase to handle concurrent deploys
           for i in 1 2 3; do

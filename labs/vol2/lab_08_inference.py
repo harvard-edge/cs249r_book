@@ -65,7 +65,7 @@ async def _():
     H100 = Hardware.Cloud.H100
     T4 = Hardware.Cloud.T4
     EDGE = Hardware.Edge.JetsonOrinNX
-    H100_RAM_GB = 80.0
+    H100_RAM_GB = H100.memory.capacity.m_as("GB")
     H100_COST_HR = 3.0
     T4_COST_HR = 0.35
     EDGE_RAM_GB = EDGE.memory.capacity.m_as("GB")
@@ -107,7 +107,7 @@ def _(COLORS, LAB_CSS, mo):
                 <span class="badge badge-info">KV Cache Memory Wall</span>
                 <span class="badge badge-info">Continuous Batching</span>
                 <span class="badge badge-info">Fleet Design Challenge</span>
-                <span class="badge badge-warn">35&ndash;40 minutes &middot; 2 Parts</span>
+                <span class="badge badge-warn">45&ndash;55 minutes &middot; 4 Parts + Synthesis</span>
             </div>
         </div>
     </div>
@@ -142,8 +142,8 @@ def _(mo, COLORS):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    KV cache formula from @sec-inference-at-scale &middot;
-                    Queuing theory (Kingman's formula) from @sec-fleet-orchestration
+                    KV cache formula from the Inference at Scale chapter &middot;
+                    Queuing theory (Kingman's formula) from the Fleet Orchestration chapter
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -181,10 +181,10 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** -- Complete before this lab:
 
-    - **@sec-inference-at-scale** -- Serving economics, KV cache scaling, continuous batching
+    - **The Inference at Scale chapter** -- Serving economics, KV cache scaling, continuous batching
     - The KV Cache section -- `KV = 2 * L * H * S * B * P` bytes formula
     - The Continuous Batching section -- Static vs iteration-level scheduling
-    - The Queuing Theory section from @sec-fleet-orchestration -- Kingman's formula
+    - The Queuing Theory section from the Fleet Orchestration chapter -- Kingman's formula
     """), kind="info")
     return
 
@@ -454,11 +454,13 @@ def _(
         _fig.add_trace(go.Scatter(
             x=_week_range, y=_training_line, mode="lines",
             name="Training cost ($2M)", line=dict(color=COLORS["BlueLine"], width=2.5, dash="dash"),
+            hovertemplate="Week %{x}: $%{y:,.0f}<extra></extra>",
         ))
         _fig.add_trace(go.Scatter(
             x=_week_range, y=_serving_cumulative, mode="lines",
             name="Cumulative serving cost", line=dict(color=COLORS["RedLine"], width=2.5),
             fill="tonexty", fillcolor="rgba(203,32,45,0.1)",
+            hovertemplate="Week %{x}: $%{y:,.0f}<extra></extra>",
         ))
         if _crossover_weeks <= _weeks:
             _fig.add_vline(x=_crossover_weeks, line=dict(color=COLORS["OrangeLine"], width=2, dash="dot"),
@@ -664,10 +666,12 @@ def _(
 
         _fig = go.Figure()
         _fig.add_trace(go.Bar(x=_n_requests, y=_weight_vals, name="Model weights",
-                               marker_color=COLORS["BlueLine"]))
+                               marker_color=COLORS["BlueLine"],
+                               hovertemplate="Requests %{x}: %{y:.1f} GB<extra></extra>"))
         _kv_colors = [COLORS["GreenLine"] if t <= _total_hbm_gb else COLORS["RedLine"] for t in _total_vals]
         _fig.add_trace(go.Bar(x=_n_requests, y=_kv_vals, name="KV cache",
-                               marker_color=_kv_colors))
+                               marker_color=_kv_colors,
+                               hovertemplate="Requests %{x}: %{y:.1f} GB<extra></extra>"))
         _fig.add_hline(y=_total_hbm_gb, line=dict(color=COLORS["RedLine"], width=2, dash="dash"),
                        annotation_text=f"Total HBM: {_total_hbm_gb:.0f} GB", annotation_position="top right")
         _fig.update_layout(
@@ -905,15 +909,18 @@ def _(
         _fig.add_trace(go.Scatter(
             x=_ratios * 100, y=_static_tp, mode="lines",
             name="Static batching", line=dict(color=COLORS["RedLine"], width=2.5),
+            hovertemplate="%{x:.0f}%%: %{y:.1f} req/cycle<extra></extra>",
         ))
         _fig.add_trace(go.Scatter(
             x=_ratios * 100, y=_continuous_tp, mode="lines",
             name="Continuous batching", line=dict(color=COLORS["GreenLine"], width=2.5),
+            hovertemplate="%{x:.0f}%%: %{y:.1f} req/cycle<extra></extra>",
         ))
         _fig.add_trace(go.Scatter(
             x=[_avg / _max * 100], y=[_continuous_throughput],
             mode="markers", marker=dict(size=14, color=COLORS["OrangeLine"], symbol="diamond"),
             name="Current config",
+            hovertemplate="%{x:.0f}%%: %{y:.1f} req/cycle<extra></extra>",
         ))
         _fig.update_layout(
             height=300,
@@ -1152,6 +1159,7 @@ def _(
                 text=[f"${_cost/1000:.0f}K"],
                 textposition="auto",
                 showlegend=False,
+                hovertemplate="%{x}: $%{y:.1f}K/day<extra></extra>",
             ))
         _fig.update_layout(
             height=300,
@@ -1351,7 +1359,7 @@ def _(
                         Textbook &amp; TinyTorch
                     </div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-inference-at-scale for the full KV cache derivation,
+                        <strong>Read:</strong> the Inference at Scale chapter for the full KV cache derivation,
                         continuous batching mechanics, and fleet design principles.<br/>
                         <strong>Build:</strong> TinyTorch inference module &mdash; implement KV cache
                         management and continuous batching in <code>tinytorch/src/inference/</code>.

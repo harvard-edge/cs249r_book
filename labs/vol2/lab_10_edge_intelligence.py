@@ -158,7 +158,7 @@ def _(LAB_CSS, mo):
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px;">
                 <span class="badge badge-fail">4-12x memory amplification</span>
-                <span class="badge badge-warn">15% battery drain per CPU session</span>
+                <span class="badge badge-warn">significant battery drain on CPU</span>
                 <span class="badge badge-info">NPU: 50x energy savings</span>
             </div>
         </div>
@@ -199,7 +199,7 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Training memory breakdown from @sec-edge-intelligence &middot;
+                    Training memory breakdown from the Edge Intelligence chapter &middot;
                     LoRA rank decomposition &middot; FedAvg algorithm
                 </div>
             </div>
@@ -223,7 +223,7 @@ def _(COLORS, mo):
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
                 &ldquo;On-device training is 'just inference with a backward pass.' Why does it
-                require 4-12x more memory, drain 15% of the battery per session on CPU, and
+                require 4-12x more memory, significantly drain the battery on CPU, and
                 need 4-8x more communication rounds when data is non-IID?&rdquo;
             </div>
         </div>
@@ -239,7 +239,7 @@ def _(mo):
     **Recommended Reading** &mdash; Complete before this lab:
 
     - **Training Memory Amplification** &mdash; The 4-12x memory multiplier from activations,
-      gradients, and optimizer state (@sec-edge-intelligence).
+      gradients, and optimizer state (the Edge Intelligence chapter).
     - **Adaptation Strategies** &mdash; LoRA, bias-only, and full fine-tuning trade-offs.
     - **On-Device Energy** &mdash; CPU vs NPU power and latency for fine-tuning.
     - **Federated Learning** &mdash; FedAvg, non-IID data impact, gradient compression.
@@ -403,6 +403,21 @@ def _(
 
     def build_part_a():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Mobile ML Product Manager, Paxos Devices</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;We want to fine-tune our 350M-parameter language model directly on-device. The phone has 6 GB of RAM,
+        but the OS and apps already consume 4 GB. Can we even fit the training graph in the remaining 2 GB,
+        or does the memory amplification from optimizer states and activations make this impossible?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Priya Ramanathan, Mobile ML Product Manager &middot; Paxos Devices</div>
+</div>
+"""))
 
         # Banner
         items.append(mo.Html(f"""
@@ -571,6 +586,27 @@ Total         = {_total_mb:.0f} MB ({_amplification:.1f}x inference)
 
         items.append(mo.callout(mo.md(_msg), kind=_kind))
 
+        items.append(mo.accordion({
+            "Math Peek: Training Memory Amplification": mo.md("""
+**Formula:**
+$$
+M_{\\text{train}} = M_{\\text{weights}} + M_{\\text{grad}} + M_{\\text{opt}} + M_{\\text{act}}
+$$
+
+**Where:**
+- **$M_{\\text{weights}}$**: Model parameters in FP16 = $P \\times 2$ bytes
+- **$M_{\\text{grad}}$**: Gradient storage (same size as weights) = $P \\times 2$ bytes
+- **$M_{\\text{opt}}$**: Adam stores momentum + variance in FP32 = $P \\times 4 \\times 2$ bytes
+- **$M_{\\text{act}}$**: Activations cached for backward pass, scales with batch size $B$
+
+**Amplification factor** over inference ($M_{\\text{inf}} = P \\times 2$):
+
+$$
+\\text{Amplification} = \\frac{M_{\\text{train}}}{M_{\\text{inf}}} = 1 + 1 + 4 + \\frac{M_{\\text{act}}}{P \\times 2} \\approx 5\\text{-}9\\times
+$$
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -579,6 +615,21 @@ Total         = {_total_mb:.0f} MB ({_amplification:.1f}x inference)
 
     def build_part_b():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Embedded Systems Engineer, Paxos Devices</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;I keep hearing that LoRA solves the on-device fine-tuning problem, but nobody tells me
+        the actual memory numbers. For a 350M model, how much storage does LoRA rank-16 really save
+        compared to full fine-tuning? And does bias-only tuning even move the needle on accuracy?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Marcus Chen, Embedded Systems Engineer &middot; Paxos Devices</div>
+</div>
+"""))
 
         # Banner
         items.append(mo.Html(f"""
@@ -688,6 +739,28 @@ Total         = {_total_mb:.0f} MB ({_amplification:.1f}x inference)
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
 
+        items.append(mo.accordion({
+            "Math Peek: LoRA Storage Savings": mo.md("""
+**Formula:**
+$$
+M_{\\text{LoRA}} = M_{\\text{base}} + K \\times r \\times (d_{\\text{in}} + d_{\\text{out}}) \\times 2
+$$
+
+**Where:**
+- **$M_{\\text{base}}$**: Base model weights (shared, stored once)
+- **$K$**: Number of user contexts (adapters)
+- **$r$**: LoRA rank (typically 4-16)
+- **$d_{\\text{in}}, d_{\\text{out}}$**: Dimensions of the adapted weight matrices
+- Factor of 2: bytes per FP16 parameter
+
+**Savings ratio** vs. full fine-tuning ($K$ separate models):
+
+$$
+\\text{Ratio} = \\frac{K \\times M_{\\text{base}}}{M_{\\text{base}} + K \\times r/d \\times M_{\\text{base}}} \\approx \\frac{K}{1 + K \\times 0.01} \\approx 10\\times \\text{ at } K{=}10
+$$
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -696,6 +769,21 @@ Total         = {_total_mb:.0f} MB ({_amplification:.1f}x inference)
 
     def build_part_c():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Battery Team Lead, Paxos Devices</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;Product wants continuous on-device inference, but our 5,000 mAh battery already struggles
+        to last a full day. How many joules does a single forward pass actually cost at different
+        batch sizes, and at what query rate do we start draining faster than the user can charge?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Tomoko Ishida, Battery Systems Lead &middot; Paxos Devices</div>
+</div>
+"""))
 
         # Banner
         items.append(mo.Html(f"""
@@ -717,7 +805,7 @@ Total         = {_total_mb:.0f} MB ({_amplification:.1f}x inference)
             <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
                         line-height: 1.55; max-width: 700px;">
                 LoRA makes fine-tuning fit in memory. But does it make it practical? A fine-tuning
-                session that drains 15% of the battery is a product-killing feature, not a
+                session that visibly drains the battery is a product-killing feature, not a
                 product feature. The NPU changes the equation entirely.
             </div>
         </div>
@@ -840,6 +928,31 @@ You predicted: {_predicted:.1f}%. Actual CPU drain: {_cpu_drain:.1f}%.
 *Source: @sec-edge-intelligence, on-device energy model*
 """))
 
+        items.append(mo.accordion({
+            "Math Peek: Energy per Inference and Battery Drain": mo.md("""
+**Dynamic power consumption:**
+$$
+P = C \\cdot V^2 \\cdot f
+$$
+
+**Where:**
+- **$C$**: Switching capacitance (depends on circuit activity)
+- **$V$**: Supply voltage
+- **$f$**: Clock frequency
+
+**Energy per session and battery drain:**
+$$
+E_{\\text{session}} = P \\times t_{\\text{duration}} \\quad \\text{(Wh)}
+$$
+$$
+\\text{Drain}(\\%) = \\frac{E_{\\text{session}}}{E_{\\text{battery}}} \\times 100
+$$
+
+**NPU advantage:** NPU achieves the same computation at lower $V$ and optimized $C$,
+yielding $\\sim$50x energy efficiency over CPU for ML workloads.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -848,6 +961,21 @@ You predicted: {_predicted:.1f}%. Actual CPU drain: {_cpu_drain:.1f}%.
 
     def build_part_d():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Privacy Officer, Paxos Devices</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;Legal says we cannot send raw user data to the cloud, so we are betting on federated learning.
+        But my engineers warn that with only 50 heterogeneous devices per round, the model may never converge.
+        How many federation rounds does it actually take, and when does communication cost exceed centralized training?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Elena Vasquez, Chief Privacy Officer &middot; Paxos Devices</div>
+</div>
+"""))
 
         # Banner
         items.append(mo.Html(f"""
@@ -1014,6 +1142,31 @@ Total communication  = {_compressed_rounds:.0f} x {_compressed_bytes:.1f} MB = {
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
 
+        items.append(mo.accordion({
+            "Math Peek: FedAvg Convergence under Non-IID Data": mo.md("""
+**Convergence rounds scaling:**
+$$
+R_{\\text{non-IID}} = R_{\\text{IID}} \\times \\left(1 + \\frac{\\sigma^2_{\\text{het}}}{\\beta^2}\\right)
+$$
+
+**Where:**
+- **$R_{\\text{IID}}$**: Baseline rounds under IID data distribution
+- **$\\beta$**: Dirichlet concentration parameter (lower = more heterogeneous)
+- **$\\sigma^2_{\\text{het}}$**: Variance of local data distributions across clients
+
+**Communication cost per round:**
+$$
+C_{\\text{round}} = N_{\\text{clients}} \\times |\\theta| \\times b_{\\text{precision}}
+$$
+
+- **$N_{\\text{clients}}$**: Number of participating devices
+- **$|\\theta|$**: Model parameter count
+- **$b_{\\text{precision}}$**: Bytes per parameter (2 for FP16, reduced by compression)
+
+**Gradient compression** reduces $b_{\\text{precision}}$ by 4-10x (INT8, Top-K sparsification).
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1039,8 +1192,8 @@ Total communication  = {_compressed_rounds:.0f} x {_compressed_bytes:.1f} MB = {
                 </div>
                 <div style="margin-bottom: 10px;">
                     <strong>2. The hardware execution target determines viability.</strong>
-                    CPU fine-tuning drains ~15% of battery per session (~6 sessions per charge).
-                    NPU fine-tuning drains ~0.3% (~300 sessions per charge). Same algorithm,
+                    CPU fine-tuning drains measurable battery per session due to thermal throttling.
+                    NPU fine-tuning is 50-100x more energy-efficient. Same algorithm,
                     50x energy difference. The NPU makes on-device training a product feature.
                 </div>
                 <div>
@@ -1076,7 +1229,7 @@ Total communication  = {_compressed_rounds:.0f} x {_compressed_bytes:.1f} MB = {
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-edge-intelligence for full derivations.<br/>
+                    <strong>Read:</strong> the Edge Intelligence chapter for full derivations.<br/>
                     <strong>Build:</strong> TinyTorch federated averaging module &mdash;
                     implement FedAvg with non-IID data simulation.
                 </div>
@@ -1107,12 +1260,22 @@ Total communication  = {_compressed_rounds:.0f} x {_compressed_bytes:.1f} MB = {
 
 # ─── CELL 10: LEDGER HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, pA_pred, pA_strategy, pB_pred, pC_pred, pC_target, pD_pred, pD_compress):
+    _mem_pred = pA_pred.value if hasattr(pA_pred, 'value') else None
+    _adapt = pA_strategy.value if hasattr(pA_strategy, 'value') else "full"
+    _lora_pred = pB_pred.value if hasattr(pB_pred, 'value') else None
+    _drain_pred = pC_pred.value if hasattr(pC_pred, 'value') else None
+    _exec_target = pC_target.value if hasattr(pC_target, 'value') else "cpu"
+    _fed_pred = pD_pred.value if hasattr(pD_pred, 'value') else None
+    _compress = pD_compress.value if hasattr(pD_compress, 'value') else "none"
     ledger.save(chapter=10, design={
-        "memory_amplification": "4-12x",
-        "adaptation_strategy": "LoRA",
-        "execution_target": "NPU",
-        "noniid_penalty": "4-8x rounds",
+        "partA_memory_prediction": _mem_pred,
+        "partA_adaptation_strategy": _adapt,
+        "partB_lora_prediction": _lora_pred,
+        "partC_drain_prediction_pct": _drain_pred,
+        "partC_execution_target": _exec_target,
+        "partD_federation_prediction": _fed_pred,
+        "partD_compression_choice": _compress,
     })
 
     mo.Html(f"""

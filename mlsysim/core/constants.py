@@ -19,10 +19,12 @@ V100_MEM_CAPACITY = 32 * GiB
 V100_TDP = 300 * watt                     # SXM2 variant
 
 # NVIDIA A100 (Ampere, 2020) — Source: NVIDIA A100 Data Sheet
-A100_FLOPS_FP16_TENSOR = 312 * TFLOPs / second
-A100_FLOPS_TF32 = 156 * TFLOPs / second
-A100_FLOPS_FP32 = 19.5 * TFLOPs / second  # Standard CUDA cores
-A100_FLOPS_INT8 = 624 * TFLOPs / second   # INT8 Tensor Core
+# NOTE: Dense (without structured sparsity) values. With 2:4 sparsity, double these.
+A100_FLOPS_FP16_TENSOR = 312 * TFLOPs / second   # Dense FP16 Tensor Core (624 with sparsity)
+A100_FLOPS_FP16_SPARSE = 624 * TFLOPs / second   # With 2:4 structured sparsity
+A100_FLOPS_TF32 = 156 * TFLOPs / second           # Dense TF32 (312 with sparsity)
+A100_FLOPS_FP32 = 19.5 * TFLOPs / second          # Standard CUDA cores (no tensor)
+A100_FLOPS_INT8 = 624 * TFLOPs / second            # Dense INT8 Tensor Core (1248 with sparsity)
 A100_MEM_BW = 2039 * GB / second           # HBM2e (SXM variant)
 A100_MEM_CAPACITY = 80 * GiB              # SXM variant (also 40 GiB PCIe)
 A100_TDP = 400 * watt                     # SXM variant
@@ -39,7 +41,7 @@ H100_TDP = 700 * watt                     # SXM variant
 # NVIDIA H200 (Hopper, 2023) — Source: NVIDIA H200 Data Sheet
 # H200 shares the Hopper compute die with H100, only memory differs
 H200_MEM_BW = 4.8 * TB / second             # HBM3e
-H200_MEM_CAPACITY = 141 * GB
+H200_MEM_CAPACITY = 141 * GB               # NVIDIA specifies H200 as 141 GB (decimal)
 H200_TDP = 700 * watt                       # Same as H100 SXM
 
 # NVIDIA B100/B200 (Blackwell, 2024) — Source: NVIDIA Blackwell Architecture
@@ -55,7 +57,8 @@ B200_TDP = 1000 * watt
 # This is a full rack containing 72 Blackwell GPUs and 36 Grace CPUs.
 # We model the aggregate resources of the rack for macro-scale simulation.
 NVL72_GPUs = 72 * count
-NVL72_FLOPS_FP8_TENSOR = 720 * PFLOPs / second  # 72 * 10 PFLOPS (Dense/Sparse vary)
+NVL72_FLOPS_FP4_TENSOR = 720 * PFLOPs / second  # 72 * 10 PFLOPS FP4 dense (NVIDIA marketing headline)
+NVL72_FLOPS_FP8_TENSOR = 324 * PFLOPs / second  # 72 * 4.5 PFLOPS FP8 dense
 NVL72_MEM_CAPACITY = 13.8 * TB                  # 72 * 192 GB
 NVL72_MEM_BW = 576 * TB / second                # 72 * 8 TB/s
 NVL72_NVLINK_BW = 130 * TB / second             # Full bisection (bidirectional)
@@ -64,9 +67,41 @@ NVL72_UNIT_COST = 3000000 * USD                 # Estimated $3M+ per rack
 
 # AMD Instinct MI300X (CDNA 3, 2023) — Source: AMD Instinct MI300X Data Sheet
 MI300X_FLOPS_FP16_TENSOR = 1307 * TFLOPs / second  # Dense. Sparse is 2614.
+MI300X_FLOPS_FP8 = 2614 * TFLOPs / second          # FP8 dense (same as FP16 sparse)
+MI300X_FLOPS_INT8 = 2614 * TFLOPs / second          # INT8 dense
+MI300X_FLOPS_FP32 = 163.4 * TFLOPs / second         # FP32 (Matrix Core)
 MI300X_MEM_BW = 5.3 * TB / second
 MI300X_MEM_CAPACITY = 192 * GiB
 MI300X_TDP = 750 * watt
+
+# AMD Instinct MI250X (CDNA 2, 2021) — Source: AMD MI250X Data Sheet
+MI250X_FLOPS_FP16_TENSOR = 383 * TFLOPs / second   # Dense FP16 Matrix Core (per OAM)
+MI250X_FLOPS_FP32 = 47.9 * TFLOPs / second
+MI250X_FLOPS_INT8 = 383 * TFLOPs / second
+MI250X_MEM_BW = 3.2 * TB / second                   # HBM2e (2x 1.6 TB/s per GCD)
+MI250X_MEM_CAPACITY = 128 * GiB                      # 2x 64 GiB HBM2e
+MI250X_TDP = 500 * watt
+
+# Intel Gaudi 2 (2022) — Source: Intel Gaudi 2 White Paper
+GAUDI2_FLOPS_BF16 = 432 * TFLOPs / second           # BF16 Tensor (MME)
+GAUDI2_FLOPS_FP8 = 865 * TFLOPs / second            # FP8
+GAUDI2_MEM_BW = 2.45 * TB / second                   # HBM2e
+GAUDI2_MEM_CAPACITY = 96 * GiB
+GAUDI2_TDP = 600 * watt
+
+# Intel Gaudi 3 (2024) — Source: Intel Gaudi 3 Architecture White Paper
+GAUDI3_FLOPS_BF16 = 1835 * TFLOPs / second          # BF16 Tensor
+GAUDI3_FLOPS_FP8 = 3670 * TFLOPs / second           # FP8
+GAUDI3_MEM_BW = 3.7 * TB / second                    # HBM2e
+GAUDI3_MEM_CAPACITY = 128 * GiB
+GAUDI3_TDP = 900 * watt
+
+# AWS Trainium 2 (2024) — Source: AWS re:Invent 2023 announcements
+TRAINIUM2_FLOPS_BF16 = 380 * TFLOPs / second        # BF16 (estimated from 4x Trainium 1)
+TRAINIUM2_FLOPS_FP8 = 760 * TFLOPs / second         # FP8 (estimated)
+TRAINIUM2_MEM_BW = 2.4 * TB / second                 # HBM (estimated)
+TRAINIUM2_MEM_CAPACITY = 96 * GiB
+TRAINIUM2_TDP = 500 * watt                           # Estimated
 
 # NVIDIA T4 (Turing, 2018) — Source: NVIDIA T4 Data Sheet
 T4_FLOPS_FP16_TENSOR = 65 * TFLOPs / second
@@ -94,6 +129,7 @@ TPUV4_MEM_BW = 1200 * GB / second
 
 # Google TPU v5p — Source: Google Cloud Documentation (2024)
 TPUV5P_FLOPS_BF16 = 459 * TFLOPs / second
+TPUV5P_FLOPS_INT8 = 918 * TFLOPs / second          # INT8 (2x BF16)
 TPUV5P_MEM_BW = 2.76 * TB / second
 TPUV5P_MEM_CAPACITY = 95 * GiB
 TPUV5P_ICI_BW = 1600 * GB / second        # Inter-Chip Interconnect
@@ -166,8 +202,8 @@ NVLINK_A100_BW = 600 * GB / second        # NVLink 3.0 (A100, 12 links × 50 GB/
 NVLINK_H100_BW = 900 * GB / second        # NVLink 4.0 (H100, 18 links × 50 GB/s)
 NVLINK_B200_BW = 1800 * GB / second       # NVLink 5.0 (B200, 72 links × 25 GB/s)
 PCIE_GEN3_BW = 15.75 * GB / second        # PCIe Gen3 x16 (after 128b/130b encoding)
-PCIE_GEN4_BW = 32 * GB / second           # PCIe Gen4 x16 (bidirectional)
-PCIE_GEN5_BW = 64 * GB / second           # PCIe Gen5 x16 (bidirectional)
+PCIE_GEN4_BW = 32 * GB / second           # PCIe Gen4 x16 (unidirectional, per direction)
+PCIE_GEN5_BW = 64 * GB / second           # PCIe Gen5 x16 (unidirectional, per direction)
 
 # Inter-node interconnects
 INFINIBAND_HDR_BW = 200 * Gbps            # HDR InfiniBand (25 GB/s)
@@ -282,6 +318,7 @@ LLAMA2_70B_PARAMS = 70e9 * param
 LLAMA2_70B_LAYERS = 80
 LLAMA2_70B_HIDDEN_DIM = 8192
 LLAMA2_70B_HEADS = 64
+LLAMA2_70B_KV_HEADS = 8                       # Grouped-Query Attention (GQA)
 
 # Llama 3.1
 LLAMA3_8B_PARAMS = 8.03e9 * param
@@ -461,10 +498,13 @@ TPU_POD_POWER = 3 * ureg.megawatt
 # --- Shared Precision Map ---
 # Used by Engine, ServingModel, SynthesisSolver to map precision strings to byte widths.
 PRECISION_MAP = {
-    "fp32": BYTES_FP32,
-    "fp16": BYTES_FP16,
-    "int8": BYTES_INT8,
-    "int4": BYTES_INT4,
+    "fp32": BYTES_FP32,      # 4 bytes
+    "tf32": BYTES_FP32,      # 4 bytes storage, TF32 compute (19-bit effective mantissa)
+    "bf16": BYTES_FP16,      # 2 bytes (Brain Float 16, default training precision)
+    "fp16": BYTES_FP16,      # 2 bytes (IEEE half-precision)
+    "fp8":  BYTES_INT8,      # 1 byte  (E4M3/E5M2, Hopper+ training/inference)
+    "int8": BYTES_INT8,      # 1 byte  (quantized inference)
+    "int4": BYTES_INT4,      # 0.5 bytes (aggressive quantization)
 }
 
 # Fleet-Scale Constants (Volume II)

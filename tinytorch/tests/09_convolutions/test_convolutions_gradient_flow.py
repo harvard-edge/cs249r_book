@@ -12,6 +12,7 @@ Prevents regression of gradient flow issues discovered in milestone testing.
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -28,7 +29,7 @@ def test_conv2d_has_backward_function():
     print("Testing Conv2d _grad_fn attachment...")
 
     conv = Conv2d(1, 8, kernel_size=3)
-    x = Tensor(np.random.randn(2, 1, 8, 8), requires_grad=True)
+    x = Tensor(rng.standard_normal((2, 1, 8, 8)), requires_grad=True)
 
     # Forward pass
     output = conv(x)
@@ -49,7 +50,7 @@ def test_conv2d_weight_gradient_flow():
     conv = Conv2d(1, 8, kernel_size=3)
     conv.weight.requires_grad = True
 
-    x = Tensor(np.random.randn(2, 1, 8, 8), requires_grad=True)
+    x = Tensor(rng.standard_normal((2, 1, 8, 8)), requires_grad=True)
 
     # Forward
     output = conv(x)
@@ -72,7 +73,7 @@ def test_conv2d_bias_gradient_flow():
     conv = Conv2d(1, 8, kernel_size=3)
     conv.bias.requires_grad = True
 
-    x = Tensor(np.random.randn(2, 1, 8, 8), requires_grad=True)
+    x = Tensor(rng.standard_normal((2, 1, 8, 8)), requires_grad=True)
 
     # Forward
     output = conv(x)
@@ -93,7 +94,7 @@ def test_conv2d_input_gradient_flow():
     print("Testing Conv2d input gradient flow...")
 
     conv = Conv2d(1, 8, kernel_size=3)
-    x = Tensor(np.random.randn(2, 1, 8, 8), requires_grad=True)
+    x = Tensor(rng.standard_normal((2, 1, 8, 8)), requires_grad=True)
 
     # Forward
     output = conv(x)
@@ -114,7 +115,7 @@ def test_maxpool2d_has_backward_function():
     print("Testing MaxPool2d _grad_fn attachment...")
 
     pool = MaxPool2d(2)
-    x = Tensor(np.random.randn(2, 8, 8, 8), requires_grad=True)
+    x = Tensor(rng.standard_normal((2, 8, 8, 8)), requires_grad=True)
 
     # Forward pass
     output = pool(x)
@@ -133,7 +134,7 @@ def test_maxpool2d_gradient_flow():
     print("Testing MaxPool2d gradient flow...")
 
     pool = MaxPool2d(2)
-    x = Tensor(np.random.randn(2, 8, 8, 8), requires_grad=True)
+    x = Tensor(rng.standard_normal((2, 8, 8, 8)), requires_grad=True)
 
     # Forward
     output = pool(x)
@@ -165,7 +166,7 @@ def test_conv2d_maxpool2d_chain():
     conv.bias.requires_grad = True
     pool = MaxPool2d(2)
 
-    x = Tensor(np.random.randn(2, 1, 8, 8), requires_grad=True)
+    x = Tensor(rng.standard_normal((2, 1, 8, 8)), requires_grad=True)
 
     # Forward
     conv_out = conv(x)
@@ -194,7 +195,7 @@ def test_conv2d_gradient_correctness():
     conv = Conv2d(1, 2, kernel_size=3, padding=0)
     conv.weight.requires_grad = True
 
-    x = Tensor(np.random.randn(1, 1, 5, 5), requires_grad=True)
+    x = Tensor(rng.standard_normal((1, 1, 5, 5)), requires_grad=True)
 
     # Forward
     output = conv(x)
@@ -247,7 +248,7 @@ def test_data_bypass_detection():
 
     # This is a regression test to ensure we catch .data usage
     conv = Conv2d(1, 8, kernel_size=3)
-    x = Tensor(np.random.randn(2, 1, 8, 8), requires_grad=True)
+    x = Tensor(rng.standard_normal((2, 1, 8, 8)), requires_grad=True)
 
     # Correct way (should have _grad_fn)
     output_correct = conv(x)

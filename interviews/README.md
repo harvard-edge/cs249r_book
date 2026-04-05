@@ -1,43 +1,40 @@
-<!-- DEV-BANNER-START -->
 <div align="center">
-<table>
-<tr><td>
-<h3>🚧 Under Active Development</h3>
-<p>This component is being built on the <code>dev</code> branch and is <b>not yet available</b> on the live site.<br>
-Content may be incomplete or change without notice. The published curriculum lives at <a href="https://mlsysbook.ai"><b>mlsysbook.ai</b></a>.</p>
-<p>
-<a href="https://github.com/harvard-edge/cs249r_book/tree/dev"><img src="https://img.shields.io/badge/branch-dev-orange?logo=git&logoColor=white" alt="dev branch"></a>
-<a href="https://mlsysbook.ai"><img src="https://img.shields.io/badge/live_site-mlsysbook.ai-blue?logo=safari&logoColor=white" alt="live site"></a>
-<a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml"><img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml/badge.svg?branch=dev" alt="StaffML Build"></a>
-</p>
-</td></tr>
-</table>
+
+# StaffML
+
+### ML Systems Interview Playbook
+
+**5,700+ physics-grounded systems design questions across Cloud, Edge, Mobile & TinyML.**
+
+*You can generate the code, but you cannot prompt your way out of a silicon bottleneck.*
+
+<br>
+
+<a href="https://mlsysbook.ai/staffml/"><img src="https://img.shields.io/badge/%F0%9F%8E%AF_Launch_StaffML-blue?style=for-the-badge&logoColor=white" alt="Launch StaffML" height="36"></a>
+
+<br><br>
+
+<a href="https://github.com/harvard-edge/cs249r_book"><img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=social" alt="GitHub Stars"></a>
+<a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-publish-live.yml"><img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-publish-live.yml/badge.svg" alt="StaffML Deploy"></a>
+<a href="https://mlsysbook.ai"><img src="https://img.shields.io/badge/part_of-MLSysBook.ai-a31f34" alt="MLSysBook.ai"></a>
+
 </div>
-<!-- DEV-BANNER-END -->
-
-# StaffML: ML Systems Interview Playbook
-
-<p align="center">
-  <b>Physics-grounded systems design questions across Cloud, Edge, Mobile & TinyML tracks.</b><br>
-  <i>You can generate the code, but you cannot prompt your way out of a silicon bottleneck.</i>
-</p>
 
 ---
 
-## What is StaffML?
+StaffML is a free, open-source interview prep platform for ML systems engineers. Browse a curated vault of questions organized by competency area, difficulty level (Bloom's Taxonomy L1–L6+), and deployment track. Built by [Prof. Vijay Janapa Reddi](https://github.com/profvjreddi), Harvard University.
 
-StaffML is an interview prep platform for ML systems engineers. It provides a curated vault of questions organized by competency area, difficulty level (Bloom's Taxonomy L1–L6+), and deployment track.
+| Feature | Description |
+|---------|-------------|
+| **Vault** | Browse questions by area, topic, and difficulty |
+| **Practice** | Drill with spaced repetition and daily challenges |
+| **Gauntlet** | Timed mock interview sessions with self-assessment |
+| **Progress** | Track coverage across competency areas and tracks |
+| **Chains** | Deepening sequences from L1 Recall to L6+ Architect |
 
-**Key features:**
-- **Vault** — Browse questions by area, topic, and difficulty
-- **Practice** — Drill with spaced repetition and daily challenges
-- **Mock Interview (Gauntlet)** — Timed sessions with self-assessment
-- **Progress** — Track coverage across competency areas and tracks
-- **Chains** — Deepening question sequences (L1 Recall → L6+ Architect)
+> If StaffML helps your prep, **[give us a star](https://github.com/harvard-edge/cs249r_book)** — it helps others find this resource.
 
-Built on [MLSysBook.ai](https://mlsysbook.ai) by Prof. Vijay Janapa Reddi, Harvard University.
-
-**App:** [staffml/](staffml/) · **Corpus data:** [`vault/corpus.json`](vault/corpus.json) · **Taxonomy:** [`vault/taxonomy.json`](vault/taxonomy.json)
+**Data:** [`vault/corpus.json`](vault/corpus.json) · [`vault/taxonomy.json`](vault/taxonomy.json) · **App source:** [`staffml/`](staffml/)
 
 ---
 
@@ -103,15 +100,13 @@ Questions are organized into **chains** — sequences that deepen understanding 
 
 ## Sample Questions
 
-A taste of what's inside. Click to reveal model answers with napkin math.
+A taste of what's inside. Click any question to reveal the model answer with napkin math.
 
 ### ☁️ Cloud
 
-### 🟢 L2 Physical Limits on Training Cluster Scale
-
-> Explain why you cannot simply double the number of GPUs indefinitely to halve training time, and identify the three physical ceilings that bound cluster scaling.
-
-<details><summary>Model Answer</summary>
+<details>
+<summary><b>🟢 L2 &nbsp; Physical Limits on Training Cluster Scale</b></summary>
+<blockquote>Explain why you cannot simply double the number of GPUs indefinitely to halve training time, and identify the three physical ceilings that bound cluster scaling.</blockquote>
 
 Three physical ceilings prevent infinite scaling: (1) **Communication bottleneck** — synchronous training requires AllReduce to average gradients across all GPUs every step. With N GPUs, AllReduce latency grows as O(log N) per step. At 10,000+ GPUs, communication time can exceed computation time. (2) **Power and cooling** — each GPU draws 300–700W. A 10K GPU cluster requires 4+ MW just for GPUs. (3) **Critical batch size** — beyond the critical batch size, gradient noise diminishes returns. For GPT-3, this is ~3.2M tokens.
 
@@ -120,14 +115,11 @@ Three physical ceilings prevent infinite scaling: (1) **Communication bottleneck
 AllReduce at 10K nodes: ~10ms overhead vs ~50ms compute = 17% communication tax
 Critical batch size for GPT-3: ~3.2M tokens
 ```
-
 </details>
 
-### 🟠 L4 The Half-Baked Speedup
-
-> You converted most of your LLM to BF16 but only see 1.4x speedup instead of the expected 2x. What is happening?
-
-<details><summary>Model Answer</summary>
+<details>
+<summary><b>🟠 L4 &nbsp; The Half-Baked Speedup</b></summary>
+<blockquote>You converted most of your LLM to BF16 but only see 1.4x speedup instead of the expected 2x. What is happening?</blockquote>
 
 Training involves a mix of compute-bound and memory-bound operations — only some benefit from BF16. Large GEMMs (attention, FFN) see ~2x speedup. But optimizer steps (Adam maintains FP32 master weights), normalization layers, and loss computation remain in FP32. The weighted average: 70% of time in BF16-accelerated ops × 2x + 30% in FP32 ops × 1x = 1.4x overall.
 
@@ -138,14 +130,11 @@ Optimizer (Adam): 15% of time → FP32 → 1x
 Other (norm, loss): 15% of time → FP32 → 1x
 Weighted: 0.7 × 2 + 0.3 × 1 = 1.7... but memory-bound ops don't see full 2x → ~1.4x
 ```
-
 </details>
 
-### 🟣 L6+ The Exploding Data Lake Bill
-
-> Your data lake on S3 has grown to 500 PB. Design a tiering strategy to cut the monthly storage bill by 60%+.
-
-<details><summary>Model Answer</summary>
+<details>
+<summary><b>🟣 L6+ &nbsp; The Exploding Data Lake Bill</b></summary>
+<blockquote>Your data lake on S3 has grown to 500 PB. Design a tiering strategy to cut the monthly storage bill by 60%+.</blockquote>
 
 Intelligent data tiering based on access frequency. Classify data, apply lifecycle policies: hot data (30%) stays in S3 Standard, warm data in S3 Standard-IA, cold data (70%) moves to Glacier Deep Archive.
 
@@ -156,16 +145,13 @@ Current: $0.023 × 500 PB = $11.5M/month
 Optimized: 150 PB × $0.023 + 350 PB × $0.00099 ≈ $3.8M/month
 Savings: ~67%
 ```
-
 </details>
 
 ### 🤖 Edge
 
-### 🔵 L1 The Fleet's Cellular Bill
-
-> You have 1M autonomous vehicles. Compare the daily data cost of centralized retraining (10 MB upload/vehicle) vs. federated learning (50 MB gradient upload, 10% participation).
-
-<details><summary>Model Answer</summary>
+<details>
+<summary><b>🔵 L1 &nbsp; The Fleet's Cellular Bill</b></summary>
+<blockquote>You have 1M autonomous vehicles. Compare the daily data cost of centralized retraining (10 MB upload/vehicle) vs. federated learning (50 MB gradient upload, 10% participation).</blockquote>
 
 Centralized: 1M × 10 MB = 10 TB/day. Federated (10% participate): 100K × 50 MB = 5 TB/day. At $2/GB cellular cost: centralized = $20,000/day, federated = $10,000/day. Annual savings: $3.65M. But federated also avoids regulatory risk of centralizing raw sensor data.
 
@@ -174,14 +160,11 @@ Centralized: 1M × 10 MB = 10 TB/day × $2/GB = $20,000/day
 Federated:  100K × 50 MB = 5 TB/day × $2/GB = $10,000/day
 Annual savings: $3.65M + regulatory risk reduction
 ```
-
 </details>
 
-### 🟠 L4 The Phantom Sensor Attack
-
-> Your autonomous vehicle uses GPS, IMU, and wheel encoder. An attacker spoofs GPS signals. How do you detect and mitigate this?
-
-<details><summary>Model Answer</summary>
+<details>
+<summary><b>🟠 L4 &nbsp; The Phantom Sensor Attack</b></summary>
+<blockquote>Your autonomous vehicle uses GPS, IMU, and wheel encoder. An attacker spoofs GPS signals. How do you detect and mitigate this?</blockquote>
 
 Multi-layered defense using sensor fusion consistency checks. The IMU and wheel encoder provide *relative* motion — if GPS reports a 50m jump in 1 second while the IMU shows 0.5m movement, the innovation (residual) is 49.5m, far exceeding normal GPS noise (~3m). The state estimator (EKF/UKF) should reject GPS measurements with innovations exceeding a threshold, fall back to dead reckoning, and alert the operator.
 
@@ -191,16 +174,13 @@ GPS accuracy: 1-3m
 Spoof detection threshold: innovation > 5× expected noise = 15m
 At 50m jump vs 0.5m IMU: innovation = 49.5m → reject with 99.99% confidence
 ```
-
 </details>
 
 ### 📱 Mobile
 
-### 🟢 L2 Background Inference Limits
-
-> You want to run an LLM to summarize audio while your iOS app is in the background. What is the primary risk?
-
-<details><summary>Model Answer</summary>
+<details>
+<summary><b>🟢 L2 &nbsp; Background Inference Limits</b></summary>
+<blockquote>You want to run an LLM to summarize audio while your iOS app is in the background. What is the primary risk?</blockquote>
 
 The iOS Watchdog Timer. iOS aggressively monitors background apps for memory and CPU usage. Background execution limits: 30 seconds for most tasks, 3 minutes for audio processing. A 7B LLM at INT4 = 3.5 GB weights + 0.5 GB KV-cache = 4 GB. iPhone 16 Pro has 8 GB total, ~5 GB available. In foreground: fits. In background: iOS reclaims memory aggressively, and sustained 3W inference drains 20% battery per hour.
 
@@ -210,14 +190,11 @@ Battery: 4,000 mAh × 3.7V = 14.8 Wh
 Drain at 3W: 20% per hour
 iOS background limit: ~30 seconds → 0.025 Wh per cycle
 ```
-
 </details>
 
-### 🟡 L3 The Trivial Model Paradox
-
-> A single 100-neuron dense layer runs *faster* on CPU than NPU. Why?
-
-<details><summary>Model Answer</summary>
+<details>
+<summary><b>🟡 L3 &nbsp; The Trivial Model Paradox</b></summary>
+<blockquote>A single 100-neuron dense layer runs <i>faster</i> on CPU than NPU. Why?</blockquote>
 
 NPUs have significant startup and data transfer overheads that overshadow benefits for tiny models. Driver initialization (~100μs), data transfer to NPU memory (~20μs), and NPU compute (~5μs) total ~125μs. The CPU does the same computation in ~50μs with no transfer overhead. The crossover point is typically around 10K parameters — below that, CPU wins.
 
@@ -227,16 +204,13 @@ NPU: 100μs startup + 20μs transfer + 5μs compute = 125μs
 NPU is 2.5× slower for trivial models
 Crossover: ~10K parameters
 ```
-
 </details>
 
 ### 🔬 TinyML
 
-### 🟢 L2 Microcontroller Arithmetic Intensity
-
-> Calculate the Ridge Point for a Cortex-M4 microcontroller. Is it compute-bound or memory-bound?
-
-<details><summary>Model Answer</summary>
+<details>
+<summary><b>🟢 L2 &nbsp; Microcontroller Arithmetic Intensity</b></summary>
+<blockquote>Calculate the Ridge Point for a Cortex-M4 microcontroller. Is it compute-bound or memory-bound?</blockquote>
 
 Ridge Point = Peak Compute / Peak Memory Bandwidth. Cortex-M4 at 168 MHz: ~168 MFLOPS (1 FP op/cycle). Memory: 32-bit bus at 168 MHz = 672 MB/s. Ridge Point = 0.168 GFLOPS / 0.672 GB/s = 0.25 FLOPS/byte. Most neural network layers have arithmetic intensity of 10-100 — far above the ridge point. MCUs are almost always **compute-bound**, the opposite of GPUs.
 
@@ -246,14 +220,11 @@ Conv2D AI: ~50 FLOPS/byte → compute-bound
 GPU (H100): 989 TFLOPS / 3.35 TB/s = 295 FLOPS/byte → memory-bound
 MCUs are the mirror image of GPUs on the roofline
 ```
-
 </details>
 
-### 🟣 L6+ The Ghost in the Dashboard
-
-> 100,000 vehicles with Cortex-M4 voice assistants. After a year, humid-climate devices activate randomly. Design an OTA fix within 20% free Flash/SRAM.
-
-<details><summary>Model Answer</summary>
+<details>
+<summary><b>🟣 L6+ &nbsp; The Ghost in the Dashboard</b></summary>
+<blockquote>100,000 vehicles with Cortex-M4 voice assistants. After a year, humid-climate devices activate randomly. Design an OTA fix within 20% free Flash/SRAM.</blockquote>
 
 Three components within the resource budget: (1) Lightweight drift detector — running mean/variance on audio energy, 12 bytes SRAM. (2) Circuit breaker — if drift exceeds threshold, suppress activations and log diagnostics. (3) Diagnostic reporter — 16-bin histogram per event, store 100 records in Flash. Total: ~10KB Flash (5% of budget), <1KB SRAM.
 
@@ -265,16 +236,13 @@ Circuit breaker: 32B Flash
 Diagnostics: 76B × 100 records = 7.6KB Flash
 Total: ~10KB Flash, <1KB SRAM — well within budget
 ```
-
 </details>
 
 ### 🌐 Global
 
-### 🟢 L2 InfiniBand vs Ethernet for Training
-
-> Why do large-scale LLM training clusters prefer InfiniBand over Ethernet?
-
-<details><summary>Model Answer</summary>
+<details>
+<summary><b>🟢 L2 &nbsp; InfiniBand vs Ethernet for Training</b></summary>
+<blockquote>Why do large-scale LLM training clusters prefer InfiniBand over Ethernet?</blockquote>
 
 Three properties beyond raw bandwidth: (1) RDMA — GPU memory read/written directly over the network, bypassing CPU and OS kernel. Latency drops from ~50μs (TCP/IP) to ~1-2μs. (2) Lossless fabric — credit-based flow control guarantees zero packet loss, critical for AllReduce correctness. (3) Adaptive routing — hardware-level load balancing across multiple paths reduces congestion.
 
@@ -284,14 +252,11 @@ InfiniBand RDMA: 1GB/(50 GB/s) + 2μs × log₂(1024) = ~20ms
 Ethernet TCP: 1GB/(50 GB/s) + 50μs × log₂(1024) + retransmit risk = 30-150ms
 InfiniBand: 2-7× lower tail latency
 ```
-
 </details>
 
-### 🟠 L4 Mysterious 15% Throughput Drop at Noon
-
-> Your 64-GPU cluster shows 15% lower throughput between 11 AM and 3 PM. GPU utilization stays at 98%. No other jobs running. What is happening?
-
-<details><summary>Model Answer</summary>
+<details>
+<summary><b>🟠 L4 &nbsp; Mysterious 15% Throughput Drop at Noon</b></summary>
+<blockquote>Your 64-GPU cluster shows 15% lower throughput between 11 AM and 3 PM. GPU utilization stays at 98%. No other jobs running. What is happening?</blockquote>
 
 Thermal throttling. The data center's cooling struggles during peak afternoon heat. When GPU junction temperature exceeds 83°C (A100 throttle point), the GPU reduces clock frequency. Clock drops from 1410 MHz to 1200 MHz = exactly 15% reduction. The GPU reports 98% utilization because it's still busy — just at a lower clock.
 
@@ -302,14 +267,11 @@ Afternoon: ambient +8°C → junction hits 83°C → throttle
 Fix: lower power limit from 400W to 350W → 5°C drop → no throttle
 Net result: +3% vs current daytime (lose 12.5% power but gain back 15% clock)
 ```
-
 </details>
 
-### 🟣 L6+ The Agentic Memory Architecture
-
-> Design a memory system for a coding agent that maintains context across a multi-hour session with 500K tokens of history.
-
-<details><summary>Model Answer</summary>
+<details>
+<summary><b>🟣 L6+ &nbsp; The Agentic Memory Architecture</b></summary>
+<blockquote>Design a memory system for a coding agent that maintains context across a multi-hour session with 500K tokens of history.</blockquote>
 
 Three-tier memory: (1) Working memory (<8K tokens) — current file, last 2-3 tool results, current plan. Managed programmatically, not by the LLM. (2) Episodic memory (vector DB) — summarized past interactions, indexed by embedding. Retrieved via semantic search when relevant. (3) Persistent memory (key-value store) — facts, decisions, file states. Never evicted, always available.
 
@@ -319,13 +281,12 @@ Tiered: 8K tokens/turn × $0.003/1K = $0.024/turn
 Compression ratio: 62.5×
 Cost reduction: 98.4%
 ```
-
 </details>
 
 ---
 
 <p align="center">
-  <b>👆 These are 15 of 5,700+ questions.</b><br>
+  <b>These are 15 of 5,700+ questions.</b><br>
   <a href="staffml/">Explore the full vault →</a>
 </p>
 

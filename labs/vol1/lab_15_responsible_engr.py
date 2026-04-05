@@ -113,7 +113,7 @@ def _(COLORS, mo):
                     &mdash; the first 10pp gap reduction costs 3&ndash;5% accuracy (sweet spot);
                     the last 5pp costs 10%+ (cliff).</div>
                 <div style="margin-bottom: 3px;">3. <strong>Calculate explanation overhead</strong>
-                    &mdash; SHAP with 50 features adds 50x latency to each prediction.</div>
+                    &mdash; SHapley Additive exPlanations (SHAP) with 50 features adds 50x latency to each prediction.</div>
             </div>
         </div>
         <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
@@ -123,8 +123,8 @@ def _(COLORS, mo):
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                     Prerequisites</div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Classification metrics from @sec-model-training &middot;
-                    Model serving SLOs from @sec-model-serving</div>
+                    Classification metrics from the Training chapter &middot;
+                    Model serving Service Level Objectives (SLOs) from the Model Serving chapter</div>
             </div>
             <div style="flex: 0 0 180px;">
                 <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
@@ -160,7 +160,7 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** &mdash; Complete before this lab:
 
-    - **@sec-responsible-engineering** &mdash; Chouldechova impossibility theorem,
+    - **The Responsible Engineering chapter** &mdash; Chouldechova impossibility theorem,
       fairness-accuracy Pareto frontier, explainability methods, and carbon accounting.
     """), kind="info")
     return
@@ -180,7 +180,7 @@ def _(COLORS, H100_TDP_W, JETSON_TDP_W, apply_plotly_theme, go, math, mo, np):
             "C) No -- Group B FPR is 3x higher despite equal accuracy": "3x",
             "D) No -- Group A FPR is higher (more positives)": "a_higher",
         },
-        label="Loan model: 92% accuracy for both groups. Group A base rate 30%, Group B 10%. FPR equal?",
+        label="Loan model: 92% accuracy for both groups. Group A base rate 30%, Group B 10%. False Positive Rate (FPR) equal?",
     )
     return (partA_pred,)
 
@@ -222,9 +222,9 @@ def _(mo, partB_pred):
     partC_pred = mo.ui.radio(
         options={
             "A) ~2x (modest overhead)": "2x",
-            "B) ~10x (significant but manageable)": "10x",
-            "C) ~50x (one forward pass per feature)": "50x",
-            "D) ~2500x (all permutation subsets)": "2500x",
+            "B) ~10x (noticeable but manageable)": "10x",
+            "C) ~50x (scales with feature count)": "50x",
+            "D) ~2500x (exponential in features)": "2500x",
         },
         label="Loan model has 50 features. How much does SHAP add to inference latency?",
     )
@@ -287,7 +287,7 @@ def _(mo, partD_pred):
 ## The Chouldechova Impossibility Theorem
 
 When **base rates differ** between groups, a calibrated classifier cannot simultaneously
-satisfy equal FPR, equal FNR, and equal PPV. Equal accuracy does **not** mean equal
+satisfy equal FPR, equal False Negative Rate (FNR), and equal Positive Predictive Value (PPV). Equal accuracy does **not** mean equal
 treatment. This is a mathematical impossibility, not an engineering limitation.
 
 The key: accuracy = (TP + TN) / total. With different base rates, the composition
@@ -422,6 +422,24 @@ PPV gap:       {abs(_ma['ppv']-_mb['ppv']):.1f} pp
                 f"**The FPR gap is {_fpr_gap:.1f} pp despite equal accuracy.** "
                 "Different base rates force different error distributions."), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Chouldechova Impossibility": mo.md("""
+**Theorem (Chouldechova, 2017):**
+
+When base rates differ between groups ($b_A \\neq b_B$), it is **impossible** to simultaneously equalize:
+
+$$
+\\text{FPR}_A = \\text{FPR}_B, \\quad \\text{FNR}_A = \\text{FNR}_B, \\quad \\text{PPV}_A = \\text{PPV}_B
+$$
+
+**Variables:**
+- **FPR**: False Positive Rate &mdash; $P(\\hat{Y}=1 \\mid Y=0)$
+- **FNR**: False Negative Rate &mdash; $P(\\hat{Y}=0 \\mid Y=1)$
+- **PPV**: Positive Predictive Value &mdash; $P(Y=1 \\mid \\hat{Y}=1)$
+- **$b_A, b_B$**: base rates (prevalence) for each group &mdash; when these differ, equalizing any two metrics forces the third to diverge
+""")
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -540,6 +558,20 @@ Cliff (gap=0pp):      ~{_k * (3.0 + 2.0):.1f} pp accuracy cost
                 f"**The accuracy cost is ~{_curr_loss:.1f} pp.** The Pareto frontier "
                 "is concave: first gains are cheap, strict equality is expensive."), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: Price of Fairness (Pareto Frontier)": mo.md("""
+**Formula:**
+$$
+\\text{Accuracy\\_cost} = f\\bigl(\\Delta_{\\text{fairness}}\\bigr) \\quad \\text{where the frontier is concave}
+$$
+
+**Variables:**
+- **$\\Delta_{\\text{fairness}}$**: reduction in the fairness gap (e.g., FPR difference between groups)
+- **Accuracy\\_cost**: accuracy points sacrificed to achieve that gap reduction
+- **Knee point**: the sweet spot on the Pareto frontier where marginal cost of fairness is lowest &mdash; beyond it, each additional pp of gap reduction costs disproportionately more accuracy
+""")
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -554,7 +586,7 @@ Cliff (gap=0pp):      ~{_k * (3.0 + 2.0):.1f} pp accuracy cost
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
                 Regulatory Requirement &middot; Compliance Team, EquiLend</div>
             <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Under ECOA, denied applicants must receive an explanation of which factors
+                &ldquo;Under the Equal Credit Opportunity Act (ECOA), denied applicants must receive an explanation of which factors
                 contributed to the decision. How much compute does this cost?&rdquo;</div>
         </div>"""))
 
@@ -569,7 +601,7 @@ Explanation latency = N_features * base_inference_latency
 ```
 
 Exact SHAP requires 2^N evaluations (infeasible for N > 30).
-LIME uses ~100 samples (fixed). Feature importance is free (~1x).
+Local Interpretable Model-agnostic Explanations (LIME) uses ~100 samples (fixed). Feature importance is free (~1x).
         """))
 
         items.append(partC_pred)
@@ -659,6 +691,20 @@ LIME uses ~100 samples (fixed). Feature importance is free (~1x).
                 f"**SHAP overhead = {_nf}x.** Each feature requires a separate "
                 "model evaluation to compute its marginal contribution."), kind="warn"))
 
+        items.append(mo.accordion({
+            "Math Peek: SHAP Explainability Overhead": mo.md("""
+**Formula:**
+$$
+\\text{Latency}_{\\text{SHAP}} = N_{\\text{features}} \\times T_{\\text{base}}
+$$
+
+**Variables:**
+- **$N_{\\text{features}}$**: number of input features requiring explanation
+- **$T_{\\text{base}}$**: latency of a single model forward pass
+- **Latency$_{\\text{SHAP}}$**: total explanation time per prediction &mdash; SHAP requires one forward pass per feature to estimate each feature's marginal contribution
+""")
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -677,6 +723,25 @@ LIME uses ~100 samples (fixed). Feature importance is free (~1x).
                 for all denied applications. What is the annual carbon footprint compared
                 to our baseline model that was trained once?&rdquo;</div>
         </div>"""))
+
+        items.append(mo.md("""
+## The Carbon Accounting of Responsible AI
+
+Every intervention in the responsible AI stack has an energy cost:
+
+- **Retraining** consumes GPU-hours. Weekly retraining is 52x the baseline of train-once.
+- **SHAP explanations** require N additional forward passes per explained prediction.
+  For 10M annual predictions at 10% coverage, that is 1M extra inference calls.
+- **Grid carbon intensity** transforms energy into emissions: hydro grids (20 gCO2/kWh)
+  produce 40x less carbon than coal grids (800 gCO2/kWh) for identical workloads.
+
+The question is not whether to pay this cost -- regulation and ethics demand it.
+The question is: **how large is the carbon multiplier, and how do you budget it?**
+
+```
+Annual carbon = (retrains/yr * train_energy + explanations * serve_energy) * grid_intensity
+```
+        """))
 
         items.append(partD_pred)
         if partD_pred.value is None:
@@ -781,6 +846,20 @@ Responsible AI:
             f"you must retrain in the cloud and deploy to the edge, adding OTA update costs."
         ), kind="info"))
 
+        items.append(mo.accordion({
+            "Math Peek: Carbon Accounting": mo.md("""
+**Formula:**
+$$
+\\text{Carbon}_{\\text{kg}} = \\frac{E_{\\text{kWh}} \\times G_{\\text{gCO}_2/\\text{kWh}}}{1000}
+$$
+
+**Variables:**
+- **$E_{\\text{kWh}}$**: energy consumed (training + serving + explanation overhead)
+- **$G_{\\text{gCO}_2/\\text{kWh}}$**: grid carbon intensity in grams CO2 per kWh (varies by region)
+- **Carbon$_{\\text{kg}}$**: total carbon emissions in kilograms &mdash; fairness and explainability add energy overhead that compounds into measurable carbon cost
+""")
+        }))
+
         return mo.vstack(items)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -804,16 +883,37 @@ Responsible AI:
                 "SHAP adds Nx latency (N = features). Weekly retraining adds 52x carbon. "
                 "These costs are not optional under regulation."
             ), kind="info"),
-            mo.md("""
-## Connections
-
-**Textbook:** @sec-responsible-engineering &mdash; impossibility theorems,
-fairness-accuracy trade-offs, explainability methods, carbon accounting.
-
-**TinyTorch:** Module 15 &mdash; implement SHAP explanations from scratch.
-
-**Next Lab:** Lab 16 is the capstone &mdash; every invariant from 15 labs
-collapses into one deployment decision.
+            mo.Html(f"""
+            <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        What's Next
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Lab 16: Capstone</strong> -- Every invariant from 15 labs
+                        collapses into one deployment decision. You will trace a single
+                        model from arithmetic intensity through fairness constraints and
+                        discover which constraint actually binds.
+                    </div>
+                </div>
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        Textbook &amp; TinyTorch
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Read:</strong> the Responsible Engineering chapter for impossibility
+                        theorems, fairness-accuracy trade-offs, and carbon accounting.<br/>
+                        <strong>Build:</strong> TinyTorch Module 15 -- implement SHAP
+                        explanations from scratch.
+                    </div>
+                </div>
+            </div>
             """),
         ])
 
@@ -834,12 +934,17 @@ collapses into one deployment decision.
 # ===========================================================================
 
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
+def _(COLORS, ledger, mo, partA_pred, partB_pred, partC_pred, partD_pred):
     _track = ledger.get_track()
-    ledger.save(chapter=15, design={
-        "chapter": "v1_15",
-        "completed": True,
-    })
+    if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None:
+        ledger.save(chapter=15, design={
+            "chapter": "v1_15",
+            "impossibility_theorem_understood": True,
+            "fairness_accuracy_tradeoff": "pareto_frontier",
+            "explainability_latency_cost": "Nx_features",
+            "carbon_multiplier_from_retraining": "52x",
+            "completed": True,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">

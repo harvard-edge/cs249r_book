@@ -14,6 +14,7 @@ DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 0
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -69,7 +70,7 @@ class TestConvolutionCore:
             conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
             
             # Input: (batch, channels, height, width)
-            x = Tensor(np.random.randn(2, 3, 32, 32))
+            x = Tensor(rng.standard_normal((2, 3, 32, 32)))
             
             output = conv(x)
             
@@ -101,7 +102,7 @@ class TestConvolutionCore:
             
             pool = MaxPool2d(kernel_size=2)
             
-            x = Tensor(np.random.randn(2, 16, 32, 32))
+            x = Tensor(rng.standard_normal((2, 16, 32, 32)))
             
             output = pool(x)
             
@@ -129,7 +130,7 @@ class TestConvWithPriorModules:
             conv = Conv2d(3, 16, kernel_size=3, padding=1)
             relu = ReLU()
             
-            x = Tensor(np.random.randn(2, 3, 16, 16))
+            x = Tensor(rng.standard_normal((2, 3, 16, 16)))
             
             conv_out = conv(x)
             activated = relu(conv_out)
@@ -161,7 +162,7 @@ class TestConvWithPriorModules:
             fc = Linear(16 * 16 * 16, 10)
             
             # Forward pass
-            x = Tensor(np.random.randn(2, 3, 32, 32))
+            x = Tensor(rng.standard_normal((2, 3, 32, 32)))
             
             conv_out = relu(conv(x))
             pooled = pool(conv_out)
@@ -185,7 +186,7 @@ class TestConvWithPriorModules:
             from tinytorch.core.tensor import Tensor
             
             # Image dataset
-            images = Tensor(np.random.randn(20, 3, 16, 16))
+            images = Tensor(rng.standard_normal((20, 3, 16, 16)))
             labels = Tensor(np.arange(20).astype(float))
             
             dataset = TensorDataset(images, labels)
@@ -211,7 +212,7 @@ class TestConvWithPriorModules:
             
             conv = Conv2d(3, 8, kernel_size=3, padding=1)
             
-            x = Tensor(np.random.randn(2, 3, 8, 8), requires_grad=True)
+            x = Tensor(rng.standard_normal((2, 3, 8, 8)), requires_grad=True)
             
             out = conv(x)
             
@@ -256,7 +257,7 @@ class TestCNNArchitecture:
             relu = ReLU()
             
             # Forward
-            x = Tensor(np.random.randn(4, 1, 28, 28))
+            x = Tensor(rng.standard_normal((4, 1, 28, 28)))
             
             h = relu(conv1(x))
             h = pool1(h)
@@ -298,8 +299,8 @@ class TestCNNArchitecture:
             loss_fn = MSELoss()
             
             # Training step
-            x = Tensor(np.random.randn(2, 3, 16, 16))
-            target = Tensor(np.random.randn(2, 5))
+            x = Tensor(rng.standard_normal((2, 3, 16, 16)))
+            target = Tensor(rng.standard_normal((2, 5)))
             
             # Forward
             h = relu(conv(x))
@@ -352,7 +353,7 @@ class TestRegressionPrevention:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             layer = Linear(4, 2)
-            x = Tensor(np.random.randn(2, 4))
+            x = Tensor(rng.standard_normal((2, 4)))
             y = layer(x)
             assert y.shape == (2, 2)
         except Exception as e:
@@ -376,7 +377,7 @@ class TestRegressionPrevention:
         try:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.dataloader import TensorDataset, DataLoader
-            data = Tensor(np.random.randn(10, 3))
+            data = Tensor(rng.standard_normal((10, 3)))
             targets = Tensor(np.arange(10).astype(float))
             dataset = TensorDataset(data, targets)
             dataloader = DataLoader(dataset, batch_size=2)
@@ -418,8 +419,8 @@ class TestRegressionPrevention:
             loss_fn = MSELoss()
             opt = SGD(layer.parameters(), lr=0.1)
             
-            x = Tensor(np.random.randn(2, 4))
-            y = Tensor(np.random.randn(2, 2))
+            x = Tensor(rng.standard_normal((2, 4)))
+            y = Tensor(rng.standard_normal((2, 2)))
             
             pred = layer(x)
             loss = loss_fn(pred, y)
@@ -462,7 +463,7 @@ class TestModule09Completion:
             
             # Test 2: Conv2d forward
             conv = Conv2d(3, 8, kernel_size=3, padding=1)
-            x = Tensor(np.random.randn(2, 3, 16, 16))
+            x = Tensor(rng.standard_normal((2, 3, 16, 16)))
             out = conv(x)
             if out.shape == (2, 8, 16, 16):
                 capabilities["Conv2d forward works"] = True

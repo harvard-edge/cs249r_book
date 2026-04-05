@@ -12,6 +12,7 @@ import webbrowser
 import uuid
 from pathlib import Path
 from typing import Optional, Dict
+import urllib.parse
 from urllib.parse import urlparse, parse_qs
 
 import certifi
@@ -220,7 +221,8 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
 
             # Redirect to the branded "Logged In" page
             user_email = self.server.auth_data['user_email']
-            redirect_url = f"{API_BASE_URL}/cli/logged-in?email={user_email}"
+            safe_email = urllib.parse.quote(user_email.replace('\r', '').replace('\n', ''), safe='@.')
+            redirect_url = f"{API_BASE_URL}/cli/logged-in?email={safe_email}"
 
             self.send_response(302)
             self.send_header('Location', redirect_url)

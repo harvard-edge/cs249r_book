@@ -17,6 +17,7 @@ WHAT STUDENTS LEARN:
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import pytest
 import sys
 from pathlib import Path
@@ -40,8 +41,8 @@ class TestDataLoaderBasics:
         STUDENT LEARNING: DataLoader is iterable - use it in for loops.
         """
         # Simple dataset
-        X = np.random.randn(100, 10)
-        y = np.random.randint(0, 2, 100).astype(np.float32)
+        X = rng.standard_normal((100, 10))
+        y = rng.integers(0, 2, 100).astype(np.float32)
 
         dataset = TensorDataset(Tensor(X), Tensor(y))
         loader = DataLoader(dataset, batch_size=16)
@@ -61,8 +62,8 @@ class TestDataLoaderBasics:
         STUDENT LEARNING: Common batch sizes: 16, 32, 64, 128.
         Start small if memory is limited.
         """
-        X = np.random.randn(100, 10)
-        y = np.random.randint(0, 2, 100).astype(np.float32)
+        X = rng.standard_normal((100, 10))
+        y = rng.integers(0, 2, 100).astype(np.float32)
 
         dataset = TensorDataset(Tensor(X), Tensor(y))
         loader = DataLoader(dataset, batch_size=32)

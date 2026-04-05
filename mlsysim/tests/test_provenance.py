@@ -35,7 +35,8 @@ def test_system_assumption_preserves_metadata():
     
     md = assump.render_markdown()
     assert "Test MFU" in md
-    assert "https://example.com" in md
+    expected_url = "https://example.com"
+    assert expected_url in md
     assert "0.5" in md
 
 def test_system_assumption_with_pint():

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Nav from "@/components/Nav";
+import EcosystemBar from "@/components/EcosystemBar";
 import Providers from "@/components/Providers";
 
 export const metadata: Metadata = {
@@ -36,10 +37,11 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <meta httpEquiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; connect-src 'self' https://api.github.com https://mlsysbook.ai https://harvard-edge.github.io; img-src 'self' data: https://mlsysbook.ai https://harvard-edge.github.io; frame-ancestors 'none';" />
         <script dangerouslySetInnerHTML={{ __html: `
           (function() {
             var t = localStorage.getItem('staffml_theme');
-            if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            if (!t) t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
             document.documentElement.dataset.theme = t;
           })();
         `}} />
@@ -49,6 +51,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-screen flex flex-col bg-background selection:bg-accentBlue/30 selection:text-textPrimary">
         <Providers>
+          <EcosystemBar />
           <Nav />
           <main className="flex-1 flex flex-col">{children}</main>
         </Providers>

@@ -100,7 +100,7 @@ def _(COLORS, LAB_CSS, mo):
                 <span class="badge badge-info">Pollaczek-Khinchine Formula</span>
                 <span class="badge badge-info">GPU Fragmentation</span>
                 <span class="badge badge-info">Utilization Paradox</span>
-                <span class="badge badge-warn">35&ndash;40 minutes &middot; 2 Parts</span>
+                <span class="badge badge-warn">45&ndash;55 minutes &middot; 4 Parts + Synthesis</span>
             </div>
         </div>
     </div>
@@ -136,8 +136,8 @@ def _(mo, COLORS):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Queuing theory basics from @sec-fleet-orchestration &middot;
-                    Bandwidth hierarchy from @sec-collective-communication
+                    Queuing theory basics from the Fleet Orchestration chapter &middot;
+                    Bandwidth hierarchy from the Communication chapter
                 </div>
             </div>
             <div style="flex: 0 0 180px;">
@@ -175,7 +175,7 @@ def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** -- Complete before this lab:
 
-    - **@sec-fleet-orchestration** -- GPU scheduling, heavy-tailed distributions
+    - **The Fleet Orchestration chapter** -- GPU scheduling, heavy-tailed distributions
     - The Queuing Theory section -- Pollaczek-Khinchine formula, coefficient of variation
     - The Fragmentation section -- Gang scheduling, multi-dimensional bin packing
     - The Scheduling Policy section -- Utilization vs fairness vs latency trade-off
@@ -1351,7 +1351,7 @@ def _(
                     Textbook &amp; TinyTorch
                 </div>
                 <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> @sec-fleet-orchestration for queuing theory, fragmentation analysis,
+                    <strong>Read:</strong> the Fleet Orchestration chapter for queuing theory, fragmentation analysis,
                     and scheduling policy trade-offs.<br/>
                     <strong>Build:</strong> TinyTorch scheduler module &mdash; implement a basic
                     gang scheduler with backfill in <code>tinytorch/src/scheduler/</code>.

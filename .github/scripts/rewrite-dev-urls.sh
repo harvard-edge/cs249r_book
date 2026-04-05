@@ -31,6 +31,7 @@ declare -A SUBSITES=(
   [slides]="slides"
   [instructors]="instructors"
   [interviews]="interviews"
+  [staffml]="staffml"
   [newsletter]="newsletter"
   [community]="community"
   [about]="about"

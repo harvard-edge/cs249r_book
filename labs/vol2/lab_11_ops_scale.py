@@ -193,7 +193,7 @@ def _(COLORS, mo):
                     Prerequisites
                 </div>
                 <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    ML deployment pipelines from @sec-ml-operations-scale &middot;
+                    ML deployment pipelines from the ML Operations at Scale chapter &middot;
                     Statistical significance and hypothesis testing basics
                 </div>
             </div>
@@ -232,7 +232,7 @@ def _(mo):
     **Recommended Reading** &mdash; Complete before this lab:
 
     - **Operational Complexity Scaling** &mdash; How alerts grow O(N), coordination O(N log N),
-      and dependencies O(N^2) with model count (@sec-ml-operations-scale).
+      and dependencies O(N^2) with model count (the ML Operations at Scale chapter).
     - **Silent Model Regression** &mdash; Why model failures produce no errors or crashes.
     - **Staged Rollout Strategies** &mdash; Canary deployments and observation window math.
     - **Fleet-Scale Monitoring** &mdash; False alarm rates and hierarchical aggregation.
@@ -382,6 +382,21 @@ def _(
     def build_part_a():
         items = []
 
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; SRE Lead, Nimbus Health</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;We started with 3 models and 12 alert rules. Now we run 40 models and my team maintains
+        over 600 alerts. Half of them fire every week and nobody reads them anymore. How does operational
+        complexity actually scale with fleet size &mdash; linearly, or is there a combinatorial explosion hiding in there?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; David Okonkwo, SRE Lead &middot; Nimbus Health</div>
+</div>
+"""))
+
         # Part header
         items.append(mo.Html(f"""
         <div id="part-a" style="margin: 32px 0 12px 0;">
@@ -515,6 +530,24 @@ Total        = {_cur_total:,.0f} hrs/yr  (capacity: {TEAM_CAPACITY_HOURS:,})
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
 
+        items.append(mo.accordion({
+            "Math Peek: Alert Complexity Scaling": mo.md("""
+**Formula:**
+$$
+\\text{Alerts} = N_{\\text{models}} \\times M_{\\text{metrics}} \\times K_{\\text{thresholds}}
+$$
+
+**Variables:**
+- **$N_{\\text{models}}$**: number of models in production
+- **$M_{\\text{metrics}}$**: monitored metrics per model (latency, accuracy, drift, etc.)
+- **$K_{\\text{thresholds}}$**: alert thresholds per metric (warn, critical, page)
+
+The combinatorial explosion is why operational load scales superlinearly: each new model
+adds not just its own alerts but also new cross-model dependency checks ($O(N^2)$) and
+coordination overhead ($O(N \\log N)$).
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -523,6 +556,21 @@ Total        = {_cur_total:,.0f} hrs/yr  (capacity: {TEAM_CAPACITY_HOURS:,})
 
     def build_part_b():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; ML Platform Engineer, Nimbus Health</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;Last quarter a model silently drifted for 11 days before anyone noticed &mdash; the accuracy drop cost us
+        $2.3M in misrouted claims. Our dashboards were all green the entire time. How do we even quantify
+        the cost of failures that never trigger an alert?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Amara Osei, ML Platform Engineer &middot; Nimbus Health</div>
+</div>
+"""))
 
         # Part header
         items.append(mo.Html(f"""
@@ -641,6 +689,25 @@ Detection latency is a {_detect_hrs}x cost multiplier:
 *Source: @sec-ml-operations-scale-staged-rollout-strategies-2d1f*
 """))
 
+        items.append(mo.accordion({
+            "Math Peek: Silent Failure Cost": mo.md("""
+**Formula:**
+$$
+\\text{Cost} = R_{\\text{hour}} \\times T_{\\text{undetected}} \\times N_{\\text{affected}}
+$$
+
+where $R_{\\text{hour}} = \\text{QPS} \\times 3600 \\times \\Delta\\text{CTR} \\times \\text{Rev}_{\\text{click}}$
+
+**Variables:**
+- **$R_{\\text{hour}}$**: revenue loss per hour from a single degraded model
+- **$T_{\\text{undetected}}$**: hours before detection (the **cost multiplier**)
+- **$N_{\\text{affected}}$**: number of models exhibiting the same silent regression
+
+Detection latency, not regression magnitude, is the dominant cost driver. A 0.5%
+drop detected in 1 hour costs \\$45K; the same drop detected in 24 hours costs \\$1.08M.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -649,6 +716,21 @@ Detection latency is a {_detect_hrs}x cost multiplier:
 
     def build_part_c():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; Platform Architect, Nimbus Health</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;My VP wants to build a full internal MLOps platform. The vendor quotes $480K/year but our
+        custom prototype already took 6 engineer-months. At what fleet size does building our own
+        actually break even, or are we just burning runway on undifferentiated infrastructure?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Raj Patel, Platform Architect &middot; Nimbus Health</div>
+</div>
+"""))
 
         # Part header
         items.append(mo.Html(f"""
@@ -752,6 +834,24 @@ Break-even: ${_plat_cost:,} / ${PER_MODEL_SAVINGS:,} = {_breakeven} models
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
 
+        items.append(mo.accordion({
+            "Math Peek: Platform Breakeven": mo.md("""
+**Formula:**
+$$
+N_{\\text{breakeven}} = \\frac{C_{\\text{platform}}}{S_{\\text{model}} \\times N_{\\text{models}}} \\quad \\Rightarrow \\quad N_{\\text{breakeven}} = \\frac{C_{\\text{platform}}}{S_{\\text{model}}}
+$$
+
+**Variables:**
+- **$C_{\\text{platform}}$**: annual platform cost (\\$2M/year)
+- **$S_{\\text{model}}$**: per-model operational savings from centralization (\\$100K/year)
+- **$N_{\\text{models}}$**: number of models on the platform
+
+At $N < N_{\\text{breakeven}}$, the platform is a cost center. At $N > N_{\\text{breakeven}}$,
+savings compound linearly while platform cost stays fixed. The platform also reduces
+dependency scaling from $O(N^2)$ to $O(N \\log N)$.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -760,6 +860,21 @@ Break-even: ${_plat_cost:,} / ${PER_MODEL_SAVINGS:,} = {_breakeven} models
 
     def build_part_d():
         items = []
+
+        items.append(mo.Html(f"""
+<div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+            border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        Incoming Message &middot; VP of Finance, Nimbus Health</div>
+    <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+        &ldquo;Engineering tells me canary deployments add safety, but every hour in canary is an hour
+        we are running two model versions in parallel. What is the minimum canary duration that
+        actually catches regressions, and how much does each extra hour of caution cost us?&rdquo;</div>
+    <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+        &mdash; Christine Muller, VP of Finance &middot; Nimbus Health</div>
+</div>
+"""))
 
         # Part header
         items.append(mo.Html(f"""
@@ -868,6 +983,24 @@ Total 5-stage rollout: {_total_rollout:.1f} hours
             _kind = "warn"
         items.append(mo.callout(mo.md(_msg), kind=_kind))
 
+        items.append(mo.accordion({
+            "Math Peek: Canary Observation Window": mo.md("""
+**Formula:**
+$$
+T_{\\text{canary}} = \\max\\!\\left(T_{\\text{detect}},\\; T_{\\text{confidence}}\\right) = \\max\\!\\left(\\frac{N_{\\text{samples}}}{r_{\\text{req}} \\times p_{\\text{canary}}},\\; T_{\\text{stat}}\\right)
+$$
+
+**Variables:**
+- **$N_{\\text{samples}}$**: minimum samples for statistical significance (e.g., 10,000)
+- **$r_{\\text{req}}$**: total request rate (requests/hour)
+- **$p_{\\text{canary}}$**: fraction of traffic routed to canary (e.g., 0.01 for 1%)
+- **$T_{\\text{stat}}$**: minimum time for statistical test convergence
+
+At 1% canary with 1M req/hour, only 10K req/hour reach the canary. Accumulating 10K
+samples takes exactly 1 hour -- far longer than most engineers expect.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -968,6 +1101,25 @@ False alerts/day     = {_total_monitors:.0f} x {_fpr} x {_checks_per_day:.0f} = 
 *Source: @eq-false-alert-rate*
 """))
 
+        items.append(mo.accordion({
+            "Math Peek: Alert Fatigue Rate": mo.md("""
+**Formula:**
+$$
+F_{\\text{day}} = N_{\\text{models}} \\times M_{\\text{metrics}} \\times P(\\text{false alarm}) \\times \\frac{1440}{\\Delta t}
+$$
+
+**Variables:**
+- **$N_{\\text{models}}$**: models in the fleet
+- **$M_{\\text{metrics}}$**: monitored metrics per model
+- **$P(\\text{false alarm})$**: per-check false positive rate (0.27% at 3-sigma)
+- **$\\Delta t$**: check interval in minutes (e.g., 5 min)
+
+At 100 models, 10 metrics, 3-sigma, checked every 5 minutes:
+$100 \\times 10 \\times 0.0027 \\times 288 = 778$ false alerts/day -- far exceeding
+the ~50/day human processing capacity.
+""")
+        }))
+
         return mo.vstack(items)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1030,7 +1182,7 @@ False alerts/day     = {_total_monitors:.0f} x {_fpr} x {_checks_per_day:.0f} = 
                     <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
                                 text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">Textbook &amp; TinyTorch</div>
                     <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> @sec-ml-operations-scale for full derivations.<br/>
+                        <strong>Read:</strong> the ML Operations at Scale chapter for full derivations.<br/>
                         <strong>Build:</strong> TinyTorch monitoring module &mdash; implement canary
                         deployment with statistical significance testing.
                     </div>

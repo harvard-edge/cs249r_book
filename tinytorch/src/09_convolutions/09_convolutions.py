@@ -60,6 +60,7 @@ from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 import time
 
 from tinytorch.core.tensor import Tensor
@@ -627,7 +628,7 @@ class Conv2d:
         std = np.sqrt(2.0 / fan_in)
 
         # Weight shape: (out_channels, in_channels, kernel_h, kernel_w)
-        self.weight = Tensor(np.random.normal(0, std,
+        self.weight = Tensor(rng.normal(0, std,
                            (out_channels, in_channels, kernel_h, kernel_w)),
                            requires_grad=True)
 
@@ -772,7 +773,7 @@ class Conv2d:
 
         EXAMPLE:
         >>> conv = Conv2d(3, 16, kernel_size=3, padding=1)
-        >>> x = Tensor(np.random.randn(2, 3, 32, 32))  # batch=2, RGB, 32x32
+        >>> x = Tensor(rng.standard_normal((2, 3, 32, 32)))  # batch=2, RGB, 32x32
         >>> out = conv(x)
         >>> print(out.shape)  # Should be (2, 16, 32, 32)
         """
@@ -1047,7 +1048,7 @@ def test_unit_conv2d():
     # Test 1: Basic convolution without padding
     print("  Testing basic convolution...")
     conv1 = Conv2d(in_channels=3, out_channels=16, kernel_size=3)
-    x1 = Tensor(np.random.randn(2, 3, 32, 32))
+    x1 = Tensor(rng.standard_normal((2, 3, 32, 32)))
     out1 = conv1(x1)
 
     expected_h = (32 - 3) + 1  # 30
@@ -1057,7 +1058,7 @@ def test_unit_conv2d():
     # Test 2: Convolution with padding (same size)
     print("  Testing convolution with padding...")
     conv2 = Conv2d(in_channels=3, out_channels=8, kernel_size=3, padding=1)
-    x2 = Tensor(np.random.randn(1, 3, 28, 28))
+    x2 = Tensor(rng.standard_normal((1, 3, 28, 28)))
     out2 = conv2(x2)
 
     # With padding=1, output should be same size as input
@@ -1066,7 +1067,7 @@ def test_unit_conv2d():
     # Test 3: Convolution with stride
     print("  Testing convolution with stride...")
     conv3 = Conv2d(in_channels=1, out_channels=4, kernel_size=3, stride=2)
-    x3 = Tensor(np.random.randn(1, 1, 16, 16))
+    x3 = Tensor(rng.standard_normal((1, 1, 16, 16)))
     out3 = conv3(x3)
 
     expected_h = (16 - 3) // 2 + 1  # 7
@@ -1454,7 +1455,7 @@ class MaxPool2d:
 
         EXAMPLE:
         >>> pool = MaxPool2d(kernel_size=2, stride=2)
-        >>> x = Tensor(np.random.randn(1, 3, 8, 8))
+        >>> x = Tensor(rng.standard_normal((1, 3, 8, 8)))
         >>> out = pool(x)
         >>> print(out.shape)  # Should be (1, 3, 4, 4)
         """
@@ -1802,7 +1803,7 @@ class AvgPool2d:
 
         EXAMPLE:
         >>> pool = AvgPool2d(kernel_size=2, stride=2)
-        >>> x = Tensor(np.random.randn(1, 3, 8, 8))
+        >>> x = Tensor(rng.standard_normal((1, 3, 8, 8)))
         >>> out = pool(x)
         >>> print(out.shape)  # Should be (1, 3, 4, 4)
         """
@@ -2161,7 +2162,7 @@ class BatchNorm2d:
 
         EXAMPLE:
         >>> bn = BatchNorm2d(16)
-        >>> x = Tensor(np.random.randn(2, 16, 8, 8))
+        >>> x = Tensor(rng.standard_normal((2, 16, 8, 8)))
         >>> y = bn(x)
         >>> print(y.shape)  # (2, 16, 8, 8)
 
@@ -2218,19 +2219,19 @@ def test_unit_batchnorm2d_validate_input():
     bn = BatchNorm2d(num_features=16)
 
     # Valid 4D input should not raise
-    x_valid = Tensor(np.random.randn(2, 16, 8, 8))
+    x_valid = Tensor(rng.standard_normal((2, 16, 8, 8)))
     bn._validate_input(x_valid)  # Should pass silently
 
     # 3D input should raise
     try:
-        bn._validate_input(Tensor(np.random.randn(16, 8, 8)))
+        bn._validate_input(Tensor(rng.standard_normal((16, 8, 8))))
         assert False, "Should have raised ValueError for 3D input"
     except ValueError as e:
         assert "3D" in str(e), f"Error should mention 3D, got: {e}"
 
     # Wrong channel count should raise
     try:
-        bn._validate_input(Tensor(np.random.randn(2, 8, 4, 4)))
+        bn._validate_input(Tensor(rng.standard_normal((2, 8, 4, 4))))
         assert False, "Should have raised ValueError for wrong channels"
     except ValueError as e:
         assert "mismatch" in str(e), f"Error should mention mismatch, got: {e}"
@@ -2255,7 +2256,7 @@ def test_unit_batchnorm2d_get_stats():
     print("🧪 Unit Test: BatchNorm2d._get_stats...")
 
     bn = BatchNorm2d(num_features=4)
-    x = Tensor(np.random.randn(8, 4, 6, 6))
+    x = Tensor(rng.standard_normal((8, 4, 6, 6)))
 
     # Training mode: should return batch stats and update running stats
     bn.train()
@@ -2303,7 +2304,7 @@ def test_unit_batchnorm2d():
     # Test 1: Basic forward pass shape
     print("  Testing basic forward pass...")
     bn = BatchNorm2d(num_features=16)
-    x = Tensor(np.random.randn(4, 16, 8, 8))  # batch=4, channels=16, 8x8
+    x = Tensor(rng.standard_normal((4, 16, 8, 8)))  # batch=4, channels=16, 8x8
     y = bn(x)
 
     assert y.shape == x.shape, f"Output shape should match input, got {y.shape}"
@@ -2314,7 +2315,7 @@ def test_unit_batchnorm2d():
     bn2.train()  # Ensure training mode
 
     # Create input with known statistics per channel
-    x2 = Tensor(np.random.randn(32, 8, 4, 4) * 10 + 5)  # Mean~5, std~10
+    x2 = Tensor(rng.standard_normal((32, 8, 4, 4)) * 10 + 5)  # Mean~5, std~10
     y2 = bn2(x2)
 
     # After normalization, each channel should have mean≈0, std≈1
@@ -2330,7 +2331,7 @@ def test_unit_batchnorm2d():
     initial_running_mean = bn2.running_mean.copy()
 
     # Forward pass updates running stats
-    x3 = Tensor(np.random.randn(16, 8, 4, 4) + 3)  # Offset mean
+    x3 = Tensor(rng.standard_normal((16, 8, 4, 4)) + 3)  # Offset mean
     _ = bn2(x3)
 
     # Running mean should have moved toward batch mean
@@ -2343,7 +2344,7 @@ def test_unit_batchnorm2d():
 
     # Train on some data to establish running stats
     for _ in range(10):
-        x_train = Tensor(np.random.randn(8, 4, 4, 4) * 2 + 1)
+        x_train = Tensor(rng.standard_normal((8, 4, 4, 4)) * 2 + 1)
         _ = bn3(x_train)
 
     saved_running_mean = bn3.running_mean.copy()
@@ -2353,7 +2354,7 @@ def test_unit_batchnorm2d():
     bn3.eval()
 
     # Process different data - running stats should NOT change
-    x_eval = Tensor(np.random.randn(2, 4, 4, 4) * 5)  # Different distribution
+    x_eval = Tensor(rng.standard_normal((2, 4, 4, 4)) * 5)  # Different distribution
     _ = bn3(x_eval)
 
     assert np.allclose(bn3.running_mean, saved_running_mean), \
@@ -2396,7 +2397,7 @@ def test_unit_pooling():
     # Test 1: MaxPool2d basic functionality
     print("  Testing MaxPool2d...")
     maxpool = MaxPool2d(kernel_size=2, stride=2)
-    x1 = Tensor(np.random.randn(1, 3, 8, 8))
+    x1 = Tensor(rng.standard_normal((1, 3, 8, 8)))
     out1 = maxpool(x1)
 
     expected_shape = (1, 3, 4, 4)  # 8/2 = 4
@@ -2405,7 +2406,7 @@ def test_unit_pooling():
     # Test 2: AvgPool2d basic functionality
     print("  Testing AvgPool2d...")
     avgpool = AvgPool2d(kernel_size=2, stride=2)
-    x2 = Tensor(np.random.randn(2, 16, 16, 16))
+    x2 = Tensor(rng.standard_normal((2, 16, 16, 16)))
     out2 = avgpool(x2)
 
     expected_shape = (2, 16, 8, 8)  # 16/2 = 8
@@ -2441,7 +2442,7 @@ def test_unit_pooling():
     # Test 4: Overlapping pooling (stride < kernel_size)
     print("  Testing overlapping pooling...")
     overlap_pool = MaxPool2d(kernel_size=3, stride=1)
-    x4 = Tensor(np.random.randn(1, 1, 5, 5))
+    x4 = Tensor(rng.standard_normal((1, 1, 5, 5)))
     out4 = overlap_pool(x4)
 
     # Output: (5-3)/1 + 1 = 3
@@ -2492,7 +2493,7 @@ def analyze_convolution_complexity():
         conv = Conv2d(in_ch, out_ch, kernel_size=k_size, padding=k_size//2)
 
         # Create input tensor
-        x = Tensor(np.random.randn(*config["input"]))
+        x = Tensor(rng.standard_normal(config["input"]))
 
         # Calculate theoretical FLOPs
         batch, in_channels, h, w = config["input"]
@@ -2871,7 +2872,7 @@ def test_unit_simple_cnn():
     # Test 1: Forward pass with CIFAR-10 sized input
     print("  Testing forward pass...")
     model = SimpleCNN(num_classes=10)
-    x = Tensor(np.random.randn(2, 3, 32, 32))  # Batch of 2, RGB, 32×32
+    x = Tensor(rng.standard_normal((2, 3, 32, 32)))  # Batch of 2, RGB, 32×32
 
     features = model(x)
 
@@ -2898,7 +2899,7 @@ def test_unit_simple_cnn():
     print("  Testing different input sizes...")
 
     # Test with different spatial dimensions
-    x_small = Tensor(np.random.randn(1, 3, 16, 16))
+    x_small = Tensor(rng.standard_normal((1, 3, 16, 16)))
     features_small = model(x_small)
 
     # 16×16 → 8×8 → 4×4, so 32 × 4×4 = 512 features
@@ -2907,7 +2908,7 @@ def test_unit_simple_cnn():
 
     # Test 4: Batch processing
     print("  Testing batch processing...")
-    x_batch = Tensor(np.random.randn(8, 3, 32, 32))
+    x_batch = Tensor(rng.standard_normal((8, 3, 32, 32)))
     features_batch = model(x_batch)
 
     expected_batch = (8, 2048)
@@ -2981,7 +2982,7 @@ def test_module():
     pool2 = AvgPool2d(2, stride=2)
 
     # Process batch of images (training mode)
-    batch_images = Tensor(np.random.randn(4, 3, 32, 32))
+    batch_images = Tensor(rng.standard_normal((4, 3, 32, 32)))
 
     # Forward pass: Conv → BatchNorm → ReLU → Pool (modern pattern)
     x = conv1(batch_images)  # (4, 8, 32, 32)
@@ -3021,7 +3022,7 @@ def test_module():
     bn2.eval()
 
     # Run inference with single sample (would fail with batch stats)
-    single_image = Tensor(np.random.randn(1, 3, 32, 32))
+    single_image = Tensor(rng.standard_normal((1, 3, 32, 32)))
     x = conv1(single_image)
     x = bn1(x)  # Uses running stats, not batch stats
     assert x.shape == (1, 8, 32, 32), f"Single sample inference should work in eval mode"
@@ -3032,7 +3033,7 @@ def test_module():
     print("🧪 Integration Test: Memory efficiency analysis...")
 
     # Compare different pooling strategies (reduced size for faster execution)
-    input_data = Tensor(np.random.randn(1, 16, 32, 32))
+    input_data = Tensor(rng.standard_normal((1, 16, 32, 32)))
 
     # No pooling: maintain spatial size
     conv_only = Conv2d(16, 32, kernel_size=3, padding=1)
@@ -3150,7 +3151,7 @@ def demo_convolutions():
     print("=" * 45)
 
     # Create a simple 8x8 "image" with 1 channel
-    image = Tensor(np.random.randn(1, 1, 8, 8))
+    image = Tensor(rng.standard_normal((1, 1, 8, 8)))
 
     # Conv2d: 1 input channel → 4 feature maps
     conv = Conv2d(in_channels=1, out_channels=4, kernel_size=3)

@@ -1,72 +1,50 @@
-# Scripts Directory
+# Scripts directory
 
-Automation scripts and tools for the Machine Learning Systems textbook.
+Python and shell automation used by the **Machine Learning Systems** textbook tooling. Most behavior is exposed through the **Book Binder** CLI; this tree is the implementation layer.
 
-## Deprecation Note
+## Use Binder first
 
-For workflows now exposed by Binder, prefer `./book/binder ...` commands over direct script execution.
-
-- Validation checks: use `./book/binder validate ...`
-- Maintenance utilities: use `./book/binder maintain ...`
-
-Scripts remain available as internal utilities, but direct invocation is soft-deprecated for Binder-covered tasks.
-
-## Directory Structure
-
-```
-scripts/
-├── common/           Shared base classes, config, logging, validators
-├── content/          Content validation, formatting, and editing tools
-├── docs/             Script documentation
-├── glossary/         Glossary generation and consolidation
-├── images/           Image processing, compression, validation
-├── infrastructure/   CI/CD and Docker utilities
-├── maintenance/      Repo health, image casing, build artifact cleanup
-├── publish/          MIT Press release builder, figure extraction, deployment
-├── socratiQ/         SocratiQ integration
-├── testing/          Debug builds, test runners, linters
-└── utilities/        Footnote analysis, ref auditing, JSON/EPUB validation
-```
-
-## Key Scripts by Task
-
-### Content Editing
-- `content/format_blank_lines.py` - Normalize blank lines in .qmd files
-- `content/format_tables.py` - Format Quarto tables
-- `content/section_splitter.py` - Split chapters into sections for processing
-- `content/relocate_figures.py` - Move figures closer to first reference
-- `content/manage_section_ids.py` - Manage `@sec-` cross-reference IDs
-
-### Validation
-- **Reference check** — `./book/binder validate references` (native CLI; validates .bib vs academic DBs via [hallucinator](https://github.com/gianlucasb/hallucinator)). See [README_REFERENCE_CHECK.md](README_REFERENCE_CHECK.md).
-- `content/check_duplicate_labels.py` - Find duplicate labels
-- `content/check_fig_references.py` - Validate figure references
-- `content/check_unreferenced_labels.py` - Find unused labels
-- `content/validate_citations.py` - Check citation formatting
-- `utilities/validate_epub.py` - Validate EPUB output
-- `utilities/validate_json.py` - Validate JSON files
-
-### Publishing
-- `publish/mit-press-release.sh` - Build MIT Press PDFs (regular or copy-edit)
-- `publish/extract_figures.py` - Extract figure lists for MIT Press submission
-- `publish/publish.sh` - Full release workflow with versioning
-- `publish/render_compress_publish.py` - Render, compress, and publish
-
-### Images
-- `images/compress_images.py` - Compress images for web/PDF
-- `images/validate_image_references.py` - Check image references
-- `images/convert_svg_to_png.py` - SVG to PNG conversion
-
-### Glossary
-- `glossary/build_global_glossary.py` - Build master glossary from chapters
-- `glossary/consolidate_similar_terms.py` - Merge near-duplicate terms
-
-## Usage
-
-All Python scripts use `python3`. Most support `--help` for options.
+From the **repository root**:
 
 ```bash
-python3 book/tools/scripts/content/format_blank_lines.py path/to/file.qmd
-python3 book/tools/scripts/publish/extract_figures.py --vol 1
+./book/binder validate all
+./book/binder maintain repo-health
+./book/binder help
+```
+
+If your shell is already in **`book/`**, use `./binder` instead of `./book/binder`.
+
+Full command list, validation options, and setup: **[`book/docs/BINDER.md`](../docs/BINDER.md)**.
+
+Direct `python3 book/tools/scripts/...` use is for maintenance or cases not wired into Binder yet. Prefer `./book/binder` when a subcommand exists.
+
+## Subfolder docs
+
+| Area | README |
+|------|--------|
+| Content tools | [`content/README.md`](content/README.md) |
+| Images | [`images/README.md`](images/README.md) |
+| Glossary | [`glossary/README.md`](glossary/README.md) |
+| Infra / CI helpers | [`infrastructure/README.md`](infrastructure/README.md) |
+| Utilities | [`utilities/README.md`](utilities/README.md) |
+| Extra script notes | [`docs/README.md`](docs/README.md) |
+
+Other directories (`publish/`, `maintenance/`, `testing/`, `socratiQ/`) are documented here only where needed; see source and `--help` on individual scripts.
+
+## Shell entrypoints (often run outside Binder)
+
+These are common when you need the exact script interface:
+
+```bash
 ./book/tools/scripts/publish/mit-press-release.sh --vol1
+./book/tools/scripts/publish/publish.sh
+./book/tools/scripts/maintenance/run_maintenance.sh
+```
+
+## Python scripts
+
+Use Python 3. Most modules support `--help`:
+
+```bash
+python3 book/tools/scripts/publish/extract_figures.py --help
 ```

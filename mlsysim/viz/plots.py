@@ -239,9 +239,9 @@ def plot_distributed_roofline(fleet_system, workloads=None):
     synchronization exceeds the fleet's bisection bandwidth.
     """
     # 1. PARAMETERS (Fleet Specs)
-    peak_flops = fleet_system.hardware.compute.peak_flops.to("TFLOPs/s").magnitude * fleet_system.num_nodes
+    peak_flops = fleet_system.node.accelerator.compute.peak_flops.to("TFLOPs/s").magnitude * fleet_system.count
     # Bisection Bandwidth (total network capacity for All-Reduce)
-    peak_network_bw = fleet_system.network.bandwidth.to("GB/s").magnitude
+    peak_network_bw = fleet_system.fabric.bandwidth.to("GB/s").magnitude
     ridge_point = peak_flops / (peak_network_bw / 1000) # FLOP/Byte
 
     # 2. AXIS RANGE
@@ -358,7 +358,7 @@ def plot_distributed_roofline(fleet_system, workloads=None):
 
     ax.set_xlabel("Communication Intensity (FLOP/Byte)")
     ax.set_ylabel("Fleet Performance (TFLOP/s)")
-    ax.set_title(f"Distributed Roofline: {fleet_system.num_nodes}x {fleet_system.hardware.name}")
+    ax.set_title(f"Distributed Roofline: {fleet_system.count}x {fleet_system.node.accelerator.name}")
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(peak_flops * 0.001, peak_flops * 2)
     ax.legend(loc="lower right", fontsize=8, framealpha=0.9)

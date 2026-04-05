@@ -34,59 +34,50 @@ def main() -> None:
         print(f"❌ StaffML data directory not found: {STAFFML_DATA}")
         sys.exit(1)
 
-    synced = 0
-    for filename, label in FILES_TO_SYNC:
-        src = VAULT_DIR / filename
-        dst = STAFFML_DATA / filename
-
-        if not src.exists():
-            print(f"  ❌ {label}: source not found ({src})")
-            sys.exit(1)
-
-        # Compare sizes
-        src_size = src.stat().st_size
-        dst_size = dst.stat().st_size if dst.exists() else 0
-
-        # Compare question counts for corpus
-        diff_info = ""
-        if filename == "corpus.json":
-            with open(src) as f:
-                src_data = json.load(f)
-            src_count = len(src_data)
-            if dst.exists():
-                with open(dst) as f:
-                    dst_data = json.load(f)
-                dst_count = len(dst_data)
-                delta = src_count - dst_count
-                if delta != 0:
-                    diff_info = f" ({delta:+d} questions, {dst_count} → {src_count})"
-                else:
-                    diff_info = f" ({src_count} questions, no change)"
-            else:
-                diff_info = f" ({src_count} questions, new)"
-
-        if filename == "taxonomy.json":
-            with open(src) as f:
-                src_data = json.load(f)
-            src_concepts = len(src_data.get("concepts", []))
-            if dst.exists():
-                with open(dst) as f:
-                    dst_data = json.load(f)
-                dst_concepts = len(dst_data.get("concepts", []))
-                delta = src_concepts - dst_concepts
-                if delta != 0:
-                    diff_info = f" ({delta:+d} concepts, {dst_concepts} → {src_concepts})"
-                else:
-                    diff_info = f" ({src_concepts} concepts, no change)"
-            else:
-                diff_info = f" ({src_concepts} concepts, new)"
-
+    # Run the export script which handles filtering, field stripping, and all data files
+    export_script = VAULT_DIR / "scripts" / "export_to_staffml.py"
+    if export_script.exists():
+        print("  Running vault export script...")
         if DRY_RUN:
-            print(f"  📋 {label}: would copy{diff_info}")
+            print("  📋 Would run export_to_staffml.py")
         else:
-            shutil.copy2(src, dst)
-            print(f"  ✅ {label}: synced{diff_info}")
-            synced += 1
+            import subprocess
+            result = subprocess.run(
+                [sys.executable, str(export_script)],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split("\n"):
+                    print(f"  {line}")
+            else:
+                print(f"  ❌ Export failed:\n{result.stderr}")
+                sys.exit(1)
+    else:
+        # Fallback: direct copy (legacy behavior)
+        print("  ⚠️  export_to_staffml.py not found, falling back to direct copy")
+        for filename, label in FILES_TO_SYNC:
+            src = VAULT_DIR / filename
+            dst = STAFFML_DATA / filename
+            if not src.exists():
+                print(f"  ❌ {label}: source not found ({src})")
+                sys.exit(1)
+            if not DRY_RUN:
+                shutil.copy2(src, dst)
+                print(f"  ✅ {label}: synced")
+
+    # Show what we got
+    corpus_path = STAFFML_DATA / "corpus.json"
+    if corpus_path.exists():
+        with open(corpus_path) as f:
+            count = len(json.load(f))
+        print(f"\n  📊 Corpus: {count} questions")
+
+    taxonomy_path = STAFFML_DATA / "taxonomy.json"
+    if taxonomy_path.exists():
+        with open(taxonomy_path) as f:
+            concepts = len(json.load(f).get("concepts", []))
+        print(f"  📊 Taxonomy: {concepts} topics")
 
     # Regenerate manifest
     if not DRY_RUN:
@@ -106,7 +97,7 @@ def main() -> None:
     else:
         print("\n📋 Would regenerate vault manifest")
 
-    print(f"\n{'🎯 Sync complete' if not DRY_RUN else '📋 Dry run complete'} — {synced} files synced")
+    print(f"\n{'🎯 Sync complete' if not DRY_RUN else '📋 Dry run complete'}")
 
 
 if __name__ == "__main__":
