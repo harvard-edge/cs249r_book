@@ -196,8 +196,12 @@ Canonical forms (first spelling in Webster's):
 - iron law (lowercase)
 - k-nearest neighbors
 - lifecycle (n, adj)
-- multi-chip (adj)
+- multichip (one word — close-up per CMS 17 §7.89; same for multilayer, multimodel, multiserver, multistream, multiscale)
 - nonzero (one word)
+- pretrained, pretraining, predeployment (close-up; "pre-" prefix)
+- semisupervised, semiautomatic (close-up; "semi-" prefix)
+- antipattern (close-up; "anti-" prefix)
+- KEEP HYPHEN before acronyms/proper nouns: multi-GPU, multi-NUMA, pre-CUDA
 - one-hot encoding
 - open-source (adj)
 - PagedAttention
