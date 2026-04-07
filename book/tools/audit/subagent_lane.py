@@ -224,20 +224,50 @@ def apply_subagent_edits_to_file(
     expected_delta = 0
     applied = 0
 
+    # Heading-text extractor: strip trailing {#anchor-id} and {.unnumbered}
+    # markers so we can match against the heading text alone. Subagents
+    # frequently drop these attribute markers from their `before` strings,
+    # but the markers are protected and never modified by edits, so it's
+    # safe to match without them as long as we preserve them on output.
+    import re
+    _HEADING_ATTR_RE = re.compile(r"\s*\{[^}]*\}\s*$")
+
+    def _heading_text(s: str) -> str:
+        return _HEADING_ATTR_RE.sub("", s).rstrip()
+
+    def _heading_attrs(s: str) -> str:
+        """Return the trailing {...} attribute string, or empty."""
+        m = _HEADING_ATTR_RE.search(s)
+        return m.group(0) if m else ""
+
     for edit in edits:
         idx = edit.line - 1
         if idx < 0 or idx >= len(lines):
             continue
         current = lines[idx]
-        # Verify the edit's "before" matches the current line.
-        # Subagents sometimes return text without trailing whitespace.
-        if current.rstrip() != edit.before.rstrip():
-            # Drift; skip
-            continue
+        # Strict match (handles whitespace drift)
+        if current.rstrip() == edit.before.rstrip():
+            new_line = edit.after
+        else:
+            # Looser match: ignore trailing {#...} / {.unnumbered}.
+            # The agent may have dropped attribute markers; we restore
+            # them on the corrected output.
+            current_text = _heading_text(current)
+            before_text = _heading_text(edit.before)
+            if current_text != before_text:
+                # Real drift; skip
+                continue
+            # Reattach the original attribute markers to the agent's
+            # `after` text, since they are protected and not part of
+            # the case-correction.
+            after_text = _heading_text(edit.after)
+            attrs = _heading_attrs(current)
+            new_line = after_text + attrs
+
         # Apply
-        lines[idx] = edit.after
+        lines[idx] = new_line
         before_bytes = len(current.encode("utf-8"))
-        after_bytes = len(edit.after.encode("utf-8"))
+        after_bytes = len(new_line.encode("utf-8"))
         expected_delta += after_bytes - before_bytes
         applied += 1
 

@@ -1698,11 +1698,11 @@ In a typical pipeline parallel implementation, the training loop operates as a r
 
 The architecture fundamentally changes the optimization dynamics compared to data parallelism. Instead of a global AllReduce to average gradients across replicas, each GPU performs a local optimizer step (Adam [@kingma2015adam], AdaFactor, or similar) on its specific slice of parameters. A device holding transformer layers 1--12 updates only those layers' weights and biases, with no cross-device synchronization required during the optimization step. While this eliminates the bandwidth-heavy gradient synchronization of data parallelism, it trades one bottleneck for another: **pipeline bubbles**. If the layers assigned to GPU 1 are computationally heavier than those on GPU 2 (common when attention layers have different head counts or when embedding layers are unevenly sized), valuable compute cycles are lost to waiting. The primary engineering challenge thus shifts from maximizing arithmetic intensity to minimizing serialization latency and ensuring balanced load across the partitioned fleet [@deepspeed_training_system_2021].
 
-### Parallelism Variations {#sec-distributed-training-systems-systems-parallelism-variations-592a}
+### Parallelism variations {#sec-distributed-training-systems-systems-parallelism-variations-592a}
 
 To address these latency and balancing challenges, the choice of partitioning strategy must align with the model's architecture. Three primary approaches, layer-wise partitioning, operator-level partitioning (tensor parallelism), and pipeline parallelism, each optimize for different structural constraints.
 
-#### Layer-wise Partitioning {#sec-distributed-training-systems-systems-layerwise-partitioning-cf6a}
+#### Layer-wise partitioning {#sec-distributed-training-systems-systems-layerwise-partitioning-cf6a}
 
 Layer-wise partitioning assigns distinct model layers to separate computing devices. In transformer architectures, this translates to specific devices managing defined sets of attention and feed-forward blocks. @fig-dist-layers-blocks demonstrates this partitioning for a 24-layer transformer: six consecutive blocks reside on each of four devices, with forward activations flowing left-to-right and backward gradients propagating right-to-left across the device boundaries.
 
@@ -1714,7 +1714,7 @@ Layer-wise partitioning assigns distinct model layers to separate computing devi
 
 Sequential processing introduces device idle time, as each device must wait for the previous device to complete its computation before beginning work. While device 1 processes the initial blocks, devices 2, 3, and 4 remain inactive. Similarly, when device 2 begins its computation, device 1 sits idle. This pattern of waiting and idle time reduces hardware utilization efficiency compared to other parallelization strategies.
 
-#### Pipeline Parallelism {#sec-distributed-training-systems-systems-pipeline-parallelism-8748}
+#### Pipeline parallelism {#sec-distributed-training-systems-systems-pipeline-parallelism-8748}
 
 Pipeline parallelism extends layer-wise partitioning by introducing microbatching to minimize device idle time. Instead of waiting for an entire batch to sequentially pass through all devices, the computation is divided into smaller segments called microbatches, with overlapping execution across pipeline stages. @fig-pipeline-parallelism shows how this overlapping works: while device 1 processes microbatch $N+1$, device 2 computes microbatch $N$, device 3 handles $N-1$, and device 4 executes $N-2$, creating a continuous flow that keeps all devices active simultaneously.
 
@@ -1793,7 +1793,7 @@ In a transformer model distributed across four devices, device 1 would process b
 
 The transfer of hidden states between devices occurs continuously rather than in distinct phases. When device 1 completes processing a microbatch, it immediately transfers the output tensor of shape [microbatch_size, sequence_length, hidden_dimension] to device 2 and begins processing the next microbatch. This overlapping computation pattern maintains full hardware utilization while preserving the model's mathematical properties.
 
-##### Zero-Bubble Pipeline Parallelism {#sec-distributed-training-systems-systems-zero-bubble}
+##### Zero-bubble pipeline parallelism {#sec-distributed-training-systems-systems-zero-bubble}
 
 The classic problem with pipeline parallelism is the **pipeline bubble**: GPUs at the beginning of the pipeline are idle while waiting for gradients to flow back from the end, and vice versa. These bubbles represent wasted compute. The **1F1B** (one forward, one backward) schedule reduces the bubble by interleaving forward and backward microbatches. Once the pipeline is filled, each GPU alternates between executing one forward microbatch and one backward microbatch, keeping SMs busy most of the time.
 
@@ -1803,7 +1803,7 @@ The scheduling freedom provided by this B/W split is substantial. In a 4-stage p
 
 The trade-off is memory: zero-bubble scheduling requires storing intermediate activations for longer (because the W computation is deferred), increasing peak memory usage. Some implementations address this by combining zero-bubble scheduling with activation checkpointing, selectively recomputing certain activations rather than storing them. The interaction between these techniques creates a three-way trade-off among pipeline bubble size, memory consumption, and recomputation overhead.
 
-#### Tensor Parallelism {#sec-distributed-training-systems-systems-tensor-parallelism-d76e}
+#### Tensor parallelism {#sec-distributed-training-systems-systems-tensor-parallelism-d76e}
 
 Pipeline parallelism, examined above, addresses device idle time by overlapping microbatch processing across stages. Each device holds complete layers and processes them sequentially, with communication only at stage boundaries when activations transfer between devices. This approach tolerates moderate interconnect bandwidth because communication occurs infrequently, once per layer boundary per microbatch. However, pipeline parallelism cannot help when individual layers themselves exceed device memory, or when the communication pattern within layers benefits from a different granularity than layer boundaries.
 
@@ -1878,7 +1878,7 @@ Tensor parallelism scaling degrades rapidly beyond 8-way parallelism because:
 
 Production systems (GPT-4, LLaMA, Gemini) use 8-way tensor parallelism within nodes, combined with pipeline parallelism across nodes, achieving the best balance of memory distribution and communication efficiency.
 
-##### Ring Attention for Extreme Sequences {#sec-distributed-training-systems-systems-ring-attention}
+##### Ring attention for extreme sequences {#sec-distributed-training-systems-systems-ring-attention}
 
 While standard tensor parallelism tiles computation across the HBM-NVLink boundary within a node, **Ring Attention**\index{Ring Attention} extends this principle to the entire sequence dimension. For sequence lengths that exceed even the memory capacity of a single GPU (e.g., million-token context windows), Ring Attention distributes $K$ and $V$ blocks across GPUs in a ring topology. Each GPU holds a portion of $Q$ and iterates through the ring, receiving $K$/$V$ blocks from its neighbor while simultaneously computing attention on the current block and sending the previous block onward.
 
@@ -1929,7 +1929,7 @@ If the compute time for one tile exceeds the communication time for transferring
 
 The practical impact of Ring Attention is measured in context length. Without it, a single GPU's attention computation is limited by HBM capacity: the KV cache for a sequence of length $N$ must fit entirely in one GPU's memory. With Ring Attention across $P$ GPUs, each GPU holds $N/P$ tokens of the KV cache, enabling context lengths of $P \times N_{\text{single}}$. Combined with FlashAttention's efficient tiling within each GPU (see @sec-performance-engineering-flashattention), Ring Attention enables the massive context windows required for long-document reasoning and multi-modal understanding.
 
-### Parameter Servers and Embedding Sharding {#sec-distributed-training-systems-systems-parameter-servers-embedding-sharding-8821}
+### Parameter servers and embedding sharding {#sec-distributed-training-systems-systems-parameter-servers-embedding-sharding-8821}
 
 While AllReduce dominates dense model training, the **Parameter Server (PS)** architecture remains the standard for recommendation systems and other sparse workloads. A Parameter Server architecture separates workers (who compute gradients) from servers (who store parameters and apply updates).
 
@@ -1945,7 +1945,7 @@ In this regime, Parameter Servers (often rebranded as "Embedding Servers") shine
 
 The **Sparse Pull / Sparse Push** pattern avoids the bandwidth bottleneck of dense AllReduce. Modern implementations like TorchRec or Meta's hierarchical sharding place "hot" embeddings on GPUs and "cold" embeddings on CPU PS nodes, creating a tiered memory hierarchy for model parameters.
 
-### Expert Parallelism (Mixture of Experts) {#sec-distributed-training-systems-systems-expert-parallelism-mixture-experts-bc45}
+### Expert parallelism (mixture of experts) {#sec-distributed-training-systems-systems-expert-parallelism-mixture-experts-bc45}
 
 While tensor parallelism splits dense layers across devices, **Expert Parallelism** enables scaling model capacity (parameters) without increasing compute cost (FLOPs) by using conditional computation. In a Mixture-of-Experts (MoE) architecture [@shazeer2017outrageously], the feed-forward network (FFN) of each transformer block is replaced by a set of $N$ "experts" (independent FFNs). For each token, a gating network selects a small subset (typically top-1 or top-2) of experts to process it.
 
@@ -1979,7 +1979,7 @@ The distinction dictates fundamentally different cluster designs: dense GPU pods
 
 :::
 
-### Trade-offs: The Bubble vs. Bandwidth Dilemma {#sec-distributed-training-systems-systems-model-parallelism-tradeoffs}
+### Trade-offs: the bubble vs. bandwidth dilemma {#sec-distributed-training-systems-systems-model-parallelism-tradeoffs}
 
 Model parallelism breaks the memory wall but introduces sequential dependencies that reduce hardware utilization. The engineering challenge is balancing **pipeline bubbles** (idle time) against **all-to-all bandwidth** (communication time).
 
@@ -1991,7 +1991,7 @@ The advantages come at the cost of three fundamental limitations. Pipeline bubbl
 
 As models scale, the efficiency of individual operations becomes as critical as the overall distribution strategy. Advanced training primitives reduce the "cost per step" by optimizing the numerical precision of computation and the overlap of memory accesses.
 
-### FP8: The Training Frontier {#sec-distributed-training-fp8}
+### FP8: the training frontier {#sec-distributed-training-fp8}
 
 Traditional mixed-precision training uses FP32 master weights with FP16 forward and backward passes. Modern hardware like the NVIDIA H100 adds support for 8-bit floating point (FP8), offering two formats optimized for different phases of training.
 
@@ -2033,7 +2033,7 @@ Only by combining all three can we train Archetype A systems efficiently.
 
 :::
 
-### The 3D Training Loop {#sec-distributed-training-systems-systems-hybrid-parallelism-3d-loop}
+### The 3D training loop {#sec-distributed-training-systems-systems-hybrid-parallelism-3d-loop}
 
 Training a `{python} FrontierTrainingContext.frontier_params_b_str`B parameter model requires orchestrating computation across thousands of devices through **3D Parallelism**[^fn-3d-parallelism]. This approach does not merely sum the benefits of individual parallelism strategies; it composes them geometrically to match the physical topology of the hardware.
 
@@ -2046,23 +2046,23 @@ The backward pass inverts this flow and exposes the critical dependencies betwee
 
 The architectural imperative is **bandwidth matching**: the communication volume of each algorithm must map inversely to the latency of the hardware interconnects. Chatty, blocking TP communication stays within the `{python} DistTrainConstants.nvlink_a100_str`+ GB/s NVLink domain. Serialized, point-to-point PP transfers traverse the cluster spine at InfiniBand speeds. The massive but infrequent DP synchronization amortizes across the full training step. Attempting to run TP across racks, or DP without gradient accumulation, would violate this hierarchy—causing the 16,000-GPU fleet to wait idly for data to traverse the wire. This bandwidth-matching principle is precisely the "Jeff Dean Test" introduced in @sec-distributed-training-systems-systems-engineering-tradeoffs-selecting-parallelism-strategy-b344.
 
-### Configuration Design {#sec-distributed-training-systems-systems-hybrid-parallelism-configuration-design}
+### Configuration design {#sec-distributed-training-systems-systems-hybrid-parallelism-configuration-design}
 
 Applying this bandwidth-matching principle to physical infrastructure transforms cluster design into a combinatorial optimization problem: mapping the three dimensions of parallelism (Tensor, Pipeline, and Data) to the network topology. The fundamental constraint is that hardware interconnects dictate which strategies are feasible at each level. Intra-node NVLink (`{python} DistTrainConstants.nvlink_a100_str`--`{python} FlashAttentionOverlapScenario.nvlink_h100` GB/s) supports the frequent AllReduce operations of Tensor Parallelism. Inter-node InfiniBand (25--100 GB/s) handles the less frequent point-to-point transfers of Pipeline Parallelism. The remaining cross-pod bandwidth serves Data Parallelism's once-per-step gradient synchronization. Memory capacity per device (40–80 GB) sets the hard limit for model shards at each level. A detailed analysis of these physical systems—including TPU Pods, SuperPODs, and wafer-scale integration—is provided in @sec-compute-infrastructure. For a standard DGX A100 deployment, we typically fix Tensor Parallelism at $t=8$ to match the number of GPUs within a single node. This ensures that the bandwidth-heavy `AllReduce` operations required by matrix multiplications occur over the high-speed NVLink fabric. We then map Pipeline Parallelism ($p$) across multiple nodes within the same high-bandwidth rack or island to handle the point-to-point activation transfers, often setting $p=8$ or $p=16$ depending on the memory footprint. Finally, Data Parallelism ($d$) scales out to the remaining dimensions across pods, as the gradient synchronization step is less sensitive to the bisection bandwidth constraints of the upper network layers.
 
-### Memory Analysis {#sec-distributed-training-systems-systems-hybrid-parallelism-memory-analysis}
+### Memory analysis {#sec-distributed-training-systems-systems-hybrid-parallelism-memory-analysis}
 
 The memory budget for training a 175-billion parameter model is dominated by model states and requires aggressive sharding to fit within the 80 GB HBM capacity of modern accelerators. The FP16 weights alone consume approximately 350 GB ($175 \times 10^9 \times 2$ bytes). If we relied solely on Tensor Parallelism with $t=8$, each GPU would hold a 43.75 GB slice of the weights. However, the optimizer state presents a larger hurdle; standard Adam maintains FP32 momentum and variance estimates, consuming roughly 12 bytes per parameter (or simplified to ~8 bytes/param for pure state excluding master weights), adding over 1.4 TB globally. Even with $t=8$, the combined weight and optimizer state would exceed 150 GB per GPU, causing an Out-Of-Memory (OOM) error. Consequently, we must employ Pipeline Parallelism ($p$) to further partition the model layers. With a hybrid configuration of $t=8$ and $p=16$, the static memory footprint drops to roughly 15 GB per GPU, leaving the remaining 65 GB of HBM available for the dynamic activation memory ($A$) generated during the forward pass, which scales linearly with micro-batch size and sequence length.
 
-### Communication Analysis {#sec-distributed-training-systems-systems-hybrid-parallelism-communication-analysis}
+### Communication analysis {#sec-distributed-training-systems-systems-hybrid-parallelism-communication-analysis}
 
 Each parallelism dimension imposes a distinct traffic profile on the network. Tensor Parallelism is the most chatty, requiring two `AllReduce` operations for every Transformer block (one for the Attention projection, one for the MLP) in both the forward and backward passes. These messages are relatively small but occur thousands of times per step, making them strictly latency-bound and necessitating NVLink. Pipeline Parallelism, in contrast, involves point-to-point transfers of activation tensors (size $B_{\mu} \times S \times H$) only at the boundaries of the pipeline stages. While these messages are moderate in size, they occur less frequently, making them manageable over standard InfiniBand links. Data Parallelism generates the largest burst of traffic, requiring a global `AllReduce` of the entire 350 GB gradient buffer. However, this communication occurs only once per global batch update. By using gradient bucketing to overlap this transmission with the compute-intensive backward pass, the effective cost of DP communication can often be hidden, provided the cluster maintains sufficient cross-sectional bandwidth.
 
-### Pipeline Bubble {#sec-distributed-training-systems-systems-hybrid-parallelism-pipeline-bubble}
+### Pipeline bubble {#sec-distributed-training-systems-systems-hybrid-parallelism-pipeline-bubble}
 
 The primary efficiency penalty in pipeline parallelism is the "bubble"—the periods at the start and end of a training step where GPUs sit idle waiting for the pipeline to fill or drain. For a naive GPipe schedule, the pipeline must completely fill with micro-batches before the first backward pass begins, and completely drain at the end. The fraction of time spent in this bubble is given by the ratio $\frac{P-1}{M + P - 1}$, where $P$ is the number of pipeline stages and $M$ is the number of micro-batches per global batch. For a GPT-175B configuration with $P=16$ stages and $M=32$ micro-batches, the bubble fraction is $\frac{15}{47} \approx 31.9\%$, meaning nearly one-third of the theoretical compute capacity is wasted. To mitigate this, modern systems employ 1F1B (One-Forward-One-Backward) scheduling. 1F1B interleaves forward and backward passes once the pipeline enters the steady state, allowing memory to be freed earlier. This reduction in peak memory pressure allows practitioners to increase $M$, which drives the bubble fraction down asymptotically, improving hardware utilization.
 
-### Blackwell and the Scaling Frontier {#sec-distributed-training-systems-systems-hybrid-parallelism-blackwell}
+### Blackwell and the scaling frontier {#sec-distributed-training-systems-systems-hybrid-parallelism-blackwell}
 
 The transition to the **Blackwell** architecture (2024) introduces two architectural shifts that redefine the 3D parallelism trade-offs. First, **NVLink 5** provides 1.8 TB/s of bidirectional bandwidth per GPU, doubling the intra-node capacity of the Hopper generation. This allows for even larger **Tensor Parallelism ($t$)** groups (e.g., $t=16$ or $t=32$ across multiple nodes) with negligible latency overhead. Second, the introduction of native **FP4 support** enables 4-bit training for specific workloads, effectively doubling the arithmetic throughput ($R_{\text{peak}}$) and halving the memory footprint ($D_{\text{vol}}$) compared to FP8.
 
@@ -2318,7 +2318,7 @@ plt.close()
 
 The parallelism strategies examined so far assume a single model being trained on a single objective. Reinforcement Learning from Human Feedback (RLHF) and its variants break this assumption by requiring multiple models to coordinate within a single training loop, each with different memory footprints, compute profiles, and gradient requirements. This creates a heterogeneous fleet management problem that cannot be solved by any single parallelism strategy and represents a qualitatively different distributed systems challenge from standard pretraining.
 
-### The Multi-Model Coordination Problem {#sec-distributed-training-rlhf-coordination}
+### The multi-model coordination problem {#sec-distributed-training-rlhf-coordination}
 
 Standard pretraining involves one model, one loss function, and one gradient stream. RLHF alignment, by contrast, orchestrates a *system of models* that interact during every training step. In the Proximal Policy Optimization (PPO) formulation [@ouyang2022training], four distinct models must operate in concert:
 
@@ -2332,7 +2332,7 @@ Standard pretraining involves one model, one loss function, and one gradient str
 
 The aggregate memory demand of the four-model PPO system dwarfs standard pretraining. A naive co-location of a 70B policy, 70B reference, 13B reward, and 70B value model requires approximately 1,120 + 140 + 26 + 1,120 = 2,406 GB of accelerator memory, before accounting for the KV caches and intermediate activations generated during sequence generation. On H100 GPUs with `{python} DistTrainConstants.h100_mem_str` GB of HBM each, this system requires a minimum of $\lceil 2,406 / 80 \rceil = 31$ GPUs for parameter storage alone. Once generation-phase KV caches (which grow linearly with output sequence length) and training-phase activations are included, the practical minimum rises to 64--128 GPUs for a single RLHF training instance.
 
-### Infrastructure Asymmetry: Training versus Inference Models {#sec-distributed-training-rlhf-asymmetry}
+### Infrastructure asymmetry: training versus inference models {#sec-distributed-training-rlhf-asymmetry}
 
 The defining infrastructure challenge of RLHF is not the total memory footprint but the *asymmetry* between the models' compute profiles. The policy and value models require full backward passes with gradient computation, activation checkpointing, and optimizer updates — compute-intensive operations that benefit from tensor parallelism and high arithmetic intensity. The reference and reward models, by contrast, perform only forward passes: they are inference workloads embedded within a training loop, with memory access patterns dominated by KV cache management rather than gradient accumulation.
 
@@ -2342,7 +2342,7 @@ The generation phase itself introduces a sequential bottleneck absent from stand
 
 Production RLHF systems address this asymmetry through temporal multiplexing. During the generation phase, the cluster operates as an inference system: the policy model generates sequences while the reference model computes log-probabilities, both using inference-optimized kernels (continuous batching, speculative decoding, PagedAttention for KV cache management). During the training phase, the cluster switches to training mode: gradients are computed through the policy and value models using the standard 3D parallelism configuration. This two-phase approach recovers most of the efficiency lost to model asymmetry but requires the orchestration layer to manage the transition between inference and training configurations — a scheduling challenge that standard training frameworks do not address.
 
-### DPO: Simplifying the Fleet {#sec-distributed-training-rlhf-dpo}
+### DPO: simplifying the fleet {#sec-distributed-training-rlhf-dpo}
 
 Direct Preference Optimization (DPO) [@rafailov2024direct] eliminates the reward model and value model entirely by reformulating the alignment objective as a classification loss over preference pairs. Instead of generating sequences, computing rewards, and estimating advantages, DPO directly optimizes the policy to assign higher log-probability to preferred responses over dispreferred ones, using the reference model only to compute a KL-divergence regularization term.
 
@@ -2350,7 +2350,7 @@ The infrastructure implications are substantial. DPO reduces the multi-model sys
 
 The trade-off is capability. DPO operates on a static preference dataset, meaning the policy cannot explore new responses and receive feedback during training. PPO's online generation allows the policy to improve iteratively on its own outputs, potentially discovering better strategies that the static dataset does not contain. For deployment scenarios where the preference data comprehensively covers the target distribution, DPO's infrastructure simplification dominates. For scenarios requiring adaptive exploration (training models to solve novel reasoning tasks, for example), PPO's online feedback loop may justify the 2$\times$ infrastructure overhead.
 
-### Quantitative Analysis: PPO versus DPO Resource Requirements {#sec-distributed-training-rlhf-quantitative}
+### Quantitative analysis: PPO versus DPO resource requirements {#sec-distributed-training-rlhf-quantitative}
 
 To make the infrastructure trade-off concrete, consider aligning a 70B policy model on a cluster of 256 H100 GPUs (`{python} DistTrainConstants.h100_mem_str` GB HBM each).
 
@@ -2460,7 +2460,7 @@ PPO's two-phase design (generate then train) introduces a fundamental throughput
 
 :::
 
-### Sequence Length Variance and Batching Challenges {#sec-distributed-training-rlhf-batching}
+### Sequence length variance and batching challenges {#sec-distributed-training-rlhf-batching}
 
 Both PPO and DPO face a data engineering challenge absent from standard pretraining: extreme variance in sequence length. Pretraining typically uses fixed-length sequences (2,048 or 4,096 tokens, padded or packed to fill each position), enabling uniform batch shapes and predictable memory consumption. RLHF training data consists of variable-length prompts (10--500 tokens) concatenated with variable-length completions (50--2,048 tokens), producing sequence lengths with 10--50$\times$ variance within a single batch.
 
@@ -2493,7 +2493,7 @@ To systematically weigh the architectural and hardware trade-offs for a new 50-b
 
 The parallelism strategies examined throughout this chapter (gradient averaging, AllReduce synchronization, tensor splitting, pipeline scheduling) translate into production systems through a layered abstraction hierarchy. Understanding this hierarchy matters because the abstraction level determines which constraints the engineer must manage directly and which are delegated to the runtime.
 
-### Data Parallel Abstractions {#sec-distributed-training-systems-systems-data-parallel-framework-apis-f549}
+### Data parallel abstractions {#sec-distributed-training-systems-systems-data-parallel-framework-apis-f549}
 
 The simplest distributed training abstraction wraps a model so that the framework automatically replicates it across available accelerators, splits each batch, and averages gradients after the backward pass. This parameter-server approach[^fn-parameter-server] [@li2014parameter] requires minimal changes to a single-device training loop but creates a communication bottleneck at the central server node: with $N$ workers pushing dense gradient streams simultaneously, the server's inbound bandwidth becomes the chokepoint. For dense models beyond 4--8 GPUs, this centralized design collapses.
 
@@ -2501,13 +2501,13 @@ The simplest distributed training abstraction wraps a model so that the framewor
 
 Production-scale data parallelism eliminates this bottleneck by replacing the central server with decentralized AllReduce. Each worker participates symmetrically in the reduction: every device both sends and receives gradient chunks at its own link rate, distributing the bandwidth load across all nodes rather than concentrating it. The framework initializes a process group that maps workers to the physical topology, selects the optimal collective algorithm (ring, tree, or hierarchical) based on the detected interconnect, and inserts gradient synchronization hooks into the backward pass automatically. Gradient bucketing further improves efficiency by grouping small tensors into larger messages before transmission, and computation-communication overlap allows the AllReduce for early layers to proceed while later layers are still computing gradients. These optimizations collectively achieve 90 percent+ parallel efficiency at moderate scale—not because the API is simple, but because the underlying runtime makes topology-aware decisions that a manual implementation would require thousands of lines to replicate.
 
-### Model and Pipeline Parallel Abstractions {#sec-distributed-training-systems-systems-model-parallel-framework-support-7f7f}
+### Model and pipeline parallel abstractions {#sec-distributed-training-systems-systems-model-parallel-framework-support-7f7f}
 
 Model parallelism requires a fundamentally different abstraction because the framework must manage cross-device tensor placement and the sequential data flow between partitions. The core principle is explicit device assignment: the engineer specifies which layers reside on which devices, and the framework handles the activation transfers between devices during the forward pass and the gradient flow in reverse during backpropagation. Explicit device assignment makes the sequential dependencies of model parallelism visible, since each downstream device must wait for its upstream neighbor to complete. The engineer must reason about pipeline bubbles and load balance at the architecture level rather than hiding them behind an opaque wrapper.
 
 For production-scale model parallelism, the key architectural insight is that tensor splitting and pipeline scheduling require different levels of framework support. Tensor parallelism replaces standard linear layers with column-parallel and row-parallel variants that automatically insert AllReduce operations at the correct points in the transformer computation graph, as described in @sec-distributed-training-systems-systems-tensor-parallelism-d76e. Pipeline parallelism adds microbatch scheduling logic that interleaves forward and backward passes across stages to minimize bubble overhead. Memory-efficient sharding integrates ZeRO-3 style parameter partitioning by wrapping model layers with automatic AllGather operations before each forward pass and ReduceScatter after each backward pass. The critical design decision is which abstraction levels to compose: pure data parallelism suffices when the model fits in memory, memory-efficient sharding extends data parallelism to memory-constrained regimes, and full tensor or pipeline parallelism becomes necessary when individual layers or the full model depth exceed single-device capacity.
 
-### Communication Primitives {#sec-distributed-training-systems-systems-communication-primitives-7207}
+### Communication primitives {#sec-distributed-training-systems-systems-communication-primitives-7207}
 
 All distributed training ultimately reduces to a small set of collective communication primitives. Gradient synchronization requires AllReduce: each device contributes its local gradient tensor, and all devices receive the globally averaged result. Parameter broadcasting propagates a single device's state to all others, used during initialization or after asymmetric updates. AllGather collects tensor fragments from every device into a complete tensor on each device, the operation that enables FSDP to reconstruct sharded parameters before each layer's forward pass. ReduceScatter combines reduction and distribution, delivering to each device only its assigned shard of the reduced result—the inverse of AllGather that makes ZeRO-2 gradient sharding possible.
 
