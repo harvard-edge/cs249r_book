@@ -10,7 +10,7 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: "light",
+  theme: "dark",
   toggleTheme: () => {},
 });
 
@@ -19,15 +19,19 @@ export function useTheme() {
 }
 
 function getInitialTheme(): Theme {
-  if (typeof window === "undefined") return "light";
+  if (typeof window === "undefined") return "dark";
   const stored = localStorage.getItem("staffml_theme") as Theme | null;
   if (stored === "light" || stored === "dark") return stored;
-  // Default to dark; honor OS preference only if explicitly light
-  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  // Dark is the site-wide default. OS preference is intentionally NOT
+  // honored — users can opt into light via the theme toggle.
+  return "dark";
 }
 
 export default function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("light");
+  // SSR/first-paint defaults to dark to match the inline script in layout.tsx.
+  // The useEffect below reconciles with the DOM value the inline script set,
+  // which may be "light" if the user has an OS preference or stored choice.
+  const [theme, setTheme] = useState<Theme>("dark");
 
   // Sync with actual DOM on mount (inline script already set data-theme)
   useEffect(() => {
