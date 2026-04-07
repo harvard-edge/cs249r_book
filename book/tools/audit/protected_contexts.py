@@ -131,7 +131,6 @@ class LineWalker:
     """
 
     _CODE_FENCE_RE = re.compile(r"^\s*```")
-    _DISPLAY_MATH_RE = re.compile(r"^\s*\$\$")
     _HTML_OPEN_RE = re.compile(r"<(style|script)\b", re.IGNORECASE)
     _HTML_CLOSE_RE = re.compile(r"</(style|script)>", re.IGNORECASE)
     # Multi-line HTML comments. Quarto accepts both <!-- and <!--- (three
@@ -139,6 +138,49 @@ class LineWalker:
     # (open and close on same line) must NOT toggle state.
     _HTML_COMMENT_OPEN_RE = re.compile(r"<!--")
     _HTML_COMMENT_CLOSE_RE = re.compile(r"-->")
+
+    # Display math delimiter patterns. A $$ is a TRUE delimiter if it
+    # appears at line start, line end, or after \end{...}. The patterns
+    # below count true delimiters per line (0, 1, or 2).
+    _DD_LINE_START_RE = re.compile(r"^\s*\$\$")
+    _DD_LINE_END_RE = re.compile(r"\$\$\s*(?:\{[^}]*\}\s*)?$")
+    _DD_AFTER_END_RE = re.compile(r"\\end\{[^}]+\}\s*\$\$")
+
+    @classmethod
+    def _is_display_math_delim(cls, line: str) -> int:
+        """Count true display-math delimiters on a line.
+
+        Returns 0 (none), 1 (opens or closes a block), or 2 (single-line
+        block, both open and close on this line).
+
+        Per the proven fix scripts and corpus observation, a $$ is a TRUE
+        display-math delimiter only when:
+        - The line starts with $$ (whitespace allowed before)
+        - The line ends with $$ (whitespace, {#eq-...}, or {.unnumbered}
+          allowed after)
+        - The $$ is immediately preceded by \\end{...} (closing a multi-
+          line aligned/cases/etc. environment)
+        Other $$ occurrences are inline-math adjacency (e.g. $X$$Y$) and
+        do NOT count as delimiters.
+        """
+        if "$$" not in line:
+            return 0
+
+        starts = bool(cls._DD_LINE_START_RE.match(line))
+        ends = bool(cls._DD_LINE_END_RE.search(line))
+        after_end = bool(cls._DD_AFTER_END_RE.search(line))
+
+        # Count distinct delimiters
+        if starts and ends:
+            # `$$ x $$` on one line — single-line display math
+            # But if the line is JUST `$$` (only whitespace), it is one
+            # delimiter, not two.
+            if line.strip() == "$$":
+                return 1
+            return 2
+        if starts or ends or after_end:
+            return 1
+        return 0
 
     def __init__(self, text: str):
         # Preserve trailing newlines so byte counts match the source
@@ -222,29 +264,46 @@ class LineWalker:
                 continue
 
             # ── Display math ──
-            # Lines starting with $$ toggle the display-math flag, UNLESS
-            # the line contains a closing $$ on the same line (single-line
-            # display math like `$$ x = y $$`), in which case state is
-            # unchanged but the line itself is protected.
-            if self._DISPLAY_MATH_RE.match(line):
-                dd_count = stripped.count("$$")
-                if dd_count >= 2:
-                    # Single-line display math. Yield as protected
-                    # (we set the flag temporarily for this line only).
+            # Display math blocks are bounded by `$$` delimiters. The
+            # corpus has three observed patterns:
+            #
+            #   $$ x = y $$              <- single-line display math
+            #   $$E[...] = ...           <- opens multi-line block
+            #     ...                    <- inside block
+            #   \end{cases}$$            <- closes block (NOT line-start)
+            #
+            # We must distinguish TRUE display-math delimiters from the
+            # FALSE pattern `$X$$Y$` (two adjacent inline-math spans where
+            # the closing `$` of the first abuts the opening `$` of the
+            # second, accidentally producing `$$` mid-prose).
+            #
+            # Rule: a `$$` is a display-math delimiter if and only if:
+            #   1. The line is just `$$` (whitespace-only before/after)
+            #   2. The line STARTS with `$$` (whitespace allowed before)
+            #   3. The line ENDS with `$$` (whitespace and { } allowed after)
+            #   4. The `$$` is preceded by `\end{...}` (closing multi-line env)
+            # All other `$$` occurrences in mid-prose are inline-math
+            # adjacency and must NOT toggle display-math state.
+            dd_match = self._is_display_math_delim(line)
+            if dd_match:
+                # The line contains a display-math delimiter. Determine
+                # if this opens, closes, or is a single-line block.
+                num_delims = dd_match  # 1 = open or close; 2 = self-closed
+                if num_delims >= 2:
+                    # Single-line display math (open + close on same line).
+                    # State unchanged; line is protected.
                     saved = self.state.in_display_math
                     self.state.in_display_math = True
                     yield line, self.state, i + 1
                     self.state.in_display_math = saved
-                    continue
                 else:
-                    # Multi-line display math toggle.
-                    if self.state.in_display_math:
-                        yield line, self.state, i + 1
-                        self.state.in_display_math = False
-                    else:
-                        self.state.in_display_math = True
-                        yield line, self.state, i + 1
-                    continue
+                    # One delimiter — toggles state. Line is protected
+                    # regardless of which side of the toggle it sits on.
+                    saved = self.state.in_display_math
+                    self.state.in_display_math = True
+                    yield line, self.state, i + 1
+                    self.state.in_display_math = not saved
+                continue
 
             # ── HTML <style>/<script> blocks ──
             if self._HTML_OPEN_RE.search(line):
