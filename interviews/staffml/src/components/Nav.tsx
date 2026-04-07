@@ -7,7 +7,7 @@ import { ECOSYSTEM_BASE } from "../lib/env";
 import {
   Library, Target, Crosshair, BarChart3, BookOpen, Github,
   Menu, X, Sun, Moon, Map, Cpu, Server, ChevronDown, Info,
-  Star, Bug, Send,
+  Star, Bug, Send, Atom,
 } from "lucide-react";
 import clsx from "clsx";
 import StreakBadge from "@/components/StreakBadge";
@@ -25,6 +25,7 @@ const primaryLinks = [
 
 const toolLinks = [
   { href: "/plans", label: "Study Plans", icon: Map },
+  { href: "/framework", label: "Framework", icon: Atom },
   { href: "/contribute", label: "Contribute", icon: Send },
   { href: "/roofline", label: "Roofline", icon: Cpu },
   { href: "/simulator", label: "Simulator", icon: Server },
