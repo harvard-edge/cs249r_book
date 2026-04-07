@@ -126,7 +126,7 @@ Part I built the physical fleet: @sec-compute-infrastructure established the acc
 
 A single GPU with 100 terabytes of memory and an exaflop of compute would make distributed training unnecessary. Because the laws of physics prevent this, training must be shattered across thousands of independent chips. In the **Fleet Stack** framework (@sec-vol2-introduction), Distributed Training represents the **Distribution Layer**—the logic that partitions the mathematical workload across the physical fleet.
 
-### The Physics of the Cluster
+### The physics of the cluster
 
 Before optimizing algorithms, we must understand the physical constraints of the **Machine Learning Fleet**. The performance of any distributed training job is governed by the **Iron Law of Scale** introduced in @sec-vol2-introduction-fleet-law:
 
@@ -143,7 +143,7 @@ In the **Fleet Stack** framework (@fig-fleet-stack in @sec-vol2-introduction), D
 
 :::
 
-### Multi-Machine Training Requirements {#sec-distributed-training-systems-systems-multimachine-training-requirements-0277}
+### Multi-machine training requirements {#sec-distributed-training-systems-systems-multimachine-training-requirements-0277}
 
 Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. First, **memory exhaustion** occurs when model parameters, optimizer states, and activation storage exceed single-device capacity. For transformer models, this threshold typically occurs around 10--20 billion parameters on current generation GPUs with 40--80 GB memory [@rajbhandari2020zero].
 
@@ -151,7 +151,7 @@ Second, **unacceptable training duration** emerges when single-device training w
 
 Third, **dataset scale** exceeds single-machine storage when training data reaches multiple terabytes, as occurs in large-scale vision or language modeling tasks.
 
-### Distributed Training Complexity Trade-offs {#sec-distributed-training-systems-systems-distributed-training-complexity-tradeoffs-0138}
+### Distributed training complexity trade-offs {#sec-distributed-training-systems-systems-distributed-training-complexity-tradeoffs-0138}
 
 Distributed training introduces three primary complexity dimensions not present in single-machine scenarios:
 
@@ -159,7 +159,7 @@ Distributed training introduces three primary complexity dimensions not present 
 2.  **Fault Tolerance**: Requirements increase exponentially with cluster size. A 100-node cluster with 99.9 percent per-node reliability experiences failures every few hours.
 3.  **Algorithmic Stability**: Large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies that single-machine training does not require [@goyal2017accurate].
 
-### Single-Machine to Distributed Transition {#sec-distributed-training-systems-systems-singlemachine-distributed-transition-1ee4}
+### Single-machine to distributed transition {#sec-distributed-training-systems-systems-singlemachine-distributed-transition-1ee4}
 
 The systematic optimization methodology established for single-machine training extends to distributed environments with important adaptations. Profiling must now capture inter-device communication patterns and synchronization overhead in addition to computation and memory metrics. The solution space expands to include data parallelism, model parallelism, pipeline parallelism, and hybrid approaches. @fig-3d-parallelism-cube visualizes this three-dimensional configuration space.
 
@@ -171,7 +171,7 @@ The systematic optimization methodology established for single-machine training 
 
 The key insight from @fig-3d-parallelism-cube is that the total accelerator count equals $d \times t \times p$: each axis is independent, and production systems select a specific coordinate in this cube based on the memory, compute, and bandwidth constraints of the target model and cluster.
 
-### Engineering Trade-offs: Selecting a Parallelism Strategy {#sec-distributed-training-systems-systems-engineering-tradeoffs-selecting-parallelism-strategy-b344}
+### Engineering trade-offs: Selecting a parallelism strategy {#sec-distributed-training-systems-systems-engineering-tradeoffs-selecting-parallelism-strategy-b344}
 
 Choosing the right parallelism strategy is not a matter of preference; it is a constraint satisfaction problem governed by model size ($M$), batch size ($B$), and interconnect bandwidth. @tbl-parallelism-tradeoffs quantifies the communication costs for each strategy, revealing which approaches are physically feasible for a given hardware topology.
 
@@ -561,7 +561,7 @@ Production teams typically benchmark communication patterns and scaling efficien
 
 :::
 
-### Data Parallelism Implementation {#sec-distributed-training-systems-systems-data-parallelism-implementation-fa03}
+### Data parallelism implementation {#sec-distributed-training-systems-systems-data-parallelism-implementation-fa03}
 
 The mathematical foundation above (gradient averaging preserves the statistical properties of SGD) translates into concrete implementation steps. Each step corresponds to a phase in the gradient averaging process, from distributing data subsets to synchronizing the computed gradients.
 
@@ -575,7 +575,7 @@ The process of data parallelism can be broken into a series of distinct steps, e
 
 As @fig-dist-train-data-parallelism shows, the critical synchronization point is stage 4: AllReduce must complete before any GPU can update parameters, making gradient communication the dominant bottleneck as the device count grows.
 
-#### Dataset Splitting {#sec-distributed-training-systems-systems-dataset-splitting-1edf}
+#### Dataset splitting {#sec-distributed-training-systems-systems-dataset-splitting-1edf}
 
 The first step in data parallelism involves dividing the dataset into smaller, non-overlapping subsets. This ensures that each device processes a unique portion of the data, avoiding redundancy and enabling efficient utilization of available hardware. With a dataset of 100,000 training examples and 4 GPUs, each GPU receives 25,000 examples per epoch. The DistributedSampler must ensure no overlap between subsets to maintain gradient estimation validity: if two GPUs process the same example, the resulting gradient average would overweight that example, violating the unbiased gradient assumption that makes data parallelism mathematically equivalent to single-device training.
 
@@ -620,13 +620,13 @@ class FrontierTrainingContext:
     frontier_name = model.name
 ```
 
-#### Compute Phase: Forward and Backward Passes {#sec-distributed-training-systems-systems-compute-phase-forward-backward}
+#### Compute phase: Forward and backward passes {#sec-distributed-training-systems-systems-compute-phase-forward-backward}
 
 The defining feature of data parallelism is that the computation phase, both forward and backward, is **embarrassingly parallel**. Each GPU operates as an isolated island, executing an identical copy of the model on a unique micro-batch of data. For our `{python} FrontierTrainingContext.frontier_params_b_str`B parameter reference model, this isolation is critical: during the forward pass, each GPU independently computes activations for its local batch (micro-batch size 4, sequence length 2048). Without optimization, storing these activations for backpropagation would consume over 200 GB of HBM, exceeding the capacity of even an H100 GPU. **Activation checkpointing**, which recomputes activations during the backward pass rather than storing them, is mandatory to suppress this footprint to a manageable ~50 GB.
 
 The backward pass mirrors this independence but introduces the system's primary bottleneck. As the GPU traverses the computation graph in reverse, it computes gradients for every parameter in the model. For a `{python} FrontierTrainingContext.frontier_params_b_str`B model in FP16, this generates a 350 GB gradient payload per GPU. The computation itself requires zero communication, yet the resulting gradients represent a fractured view of the true loss surface, valid only for the local micro-batch. Before the optimizer step can occur, these local gradients must be aggregated across all $N$ GPUs to form a valid global gradient. The transition from isolated, high-throughput compute to a massive, global synchronization event defines the rhythm of data parallel training: long periods of silent, intense arithmetic punctuated by bursts of heavy network traffic.
 
-#### Gradient Synchronization {#sec-distributed-training-systems-systems-gradient-synchronization-614b}
+#### Gradient synchronization {#sec-distributed-training-systems-systems-gradient-synchronization-614b}
 
 To maintain consistency across the distributed system, the gradients computed by each device must be synchronized. This coordination represents a distributed systems challenge in achieving global consensus while minimizing communication complexity.
 
@@ -679,7 +679,7 @@ The analysis demonstrates how the Fleet Stack layers interact: Physical constrai
 
 The trade-off visible in @fig-coll-comm is between bandwidth and latency: Ring AllReduce achieves optimal bandwidth utilization with $O(N)$ latency steps, while Tree AllReduce reduces latency to $O(\log N)$ at the cost of potential congestion near the root. Modern frameworks such as NCCL select between these topologies automatically based on message size and cluster topology.
 
-#### Synchronization Models {#sec-distributed-training-systems-systems-synchronization-models-396f}
+#### Synchronization models {#sec-distributed-training-systems-systems-synchronization-models-396f}
 
 Distributed training systems operate under explicit synchronization models that govern when workers observe each other's updates. The choice of model determines whether the system guarantees mathematical equivalence to single-device training or trades consistency for throughput.
 
@@ -711,7 +711,7 @@ The key trade-offs across synchronization models are summarized here, and @fig-s
 
 The choice of synchronization model directly affects both system throughput and model convergence. Production systems typically use BSP for final training runs to ensure reproducibility, while exploring SSP or async approaches during hyperparameter search where exact reproducibility is less critical.
 
-#### Barrier Semantics and Failure Modes {#sec-distributed-training-systems-systems-barrier-semantics-failure-modes-5c94}
+#### Barrier semantics and failure modes {#sec-distributed-training-systems-systems-barrier-semantics-failure-modes-5c94}
 
 AllReduce operations implement implicit barriers where no worker can proceed until all workers have contributed their gradients. This coupling creates failure modes absent from single-device training.
 
@@ -723,7 +723,7 @@ Straggler-induced delays arise because iteration time equals the slowest worker'
 
 Production systems address these issues through timeouts, heartbeat monitoring, and elastic training mechanisms. @sec-fault-tolerance-reliability provides comprehensive coverage of failure detection, checkpointing strategies, and recovery mechanisms that enable training jobs to complete despite inevitable hardware failures.
 
-#### Parameter Updating {#sec-distributed-training-systems-systems-parameter-updating-bb64}
+#### Parameter updating {#sec-distributed-training-systems-systems-parameter-updating-bb64}
 
 After gradient aggregation, each device independently updates model parameters using the chosen optimization algorithm such as SGD with momentum or Adam. This decentralized update strategy enables efficient parameter updates without requiring a central coordination server. Since all devices have identical gradient values after synchronization, they perform mathematically equivalent updates to maintain model consistency across the distributed system.
 
@@ -731,7 +731,7 @@ In a system with 8 GPUs training a ResNet model, each GPU computes local gradien
 
 The cycle of splitting data, computing gradients, synchronizing results, and updating parameters repeats for each batch. Modern frameworks automate this cycle, allowing engineers to focus on model architecture and hyperparameter tuning rather than distributed computing logistics.
 
-### Trade-offs: The Communication Wall {#sec-distributed-training-systems-systems-data-parallelism-tradeoffs}
+### Trade-offs: The communication wall {#sec-distributed-training-systems-systems-data-parallelism-tradeoffs}
 
 Data parallelism is the default strategy for a reason: it scales **throughput** linearly with device count, provided the model fits in memory and communication is not the bottleneck. However, it hits a hard ceiling defined by the **Communication-Computation Ratio**.
 
@@ -988,7 +988,7 @@ OpenAI's GPT-2 paper reports training on 32 V100s across 4 nodes using optimized
 
 :::
 
-### Memory-Efficient Data Parallelism: ZeRO and FSDP {#sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69}
+### Memory-efficient data parallelism: ZeRO and FSDP {#sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69}
 
 The memory constraints of data parallelism motivate a family of techniques that shard memory state across workers while preserving the simplicity of data parallel training. ZeRO (Zero Redundancy Optimizer)[^fn-zero] [@rajbhandari2020zero] and its PyTorch implementation FSDP (Fully Sharded Data Parallel) [@zhao2023fsdp] enable training models that would otherwise require model parallelism.
 
@@ -1081,7 +1081,7 @@ The bandwidth requirements for efficient distributed training are substantial, p
 
 Synchronization frequency presents a trade-off between communication efficiency and convergence behavior. Gradient accumulation reduces synchronization frequency but increases memory requirements and may impact convergence. Synchronizing every 4 steps reduces communication overhead by 60 percent while increasing memory usage by 3$\times$ for gradient storage. Asynchronous methods eliminate synchronization costs entirely but introduce staleness that degrades convergence by 15--30 percent for large learning rates.
 
-### The Physics of Scaling: Amdahl's Law with Communication {#sec-distributed-training-systems-systems-physics-scaling-amdahls-law-communication-4d7f}
+### The physics of scaling: Amdahl's Law with communication {#sec-distributed-training-systems-systems-physics-scaling-amdahls-law-communication-4d7f}
 
 Just as the Iron Law of Processor Performance governs single-thread execution, distributed training is governed by an extended version of Amdahl's Law that explicitly accounts for communication overhead. The time to complete one training step on $N$ devices is not simply $T_{single} / N$, but is constrained by the sequential nature of synchronization.
 
@@ -1202,11 +1202,11 @@ Hardware selection critically impacts these scaling characteristics. NVIDIA DGX 
 
 The efficiency metrics directly influence the choice of parallelism strategy. Data parallelism works well in the linear scaling regime but becomes communication-bound at scale. Model parallelism addresses memory constraints but introduces sequential dependencies that limit efficiency. Pipeline parallelism reduces device idle time but introduces complexity in managing microbatches. The optimal strategy depends on which constraint — memory, bandwidth, or synchronization — dominates the target workload.
 
-### Convergence Guarantees for Distributed Optimization {#sec-distributed-training-systems-systems-convergence-guarantees-distributed-optimization-350e}
+### Convergence guarantees for distributed optimization {#sec-distributed-training-systems-systems-convergence-guarantees-distributed-optimization-350e}
 
 Hardware efficiency metrics govern throughput, but convergence theory determines whether distributed training reaches the same solution quality as single-device training. Parallelism affects optimization convergence in three ways: convergence rate changes with batch size, adding workers yields diminishing returns beyond the critical batch size, and learning rates must scale with batch size.
 
-### Convergence Rate for Synchronous Data Parallel SGD {#sec-distributed-training-systems-systems-convergence-rate-synchronous-data-parallel-sgd-2ed5}
+### Convergence rate for synchronous data parallel SGD {#sec-distributed-training-systems-systems-convergence-rate-synchronous-data-parallel-sgd-2ed5}
 
 The fundamental convergence result for distributed SGD provides the theoretical basis for understanding parallel training. For a loss function $L(\theta)$ with $L$-Lipschitz gradients (smoothness condition) and variance-bounded stochastic gradients $\mathbb{E}[\|g_i - \nabla L(\theta)\|^2] \leq \sigma^2$, synchronous data parallel SGD with $N$ workers achieves the following convergence rate.
 
@@ -1226,7 +1226,7 @@ The theorem reveals several important insights. First, the variance floor decrea
 
 However, the theorem assumes perfect synchronization (BSP). When workers proceed at different rates or use stale gradients, convergence guarantees degrade, as we examine next.
 
-### Staleness Impact: BSP versus SSP versus ASP {#sec-distributed-training-systems-systems-staleness-impact-bsp-versus-ssp-versus-asp-e153}
+### Staleness impact: BSP versus SSP versus ASP {#sec-distributed-training-systems-systems-staleness-impact-bsp-versus-ssp-versus-asp-e153}
 
 Synchronization models fundamentally affect convergence behavior. The staleness parameter $\tau$ quantifies how many iterations behind a gradient may be when applied to parameters.
 
@@ -1274,7 +1274,7 @@ where $\bar{\tau}$ is the average staleness. The staleness penalty now scales wi
 
 : **Convergence Properties by Synchronization Model**. BSP provides optimal convergence guarantees at the cost of synchronization overhead. SSP offers a tunable trade-off between throughput and convergence. ASP maximizes throughput but loses the variance reduction benefit of parallelism. {#tbl-convergence-comparison}
 
-### Learning Rate Scaling Rules {#sec-distributed-training-systems-systems-learning-rate-scaling-rules-fa26}
+### Learning rate scaling rules {#sec-distributed-training-systems-systems-learning-rate-scaling-rules-fa26}
 
 When increasing the effective batch size through data parallelism, the learning rate must be adjusted to maintain convergence quality. Two primary scaling rules have emerged from both theory and practice.
 
@@ -1314,7 +1314,7 @@ $$
 
 Layer-wise scaling prevents layers with small weights from receiving disproportionately large updates. LAMB enabled BERT training with batch sizes up to 64K while maintaining convergence quality.
 
-### Critical Batch Size: When Does Parallelism Hurt? {#sec-distributed-training-systems-systems-critical-batch-size-parallelism-hurt-4961}
+### Critical batch size: When does parallelism hurt? {#sec-distributed-training-systems-systems-critical-batch-size-parallelism-hurt-4961}
 
 A fundamental question in distributed training is: when does adding more workers stop helping? The **critical batch size** $B*$ marks the transition point beyond which increasing batch size yields diminishing returns in convergence per sample seen.
 
@@ -1370,7 +1370,7 @@ Given a 7B parameter model distributed across a cluster of 64 A100 GPUs (80 GB H
 
 :::
 
-### Worked Example: Convergence Comparison for 8 versus 64 Workers {#sec-distributed-training-systems-systems-worked-example-convergence-comparison-8-versus-64-workers-57ce}
+### Worked example: Convergence comparison for 8 versus 64 workers {#sec-distributed-training-systems-systems-worked-example-convergence-comparison-8-versus-64-workers-57ce}
 
 To illustrate these concepts concretely, consider *scaling from 8 to 64 workers* when training a transformer language model with baseline batch size $b = 32$ per worker.
 
@@ -1501,7 +1501,7 @@ Despite higher parallelism, 64-GPU training costs more per run due to communicat
 
 :::
 
-### Trade-off: Communication Cost versus Convergence Speed {#sec-distributed-training-systems-systems-tradeoff-communication-cost-versus-convergence-speed-cb7c}
+### Trade-off: Communication cost versus convergence speed {#sec-distributed-training-systems-systems-tradeoff-communication-cost-versus-convergence-speed-cb7c}
 
 The fundamental trade-off in distributed training is between communication efficiency and convergence quality. @fig-comm-convergence-tradeoff visualizes this trade-off space.
 
@@ -1629,7 +1629,7 @@ Verify your understanding of model sharding:
 
 :::
 
-### Model Parallelism Implementation {#sec-distributed-training-systems-systems-model-parallelism-implementation-0728}
+### Model parallelism implementation {#sec-distributed-training-systems-systems-model-parallelism-implementation-0728}
 
 When a model's parameter count exceeds single-device memory capacity, model parallelism divides the neural network across multiple computing devices, with each device computing a distinct portion of the model's operations. The technique encompasses device coordination, data flow management, and gradient computation across distributed model segments. @fig-dist-model-parallelism captures this bidirectional data flow: input data propagates forward through sequentially assigned model partitions while gradients flow backward to update parameters, with intermediate results transferring across device boundaries at each stage.
 
@@ -1979,7 +1979,7 @@ The distinction dictates fundamentally different cluster designs: dense GPU pods
 
 :::
 
-### Trade-offs: the bubble vs. bandwidth dilemma {#sec-distributed-training-systems-systems-model-parallelism-tradeoffs}
+### Trade-offs: The bubble vs. bandwidth dilemma {#sec-distributed-training-systems-systems-model-parallelism-tradeoffs}
 
 Model parallelism breaks the memory wall but introduces sequential dependencies that reduce hardware utilization. The engineering challenge is balancing **pipeline bubbles** (idle time) against **all-to-all bandwidth** (communication time).
 
@@ -1991,7 +1991,7 @@ The advantages come at the cost of three fundamental limitations. Pipeline bubbl
 
 As models scale, the efficiency of individual operations becomes as critical as the overall distribution strategy. Advanced training primitives reduce the "cost per step" by optimizing the numerical precision of computation and the overlap of memory accesses.
 
-### FP8: the training frontier {#sec-distributed-training-fp8}
+### FP8: The training frontier {#sec-distributed-training-fp8}
 
 Traditional mixed-precision training uses FP32 master weights with FP16 forward and backward passes. Modern hardware like the NVIDIA H100 adds support for 8-bit floating point (FP8), offering two formats optimized for different phases of training.
 
@@ -2342,7 +2342,7 @@ The generation phase itself introduces a sequential bottleneck absent from stand
 
 Production RLHF systems address this asymmetry through temporal multiplexing. During the generation phase, the cluster operates as an inference system: the policy model generates sequences while the reference model computes log-probabilities, both using inference-optimized kernels (continuous batching, speculative decoding, PagedAttention for KV cache management). During the training phase, the cluster switches to training mode: gradients are computed through the policy and value models using the standard 3D parallelism configuration. This two-phase approach recovers most of the efficiency lost to model asymmetry but requires the orchestration layer to manage the transition between inference and training configurations — a scheduling challenge that standard training frameworks do not address.
 
-### DPO: simplifying the fleet {#sec-distributed-training-rlhf-dpo}
+### DPO: Simplifying the fleet {#sec-distributed-training-rlhf-dpo}
 
 Direct Preference Optimization (DPO) [@rafailov2024direct] eliminates the reward model and value model entirely by reformulating the alignment objective as a classification loss over preference pairs. Instead of generating sequences, computing rewards, and estimating advantages, DPO directly optimizes the policy to assign higher log-probability to preferred responses over dispreferred ones, using the reference model only to compute a KL-divergence regularization term.
 
