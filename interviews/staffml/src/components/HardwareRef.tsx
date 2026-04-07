@@ -5,8 +5,8 @@ import { ChevronDown, ChevronRight, Cpu } from "lucide-react";
 import clsx from "clsx";
 import { HARDWARE_SPECS, INTERCONNECTS, LATENCY_HIERARCHY, HardwareSpec } from "@/lib/hardware";
 
-export default function HardwareRef() {
-  const [open, setOpen] = useState(false);
+export default function HardwareRef({ defaultOpen = false }: { defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const [activeTab, setActiveTab] = useState<'specs' | 'latency' | 'interconnects'>('specs');
 
   return (

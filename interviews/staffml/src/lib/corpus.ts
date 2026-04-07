@@ -244,6 +244,32 @@ export function cleanScenario(text: string): string {
     .trim();
 }
 
+// ─── Answer-type inference ──────────────────────────────────
+// TODO(answer_type): replace this heuristic with an explicit
+// `answer_type: 'numeric' | 'recall' | 'conceptual' | 'design'`
+// field on every question in the corpus. Until then, infer from
+// the scenario text. The bias is conservative: only classify as
+// numeric when we're confident, so the grader can never fire on
+// a recall question like "What does NPU stand for?".
+const QUANT_VERBS = /\b(estimate|calculate|compute|how (?:many|much|long|fast|big)|what(?:'s| is) the (?:size|bandwidth|throughput|latency|memory|cost|time|number|ratio)|derive|approximate)\b/i;
+const HAS_DIGIT = /\d/;
+const QUESTION_MARK = /\?/;
+
+export function isNumericQuestion(question: { scenario: string; details: { napkin_math?: string } }): boolean {
+  // Required: the corpus has napkin math AND that napkin math contains a number
+  if (!question.details.napkin_math) return false;
+  if (extractFinalNumber(question.details.napkin_math) === null) return false;
+
+  // Required: the prompt itself either contains a quantitative verb,
+  // or shows a digit alongside a question mark (a typical numeric ask).
+  const scenario = question.scenario || '';
+  if (QUANT_VERBS.test(scenario)) return true;
+  if (HAS_DIGIT.test(scenario) && QUESTION_MARK.test(scenario)) return true;
+
+  // Defensive default: not numeric. Falls back to self-rate.
+  return false;
+}
+
 // Extract the user's final answer number
 export function extractFinalNumber(text: string): number | null {
   const markerMatch = text.match(/(?:^|\n)\s*(?:=>|answer:|final:)\s*([\d,]+(?:\.\d+)?)/im);

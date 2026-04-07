@@ -439,24 +439,39 @@ function HomePage() {
           </div>
         </div>
 
-        {/* Detail panel */}
-        <AnimatePresence>
-          {selectedTopic && selectedStyle && (
+      </div>
+
+      {/* Desktop detail drawer (right-anchored slide-over) */}
+      <AnimatePresence>
+        {selectedTopic && selectedStyle && (
+          <div className="hidden lg:block">
+            {/* Backdrop — click anywhere outside to close */}
             <motion.div
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 420, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="shrink-0 overflow-hidden border-l border-border hidden lg:block h-full"
+              key="desktop-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="fixed inset-0 z-40 bg-black/30"
+              onClick={() => setSelectedTopic(null)}
+              aria-hidden="true"
+            />
+            <motion.div
+              key="desktop-drawer"
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 32, stiffness: 320 }}
+              className="fixed top-0 right-0 bottom-0 z-50 w-[480px] max-w-[90vw] border-l border-border bg-background shadow-2xl"
             >
               <TopicDetail topic={selectedTopic}
                 areaName={selectedArea?.name || ""} style={selectedStyle}
                 selectedTrack={selectedTrack}
                 onClose={() => setSelectedTopic(null)} />
             </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Mobile detail sheet + backdrop */}
       <AnimatePresence>

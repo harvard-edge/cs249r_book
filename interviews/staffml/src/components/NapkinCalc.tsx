@@ -15,8 +15,8 @@ const CALC_MODES: { id: CalcMode; label: string; desc: string }[] = [
   { id: 'kv_cache', label: 'KV Cache Size', desc: 'Inference memory for attention' },
 ];
 
-export default function NapkinCalc() {
-  const [open, setOpen] = useState(false);
+export default function NapkinCalc({ defaultOpen = false }: { defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const [mode, setMode] = useState<CalcMode>('model_memory');
 
   // Inputs
