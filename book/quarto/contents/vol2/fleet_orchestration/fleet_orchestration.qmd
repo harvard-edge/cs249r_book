@@ -269,7 +269,7 @@ The remainder of this chapter develops the algorithms and trade-offs for ML clus
 
 Cluster scheduling is fundamentally harder than single-machine process scheduling because the problem transitions from an optimization challenge to a distributed systems challenge of maintaining consistent state across thousands of machines. Operating systems have scheduled processes on CPUs for decades, yet the qualitative shift at fleet scale invalidates the assumptions that make single-machine scheduling tractable. Understanding why cluster scheduling is intrinsically hard clarifies the design constraints that every solution must navigate.
 
-### Distributed Scheduling Complexity {#sec-fleet-orchestration-distributed-scheduling}
+### Distributed scheduling complexity {#sec-fleet-orchestration-distributed-scheduling}
 
 A single-machine scheduler enjoys luxuries that a cluster scheduler cannot: it has instantaneous, consistent visibility into all resource states; it can make atomic decisions that take effect immediately; and failures are binary (the machine is up or it is down). Cluster scheduling surrenders all three of these properties, and several fundamental distributed systems problems emerge as a result.
 
@@ -285,7 +285,7 @@ These four challenges connect directly to the **CAP theorem**[^fn-cap-scheduling
 
 [^fn-cap-scheduling]: **CAP Theorem**: Conjectured by Eric Brewer (2000) and proven by Gilbert and Lynch (2002), CAP establishes that no distributed system can simultaneously guarantee Consistency, Availability, and Partition tolerance. For ML schedulers, this trade-off is acute: Slurm sacrifices availability (blocking allocations during uncertainty) to prevent double-booking GPUs worth thousands of dollars per hour, while Kubernetes sacrifices consistency (allowing temporary resource overcommit) to keep scheduling responsive during partial failures. \index{CAP Theorem!scheduling}
 
-### Failure Rates at Scale {#sec-fleet-orchestration-failure-rates}
+### Failure rates at scale {#sec-fleet-orchestration-failure-rates}
 
 At scale, failure is normal operation, not exceptional. This principle, established in the reliability analysis of @sec-fault-tolerance-reliability, has direct consequences for scheduling: the scheduler must not merely tolerate failure but actively plan for it in every allocation decision. Component reliability does not change with cluster size, but aggregate system reliability degrades multiplicatively. With 99.9 percent annual GPU reliability (typical for datacenter hardware), a 4,096-GPU cluster experiences:
 
@@ -299,7 +299,7 @@ Consider the scheduler's decision when a node heartbeat is missed. The scheduler
 
 These requirements connect the scheduler directly to the checkpoint and recovery infrastructure from @sec-fault-tolerance-reliability: scheduling decisions about spare capacity, preemption policies, and elastic training support determine how quickly the system recovers from the failures that are statistically guaranteed to occur. A well-designed scheduler that maintains 5 percent spare capacity and supports elastic recovery can restore training throughput within minutes of a failure, while a poorly designed scheduler that has no spare capacity and requires full job restart may waste hours of GPU time per failure event.
 
-### Scheduling Objectives and Their Conflicts {#sec-fleet-orchestration-objectives}
+### Scheduling objectives and their conflicts {#sec-fleet-orchestration-objectives}
 
 Every scheduling decision represents a trade-off between four fundamental and often contradictory objectives. **Throughput** measures the total useful work completed per unit time, naturally favoring large, long-running jobs that saturate hardware and minimize the overhead of context switching and data movement. A throughput-maximal policy would fill the cluster with massive training runs, achieving near-perfect arithmetic intensity but forcing every other user to wait weeks for a slot. **Fairness**, conversely, measures the equitable distribution of resources across users or teams, often implementing policies like dominant resource fairness to ensure that a single large team cannot monopolize the fleet. This inevitably fragments resources, leaving small gaps that cannot be filled by large jobs, thereby sacrificing aggregate throughput for social harmony.
 
@@ -356,7 +356,7 @@ At 80 percent utilization ($\rho = 0.8$): with a uniform workload ($C_s = 1$), $
 
 :::
 
-### Bin Packing {#sec-fleet-orchestration-bin-packing}
+### Bin packing {#sec-fleet-orchestration-bin-packing}
 
 The most fundamental scheduling algorithm is **bin packing**[^fn-bin-packing-scheduling]: fitting jobs of varying sizes into fixed-capacity nodes. This problem is NP-hard in its general form, meaning no known algorithm finds optimal solutions in polynomial time. Fortunately, practical heuristics such as first-fit decreasing and best-fit decreasing achieve near-optimal results for the workload distributions typical of ML clusters, where job sizes follow a heavy-tailed distribution (many small jobs, few large ones).
 
@@ -476,7 +476,7 @@ fig = plt.gcf()
 
 :::
 
-### Gang Scheduling {#sec-fleet-orchestration-gang-scheduling}
+### Gang scheduling {#sec-fleet-orchestration-gang-scheduling}
 
 Partial allocation of multi-GPU jobs creates a failure mode unique to ML clusters: two jobs can each hold half the resources they need, blocking each other indefinitely while every allocated GPU sits idle. @fig-gang-scheduling-deadlock contrasts this deadlock scenario with the atomic allocation approach that eliminates it.
 
@@ -509,7 +509,7 @@ This savings exceeds the cost of a dedicated scheduling engineering team by orde
 
 :::
 
-### Deadlock Prevention and Detection {#sec-fleet-orchestration-deadlock}
+### Deadlock prevention and detection {#sec-fleet-orchestration-deadlock}
 
 Gang scheduling eliminates the **hold-and-wait** condition, one of the four formal Coffman conditions for deadlock, but it does not immunize the cluster against all forms of resource contention. Deadlocks can still emerge from the interaction of priority rules, preemption policies, and auxiliary resource dependencies. In a cluster with thousands of GPUs and petabytes of state, these edge cases transition from theoretical curiosities to daily operational incidents.
 
@@ -529,7 +529,7 @@ Solving this requires a choice between prevention and detection. Prevention mech
 
 For large-scale fleets, detection is computationally non-trivial. A cluster with 10,000 GPUs and 500 pending jobs has a state space exceeding $10^{15}$ possible allocations. Constructing and traversing a global "wait-for" graph to detect cycles in real time is often intractable. Production systems therefore rely on heuristics. **Lease-based resources** assign all allocations a time-to-live (TTL); if a job effectively deadlocks, its lease expires, and the scheduler reclaims the GPUs. **Progress monitoring** flags jobs whose GPU utilization drops to zero for a threshold period (e.g., 10 minutes) as "zombies" and terminates them regardless of their reported status. **Holistic preemption** reserves all necessary resources (CPU, network, storage bandwidth) for the victim to exit gracefully when preempting for high-priority jobs, preventing the priority inversion trap. These strategies accept a nonzero rate of false positives (killing healthy but slow jobs) to guarantee cluster liveness.
 
-### Heterogeneous Gang Scheduling {#sec-fleet-orchestration-heterogeneous-gang}
+### Heterogeneous gang scheduling {#sec-fleet-orchestration-heterogeneous-gang}
 
 The traditional gang scheduling model assumes a homogeneous Bulk Synchronous Parallel (BSP) workload: $N$ identical workers executing the exact same compute graph. However, advanced training paradigms fundamentally break this assumption. Reinforcement Learning from Human Feedback (RLHF) requires running four models of different sizes simultaneously: an Actor model (training), a Critic model (training), a Reference model (inference), and a Reward model (inference).
 
@@ -584,7 +584,7 @@ Preemption introduces a scheduling paradox: it improves the scheduler's ability 
 
 Slurm's strengths for ML training are clear: predictable allocation guarantees, mature fair-share policies, straightforward integration with MPI-based distributed training frameworks, and decades of operational experience in managing large-scale scientific computing. Its weaknesses emerge for inference workloads and mixed training-serving clusters, where the batch-oriented model struggles with the dynamic, latency-sensitive nature of serving traffic. Slurm has no native concept of "a service that should always be running," making it awkward for inference endpoints that must respond to requests continuously. Adding or removing inference replicas requires submitting or canceling Slurm jobs, a much heavier operation than scaling a Kubernetes deployment.
 
-### Advanced Slurm Configuration for ML {#sec-fleet-orchestration-slurm-advanced}
+### Advanced Slurm configuration for ML {#sec-fleet-orchestration-slurm-advanced}
 
 Standard partitions and fair-share policies handle basic batch workloads, but optimizing Slurm for large-scale deep learning requires configuring logic that understands the specific parallelism and failure modes of distributed training. Production ML clusters rely on three advanced capabilities: job arrays, heterogeneous steps, and lifecycle hooks.
 
@@ -596,7 +596,7 @@ Prolog and epilog scripts serve as the cluster's immune system, running administ
 
 Finally, **Trackable Resources (TRES)** extend Slurm's accounting beyond simple CPU/memory tracking to arbitrary assets like GPU-hours, license tokens, or power budget. Organizations use TRES to implement project billing for expensive resources. By defining a TRES type `billing=gpu`, administrators can charge different rates for A100s versus V100s, or track the consumption of specific software licenses. This granular accounting enables the implementation of fair-share policies based on actual economic cost rather than just core counts, ensuring that a team using 100 older GPUs does not deplete its budget as fast as a team using 100 flagship H100s.
 
-### Kubernetes: The Cloud Native Standard {#sec-fleet-orchestration-kubernetes}
+### Kubernetes: the cloud native standard {#sec-fleet-orchestration-kubernetes}
 
 Kubernetes has become the dominant platform for ML infrastructure, particularly for organizations requiring unified management of training and serving workloads. Where Slurm's model is imperative ("run this job on these resources"), Kubernetes is **declarative** ("ensure this state exists"), using control loops that continuously reconcile desired state with actual state. This fundamental difference shapes every aspect of ML workload management, from job submission to failure recovery.
 
@@ -651,7 +651,7 @@ Kueue provides fair-share scheduling through ClusterQueues that represent organi
 
 [^fn-kueue-k8s]: **Kueue**: Introduced by Google in 2022, Kueue separates *admission control* (when jobs enter the cluster) from *scheduling* (where pods are placed), unlike Volcano which replaces the scheduler entirely. This less-invasive design can be deployed alongside existing Kubernetes infrastructure without disrupting running workloads, but it lacks Volcano's strong gang scheduling guarantees, forcing teams to choose between deployment safety and scheduling atomicity. \index{Kueue!Kubernetes scheduling}
 
-### Kubernetes Ecosystem for ML Training {#sec-fleet-orchestration-k8s-ecosystem}
+### Kubernetes ecosystem for ML training {#sec-fleet-orchestration-k8s-ecosystem}
 
 Kubernetes provides the orchestration primitives, but a specialized ecosystem of operators and plugins is required to bridge the gap between microservice orchestration and high-performance training. This ecosystem augments Kubernetes with the batch processing, hardware acceleration, and observability capabilities found in HPC environments.
 
@@ -665,7 +665,7 @@ The **observability stack** for training clusters combines general-purpose clust
 
 Our 175B model training on Kubernetes uses this full stack. The workload is defined as a `PyTorchJob` with 128 worker pods, each requesting 8 GPUs. Host networking is enabled to allow direct InfiniBand access for the NVLink-connected nodes. A PVC backed by a high-throughput Lustre file system provides access to the 100 TB training dataset and absorbs periodic checkpoints. DCGM metrics stream to Prometheus, triggering alerts if any GPU reports uncorrectable ECC errors or if NVLink bandwidth drops below the expected baseline.
 
-### Choosing Between Paradigms {#sec-fleet-orchestration-paradigm-choice}
+### Choosing between paradigms {#sec-fleet-orchestration-paradigm-choice}
 
 The choice between Slurm and Kubernetes is rarely binary; it depends on workload composition, organizational context, and the relative importance of different system qualities. Understanding where each paradigm excels guides the architectural decision.
 
@@ -691,7 +691,7 @@ The following table summarizes the key trade-offs between the two paradigms acro
 
 As @tbl-fleet-orchestration-paradigm-comparison illustrates, the choice also reflects organizational trajectory. Teams starting with HPC-focused training infrastructure may begin with Slurm and add Kubernetes for serving. Teams starting from cloud-native application infrastructure may begin with Kubernetes and add HPC-oriented extensions (Volcano, Kueue) for training. Either path can reach a functional hybrid architecture, but the starting point determines which capabilities are strongest and which require the most investment to develop.
 
-### Hybrid Architectures in Practice {#sec-fleet-orchestration-hybrid-architectures}
+### Hybrid architectures in practice {#sec-fleet-orchestration-hybrid-architectures}
 
 While the choice between Slurm and Kubernetes often appears binary, sophisticated engineering organizations increasingly deploy **hybrid architectures** that use the strengths of both systems. These architectures acknowledge a fundamental reality: training workloads behave like HPC applications (batch, synchronous, monolithic), while serving workloads behave like microservices (continuous, asynchronous, elastic). Forcing both into a single paradigm often results in a "lowest common denominator" system that serves neither well.
 
@@ -752,7 +752,7 @@ The scheduler must therefore model the cluster not as a flat list of compute slo
 
 The bandwidth gap shown in @fig-topology-placement-paths is the key constraint: an 18$\times$ reduction from NVLink to InfiniBand means that scattered placement forces tensor parallel groups to spend more time communicating than computing, a penalty that compounds at every transformer layer in the model.
 
-### Placement Algorithms {#sec-fleet-orchestration-placement-algorithms}
+### Placement algorithms {#sec-fleet-orchestration-placement-algorithms}
 
 Topology-aware placement algorithms assign jobs to nodes that minimize communication cost, transforming the abstract bin packing problem into a graph optimization problem on the cluster's physical topology. The simplest approach uses a **locality score** that penalizes allocations spanning multiple topology domains:
 
@@ -895,7 +895,7 @@ The tensor parallel communication alone illustrates the impact. With NVLink at `
 
 :::
 
-### Rail-Optimized Scheduling {#sec-fleet-orchestration-rail-optimized}
+### Rail-optimized scheduling {#sec-fleet-orchestration-rail-optimized}
 
 Large GPU clusters increasingly use **rail-optimized topologies** where each GPU in a node connects to a different network switch, creating parallel "rails" through the network fabric. This design, analyzed in @sec-network-fabrics, provides balanced bandwidth across all GPUs by distributing traffic across independent switch hierarchies. However, it also creates a scheduling constraint: AllReduce operations are most efficient when communicating GPUs are on the same rail (connected to the same switch chain), because same-rail communication avoids cross-rail traffic that could create congestion at shared switch ports.
 
@@ -905,7 +905,7 @@ The interaction between rail-aware scheduling and topology-aware placement creat
 
 Production schedulers resolve these conflicts using weighted scoring functions that prioritize constraints based on workload characteristics. For large training jobs using 3D parallelism, tensor parallel locality receives the highest weight (because NVLink-to-InfiniBand performance degradation is the largest), followed by rail alignment (because it eliminates congestion for the most frequent communication pattern), followed by rack locality (because the performance benefit is smaller and can be partially compensated by compute-communication overlap). For pure data parallel jobs, rail alignment receives the highest weight. For single-node jobs, topology constraints are irrelevant and the scheduler optimizes purely for packing efficiency.
 
-### Topology Discovery and Dynamic Adaptation {#sec-fleet-orchestration-topology-discovery}
+### Topology discovery and dynamic adaptation {#sec-fleet-orchestration-topology-discovery}
 
 Static configuration files like Slurm's `topology.conf` or Kubernetes node labels provide a baseline map of the cluster, but they represent the *intended* state, not the *effective* state. True **topology discovery** requires runtime introspection to validate that the physical hardware matches the architectural diagram. Libraries like NCCL bypass static configurations entirely, parsing the Linux virtual filesystem at `/sys/class/infiniband` to map the PCIe bus hierarchy, enumerate NVLink connections, and verify NIC proximity. This creates a ground-truth graph where edges represent verified, operational links rather than theoretical cables.
 
@@ -959,7 +959,7 @@ The first approach, constant batch size scaling, adjusts $B_{per\_worker}$ inver
 
 The alternative, adaptive batch size scaling, keeps $B_{per\_worker}$ constant and adjusts the learning rate using scaling rules like the linear scaling rule of @goyal2017accurate, which increases the learning rate proportionally with batch size. This approach accepts changed optimization dynamics (larger batch sizes produce lower-variance gradient estimates, which may require different learning rate schedules) in exchange for simpler worker management (each worker's compute and memory requirements remain constant regardless of group size). For many practical workloads, adaptive batch size with linear learning rate scaling produces equivalent convergence outcomes, but the interaction between batch size scaling and other training hyperparameters (warmup schedule, weight decay, momentum) requires careful tuning.
 
-### Framework Support {#sec-fleet-orchestration-elastic-frameworks}
+### Framework support {#sec-fleet-orchestration-elastic-frameworks}
 
 TorchElastic (torchelastic), integrated into PyTorch's `torch.distributed.elastic` module, provides the runtime infrastructure for elastic training. Jobs specify minimum and maximum worker counts, and TorchElastic manages worker lifecycle:
 
@@ -1012,7 +1012,7 @@ The key architectural difference between TorchElastic and Elastic Horovod lies i
 
 Both frameworks share a common limitation: the elastic transition period (the time between detecting a change and completing the group reconfiguration) is a period of reduced or zero training throughput. For TorchElastic, this transition typically takes 10 to 60 seconds depending on the number of workers and the rendezvous backend's performance. For Elastic Horovod, the transition is faster (5 to 30 seconds) but requires the driver process to be reachable. Minimizing transition time is important because frequent transitions (e.g., in a highly volatile spot instance environment) can accumulate enough overhead to negate the cost savings from elastic scheduling.
 
-### Elastic Training Limitations and Failure Modes {#sec-fleet-orchestration-elastic-limitations}
+### Elastic training limitations and failure modes {#sec-fleet-orchestration-elastic-limitations}
 
 Elastic training offers theoretical resilience, but the physics of distributed deep learning imposes hard constraints on its practical utility. The most significant limitation is **incompatibility with model parallelism**. Elastic scaling is fundamentally a data-parallel operation: we add or remove replicas of the model, changing the global batch size but keeping the model architecture constant. For our 175B-parameter example, which relies on 8-way tensor parallelism within each node, elasticity operates strictly at the *node* level. The job can scale from 128 nodes (1,024 GPUs) to 120 nodes (960 GPUs), changing the data-parallel degree. However, it cannot elastically remove a single GPU from a tensor-parallel group; doing so would require re-sharding the 350 GB of model weights across the remaining 7 GPUs, a process equivalent to a full checkpoint-and-restart cycle. Similarly, pipeline parallelism allows for limited elasticity. Adding or removing pipeline stages is possible in principle, but it forces a complete recalculation of the pipeline schedule to balance computation, often negating the benefits of dynamic scaling.
 
@@ -1020,7 +1020,7 @@ At scale, the mechanics of recovery introduce their own failure modes, most nota
 
 The mathematical integrity of the training process is also compromised by **gradient staleness during transitions**. When new workers join the fleet to replace failed ones, they receive the latest model parameters but often miss the gradient updates that were in-flight during the transition window. This results in a temporary inconsistency in the global optimizer state, manifesting as a sharp spike in the training loss curve. For a 175B model training on 1,024 GPUs, a recovery event typically incurs 30 to 90 seconds of rendezvous latency and 15 to 45 seconds of parameter broadcast overhead (saturating InfiniBand links). The resulting loss spike from stale gradients usually self-corrects within 50 to 200 iterations, but if this occurs during a critical phase such as a learning rate warmup or decay, it can permanently destabilize convergence. Careful scheduling of elastic transitions to avoid sensitive training phases, combined with gradient clipping that limits the impact of stale updates, reduces this risk in practice.
 
-### Scheduler Integration {#sec-fleet-orchestration-elastic-scheduler-integration}
+### Scheduler integration {#sec-fleet-orchestration-elastic-scheduler-integration}
 
 Elastic training's value depends critically on scheduler integration. Without scheduler awareness, elastic training is merely a fault tolerance mechanism (replacing failed workers). With scheduler integration, it becomes a scheduling optimization that fundamentally changes the economics of cluster utilization. The scheduler must understand that elastic jobs can operate within a range of resource allocations, specified as $[N_{min}, N_{max}]$ workers, enabling three key scheduling optimizations.
 
@@ -1032,7 +1032,7 @@ Graceful preemption transforms the scheduler's response to resource pressure. In
 
 The trade-off for all of these benefits is complexity. Elastic training requires framework support (not all training frameworks support it), introduces potential convergence concerns from batch size changes (requiring validation that elastic scaling does not degrade model quality), and complicates performance modeling (a job's throughput is no longer constant, making capacity planning harder). Not all workloads benefit equally from elastic scaling: jobs with high communication-to-computation ratios see diminishing returns from additional workers (because communication overhead grows with worker count) and thus benefit less from scale-up, while compute-bound jobs with low communication overhead scale more linearly and benefit more from opportunistic scaling. The scheduler must model these scaling characteristics per-job to make optimal elastic scaling decisions.
 
-### Elastic Scaling Policies {#sec-fleet-orchestration-elastic-policies}
+### Elastic scaling policies {#sec-fleet-orchestration-elastic-policies}
 
 Adding resources to a running job does not always accelerate time-to-convergence. The naive assumption that throughput scales linearly with worker count collapses under the weight of communication overhead, requiring the scheduler to enforce elastic scaling policies based on empirical efficiency curves rather than resource availability alone. A job's **scaling efficiency** $E(k)$, defined as the ratio of observed throughput at $k$ workers to the ideal linear speedup, typically exhibits three distinct phases: a linear phase where computation dominates communication, a sublinear phase where gradient synchronization latency begins to mask compute, and a saturation phase where the AllReduce ring becomes the bottleneck. A scheduler that blindly assigns available GPUs to a job in the saturation phase wastes cluster capacity that could have cleared the queue; conversely, running a job below its **minimum viable scale** forces it to hold onto memory and network leases for disproportionately low progress.
 
@@ -1244,7 +1244,7 @@ plt.close()
 
 :::
 
-### Spot Instances and Preemptible VMs {#sec-fleet-orchestration-spot-instances}
+### Spot instances and preemptible VMs {#sec-fleet-orchestration-spot-instances}
 
 Cloud providers offer **spot instances**[^fn-spot-instances-cloud] (AWS) or **preemptible VMs** (GCP) at 60 to 70 percent discounts compared to on-demand pricing, with the caveat that instances can be reclaimed with as little as 30 seconds to 2 minutes notice when the provider needs the capacity for on-demand customers. At $`{python} FleetSetup.spot_price_str` per GPU-hour instead of $`{python} f"{ClusterEconomicsContext.gpu_hour_cost_usd:.2f}"`, spot instances transform the economics of large-scale training, potentially reducing the cost of a multi-week pretraining run from hundreds of thousands of dollars to under one hundred thousand.
 
@@ -1260,7 +1260,7 @@ The relationship between spot savings and fault tolerance infrastructure is circ
 
 The strategic insight is that fault tolerance infrastructure has a double return: it both protects against involuntary losses (hardware failure) and enables voluntary cost savings (spot instances). This double return often justifies fault tolerance investments that would be hard to justify on reliability grounds alone, because the cost savings from spot utilization are concrete and measurable while the cost avoidance from hardware failure protection is statistical and harder to quantify.
 
-### Spot Instance Strategies for ML Training {#sec-fleet-orchestration-spot-strategies}
+### Spot instance strategies for ML training {#sec-fleet-orchestration-spot-strategies}
 
 To maximize spot instance utility while minimizing disruption, sophisticated schedulers employ diversification and predictive strategies that go beyond simple "retry on failure" logic.
 
@@ -1278,7 +1278,7 @@ A major AI lab configured their entire research fleet to use spot instances in a
 
 :::
 
-### Capacity Reservation Strategies {#sec-fleet-orchestration-capacity-reservation}
+### Capacity reservation strategies {#sec-fleet-orchestration-capacity-reservation}
 
 Organizations that rely on cloud infrastructure (or that think about on-premise infrastructure in economic terms) balance three tiers of compute capacity, each offering a different trade-off between cost, availability, and commitment.
 
@@ -1310,7 +1310,7 @@ The economics are compelling when fault tolerance infrastructure is already in p
 
 :::
 
-### Scheduling for Cost Efficiency {#sec-fleet-orchestration-cost-scheduling}
+### Scheduling for cost efficiency {#sec-fleet-orchestration-cost-scheduling}
 
 Cost-aware scheduling extends the scheduler's optimization objective beyond utilization and fairness to include financial efficiency. Traditional schedulers minimize a single objective (e.g., average job completion time or maximum wait time), but cost-aware schedulers must navigate multi-objective trade-offs where time, money, and reliability are all decision variables. The scheduler must routinely make decisions such as: Should this job run on reserved A100s now, or wait 2 hours for spot H100s that would complete the job 3$\times$ faster at half the cost? Should a low-priority hyperparameter sweep be preempted to make room for a high-priority training run on reserved capacity, or should the training run be placed on more expensive on-demand instances? When spot capacity is reclaimed, should the scheduler migrate the job to on-demand (maintaining throughput at higher cost) or scale down elastically (reducing throughput but maintaining low cost)?
 
@@ -1350,7 +1350,7 @@ General-purpose orchestration and cost-saving measures treat ML models as opaque
 
 If a scheduler knew that a deep learning model was in the final, diminishing-returns phase of its learning curve, it could dynamically shrink its GPU allocation and give those resources to a brand-new experiment that would benefit more. General-purpose schedulers treat jobs as opaque black boxes, but custom ML schedulers peer inside the training loop to optimize for time-to-accuracy rather than just time-to-completion.
 
-### Tiresias: Duration-Agnostic Scheduling {#sec-fleet-orchestration-tiresias}
+### Tiresias: duration-agnostic scheduling {#sec-fleet-orchestration-tiresias}
 
 **Tiresias** [@gu2019tiresias] addresses the fundamental problem identified in @sec-fleet-orchestration-gang-scheduling: ML job durations are unpredictable, and backfill scheduling degrades when users cannot provide accurate runtime estimates. Users consistently overestimate or underestimate runtimes by 2 to 5$\times$, and the game-theoretic incentives encourage overestimation (to avoid being killed before completion), further degrading scheduler performance.
 
@@ -1362,7 +1362,7 @@ A discretized version groups jobs into service bins (e.g., less than 1 GPU-hour,
 
 Experiments on production cluster traces from Microsoft and Alibaba show 40 to 60 percent reduction in average job completion time compared to FIFO scheduling, with the largest improvements for short jobs that previously waited behind long-running training runs. The improvement is not free: long-running training jobs experience increased completion times because they are systematically deprioritized. However, the aggregate benefit is positive because there are many more short jobs than long ones, and the short-job improvement exceeds the long-job penalty in total.
 
-### Gandiva: Iteration-Aware Scheduling {#sec-fleet-orchestration-gandiva}
+### Gandiva: iteration-aware scheduling {#sec-fleet-orchestration-gandiva}
 
 **Gandiva** [@xiao2018gandiva] exploits a characteristic that general-purpose schedulers completely ignore: the iterative nature of deep learning training. Each training iteration follows a predictable, repeating pattern: a GPU-intensive forward pass, a GPU-intensive backward pass, a communication-intensive gradient synchronization, and then a CPU-intensive data loading and preprocessing phase before the next iteration. During the data loading phase, the GPU sits partially idle, computing at less than full utilization while waiting for the next batch of data to be prepared.
 
@@ -1370,7 +1370,7 @@ Gandiva **time-slices GPU access at iteration boundaries**, enabling higher util
 
 Gandiva also implements **grow-shrink elasticity** at a finer granularity than the framework-level elastic training discussed in @sec-fleet-orchestration-elastic-training. Gandiva automatically adjusts data parallelism degree based on real-time resource availability, using profiled iteration times to predict the throughput impact of adding or removing workers. When a high-priority job arrives, Gandiva shrinks lower-priority jobs by reducing their worker count rather than killing them entirely, preserving their progress while freeing resources. When resources become available again, it grows jobs back to their preferred parallelism degree. This fine-grained elasticity, informed by actual iteration-level profiling data, enables scheduling decisions that general-purpose systems cannot make because they lack visibility into job internals.
 
-### Themis: Finish-Time Fairness {#sec-fleet-orchestration-themis}
+### Themis: finish-time fairness {#sec-fleet-orchestration-themis}
 
 Traditional fair-share scheduling treats all GPU-seconds equally: a job consuming 100 GPU-hours is treated the same whether those hours represent the first 10 percent of a long training run or the last 10 percent of a nearly complete one. From a resource accounting perspective, 100 GPU-hours is 100 GPU-hours regardless of context. **Themis** [@mahajan2020themis] argues this resource-centric view is fundamentally unfair because it ignores the sunk cost of work already performed.
 
@@ -1378,7 +1378,7 @@ Themis defines a **finish-time fairness** metric that allocates resources to min
 
 This approach benefits shorter jobs and nearly-complete jobs without excessive penalty to longer ones, and it aligns scheduling decisions with the economic value of completing work rather than the simple accounting of resource consumption. Themis implements this metric through an auction mechanism where jobs bid for resources based on their current marginal value (how much their completion time improves per GPU-hour allocated), creating a market-like dynamic that naturally directs resources to their highest-value use.
 
-### Pollux: Adaptive Resource Allocation {#sec-fleet-orchestration-pollux}
+### Pollux: adaptive resource allocation {#sec-fleet-orchestration-pollux}
 
 **Pollux** [@qiao2021pollux] takes the most aggressive approach of the four research schedulers by jointly optimizing resource allocation and training hyperparameters. Where Tiresias, Gandiva, and Themis make scheduling decisions *about* jobs (when to run, how to share), Pollux makes decisions *within* jobs (how many GPUs and what batch size). The key observation is that the optimal number of GPUs for a training job depends on the current batch size, learning rate, and gradient noise level, all of which change during training as the model moves through different phases of convergence.
 
@@ -1386,7 +1386,7 @@ Pollux dynamically adjusts each job's GPU allocation and batch size to maximize 
 
 This co-optimization of scheduling and hyperparameters achieves 37 to 50 percent improvement in average job completion time compared to scheduling with fixed resource allocations. The improvement comes from two sources: better resource allocation (GPUs go to jobs where they produce the most progress) and better batch size tuning (each job runs at a batch size that balances statistical and computational efficiency for its current training phase). The combined effect is greater than either optimization alone.
 
-### Scheduler Comparison Framework {#sec-fleet-orchestration-scheduler-comparison}
+### Scheduler comparison framework {#sec-fleet-orchestration-scheduler-comparison}
 
 Custom ML schedulers represent a progressive trade-off between implementation complexity and scheduling precision. While general-purpose schedulers treat jobs as opaque boxes, these research systems open the box to exploit specific characteristics of deep learning workloads: their iterative nature, their malleability (elasticity), and their predictability.
 
@@ -1409,7 +1409,7 @@ The consistent theme across all four systems is that exploiting domain-specific 
 
 The challenge for production systems is incorporating these insights while maintaining the operational reliability, policy flexibility, and organizational governance that production environments require. No production system has fully adopted any single research scheduler, but the ideas from these systems are gradually being incorporated into extensions for Slurm and Kubernetes.
 
-### From Research to Production {#sec-fleet-orchestration-research-to-production}
+### From research to production {#sec-fleet-orchestration-research-to-production}
 
 While research schedulers like Tiresias and Pollux offer theoretically optimal placement strategies, deploying them into a live production environment reveals a chasm between the clean abstractions of a paper and the messy reality of a datacenter. In research, the cluster is often assumed to be a homogeneous pool of accelerators with uniform interconnect topology, and jobs are well-behaved entities that declare their resource needs accurately. In production, the "cluster" is a geological formation of hardware generations: V100s alongside A100s and H100s, connected by a patchwork of InfiniBand and Ethernet, running jobs that frequently crash, hang, or misrepresent their memory requirements. Consequently, no major hyperscaler simply "installs" a research scheduler; instead, they selectively transplant specific algorithms into standard orchestrators via Kubernetes operators or Slurm plugins.
 
@@ -1444,7 +1444,7 @@ Training jobs are predictable, batch-oriented beasts that run for weeks; serving
 
 The serving infrastructure analyzed in @sec-inference-scale provides the architectural foundations for efficient inference execution on individual accelerators. The fleet orchestrator manages the resource envelope around those serving systems: scaling replica counts up and down with demand, isolating serving workloads from interference, and balancing inference resource needs against training's claims on the same shared infrastructure.
 
-### Autoscaling for Inference {#sec-fleet-orchestration-autoscaling}
+### Autoscaling for inference {#sec-fleet-orchestration-autoscaling}
 
 Kubernetes **Horizontal Pod Autoscaling (HPA)** adjusts replica counts based on observed metrics, adding instances when load increases and removing them when load decreases. The default autoscaling metric for general cloud workloads is CPU utilization, with targets of 50 to 70 percent. This default poorly reflects GPU inference workloads for two reasons. First, GPU utilization is a noisy metric that can be high even when the system is not processing user requests (background maintenance, model warmup). Second, the relationship between GPU utilization and inference latency is highly nonlinear: latency can spike dramatically when utilization crosses a threshold (typically 70 to 80 percent for GPU inference), making utilization-based scaling reactive rather than predictive. Effective ML autoscaling uses custom metrics that better predict user-facing performance before degradation occurs:
 
@@ -1471,7 +1471,7 @@ Aggressive scale-down policies that terminate replicas during brief traffic lull
 
 Production systems address cold start through several complementary strategies. Maintaining a **minimum replica count** above zero ensures at least one warm replica is always available, eliminating cold starts for the first burst of traffic but incurring a baseline cost even during truly idle periods. **Predictive scaling** based on historical traffic patterns (diurnal cycles, day-of-week patterns, known events) scales up before expected peak hours rather than reacting to load, avoiding the cold-start window entirely for predictable traffic patterns. **Pre-warming** model replicas on standby GPUs loads the model into GPU memory without actively serving traffic, reducing the cost of activation from minutes (model loading) to seconds (process initialization). The trade-off is that standby replicas consume GPU memory that cannot be used for other workloads. Organizations with multiple models competing for the same GPU pool must carefully balance the pre-warming overhead against the cold-start penalty, choosing which models to keep warm based on their traffic patterns and latency requirements.
 
-### Predictive Autoscaling and SLO Management {#sec-fleet-orchestration-predictive-autoscaling}
+### Predictive autoscaling and SLO management {#sec-fleet-orchestration-predictive-autoscaling}
 
 Reactive autoscaling (like Kubernetes HPA) is inherently backward-looking: it observes a metric breach (e.g., GPU utilization exceeding 80 percent), waits for a stabilization window, and then triggers a scale-up event. For a container that starts in milliseconds, this lag is negligible. For a 175B parameter model that takes 3 minutes to load weights from disk to GPU memory, this lag is fatal to SLOs. If traffic doubles in 30 seconds, a realistic scenario during a product launch or viral event, the reactive scaler will provision new replicas only *after* the surge has already saturated the existing fleet, causing a 3-minute window of degraded latency and dropped requests.
 
@@ -1544,7 +1544,7 @@ Consider a serving fleet with 10 replicas, each capable of 5 queries per second 
 
 :::
 
-### Resource Isolation {#sec-fleet-orchestration-resource-isolation}
+### Resource isolation {#sec-fleet-orchestration-resource-isolation}
 
 When multiple inference workloads share the same physical hardware, **noisy neighbor problems** arise when one workload's resource consumption degrades another's performance. On GPUs, interference manifests through several shared resource channels: memory bandwidth (one workload's data movement saturates the HBM interface), L2 cache contention (one workload's working set evicts another's cached data), PCIe bottlenecks (concurrent host-device transfers compete for bus bandwidth), and even thermal effects (one workload's heat generation causes thermal throttling that affects all workloads on the same GPU). For latency-sensitive inference, even minor interference can push P99 latency above SLO thresholds, turning a seemingly well-provisioned system into an SLO-violating one.
 
@@ -1564,7 +1564,7 @@ At the CPU level, core pinning assigns specific CPU cores to inference pods, pre
 
 The isolation techniques discussed here represent a spectrum from strong (MIG, hardware isolation) to flexible (MPS, software sharing), and the choice depends on the trust boundary between colocated workloads. Multi-tenant inference platforms serving different external customers typically require MIG for security isolation. Single-tenant platforms serving different internal models on the same GPU can use MPS or time-slicing where the isolation requirements are weaker.
 
-### GPU Sharing Economics {#sec-fleet-orchestration-gpu-sharing}
+### GPU sharing economics {#sec-fleet-orchestration-gpu-sharing}
 
 The decision to co-locate multiple models on a single GPU defines the efficiency frontier of an inference fleet. This choice operates on a spectrum: at one end, **exclusive access** guarantees isolation but strands capacity; at the other, **aggressive sharing** (via MPS or time-slicing) maximizes utilization but risks latency interference. The physics of this trade-off are dictated by memory fragmentation and compute contention.
 
@@ -1649,7 +1649,7 @@ Sharing reduces the fleet size by `{python} GpuSharingRoi.gs_saved_pct_str` perc
 
 :::
 
-### Model Routing and Traffic Management {#sec-fleet-orchestration-model-routing}
+### Model routing and traffic management {#sec-fleet-orchestration-model-routing}
 
 Once resources are isolated, the orchestrator faces the challenge of directing inference queries to the correct model replicas. For a monolithic web service, simple round-robin load balancing suffices. For a 175B parameter language model served across thousands of GPUs, routing becomes a complex distributed systems problem where the "unit of serving" is no longer a single container but a **tensor parallel group**, a collection of 8 GPUs that must function as a single logical entity. The load balancer cannot simply route a request to "GPU 12"; it must route to "TP Group 3," ensuring the request arrives at the exact moment the group is ready to process it.
 
@@ -1732,7 +1732,7 @@ When the computer vision team hoards 500 GPUs for a week while the NLP team sits
 
 Without explicit resource management policies, resource allocation degrades to a tragedy of the commons. Teams with the most aggressive job submission rates, the largest jobs, or the most persistent resubmission scripts consume disproportionate resources, while teams with more modest or intermittent needs find the cluster perpetually occupied. This creates organizational friction, political escalation to management, and underinvestment in slower-moving but potentially higher-value projects whose teams lack the engineering effort to compete for resources. The multi-tenancy and quota systems discussed in this section prevent this degradation by establishing formal policies for resource allocation, borrowing, and reclamation.
 
-### Hierarchical Fair-Share {#sec-fleet-orchestration-fair-share-multi}
+### Hierarchical fair-share {#sec-fleet-orchestration-fair-share-multi}
 
 GPU quota allocation typically operates at the namespace or project level, defining how much of the cluster each team is entitled to use. The simplest approach allocates fixed GPU counts per team: Team A gets 500 GPUs, Team B gets 300 GPUs, Team C gets 200 GPUs. This approach is easy to understand and implement but leads to systematic underutilization when teams have variable workloads. If Team A's 500-GPU allocation sits 50 percent idle during a quiet period while Team B's queue overflows with urgent work, the cluster wastes 250 GPUs of capacity that rigid quotas forbid Team B from using. The alternative, allocating less quota to each team, creates a different problem: teams are blocked from running legitimate work during peak periods even when the cluster has overall spare capacity.
 
@@ -1746,7 +1746,7 @@ This borrowing mechanism is essential for achieving high utilization in multi-te
 
 The preemption dynamics of borrowing require careful integration with the checkpoint infrastructure from @sec-fault-tolerance-reliability. Jobs running on borrowed capacity must checkpoint frequently enough that preemption (when the owning team reclaims resources) does not waste significant work. Production systems typically distinguish between "guaranteed" and "opportunistic" scheduling tiers: guaranteed jobs run on the team's owned quota and face preemption only from higher-priority work, while opportunistic jobs run on borrowed capacity and accept that they may be preempted when the owning team needs its resources back. Training frameworks that support elastic scaling can respond to borrowed-capacity reclamation by shrinking rather than terminating, further reducing the cost of the borrowing mechanism.
 
-### Burst Capacity and Over-Subscription {#sec-fleet-orchestration-burst-capacity}
+### Burst capacity and over-subscription {#sec-fleet-orchestration-burst-capacity}
 
 In a shared GPU cluster, static quotas inevitably lead to the "burst capacity" paradox: Team A has a quota of 64 GPUs but needs 256 for a weekend-long training run, while Team B's allocated 64 GPUs sit idle. The solution requires decoupling "guaranteed quota" from "limit quota." A team is guaranteed 64 GPUs, which they can access instantly, but can burst up to 512 GPUs if the cluster has slack capacity. This "over-subscription" model relies on preemption: if Team B wakes up and reclaims their guaranteed share, the scheduler must immediately terminate Team A's burst jobs.
 
@@ -1756,7 +1756,7 @@ To manage this safely, clusters must implement strict priority classes. **Produc
 
 The appropriate over-commitment ratio depends on workload characteristics and requires careful observation of actual resource utilization patterns. If most jobs request 100 percent GPU utilization but actually achieve 70 percent (due to data loading phases, communication overhead, memory allocation gaps, or suboptimal kernel scheduling), a 1.3$\times$ over-commitment ratio improves cluster-wide utilization without significant contention because the total actual demand (70 percent$\times$ 1.3 = 91 percent) remains below physical capacity. If jobs are genuinely compute-bound and sustain near-100 percent GPU utilization, over-commitment leads to resource contention and performance degradation for all colocated workloads. The over-commitment ratio should therefore be calibrated empirically based on cluster-wide utilization telemetry, not set based on theoretical assumptions about workload behavior.
 
-### Resource Accounting and Observability {#sec-fleet-orchestration-resource-accounting}
+### Resource accounting and observability {#sec-fleet-orchestration-resource-accounting}
 
 The 64 GPUs that sat idle for a weekend because a researcher forgot to cancel a reservation represent invisible waste in a multi-tenant cloud fleet. In a dedicated cluster, such waste is at least visible: the lights are on, but the fans are quiet. In a shared environment, the cost is hidden and compounds across thousands of jobs. Effective governance requires moving beyond simple "allocation" metrics to a tiered accounting model that distinguishes between what was requested, what was used, and what was useful.
 
@@ -1774,7 +1774,7 @@ To debug cluster efficiency, measure utilization at three distinct layers. **All
 
 :::
 
-### Security and Namespace Isolation {#sec-fleet-orchestration-security-isolation}
+### Security and namespace isolation {#sec-fleet-orchestration-security-isolation}
 
 Multi-tenancy requires not only fair resource allocation but also security isolation that prevents teams from interfering with or observing each other's workloads. The stakes are real: ML models represent significant intellectual property, training data may contain sensitive information subject to privacy regulations, and the models themselves may encode proprietary business logic. Without proper isolation, a compromised or misconfigured workload in one team's namespace could access another team's model weights, training data, or inference traffic.
 
@@ -1786,7 +1786,7 @@ GPU virtualization options represent a spectrum of isolation strength versus res
 
 Security in multi-tenant environments extends beyond simple resource fairness. Side-channel attacks on shared GPUs are a documented vulnerability; by monitoring contention on shared caches or memory controllers, a malicious tenant can infer the architecture or even data properties of a co-resident model. In highly sensitive environments, hardware isolation mechanisms like MIG or strictly dedicating entire GPU nodes to single tenants become mandatory requirements.
 
-### Priority Preemption Cascades {#sec-fleet-orchestration-preemption-cascades}
+### Priority preemption cascades {#sec-fleet-orchestration-preemption-cascades}
 
 When a high-priority job enters a saturated cluster, the scheduler faces a critical decision: which running workloads must be terminated to free up resources? This decision is rarely isolated. In tightly packed clusters, evicting a medium-priority job to accommodate a high-priority request often triggers a **preemption cascade**, where the evicted job immediately attempts to reschedule itself by displacing lower-priority workloads. Without dampening controls, a single urgent inference service deployment can ripple through the queue, destabilizing dozens of training jobs and forcing a storm of checkpoint reloads that saturate storage bandwidth.
 
@@ -1794,7 +1794,7 @@ The engineering cost of preemption extends far beyond the scheduling latency. Th
 
 During this 45-minute recovery window, the GPUs are active but effectively unproductive. At \$2 per GPU-hour, a single preemption event costs \$96 in wasted compute capital. If the scheduler allows unlimited preemption, a cluster averaging 12 preemptions per day wastes 8.5 hours, over 35 percent of total capacity, on recovery overhead. To mitigate this, production systems enforce **preemption budgets**. These rate limits constrain disruption frequency, ensuring that a job cannot be preempted more than once per hour, or that total cluster preemption churn cannot exceed 5 percent of capacity in any 10-minute window. This forces the scheduler to wait for natural job completions rather than triggering a cascade, trading slightly higher pending times for significantly higher aggregate throughput.
 
-### Quota Governance and Organizational Dynamics {#sec-fleet-orchestration-quota-governance}
+### Quota governance and organizational dynamics {#sec-fleet-orchestration-quota-governance}
 
 Schedulers manage the second-by-second allocation of silicon, but **quota governance** manages the month-by-month allocation of organizational intent. Quotas are the interface between engineering constraints and business priorities. In mature ML organizations, these are rarely static; they are adjusted through periodic **quota review cycles** where allocations are recalibrated based on realized utilization rather than forecasted demand. A team that consistently uses only 40 percent of their 128-GPU allocation is effectively blocking other teams from launching experiments, creating a phantom scarcity that drives up queue times despite ample physical capacity.
 
@@ -2028,7 +2028,7 @@ Effective debugging required examining both layers and their interaction, recogn
 
 :::
 
-### Common Utilization Anti-Patterns {#sec-fleet-orchestration-anti-patterns}
+### Common utilization anti-patterns {#sec-fleet-orchestration-anti-patterns}
 
 High-level metrics often mask deep inefficiencies. A cluster dashboard may report 85 percent allocation, but the productive utilization, cycles actually advancing model state, can be significantly lower. Debugging these gaps requires identifying specific signatures in the GPU telemetry that reveal the underlying bottleneck.
 
