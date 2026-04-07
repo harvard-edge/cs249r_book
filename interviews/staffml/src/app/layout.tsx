@@ -3,6 +3,8 @@ import "./globals.css";
 import Nav from "@/components/Nav";
 import EcosystemBar from "@/components/EcosystemBar";
 import Providers from "@/components/Providers";
+import CommandPalette from "@/components/CommandPalette";
+import KeyboardShortcutsOverlay from "@/components/KeyboardShortcutsOverlay";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://staffml.ai"),
@@ -37,11 +39,22 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <meta httpEquiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; connect-src 'self' https://api.github.com https://mlsysbook.ai https://harvard-edge.github.io; img-src 'self' data: https://mlsysbook.ai https://harvard-edge.github.io; frame-ancestors 'none';" />
+        {/*
+          Dev-mode needs 'unsafe-eval' because Next.js's React Refresh / HMR
+          runtime evaluates strings as JavaScript. Production locks this down.
+        */}
+        <meta
+          httpEquiv="Content-Security-Policy"
+          content={`default-src 'self'; script-src 'self' 'unsafe-inline'${
+            process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""
+          }; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; connect-src 'self' https://api.github.com https://mlsysbook.ai https://harvard-edge.github.io; img-src 'self' data: https://mlsysbook.ai https://harvard-edge.github.io;`}
+        />
         <script dangerouslySetInnerHTML={{ __html: `
           (function() {
+            // Dark is the default site-wide; users can opt into light via the
+            // theme toggle, which persists in localStorage.
             var t = localStorage.getItem('staffml_theme');
-            if (!t) t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+            if (t !== 'light' && t !== 'dark') t = 'dark';
             document.documentElement.dataset.theme = t;
           })();
         `}} />
@@ -54,6 +67,8 @@ export default function RootLayout({
           <EcosystemBar />
           <Nav />
           <main className="flex-1 flex flex-col">{children}</main>
+          <CommandPalette />
+          <KeyboardShortcutsOverlay />
         </Providers>
       </body>
     </html>

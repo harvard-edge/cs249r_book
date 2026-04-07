@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Target, CheckCircle2, XCircle, Terminal, SkipForward,
-  BookOpen, Calculator
+  BookOpen, Calculator, FileText, ExternalLink as ExternalLinkIcon
 } from "lucide-react";
 import clsx from "clsx";
 import HardwareRef from "@/components/HardwareRef";
@@ -18,10 +18,12 @@ import {
   getTracks, getLevels, getCompetencyAreas, getZones, getQuestionsByFilter,
   getQuestions, getQuestionsByTopic,
   Question, checkNapkinMath, extractFinalNumber, cleanScenario,
-  NapkinResult
+  NapkinResult, isNumericQuestion
 } from "@/lib/corpus";
 import { saveAttempt, getAttempts, updateSRCard, getDueQuestionIds, getDueCount, recordActivity } from "@/lib/progress";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
+import { classifyRef } from "@/lib/refs";
+import { trackTooltip, competencyTooltip } from "@/lib/meta-descriptions";
 import { getQuestionById } from "@/lib/corpus";
 import { getTopicById, getZoneDefinition } from "@/lib/taxonomy";
 import { getLevelDef } from "@/lib/levels";
@@ -35,6 +37,7 @@ import Link from "next/link";
 import { buildReportUrl } from "@/lib/issue-url";
 import QuestionFeedback from "@/components/QuestionFeedback";
 import { track } from "@/lib/analytics";
+import FirstRunExplainer from "@/components/FirstRunExplainer";
 
 export default function PracticePageWrapper() {
   return (
@@ -250,12 +253,15 @@ function PracticePage() {
     }
     incrementReveals();
 
-    // Try napkin math check if the question has napkin_math and user typed something
+    // Try napkin math check ONLY when (a) the question is actually numeric
+    // (so we never grade a recall question like "what does NPU stand for?")
+    // and (b) the user typed something containing at least one digit.
+    // Falls back to self-rate when either condition fails.
     let napkinGrade: string | undefined;
-    if (current?.details.napkin_math && userAnswer.trim()) {
+    if (current && isNumericQuestion(current) && userAnswer.trim() && /\d/.test(userAnswer)) {
       const userNum = extractFinalNumber(userAnswer);
-      const modelNum = extractFinalNumber(current.details.napkin_math);
-      if (userNum !== null && modelNum !== null && modelNum > 0) {
+      const modelNum = extractFinalNumber(current.details.napkin_math || '');
+      if (userNum !== null && modelNum !== null && modelNum > 0 && !isNaN(userNum) && isFinite(userNum)) {
         const result = checkNapkinMath(userNum, modelNum, current.track);
         setNapkinResult({ ...result, userNum, modelNum });
         napkinGrade = result.grade;
@@ -364,7 +370,9 @@ function PracticePage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col lg:flex-row">
+    <div className="flex-1 flex flex-col">
+      <FirstRunExplainer mode="practice" />
+      <div className="flex-1 flex flex-col lg:flex-row min-h-0">
       {/* Sidebar filters */}
       <aside className="w-full lg:w-64 border-b lg:border-b-0 lg:border-r border-border bg-surface/50 p-4 lg:p-5 flex flex-col gap-4 lg:gap-6 lg:overflow-y-auto">
         {/* Back to vault link */}
@@ -473,21 +481,25 @@ function PracticePage() {
         <div>
           <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-2">Track</label>
           <div className="flex flex-wrap gap-1 lg:flex-col lg:gap-1">
-            {tracks.map(t => (
-              <button
-                key={t}
-                onClick={() => setSelectedTrack(t)}
-                className={clsx(
-                  "px-3 py-1.5 lg:py-2 lg:w-full rounded-md text-sm font-medium capitalize transition-all",
-                  "lg:text-left",
-                  selectedTrack === t
-                    ? "bg-accentBlue/10 text-accentBlue"
-                    : "text-textSecondary hover:bg-surfaceHover"
-                )}
-              >
-                {t === "tinyml" ? "TinyML" : t}
-              </button>
-            ))}
+            {tracks.map(t => {
+              const tip = trackTooltip(t);
+              return (
+                <button
+                  key={t}
+                  onClick={() => setSelectedTrack(t)}
+                  title={`${tip.title}\n${tip.body}`}
+                  className={clsx(
+                    "px-3 py-1.5 lg:py-2 lg:w-full rounded-md text-sm font-medium capitalize transition-all",
+                    "lg:text-left",
+                    selectedTrack === t
+                      ? "bg-accentBlue/10 text-accentBlue"
+                      : "text-textSecondary hover:bg-surfaceHover"
+                  )}
+                >
+                  {t === "tinyml" ? "TinyML" : t}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -540,20 +552,24 @@ function PracticePage() {
             >
               All areas
             </button>
-            {areas.map(a => (
-              <button
-                key={a}
-                onClick={() => setSelectedArea(a)}
-                className={clsx(
-                  "w-full text-left px-3 py-1.5 rounded text-xs font-medium capitalize transition-all",
-                  selectedArea === a
-                    ? "bg-accentBlue/10 text-accentBlue"
-                    : "text-textSecondary hover:bg-surfaceHover"
-                )}
-              >
-                {a}
-              </button>
-            ))}
+            {areas.map(a => {
+              const tip = competencyTooltip(a);
+              return (
+                <button
+                  key={a}
+                  onClick={() => setSelectedArea(a)}
+                  title={`${tip.title}\n${tip.body}`}
+                  className={clsx(
+                    "w-full text-left px-3 py-1.5 rounded text-xs font-medium capitalize transition-all",
+                    selectedArea === a
+                      ? "bg-accentBlue/10 text-accentBlue"
+                      : "text-textSecondary hover:bg-surfaceHover"
+                  )}
+                >
+                  {a}
+                </button>
+              );
+            })}
           </div>
         </details>
 
@@ -671,17 +687,25 @@ function PracticePage() {
                       </p>
                     </div>
 
-                    {current.details.deep_dive_title && (
-                      <a
-                        href={current.details.deep_dive_url ? current.details.deep_dive_url.replace('https://mlsysbook.ai', ECOSYSTEM_BASE) : '#'}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 mt-6 px-3 py-2 text-[13px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
-                      >
-                        <BookOpen className="w-4 h-4" />
-                        {current.details.deep_dive_title}
-                      </a>
-                    )}
+                    {current.details.deep_dive_title && current.details.deep_dive_url && (() => {
+                      const refInfo = classifyRef(current.details.deep_dive_url);
+                      const href = refInfo.isBook
+                        ? current.details.deep_dive_url!.replace('https://mlsysbook.ai', ECOSYSTEM_BASE)
+                        : current.details.deep_dive_url!;
+                      const Icon = refInfo.isBook ? BookOpen : refInfo.source === "arxiv" || refInfo.source === "paper" ? FileText : ExternalLinkIcon;
+                      return (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={refInfo.label}
+                          className="inline-flex items-center gap-2 mt-6 px-3 py-2 text-[13px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
+                        >
+                          <Icon className="w-4 h-4" />
+                          {current.details.deep_dive_title}
+                        </a>
+                      );
+                    })()}
 
                   </motion.div>
                 </AnimatePresence>
@@ -706,7 +730,7 @@ function PracticePage() {
             <div className="w-full lg:w-[460px] border-t lg:border-t-0 lg:border-l border-border bg-surface/90 flex flex-col">
               <div className="h-10 border-b border-border flex items-center px-4 bg-background/50 justify-between">
                 <span className="text-[10px] font-mono text-textTertiary uppercase tracking-widest flex items-center gap-2">
-                  <Calculator className="w-3 h-3" /> {current.details.napkin_math ? "napkin_math.py" : "answer.md"}
+                  <Calculator className="w-3 h-3" /> {isNumericQuestion(current) ? "napkin_math.py" : "answer.md"}
                 </span>
                 <button
                   onClick={() => pickRandom()}
@@ -725,7 +749,7 @@ function PracticePage() {
                       value={userAnswer}
                       onChange={(e) => setUserAnswer(e.target.value)}
                       placeholder={
-                        current.details.napkin_math
+                        isNumericQuestion(current)
                           ? "Type your napkin math here...\n\nExample:\nBandwidth: 3.35 TB/s\nModel size: 140 GB\nTime = 140 / 3350 ≈ 42 ms\n\n=> 42 ms   (mark your final answer with =>)"
                           : "Type your answer or reasoning here..."
                       }
@@ -820,18 +844,31 @@ function PracticePage() {
                       </div>
                     )}
 
-                    {/* Deep-dive link to MLSysBook.ai */}
-                    {current.details.deep_dive_title && (
-                      <a
-                        href={current.details.deep_dive_url ? current.details.deep_dive_url.replace('https://mlsysbook.ai', ECOSYSTEM_BASE) : '#'}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 px-3 py-2.5 text-[12px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
-                      >
-                        <BookOpen className="w-3.5 h-3.5 shrink-0" />
-                        <span>Learn more on <span className="font-semibold">MLSysBook.ai</span> &mdash; {current.details.deep_dive_title}</span>
-                      </a>
-                    )}
+                    {/* Deep-dive reference — labelled honestly per destination
+                        (book / paper / vendor docs / blog / external) so users
+                        know what they're clicking into. See lib/refs.ts. */}
+                    {current.details.deep_dive_title && current.details.deep_dive_url && (() => {
+                      const refInfo = classifyRef(current.details.deep_dive_url);
+                      const href = refInfo.isBook
+                        ? current.details.deep_dive_url!.replace('https://mlsysbook.ai', ECOSYSTEM_BASE)
+                        : current.details.deep_dive_url!;
+                      const Icon = refInfo.isBook ? BookOpen : refInfo.source === "arxiv" || refInfo.source === "paper" ? FileText : ExternalLinkIcon;
+                      return (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={refInfo.mayBeUnavailable ? "This link may be temporarily unavailable while the book site is being redeployed." : refInfo.label}
+                          className="flex items-center gap-2 px-3 py-2.5 text-[12px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
+                        >
+                          <Icon className="w-3.5 h-3.5 shrink-0" />
+                          <span><span className="font-semibold">{refInfo.label}</span> &mdash; {current.details.deep_dive_title}</span>
+                          {refInfo.mayBeUnavailable && (
+                            <span className="ml-auto text-accentAmber text-[10px] font-mono" aria-label="May be unavailable">⚠</span>
+                          )}
+                        </a>
+                      );
+                    })()}
 
                     {/* Rubric checkboxes */}
                     {rubricItems.length > 0 && (
@@ -882,6 +919,25 @@ function PracticePage() {
                       <span className="text-[10px] font-mono text-textTertiary uppercase block mb-3">
                         {rubricItems.length > 0 ? 'Confirm or override' : 'Rate yourself'}
                         <span className="text-textTertiary/50 ml-2">Press 1-4</span>
+                        <details className="inline-block ml-2 group">
+                          <summary className="cursor-pointer text-accentBlue/70 hover:text-accentBlue text-[10px] normal-case font-sans select-none">
+                            (how does this affect drilling?)
+                          </summary>
+                          <div className="mt-2 p-3 rounded-md border border-borderSubtle bg-surface/50 text-[10px] text-textSecondary leading-relaxed normal-case font-sans">
+                            <p className="mb-2">
+                              Your honest rating drives spaced repetition. The system schedules the next time you'll see this question based on how you did:
+                            </p>
+                            <ul className="space-y-1 mb-2">
+                              <li><span className="text-accentRed font-semibold">Wrong</span> → comes back tomorrow</li>
+                              <li><span className="text-accentAmber font-semibold">Partial</span> → comes back in 3 days</li>
+                              <li><span className="text-accentGreen font-semibold">Nailed</span> → comes back in 1–2 weeks (intervals lengthen each time you nail it)</li>
+                              <li><span className="text-textTertiary font-semibold">Skip</span> → no schedule change, doesn't count toward your streak</li>
+                            </ul>
+                            <p className="text-textTertiary italic">
+                              The "due" counter in the nav shows how many cards are waiting for you. Be honest — over-rating "Nailed" means you'll forget; under-rating wastes your time on stuff you already know.
+                            </p>
+                          </div>
+                        </details>
                       </span>
                       <div className="grid grid-cols-4 gap-2">
                         {[
@@ -949,6 +1005,7 @@ function PracticePage() {
       {showStarGate && (
         <StarGate onVerified={() => { setShowStarGate(false); track({ type: 'star_gate_verified' }); }} />
       )}
+      </div>
     </div>
   );
 }

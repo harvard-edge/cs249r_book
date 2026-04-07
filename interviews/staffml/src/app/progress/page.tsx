@@ -225,15 +225,34 @@ export default function ProgressPage() {
               <BarChart3 className="w-8 h-8 text-textTertiary" />
             </div>
             <h2 className="text-xl font-bold text-textPrimary mb-2">No data yet</h2>
-            <p className="text-sm text-textSecondary mb-6 max-w-md">
-              Complete a Gauntlet or drill some questions to see your readiness heat map populate.
+            <p className="text-sm text-textSecondary mb-6 max-w-md leading-relaxed">
+              Your progress page lights up after you've drilled questions or completed a mock interview. Pick a starting point — there's no wrong choice.
             </p>
-            <Link
-              href="/gauntlet"
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-textPrimary text-background font-bold rounded-lg hover:opacity-90 transition-all text-sm"
-            >
-              <Crosshair className="w-4 h-4" /> Start a Gauntlet
-            </Link>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Link
+                href="/practice?level=L1"
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-surface border border-border text-textPrimary hover:border-accentBlue/60 rounded-lg transition-all text-sm font-medium"
+                title="Start with the easiest level — recall questions to warm up."
+              >
+                <Target className="w-4 h-4 text-accentGreen" /> Drill 5 easy
+              </Link>
+              <Link
+                href="/practice?daily=1"
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-surface border border-border text-textPrimary hover:border-accentBlue/60 rounded-lg transition-all text-sm font-medium"
+                title="3 hand-picked questions, same for everyone, takes ~5 min."
+              >
+                <Target className="w-4 h-4 text-accentBlue" /> Daily challenge
+              </Link>
+              <Link
+                href="/gauntlet"
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-textPrimary text-background font-bold rounded-lg hover:opacity-90 transition-all text-sm"
+              >
+                <Crosshair className="w-4 h-4" /> Mock interview
+              </Link>
+            </div>
+            <p className="text-[11px] text-textTertiary italic mt-6 max-w-md">
+              Tip: every question you answer feeds the heat map below, so you can see at a glance which competency areas need more work.
+            </p>
           </motion.div>
         ) : (
           <>

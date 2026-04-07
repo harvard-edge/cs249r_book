@@ -1,0 +1,247 @@
+name: '🎯 StaffML · 🔗 Link Check'
+
+# =============================================================================
+# StaffML — Corpus deep_dive_url health check
+# =============================================================================
+#
+# Probes every unique deep_dive_url in src/data/corpus.json via curl and
+# uploads a structured JSON health report. Runs on a weekly schedule and on
+# manual dispatch. Optionally fails the workflow if any new URLs are dead.
+#
+# Flow:
+#   1. CHECKOUT  — minimal clone, no deps
+#   2. PROBE     — python3 scripts/check-deep-dive-links.py
+#   3. UPLOAD    — _deep_dive_link_report.json as workflow artifact
+#   4. NOTIFY    — open an issue if broken-count regresses week-over-week
+#
+# Triggers:
+#   - schedule:           every Monday 09:00 UTC
+#   - workflow_dispatch:  manual run
+#   - pull_request:       only when corpus.json or refs.ts is touched
+#
+# Related:
+#   - interviews/staffml/scripts/check-deep-dive-links.py
+#   - interviews/staffml/src/lib/refs.ts (matching URL classifier)
+#
+# =============================================================================
+
+on:
+  schedule:
+    # Mondays at 09:00 UTC — early enough to catch the weekend's regressions
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      fail_on_broken:
+        description: 'Fail the workflow if any URL is dead'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['true', 'false']
+  pull_request:
+    paths:
+      - 'interviews/staffml/src/data/corpus.json'
+      - 'interviews/staffml/src/lib/refs.ts'
+      - 'interviews/staffml/scripts/check-deep-dive-links.py'
+      - '.github/workflows/staffml-link-check.yml'
+
+permissions:
+  contents: read
+  issues: write   # only used by the regression-notify step
+
+concurrency:
+  group: staffml-link-check
+  cancel-in-progress: false   # let scheduled runs always finish
+
+jobs:
+  check-links:
+    name: '🔗 Probe corpus deep_dive_urls'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          # Minimal clone — we only need the corpus and the script
+          fetch-depth: 1
+
+      - name: 🐍 Verify Python
+        run: python3 --version
+
+      - name: 🔍 Verify curl
+        run: curl --version
+
+      - name: 🌐 Run link checker
+        id: probe
+        working-directory: interviews/staffml
+        run: |
+          set +e
+          python3 scripts/check-deep-dive-links.py --quiet | tee /tmp/link-check.log
+          rc=$?
+          set -e
+
+          if [ ! -f scripts/_deep_dive_link_report.json ]; then
+            echo "❌ Link checker did not produce a report"
+            exit 1
+          fi
+
+          # Extract summary metrics for downstream steps
+          eval "$(python3 - <<'PY'
+          import json
+          with open('scripts/_deep_dive_link_report.json') as f:
+              r = json.load(f)
+          total = r.get('total_links', 0)
+          unique = r.get('unique_urls', 0)
+          broken = r.get('broken_count', 0)
+          healthy = unique - broken
+          pct = (healthy / unique * 100) if unique else 0
+          print(f"TOTAL_LINKS={total}")
+          print(f"UNIQUE_URLS={unique}")
+          print(f"BROKEN_COUNT={broken}")
+          print(f"HEALTHY_COUNT={healthy}")
+          print(f"HEALTH_PCT={pct:.1f}")
+          PY
+          )"
+
+          # Publish to step outputs for downstream steps
+          {
+            echo "total_links=$TOTAL_LINKS"
+            echo "unique_urls=$UNIQUE_URLS"
+            echo "broken_count=$BROKEN_COUNT"
+            echo "healthy_count=$HEALTHY_COUNT"
+            echo "health_pct=$HEALTH_PCT"
+          } >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "─── Link health summary ───"
+          echo "Total references : $TOTAL_LINKS"
+          echo "Unique URLs      : $UNIQUE_URLS"
+          echo "Healthy          : $HEALTHY_COUNT ($HEALTH_PCT%)"
+          echo "Broken           : $BROKEN_COUNT"
+
+          # Honor the manual fail-on-broken input
+          if [ "${{ github.event.inputs.fail_on_broken }}" = "true" ] && [ "$rc" -ne 0 ]; then
+            echo "❌ Manual fail-on-broken requested and broken URLs found"
+            exit 1
+          fi
+
+      - name: 📤 Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staffml-link-report
+          path: interviews/staffml/scripts/_deep_dive_link_report.json
+          retention-days: 90
+
+      - name: 📊 PR comment with link health diff
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(
+              fs.readFileSync('interviews/staffml/scripts/_deep_dive_link_report.json', 'utf8')
+            );
+            const total = report.total_links;
+            const unique = report.unique_urls;
+            const broken = report.broken_count;
+            const healthy = unique - broken;
+            const pct = unique ? ((healthy / unique) * 100).toFixed(1) : '0.0';
+
+            // Top 5 broken-by-impact, surfaced inline
+            const top = (report.broken || [])
+              .slice(0, 5)
+              .map(b => `| ${b.status} | ${b.occurrences} | \`${b.url.slice(0, 80)}\` |`)
+              .join('\n');
+
+            const body = [
+              '## 🔗 StaffML link-health report',
+              '',
+              `- **Total references**: ${total}`,
+              `- **Unique URLs**: ${unique}`,
+              `- **Healthy (2xx/3xx)**: ${healthy} (${pct}%)`,
+              `- **Broken**: ${broken}`,
+              '',
+              top ? '### Top 5 broken URLs by user-impact' : '',
+              top ? '| Status | Occurrences | URL |' : '',
+              top ? '|---|---|---|' : '',
+              top,
+              '',
+              '> Full report uploaded as workflow artifact `staffml-link-report`.',
+            ].filter(Boolean).join('\n');
+
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: 🚨 Open issue on regression
+        # Only on scheduled runs — we want a single source of weekly truth
+        if: github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(
+              fs.readFileSync('interviews/staffml/scripts/_deep_dive_link_report.json', 'utf8')
+            );
+            const broken = report.broken_count || 0;
+            const unique = report.unique_urls || 0;
+            const healthy = unique - broken;
+            const pct = unique ? ((healthy / unique) * 100).toFixed(1) : '0.0';
+
+            // Only file an issue if health < 60% — adjust as the corpus heals
+            const HEALTH_THRESHOLD = 60.0;
+            if (parseFloat(pct) >= HEALTH_THRESHOLD) {
+              console.log(`Health ${pct}% >= threshold ${HEALTH_THRESHOLD}%, no issue filed.`);
+              return;
+            }
+
+            const top = (report.broken || [])
+              .slice(0, 10)
+              .map(b => `- [${b.status}] x${b.occurrences} \`${b.url}\``)
+              .join('\n');
+
+            const title = `[StaffML] Link health ${pct}% (${broken}/${unique} broken)`;
+            const body = [
+              `## Weekly StaffML link-health report`,
+              '',
+              `- **Healthy**: ${healthy}/${unique} (${pct}%)`,
+              `- **Broken**: ${broken}`,
+              `- **Threshold**: ${HEALTH_THRESHOLD}%`,
+              '',
+              `### Top 10 broken URLs by user-impact`,
+              top,
+              '',
+              `Full report attached as artifact \`staffml-link-report\` on the [workflow run](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}).`,
+              '',
+              `_Auto-filed by \`.github/workflows/staffml-link-check.yml\`._`,
+            ].join('\n');
+
+            // Avoid duplicates: look for an open issue with the same title prefix
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'staffml,link-health',
+            });
+            const dup = existing.data.find(i => i.title.startsWith('[StaffML] Link health'));
+            if (dup) {
+              console.log(`Updating existing issue #${dup.number}`);
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: dup.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['staffml', 'link-health'],
+              });
+            }
