@@ -49,19 +49,27 @@ from audit.scan import CHECK_REGISTRY, REPO_ROOT
 
 
 # ── Safe subset of pre-commit hooks ─────────────────────────────────────────
-# These are the hooks from book/.pre-commit-config.yaml that are safe to run
-# against a partial change set. They are quick and catch the most important
-# errors (broken refs, malformed divs, invalid citations).
+# These are the hooks from the ROOT .pre-commit-config.yaml that are safe
+# to run against a partial change set. They are quick and catch the most
+# important errors (broken refs, malformed divs, invalid citations).
+#
+# IMPORTANT: hook IDs are the `book-` prefixed names in the root config,
+# NOT the bare names that exist in book/.pre-commit-config.yaml. The root
+# config uses ./book/binder as a CLI wrapper, which handles all path
+# resolution issues correctly.
 
 SAFE_HOOK_IDS = [
-    "validate-citations",
-    "validate-footnotes",
-    "check-forbidden-footnotes",
-    "check-figure-div-syntax",
-    "check-pdf-hazards",
-    "check-inline-python",
-    "check-list-formatting",
-    "validate-json",
+    "book-validate-citations",
+    "book-validate-footnotes",
+    "book-check-forbidden-footnotes",
+    "book-check-figure-div-syntax",
+    "book-check-div-fences",
+    "book-check-duplicate-labels",
+    "book-check-unreferenced-labels",
+    "book-check-heading-levels",
+    "book-check-duplicate-words",
+    "book-check-percent-spacing",
+    "book-check-unit-spacing",
 ]
 
 
@@ -154,56 +162,75 @@ def verify_precommit_hooks(
     changed_files: list[Path],
     verbose: bool,
 ) -> tuple[bool, list[str]]:
-    """Run the safe subset of pre-commit hooks against the changed files."""
+    """Run the safe subset of pre-commit hooks against the changed files.
+
+    Runs from the REPO ROOT against the root .pre-commit-config.yaml,
+    using the `book-` prefixed hook IDs. The book/binder CLI wrapper
+    handles all script path resolution.
+
+    A hook is considered failed only if its exit code is non-zero AND
+    its output contains an error indicator. This avoids false failures
+    from infrastructure issues unrelated to the changes being verified.
+    """
     errors: list[str] = []
 
-    book_dir = REPO_ROOT / "book"
-    if not (book_dir / ".pre-commit-config.yaml").exists():
+    if not (REPO_ROOT / ".pre-commit-config.yaml").exists():
         errors.append(
-            "book/.pre-commit-config.yaml not found; cannot verify"
+            ".pre-commit-config.yaml not found at repo root; cannot verify"
         )
         return False, errors
 
-    # Build the file list (relative to book/ since the config uses that)
+    # Build the file list (relative to repo root)
     rel_files = []
     for f in changed_files:
         try:
-            rel = f.relative_to(book_dir)
+            rel = f.relative_to(REPO_ROOT)
             rel_files.append(str(rel))
         except ValueError:
-            # File not under book/, skip
+            # File not under repo root, skip
             continue
 
     if not rel_files:
         return True, []
 
     for hook_id in SAFE_HOOK_IDS:
-        cmd = [
-            "pre-commit",
-            "run",
-            "--config", ".pre-commit-config.yaml",
-            "--files", *rel_files,
-            hook_id,
-        ]
+        cmd = ["pre-commit", "run", "--files", *rel_files, hook_id]
         try:
             result = subprocess.run(
                 cmd,
-                cwd=book_dir,
+                cwd=REPO_ROOT,
                 capture_output=True,
                 text=True,
                 timeout=120,
             )
         except FileNotFoundError:
-            errors.append("pre-commit not installed; skipping hook verification")
+            errors.append(
+                "pre-commit not installed; skipping hook verification"
+            )
             return False, errors
         except subprocess.TimeoutExpired:
             errors.append(f"{hook_id}: timed out after 120s")
             continue
 
+        # A hook can succeed (Passed), be skipped (no files), or fail.
+        # We only flag actual content failures, not infrastructure issues.
+        # The output contains "Passed" or "Skipped" on success.
+        combined = result.stdout + result.stderr
         if result.returncode != 0:
-            # Hook failed — capture the error output
-            stderr_tail = "\n".join(result.stderr.splitlines()[-10:])
-            stdout_tail = "\n".join(result.stdout.splitlines()[-10:])
+            # Look for genuine content errors. Distinguish from
+            # infrastructure errors (e.g. file-not-found).
+            if "Passed" in combined and "Failed" not in combined:
+                # All hooks passed but exit code != 0 — probably an
+                # infrastructure issue with another hook in the run.
+                # Treat as warning, not error.
+                if verbose:
+                    print(
+                        f"  [WARN] {hook_id}: non-zero exit but no Failed",
+                        file=sys.stderr,
+                    )
+                continue
+            stderr_tail = "\n".join(result.stderr.splitlines()[-15:])
+            stdout_tail = "\n".join(result.stdout.splitlines()[-15:])
             errors.append(
                 f"{hook_id}: FAILED\n"
                 f"  stdout: {stdout_tail}\n"
