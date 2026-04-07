@@ -99,46 +99,50 @@ def check(
 
         spans = inline_protected_spans(line)
 
+        # Collect all matches first, then build a single fully-fixed
+        # suggested_after for the whole line. This is required because
+        # the applier replaces lines wholesale: emitting multiple issues
+        # with partial suggested_after values would only apply ONE of
+        # them per line. Use the compound_prefix.py pattern: collect
+        # edits as (start, end, replacement) tuples, apply in reverse
+        # order to keep indices stable, emit one Issue per match all
+        # sharing the same fully-fixed line.
+
+        edits: list[tuple[int, int, str, str]] = []  # (start, end, before, after)
+
         # Pass 1: inline-python-followed-by-% matches
         for m in _INLINE_PY_PCT_RE.finditer(line):
-            # The `{python}...` span is protected; the % immediately after
-            # is NOT protected, so we check the % position.
             pct_pos = m.end() - 1  # position of the '%' char
             if position_in_spans(pct_pos, spans):
                 continue
-            # Build the suggested replacement for the full match
-            before_match = line[: m.start()]
-            after_match = line[m.end() :]
-            # Replace `{python} ...`% with `{python} ...` percent
             py_expr = m.group(1)
-            new_line = before_match + py_expr + " percent" + after_match
-
-            issues.append(
-                Issue(
-                    id=make_issue_id(scope, CATEGORY, counter),
-                    category=CATEGORY,
-                    rule=RULE,
-                    rule_text=RULE_TEXT,
-                    file=str(file_path),
-                    line=line_num,
-                    col=m.start(),
-                    before=line,
-                    suggested_after=new_line,
-                    auto_fixable=True,
-                    reason="inline-python %",
-                )
-            )
-            counter += 1
+            before_text = m.group(0)
+            after_text = py_expr + " percent"
+            edits.append((m.start(), m.end(), before_text, after_text))
 
         # Pass 2: hard-coded digit% matches
         for m in _HARDCODED_PCT_RE.finditer(line):
             pct_pos = m.end() - 1
             if position_in_spans(pct_pos, spans):
                 continue
-            # Replace "N%" with "N percent"
             num = m.group(1)
-            new_line = line[: m.start()] + num + " percent" + line[m.end() :]
+            before_text = m.group(0)
+            after_text = f"{num} percent"
+            edits.append((m.start(), m.end(), before_text, after_text))
 
+        if not edits:
+            continue
+
+        # Sort by position (so the reverse-application order is stable)
+        edits.sort(key=lambda e: e[0])
+
+        # Build the fully-fixed line by applying all edits in reverse order
+        new_line = line
+        for start, end, _b, after in reversed(edits):
+            new_line = new_line[:start] + after + new_line[end:]
+
+        # Emit one Issue per edit, all sharing the same suggested_after
+        for start, end, before_text, after_text in edits:
             issues.append(
                 Issue(
                     id=make_issue_id(scope, CATEGORY, counter),
@@ -147,11 +151,11 @@ def check(
                     rule_text=RULE_TEXT,
                     file=str(file_path),
                     line=line_num,
-                    col=m.start(),
+                    col=start,
                     before=line,
                     suggested_after=new_line,
                     auto_fixable=True,
-                    reason=f"{num}% -> {num} percent",
+                    reason=f"{before_text} -> {after_text}",
                 )
             )
             counter += 1
