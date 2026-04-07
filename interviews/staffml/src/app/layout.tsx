@@ -3,6 +3,8 @@ import "./globals.css";
 import Nav from "@/components/Nav";
 import EcosystemBar from "@/components/EcosystemBar";
 import Providers from "@/components/Providers";
+import CommandPalette from "@/components/CommandPalette";
+import KeyboardShortcutsOverlay from "@/components/KeyboardShortcutsOverlay";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://staffml.ai"),
@@ -65,6 +67,8 @@ export default function RootLayout({
           <EcosystemBar />
           <Nav />
           <main className="flex-1 flex flex-col">{children}</main>
+          <CommandPalette />
+          <KeyboardShortcutsOverlay />
         </Providers>
       </body>
     </html>

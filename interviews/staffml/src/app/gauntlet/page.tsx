@@ -18,6 +18,10 @@ import { track } from "@/lib/analytics";
 import { saveAttempt, saveGauntletResult, AttemptRecord, recordActivity, updateSRCard } from "@/lib/progress";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import QuestionFeedback from "@/components/QuestionFeedback";
+import HardwareRef from "@/components/HardwareRef";
+import NapkinCalc from "@/components/NapkinCalc";
+import AskInterviewer from "@/components/AskInterviewer";
+import FirstRunExplainer from "@/components/FirstRunExplainer";
 
 type Phase = "setup" | "active" | "review" | "results";
 
@@ -38,6 +42,26 @@ export default function GauntletPage() {
   const [selectedDuration, setSelectedDuration] = useState(1); // index into DURATIONS
   const [availableCount, setAvailableCount] = useState(0);
 
+  // Realism: how interview-like is the session?
+  //   strict   = no Hardware Reference, no Napkin Calc, no Ask Interviewer
+  //   standard = tools available, collapsed by default (current default)
+  //   open     = tools available, expanded by default
+  // Persisted in localStorage so the user's choice survives reloads.
+  type Realism = "strict" | "standard" | "open";
+  const [realism, setRealism] = useState<Realism>("standard");
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("staffml_gauntlet_realism");
+      if (saved === "strict" || saved === "standard" || saved === "open") {
+        setRealism(saved);
+      }
+    } catch { /* localStorage may be unavailable */ }
+  }, []);
+  const updateRealism = (r: Realism) => {
+    setRealism(r);
+    try { localStorage.setItem("staffml_gauntlet_realism", r); } catch { /* ignore */ }
+  };
+
   // Active state
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -49,6 +73,17 @@ export default function GauntletPage() {
   // Review state (self-assessment per question)
   const [scores, setScores] = useState<number[]>([]);
   const [copied, setCopied] = useState(false);
+
+  // Per-question clarifications log — surfaced in the results phase as
+  // "you asked N clarifications on this problem." Powers the metacognitive
+  // post-mortem ritual for both Journal and Hosted AskInterviewer modes.
+  const [clarifications, setClarifications] = useState<Record<string, string[]>>({});
+  const recordClarification = (qId: string, q: string) => {
+    setClarifications((prev) => ({
+      ...prev,
+      [qId]: [...(prev[qId] || []), q],
+    }));
+  };
 
   const tracks = getTracks().filter(t => t !== "global");
   const levels = getLevels();
@@ -167,6 +202,7 @@ export default function GauntletPage() {
     setShowAnswer(false);
     setUserAnswer("");
     setScores([]);
+    setClarifications({});
     setTimeRemaining(dur.minutes * 60);
     setPhase("active");
     track({ type: 'gauntlet_started', track: selectedTrack, level: selectedLevel, questionCount: selected.length });
@@ -242,7 +278,11 @@ export default function GauntletPage() {
   // ─── SETUP PHASE ─────────────────────────────────────
   if (phase === "setup") {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center px-6 py-16">
+      <div className="flex-1 flex flex-col">
+        <div className="max-w-2xl w-full mx-auto px-6 pt-6">
+          <FirstRunExplainer mode="gauntlet" />
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center px-6 py-16">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -335,6 +375,33 @@ export default function GauntletPage() {
             )}
           </div>
 
+          {/* Realism — controls which helper tools appear during the interview */}
+          <div className="mb-8">
+            <label className="text-[10px] font-mono text-textTertiary uppercase tracking-widest block mb-3">Realism</label>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { id: "strict",   label: "Strict",   desc: "No tools. Closest to a real whiteboard." },
+                { id: "standard", label: "Standard", desc: "Tools available, collapsed by default." },
+                { id: "open",     label: "Open",     desc: "Tools open. Use any time." },
+              ] as { id: Realism; label: string; desc: string }[]).map(opt => (
+                <button
+                  key={opt.id}
+                  onClick={() => updateRealism(opt.id)}
+                  aria-pressed={realism === opt.id}
+                  className={clsx(
+                    "px-3 py-3 rounded-lg border text-left transition-all",
+                    realism === opt.id
+                      ? "border-accentBlue bg-accentBlue/10"
+                      : "border-border bg-surface hover:border-borderHighlight"
+                  )}
+                >
+                  <div className="text-sm font-bold text-textPrimary">{opt.label}</div>
+                  <div className="text-[10px] text-textTertiary mt-0.5 leading-relaxed">{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Available count + start */}
           <div className="flex items-center justify-between">
             <span className="text-xs text-textTertiary font-mono">
@@ -356,6 +423,7 @@ export default function GauntletPage() {
             </div>
           )}
         </motion.div>
+        </div>
       </div>
     );
   }
@@ -423,6 +491,22 @@ export default function GauntletPage() {
               </span>
             </div>
 
+            {/* Tools — gated by the user's realism choice on the setup screen.
+                Strict   = no tools at all (closest to a real whiteboard)
+                Standard = tools mounted, collapsed by default
+                Open     = tools mounted, expanded by default */}
+            {realism !== "strict" && (
+              <>
+                <HardwareRef defaultOpen={realism === "open"} />
+                <NapkinCalc defaultOpen={realism === "open"} />
+                <AskInterviewer
+                  questionContext={q.scenario}
+                  defaultOpen={realism === "open"}
+                  onAsk={(question) => recordClarification(q.id, question)}
+                />
+              </>
+            )}
+
             <div className="flex-1 p-5 flex flex-col overflow-y-auto">
               {!showAnswer ? (
                 <>
@@ -449,6 +533,20 @@ export default function GauntletPage() {
                   animate={{ opacity: 1, y: 0 }}
                   className="space-y-5"
                 >
+                  {/* User's answer — preserved for self-comparison against the model.
+                      Collapsed by default so the model answer stays the visual focus. */}
+                  {userAnswer.trim() && (
+                    <details className="group" open>
+                      <summary className="text-[10px] font-mono text-textTertiary uppercase cursor-pointer select-none flex items-center gap-1.5">
+                        <span className="group-open:rotate-90 transition-transform text-[8px]">&#9654;</span>
+                        Your answer
+                      </summary>
+                      <div className="mt-2 p-3 bg-background border border-border rounded-md font-mono text-[12px] text-textSecondary whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
+                        {userAnswer}
+                      </div>
+                    </details>
+                  )}
+
                   {/* Model answer */}
                   {q.details.common_mistake && (
                     <div className="border-l-4 border-accentRed pl-4">
@@ -568,6 +666,7 @@ export default function GauntletPage() {
             {questions.map((q, i) => {
               const s = scores[i] ?? 0;
               const labels = ['Skipped', 'Wrong', 'Partial', 'Nailed'];
+              const askedClarifications = clarifications[q.id] || [];
               return (
                 <details key={q.id} className="group rounded-lg border border-borderSubtle bg-surface">
                   <summary className="flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm">
@@ -578,12 +677,34 @@ export default function GauntletPage() {
                       {i + 1}
                     </span>
                     <span className="text-textPrimary truncate flex-1">{q.title}</span>
+                    {askedClarifications.length > 0 && (
+                      <span className="text-[9px] font-mono text-accentBlue shrink-0" title={`You asked ${askedClarifications.length} clarification${askedClarifications.length === 1 ? "" : "s"} on this problem`}>
+                        ?{askedClarifications.length}
+                      </span>
+                    )}
                     <span className="text-[10px] font-mono text-textTertiary shrink-0">{labels[s]}</span>
                   </summary>
                   <div className="px-3 pb-3 pt-1 border-t border-borderSubtle space-y-2">
                     <p className="text-[12px] text-textSecondary leading-relaxed">{q.details.realistic_solution}</p>
                     {q.details.common_mistake && (
                       <p className="text-[11px] text-accentRed/80"><span className="font-bold">Common mistake:</span> {q.details.common_mistake}</p>
+                    )}
+                    {askedClarifications.length > 0 && (
+                      <div className="pt-2 mt-2 border-t border-borderSubtle">
+                        <p className="text-[10px] font-mono text-accentBlue uppercase mb-1.5">
+                          Your clarifications ({askedClarifications.length})
+                        </p>
+                        <ul className="space-y-1">
+                          {askedClarifications.map((c, j) => (
+                            <li key={j} className="text-[11px] text-textSecondary leading-relaxed">
+                              <span className="text-textTertiary mr-1.5">{j + 1}.</span>{c}
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="text-[10px] text-textTertiary italic mt-2">
+                          Senior interviewees typically ask 3–6 clarifications before solving. Compare against the model answer's assumptions.
+                        </p>
+                      </div>
                     )}
                     <QuestionFeedback question={{
                       id: q.id, title: q.title, level: q.level,
