@@ -53,6 +53,7 @@ CHECK_REGISTRY: list[tuple[str, str]] = [
     ("audit.checks.abbreviation_first_use", "abbreviation-first-use"),
     ("audit.checks.latin_running_text", "latin-running-text"),
     ("audit.checks.alt_text_style", "alt-text-style"),
+    ("audit.checks.bibliography_hygiene", "bibliography-hygiene"),
 ]
 
 
@@ -77,23 +78,37 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 CONTENTS_ROOT = REPO_ROOT / "book" / "quarto" / "contents"
 
 
+# File extensions the scanner walks. Per-check modules may declare a
+# narrower subset via the `FILE_EXTENSIONS` module attribute; by default
+# (absent the attribute) a check runs on `.qmd` files only. The
+# bibliography-hygiene check declares `FILE_EXTENSIONS = (".bib",)` so
+# it sees the `.bib` files and existing `.qmd`-only checks skip them.
+_SCANNED_EXTENSIONS = ("*.qmd", "*.bib")
+DEFAULT_CHECK_EXTENSIONS = (".qmd",)
+
+
 def resolve_scope(scope: str) -> list[Path]:
     """Return the content files for the requested scope.
 
     Supported scopes:
-      vol1          -> book/quarto/contents/vol1/**/*.qmd
-      vol2          -> book/quarto/contents/vol2/**/*.qmd
+      vol1          -> book/quarto/contents/vol1/**/*.{qmd,bib}
+      vol2          -> book/quarto/contents/vol2/**/*.{qmd,bib}
       both          -> both volumes
       <path>        -> treat as a file or directory path
     """
+    def _walk(root: Path) -> list[Path]:
+        files: list[Path] = []
+        for pattern in _SCANNED_EXTENSIONS:
+            files.extend(root.rglob(pattern))
+        return files
+
     if scope == "vol1":
         root = CONTENTS_ROOT / "vol1"
     elif scope == "vol2":
         root = CONTENTS_ROOT / "vol2"
     elif scope == "both":
         return sorted(
-            list((CONTENTS_ROOT / "vol1").rglob("*.qmd"))
-            + list((CONTENTS_ROOT / "vol2").rglob("*.qmd"))
+            _walk(CONTENTS_ROOT / "vol1") + _walk(CONTENTS_ROOT / "vol2")
         )
     else:
         root = Path(scope)
@@ -103,7 +118,7 @@ def resolve_scope(scope: str) -> list[Path]:
 
     if root.is_file():
         return [root]
-    return sorted(root.rglob("*.qmd"))
+    return sorted(_walk(root))
 
 
 # ── Rule file SHA ───────────────────────────────────────────────────────────
@@ -175,7 +190,14 @@ def scan(
     for category, module in checks:
         cat_start = time.time()
         cat_count = 0
+        # Each check module may declare FILE_EXTENSIONS to narrow which
+        # file types it runs on. Default is `.qmd` only.
+        allowed_exts = getattr(
+            module, "FILE_EXTENSIONS", DEFAULT_CHECK_EXTENSIONS
+        )
         for file_path in files:
+            if file_path.suffix not in allowed_exts:
+                continue
             try:
                 text = file_path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as e:
