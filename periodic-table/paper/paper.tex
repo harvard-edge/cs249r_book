@@ -409,35 +409,7 @@ for any composing function $f$ drawn from the class of steady-state dataflow gra
 
 This is a cost-model criterion, not an implementation criterion. A MAC unit can be decomposed into adders and multipliers at the circuit layer, but its Hardware-layer cost, the precision-dependent throughput of \cvalint{\HhPeakTFLOPS}\,TFLOP/s at FP16 versus 67\,TFLOP/s at FP32 on the same chip, cannot be derived from same-layer components. The $15\times$ gap is a property of the MAC's microarchitecture, not of its logical decomposition.\footnote{This parallels the original RISC argument \citep{patterson1980risc}: an ISA-layer \texttt{ADD} is irreducible at the ISA layer even though it decomposes into carry-chain logic at the circuit layer. Every useful taxonomy chooses a resolution that matches its cost model.}
 
-\paragraph{Proof of irreducibility: MAC Unit (Ma).} At the Hardware layer, let $\text{Ma} = g(\text{Adder}, \text{Multiplier})$. A dataflow-graph composition yields:
-\begin{align}
-\label{eq:mac-proof}
-&f\bigl(\text{Cost}_L(\text{Adder}),\, \text{Cost}_L(\text{Multiplier})\bigr) \notag \\
-&\quad = N_{\text{cores}} \cdot f_{\text{clk}} \cdot 2 \;\approx\; 67\;\text{TFLOP/s}.
-\end{align}
-But $\text{Cost}_L(\text{Ma}) = \cvalint{\HhPeakTFLOPS}\;\text{TFLOP/s}$ (FP16 tensor cores). The $14.8\times$ gap arises from the tensor-core pipeline's $4{\times}4{\times}4$ warp-level matrix multiply, a microarchitectural optimization invisible at the arithmetic level. Since $\cvalint{\HhPeakTFLOPS} \neq 67$ under any steady-state dataflow composition of adders and multipliers, the MAC is irreducible. \qed
-
-\paragraph{Proof of irreducibility: Attention (At).} At the Algorithm layer, decompose attention into two Dense Dots and a Softmax: $\text{At} = g(\text{Dd}_1, \text{Sm}, \text{Dd}_2)$. Each component's cost is expressible independently: $\text{Cost}_L(\text{Dd}_i) = O(n \cdot d^2)$ FLOPs, $\text{Cost}_L(\text{Sm}) = O(n)$. But their composition creates an $O(n^2 d)$ intermediate matrix $S = QK^T$ whose memory cost is a property of the attention pattern, not of the individual matmuls:
-\begin{equation}
-\label{eq:attn-proof}
-\text{Cost}_L(\text{At})_{\text{mem}} = O(n^2) \neq O(n d^2) + O(n) + O(n d^2)
-\end{equation}
-No dataflow graph over the individual costs recovers the quadratic memory term. Attention is irreducible. \qed
-
-\paragraph{Proof of reducibility: Systolic Array.} A Systolic Array \citep{kung1982systolic} is a regular grid of $N \times N$ MAC units connected by nearest-neighbor links. Its cost decomposes as:
-\begin{align}
-\label{eq:systolic-proof}
-\text{Throughput}(\text{SA}_{N \times N}) &= N^2 \times \text{Throughput}(\text{Ma}) \\
-\text{Latency}(\text{SA}_{N \times N}) &= (2N - 1) \times \text{Latency}(\text{Ma}) \notag \\
-\text{Energy}(\text{SA}_{N \times N}) &= N^2 \times \text{Energy}(\text{Ma}) + E_{\text{link}} \notag
-\end{align}
-where $E_{\text{link}}$ is the nearest-neighbor interconnect energy, itself a same-layer quantity. All three cost metrics are steady-state dataflow compositions of same-layer elements. The Systolic Array is reducible: \Cref{eq:irreducibility} is satisfied, so it is rejected from the taxonomy. \qed
-
-\paragraph{Caveat on parameterization.} The systolic reducibility proof assumes that nearest-neighbor interconnect energy $E_{\text{link}}$ is a same-layer Hardware element with its own cost model. If wire-delay variation were treated as an emergent property (a circuit-layer concern), the systolic array would reclassify as irreducible. The criterion is parameterized by what one admits as a same-layer element, and the parameterization is explicit. Choosing it differently is equivalent to choosing a different taxonomic resolution; the criterion does the work either way.
-
-Similarly, a Transformer Block is reducible: its cost decomposes into independently modelable attention and feed-forward components at the same layer.
-
-\paragraph{The boundary of irreducibility.} The key distinction is \emph{emergent cost}: cost that arises from the interaction of components in a way that no DAG over individual component costs can predict. Tensor cores exhibit emergent throughput (pipeline scheduling). Attention exhibits emergent memory (quadratic intermediate). Systolic arrays do not: their cost scales linearly and predictably from their constituents. This boundary is well-defined because the class of composing functions $f$ is precisely defined.
+\paragraph{The boundary of irreducibility.} The key distinction is \emph{emergent cost}: cost that arises from the interaction of components in a way that no DAG over individual component costs can predict. A MAC unit on a tensor-core pipeline exhibits emergent throughput (the \cvalint{\HhPeakTFLOPS}\,TFLOP/s FP16 figure cannot be derived from adder and multiplier costs alone; it depends on the $4{\times}4{\times}4$ warp-level matmul pipeline). Attention exhibits emergent memory (the $O(n^2)$ intermediate matrix $S = QK^T$ is a property of the attention pattern, not of its constituent Dense Dots and Softmax). A Systolic Array does not: its throughput, latency, and energy scale as predictable dataflow compositions of MAC costs plus an explicit nearest-neighbor interconnect term, so it is reducible and rejected from the taxonomy. Transformer Blocks are similarly reducible: their cost decomposes into independently modelable attention and feed-forward components at the same layer. \Cref{sec:appendix-proofs} gives the three formal proofs (MAC and Attention irreducibility, Systolic Array reducibility) and discusses how parameterization choices can flip the Systolic Array result.
 
 % ============================================================================
 \section{Molecular ML}
@@ -988,7 +960,35 @@ T_{\text{compute}} \approx \frac{2 \times 7 \times 10^9}{\cvalint{\EdgeTFLOPS} \
 
 On the unsolved edge problem, the framework produced a structurally specified molecule, predicted the components any viable solution must contain, and showed the wrong paths it considered before arriving at the cascade. ``Generative'' here does not mean the framework outputs the answer; it means the framework narrows the answer space tightly enough that any viable answer must contain (or functionally substitute for) the structural ingredients we predicted.
 
-Across all five walkthroughs the same four-filter procedure operated on the same 90-element table and produced five qualitatively different molecules. The differences trace cleanly to the inputs: different constraint type (capacity vs.\ fragmentation), different scope (single-device vs.\ multi-device), different hardware context (NVLink vs.\ InfiniBand vs.\ unified memory), different interaction shape (single intervention vs.\ cascade vs.\ simultaneous constraints). In every case the filter steps were deterministic, the eliminations were justified by metadata, and the output corresponded to a published system, or for the edge case to a structurally predicted future one. The framework does not need to know about FlashAttention to produce its intervention. It needs to know about Tiling, Fusion, SRAM, and the irreducibility of Attention.
+\subsection{An Honest Failure: Mamba}
+\label{sec:mamba-failure}
+
+The preceding five walkthroughs all succeed. That could mean the framework is genuinely generative, or it could mean we selected cases the framework was designed to handle. The honest test is a walkthrough where we know in advance the framework will fail, and we examine exactly where in the filter chain the failure surfaces. We use Mamba and other state-space models as the failure case.
+
+\paragraph{Stage 1: the na\"ive molecule.} Decode-time attention on a long-context Transformer has the molecule $M_{\text{decode}} = \text{At}\rightarrow \text{FFN}$, with attention materializing an $O(n)$ KV state that must be streamed from HBM at every decode step. At long context, the KV stream dominates decode time.
+
+\paragraph{Stage 2: the binding constraint.} For a 70B model at 128K context, per-token KV stream is $2\cdot 80\cdot 8\cdot 128\cdot 128{,}000\cdot 2 \approx 42$\,GB; at \cvalint{\HhHBMGB}\,GB HBM it would not fit, and even sharded the decode reads the entire KV-cache per step. The binding constraint is $\text{HBM-bandwidth}$: attention is reading KV state at the ceiling of the memory system, and arithmetic intensity stays fixed below ridge regardless of tile size. $M_{\text{decode}} \mid_{\text{BW}}$.
+
+\paragraph{Stage 3: the constraint-driven search.} We run the four filters against the HBM-bandwidth violation.
+
+\begin{itemize}[nosep, leftmargin=*]
+\item \textbf{Filter 1 (Layer).} Bandwidth violation at Hardware $\Rightarrow$ Runtime and Optimization candidates: $\{$Ti, Fs, Pf, Cc, Sc, Vr, Qz, Fc$\}$.
+\item \textbf{Filter 2 (Role).} Bandwidth pressure favors Represent (reduce bytes moved) or Compute (fuse work into fewer reads): $\{$Ti, Fs, Vr, Cc, Qz, Fc$\}$.
+\item \textbf{Filter 3 (Constraint type).} Bandwidth at the HBM ceiling, not capacity, not fragmentation: $\{$Fs, Qz, Fc$\}$. Tiling does not reduce total bytes moved during decode; Virtualization addresses fragmentation, not aggregate bandwidth.
+\item \textbf{Filter 4 (Hardware context).} Decode must read the full KV-cache once per token regardless of how the computation is scheduled or how precisely weights are stored. Fusion, Quantization, and Factorization all reduce \emph{weight} or \emph{activation} memory traffic; none of them changes the KV-cache traffic that dominates decode at 128K context.
+\end{itemize}
+
+\paragraph{What the filters return.} The best the search produces is a cascade (Qz + Fs + Pf) that reduces \emph{weight} streaming and overlaps it with compute, but leaves the KV-cache stream untouched. Decode time drops by a modest factor tied to weight-byte savings and stalls again at the KV bandwidth ceiling as context length grows. The filter chain cannot return a molecule that removes the KV stream, because no element in the 90-primitive table replaces the $\text{At}$ primitive with something that trades $O(n)$ KV state for an $O(1)$ recurrent state at the same functional role.
+
+\paragraph{Why the framework fails here.} Mamba, and state-space models more broadly \citep{gu2023mamba}, resolve the constraint by substituting a different \emph{algorithmic} primitive in the Represent-at-Algorithm cell: the recurrent State ($\text{St}$) element replaces Attention ($\text{At}$), trading a growing KV-cache for a fixed-size hidden state. In our notation:
+\begin{equation*}
+M_{\text{mamba}} = \text{St} \rightarrow \text{FFN},
+\end{equation*}
+with $\text{St}$ carrying bounded memory regardless of sequence length. The Constraint-Driven Structural Search cannot generate this molecule because the search operates on element \emph{metadata} within a fixed taxonomy. Swapping $\text{At}$ for $\text{St}$ is not a layout refactoring; it is an algorithm substitution that changes what the molecule computes, not how it is scheduled. The framework does not model the functional equivalence between attention and state-space recurrence, so the filters cannot propose $\text{St}$ as an intervention for any bandwidth constraint. Speculative decoding (trading verification compute for serial latency) and Mixture-of-Experts routing (trading dense compute for conditional compute) fail for the same reason and are summarized in \Cref{fig:mamba}.
+
+\paragraph{What the failure proves about scope.} The scope of the framework is now precise. The Constraint-Driven Structural Search derives architectural interventions that preserve the algorithmic primitives in the na\"ive molecule and refactor their data layout, scheduling, precision, or memory residency. It does not derive interventions that substitute one primitive for another at the same role cell; those are algorithmic innovations by definition, and adopting one requires updating the table itself. When a new algorithmic primitive is proposed (Mamba's recurrent State, Hyena's long convolution, a Mixture-of-Experts router), the framework absorbs it by admitting a new element through the Irreducibility Criterion (\Cref{sec:irreducibility}), after which the filter search can compose molecules that use it. The framework is generative over layout refactorings, not over algorithm design.
+
+Across all six walkthroughs the same four-filter procedure operated on the same 90-element table and produced five viable molecules plus one honest failure. The differences trace cleanly to the inputs: different constraint type (capacity vs.\ fragmentation vs.\ bandwidth), different scope (single-device vs.\ multi-device), different hardware context (NVLink vs.\ InfiniBand vs.\ unified memory), different interaction shape (single intervention vs.\ cascade vs.\ simultaneous constraints). In every case the filter steps were deterministic, the eliminations were justified by metadata, and the output, viable or infeasible, came from operating on the table rather than recalling a known answer. The framework does not need to know about FlashAttention to produce its intervention; it needs to know about Tiling, Fusion, SRAM, and the irreducibility of Attention.
 
 % ============================================================================
 \section{Probabilistic Constraints}
@@ -1316,5 +1316,6 @@ The framework does not replace simulators, compilers, or profilers; it provides 
 \bibliography{references}
 
 \input{appendix-elements}
+\input{appendix-proofs}
 
 \end{document}
