@@ -15,8 +15,14 @@ def _ensure_unit(val, unit):
 def calc_network_latency_ms(distance_km):
     """
     Calculates round-trip time in milliseconds based on speed of light in fiber.
-    
+
     Source: Standard networking physics (c/1.5 refractive index).
+
+    Args:
+        distance_km: One-way distance in kilometers.
+
+    Returns:
+        float: Round-trip latency in milliseconds.
     """
     d = _ensure_unit(distance_km, ureg.kilometer)
     round_trip_s = (d * 2) / SPEED_OF_LIGHT_FIBER_KM_S
@@ -25,13 +31,24 @@ def calc_network_latency_ms(distance_km):
 def dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
     """
     Core training time calculation (first-principles).
-    
+
     Source: Standard Performance Modeling for Distributed Systems.
-    Returns a Pint Quantity in seconds.
+
+    Args:
+        total_ops: Total floating point operations for training.
+        num_devices: Number of accelerators.
+        peak_flops_per_device: Peak FLOP/s per accelerator.
+        efficiency_eta: Model FLOPs utilization (0.0 to 1.0).
+
+    Returns:
+        Quantity[second]: Estimated training duration.
     """
-    # ops / (n * p * eta)
-    effective_throughput = num_devices * peak_flops_per_device * efficiency_eta
-    duration = total_ops / effective_throughput
+    ops = _ensure_unit(total_ops, ureg.flop)
+    flops = _ensure_unit(peak_flops_per_device, ureg.flop / ureg.second)
+    effective_throughput = num_devices * flops * efficiency_eta
+    if getattr(effective_throughput, 'magnitude', effective_throughput) == 0:
+        return float('inf') * ureg.second
+    duration = ops / effective_throughput
     return duration.to(ureg.second)
 
 
@@ -50,12 +67,29 @@ def calc_amdahls_speedup(p, s):
     Args:
         p: fraction of work that can be improved (0.0 to 1.0)
         s: speedup of that fraction
+        
+    Returns:
+        float: The overall system speedup.
     """
-    overall = 1 / ((1 - p) + (p / s))
+    if s == 0:
+        return 0.0
+    denom = (1 - p) + (p / s)
+    if denom == 0:
+        return float('inf')
+    overall = 1 / denom
     return overall
 
 def calc_monthly_egress_cost(bytes_per_sec, cost_per_gb):
-    """Calculates monthly cloud egress cost based on standard cloud egress rates."""
+    """
+    Calculates monthly cloud egress cost based on standard cloud egress rates.
+    
+    Args:
+        bytes_per_sec: Egress bandwidth in bytes per second.
+        cost_per_gb: Cost per gigabyte.
+        
+    Returns:
+        float: Monthly egress cost in dollars.
+    """
     b_s = _ensure_unit(bytes_per_sec, ureg.byte / ureg.second)
     monthly_bytes = b_s * (30 * ureg.day)
     cost = monthly_bytes * cost_per_gb
@@ -66,6 +100,16 @@ def calc_fleet_tco(unit_cost, power_w, quantity, years, kwh_price):
     Calculates Total Cost of Ownership (TCO).
     
     Source: Barroso et al. (2018), "The Datacenter as a Computer."
+    
+    Args:
+        unit_cost: Cost per unit.
+        power_w: Power consumption per unit in Watts.
+        quantity: Number of units.
+        years: Operational lifespan in years.
+        kwh_price: Electricity price per kWh.
+        
+    Returns:
+        float: Total TCO in dollars.
     """
     u_cost = _ensure_unit(unit_cost, ureg.dollar)
     p_w = _ensure_unit(power_w, ureg.watt)
@@ -82,9 +126,23 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
     Roofline bottleneck analysis.
     
     Source: Williams et al. (2009), "Roofline Model."
+    
+    Args:
+        ops: Total operations.
+        model_bytes: Total memory bytes accessed.
+        device_flops: Peak operations per second.
+        device_bw: Peak memory bandwidth in bytes per second.
+        
+    Returns:
+        dict: Bottleneck analysis profile.
     """
-    compute_time = ops / device_flops
-    memory_time = model_bytes / device_bw
+    o = _ensure_unit(ops, ureg.flop)
+    mb = _ensure_unit(model_bytes, ureg.byte)
+    df = _ensure_unit(device_flops, ureg.flop / ureg.second)
+    dbw = _ensure_unit(device_bw, ureg.byte / ureg.second)
+
+    compute_time = o / df
+    memory_time = mb / dbw
     t_comp_ms = compute_time.m_as(ureg.millisecond)
     t_mem_ms = memory_time.m_as(ureg.millisecond)
     
@@ -97,9 +155,18 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
             "intensity": 0.0
         }
 
+    if t_mem_ms == 0:
+        return {
+            "compute_ms": t_comp_ms,
+            "memory_ms": 0.0,
+            "bottleneck": "Compute",
+            "ratio": float('inf'),
+            "intensity": float('inf') if mb.magnitude == 0 else (o / mb).magnitude
+        }
+
     is_memory_bound = t_mem_ms > t_comp_ms
     ratio = t_mem_ms / t_comp_ms if is_memory_bound else t_comp_ms / t_mem_ms
-    intensity = ops / model_bytes
+    intensity = o / mb
     return {
         "compute_ms": t_comp_ms,
         "memory_ms": t_mem_ms,
@@ -271,17 +338,17 @@ def calc_activation_memory(n_layers, seq_len, batch_size, hidden_dim, n_heads=No
     # Basic activation per layer: 34 * s * b * h (without recompute)
     # With selective recompute, it's significantly lower.
     if strategy == "full":
-        # Only store inputs to the block
-        bytes_per_layer = 2 * s * b * h * precision_bytes
+        # Only store inputs to the block (1 element per activation)
+        elements_per_layer = 1 * s * b * h
     elif strategy == "selective":
         # Store some intermediate activations to avoid full recompute
-        # Reference estimate: ~10 * s * b * h bytes
-        bytes_per_layer = 10 * s * b * h * precision_bytes
+        # Reference estimate: ~5 elements per activation
+        elements_per_layer = 5 * s * b * h
     else:
-        # No recompute: store everything
-        bytes_per_layer = 34 * s * b * h * precision_bytes
+        # No recompute: store everything (17 elements per activation)
+        elements_per_layer = 17 * s * b * h
         
-    return (n_layers * bytes_per_layer) * ureg.byte
+    return (n_layers * elements_per_layer * precision_bytes) * ureg.byte
 
 
 def calc_hierarchical_allreduce_time(message_bytes, n_nodes, gpus_per_node, 
@@ -307,12 +374,14 @@ def calc_hierarchical_allreduce_time(message_bytes, n_nodes, gpus_per_node,
         Quantity[second]: Estimated communication time
     """
     # 1. Intra-node Reduce (to one GPU per node)
-    t_reduce = calc_ring_allreduce_time(message_bytes, gpus_per_node, intra_node_bw, intra_node_lat)
+    # A Reduce takes exactly half the time of a full Ring AllReduce
+    t_reduce = calc_ring_allreduce_time(message_bytes, gpus_per_node, intra_node_bw, intra_node_lat) / 2
     
     # 2. Inter-node AllReduce (between lead GPUs of each node)
     t_allreduce_inter = calc_ring_allreduce_time(message_bytes, n_nodes, inter_node_bw, inter_node_lat)
     
     # 3. Intra-node Broadcast (back to all GPUs)
+    # A Broadcast takes exactly half the time of a full Ring AllReduce
     t_broadcast = t_reduce # Symmetry assumption
     
     return t_reduce + t_allreduce_inter + t_broadcast
@@ -350,6 +419,8 @@ def calc_mtbf_cluster(component_mtbf_hours, n_components):
     Returns:
         Quantity[hour]: Cluster MTBF
     """
+    if n_components <= 0:
+        return float('inf') * ureg.hour
     mtbf = _ensure_unit(component_mtbf_hours, ureg.hour)
     return (mtbf / n_components).to(ureg.hour)
 
@@ -377,9 +448,16 @@ def calc_mtbf_node(gpu_mtbf_h, n_gpus, nic_mtbf_h, n_nics,
     gpu = _ensure_unit(gpu_mtbf_h, ureg.hour)
     nic = _ensure_unit(nic_mtbf_h, ureg.hour)
     psu = _ensure_unit(psu_mtbf_h, ureg.hour)
-    rate = n_gpus / gpu + n_nics / nic + n_psus / psu
+    rate = 0.0 / ureg.hour
+    if n_gpus > 0: rate += n_gpus / gpu
+    if n_nics > 0: rate += n_nics / nic
+    if n_psus > 0: rate += n_psus / psu
+    
     if other_mtbf_h is not None and n_other > 0:
         rate += n_other / _ensure_unit(other_mtbf_h, ureg.hour)
+    
+    if getattr(rate, 'magnitude', rate) == 0:
+        return float('inf') * ureg.hour
     return (1.0 / rate).to(ureg.hour)
 
 
@@ -484,6 +562,10 @@ def calc_failure_probability(mtbf, job_duration):
             "calc_failure_probability: both arguments must be Quantities or both raw numbers. "
             "Mixed types are ambiguous — attach units to the raw number first."
         )
+    mtbf_mag = getattr(mtbf, 'magnitude', mtbf)
+    if mtbf_mag == 0:
+        return 1.0
+
     if both_qty:
         ratio = job_duration.to(ureg.second).magnitude / mtbf.to(ureg.second).magnitude
     else:

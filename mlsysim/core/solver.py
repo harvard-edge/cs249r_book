@@ -240,6 +240,9 @@ class SustainabilitySolver(BaseSolver):
         """
         Calculates energy, carbon, and water footprint for a fleet operation.
         """
+        if duration_days < 0:
+            raise ValueError("duration_days cannot be negative")
+            
         # 1. Resolve Environment
         dc = datacenter or fleet.datacenter
         
@@ -266,7 +269,7 @@ class SustainabilitySolver(BaseSolver):
         total_energy_kwh = it_energy_kwh * pue
         
         # 4. Carbon Footprint
-        carbon_kg = region.carbon_kg(it_energy_kwh.magnitude) if hasattr(region, 'carbon_kg') else it_energy_kwh.magnitude * (region.carbon_intensity_g_kwh / 1000.0)
+        carbon_kg = region.carbon_kg(total_energy_kwh.magnitude) if hasattr(region, 'carbon_kg') else total_energy_kwh.magnitude * (region.carbon_intensity_g_kwh / 1000.0)
         
         # 5. Water Usage
         # Resolve WUE from dc.grid, dc, or region
@@ -381,8 +384,9 @@ class EconomicsSolver(BaseSolver):
             
         opex_energy = energy_result["total_energy_kwh"].magnitude * price
         
-        unit_cost = fleet.node.accelerator.unit_cost or Q_("30000 USD")
-        total_capex = unit_cost.magnitude * fleet.total_accelerators
+        accel_cost = fleet.node.accelerator.unit_cost or Q_("30000 USD")
+        node_cost = (accel_cost.magnitude * fleet.node.accelerators_per_node) * 1.25  # ~25% overhead for CPU/RAM/Chassis
+        total_capex = node_cost * fleet.count
         
         annual_maintenance_ratio = 0.05
         opex_maintenance = total_capex * annual_maintenance_ratio * (duration_days / 365.0)
