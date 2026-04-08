@@ -183,6 +183,42 @@ function HomePage() {
   const selectedArea = selectedTopic ? getAreaForTopic(selectedTopic.id) : null;
   const selectedStyle = selectedArea ? getAreaStyle(selectedArea.id) : null;
 
+  // Flat list of topics in the current display order. Used by the
+  // drawer's j/k (and arrow-key) sweep handler to navigate to the next
+  // or previous topic without closing the drawer.
+  const flatTopics = useMemo<Topic[]>(
+    () => displayAreas.flatMap((a) => a.topics),
+    [displayAreas],
+  );
+
+  // Drawer keyboard navigation: j/ArrowDown = next, k/ArrowUp = prev.
+  // Skipped when the user is typing in an input (search box, textarea)
+  // so we never interfere with keystrokes. Skipped when the drawer is
+  // closed. Escape handling lives inside TopicDetail.
+  useEffect(() => {
+    if (!selectedTopic) return;
+    const handleKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+      if (flatTopics.length === 0) return;
+      const idx = flatTopics.findIndex((t) => t.id === selectedTopic.id);
+      if (idx === -1) return;
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const next = flatTopics[(idx + 1) % flatTopics.length];
+        setSelectedTopic(next);
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const prev = flatTopics[(idx - 1 + flatTopics.length) % flatTopics.length];
+        setSelectedTopic(prev);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [selectedTopic, flatTopics]);
+
   if (!mounted) {
     return <div className="flex-1" />;
   }
@@ -459,18 +495,23 @@ function HomePage() {
 
       </div>
 
-      {/* Desktop detail drawer (right-anchored slide-over) */}
+      {/* Desktop detail drawer (right-anchored slide-over).
+          Design decisions for the polish pass:
+          - Width reduced from 480px to 380px so the main track grid
+            stays readable even on a 13" display.
+          - Backdrop scrim removed (was bg-black/30). A transparent
+            click-catcher stays in place so clicking outside still
+            closes the drawer, but the grid is no longer dimmed.
+          - j/k (and ArrowDown/ArrowUp) sweep between topics without
+            closing the drawer — see the keyboard effect above. */}
       <AnimatePresence>
         {selectedTopic && selectedStyle && (
           <div className="hidden lg:block">
-            {/* Backdrop — click anywhere outside to close */}
-            <motion.div
-              key="desktop-backdrop"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="fixed inset-0 z-40 bg-black/30"
+            {/* Transparent click-catcher — closes the drawer on outside
+                click without visually dimming the grid. */}
+            <div
+              key="desktop-catcher"
+              className="fixed inset-0 z-40"
               onClick={() => setSelectedTopic(null)}
               aria-hidden="true"
             />
@@ -480,7 +521,7 @@ function HomePage() {
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 32, stiffness: 320 }}
-              className="fixed top-0 right-0 bottom-0 z-50 w-[480px] max-w-[90vw] border-l border-border bg-background shadow-2xl"
+              className="fixed top-0 right-0 bottom-0 z-50 w-[380px] max-w-[92vw] border-l border-border bg-background shadow-2xl"
             >
               <TopicDetail topic={selectedTopic}
                 areaName={selectedArea?.name || ""} style={selectedStyle}

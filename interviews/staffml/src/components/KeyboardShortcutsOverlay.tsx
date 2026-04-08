@@ -41,6 +41,15 @@ const SECTIONS: Section[] = [
     ],
   },
   {
+    label: "Vault drawer",
+    shortcuts: [
+      { keys: ["J"],          description: "Next topic (without closing the drawer)" },
+      { keys: ["K"],          description: "Previous topic (without closing the drawer)" },
+      { keys: ["↓"],          description: "Next topic — same as J" },
+      { keys: ["↑"],          description: "Previous topic — same as K" },
+    ],
+  },
+  {
     label: "Practice",
     shortcuts: [
       { keys: ["⌘", "↵"],     description: "Reveal answer (when typing in the answer box)" },
