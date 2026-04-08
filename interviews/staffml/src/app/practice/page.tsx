@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Target, CheckCircle2, XCircle, Terminal, SkipForward,
-  BookOpen, Calculator
+  BookOpen, Calculator, SlidersHorizontal, X
 } from "lucide-react";
 import clsx from "clsx";
 import HardwareRef from "@/components/HardwareRef";
@@ -14,6 +14,7 @@ import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import LevelBadge from "@/components/LevelBadge";
 import { useToast } from "@/components/Toast";
 import { ECOSYSTEM_BASE } from "@/lib/env";
+import { safeHref } from "@/lib/url";
 import {
   getTracks, getLevels, getCompetencyAreas, getZones, getQuestionsByFilter,
   getQuestions, getQuestionsByTopic,
@@ -52,6 +53,42 @@ function PracticePage() {
   const searchParams = useSearchParams();
   const { show: showToast } = useToast();
   const [mounted, setMounted] = useState(false);
+  // Mobile-only filter drawer state. Desktop ignores this entirely (the
+  // sidebar is always visible at lg+ breakpoints). On <lg viewports the
+  // sidebar transforms into a slide-in drawer triggered by the FAB button
+  // in the bottom-right corner of the main content area.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterCloseBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Modal hygiene for the mobile filter drawer:
+  //   - lock body scroll so the page underneath doesn't scroll while the
+  //     drawer is open (otherwise iOS Safari produces a bouncy scroll
+  //     chain that scrolls both the drawer and the main page)
+  //   - close on Escape key for keyboard users
+  //   - move focus to the close button on open so screen readers and
+  //     tab navigation start inside the drawer (lightweight focus
+  //     management — not a full focus trap, but better than nothing)
+  // Desktop (lg+) is unaffected because filtersOpen never becomes true
+  // when the drawer is hidden by the lg:translate-x-0 utility.
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFiltersOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    // Defer focus to next tick so the slide-in animation has started.
+    const focusTimer = window.setTimeout(() => {
+      filterCloseBtnRef.current?.focus();
+    }, 50);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener("keydown", onKey);
+      window.clearTimeout(focusTimer);
+    };
+  }, [filtersOpen]);
+
   const [selectedTrack, setSelectedTrack] = useState("cloud");
   const [selectedLevel, setSelectedLevel] = useState("L3");
   const [selectedArea, setSelectedArea] = useState<string | null>(null);
@@ -364,9 +401,55 @@ function PracticePage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col lg:flex-row">
-      {/* Sidebar filters */}
-      <aside className="w-full lg:w-64 border-b lg:border-b-0 lg:border-r border-border bg-surface/50 p-4 lg:p-5 flex flex-col gap-4 lg:gap-6 lg:overflow-y-auto">
+    <div className="flex-1 flex flex-col lg:flex-row relative">
+      {/*
+        Mobile drawer backdrop. Renders only when filtersOpen is true and only
+        below the lg breakpoint. Tapping the backdrop closes the drawer.
+      */}
+      {filtersOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-[1px]"
+          onClick={() => setFiltersOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      {/*
+        Sidebar — at lg+ this is the inline left column (w-64, in-flow).
+        Below lg it transforms into a fixed-position slide-in drawer that
+        slides in from the left when the user taps the Filters FAB. The
+        drawer occupies 85% of the viewport width (max 320px) so the user
+        can still see a sliver of the underlying question — a standard
+        affordance from iOS Files / Notion mobile.
+      */}
+      <aside
+        id="practice-filters"
+        aria-label="Practice filters"
+        role="dialog"
+        aria-modal={filtersOpen}
+        className={clsx(
+          "border-border bg-surface/50 p-4 lg:p-5 flex flex-col gap-4 lg:gap-6",
+          // Desktop layout (lg+): inline left column, in-flow, with right border.
+          "lg:relative lg:w-64 lg:border-r lg:border-b-0 lg:translate-x-0 lg:overflow-y-auto",
+          // Mobile layout (<lg): fixed full-height left drawer, slides in/out.
+          "fixed inset-y-0 left-0 z-50 w-[85%] max-w-[320px] overflow-y-auto",
+          "transition-transform duration-200 ease-out shadow-2xl lg:shadow-none",
+          filtersOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        )}
+      >
+        {/*
+          Mobile-only drawer close button. Hidden on lg+ where the sidebar
+          is always visible. Receives focus on drawer open via the
+          useEffect above so keyboard / screen-reader users start inside
+          the drawer.
+        */}
+        <button
+          ref={filterCloseBtnRef}
+          onClick={() => setFiltersOpen(false)}
+          className="lg:hidden self-end -mt-1 -mr-1 p-2 text-textTertiary hover:text-textPrimary rounded-lg"
+          aria-label="Close filters"
+        >
+          <X className="w-5 h-5" />
+        </button>
         {/* Back to vault link */}
         {sourceTopic && (
           <Link
@@ -612,6 +695,26 @@ function PracticePage() {
         </div>
       </aside>
 
+      {/*
+        Floating Filters button — visible only below the lg breakpoint where
+        the sidebar is hidden by default. The bottom offset uses
+        env(safe-area-inset-bottom) so the FAB clears the iOS home
+        indicator on modern iPhones (otherwise the gesture bar overlaps
+        the button on iPhone X+). max() guarantees a minimum 1rem gap
+        even on devices with no safe-area inset. Aria-controls ties it to
+        the drawer for screen readers.
+      */}
+      <button
+        onClick={() => setFiltersOpen(true)}
+        aria-controls="practice-filters"
+        aria-expanded={filtersOpen}
+        className="lg:hidden fixed right-4 z-30 flex items-center gap-2 px-4 py-3 bg-accentBlue text-white font-bold rounded-full shadow-lg shadow-accentBlue/30 hover:opacity-90 active:scale-95 transition-all"
+        style={{ bottom: "max(1rem, env(safe-area-inset-bottom, 1rem))" }}
+      >
+        <SlidersHorizontal className="w-4 h-4" />
+        <span className="text-sm">Filters</span>
+      </button>
+
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {current ? (
@@ -673,7 +776,7 @@ function PracticePage() {
 
                     {current.details.deep_dive_title && (
                       <a
-                        href={current.details.deep_dive_url ? current.details.deep_dive_url.replace('https://mlsysbook.ai', ECOSYSTEM_BASE) : '#'}
+                        href={safeHref(current.details.deep_dive_url?.replace('https://mlsysbook.ai', ECOSYSTEM_BASE))}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 mt-6 px-3 py-2 text-[13px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
@@ -823,7 +926,7 @@ function PracticePage() {
                     {/* Deep-dive link to MLSysBook.ai */}
                     {current.details.deep_dive_title && (
                       <a
-                        href={current.details.deep_dive_url ? current.details.deep_dive_url.replace('https://mlsysbook.ai', ECOSYSTEM_BASE) : '#'}
+                        href={safeHref(current.details.deep_dive_url?.replace('https://mlsysbook.ai', ECOSYSTEM_BASE))}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-2 px-3 py-2.5 text-[12px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"

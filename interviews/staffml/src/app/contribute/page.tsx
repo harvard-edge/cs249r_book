@@ -31,6 +31,13 @@ const ZONES = [
 
 const STORAGE_KEY = 'staffml_contributions';
 
+// Hard cap on the number of locally-stored contribution drafts. Without this,
+// repeated submissions (or a malicious script spamming the form) would fill
+// the ~5 MB localStorage quota, raising QuotaExceededError on every subsequent
+// write across the app (theme switching, attempt logging, etc.) and bricking
+// it. We keep the most recent 50 — anything older is dropped (LRU style).
+const MAX_CONTRIBUTIONS = 50;
+
 interface Contribution {
   id: string;
   track: string;
@@ -46,8 +53,11 @@ interface Contribution {
 
 function saveContribution(c: Contribution): void {
   try {
-    const all = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]');
+    const raw = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]');
+    const all: Contribution[] = Array.isArray(raw) ? raw : [];
     all.push(c);
+    // Drop oldest entries until we're under the cap.
+    while (all.length > MAX_CONTRIBUTIONS) all.shift();
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
   } catch {}
 }

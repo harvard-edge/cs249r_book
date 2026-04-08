@@ -9,6 +9,7 @@ import type { Topic, AreaStyle } from "@/lib/taxonomy";
 import { LEVELS as LEVEL_DEFS } from "@/lib/levels";
 import LevelBadge from "@/components/LevelBadge";
 import SectionDivider from "./SectionDivider";
+import { safeHref } from "@/lib/url";
 
 const LEVEL_IDS = LEVEL_DEFS.map(l => l.id);
 
@@ -145,7 +146,7 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
               {topic.chapterUrl && (
                 <div>
                   <SectionDivider label="Learn First" />
-                  <a href={topic.chapterUrl} target="_blank" rel="noopener noreferrer"
+                  <a href={safeHref(topic.chapterUrl)} target="_blank" rel="noopener noreferrer"
                     className="flex items-center gap-3 p-4 mt-3 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
                     <BookOpen className="w-5 h-5 text-textTertiary group-hover:text-accentBlue shrink-0" />
                     <div className="flex-1 min-w-0">
