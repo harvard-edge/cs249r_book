@@ -155,6 +155,30 @@ def _is_inside_bold_span(
     return False
 
 
+# ── Preserved named-principle phrases ──────────────────────────────────────
+#
+# Book-coined formal principle names that include a concept term but are
+# themselves proper nouns (parallel to "Amdahl's Law" in §10.9). Matches
+# that fall inside any of these phrases are skipped regardless of any
+# other rule — these are the explicit editorial exceptions to §10.3.
+
+_PRESERVED_PHRASES = (
+    "Data Gravity Invariant",
+    "Data as Code Invariant",
+)
+
+
+def _is_inside_preserved_phrase(line: str, start: int, end: int) -> bool:
+    """True if [start, end) is inside any preserved named-principle phrase."""
+    for phrase in _PRESERVED_PHRASES:
+        idx = line.find(phrase)
+        while idx != -1:
+            if idx <= start and end <= idx + len(phrase):
+                return True
+            idx = line.find(phrase, idx + 1)
+    return False
+
+
 # ── Per-term special cases (must stay capitalized even in body prose) ──────
 
 def _is_hp_reference(line: str, match_end: int) -> bool:
@@ -250,6 +274,11 @@ def _skip_match(
     #    (e.g. `**The Iron Law Connection:**`). Uses full-span
     #    containment, not just edge-adjacency.
     if _is_inside_bold_span(line, start, end, bold_spans):
+        return True
+    # 2b. Inside a preserved book-coined named-principle phrase
+    #     (Data Gravity Invariant, Data as Code Invariant). These
+    #     are formal principle names parallel to Amdahl's Law.
+    if _is_inside_preserved_phrase(line, start, end):
         return True
     # 3. Inside inline math, inline code, \index{}, @sec-/fig-/tbl-, etc.
     if position_in_spans(start, spans):
@@ -392,6 +421,9 @@ _NEGATIVE_LINES = [
     # to the `**` markers. Requires full-span containment detection.
     "**The Iron Law Connection:**",
     "**The Memory Wall Implication:** bandwidth dominates.",
+    # Preserved named-principle phrases (parallel to Amdahl's Law).
+    "The Data Gravity Invariant determines where the model runs.",
+    "Principle: the Data as Code Invariant governs reproducibility.",
     # Exception 3: triple bold (definition callout term)
     "***Memory Wall***\\index{Memory Wall!definition} is the point where...",
     # Exception 4: section headers (H1, H2, H3+ — all skipped by the line filter)
