@@ -7,15 +7,14 @@ The SVG follows the paper's typographic conventions:
   * Helvetica neue / Arial sans family
   * Block colors taken directly from the YAML (matches the website brand)
   * White background suitable for print and screen
-  * Mathematical layout: 15 columns x 8 rows of square-ish element cells
+  * Mathematical layout: 18 columns x 8 rows of square-ish element cells
 
 Output: paper/figures/periodic_table_hero.svg
-
 The SVG is then rasterized to PDF by the existing Makefile rule via
 `rsvg-convert -f pdf`.
 
 Run:
-    python3 paper/scripts/generate_periodic_svg.py
+  python3 paper/scripts/generate_periodic_svg.py
 """
 from __future__ import annotations
 
@@ -23,9 +22,9 @@ import sys
 from pathlib import Path
 
 try:
-    import yaml
+  import yaml
 except ImportError:
-    sys.exit("PyYAML required: pip install pyyaml")
+  sys.exit("PyYAML required: pip install pyyaml")
 
 # ── Paths ────────────────────────────────────────────────────────────
 HERE = Path(__file__).resolve().parent
@@ -44,7 +43,7 @@ RIGHT_MARGIN = 22
 TOP_MARGIN = 96         # title + block headers
 BOTTOM_MARGIN = 72      # legend + footnote
 
-GRID_COLS = 15
+GRID_COLS = 18
 GRID_ROWS = 8
 
 CANVAS_W = LEFT_MARGIN + GRID_COLS * CELL_W + RIGHT_MARGIN
@@ -241,7 +240,7 @@ parts.append(
     f'<text x="{CANVAS_W/2}" y="{foot_y}" text-anchor="middle" '
     f'font-size="8" font-style="italic" fill="{TEXT_MUTED}">'
     f'Each element satisfies the formal irreducibility criterion (Section 2.3); '
-    f'the table is the input to the Constraint-Driven Lowering Heuristic.'
+    f'the table is the input to the Constraint-Driven Structural Search.'
     f'</text>'
 )
 
