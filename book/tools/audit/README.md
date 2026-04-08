@@ -167,11 +167,13 @@ The `h3-titlecase: 609` matches the Pass 15 plan's expected ~611 (off
 by 2, within tolerance). The `vs-period: 0` on vol1 confirms pass 10b's
 work is intact.
 
-### Post-Pass-16 anchor (2026-04-08, Item B)
+### Post-Pass-16 anchor (2026-04-08, Items A+B+C)
 
 After Pass 15's 847 editorial fixes, Pass 16 Item A's persistent
-accept-list, and Pass 16 Item B's detector improvements to
-`h3_titlecase.py`, the scanner reports the following steady state.
+accept-list, Pass 16 Item B's h3_titlecase detector improvements,
+the LineWalker `$$ {#eq-label}` display-math fix, and Pass 16 Item
+C's new `concept-term-capitalization` check, the scanner reports
+the following steady state:
 
 | Category | vol1 open | vol1 accepted | vol2 open | vol2 accepted |
 |---|---:|---:|---:|---:|
@@ -181,27 +183,44 @@ accept-list, and Pass 16 Item B's detector improvements to
 | lowercase-prose-references | 0 | 0 | 0 | 0 |
 | acknowledgements-spelling | 0 | 0 | 0 | 0 |
 | binary-units-in-prose | 0 | 0 | 0 | 0 |
-| h3-titlecase | **42** | 0 | **0** | 0 |
+| h3-titlecase | **61** | 0 | **29** | 0 |
+| concept-term-capitalization | **19** | 0 | **62** | 0 |
 
-The 42 vol1 `open` h3-titlecase entries are **real §10.9 violations**
-newly surfaced by Item B's compound-second-part rule and concept-term
-override — not scanner FPs. Breakdown: 38 hyphenated-compound
-second-part violations (`### Non-Linear Functions` → should be
-`### Non-linear functions`), 3 concept-term override catches
-(`### Scaling Laws` → `### Scaling laws`), and 1 documented Pass 15
-Batch 1 false negative (`#### Exercise two: *iron law Analysis*`).
-They are editorial work for a separate content-edit pass — Item B's
-scope was detector engineering, not content fixes.
+All `open` entries are **real editorial violations** newly surfaced
+by Items B+C and the LineWalker fix — not scanner FPs. Breakdown:
 
-The accept-list (`accepted_fps.json`) was pruned from 75 entries to 0
-because every Pass 15-era FP is now correctly classified at the
-detector level. The file is retained as infrastructure for future
-check categories (Items C/D) that may surface new FPs.
+- **vol1 h3-titlecase (61)**: 42 from Item B's compound-second-part
+  rule and concept-term override (hyphenated compounds, scaling laws,
+  iron-law override) + 19 more made visible by the LineWalker fix.
+- **vol2 h3-titlecase (29)**: All 29 surfaced by the LineWalker fix,
+  concentrated in `performance_engineering.qmd`, which had a
+  `$$ {#eq-iron-law-perf}` at line 87 that suppressed scanning of
+  lines 88-2089.
+- **vol1 concept-term (19)**: `Iron Law`, `Data Gravity`,
+  `Information Roofline`, `Scaling Laws`, `Napkin Math`,
+  `Four Pillars Framework` in vol1 body prose. Proper-noun and
+  bold-adjacent uses are correctly preserved by the six exception
+  predicates.
+- **vol2 concept-term (62)**: `Iron Law` (28), `Memory Wall` (23),
+  `Power Wall` (7), `Scaling Laws` (1), and a few others. Vol2 was
+  not swept for §10.3 in round 1 pass 4, so this is the largest
+  newly-visible category.
+
+All four groups are editorial work for a separate content-edit pass.
+Item B/C scope is scanner engineering, not content fixes.
+
+The accept-list (`accepted_fps.json`) remains at 0 entries. No new
+FPs have been identified under the improved detector + new category.
 
 Reproduce with `python3 book/tools/audit/scan.py --scope vol1 -v`.
-Run the detector self-test with
-`PYTHONPATH=book/tools python3 book/tools/audit/checks/h3_titlecase.py`
-(expect `41/41 passed`).
+Run the detector self-tests with:
+
+```bash
+PYTHONPATH=book/tools python3 book/tools/audit/checks/h3_titlecase.py
+PYTHONPATH=book/tools python3 book/tools/audit/checks/concept_term_capitalization.py
+```
+
+Expect `41/41 passed` and `32/32 passed` respectively.
 
 ---
 
