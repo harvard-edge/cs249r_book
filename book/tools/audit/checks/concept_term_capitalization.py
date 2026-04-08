@@ -98,35 +98,60 @@ _TERMS = {
 }
 
 
-# ── Bold-adjacency predicate (porting fix_capitalization.py logic) ─────────
+# ── Bold-span predicate ────────────────────────────────────────────────────
 #
-# The proven script at book/tools/scripts/content/fix_capitalization.py
-# uses a GENEROUS bold test: skip the match if EITHER the text immediately
-# before it ends with `**`/`***` OR the text immediately after it starts
-# with `**`/`***`. This catches three cases with one predicate:
+# §10.3 exception #8 says "Bold structural labels inside callouts
+# (e.g. `**The Iron Law Connection:**`)" are exempt from the lowercase
+# rule. Matches inside the MIDDLE of a bold span — not just at the
+# edges — must be skipped.
 #
-#   **Iron Law**                 — tightly wrapped first definition
-#   **Iron Law of ML Systems**   — match is first half of a longer bold
-#   **Iron Law** and others      — match is the whole of a tight bold
+# The previous implementation used a generous OR test (`before` ends
+# with `**` OR `after` starts with `**`), which correctly handled the
+# edge cases `**Iron Law**` and `**Iron Law of ML Systems**` but
+# missed the middle case `**The Iron Law Connection:**` where the
+# term sits between bold markers but not adjacent to either one.
 #
-# The shared `audit.protected_contexts.is_inside_bold` uses strict AND
-# semantics (both sides must be bold), which is correct for checks that
-# want "exact wrap only" but misses the middle case above. We need the
-# generous OR semantics here for parity with round 1 pass 4.
+# The fix walks the line to find all `**...**` and `***...***` spans,
+# then checks whether the match position falls inside any of them.
 
-def _is_bold_adjacent(line: str, start: int, end: int) -> bool:
-    """True if the [start, end) range touches a bold marker on either side.
+def _bold_spans(line: str) -> list[tuple[int, int]]:
+    """Return (open_pos, close_pos_exclusive) for every bold span on the
+    line. Both `**...**` and `***...***` count; single `*...*` italics
+    are NOT bold and are not returned.
 
-    Mirrors fix_capitalization.py:67-71 exactly. A match is "bold
-    adjacent" if it begins right after `**`/`***` OR ends right before
-    `**`/`***`. Either condition is enough.
+    Consecutive `**`/`***` markers are paired in order (open, close,
+    open, close, ...). An unpaired trailing marker is ignored. Nested
+    bold markers in the same line are rare and are handled by
+    pair-order (not by stack depth).
     """
-    before = line[:start]
-    after = line[end:]
-    if before.endswith("**") or before.endswith("***"):
-        return True
-    if after.startswith("**") or after.startswith("***"):
-        return True
+    markers: list[tuple[int, int]] = []  # (position, marker_length)
+    i = 0
+    n = len(line)
+    while i < n:
+        if i + 3 <= n and line[i:i+3] == "***":
+            markers.append((i, 3))
+            i += 3
+        elif i + 2 <= n and line[i:i+2] == "**":
+            markers.append((i, 2))
+            i += 2
+        else:
+            i += 1
+
+    spans: list[tuple[int, int]] = []
+    for j in range(0, len(markers) - 1, 2):
+        open_pos, _ = markers[j]
+        close_pos, close_len = markers[j + 1]
+        spans.append((open_pos, close_pos + close_len))
+    return spans
+
+
+def _is_inside_bold_span(
+    line: str, start: int, end: int, spans: list[tuple[int, int]]
+) -> bool:
+    """True if [start, end) is fully enclosed by any bold span on the line."""
+    for s, e in spans:
+        if s <= start and end <= e:
+            return True
     return False
 
 
@@ -208,6 +233,7 @@ def _skip_match(
     end: int,
     term: str,
     spans: list[tuple[int, int]],
+    bold_spans: list[tuple[int, int]],
 ) -> bool:
     """Return True if this specific (line, start, end) match should not flag.
 
@@ -218,10 +244,12 @@ def _skip_match(
     # 1. Start of sentence — capital is correct at sentence start.
     if is_sentence_start(line, start):
         return True
-    # 2. Adjacent to **bold** / ***triple bold*** — first definition,
-    #    longer bold phrase, or bold-wrapped. Generous OR semantics per
-    #    fix_capitalization.py; see `_is_bold_adjacent` docstring.
-    if _is_bold_adjacent(line, start, end):
+    # 2. Inside any **bold** or ***triple bold*** span — first
+    #    definition, longer bold phrase, bold-wrapped term, or §10.3
+    #    exception #8 bold structural labels inside callouts
+    #    (e.g. `**The Iron Law Connection:**`). Uses full-span
+    #    containment, not just edge-adjacency.
+    if _is_inside_bold_span(line, start, end, bold_spans):
         return True
     # 3. Inside inline math, inline code, \index{}, @sec-/fig-/tbl-, etc.
     if position_in_spans(start, spans):
@@ -265,6 +293,7 @@ def check(
             continue
 
         spans = inline_protected_spans(line)
+        bold_spans = _bold_spans(line)
 
         # Collect every non-skipped match for every term on this line.
         # We record each match separately so the ledger reflects per-
@@ -279,7 +308,7 @@ def check(
                 if idx == -1:
                     break
                 end = idx + len(term)
-                if _skip_match(line, idx, end, term, spans):
+                if _skip_match(line, idx, end, term, spans, bold_spans):
                     offset = end
                     continue
                 matches.append((idx, end, term, replacement))
@@ -358,6 +387,11 @@ _NEGATIVE_LINES = [
     # Exception 2: inside **bold** (first definition)
     "The **Iron Law** of ML Systems is a three-term decomposition.",
     "Engineers encounter the **Memory Wall** whenever bandwidth saturates.",
+    # Exception 2b: §10.3 #8 — bold structural labels in callouts
+    # where the term is in the MIDDLE of the bold span, not adjacent
+    # to the `**` markers. Requires full-span containment detection.
+    "**The Iron Law Connection:**",
+    "**The Memory Wall Implication:** bandwidth dominates.",
     # Exception 3: triple bold (definition callout term)
     "***Memory Wall***\\index{Memory Wall!definition} is the point where...",
     # Exception 4: section headers (H1, H2, H3+ — all skipped by the line filter)
@@ -394,6 +428,7 @@ def _self_test() -> int:
         if _skip_concept_term_line(line, state):
             return False
         spans = inline_protected_spans(line)
+        bold_spans = _bold_spans(line)
         for term in _TERMS:
             offset = 0
             while True:
@@ -401,7 +436,7 @@ def _self_test() -> int:
                 if idx == -1:
                     break
                 end = idx + len(term)
-                if not _skip_match(line, idx, end, term, spans):
+                if not _skip_match(line, idx, end, term, spans, bold_spans):
                     return True
                 offset = end
         return False
