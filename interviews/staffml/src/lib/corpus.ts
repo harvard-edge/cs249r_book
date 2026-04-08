@@ -30,6 +30,17 @@ export function getQuestions(): Question[] {
   return questions;
 }
 
+/**
+ * Marketing-friendly question count string. Rounds the live corpus length
+ * down to the nearest thousand and appends a `+` so the headline never goes
+ * stale until the next 1,000-question milestone is crossed. Used in page
+ * metadata, OG descriptions, and hero copy as a single source of truth so
+ * we never have to chase hardcoded counts in five different files again.
+ *
+ * Example: corpus length 8,053 → "8,000+"
+ */
+export const QUESTION_COUNT_DISPLAY = `${(Math.floor(questions.length / 1000) * 1000).toLocaleString("en-US")}+`;
+
 export function getQuestionById(id: string): Question | undefined {
   return questions.find((q) => q.id === id);
 }

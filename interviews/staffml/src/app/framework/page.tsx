@@ -512,19 +512,32 @@ function ElementDetail({
       className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4"
       onClick={onClose}
     >
+      {/*
+        Two-layer modal panel:
+        - Outer wrapper (relative, non-scrolling) carries the absolute close
+          button so it stays anchored in the visual top-right corner.
+        - Inner panel (scrollable, max-h-[100dvh-2rem]) wraps the actual
+          content so long detail panels never bleed off the viewport on
+          landscape phones / short screens.
+        Without this split, the close button and bottom rows became
+        unreachable on small/landscape viewports.
+      */}
       <div
-        data-pt-panel=""
-        className="relative w-full max-w-[500px] bg-surface border border-border rounded-[14px] p-[1.8rem]"
+        className="relative w-full max-w-[500px]"
         onClick={(e) => e.stopPropagation()}
-        style={{ animation: "ptPop 0.2s ease" }}
       >
         <button
           onClick={onClose}
-          className="absolute top-[0.7rem] right-[1rem] bg-transparent border-0 text-textTertiary hover:text-textPrimary text-[1.4rem] leading-none cursor-pointer"
+          className="absolute top-[0.7rem] right-[1rem] z-10 w-10 h-10 flex items-center justify-center bg-transparent border-0 text-textTertiary hover:text-textPrimary text-[1.4rem] leading-none cursor-pointer"
           aria-label="Close"
         >
           ×
         </button>
+        <div
+          data-pt-panel=""
+          className="bg-surface border border-border rounded-[14px] p-[1.8rem] max-h-[calc(100dvh-2rem)] overflow-y-auto"
+          style={{ animation: "ptPop 0.2s ease" }}
+        >
 
         {/* Header */}
         <div className="flex items-end gap-[0.9rem] mb-4 pb-4 border-b border-border">
@@ -592,6 +605,7 @@ function ElementDetail({
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );
