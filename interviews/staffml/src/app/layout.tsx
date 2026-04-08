@@ -5,28 +5,38 @@ import EcosystemBar from "@/components/EcosystemBar";
 import Providers from "@/components/Providers";
 import CommandPalette from "@/components/CommandPalette";
 import KeyboardShortcutsOverlay from "@/components/KeyboardShortcutsOverlay";
+import {
+  SOCIAL_DESCRIPTION,
+  SOCIAL_DESCRIPTION_LONG,
+  SOCIAL_IMAGE_ALT,
+  QUESTION_COUNT_FORMATTED,
+} from "@/lib/stats";
 
+// All user-visible question/topic counts come from src/lib/stats.ts, which
+// derives them from src/data/vault-manifest.json at build time. Do not
+// hand-type numbers into metadata — they go stale the next time the corpus
+// regenerates and embarrass us on social cards.
 export const metadata: Metadata = {
   metadataBase: new URL("https://staffml.ai"),
   title: {
     default: "StaffML — ML Systems Interview Prep",
     template: "%s | StaffML",
   },
-  description: "Physics-grounded system design prep for ML Engineers. 4,800+ questions across cloud, edge, mobile, and TinyML. 100% client-side.",
+  description: SOCIAL_DESCRIPTION,
   icons: {
     icon: "/favicon.svg",
   },
   openGraph: {
     title: "StaffML — ML Systems Interview Prep",
-    description: "4,800+ physics-grounded ML systems questions with napkin math verification. Free, open source, no accounts, runs entirely in your browser.",
+    description: SOCIAL_DESCRIPTION_LONG,
     type: "website",
     siteName: "StaffML",
-    images: [{ url: "/og-image.svg", width: 1200, height: 630, alt: "StaffML — 4,800+ ML systems interview questions" }],
+    images: [{ url: "/og-image.svg", width: 1200, height: 630, alt: SOCIAL_IMAGE_ALT }],
   },
   twitter: {
     card: "summary_large_image",
     title: "StaffML — ML Systems Interview Prep",
-    description: "4,800+ physics-grounded ML systems questions with napkin math. Free, open source, no accounts.",
+    description: `${QUESTION_COUNT_FORMATTED} physics-grounded ML systems questions with napkin math. Free, open source, no accounts.`,
     images: ["/og-image.svg"],
   },
 };
