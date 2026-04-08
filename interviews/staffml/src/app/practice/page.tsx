@@ -101,6 +101,25 @@ function PracticePage() {
       }
     }
 
+    // Random question from the full corpus: ?random=1
+    // Used by the About page "Try a random question" CTA and by any
+    // other onboarding surface that wants to drop a visitor straight
+    // into the vault with no filter pre-selection.
+    const randomParam = searchParams.get('random');
+    if (randomParam === '1') {
+      const all = getQuestions();
+      if (all.length > 0) {
+        const pick = all[Math.floor(Math.random() * all.length)];
+        skipFilterCount.current = 3;
+        setCurrent(pick);
+        setSelectedTrack(pick.track);
+        setSelectedLevel(pick.level);
+        if (pick.competency_area) setSelectedArea(pick.competency_area);
+        setPool(all); // "Next" continues randomly across the whole corpus
+        return; // Skip other param handling
+      }
+    }
+
     // Default to L1 for brand-new users (no attempts yet)
     if (getAttempts().length === 0 && !searchParams.get('q') && !searchParams.get('topic') && !searchParams.get('level')) {
       setSelectedLevel("L1");

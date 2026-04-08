@@ -1,17 +1,26 @@
 "use client";
 
 import Link from "next/link";
-import { BookOpen, Github, Target, ArrowLeft, Layers, Package, Users, Crosshair, Calendar, FileText } from "lucide-react";
+import { BookOpen, Github, Target, ArrowLeft, Layers, Package, Users, Crosshair, Calendar, FileText, Shuffle } from "lucide-react";
 import { LEVELS } from "@/lib/levels";
 import { getQuestions } from "@/lib/corpus";
-import manifest from "@/data/vault-manifest.json";
+import {
+  QUESTION_COUNT_FORMATTED,
+  TOPIC_COUNT,
+  TRACK_COUNT,
+  LEVEL_COUNT,
+  VERSION,
+  BUILD_DATE,
+} from "@/lib/stats";
 
 const PAPER_URL = "https://mlsysbook.ai/staffml/downloads/StaffML-Paper.pdf";
 
 export default function AboutPage() {
-  // Pick a sample question to show on the page
+  // Pick a sample question to show on the page. Prefer the hand-picked L2
+  // "Ridge Point Logic" as the canonical intro example; fall back to any L2
+  // with napkin math if the corpus has drifted.
   const allQs = getQuestions();
-  const sampleQ = allQs.find(q => q.id === 'global-0003') // "The Ridge Point Logic" — a good L2 example
+  const sampleQ = allQs.find(q => q.id === 'global-0003')
     || allQs.find(q => q.level === 'L2' && q.details.napkin_math);
 
   return (
@@ -23,19 +32,34 @@ export default function AboutPage() {
         </Link>
 
         {/* ─── Hero ─── */}
-        <h1 className="text-3xl font-extrabold text-textPrimary tracking-tight mb-2">About StaffML</h1>
-        <p className="text-[15px] text-textSecondary leading-relaxed mb-3">
-          Questions that test what ML systems interviews actually demand.
-          Systems reasoning, napkin math, architectural tradeoffs — not trivia.
+        <h1 className="text-3xl font-extrabold text-textPrimary tracking-tight mb-3">About StaffML</h1>
+        <p className="text-[16px] text-textSecondary leading-relaxed mb-2">
+          <strong className="text-textPrimary">{QUESTION_COUNT_FORMATTED} physics-grounded ML systems questions</strong>{' '}
+          across {TOPIC_COUNT} topics and {TRACK_COUNT} deployment tracks, at {LEVEL_COUNT} difficulty levels
+          from recall to system design. Backed by a 600-page open textbook. Free,
+          open source, and runs entirely in your browser.
         </p>
-        <div className="flex flex-wrap items-center gap-3 mb-10">
+        <div className="flex flex-wrap items-center gap-2 mt-4 mb-8">
           <span className="text-[11px] px-2.5 py-1 rounded-full border border-accentGreen/30 bg-accentGreen/5 text-accentGreen font-medium">No accounts</span>
           <span className="text-[11px] px-2.5 py-1 rounded-full border border-accentGreen/30 bg-accentGreen/5 text-accentGreen font-medium">No tracking</span>
           <span className="text-[11px] px-2.5 py-1 rounded-full border border-accentGreen/30 bg-accentGreen/5 text-accentGreen font-medium">100% free</span>
           <span className="text-[11px] px-2.5 py-1 rounded-full border border-accentGreen/30 bg-accentGreen/5 text-accentGreen font-medium">Open source</span>
         </div>
 
-        {/* ─── Personal note ─── */}
+        {/* ─── Numbers banner ─── */}
+        {/* The four numbers every visitor should see before they scroll.
+            Derived from vault-manifest.json via src/lib/stats.ts, so they
+            update automatically with each corpus regeneration. */}
+        <section className="mb-10">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard value={QUESTION_COUNT_FORMATTED} label="questions" accent="blue" />
+            <StatCard value={String(TOPIC_COUNT)} label="topics" accent="amber" />
+            <StatCard value={String(TRACK_COUNT)} label="tracks" accent="green" />
+            <StatCard value={String(LEVEL_COUNT)} label="levels" accent="purple" />
+          </div>
+        </section>
+
+        {/* ─── Personal note (kept verbatim — this is the voice of the project) ─── */}
         <section className="mb-10">
           <div className="p-5 rounded-xl border border-borderSubtle bg-surface/50">
             <p className="text-[14px] text-textSecondary leading-relaxed mb-3 italic">
@@ -72,30 +96,43 @@ export default function AboutPage() {
           </div>
         </section>
 
-        {/* ─── Who is this for? ─── */}
+        {/* ─── What makes this different (promoted: this is the "why believe the scale" section) ─── */}
         <section className="mb-10">
-          <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
-            <Users className="w-4.5 h-4.5 text-accentBlue" /> Who is this for?
-          </h2>
-          <div className="space-y-2">
+          <h2 className="text-lg font-bold text-textPrimary mb-3">What makes StaffML different</h2>
+          <div className="space-y-3">
             {[
-              { who: "Preparing for your first ML role?", action: "Start with L1–L2 recall questions to build your foundation.", href: "/practice?level=L1", cta: "Start Easy" },
-              { who: "Working engineer targeting Staff+?", action: "Jump to L4–L6+ questions. Try the Mock Interview.", href: "/gauntlet", cta: "Mock Interview" },
-              { who: "Short on time?", action: "Do the Daily Challenge — 3 questions, 5 minutes, same for everyone.", href: "/practice?daily=1", cta: "Daily Challenge" },
-              { who: "Just curious about ML systems?", action: "Browse the question bank to see what the field looks like.", href: "/", cta: "Browse" },
-            ].map(({ who, action, href, cta }) => (
-              <div key={who} className="flex items-start gap-3 p-3 rounded-lg border border-borderSubtle bg-surface/50">
-                <div className="flex-1">
-                  <span className="text-[13px] font-bold text-textPrimary">{who}</span>
-                  <p className="text-[12px] text-textTertiary mt-0.5">{action}</p>
+              { title: "Textbook-grounded, not scraped", desc: `Every question traces back to a specific chapter of the Machine Learning Systems textbook. You are learning the ${TOPIC_COUNT} concepts a curriculum designer chose, not whatever the internet happened to cough up.` },
+              { title: "Real hardware, real numbers", desc: "When a question asks about memory bandwidth, the numbers come from actual H100, A100, and Jetson datasheets. The math works on real silicon, not on round numbers that make the answer tidy." },
+              { title: "Systems reasoning, not trivia", desc: "Questions ask you to estimate, diagnose, compare tradeoffs, and architect — the same skills tested in Staff+ interview loops. Nothing asks you to recite a definition." },
+              { title: "Napkin math with feedback", desc: "Type your calculation, then compare it against the model answer. The app tells you whether you are in the right ballpark or off by a factor of ten." },
+              { title: "Independently verified", desc: "Every question passed a second-pass math check by a separate model. The initial verification pass flagged an 8.3% error rate across the corpus. All flagged errors were corrected." },
+            ].map(({ title, desc }) => (
+              <div key={title} className="flex gap-3 items-start">
+                <div className="w-1.5 h-1.5 rounded-full bg-accentBlue mt-2 shrink-0" />
+                <div>
+                  <span className="text-[13px] font-bold text-textPrimary">{title}</span>
+                  <p className="text-[12px] text-textSecondary mt-0.5 leading-relaxed">{desc}</p>
                 </div>
-                <Link href={href} className="text-[11px] font-bold text-accentBlue hover:underline shrink-0 mt-1">{cta} →</Link>
               </div>
             ))}
           </div>
         </section>
 
-        {/* ─── Sample Question ─── */}
+        {/* ─── The textbook (compressed to a single epigraph + link) ─── */}
+        <section className="mb-10">
+          <div className="border-l-2 border-accentBlue/30 pl-4 py-1">
+            <p className="text-[14px] text-textSecondary italic mb-2">
+              AI is not magic &mdash; it is infrastructure, and infrastructure has laws.
+            </p>
+            <p className="text-[12px] text-textTertiary">
+              StaffML is part of the{' '}
+              <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline font-medium">Machine Learning Systems</a>{' '}
+              curriculum at Harvard University. Every topic links back to its source chapter.
+            </p>
+          </div>
+        </section>
+
+        {/* ─── Sample Question (moved up so the hook fires before the taxonomy deep-dive) ─── */}
         {sampleQ && (
           <section className="mb-10">
             <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
@@ -119,39 +156,27 @@ export default function AboutPage() {
           </section>
         )}
 
-        {/* ─── What makes this different ─── */}
+        {/* ─── Who is this for? ─── */}
         <section className="mb-10">
-          <h2 className="text-lg font-bold text-textPrimary mb-3">What makes StaffML different?</h2>
-          <div className="space-y-3">
+          <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
+            <Users className="w-4.5 h-4.5 text-accentBlue" /> Who is this for?
+          </h2>
+          <div className="space-y-2">
             {[
-              { title: "Textbook-grounded", desc: "Every question traces back to a chapter of the Machine Learning Systems textbook. You're learning real concepts, not memorizing disconnected facts." },
-              { title: "Real hardware specs", desc: "When a question asks about memory bandwidth, the numbers come from actual H100/A100 datasheets. The math works on real silicon." },
-              { title: "Systems reasoning, not trivia", desc: "Questions ask you to estimate, diagnose, compare tradeoffs, and architect — the same skills tested in Staff+ interview loops." },
-              { title: "Napkin math with feedback", desc: "Type your calculation, then compare against the model answer. The app tells you if you're in the right ballpark or way off." },
-            ].map(({ title, desc }) => (
-              <div key={title} className="flex gap-3 items-start">
-                <div className="w-1.5 h-1.5 rounded-full bg-accentBlue mt-2 shrink-0" />
-                <div>
-                  <span className="text-[13px] font-bold text-textPrimary">{title}</span>
-                  <p className="text-[12px] text-textSecondary mt-0.5 leading-relaxed">{desc}</p>
+              { who: "Preparing for your first ML role?", action: "Start with L1–L2 recall questions to build your foundation.", href: "/practice?level=L1", cta: "Start Easy" },
+              { who: "Working engineer targeting Staff+?", action: "Jump to L4–L6+ questions. Try the Mock Interview.", href: "/gauntlet", cta: "Mock Interview" },
+              { who: "Short on time?", action: "Do the Daily Challenge — 3 questions, 5 minutes, same for everyone.", href: "/practice?daily=1", cta: "Daily Challenge" },
+              { who: "Just curious about ML systems?", action: "Browse the question bank to see what the field looks like.", href: "/", cta: "Browse" },
+            ].map(({ who, action, href, cta }) => (
+              <div key={who} className="flex items-start gap-3 p-3 rounded-lg border border-borderSubtle bg-surface/50">
+                <div className="flex-1">
+                  <span className="text-[13px] font-bold text-textPrimary">{who}</span>
+                  <p className="text-[12px] text-textTertiary mt-0.5">{action}</p>
                 </div>
+                <Link href={href} className="text-[11px] font-bold text-accentBlue hover:underline shrink-0 mt-1">{cta} →</Link>
               </div>
             ))}
           </div>
-        </section>
-
-        {/* ─── The Book ─── */}
-        <section className="mb-10">
-          <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
-            <BookOpen className="w-4.5 h-4.5 text-accentBlue" /> Built on the Textbook
-          </h2>
-          <p className="text-[14px] text-textSecondary leading-relaxed mb-3">
-            StaffML is part of the <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline font-medium">Machine Learning Systems</a> curriculum
-            at Harvard University. Every topic links back to its source chapter, so you can learn the concept first and then test yourself.
-          </p>
-          <p className="text-[13px] text-textTertiary italic">
-            AI is not magic — it is infrastructure, and infrastructure has laws.
-          </p>
         </section>
 
         {/* ─── How questions are organized ─── */}
@@ -160,9 +185,10 @@ export default function AboutPage() {
             <Layers className="w-4.5 h-4.5 text-accentAmber" /> How Questions Are Organized
           </h2>
           <p className="text-[14px] text-textSecondary leading-relaxed mb-4">
-            Every question is tagged by <strong className="text-textPrimary">difficulty</strong> (6 levels from recall to system design),
-            <strong className="text-textPrimary"> competency zone</strong> (what kind of thinking it tests),
-            and <strong className="text-textPrimary"> deployment track</strong> (Cloud, Edge, Mobile, or TinyML).
+            Every question is tagged by <strong className="text-textPrimary">difficulty</strong> ({LEVEL_COUNT} levels
+            from recall to system design), <strong className="text-textPrimary"> competency zone</strong> (what
+            kind of thinking it tests), and <strong className="text-textPrimary">deployment track</strong> (Cloud,
+            Edge, Mobile, or TinyML).
           </p>
 
           <h3 className="text-[13px] font-bold text-textPrimary mb-3">Difficulty Levels</h3>
@@ -266,17 +292,22 @@ export default function AboutPage() {
             <Github className="w-4 h-4" /> View on GitHub
           </a>
           <p className="text-[11px] text-textTertiary font-mono mt-4">
-            v{manifest.version} &middot; built {manifest.buildDate.slice(0, 10)}
+            v{VERSION} &middot; built {BUILD_DATE.slice(0, 10)}
           </p>
         </section>
 
-        {/* CTA */}
+        {/* ─── Bottom CTA ─── */}
+        {/* "Try a Random Question" is the primary CTA because it's the lowest-
+            activation action on the page: no filter to pick, no level to
+            choose, no commitment. A visitor who reaches the bottom of the
+            About page and doesn't know what to do next gets a single button
+            that puts them in front of a real question instantly. */}
         <div className="border-t border-border pt-8 pb-4 flex flex-wrap items-center justify-center gap-3">
           <Link
-            href="/practice"
+            href="/practice?random=1"
             className="inline-flex items-center gap-2 px-6 py-3 bg-accentBlue text-white font-bold rounded-lg text-sm hover:opacity-90 transition-opacity"
           >
-            <Target className="w-4 h-4" /> Start Practicing
+            <Shuffle className="w-4 h-4" /> Try a Random Question
           </Link>
           <Link
             href="/practice?daily=1"
@@ -292,6 +323,30 @@ export default function AboutPage() {
           </Link>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── StatCard subcomponent ───────────────────────────────────
+// Shared by the numbers banner. Lives here (local) rather than in
+// src/components/ because it is only used on this page and its styling
+// is tightly coupled to the about-page typography scale.
+function StatCard({ value, label, accent }: {
+  value: string;
+  label: string;
+  accent: "blue" | "amber" | "green" | "purple";
+}) {
+  const accentClass = {
+    blue: "text-accentBlue",
+    amber: "text-accentAmber",
+    green: "text-accentGreen",
+    purple: "text-accentPurple",
+  }[accent];
+
+  return (
+    <div className="p-4 rounded-xl border border-borderSubtle bg-surface/50 text-center">
+      <div className={`text-2xl font-extrabold tracking-tight ${accentClass}`}>{value}</div>
+      <div className="text-[11px] font-medium text-textTertiary uppercase tracking-wider mt-1">{label}</div>
     </div>
   );
 }
