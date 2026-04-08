@@ -224,7 +224,7 @@ function HomePage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col h-[calc(100vh-3.5rem)] overflow-hidden">
+    <div className="flex-1 flex flex-col h-[calc(100dvh-3.5rem)] overflow-hidden">
       {/* ─── Header ─── */}
       <div className="px-6 pt-4 pb-4 border-b border-border">
         <div className="max-w-5xl mx-auto">

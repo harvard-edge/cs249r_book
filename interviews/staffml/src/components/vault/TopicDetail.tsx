@@ -1,15 +1,15 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { ChevronRight, ChevronLeft, X, BookOpen, ExternalLink, FileText, Target, Play } from "lucide-react";
+import { useState } from "react";
+import { ChevronRight, ChevronLeft, X, BookOpen, ExternalLink, Target, Play } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import clsx from "clsx";
 import Link from "next/link";
 import type { Topic, AreaStyle } from "@/lib/taxonomy";
-import { classifyRef } from "@/lib/refs";
 import { LEVELS as LEVEL_DEFS } from "@/lib/levels";
 import LevelBadge from "@/components/LevelBadge";
 import SectionDivider from "./SectionDivider";
+import { safeHref } from "@/lib/url";
 
 const LEVEL_IDS = LEVEL_DEFS.map(l => l.id);
 
@@ -22,8 +22,6 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
 }) {
   const [drillLevel, setDrillLevel] = useState<string | null>(null);
   const Icon = style.icon;
-  const closeBtnRef = useRef<HTMLButtonElement>(null);
-  const headingId = `topic-detail-${topic.id}`;
 
   const [prevId, setPrevId] = useState(topic.id);
   if (topic.id !== prevId) { setPrevId(topic.id); setDrillLevel(null); }
@@ -33,37 +31,10 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
 
   const levelQs = drillLevel ? topic.questionsByLevel[drillLevel] || [] : [];
 
-  // ─── A11y: Escape to close, focus management ─────────────
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    closeBtnRef.current?.focus();
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      // Restore focus to whatever invoked the drawer
-      previouslyFocused?.focus?.();
-    };
-    // onClose is stable from parent; we intentionally only wire this once per mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={headingId}
-      className="w-full h-full flex flex-col bg-background"
-    >
+    <div className="w-[420px] h-full flex flex-col bg-background">
       {/* Header */}
-      <div className="p-6 border-b border-border"
+      <div className="p-5 border-b border-border"
         style={{ background: `linear-gradient(180deg, ${style.primary}08 0%, transparent 100%)` }}>
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -72,10 +43,10 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
               <span className="text-[12px] font-semibold uppercase tracking-wide"
                 style={{ color: style.primary }}>{areaName}</span>
             </div>
-            <h2 id={headingId} className="text-[20px] font-bold text-textPrimary leading-tight">{topic.name}</h2>
+            <h2 className="text-[20px] font-bold text-textPrimary leading-tight">{topic.name}</h2>
           </div>
-          <button ref={closeBtnRef} onClick={onClose} aria-label="Close topic detail"
-            className="p-2.5 -mr-1 text-textTertiary hover:text-textPrimary hover:bg-surfaceHover rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-accentBlue/50">
+          <button onClick={onClose} aria-label="Close"
+            className="p-2.5 -mr-1 text-textTertiary hover:text-textPrimary hover:bg-surfaceHover rounded-lg transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -90,7 +61,7 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
               exit={{ x: 40, opacity: 0 }} transition={{ duration: 0.15 }}>
 
               {/* Pinned sub-header */}
-              <div className="p-6 pb-3 border-b border-borderSubtle sticky top-0 bg-background z-10">
+              <div className="p-5 pb-3 border-b border-borderSubtle sticky top-0 bg-background z-10">
                 <button onClick={() => setDrillLevel(null)}
                   className="flex items-center gap-1.5 text-[13px] font-medium text-textSecondary hover:text-textPrimary mb-4 transition-colors">
                   <ChevronLeft className="w-4 h-4" /> Back to overview
@@ -112,7 +83,7 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
               </div>
 
               {/* Question list */}
-              <div className="p-6 space-y-2">
+              <div className="p-5 space-y-2">
                 {levelQs.map((q) => (
                   <Link key={q.id} href={`/practice?q=${q.id}`}
                     className="block p-3.5 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
@@ -136,7 +107,7 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
             <motion.div key="overview"
               initial={{ x: -40, opacity: 0 }} animate={{ x: 0, opacity: 1 }}
               exit={{ x: -40, opacity: 0 }} transition={{ duration: 0.15 }}
-              className="p-6 space-y-6">
+              className="p-5 space-y-6">
 
               {topic.description && (
                 <p className="text-[14px] text-textSecondary leading-relaxed">{topic.description}</p>
@@ -171,34 +142,21 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
                 </div>
               </div>
 
-              {/* Deep dive — show learning resource before drill.
-                  Label is derived from the URL so we don't lie about destination.
-                  Book-source links currently show a "may be unavailable" warning
-                  pending the mlsysbook.ai chapter-route deploy fix. */}
-              {topic.chapterUrl && (() => {
-                const refInfo = classifyRef(topic.chapterUrl);
-                const Icon = refInfo.isBook ? BookOpen : refInfo.source === "arxiv" || refInfo.source === "paper" ? FileText : ExternalLink;
-                return (
-                  <div>
-                    <SectionDivider label="Learn First" />
-                    <a href={topic.chapterUrl} target="_blank" rel="noopener noreferrer"
-                      title={refInfo.mayBeUnavailable ? "This link may be temporarily unavailable while the book site is being redeployed." : refInfo.label}
-                      className="flex items-center gap-3 p-4 mt-3 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
-                      <Icon className="w-5 h-5 text-textTertiary group-hover:text-accentBlue shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[14px] font-semibold text-textPrimary">{topic.name}</p>
-                        <p className="text-[12px] text-textTertiary mt-0.5 flex items-center gap-1.5">
-                          {refInfo.label}
-                          {refInfo.mayBeUnavailable && (
-                            <span className="text-accentAmber text-[10px]" aria-label="May be unavailable">⚠ may be down</span>
-                          )}
-                        </p>
-                      </div>
-                      <ExternalLink className="w-4 h-4 text-textMuted group-hover:text-textSecondary shrink-0" />
-                    </a>
-                  </div>
-                );
-              })()}
+              {/* Deep dive — show learning resource before drill */}
+              {topic.chapterUrl && (
+                <div>
+                  <SectionDivider label="Learn First" />
+                  <a href={safeHref(topic.chapterUrl)} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-3 p-4 mt-3 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
+                    <BookOpen className="w-5 h-5 text-textTertiary group-hover:text-accentBlue shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[14px] font-semibold text-textPrimary">{topic.name}</p>
+                      <p className="text-[12px] text-textTertiary mt-0.5">Read on MLSysBook.ai</p>
+                    </div>
+                    <ExternalLink className="w-4 h-4 text-textMuted group-hover:text-textSecondary shrink-0" />
+                  </a>
+                </div>
+              )}
 
               {/* Drill all CTA */}
               <Link href={`/practice?topic=${topic.id}${trackParam}`}

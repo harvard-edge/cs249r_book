@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Library, Target, Crosshair, ArrowLeft } from "lucide-react";
-import { QUESTION_COUNT_FORMATTED } from "@/lib/stats";
+import { QUESTION_COUNT_DISPLAY } from "@/lib/corpus";
 
 export default function NotFound() {
   return (
@@ -44,7 +44,7 @@ export default function NotFound() {
 
       <h1 className="text-2xl font-extrabold text-textPrimary mb-2">Wrong Combination</h1>
       <p className="text-[15px] text-textSecondary mb-8 max-w-md">
-        This page doesn&apos;t exist — but the vault has {QUESTION_COUNT_FORMATTED} ML systems questions waiting for you.
+        This page doesn&apos;t exist — but the vault has {QUESTION_COUNT_DISPLAY} ML systems questions waiting for you.
       </p>
 
       <div className="flex flex-wrap items-center justify-center gap-3">
