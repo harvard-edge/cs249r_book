@@ -5,36 +5,26 @@
 import math
 import pint
 from .constants import ureg, Q_, SPEED_OF_LIGHT_FIBER_KM_S, MS, MB, GB, hour, second, byte
-from ._validation import validate_positive, validate_at_least, validate_range
 
-def _ensure_unit(val, expected_unit, param_name="Value"):
-    """
-    Helper to attach a unit if a value is a raw number, and verify 
-    dimensional correctness if it is already a Pint Quantity.
-    
-    This function acts as a guardrail for students using the framework,
-    ensuring they do not accidentally mix up units (e.g., passing Bytes 
-    when Bandwidth is expected).
-    """
+def _ensure_unit(val, unit):
+    """Helper to attach unit if value is a raw number."""
     if isinstance(val, (int, float)):
-        return val * expected_unit
-    elif isinstance(val, ureg.Quantity):
-        if not val.check(expected_unit):
-            raise pint.DimensionalityError(
-                val.units, expected_unit,
-                extra_msg=f"\n[Pedagogical Error] '{param_name}' requires units of {expected_unit.dimensionality}. You provided '{val.units}'."
-            )
-        return val
-    else:
-        raise TypeError(f"Expected a number or Pint Quantity for {param_name}, got {type(val).__name__}")
+        return val * unit
+    return val
 
 def calc_network_latency_ms(distance_km):
     """
     Calculates round-trip time in milliseconds based on speed of light in fiber.
-    
+
     Source: Standard networking physics (c/1.5 refractive index).
+
+    Args:
+        distance_km: One-way distance in kilometers.
+
+    Returns:
+        float: Round-trip latency in milliseconds.
     """
-    d = _ensure_unit(distance_km, ureg.kilometer, "distance_km")
+    d = _ensure_unit(distance_km, ureg.kilometer)
     round_trip_s = (d * 2) / SPEED_OF_LIGHT_FIBER_KM_S
     return round_trip_s.m_as(ureg.millisecond)
 
@@ -43,17 +33,24 @@ def dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
     Core training time calculation (first-principles).
 
     Source: Standard Performance Modeling for Distributed Systems.
-    Returns a Pint Quantity in seconds.
+
+    Args:
+        total_ops: Total floating point operations for training.
+        num_devices: Number of accelerators.
+        peak_flops_per_device: Peak FLOP/s per accelerator.
+        efficiency_eta: Model FLOPs utilization (0.0 to 1.0).
+
+    Returns:
+        Quantity[second]: Estimated training duration.
     """
-    validate_at_least(num_devices, 1, "num_devices")
-    validate_positive(efficiency_eta, "efficiency_eta")
-    effective_throughput = num_devices * peak_flops_per_device * efficiency_eta
-    duration = total_ops / effective_throughput
+    ops = _ensure_unit(total_ops, ureg.flop)
+    flops = _ensure_unit(peak_flops_per_device, ureg.flop / ureg.second)
+    effective_throughput = num_devices * flops * efficiency_eta
+    if getattr(effective_throughput, 'magnitude', effective_throughput) == 0:
+        return float('inf') * ureg.second
+    duration = ops / effective_throughput
     return duration.to(ureg.second)
 
-
-# Preferred name (consistent with calc_* convention); dTime kept as alias
-calc_training_time = dTime
 
 def calc_training_time_days(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
     """Calculates training duration in days."""
@@ -70,15 +67,30 @@ def calc_amdahls_speedup(p, s):
     Args:
         p: fraction of work that can be improved (0.0 to 1.0)
         s: speedup of that fraction
+        
+    Returns:
+        float: The overall system speedup.
     """
-    validate_range(p, 0.0, 1.0, "p (parallel fraction)")
-    validate_positive(s, "s (speedup factor)")
-    overall = 1 / ((1 - p) + (p / s))
+    if s == 0:
+        return 0.0
+    denom = (1 - p) + (p / s)
+    if denom == 0:
+        return float('inf')
+    overall = 1 / denom
     return overall
 
 def calc_monthly_egress_cost(bytes_per_sec, cost_per_gb):
-    """Calculates monthly cloud egress cost based on standard cloud egress rates."""
-    b_s = _ensure_unit(bytes_per_sec, ureg.byte / ureg.second, "bytes_per_sec")
+    """
+    Calculates monthly cloud egress cost based on standard cloud egress rates.
+    
+    Args:
+        bytes_per_sec: Egress bandwidth in bytes per second.
+        cost_per_gb: Cost per gigabyte.
+        
+    Returns:
+        float: Monthly egress cost in dollars.
+    """
+    b_s = _ensure_unit(bytes_per_sec, ureg.byte / ureg.second)
     monthly_bytes = b_s * (30 * ureg.day)
     cost = monthly_bytes * cost_per_gb
     return cost.m_as(ureg.dollar)
@@ -88,11 +100,21 @@ def calc_fleet_tco(unit_cost, power_w, quantity, years, kwh_price):
     Calculates Total Cost of Ownership (TCO).
     
     Source: Barroso et al. (2018), "The Datacenter as a Computer."
+    
+    Args:
+        unit_cost: Cost per unit.
+        power_w: Power consumption per unit in Watts.
+        quantity: Number of units.
+        years: Operational lifespan in years.
+        kwh_price: Electricity price per kWh.
+        
+    Returns:
+        float: Total TCO in dollars.
     """
-    u_cost = _ensure_unit(unit_cost, ureg.dollar, "unit_cost")
-    p_w = _ensure_unit(power_w, ureg.watt, "power_w")
-    price = _ensure_unit(kwh_price, ureg.dollar / ureg.kilowatt_hour, "kwh_price")
-    time = _ensure_unit(years, ureg.year, "years")
+    u_cost = _ensure_unit(unit_cost, ureg.dollar)
+    p_w = _ensure_unit(power_w, ureg.watt)
+    price = _ensure_unit(kwh_price, ureg.dollar / ureg.kilowatt_hour)
+    time = _ensure_unit(years, ureg.year)
     fleet_capex = u_cost * quantity
     total_energy = p_w * quantity * time
     power_opex = total_energy * price
@@ -102,23 +124,29 @@ def calc_fleet_tco(unit_cost, power_w, quantity, years, kwh_price):
 def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
     """
     Roofline bottleneck analysis.
-
+    
     Source: Williams et al. (2009), "Roofline Model."
-
-    Worked Example::
-
-        Llama-3 8B FP16 on H100 (batch=1):
-        ops = 2 * 8e9 = 16 GFLOP, model_bytes = 16 GB
-        compute = 16e9 / 989e12 = 0.016 ms
-        memory  = 16e9 / 3.35e12 = 4.78 ms
-        → Memory Bound (memory >> compute)
+    
+    Args:
+        ops: Total operations.
+        model_bytes: Total memory bytes accessed.
+        device_flops: Peak operations per second.
+        device_bw: Peak memory bandwidth in bytes per second.
+        
+    Returns:
+        dict: Bottleneck analysis profile.
     """
-    compute_time = ops / device_flops
-    memory_time = model_bytes / device_bw
+    o = _ensure_unit(ops, ureg.flop)
+    mb = _ensure_unit(model_bytes, ureg.byte)
+    df = _ensure_unit(device_flops, ureg.flop / ureg.second)
+    dbw = _ensure_unit(device_bw, ureg.byte / ureg.second)
+
+    compute_time = o / df
+    memory_time = mb / dbw
     t_comp_ms = compute_time.m_as(ureg.millisecond)
     t_mem_ms = memory_time.m_as(ureg.millisecond)
     
-    if t_comp_ms < 1e-15:
+    if t_comp_ms == 0:
         return {
             "compute_ms": 0.0,
             "memory_ms": t_mem_ms,
@@ -127,18 +155,18 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
             "intensity": 0.0
         }
 
-    if t_mem_ms < 1e-15:
+    if t_mem_ms == 0:
         return {
             "compute_ms": t_comp_ms,
             "memory_ms": 0.0,
             "bottleneck": "Compute",
             "ratio": float('inf'),
-            "intensity": float('inf')
+            "intensity": float('inf') if mb.magnitude == 0 else (o / mb).magnitude
         }
 
     is_memory_bound = t_mem_ms > t_comp_ms
     ratio = t_mem_ms / t_comp_ms if is_memory_bound else t_comp_ms / t_mem_ms
-    intensity = ops / model_bytes
+    intensity = o / mb
     return {
         "compute_ms": t_comp_ms,
         "memory_ms": t_mem_ms,
@@ -201,13 +229,6 @@ def calc_ring_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
 
     T = 2(N-1)/N × M/β + 2(N-1) × α
 
-    Worked Example::
-
-        1 GB gradient on 8 GPUs with 50 GB/s NVLink and 500 ns latency:
-        T = 2*(8-1)/8 * 1e9/50e9 + 2*(8-1) * 500e-9
-          = 1.75 * 0.02 + 14 * 500e-9
-          = 35 ms + 7 μs ≈ 35 ms  (bandwidth-dominated)
-
     Args:
         message_bytes: Total message size in bytes (M)
         n_gpus: Number of GPUs in the ring (N)
@@ -217,13 +238,9 @@ def calc_ring_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
     Returns:
         Quantity[second]: Estimated AllReduce time
     """
-    validate_at_least(n_gpus, 1, "n_gpus")
-    if n_gpus == 1:
-        return Q_("0 second")
-    msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
-    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s")
-    validate_positive(bw, "bandwidth_bytes_s")
-    lat = _ensure_unit(latency_s, ureg.second, "latency_s")
+    msg = _ensure_unit(message_bytes, ureg.byte)
+    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second)
+    lat = _ensure_unit(latency_s, ureg.second)
     n = n_gpus
     bw_term = 2 * (n - 1) / n * msg / bw
     lat_term = 2 * (n - 1) * lat
@@ -245,14 +262,10 @@ def calc_tree_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
     Returns:
         Quantity[second]: Estimated AllReduce time
     """
-    validate_at_least(n_gpus, 1, "n_gpus")
-    if n_gpus == 1:
-        return Q_("0 second")
-    msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
-    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s")
-    validate_positive(bw, "bandwidth_bytes_s")
-    lat = _ensure_unit(latency_s, ureg.second, "latency_s")
-    log_n = math.ceil(math.log2(max(n_gpus, 2)))  # ceil handles non-power-of-2
+    msg = _ensure_unit(message_bytes, ureg.byte)
+    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second)
+    lat = _ensure_unit(latency_s, ureg.second)
+    log_n = math.log2(n_gpus)
     bw_term = 2 * log_n * msg / bw
     lat_term = 2 * log_n * lat
     return (bw_term + lat_term).to(ureg.second)
@@ -273,9 +286,9 @@ def calc_all_to_all_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s):
     Returns:
         Quantity[second]: Estimated All-to-All time
     """
-    msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
-    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s")
-    lat = _ensure_unit(latency_s, ureg.second, "latency_s")
+    msg = _ensure_unit(message_bytes, ureg.byte)
+    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second)
+    lat = _ensure_unit(latency_s, ureg.second)
     n = n_gpus
     bw_term = (n - 1) / n * msg / bw
     lat_term = (n - 1) * lat
@@ -297,48 +310,45 @@ def calc_transformer_training_flops(n_params, n_tokens):
     Returns:
         Quantity[flop]: Total training FLOPs
     """
-    p = _ensure_unit(n_params, ureg.param, "n_params").to(ureg.count).magnitude
-    d = _ensure_unit(n_tokens, ureg.count, "n_tokens").magnitude
+    p = _ensure_unit(n_params, ureg.param).to(ureg.count).magnitude
+    d = _ensure_unit(n_tokens, ureg.count).magnitude
     return (6 * p * d) * ureg.flop
 
 
-def calc_activation_memory(n_layers, seq_len, batch_size, hidden_dim, n_heads=None,
-                           precision_bytes=1, strategy="selective"):
+def calc_activation_memory(n_layers, seq_len, batch_size, hidden_dim, n_heads=None, 
+                           precision_bytes=2, strategy="selective"):
     """
     Estimate activation memory for a Transformer layer.
-
+    
     Source: Korthikanti et al. (2023), "Reducing Activation Memory in Transformer Training"
-
-    The coefficients (34, 10, 2) already incorporate mixed-precision byte widths
-    from the original paper (Table 1). The precision_bytes parameter defaults to 1
-    to avoid double-counting; set it only if using a non-standard precision layout.
-
+    
     Args:
         n_layers: Number of layers (L)
         seq_len: Sequence length (S)
         batch_size: Batch size (B)
         hidden_dim: Hidden dimension (H)
         n_heads: Number of attention heads (A)
-        precision_bytes: Multiplier (default 1; Korthikanti coefficients already include byte widths)
+        precision_bytes: Bytes per element (default 2 for FP16)
         strategy: Recompute strategy ('none', 'selective', 'full')
-
+        
     Returns:
         Quantity[byte]: Total activation memory
     """
     s, b, h = seq_len, batch_size, hidden_dim
-    # Coefficients from Korthikanti et al. (2023) Table 1 already include byte widths
-    # for mixed-precision training (FP16 activations + FP32 where needed).
+    # Basic activation per layer: 34 * s * b * h (without recompute)
+    # With selective recompute, it's significantly lower.
     if strategy == "full":
-        # Only store inputs to the block
-        bytes_per_layer = 2 * s * b * h * precision_bytes
+        # Only store inputs to the block (1 element per activation)
+        elements_per_layer = 1 * s * b * h
     elif strategy == "selective":
         # Store some intermediate activations to avoid full recompute
-        bytes_per_layer = 10 * s * b * h * precision_bytes
+        # Reference estimate: ~5 elements per activation
+        elements_per_layer = 5 * s * b * h
     else:
-        # No recompute: store everything
-        bytes_per_layer = 34 * s * b * h * precision_bytes
+        # No recompute: store everything (17 elements per activation)
+        elements_per_layer = 17 * s * b * h
         
-    return (n_layers * bytes_per_layer) * ureg.byte
+    return (n_layers * elements_per_layer * precision_bytes) * ureg.byte
 
 
 def calc_hierarchical_allreduce_time(message_bytes, n_nodes, gpus_per_node, 
@@ -363,18 +373,15 @@ def calc_hierarchical_allreduce_time(message_bytes, n_nodes, gpus_per_node,
     Returns:
         Quantity[second]: Estimated communication time
     """
-    # 1. Intra-node Reduce-Scatter (each GPU gets M/G of the reduced result)
-    # We model the NCCL-style bucket-fused approach where reduce-scatter
-    # partitions the gradient buffer so each GPU holds 1/G of the result.
-    t_reduce = calc_ring_allreduce_time(message_bytes, gpus_per_node, intra_node_bw, intra_node_lat)
-
-    # 2. Inter-node AllReduce (between corresponding shards across nodes)
-    # Each lead GPU holds M/G after reduce-scatter — this is the key bandwidth
-    # optimization of hierarchical collectives (NCCL, Horovod).
-    reduced_message = _ensure_unit(message_bytes, ureg.byte, "message_bytes") / gpus_per_node
-    t_allreduce_inter = calc_ring_allreduce_time(reduced_message, n_nodes, inter_node_bw, inter_node_lat)
+    # 1. Intra-node Reduce (to one GPU per node)
+    # A Reduce takes exactly half the time of a full Ring AllReduce
+    t_reduce = calc_ring_allreduce_time(message_bytes, gpus_per_node, intra_node_bw, intra_node_lat) / 2
+    
+    # 2. Inter-node AllReduce (between lead GPUs of each node)
+    t_allreduce_inter = calc_ring_allreduce_time(message_bytes, n_nodes, inter_node_bw, inter_node_lat)
     
     # 3. Intra-node Broadcast (back to all GPUs)
+    # A Broadcast takes exactly half the time of a full Ring AllReduce
     t_broadcast = t_reduce # Symmetry assumption
     
     return t_reduce + t_allreduce_inter + t_broadcast
@@ -382,13 +389,9 @@ def calc_hierarchical_allreduce_time(message_bytes, n_nodes, gpus_per_node,
 
 def calc_young_daly_interval(checkpoint_cost_s, mtbf_s):
     """
-    Optimal checkpoint interval (Young's first-order approximation).
+    Optimal checkpoint interval (Young-Daly model).
 
     τ_opt = √(2 × δ × M)
-
-    This implements Young (1974), not Daly's (2006) higher-order correction
-    which adds the checkpoint cost: τ_opt = √(2δM) + δ. The Young form is
-    the standard simplification used in practice.
 
     Args:
         checkpoint_cost_s: Time to write one checkpoint in seconds (δ)
@@ -397,31 +400,29 @@ def calc_young_daly_interval(checkpoint_cost_s, mtbf_s):
     Returns:
         Quantity[second]: Optimal checkpoint interval
     """
-    delta = _ensure_unit(checkpoint_cost_s, ureg.second, "checkpoint_cost_s")
-    mtbf  = _ensure_unit(mtbf_s, ureg.second, "mtbf_s")
+    delta = _ensure_unit(checkpoint_cost_s, ureg.second)
+    mtbf  = _ensure_unit(mtbf_s, ureg.second)
     seconds = math.sqrt(2 * delta.m_as(ureg.second) * mtbf.m_as(ureg.second))
     return seconds * ureg.second
 
 
-def calc_mtbf_cluster(component_mtbf_hours, n_components, correlation_factor=1.0):
+def calc_mtbf_cluster(component_mtbf_hours, n_components):
     """
     Cluster MTBF from identical independent components.
 
-    MTBF_cluster = (MTBF_component / N) × correlation_factor
+    MTBF_cluster = MTBF_component / N
 
     Args:
         component_mtbf_hours: Single component MTBF in hours (or Quantity[hour])
         n_components: Number of identical components
-        correlation_factor: Multiplier for correlated failures (default 1.0).
-            Values < 1.0 model correlated failures (e.g., shared power rail,
-            same firmware bug) which reduce effective MTBF below the independent
-            assumption. Values > 1.0 could model redundancy benefits.
 
     Returns:
         Quantity[hour]: Cluster MTBF
     """
-    mtbf = _ensure_unit(component_mtbf_hours, ureg.hour, "component_mtbf_hours")
-    return (mtbf / n_components * correlation_factor).to(ureg.hour)
+    if n_components <= 0:
+        return float('inf') * ureg.hour
+    mtbf = _ensure_unit(component_mtbf_hours, ureg.hour)
+    return (mtbf / n_components).to(ureg.hour)
 
 
 def calc_mtbf_node(gpu_mtbf_h, n_gpus, nic_mtbf_h, n_nics,
@@ -444,12 +445,19 @@ def calc_mtbf_node(gpu_mtbf_h, n_gpus, nic_mtbf_h, n_nics,
     Returns:
         Quantity[hour]: Node MTBF
     """
-    gpu = _ensure_unit(gpu_mtbf_h, ureg.hour, "gpu_mtbf_h")
-    nic = _ensure_unit(nic_mtbf_h, ureg.hour, "nic_mtbf_h")
-    psu = _ensure_unit(psu_mtbf_h, ureg.hour, "psu_mtbf_h")
-    rate = n_gpus / gpu + n_nics / nic + n_psus / psu
+    gpu = _ensure_unit(gpu_mtbf_h, ureg.hour)
+    nic = _ensure_unit(nic_mtbf_h, ureg.hour)
+    psu = _ensure_unit(psu_mtbf_h, ureg.hour)
+    rate = 0.0 / ureg.hour
+    if n_gpus > 0: rate += n_gpus / gpu
+    if n_nics > 0: rate += n_nics / nic
+    if n_psus > 0: rate += n_psus / psu
+    
     if other_mtbf_h is not None and n_other > 0:
-        rate += n_other / _ensure_unit(other_mtbf_h, ureg.hour, "other_mtbf_h")
+        rate += n_other / _ensure_unit(other_mtbf_h, ureg.hour)
+    
+    if getattr(rate, 'magnitude', rate) == 0:
+        return float('inf') * ureg.hour
     return (1.0 / rate).to(ureg.hour)
 
 
@@ -470,40 +478,34 @@ def calc_pipeline_bubble(n_stages, n_microbatches, v_stages=1):
     return (n_stages - 1) / (v_stages * n_microbatches + n_stages - 1)
 
 
-def calc_checkpoint_size(n_params, bytes_per_param=14):
+def calc_checkpoint_size(n_params, bytes_per_param=16):
     """
     Checkpoint size for mixed-precision Adam training.
 
     Size = N × bytes_per_param
 
-    Default 14 bytes/param: 2 (FP16 weights) + 4 (FP32 master weights) +
-    4 (FP32 momentum) + 4 (FP32 variance). Gradients are ephemeral
-    and not checkpointed.
+    Default 16 bytes/param: 2 (BF16 weights) + 2 (gradients) +
+    12 (FP32 master weights + momentum + variance).
 
     Args:
         n_params: Number of model parameters
-        bytes_per_param: Bytes per parameter (default 14 for mixed-precision Adam)
+        bytes_per_param: Bytes per parameter (default 16 for mixed-precision Adam)
 
     Returns:
         Quantity[byte]: Checkpoint size
     """
-    bpp = _ensure_unit(bytes_per_param, ureg.byte, "bytes_per_param")
+    bpp = _ensure_unit(bytes_per_param, ureg.byte)
     return (n_params * bpp).to(ureg.byte)
 
 
 def calc_kv_cache_size(n_layers, n_heads, head_dim, seq_len, batch_size,
-                       bytes_per_elem=2, kv_precision_bytes=None):
+                       bytes_per_elem=2):
     """
     KV cache memory for autoregressive inference.
 
     Size = 2 × L × H × D × S × B × bytes
 
     The factor of 2 accounts for both K and V tensors.
-
-    Worked Example::
-
-        Llama-3 8B (32 layers, 8 KV heads, 128 head_dim) at seq_len=4096, batch=1, FP16:
-        Size = 2 × 32 × 8 × 128 × 4096 × 1 × 2 = 536 MB
 
     Args:
         n_layers: Number of transformer layers (L)
@@ -512,15 +514,11 @@ def calc_kv_cache_size(n_layers, n_heads, head_dim, seq_len, batch_size,
         seq_len: Sequence length / context window (S)
         batch_size: Batch size (B)
         bytes_per_elem: Bytes per element (default 2 for FP16/BF16)
-        kv_precision_bytes: Optional override for KV cache precision (e.g., 1 for
-            INT8 KV cache quantization). When provided, this overrides bytes_per_elem
-            for the KV cache size calculation.
 
     Returns:
         Quantity[byte]: KV cache size
     """
-    effective_bpe = kv_precision_bytes if kv_precision_bytes is not None else bytes_per_elem
-    bpe = _ensure_unit(effective_bpe, ureg.byte, "kv_precision_bytes" if kv_precision_bytes is not None else "bytes_per_elem")
+    bpe = _ensure_unit(bytes_per_elem, ureg.byte)
     return (2 * n_layers * n_heads * head_dim * seq_len * batch_size * bpe).to(ureg.byte)
 
 
@@ -546,12 +544,6 @@ def calc_failure_probability(mtbf, job_duration):
 
     P(≥1 failure) = 1 - e^(-T / MTBF)
 
-    Worked Example::
-
-        1000-GPU cluster (MTBF = 50 hours), 14-day training job:
-        P = 1 - e^(-(14*24)/50) = 1 - e^(-6.72) = 0.9988
-        → 99.9% chance of at least one failure
-
     If both are Quantities: units auto-reconciled (pass hours or seconds freely).
     If both are raw numbers: caller must use consistent units.
     Mixed types (one Quantity, one raw) raise TypeError — ambiguous unit intent.
@@ -563,7 +555,6 @@ def calc_failure_probability(mtbf, job_duration):
     Returns:
         Probability of at least one failure (0.0 to 1.0)
     """
-    validate_positive(mtbf, "mtbf")
     both_qty = isinstance(mtbf, ureg.Quantity) and isinstance(job_duration, ureg.Quantity)
     either_qty = isinstance(mtbf, ureg.Quantity) or isinstance(job_duration, ureg.Quantity)
     if either_qty and not both_qty:
@@ -571,6 +562,10 @@ def calc_failure_probability(mtbf, job_duration):
             "calc_failure_probability: both arguments must be Quantities or both raw numbers. "
             "Mixed types are ambiguous — attach units to the raw number first."
         )
+    mtbf_mag = getattr(mtbf, 'magnitude', mtbf)
+    if mtbf_mag == 0:
+        return 1.0
+
     if both_qty:
         ratio = job_duration.to(ureg.second).magnitude / mtbf.to(ureg.second).magnitude
     else:
@@ -593,103 +588,5 @@ def calc_effective_flops(peak_flops, mfu, scaling_eff, goodput_ratio):
     Returns:
         Effective FLOPS in same units as peak_flops
     """
-    pf = _ensure_unit(peak_flops, ureg.flop / ureg.second, "peak_flops")
+    pf = _ensure_unit(peak_flops, ureg.flop / ureg.second)
     return (pf * mfu * scaling_eff * goodput_ratio).to(ureg.flop / ureg.second)
-
-
-# =============================================================================
-# Inference & Serving Formulas
-# =============================================================================
-
-def calc_paged_kv_cache_size(n_layers, n_heads, head_dim, seq_len, batch_size,
-                             page_size_tokens=16, bytes_per_elem=2):
-    """
-    KV cache memory for autoregressive inference using PagedAttention (vLLM).
-
-    Size = 2 × L × H × D × (ceil(S / page_size) * page_size) × B × bytes
-
-    Internal fragmentation is captured by the padded space in the last page,
-    eliminating the 40-50% external fragmentation of contiguous allocation.
-
-    Source: Kwon et al. (2023), "Efficient Memory Management for Large Language... PagedAttention"
-
-    Args:
-        n_layers: Number of transformer layers (L)
-        n_heads: Number of attention heads (H)
-        head_dim: Dimension per head (D)
-        seq_len: Sequence length / context window (S)
-        batch_size: Batch size (B)
-        page_size_tokens: Tokens per page (typically 16)
-        bytes_per_elem: Bytes per element (default 2 for FP16/BF16)
-
-    Returns:
-        tuple: (Quantity[byte] size, float fragmentation_percent)
-    """
-    bpe = _ensure_unit(bytes_per_elem, ureg.byte, "bytes_per_elem")
-    padded_seq_len = math.ceil(seq_len / page_size_tokens) * page_size_tokens
-    
-    internal_frag = max(0, padded_seq_len - seq_len)
-    frag_pct = internal_frag / padded_seq_len if padded_seq_len > 0 else 0.0
-    
-    size = (2 * n_layers * n_heads * head_dim * padded_seq_len * batch_size * bpe).to(ureg.byte)
-    return size, frag_pct
-
-
-def calc_queue_latency_mmc(arrival_rate_hz, service_rate_hz, num_servers):
-    """
-    M/M/c queueing model for inference tail latency approximation.
-    
-    Evaluates stable queues (λ < cμ) and calculates P50/P99 wait times
-    based on the Erlang C formula.
-    
-    Args:
-        arrival_rate_hz: Request arrival rate (λ)
-        service_rate_hz: Request service rate per server (μ)
-        num_servers: Number of replicas (c)
-        
-    Returns:
-        tuple: (utilization, Quantity[second] p50_wait_time, Quantity[second] p99_wait_time)
-    """
-    lam = _ensure_unit(arrival_rate_hz, ureg.hertz, "arrival_rate_hz").magnitude
-    mu = _ensure_unit(service_rate_hz, ureg.hertz, "service_rate_hz").magnitude
-    c = max(1, int(num_servers))
-    
-    if lam >= c * mu or mu == 0:
-        return 1.0, float('inf') * ureg.second, float('inf') * ureg.second
-        
-    rho = lam / (c * mu)
-    
-    # Erlang C calculation for probability of queuing (log-space for numerical stability).
-    # Standard formula overflows math.factorial(c) for c > 170.
-    # Using math.lgamma avoids intermediate overflow.
-    a = c * rho  # offered load
-    try:
-        # log of numerator term: a^c / c! * 1/(1-rho)
-        log_last = c * math.log(a) - math.lgamma(c + 1) - math.log(1 - rho)
-        # log of each summation term: a^i / i!
-        log_terms = [i * math.log(a) - math.lgamma(i + 1) if a > 0 else (-math.inf if i > 0 else 0.0) for i in range(c)]
-        # log-sum-exp for numerical stability
-        max_log = max(max(log_terms) if log_terms else -math.inf, log_last)
-        sum_exp = sum(math.exp(t - max_log) for t in log_terms) + math.exp(log_last - max_log)
-        p_wait = math.exp(log_last - max_log) / sum_exp
-    except (OverflowError, ValueError, ZeroDivisionError):
-        p_wait = rho
-
-    # Safety clamp
-    if math.isnan(p_wait) or math.isinf(p_wait):
-        p_wait = rho
-    p_wait = max(0.0, min(1.0, p_wait))
-        
-    rate_param = c * mu * (1 - rho)
-    
-    if p_wait < 0.5:
-        p50_wait = 0.0
-    else:
-        p50_wait = -math.log(0.5 / p_wait) / rate_param
-        
-    if p_wait < 0.01:
-        p99_wait = 0.0
-    else:
-        p99_wait = -math.log(0.01 / p_wait) / rate_param
-        
-    return rho, p50_wait * ureg.second, p99_wait * ureg.second

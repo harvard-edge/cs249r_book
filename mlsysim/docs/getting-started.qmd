@@ -1,15 +1,16 @@
 ---
 title: "Getting Started"
-subtitle: "Install MLSys·im and run your first analysis in under 5 minutes."
+subtitle: "Install MLSYSIM and run your first analysis in under 5 minutes."
 ---
+
 ::: {.callout-note}
 ## Prerequisites
-MLSys·im assumes basic Python familiarity (variables, functions, `pip install`). No prior ML or hardware knowledge is required. Key concepts like **roofline analysis**, **memory-bound vs. compute-bound**, and **FLOP/s** are explained in context throughout the tutorials. For a full reference of terms, see the [Glossary](glossary.qmd).
+MLSYSIM assumes basic Python familiarity (variables, functions, `pip install`). No prior ML or hardware knowledge is required. Key concepts like **roofline analysis**, **memory-bound vs. compute-bound**, and **FLOP/s** are explained in context throughout the tutorials. For a full reference of terms, see the [Glossary](glossary.qmd).
 :::
 
 ## Installation
 
-MLSys·im requires Python 3.10+ and installs cleanly with pip:
+MLSYSIM requires Python 3.9+ and installs cleanly with pip:
 
 ```bash
 pip install mlsysim
@@ -23,16 +24,10 @@ cd cs249r_book/mlsysim
 pip install -e ".[dev]"
 ```
 
-### Verify Your Installation
+Verify the installation:
 
 ```bash
-python3 -c "import mlsysim; print(f'mlsysim {mlsysim.__version__} installed successfully')"
-```
-
-You should see:
-
-```
-mlsysim 0.1.0 installed successfully
+python -c "import mlsysim; print(mlsysim.__version__)"
 ```
 
 ::: {.callout-note}
@@ -44,7 +39,7 @@ any local installation. Look for the launch buttons at the top of each tutorial.
 
 ## Your First Analysis
 
-Once installed, you can run a complete roofline analysis in five lines:
+Once installed, you can run a complete roofline analysis in five lines. The roofline model is the foundation of ML systems performance reasoning -- it determines whether your workload is limited by compute (arithmetic units) or memory (data movement). For a visual walkthrough, see the [Hardware Acceleration slide deck (Vol I, Ch 11)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/11_hw_acceleration.pdf){target="_blank"}.
 
 ```python
 import mlsysim
@@ -54,151 +49,146 @@ from mlsysim import Engine
 model    = mlsysim.Models.ResNet50
 hardware = mlsysim.Hardware.Cloud.A100
 
-# 2. Solve — the Engine applies the Iron Law of ML Systems
+# 2. Solve -- the Engine applies the roofline model
 profile = Engine.solve(model=model, hardware=hardware, batch_size=1, precision="fp16")
 
 # 3. Read the results
-print(f"Bottleneck: {profile.bottleneck}")   # → 'Compute'
-print(f"Latency:    {profile.latency}")       # → 0.54 ms
-print(f"Throughput: {profile.throughput}")    # → 1847 1/s
+print(f"Bottleneck: {profile.bottleneck}")    # → 'Memory'
+print(f"Latency:    {profile.latency}")        # → 0.34 ms
+print(f"Throughput: {profile.throughput}")     # → 2941 samples/sec
 ```
 
 ::: {.callout-note}
 ## Working with units
-MLSys·im uses the [Pint](https://pint.readthedocs.io/) library for physical units. All quantities carry attached units (ms, GB, TFLOP/s, etc.). Use `.to('ms')` to convert between units. Use `.magnitude` to extract the raw number when you need it for calculations or plotting.
+MLSYSIM uses the [Pint](https://pint.readthedocs.io/) library for physical units. All quantities carry attached units (ms, GB, TFLOP/s, etc.). Use `.to('ms')` to convert between units. Use `.magnitude` to extract the raw number when you need it for calculations or plotting.
 :::
-
----
-
-## The Agent-Ready CLI
-
-MLSys·im features a powerful, first-principles analytical CLI designed for both human exploration and CI/CD automation. You can evaluate hardware and workloads directly from your terminal.
-
-### 1. Explore the Registry
-Discover built-in hardware, models, and infrastructure:
-```bash
-mlsysim zoo hardware
-mlsysim zoo models
-```
-
-### 2. Quick Evaluation
-Evaluate the physics of a workload on a specific hardware node instantly:
-```bash
-mlsysim eval Llama3_8B H100 --batch-size 32
-
-# Or directly evaluate a model from the Hugging Face Hub:
-mlsysim eval hf://meta-llama/Meta-Llama-3-8B H100
-```
-
-### 3. Declarative Infrastructure (YAML)
-Define your entire cluster and SLA constraints in a declarative `mlsys.yaml` file:
-
-```yaml
-version: "1.0"
-workload:
-  name: "Llama3_70B"
-  batch_size: 4096
-hardware:
-  name: "H100"
-  nodes: 64
-ops:
-  region: "Quebec"
-  duration_days: 14.0
-constraints:
-  assert:
-    - metric: "performance.latency"
-      max: 50.0
-```
-
-Evaluate the full 3-lens scorecard (Feasibility, Performance, Macro):
-```bash
-mlsysim eval cluster.yaml
-```
-
-*For automated scripts and AI agents, use the `-o json` flag for strict, parseable output.*
-
----
-
-## Supported Workloads
-
-MLSys·im models five families of ML architectures. Each workload type knows how to compute its own FLOPs, memory footprint, and arithmetic intensity:
-
-| Workload | Key Parameters | Scaling Behavior |
-|:---------|:---------------|:-----------------|
-| **Transformer** | Parameters, layers, heads, sequence length | 2P FLOPs/token |
-| **CNN** | Parameters, inference FLOPs | Fixed per image |
-| **Sparse (MoE)** | Total vs. active parameters, experts | Active P for FLOPs, total P for memory |
-| **SSM (Mamba)** | Parameters, state dimension | O(1) state cache |
-| **Diffusion** | Parameters, denoising steps T | T × FLOPs/step |
-
-```python
-# Access workloads from the Model Zoo
-model = mlsysim.Models.Language.Llama3_70B    # Transformer
-model = mlsysim.Models.ResNet50               # CNN
-
-# Or define a custom workload
-from mlsysim import TransformerWorkload
-custom = TransformerWorkload(
-    name="My-Model", parameters=7e9,
-    layers=32, hidden_dim=4096, heads=32
-)
-```
-
-All workloads share a common `lower()` method that produces a `ComputationGraph` — the intermediate representation consumed by every solver. This means new workload types automatically work with all existing solvers.
-
-*See the [Model Zoo](zoo/models.qmd) for the full list of vetted workloads.*
 
 ---
 
 ## Understanding the Output
 
+`Engine.solve()` returns a `PerformanceProfile` -- a structured result containing everything the roofline model can tell you about your workload.
+
+### Core fields
+
 | Field | What it means |
 |:------|:--------------|
-| `bottleneck` | `'Memory'` or `'Compute'` — which resource limits performance |
+| `bottleneck` | `'Memory'` or `'Compute'` -- which resource limits performance |
 | `latency` | Time to process one batch, derived from the roofline ceiling |
 | `throughput` | Samples per second = `batch_size / latency` |
 | `latency_compute` | Time if only compute were the constraint |
 | `latency_memory` | Time if only memory bandwidth were the constraint |
+| `arithmetic_intensity` | Operations per byte -- the x-axis of the roofline plot |
+
+### Extended fields
+
+| Field | What it means |
+|:------|:--------------|
+| `energy` | Estimated energy consumption (Joules) |
+| `memory_footprint` | Total memory required for the workload |
+| `mfu` | Model FLOPs Utilization -- fraction of peak compute achieved |
+| `feasible` | Whether the workload fits in device memory |
 
 ::: {.callout-tip}
 ## The key insight
-If `latency_memory > latency_compute`, you're **memory-bound**: buying faster GPUs won't help much.
-You need to increase batch size or use a more compute-dense operation (e.g., fused attention).
-If you're **compute-bound**, that's when parallelism and quantization pay off.
+If `latency_memory > latency_compute`, you are **memory-bound**: faster arithmetic units will not help.
+You need to increase batch size, use a more compute-dense operation (e.g., fused attention), or reduce
+data movement. If you are **compute-bound**, that is when parallelism and quantization pay off.
+
+This is the same insight taught in the [Neural Network Computation slides (Vol I, Ch 5)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/05_nn_computation.pdf){target="_blank"} and the [Performance Engineering slides (Vol II, Ch 10)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/10_performance_engineering.pdf){target="_blank"}.
 :::
 
 ---
 
 ## Exploring the Zoo
 
-MLSys·im ships with vetted registries of hardware, models, infrastructure, and systems.
-Use tab-completion to explore:
+MLSYSIM ships with vetted registries of hardware, models, infrastructure, and systems -- all sourced from real datasheets. Use tab-completion to explore.
+
+### Hardware
+
+Five tiers spanning the full deployment spectrum:
 
 ```python
-# Hardware: Cloud, Workstation, Mobile, Edge, Tiny categories
+# Cloud accelerators
+mlsysim.Hardware.Cloud.A100
 mlsysim.Hardware.Cloud.H100
-mlsysim.Hardware.Edge.JetsonOrinNX
-mlsysim.Hardware.Tiny.ESP32_S3
-mlsysim.Hardware.Mobile.iPhone15Pro
+mlsysim.Hardware.Cloud.H200
 
-# Models: Language, Vision, Tiny, StateSpace, GenerativeVision categories
-mlsysim.Models.Language.Llama3_70B
-mlsysim.Models.Vision.ResNet50
-mlsysim.Models.StateSpace.Mamba_2_8B
-mlsysim.Models.GenerativeVision.StableDiffusion_v1_5
+# Workstation / desktop GPUs
+mlsysim.Hardware.Workstation.DGXSpark
 
-# Infrastructure: Regional grids
-mlsysim.Infra.Grids.Quebec      # hydro: ~20 gCO2/kWh
-mlsysim.Infra.Grids.Poland      # coal:  ~820 gCO2/kWh
+# Mobile processors
+mlsysim.Hardware.Mobile.iPhone
+mlsysim.Hardware.Mobile.Snapdragon
+
+# Edge devices
+mlsysim.Hardware.Edge.Jetson
+
+# Tiny / microcontroller targets
+mlsysim.Hardware.Tiny.ESP32
+mlsysim.Hardware.Tiny.Himax
 ```
+
+For the theory behind this hardware spectrum, see the [Compute Infrastructure slides (Vol II, Ch 2)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/02_compute_infrastructure.pdf){target="_blank"}.
+
+### Models
+
+Organized by application domain:
+
+```python
+# Language models
+mlsysim.Models.Language.GPT2
+mlsysim.Models.Language.Llama3_8B
+mlsysim.Models.Language.Llama3_70B
+
+# Vision models
+mlsysim.Models.Vision.ResNet50
+mlsysim.Models.Vision.MobileNetV2
+mlsysim.Models.Vision.AlexNet
+
+# Tiny / edge models
+mlsysim.Models.Tiny.DS_CNN
+mlsysim.Models.Tiny.WakeVision
+```
+
+### Infrastructure
+
+Regional grids and datacenter configurations for sustainability analysis:
+
+```python
+# Regional power grids -- carbon intensity varies by energy source
+mlsysim.Infra.Grids.Quebec      # hydro:  ~20 gCO2/kWh
+mlsysim.Infra.Grids.US_Avg      # mixed:  ~390 gCO2/kWh
+mlsysim.Infra.Grids.Poland      # coal:   ~820 gCO2/kWh
+```
+
+The [Sustainable AI slides (Vol II, Ch 15)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/15_sustainable_ai.pdf){target="_blank"} explain why datacenter location is a first-class engineering decision.
+
+### Systems
+
+Cluster definitions for distributed analysis:
+
+```python
+# Network fabrics
+mlsysim.Systems.Fabrics.InfiniBand_NDR
+mlsysim.Systems.Fabrics.Ethernet_100G
+
+# Pre-configured clusters
+mlsysim.Systems.Clusters.Frontier_8K
+mlsysim.Systems.Clusters.Research_256
+```
+
+For the full topology and cluster modeling, see the [Distributed Training slides (Vol II, Ch 5)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/05_distributed_training.pdf){target="_blank"} and [Network Fabrics slides (Vol II, Ch 3)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/03_network_fabrics.pdf){target="_blank"}.
+
+Complete registry listings are available in the [Zoo reference pages](zoo/index.qmd).
 
 ---
 
 ## Adjusting the Efficiency Parameter
 
 The `efficiency` parameter (η) is the single most important tuning knob in
-MLSys·im. It represents the fraction of theoretical peak hardware performance
-that is actually achieved in practice.
+MLSYSIM. It represents the fraction of theoretical peak hardware performance
+that is actually achieved in practice. Most GPUs run at 2--5% of peak without optimization; well-tuned workloads reach 35--55%.
 
 ```python
 # Default: well-optimized training (η = 0.5)
@@ -221,12 +211,12 @@ Typical efficiency ranges:
 
 | Scenario | η range | Notes |
 |:---------|:--------|:------|
-| Well-optimized training (fp16) | 0.35–0.55 | Megatron-LM, DeepSpeed |
-| Inference (fp16) | 0.25–0.45 | vLLM, TensorRT-LLM |
-| Inference (int8) | 0.20–0.40 | Quantized serving |
+| Well-optimized training (fp16) | 0.35--0.55 | Megatron-LM, DeepSpeed |
+| Inference (fp16) | 0.25--0.45 | vLLM, TensorRT-LLM |
+| Inference (int8) | 0.20--0.40 | Quantized serving |
 
 See the [Accuracy & Validation](accuracy.qmd) page for guidance on choosing η
-for different scenarios.
+for different scenarios. The gap between theoretical peak and achieved throughput is covered in detail in the [Performance Engineering slides (Vol II, Ch 10)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/10_performance_engineering.pdf){target="_blank"}.
 
 ---
 
@@ -247,83 +237,53 @@ my_model = TransformerWorkload(
     hidden_dim=5120,
     heads=40,
     kv_heads=8,
-    inference_flops=2 * 13e9 * ureg.flop  # Rule of thumb: ~2 FLOPs per parameter per forward pass
+    inference_flops=2 * 13e9 * ureg.flop  # Rule of thumb: ~2 FLOPs per parameter
 )
 
 profile = Engine.solve(model=my_model, hardware=hardware, batch_size=1)
 print(f"Bottleneck: {profile.bottleneck}")
 print(f"Latency:    {profile.latency}")
+print(f"Feasible:   {profile.feasible}")  # Does the model fit in device memory?
 ```
+
+The [Model Compression slides (Vol I, Ch 10)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/10_model_compression.pdf){target="_blank"} explain why parameter count and precision together determine both the memory footprint and the arithmetic intensity of a workload.
 
 ---
 
-## Bring Your Own YAML (BYOY)
+## Companion Slide Decks
 
-Instead of writing Python code, hardware architects and ML engineers can define custom chips and models using declarative YAML files.
+MLSYSIM is the hands-on companion to the [Machine Learning Systems](https://mlsysbook.ai) textbook. The concepts you model with MLSYSIM are taught visually in 35 Beamer slide decks (1,099 slides total) with speaker notes and active learning exercises.
 
-First, write your hardware specification (e.g., `custom_chip.yaml`):
+| Concept in MLSYSIM | Slide Deck | Key Topics |
+|:--------------------|:-----------|:-----------|
+| `Engine.solve()` and the roofline model | [Hardware Acceleration (Vol I, Ch 11)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/11_hw_acceleration.pdf){target="_blank"} | Roofline model, arithmetic intensity, systolic arrays, memory wall |
+| FLOPs, MACs, and compute cost | [Neural Network Computation (Vol I, Ch 5)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/05_nn_computation.pdf){target="_blank"} | Forward/backward pass cost, training memory breakdown |
+| Training memory and mixed precision | [Model Training (Vol I, Ch 8)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/08_training.pdf){target="_blank"} | Iron Law of Training, gradient checkpointing, mixed precision |
+| Quantization and compression | [Model Compression (Vol I, Ch 10)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/10_model_compression.pdf){target="_blank"} | Pruning, quantization, knowledge distillation |
+| Hardware Zoo tiers | [Compute Infrastructure (Vol II, Ch 2)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/02_compute_infrastructure.pdf){target="_blank"} | Accelerator spectrum, HBM architecture, TCO |
+| DistributedSolver | [Distributed Training (Vol II, Ch 5)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/05_distributed_training.pdf){target="_blank"} | 3D parallelism, scaling efficiency, communication overhead |
+| ServingSolver and LLM inference | [Model Serving (Vol I, Ch 13)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/13_model_serving.pdf){target="_blank"} | TTFT, ITL, KV-cache, batching strategies |
+| SustainabilitySolver | [Sustainable AI (Vol II, Ch 15)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/15_sustainable_ai.pdf){target="_blank"} | Energy wall, carbon geography, PUE |
+| Efficiency parameter (η) | [Performance Engineering (Vol II, Ch 10)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/10_performance_engineering.pdf){target="_blank"} | Operator fusion, FlashAttention, precision engineering |
+| Benchmarking and validation | [Benchmarking (Vol I, Ch 12)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/12_benchmarking.pdf){target="_blank"} | MLPerf, measurement methodology, latency percentiles |
 
-```yaml
-name: "My Custom Chip"
-release_year: 2025
-compute:
-  peak_flops: "500 TFLOPs/s"
-  precision_flops:
-    fp16: "500 TFLOPs/s"
-    fp8: "1000 TFLOPs/s"
-memory:
-  capacity: "64 GB"
-  bandwidth: "2 TB/s"
-tdp: "500 W"
-```
+: {tbl-colwidths="[22,30,48]"}
 
-Then, evaluate it directly from the CLI against any model in the Zoo (or another custom model YAML):
+:::: {.columns}
 
-```bash
-mlsysim eval Llama3_8B ./custom_chip.yaml --batch-size 32
-```
+::: {.column width="50%"}
+**[Volume I: Foundations](https://mlsysbook.ai/slides/vol1.html){target="_blank"}** -- 17 decks, 570 slides
 
-This immediately parses your text file into a typed, unit-checked `HardwareNode` and runs it through the full Roofline analysis. You can export the JSON Schemas for these files to get IDE autocompletion:
+[Download All PDFs (ZIP)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/MLSysBook-Slides-Vol1-PDF.zip){target="_blank"}
+:::
 
-```bash
-mlsysim schema --type hardware > hardware.schema.json
-mlsysim schema --type workload > workload.schema.json
-```
+::: {.column width="50%"}
+**[Volume II: At Scale](https://mlsysbook.ai/slides/vol2.html){target="_blank"}** -- 18 decks, 529 slides
 
----
+[Download All PDFs (ZIP)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/MLSysBook-Slides-Vol2-PDF.zip){target="_blank"}
+:::
 
-## Importing Models from HuggingFace
-
-Instead of defining models manually, you can import any public model directly from HuggingFace Hub:
-
-```python
-from mlsysim.models import import_hf_model
-
-# Import any public model — no torch or transformers dependency required
-model = import_hf_model("meta-llama/Meta-Llama-3-8B")
-
-profile = Engine.solve(model=model, hardware=hardware, batch_size=1)
-print(f"Bottleneck: {profile.bottleneck}")
-print(f"Parameters: {model.parameters.to('Gparam'):.2f}")
-```
-
-The importer fetches the model's `config.json` and analytically estimates parameter count from the architecture fields (layers, hidden_dim, heads, FFN size). No GPU or large dependencies required.
-
----
-
-## Troubleshooting
-
-**`ModuleNotFoundError: No module named 'mlsysim'`**
-: Make sure you installed mlsysim in the same Python environment you are running. Check with `python3 -m pip show mlsysim`.
-
-**`ImportError: cannot import name 'Engine'`**
-: You may have an outdated version. Upgrade with `pip install --upgrade mlsysim`.
-
-**Units look strange (e.g., `dimensionless` instead of `ms`)**
-: MLSys·im uses [Pint](https://pint.readthedocs.io/) for physical units. Use `.to('ms')` to convert and `.magnitude` to extract the raw number.
-
-**Results seem too fast or too slow**
-: Check the `efficiency` parameter. The default (0.5) assumes well-optimized training. For inference, try 0.25–0.45. See [Accuracy & Validation](accuracy.qmd) for guidance.
+::::
 
 ---
 
@@ -332,10 +292,9 @@ The importer fetches the model's `config.json` and analytically estimates parame
 ::: {.callout-tip}
 ## Recommended path
 Follow the [structured learning path](tutorials/index.qmd) on the Tutorials page,
-starting with the **[Hello, Roofline](tutorials/00_hello_roofline.qmd)**.
+starting with the **[Hello World Tutorial](tutorials/hello_world.qmd)**. Each tutorial
+pairs with a companion slide deck for visual explanations and active learning exercises.
 
 For a complete reference of which solver to use for different questions, see the
-**[Resolver Guide](models-and-solvers.qmd)**.
-
-For production capacity planning and cost modeling, see **[For Engineers](for-engineers.qmd)**.
+**[Solver Guide](solver-guide.qmd)**.
 :::

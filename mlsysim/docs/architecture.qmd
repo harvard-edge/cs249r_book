@@ -1,201 +1,242 @@
 ---
 title: "The 5-Layer Architecture"
-subtitle: "Demand–Supply Separation and Progressive Lowering"
+subtitle: "Progressive Lowering: From Abstract Demand to Concrete Supply"
 ---
 
-::: {.callout-tip}
-## The MIPS Analogy
-Patterson and Hennessy did not give students cycle-accurate x86 simulators; they gave them a *taxonomically complete* instruction set that exposed every architectural concept through a model simple enough to reason about yet faithful enough to build real intuition. MLSys·im occupies the same niche for ML systems — sacrificing microarchitectural detail to achieve sub-second execution, enabling students and practitioners to sweep thousands of configurations in the time a cycle-accurate simulator requires for one.
-:::
+MLSYSIM organizes the full ML systems domain into five composable layers. Abstract workload *demand* (Layer A) is progressively mapped onto concrete hardware *supply* (Layers B--D) through analytical *solvers* (Layer E). Each layer corresponds directly to chapters in the [Machine Learning Systems](https://mlsysbook.ai) textbook and its companion [lecture slides](https://mlsysbook.ai/slides/).
 
-The core philosophy of MLSys·im is **Demand–Supply Separation with Progressive Lowering**. Rather than treating machine learning systems as black boxes, MLSys·im cleanly decouples *what* a model computes (demand) from *where* it runs (supply) and *why* constraints emerge (analysis).
+Understanding this stack is the key to mastering both this library and the textbook it accompanies.
 
-Abstract workload *demand* (Layer A) is progressively mapped onto concrete hardware *supply* (Layers B, C, D) through analytical *solvers* (Layer E) that enforce **dimensional strictness** at runtime — every physical quantity carries SI units via the `pint` library, making unit mismatches structurally impossible. Understanding this stack is the key to mastering both this library and the textbook it accompanies.
-
-## The Stack Diagram
+## The Stack at a Glance
 
 ```{mermaid}
 %%{init: {'theme': 'neutral'}}%%
-%%| fig-cap: "The MLSys·im 5-Layer Stack. Workloads (demand) are lowered onto Hardware (supply) through Infrastructure and Systems layers. Solvers bridge demand and supply to produce analytical profiles."
+%%| fig-cap: "The MLSYSIM 5-Layer Stack. Workloads (demand) are lowered onto Hardware (supply) through Infrastructure and Systems layers. Solvers bridge demand and supply to produce analytical profiles."
 %%| fig-width: 100%
 flowchart TB
-    A["<b>Layer A: Workloads (Demand)</b><br/>TransformerWorkload, CNNWorkload, SSMWorkload, DiffusionWorkload<br/><i>Parameters, FLOPs, Arithmetic Intensity</i>"]
-    B["<b>Layer B: Hardware (Silicon)</b><br/>HardwareNode, ComputeCore, MemoryHierarchy, StorageHierarchy<br/><i>Peak FLOP/s, BW, Capacity, TDP, IO BW</i>"]
-    C["<b>Layer C: Infrastructure (Environment)</b><br/>GridProfile, Datacenter<br/><i>Carbon Intensity, PUE, WUE</i>"]
-    D["<b>Layer D: Systems (Topology)</b><br/>Node, Fleet, NetworkFabric<br/><i>Topology, Accelerators/Node, Fabric BW</i>"]
-    E["<b>Layer E: Solvers (22 Walls, 22 Resolvers)</b><br/>Node (1–7): SingleNode · Efficiency · Serving · ContinuousBatching · WeightStreaming · TailLatency<br/>Data (8–10): Data · Transformation · Topology<br/>Algorithm (11–13): Scaling · InferenceScaling · Compression<br/>Fleet (14–16): Distributed · Reliability · Orchestration<br/>Ops (17–20): Economics · Sustainability · Checkpoint · ResponsibleEngineering<br/>Analysis (21–22): Sensitivity · Synthesis"]
-    F["<b>Typed Results</b><br/>PerformanceProfile · DistributedResult · ServingResult · ..."]
+    A["<b>Layer A · Workloads</b> — <i>Demand</i><br/>TransformerWorkload · CNNWorkload<br/>Parameters · FLOPs · Arithmetic Intensity"]
+    B["<b>Layer B · Hardware</b> — <i>Silicon</i><br/>HardwareNode · ComputeCore · MemoryHierarchy<br/>Peak FLOP/s · Bandwidth · Capacity · TDP"]
+    C["<b>Layer C · Infrastructure</b> — <i>Environment</i><br/>GridProfile · Datacenter<br/>Carbon Intensity · PUE · WUE"]
+    D["<b>Layer D · Systems</b> — <i>Topology</i><br/>Node · Fleet · NetworkFabric<br/>Topology · Accelerators/Node · Fabric BW"]
+    E["<b>Layer E · Solvers</b> — <i>Analysis</i><br/>SingleNode · Distributed · Serving<br/>Economics · Sustainability · Reliability"]
+    F["<b>Results</b><br/>PerformanceProfile · Dict[str, Quantity]"]
 
-    A --> B
-    B --> C
+    A --> E
+    B --> D
     C --> D
     D --> E
     E --> F
 ```
 
----
-
-## 1. Layer A: Workloads (Demand)
-
-A **Workload** is a hardware-agnostic description of computational demand. You don't ask "How fast is Llama-3?", you ask "How many FLOPs and memory bytes does Llama-3 require?"
-
-In MLSys·im, `TransformerWorkload`, `CNNWorkload`, `SSMWorkload`, and `DiffusionWorkload` define these intrinsic properties (parameter count, layer count, sequence length). You can also import models directly from HuggingFace Hub using `import_hf_model()`. The crucial step happens when a workload is "lowered" at a specific numerical precision (e.g., FP16 vs INT8). This lowering step determines the **Arithmetic Intensity** (ops/byte) — the ratio that decides whether a model will be compute-bound or memory-bound on physical hardware.
-
-*See the [Model Zoo](zoo/models.qmd) for vetted workloads.*
+The flow reads top-to-bottom: a **Workload** (what you want to compute) and a **System** (the hardware, network, and environment you have) feed into a **Solver** (the analytical engine), which returns quantitative results you can act on.
 
 ---
 
-## 2. Layer B: Hardware (Supply)
+## Layer A: Workloads (Demand) {#sec-layer-a}
 
-A **`HardwareNode`** represents a single physical accelerator (like an H100 GPU or an Apple M3 chip). It provides the raw physical supply:
+A **Workload** is a hardware-agnostic description of computational demand. The question is not "How fast is Llama-3?" but rather "How many FLOPs and memory bytes does Llama-3 *require*?"
 
-*   **Compute:** Theoretical peak throughput (TFLOP/s) across different precisions (FP32, FP16, INT8).
-*   **Memory:** High Bandwidth Memory (HBM) capacity and transfer speed (TB/s).
-*   **Storage & IO:** Persistent storage capacity/bandwidth and IO interconnect (e.g., PCIe Gen5) speeds.
-*   **Power:** Thermal Design Power (TDP).
+MLSYSIM provides two workload types:
 
-Every piece of silicon has a "Ridge Point" (Peak FLOPs / Memory Bandwidth). If your Workload's arithmetic intensity is lower than the hardware's ridge point, you are memory-bound.
+- **`TransformerWorkload`** — LLMs and attention-based models (GPT, Llama, BERT). Defined by parameter count, layer count, hidden dimension, attention heads, and sequence length. Supports KV-cache size estimation for autoregressive inference.
+- **`CNNWorkload`** — Vision and convolutional models (ResNet, MobileNet, YOLO). Defined by parameter count and total FLOPs per forward pass.
 
-*See the [Silicon Zoo](zoo/hardware.qmd) for vetted hardware specs.*
-
----
-
-## 3. Layer C: Infrastructure (Environment)
-
-Hardware doesn't run in a vacuum; it runs in datacenters plugged into regional power grids. The **`GridProfile`** captures this physical context.
-
-A 1000-watt GPU running in Quebec (hydroelectric power) vs. Poland (coal power) produces vastly different carbon footprints, despite doing the exact same mathematical operations. This layer introduces Power Usage Effectiveness (PUE) and Carbon Intensity to the analytical model.
-
-*See the [Infrastructure Zoo](zoo/infra.qmd) for regional grid profiles.*
-
----
-
-## 4. Layer D: Systems (Topology)
-
-You cannot train a 100-Billion parameter model on a single GPU. A **`Fleet`** composes individual `HardwareNode`s into a distributed cluster.
-
-*   **`Node`:** Groups accelerators within a physical server chassis (e.g., 8x GPUs).
-*   **`NetworkFabric`:** Specifies how servers talk to each other (e.g., 400 Gbps InfiniBand NDR).
-
-The way you structure this system determines your communication overhead and your scaling efficiency when you apply 3D/4D Parallelism.
-
-*See the [Fleet Zoo](zoo/fleets.qmd) for production cluster topologies.*
-
----
-
-## The 22 Systems Walls
-
-Before introducing the solvers, it is essential to understand the **22 physical and logical constraints** that bound ML system performance. Each wall represents a specific bottleneck, grounded in a published equation and resolved by a dedicated solver. The walls are organized into six domains that progress from local node resources to fleet-scale operations.
-
-| # | Wall | Domain | What's Bounded | Core Equation | Key Reference |
-|:--|:-----|:-------|:---------------|:--------------|:--------------|
-| 1 | Compute | Node | Peak FLOP/s ceiling | $T = \text{OPs} / (\text{Peak} \times \eta)$ | Williams et al. (2009) |
-| 2 | Memory | Node | HBM BW + capacity | $T = \|W\| / BW_{\text{HBM}}$ | Williams et al. (2009) |
-| 3 | Software | Node | Achieved MFU | $\eta = f(\text{kernel, fusion, occupancy})$ | Chowdhery et al. (2022) |
-| 4 | Serving | Node | Prefill vs. decode | Two-phase roofline | Pope et al. (2023) |
-| 5 | Batching | Node | KV-cache fragmentation | $\text{KV} = 2LHD \lceil S/p \rceil pBb$ | Kwon et al. (2023) |
-| 6 | Streaming | Node | Injection BW | $T = \max(T_{\text{inject}}, T_{\text{compute}})$ | Cerebras (2024) |
-| 7 | Tail Latency | Node | P99 queueing delay | Erlang-C M/M/$c$ | Dean & Barroso (2013) |
-| 8 | Ingestion | Data | Storage I/O throughput | $\rho = BW_{\text{demand}} / BW_{\text{supply}}$ | Mohan et al. (2022) |
-| 9 | Transformation | Data | CPU preprocessing | $T = B \cdot S / C_{\text{tput}}$ | Murray et al. (2021) |
-| 10 | Locality | Data | Network bisection BW | $BW_{\text{eff}} = BW_{\text{link}} \cdot \beta / \text{osub}$ | Leiserson (1985) |
-| 11 | Complexity | Algorithm | Scaling law bounds | $C = 6PD$; $P^{*} = \sqrt{C/120}$ | Hoffmann et al. (2022) |
-| 12 | Reasoning | Algorithm | Inference-time compute | $T = K \times T_{\text{step}}$ | Brown et al. (2024) |
-| 13 | Fidelity | Algorithm | Accuracy–efficiency | $r = 32/b$; $r = 1/(1{-}s)$ | Han et al. (2015) |
-| 14 | Communication | Fleet | AllReduce overhead | $T = 2\frac{N{-}1}{N}\frac{M}{\beta} + 2(N{-}1)\alpha$ | Shoeybi et al. (2019) |
-| 15 | Fragility | Fleet | Cluster MTBF | $\text{MTBF}_{\text{cl}} = \text{MTBF}_{\text{node}}/N$ | Daly (2006) |
-| 16 | Multi-tenant | Fleet | Queue wait time | $T_{\text{wait}} = \rho / [2\mu(1{-}\rho)]$ | Little (1961) |
-| 17 | Capital | Ops | Total cost of ownership | $\text{TCO} = \text{CapEx} + \text{OpEx}$ | Barroso et al. (2018) |
-| 18 | Sustainability | Ops | Carbon + water | $\text{CO}_2 = E \times \text{PUE} \times \text{CI}$ | Patterson et al. (2022) |
-| 19 | Checkpoint | Ops | I/O burst MFU penalty | $\text{penalty} = T_{\text{write}} / T_{\text{interval}}$ | Eisenman et al. (2022) |
-| 20 | Safety | Ops | DP-SGD overhead | $\sigma \propto 1/\epsilon$ | Abadi et al. (2016) |
-| 21 | Sensitivity | Analysis | Binding constraint | $\partial T / \partial x_i$ | Williams et al. (2009) |
-| 22 | Synthesis | Analysis | Inverse spec derivation | $BW_{\text{req}} = \|W\| / T_{\text{target}}$ | Kwon et al. (2023) |
-
-: The 22 ML Systems Walls. Each wall represents a physical or logical constraint resolved by a dedicated solver. Walls 1–2 (Compute and Memory) share the `SingleNodeModel`, yielding 21 distinct solvers across 22 walls. See the [research paper](whitepaper.qmd) for full citations. {#tbl-walls}
-
----
-
-## 5. Layer E: Solvers (Analysis)
-
-The previous four layers define *what* exists — hardware specs, model architectures, infrastructure configurations. **Solvers** are the engines that bridge demand and supply to answer specific questions: they take a (workload, hardware) pair and compute whether the system is feasible, how it performs, and what it costs.
-
-Each solver resolves one or more of the **22 ML Systems Walls** — physical or logical constraints that bound system performance. The walls are organized into six domains that progress from local node resources through data movement and algorithmic scaling to fleet coordination, operations, and cross-cutting analysis.
+The crucial step happens when a workload is "lowered" at a specific numerical precision (FP32, FP16, INT8, INT4). This precision lowering determines the **Arithmetic Intensity** (FLOPs/Byte) — the single ratio that decides whether a model will be compute-bound or memory-bound on any given hardware target.
 
 ::: {.callout-note}
-## The 22 Walls at a Glance
-Walls 1–2 (Compute and Memory) share the `SingleNodeModel`, yielding **21 distinct solvers** across 22 walls.
+## Textbook and slides
+Layer A concepts are covered in the following lecture decks:
+
+| Deck | Topic | Key Concepts |
+|:-----|:------|:-------------|
+| [NN Computation](https://mlsysbook.ai/slides/vol1.html) (Vol I, Ch 5) | The math behind the model | FLOPs, parameter counting, activation memory, forward/backward pass cost |
+| [NN Architectures](https://mlsysbook.ai/slides/vol1.html) (Vol I, Ch 6) | Architecture as infrastructure | Computational signatures of CNNs, RNNs, Transformers; quadratic attention scaling |
+| [Model Compression](https://mlsysbook.ai/slides/vol1.html) (Vol I, Ch 10) | From benchmark winner to production model | Pruning, distillation, quantization (FP32 to INT4); precision as a workload knob |
+| [Model Training](https://mlsysbook.ai/slides/vol1.html) (Vol I, Ch 8) | The physics of learning | Iron Law of training, memory breakdown (activations, gradients, optimizer states) |
 :::
 
-**Domain 1 — Node** (Single-Accelerator Resources, Walls 1–7):
+*See the [Model Zoo](zoo/models.qmd) for vetted workloads spanning language, vision, recommendation, and TinyML models.*
 
-*   **`SingleNodeModel`** (Wall 1: Compute, Wall 2: Memory): Roofline model — peak FLOP/s ceiling and HBM bandwidth + capacity.
-*   **`EfficiencyModel`** (Wall 3: Software): MFU decomposition — kernel fusion, FlashAttention, SM occupancy.
-*   **`ServingModel`** (Wall 4: Serving): Two-phase LLM inference — compute-bound prefill vs. memory-bound decode.
-*   **`ContinuousBatchingModel`** (Wall 5: Batching): PagedAttention and iteration-level scheduling with non-contiguous KV-cache allocation.
-*   **`WeightStreamingModel`** (Wall 6: Streaming): Wafer-scale inference (e.g., Cerebras CS-3) — injection bandwidth bottleneck.
-*   **`TailLatencyModel`** (Wall 7: Tail Latency): M/M/c queueing (Erlang-C) for P50/P99 SLA analysis.
+---
 
-**Domain 2 — Data** (Movement & Pipelines, Walls 8–10):
+## Layer B: Hardware (Silicon) {#sec-layer-b}
 
-*   **`DataModel`** (Wall 8: Ingestion): Storage I/O demand–supply bandwidth ratio.
-*   **`TransformationModel`** (Wall 9: Transformation): CPU preprocessing stall detection (JPEG decode, tokenization, augmentation).
-*   **`TopologyModel`** (Wall 10: Locality): Network bisection bandwidth for fat-tree, dragonfly, torus, ring topologies.
+A **`HardwareNode`** represents a single physical accelerator — an H100 GPU, an Apple M3 chip, a Jetson Orin, or even an ESP32 microcontroller. It provides the raw physical supply:
 
-**Domain 3 — Algorithm** (Scaling & Compression, Walls 11–13):
+- **Compute:** Peak throughput (TFLOP/s) across precisions (FP32, FP16, INT8), modeled via `ComputeCore`.
+- **Memory:** HBM or SRAM capacity and transfer bandwidth (TB/s), modeled via `MemoryHierarchy`.
+- **Power:** Thermal Design Power (TDP) in watts.
 
-*   **`ScalingModel`** (Wall 11: Complexity): Chinchilla scaling laws — compute-optimal model and dataset sizing.
-*   **`InferenceScalingModel`** (Wall 12: Reasoning): Inference-time compute scaling — chain-of-thought and tree-search cost.
-*   **`CompressionModel`** (Wall 13: Fidelity): Quantization/pruning accuracy–efficiency trade-offs.
+Every piece of silicon has a **ridge point** — the ratio of peak compute to memory bandwidth ($I^* = \text{Peak\_FLOPs} / \text{BW}$). When a workload's arithmetic intensity falls below this ridge point, the workload is memory-bound: the compute units starve waiting for data. When above, the workload is compute-bound: memory delivers data faster than the cores can consume it.
 
-**Domain 4 — Fleet** (Multi-Node Coordination, Walls 14–16):
+This is the Roofline model — the diagnostic framework at the heart of Layer E's `SingleNodeSolver`.
 
-*   **`DistributedModel`** (Wall 14: Communication): 4D parallelism (DP × TP × PP × EP), Ring AllReduce, pipeline bubbles.
-*   **`ReliabilityModel`** (Wall 15: Fragility): Fleet MTBF and Young-Daly optimal checkpoint interval.
-*   **`OrchestrationModel`** (Wall 16: Multi-tenant): Queueing theory (M/D/1) for shared cluster wait times.
+::: {.callout-note}
+## Textbook and slides
+Layer B concepts are covered in the following lecture decks:
 
-**Domain 5 — Ops** (Economics, Sustainability & Safety, Walls 17–20):
+| Deck | Topic | Key Concepts |
+|:-----|:------|:-------------|
+| [Hardware Acceleration](https://mlsysbook.ai/slides/vol1.html) (Vol I, Ch 11) | Moving data costs more than computing it | Systolic arrays, tensor cores, Roofline model, accelerator spectrum (GPU to ASIC) |
+| [Compute Infrastructure](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 2) | The physics of the ML fleet | HBM generations, bandwidth hierarchy (HBM to NVLink to InfiniBand), TCO analysis |
+| [Benchmarking](https://mlsysbook.ai/slides/vol1.html) (Vol I, Ch 12) | Measuring what matters | MLPerf, roofline profiling, statistical rigor, the lab-to-production gap |
+:::
 
-*   **`EconomicsModel`** (Wall 17: Capital): Total Cost of Ownership (CapEx + OpEx).
-*   **`SustainabilityModel`** (Wall 18: Sustainability): Energy, carbon footprint (kg CO₂e), and water usage.
-*   **`CheckpointModel`** (Wall 19: Checkpoint): Checkpoint I/O burst penalties and MFU impact.
-*   **`ResponsibleEngineeringModel`** (Wall 20: Safety): DP-SGD slowdown and fairness data cost.
+*See the [Silicon Zoo](zoo/hardware.qmd) for 18+ vetted hardware specs from cloud GPUs to microcontrollers.*
 
-**Domain 6 — Analysis** (Cross-Cutting Diagnostics, Walls 21–22):
+---
 
-*   **`SensitivitySolver`** (Wall 21: Sensitivity): Binding constraint identification via partial derivatives.
-*   **`SynthesisSolver`** (Wall 22: Synthesis): Inverse Roofline — derive hardware specs from an SLA.
+## Layer C: Infrastructure (Environment) {#sec-layer-c}
 
-### Solver Composition
+Hardware does not run in a vacuum. It runs in datacenters plugged into regional power grids, cooled by air or liquid systems, and constrained by physical energy budgets.
 
-Because every solver is a **stateless pure function** — $s_i : (\text{Workload}, \text{Hardware}, \text{Infra}, \text{Systems}) \rightarrow \mathcal{R}_i$ — solvers compose naturally through chaining. The output of one solver feeds into the next, with dimensional correctness preserved at every step:
+A **`GridProfile`** captures this physical context:
 
-$$
-\text{Scaling} \xrightarrow{\;\mathcal{R}_1\;} \text{Distributed} \xrightarrow{\;\mathcal{R}_2\;} \text{Economics} \xrightarrow{\;\mathcal{R}_3\;} \text{Sustainability}
-$$
+- **Carbon intensity** (g CO₂/kWh) — varies 40x across regions: Quebec's hydroelectric grid produces ~8 g CO₂/kWh; Poland's coal-dominated grid produces ~700 g CO₂/kWh.
+- **Power Usage Effectiveness (PUE)** — the ratio of total facility power to IT equipment power. A PUE of 1.1 means 10% overhead for cooling and infrastructure; 1.6 means 60%.
+- **Water Usage Effectiveness (WUE)** — liters of water consumed per kWh, determined by cooling technology (air, liquid, evaporative).
 
-This design yields three critical properties: **reproducibility** (identical inputs always produce identical outputs), **testability** (each solver validates against textbook equations in isolation), and **transparency** (students inspect exactly which equations produced a result).
+A 1000-watt GPU running identical computations in Quebec versus Poland produces vastly different carbon footprints. This layer makes that difference quantifiable.
 
-### Extensibility
+::: {.callout-note}
+## Textbook and slides
+Layer C concepts are covered in the following lecture deck:
 
-The layered architecture is designed for extension at every level. New workload types (e.g., a `RetrievalAugmentedWorkload` for RAG pipelines) require only implementing the `lower()` method to produce a `ComputationGraph`; all existing solvers apply without modification. New hardware entries are added to the Silicon Zoo as declarative `HardwareNode` specifications, with no solver changes needed. New solvers can be introduced for emerging constraints by implementing the solver interface: accept typed inputs, return dimensioned outputs. The type system enforces correctness at every boundary, so extensions compose safely with existing components.
+| Deck | Topic | Key Concepts |
+|:-----|:------|:-------------|
+| [Sustainable AI](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 15) | Energy as a first-class engineering constraint | Lifecycle carbon accounting, PUE modeling, carbon-aware scheduling, the 4 Ms framework |
+:::
 
-*See the [Contributing guide](contributing.qmd) for a hands-on walkthrough of adding custom solvers and hardware.*
+*See the [Infrastructure Zoo](zoo/infra.qmd) for regional grid profiles and datacenter configurations.*
 
-### Three-Level Evaluation
+---
 
-The `Scenario.evaluate()` entry point orchestrates solver composition through a three-level evaluation:
+## Layer D: Systems (Topology) {#sec-layer-d}
 
-1. **Level 1 — Feasibility.** Does the model fit in memory? Can the data pipeline keep pace? Any wall where demand exceeds supply is flagged immediately.
-2. **Level 2 — Performance.** What are the achievable latency, throughput, and utilization? Roofline analysis, communication modeling, and pipeline bubble combine for end-to-end step time.
-3. **Level 3 — Macro.** What does it cost, and what does it emit? TCO, carbon, water, and responsibility overhead are computed from the performance results.
+A single GPU cannot train a 100-billion-parameter model. Layer D composes individual `HardwareNode`s from Layer B into distributed clusters, connected by the network fabrics that determine communication overhead.
 
-A feasibility failure at Level 1 short-circuits the evaluation — there is no point optimizing AllReduce if the model does not fit in memory.
+Three types define a system:
 
-| Level | Purpose | Walls Evaluated |
-|:------|:--------|:----------------|
-| 1. Feasibility | Does it fit? | 1–2 (capacity), 5 (KV-cache), 8 (I/O) |
-| 2. Performance | How fast? | 1–7 (node), 11–16 (algorithm + fleet) |
-| 3. Macro | What does it cost? | 17–20 (operations), 21–22 (analysis) |
+- **`Node`** — A single compute server grouping accelerators within a physical chassis (e.g., 8x H100 GPUs connected by 900 GB/s NVLink). Includes intra-node bandwidth and NIC count.
+- **`NetworkFabric`** — The inter-node interconnect: topology (fat-tree, rail-optimized), bandwidth (e.g., 400 Gbps InfiniBand NDR), latency, and oversubscription ratio.
+- **`Fleet`** — A collection of `Node`s connected by a `NetworkFabric`, deployed in a specific `Datacenter` (Layer C). This is the complete system that solvers operate on.
 
-*See the [Resolver Guide](models-and-solvers.qmd) to learn how to apply these solvers, and [Math Foundations](math.qmd) for the equations behind each.*
+The way you structure this system — how many GPUs per node, what fabric connects them, which parallelism strategy you apply — determines your communication overhead and scaling efficiency.
+
+::: {.callout-note}
+## Textbook and slides
+Layer D concepts span four lecture decks covering the full distributed systems stack:
+
+| Deck | Topic | Key Concepts |
+|:-----|:------|:-------------|
+| [Network Fabrics](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 3) | The synchronization backbone | $\alpha$-$\beta$ model, topology (fat-tree, dragonfly), RDMA, congestion control, bisection bandwidth |
+| [Distributed Training](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 5) | The physics of scaling | Data/tensor/pipeline parallelism, ZeRO/FSDP, Communication-Computation Ratio (CCR), 3D hybrid strategies |
+| [Collective Communication](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 6) | The traffic patterns of distributed ML | AllReduce algorithms (ring, tree), gradient compression, hierarchical communication, computation-communication overlap |
+| [Fleet Orchestration](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 8) | Extracting useful work from shared infrastructure | Slurm vs. Kubernetes, topology-aware scheduling, elastic training, multi-tenancy |
+:::
+
+*See the [Fleet Zoo](zoo/fleets.qmd) for production cluster topologies from 256-GPU research clusters to 8192-GPU frontier fleets.*
+
+---
+
+## Layer E: Solvers (Analysis) {#sec-layer-e}
+
+The previous four layers are static definitions — nouns. **Solvers** are the analytical engines — verbs — that bridge demand and supply to answer specific questions.
+
+Each solver implements closed-form equations from peer-reviewed systems literature. No simulation, no benchmarking, no hardware required.
+
+| Solver | Bridges | Core Equation | Key Output |
+|:-------|:--------|:--------------|:-----------|
+| **SingleNodeSolver** | A $\to$ B | Roofline / Iron Law (Williams et al., 2009) | Latency, throughput, bottleneck classification |
+| **DistributedSolver** | A $\to$ D | Ring All-Reduce + Pipeline schedules | Scaling efficiency, communication overhead, bubble fraction |
+| **ServingSolver** | A $\to$ B | Pre-fill / Decode phase decomposition | TTFT, inter-token latency, KV-cache memory |
+| **EconomicsSolver** | D $\to$ cost | CapEx + OpEx over time horizon | TCO in USD, cost per query |
+| **SustainabilitySolver** | D $\to$ C | PUE $\times$ grid carbon intensity | Energy (kWh), carbon (kg CO₂e), water (L) |
+| **ReliabilitySolver** | D $\to$ uptime | Young-Daly optimal checkpointing | Fleet MTBF, failure probability, checkpoint interval |
+
+Solvers are composable. To answer "What is the most sustainable way to serve Llama-70B?", chain `ServingSolver` (feasibility and latency) into `EconomicsSolver` (cost) into `SustainabilitySolver` (carbon). Each solver's typed output feeds naturally into the next.
+
+::: {.callout-note}
+## Textbook and slides
+Layer E concepts draw from multiple lecture decks that teach the diagnostic and optimization frameworks:
+
+| Deck | Topic | Key Concepts |
+|:-----|:------|:-------------|
+| [Hardware Acceleration](https://mlsysbook.ai/slides/vol1.html) (Vol I, Ch 11) | The Roofline model | Arithmetic intensity, ridge points, memory-bound vs. compute-bound diagnosis |
+| [Model Serving](https://mlsysbook.ai/slides/vol1.html) (Vol I, Ch 13) | Inverting every training priority | Latency budgets, queuing theory (Little's Law), continuous batching, training-serving skew |
+| [Inference at Scale](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 9) | Where ML systems live or die economically | Serving economics, KV-cache bottleneck, batching strategies, autoscaling |
+| [Performance Engineering](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 10) | Match the software to the silicon | Operator fusion, FlashAttention, mixed precision, systematic profiling workflow |
+| [Distributed Training](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 5) | Scaling efficiency analysis | Communication-Computation Ratio, parallelism strategy selection, scaling laws |
+:::
+
+*See the [Solver Guide](solver-guide.qmd) for a decision guide on choosing the right solver, and [Math Foundations](math.qmd) for the complete equations.*
+
+---
+
+## Progressive Lowering in Action
+
+The architecture is best understood through a concrete example. Consider the question: **"Can I serve Llama-3-70B on a cluster of 4 H100s within a $50K/year budget while minimizing carbon?"**
+
+This single question touches all five layers:
+
+```
+1. Layer A — Llama-3-70B workload: 70B parameters, GQA with 8 KV heads,
+             ~140 GB at FP16 precision
+
+2. Layer B — H100 hardware: 990 TFLOP/s (FP16), 3.35 TB/s HBM3,
+             80 GB capacity, 700W TDP
+
+3. Layer C — Infrastructure: choose between Quebec (8 g CO₂/kWh)
+             and US Average (385 g CO₂/kWh)
+
+4. Layer D — System: 1 node × 4 H100s, NVLink 900 GB/s intra-node,
+             tensor parallelism across 4 GPUs
+
+5. Layer E — Chain three solvers:
+             ServingSolver  → TTFT, ITL, KV-cache feasibility
+             EconomicsSolver → TCO over 1 year
+             SustainabilitySolver → carbon footprint by region
+```
+
+Each layer contributes a different piece of the answer. No single layer is sufficient alone. This is why MLSYSIM separates concerns into five composable layers rather than offering a monolithic "predict performance" function.
+
+---
+
+## Slide Deck Quick Reference {#sec-slides-reference}
+
+For instructors and students using the companion [lecture slides](https://mlsysbook.ai/slides/), the table below maps every MLSYSIM layer to the relevant slide decks.
+
+### Volume I: Foundations
+
+| Ch | Deck | MLSYSIM Layer(s) | Download |
+|:---|:-----|:------------------|:---------|
+| 5 | NN Computation | A (Workloads) | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/05_nn_computation.pdf) |
+| 6 | NN Architectures | A (Workloads) | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/06_nn_architectures.pdf) |
+| 8 | Model Training | A + B + E | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/08_training.pdf) |
+| 10 | Model Compression | A (Workloads) | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/10_model_compression.pdf) |
+| 11 | Hardware Acceleration | B (Hardware) + E (Solvers) | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/11_hw_acceleration.pdf) |
+| 12 | Benchmarking | B (Hardware) + E (Solvers) | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/12_benchmarking.pdf) |
+| 13 | Model Serving | E (Solvers) | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/13_model_serving.pdf) |
+
+### Volume II: At Scale
+
+| Ch | Deck | MLSYSIM Layer(s) | Download |
+|:---|:-----|:------------------|:---------|
+| 2 | Compute Infrastructure | B (Hardware) | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/02_compute_infrastructure.pdf) |
+| 3 | Network Fabrics | D (Systems) | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/03_network_fabrics.pdf) |
+| 5 | Distributed Training | D (Systems) + E (Solvers) | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/05_distributed_training.pdf) |
+| 6 | Collective Communication | D (Systems) | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/06_collective_communication.pdf) |
+| 8 | Fleet Orchestration | D (Systems) | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/08_fleet_orchestration.pdf) |
+| 9 | Inference at Scale | E (Solvers) | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/09_inference.pdf) |
+| 10 | Performance Engineering | E (Solvers) | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/10_performance_engineering.pdf) |
+| 15 | Sustainable AI | C (Infrastructure) | [PDF](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/15_sustainable_ai.pdf) |
+
+---
+
+## Where to Go Next
+
+- **[Getting Started](getting-started.qmd)** — Install MLSYSIM and run your first analysis in 5 minutes.
+- **[Solver Guide](solver-guide.qmd)** — Decision guide for choosing the right analytical engine.
+- **[Math Foundations](math.qmd)** — The closed-form equations behind every solver.
+- **[Tutorials](tutorials/index.qmd)** — Hands-on notebooks for roofline analysis, distributed training, LLM serving, and sustainability.
+- **[Zoo Overview](zoo/index.qmd)** — Browse the registries of vetted models, hardware, fleets, and infrastructure.
