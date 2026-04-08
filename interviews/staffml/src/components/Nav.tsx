@@ -7,7 +7,7 @@ import { ECOSYSTEM_BASE } from "../lib/env";
 import {
   Library, Target, Crosshair, BarChart3, BookOpen, Github,
   Menu, X, Sun, Moon, Map, Cpu, Server, ChevronDown, Info,
-  Star, Bug, Send, Atom, MoreHorizontal, Search,
+  Star, Bug, Send, Atom, Search,
 } from "lucide-react";
 import clsx from "clsx";
 import StreakBadge from "@/components/StreakBadge";
@@ -195,16 +195,29 @@ export default function Nav() {
             {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
-          {/* More menu — About / Contribute / Dashboard / Star / Report */}
+          {/* About / More menu — About is labeled in the trigger so users
+              can actually find the About page. The menu also surfaces
+              Contribute, Dashboard, Star, and Report Issue. Previous iteration
+              used a bare "…" icon which tested poorly (reviewers missed the
+              About page entirely). About is the first menu item so two
+              clicks reach /about; that's acceptable for a low-frequency
+              destination. */}
           <div ref={moreRef} className="relative hidden md:block">
             <button
               onClick={() => setMoreOpen(!moreOpen)}
               aria-haspopup="menu"
               aria-expanded={moreOpen}
-              aria-label="More menu"
-              className="p-2 text-textTertiary hover:text-textSecondary transition-colors"
+              aria-label="About and more"
+              className={clsx(
+                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-colors",
+                moreLinks.some(l => isActive(l.href))
+                  ? "bg-surface text-textPrimary border border-border"
+                  : "text-textTertiary hover:text-textSecondary hover:bg-surface/50"
+              )}
             >
-              <MoreHorizontal className="w-4 h-4" />
+              <Info className="w-3.5 h-3.5" />
+              About
+              <ChevronDown className={clsx("w-3 h-3 transition-transform", moreOpen && "rotate-180")} />
             </button>
             {moreOpen && (
               <div role="menu" className="absolute top-full right-0 mt-1 w-52 bg-background border border-border rounded-lg shadow-lg py-1 z-50">
