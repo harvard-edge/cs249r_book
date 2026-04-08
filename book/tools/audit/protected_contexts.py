@@ -162,6 +162,16 @@ class LineWalker:
           line aligned/cases/etc. environment)
         Other $$ occurrences are inline-math adjacency (e.g. $X$$Y$) and
         do NOT count as delimiters.
+
+        Pass 16 Item C fix: the previous implementation returned 2 whenever
+        both `starts` and `ends` matched, which over-counted lines of the
+        form `$$ {#eq-label}` — a single `$$` at line start followed by an
+        equation-label attribute, where the same `$$` token matches both
+        the start and end regexes. That caused LineWalker to treat the
+        closing delimiter of a multi-line display-math block as a
+        standalone single-line block, keeping `in_display_math=True`
+        through the rest of the file. The fix is to require `count("$$")
+        >= 2` for the single-line branch.
         """
         if "$$" not in line:
             return 0
@@ -169,15 +179,13 @@ class LineWalker:
         starts = bool(cls._DD_LINE_START_RE.match(line))
         ends = bool(cls._DD_LINE_END_RE.search(line))
         after_end = bool(cls._DD_AFTER_END_RE.search(line))
+        num_dd = line.count("$$")
 
-        # Count distinct delimiters
-        if starts and ends:
-            # `$$ x $$` on one line — single-line display math
-            # But if the line is JUST `$$` (only whitespace), it is one
-            # delimiter, not two.
-            if line.strip() == "$$":
-                return 1
+        # Single-line display math `$$ x $$` — requires TWO distinct $$
+        # occurrences, both at line start and line end.
+        if starts and ends and num_dd >= 2:
             return 2
+        # Any single-$$ delimiter form (opens, closes, or after \end{})
         if starts or ends or after_end:
             return 1
         return 0
