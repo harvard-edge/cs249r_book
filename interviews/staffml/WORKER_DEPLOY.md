@@ -49,6 +49,36 @@ binding = "RATE_LIMIT_KV"
 id = "abc123def456..."   # ← paste your real id here
 ```
 
+### 2b. Create the waitlist KV namespace
+
+The `POST /waitlist` endpoint writes paid-tier waitlist submissions to a
+second KV namespace. If you skip this step, the worker still boots fine
+but `/waitlist` will return 503 and the client UI will transparently
+fall back to `mailto:` so no submissions are lost.
+
+```bash
+npx wrangler kv:namespace create WAITLIST_KV
+```
+
+**Copy the new `id` value** and paste it into `worker/wrangler.toml`,
+replacing `REPLACE_WITH_WAITLIST_KV_NAMESPACE_ID`:
+
+```toml
+[[kv_namespaces]]
+binding = "WAITLIST_KV"
+id = "xyz789abc012..."   # ← paste your real id here
+```
+
+To read the waitlist later:
+
+```bash
+npx wrangler kv:key list --binding WAITLIST_KV
+npx wrangler kv:key get --binding WAITLIST_KV "wl:2026-04-08T12:34:56.000Z:abc123..."
+```
+
+There's deliberately no admin endpoint — pulling records via `wrangler`
+keeps the worker's attack surface minimal.
+
 ### 3. Deploy the Worker
 
 ```bash
@@ -73,10 +103,10 @@ curl https://staffml-interviewer.your-subdomain.workers.dev/health
 Expected response:
 
 ```json
-{ "ok": true, "providers": ["cf-workers-ai"] }
+{ "ok": true, "providers": ["cf-workers-ai"], "waitlist": true }
 ```
 
-If you see `cf-workers-ai` in the providers list, the Cloudflare Workers AI binding is working. The Worker is live with the default Llama 3.1 8B floor model.
+If you see `cf-workers-ai` in the providers list, the Cloudflare Workers AI binding is working. The Worker is live with the default Llama 3.1 8B floor model. `"waitlist": true` means the WAITLIST_KV binding is configured; `false` means /waitlist will return 503 until you provision the namespace.
 
 Test an actual question:
 
