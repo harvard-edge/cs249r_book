@@ -29,8 +29,14 @@ The login command opens a browser to authorize Wrangler with your Cloudflare acc
 ### 2. Create the rate-limit KV namespace
 
 ```bash
-npx wrangler kv:namespace create RATE_LIMIT_KV
+npx wrangler kv namespace create RATE_LIMIT_KV
 ```
+
+> **Note on Wrangler syntax:** older docs (and older Wrangler v2) used
+> `kv:namespace` with a colon. Wrangler v3.60+ uses space-separated
+> subcommands: `kv namespace create`, `kv key list`, etc. If you see
+> `Unknown arguments: kv:namespace`, upgrade Wrangler or use the new
+> syntax shown here.
 
 This prints something like:
 
@@ -57,7 +63,7 @@ but `/waitlist` will return 503 and the client UI will transparently
 fall back to `mailto:` so no submissions are lost.
 
 ```bash
-npx wrangler kv:namespace create WAITLIST_KV
+npx wrangler kv namespace create WAITLIST_KV
 ```
 
 **Copy the new `id` value** and paste it into `worker/wrangler.toml`,
@@ -72,8 +78,8 @@ id = "xyz789abc012..."   # ← paste your real id here
 To read the waitlist later:
 
 ```bash
-npx wrangler kv:key list --binding WAITLIST_KV
-npx wrangler kv:key get --binding WAITLIST_KV "wl:2026-04-08T12:34:56.000Z:abc123..."
+npx wrangler kv key list --binding WAITLIST_KV
+npx wrangler kv key get --binding WAITLIST_KV "wl:2026-04-08T12:34:56.000Z:abc123..."
 ```
 
 There's deliberately no admin endpoint — pulling records via `wrangler`
@@ -298,7 +304,8 @@ If you ever want to remove the Worker entirely:
 ```bash
 cd interviews/staffml/worker
 npx wrangler delete
-npx wrangler kv:namespace delete --binding RATE_LIMIT_KV
+npx wrangler kv namespace delete --binding RATE_LIMIT_KV
+npx wrangler kv namespace delete --binding WAITLIST_KV
 ```
 
 Then unset `NEXT_PUBLIC_INTERVIEWER_ENDPOINT` in StaffML's build environment. The Ask Interviewer panel will detect the missing endpoint and fall back to journal-only mode automatically.
