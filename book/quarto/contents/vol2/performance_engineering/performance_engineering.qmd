@@ -579,9 +579,9 @@ class WorkloadIntensityCalc:
     decode_intensity_str = f"{decode_intensity_val:.1f}"
 ```
 
-Large matrix multiplications (GEMMs) are the most compute-intensive operations in ML. A square matrix multiplication of dimension $4096\times4096$ in FP16 performs approximately 137 billion FLOPs while loading roughly 100 MB of data, yielding an arithmetic intensity of approximately `{python} WorkloadIntensityCalc.gemm_intensity_str` FLOP/byte. This sits well above the H100's ridge point, making large GEMMs firmly compute-bound.
+Large general matrix multiply (GEMM) operations are the most compute-intensive operations in ML. A square matrix multiplication of dimension $4096\times4096$ in FP16 performs approximately 137 billion FLOPs while loading roughly 100 MB of data, yielding an arithmetic intensity of approximately `{python} WorkloadIntensityCalc.gemm_intensity_str` FLOP/byte. This sits well above the H100's ridge point, making large GEMMs firmly compute-bound.
 
-Element-wise operations tell the opposite story. A GELU activation applied to a $4096\times4096$ tensor performs roughly 5 operations per element but must load and store each element, yielding an arithmetic intensity of approximately `{python} WorkloadIntensityCalc.elem_intensity_str` FLOP/byte. The GPU spends almost all its time waiting for data transfers rather than computing, making these operations profoundly memory-bound.
+Element-wise operations tell the opposite story. A Gaussian Error Linear Unit (GELU) activation applied to a $4096\times4096$ tensor performs roughly 5 operations per element but must load and store each element, yielding an arithmetic intensity of approximately `{python} WorkloadIntensityCalc.elem_intensity_str` FLOP/byte. The GPU spends almost all its time waiting for data transfers rather than computing, making these operations profoundly memory-bound.
 
 Autoregressive LLM decoding at batch size one represents the extreme case. Each decoding step reads the entire weight matrix (gigabytes of data) to produce a single output token. With a hidden dimension of 4096 and batch size 1, the arithmetic intensity is approximately `{python} WorkloadIntensityCalc.decode_intensity_str` FLOP/byte, deep in the memory-bound regime. The arithmetic intensity explains why LLM token generation achieves a tiny fraction of peak FLOPS: the GPU spends nearly all its time reading weights, not multiplying them.
 
@@ -1175,7 +1175,7 @@ TorchDynamo operates at the Python bytecode level[^fn-torchdynamo-bytecode], a d
 
 [^fn-torchdynamo-bytecode]: **TorchDynamo Bytecode Interception**: By hooking CPython's frame evaluation function (`PEP 523`, added in Python 3.6), TorchDynamo captures the computation graph at the lowest level of the Python interpreter, below any source-level abstractions. This is why it can trace through decorators, closures, and third-party libraries that defeated earlier tracing approaches. The trade-off is tight coupling to CPython internals: TorchDynamo must be updated for each new Python version, and it cannot run on alternative interpreters like PyPy. \index{TorchDynamo!bytecode tracing}
 
-Previous tracing methods (torch.jit.trace, torch.fx) operated at the Python source or AST level, requiring users to avoid unsupported Python constructs. TorchDynamo intercepts the bytecode interpreter itself, capturing a computational graph without requiring the user to modify their model code. When TorchDynamo encounters Python constructs it cannot trace (data-dependent control flow, unsupported operations), it inserts a "graph break" that splits the trace into multiple subgraphs, each compiled independently. The goal is to capture as large a subgraph as possible while gracefully handling dynamic Python behavior.
+Previous tracing methods (torch.jit.trace, torch.fx) operated at the Python source or abstract syntax tree (AST) level, requiring users to avoid unsupported Python constructs. TorchDynamo intercepts the bytecode interpreter itself, capturing a computational graph without requiring the user to modify their model code. When TorchDynamo encounters Python constructs it cannot trace (data-dependent control flow, unsupported operations), it inserts a "graph break" that splits the trace into multiple subgraphs, each compiled independently. The goal is to capture as large a subgraph as possible while gracefully handling dynamic Python behavior.
 
 TorchInductor generates optimized Triton kernels (for GPU) or C++/OpenMP code (for CPU) from the captured graph. Triton is a domain-specific language for writing GPU kernels in Python-like syntax, abstracting away thread block management and memory coalescing while still exposing tiling and fusion decisions. TorchInductor automatically fuses element-wise operations, reduces memory traffic by combining operations that share inputs, and selects tile sizes through autotuning.
 
@@ -1209,7 +1209,7 @@ In this example, `torch.compile` will fuse the GELU activation with surrounding 
 
 ### XLA and TPU Optimization {#sec-performance-engineering-xla}
 
-XLA (Accelerated Linear Algebra) is Google's graph compiler, used as the backend for JAX and TensorFlow. Unlike TorchInductor, which generates Triton code targeting NVIDIA GPUs, XLA generates HLO (High-Level Operations) intermediate representation that targets multiple backends, including Google TPUs, NVIDIA GPUs, and CPUs. Its architecture is fundamentally different from `torch.compile`: while PyTorch prioritizes flexibility by allowing graph breaks for unsupported Python features, XLA enforces **whole-program compilation**, tracing the entire computation as a single static graph and enabling global optimizations that span across layers and even across the forward and backward passes.
+XLA (Accelerated Linear Algebra) is Google's graph compiler, used as the backend for JAX and TensorFlow. Unlike TorchInductor, which generates Triton code targeting NVIDIA GPUs, XLA generates HLO (High-Level Operations) intermediate representation that targets multiple backends, including Google Tensor Processing Units (TPUs), NVIDIA GPUs, and CPUs. Its architecture is fundamentally different from `torch.compile`: while PyTorch prioritizes flexibility by allowing graph breaks for unsupported Python features, XLA enforces **whole-program compilation**, tracing the entire computation as a single static graph and enabling global optimizations that span across layers and even across the forward and backward passes.
 
 The global view enables XLA's most distinctive capability: the **GSPMD (General Partitioner for SPMD)**. In distributed training, GSPMD automatically partitions the computation graph across thousands of TPU cores based on a few high-level user annotations. While a PyTorch user must manually wrap models with `DistributedDataParallel` or `FullyShardedDataParallel`, an XLA user defines the computation for a single device and allows the compiler to infer the necessary communication primitives (AllReduce, AllGather) and insert them into the graph. This allows for complex hybrid sharding strategies that are difficult to implement manually.
 
@@ -1251,7 +1251,7 @@ The `reduce-overhead` mode additionally wraps the compiled graph in CUDA Graphs 
 
 The `max-autotune` mode triggers extensive kernel autotuning, benchmarking multiple kernel variants (different tile sizes, thread block configurations, memory access patterns) for each operation and selecting the fastest. This produces the highest-performance code but may take 10--30 minutes of compilation time, making it suitable for production deployment but impractical during development.
 
-The choice of backend also matters. TorchInductor (the default) generates Triton kernels for GPU and C++ for CPU. For deployment-specific optimization, the model can be exported through `torch.export` to an intermediate representation that can be consumed by TensorRT, ONNX Runtime, or other inference-specialized runtimes. Each backend applies its own optimization passes on top of the common graph-level transformations.
+The choice of backend also matters. TorchInductor (the default) generates Triton kernels for GPU and C++ for CPU. For deployment-specific optimization, the model can be exported through `torch.export` to an intermediate representation that can be consumed by TensorRT, Open Neural Network Exchange (ONNX) Runtime, or other inference-specialized runtimes. Each backend applies its own optimization passes on top of the common graph-level transformations.
 
 ### The Triton language {#sec-performance-engineering-triton}
 
@@ -1292,7 +1292,7 @@ def fused_gelu_kernel(
     tl.store(output_ptr + offsets, gelu, mask=mask)
 ```
 
-The programmer thinks in terms of tiles (`BLOCK_SIZE` elements), not individual threads. Triton compiles this to PTX/SASS instructions, handling thread-to-data mapping, memory coalescing, and register allocation automatically. This makes it feasible for ML engineers (rather than GPU specialists) to write custom fused kernels when the automatic compiler misses a fusion opportunity.
+The programmer thinks in terms of tiles (`BLOCK_SIZE` elements), not individual threads. Triton compiles this to Parallel Thread Execution (PTX)/SASS instructions, handling thread-to-data mapping, memory coalescing, and register allocation automatically. This makes it feasible for ML engineers (rather than GPU specialists) to write custom fused kernels when the automatic compiler misses a fusion opportunity.
 
 The real power of Triton emerges when fusing multiple operations. A Triton kernel that implements `y = LayerNorm(GELU(x))` loads `x` once from HBM, computes both GELU and LayerNorm in registers/shared memory, and writes `y` once to HBM. Without fusion, this sequence requires three HBM round-trips: read `x`, write `GELU(x)`, read `GELU(x)`, write `norm_input`, read `norm_input`, write `y`. The fused kernel reduces HBM traffic by 3$\times$, and for memory-bound operations, this translates directly to a 3$\times$ speedup.
 
@@ -1366,7 +1366,7 @@ Graph compilation automates what manual kernel engineering achieves for individu
 
 ## Speculative Decoding {#sec-performance-engineering-speculative}
 
-Speculative decoding is a latency optimization that breaks the sequential bottleneck of autoregressive generation by using a smaller draft model to predict multiple tokens, which are then verified in parallel by the target model. Because this technique is primarily employed to meet strict latency SLAs during model serving, we examine the core algorithm, speedup analysis, and hardware resource implications in detail in @sec-inference-scale-speculative-decoding-c438.
+Speculative decoding is a latency optimization that breaks the sequential bottleneck of autoregressive generation by using a smaller draft model to predict multiple tokens, which are then verified in parallel by the target model. Because this technique is primarily employed to meet strict latency service level agreements (SLAs) during model serving, we examine the core algorithm, speedup analysis, and hardware resource implications in detail in @sec-inference-scale-speculative-decoding-c438.
 
 ```{python}
 #| echo: false
@@ -1734,7 +1734,7 @@ with profile(
         prof.step()
 ```
 
-The `schedule` parameter defines a warmup period where the profiler runs but does not record, allowing CUDA caches and JIT compilation to stabilize before measurement begins. Without warmup, the first few iterations include one-time costs (kernel compilation, memory allocation, CUDA context initialization) that inflate the measured times and misrepresent steady-state performance.
+The `schedule` parameter defines a warmup period where the profiler runs but does not record, allowing CUDA caches and just-in-time (JIT) compilation to stabilize before measurement begins. Without warmup, the first few iterations include one-time costs (kernel compilation, memory allocation, CUDA context initialization) that inflate the measured times and misrepresent steady-state performance.
 
 The resulting trace, viewable in TensorBoard or Chrome's trace viewer, shows:
 

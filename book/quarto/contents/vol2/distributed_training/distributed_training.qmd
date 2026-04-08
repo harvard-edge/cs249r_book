@@ -244,7 +244,7 @@ flowchart LR
 ```
 
 *   **Data Parallelism = Parallel For Loop.** We unroll the outer loop (batch dimension) across devices. Each device runs the same code body on different data indices.
-*   **Tensor Parallelism = Vectorization (SIMD).** We split the inner loops (matrix multiplication) across devices. This is "Cluster-Scale SIMD," where NVLink acts as the vector register file.
+*   **Tensor Parallelism = Vectorization (single instruction, multiple data (SIMD)).** We split the inner loops (matrix multiplication) across devices. This is "Cluster-Scale SIMD," where NVLink acts as the vector register file.
 *   **Pipeline Parallelism = Instruction Pipelining.** We split the sequential operations (layers) across devices. Just as a CPU pipeline stages fetch/decode/execute, the cluster stages Layer 1/Layer 2/Layer 3 to keep all ALUs busy.
 
 :::
@@ -725,7 +725,7 @@ Production systems address these issues through timeouts, heartbeat monitoring, 
 
 #### Parameter updating {#sec-distributed-training-systems-systems-parameter-updating-bb64}
 
-After gradient aggregation, each device independently updates model parameters using the chosen optimization algorithm such as SGD with momentum or Adam. This decentralized update strategy enables efficient parameter updates without requiring a central coordination server. Since all devices have identical gradient values after synchronization, they perform mathematically equivalent updates to maintain model consistency across the distributed system.
+After gradient aggregation, each device independently updates model parameters using the chosen optimization algorithm such as SGD with momentum or Adaptive Moment Estimation (Adam). This decentralized update strategy enables efficient parameter updates without requiring a central coordination server. Since all devices have identical gradient values after synchronization, they perform mathematically equivalent updates to maintain model consistency across the distributed system.
 
 In a system with 8 GPUs training a ResNet model, each GPU computes local gradients based on its data subset. After gradient averaging via ring all-reduce, every GPU has the same global gradient values. Each device then independently applies these gradients using the optimizer's update rule. With SGD and learning rate 0.1, the update becomes `weights = weights - 0.1 * gradients`. This process maintains mathematical equivalence to single-device training while enabling distributed computation.
 
@@ -1787,7 +1787,7 @@ GPipe[^fn-gpipe] [@gpipe2019] introduced synchronous pipeline parallelism with m
 
 [^fn-1f1b-memory]: **1F1B Scheduling**: "One-Forward-One-Backward." Unlike GPipe (which processes all forward passes before any backward passes), 1F1B interleaves them. This reduces the peak activation memory footprint from $O(M \times P)$ to $O(P)$, where $M$ is the number of micro-batches and $P$ is the number of pipeline stages. This memory reclamation is what enables the massive micro-batch counts ($M \gg P$) required to keep the pipeline bubble small. \index{1F1B Scheduling!memory efficiency}
 
-[^fn-gpipe]: **GPipe**: Published by Google in 2019, GPipe introduced synchronous micro-batch pipelining that trained a 557M-parameter AmoebaNet across 8 TPUs with near-linear scaling. The key trade-off GPipe exposed: the pipeline bubble fraction $(P-1)/(M+P-1)$ means that with $P=4$ stages and $M=4$ micro-batches, 43 percent of compute is wasted in idle time -- driving the field toward 1F1B schedules that interleave forward and backward passes to shrink this overhead below 15 percent. \index{GPipe!pipeline parallelism}
+[^fn-gpipe]: **GPipe**: Published by Google in 2019, GPipe introduced synchronous micro-batch pipelining that trained a 557M-parameter AmoebaNet across 8 Tensor Processing Units (TPUs) with near-linear scaling. The key trade-off GPipe exposed: the pipeline bubble fraction $(P-1)/(M+P-1)$ means that with $P=4$ stages and $M=4$ micro-batches, 43 percent of compute is wasted in idle time -- driving the field toward 1F1B schedules that interleave forward and backward passes to shrink this overhead below 15 percent. \index{GPipe!pipeline parallelism}
 
 In a transformer model distributed across four devices, device 1 would process blocks 1-6 for microbatch $N+1$ while device 2 computes blocks 7-12 for microbatch $N$. Simultaneously, device 3 executes blocks 13-18 for microbatch $N-1$, and device 4 processes blocks 19-24 for microbatch $N-2$. Each device maintains its assigned transformer blocks but operates on a different microbatch, creating a continuous flow of computation.
 
@@ -2013,7 +2013,7 @@ The E5M2 format (5-bit exponent, 2-bit mantissa) provides a much larger range of
 
 As @tbl-precision-formats summarizes, the critical engineering challenge in FP8 training is **dynamic scaling**. FP8's narrow dynamic range means that a fixed scale factor will cause either overflow or underflow. Per-tensor scaling multiplies each tensor by a scale factor before casting to FP8, then divides by that factor after the FP8 computation. The scale factor is adjusted dynamically, typically by tracking the running maximum absolute value of each tensor and choosing a scale that maps this maximum to near the FP8 maximum representable value.
 
-The three-precision approach (FP32 master weights, FP8 GEMMs, FP16 accumulation) achieves near-FP16 training quality while doubling effective throughput on FP8-capable hardware. The energy implications are equally significant: FP8 operations deliver twice the throughput at roughly half the energy per operation, resulting in approximately 4$\times$ improvement in energy efficiency for compute-bound workloads.
+The three-precision approach (FP32 master weights, FP8 general matrix multiply (GEMM) operations, FP16 accumulation) achieves near-FP16 training quality while doubling effective throughput on FP8-capable hardware. The energy implications are equally significant: FP8 operations deliver twice the throughput at roughly half the energy per operation, resulting in approximately 4$\times$ improvement in energy efficiency for compute-bound workloads.
 
 ## Hybrid Parallelism {#sec-distributed-training-systems-systems-hybrid-parallelism-12a0}
 
