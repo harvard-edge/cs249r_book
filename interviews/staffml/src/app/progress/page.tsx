@@ -2,13 +2,32 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { BarChart3, Trash2, Terminal, Crosshair, Download, Upload, Target } from "lucide-react";
+import { BarChart3, Trash2, Terminal, Crosshair, Download, Upload, Target, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
 import Link from "next/link";
 import { getCompetencyAreas, getTracks, getQuestionsByFilter } from "@/lib/corpus";
-import { getAttempts, getGauntletResults, clearProgress, exportProgress, importProgress } from "@/lib/progress";
+import { getAttempts, getGauntletResults, clearProgress, exportProgress, importProgress, getLastExportAt } from "@/lib/progress";
 import { useToast } from "@/components/Toast";
 import { track } from "@/lib/analytics";
+
+/**
+ * Format an ISO timestamp as a human-friendly relative string for the
+ * "Last exported" readout. Chosen to be blunt, not cute — "3 days ago"
+ * is more informative than "a few days ago" for a backup indicator.
+ */
+function formatRelativeExport(iso: string | null): string | null {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return null;
+  const diffMs = Date.now() - then;
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffDays < 1) return "today";
+  if (diffDays === 1) return "yesterday";
+  if (diffDays < 7) return `${diffDays} days ago`;
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
+  if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
+  return `${Math.floor(diffDays / 365)} years ago`;
+}
 
 export default function ProgressPage() {
   const { show: showToast } = useToast();
@@ -17,6 +36,7 @@ export default function ProgressPage() {
   const [gauntletCount, setGauntletCount] = useState(0);
   const [totalAttempted, setTotalAttempted] = useState(0);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [lastExport, setLastExport] = useState<string | null>(null);
 
   const tracks = getTracks().filter(t => t !== "global");
   const areas = getCompetencyAreas();
@@ -24,6 +44,7 @@ export default function ProgressPage() {
   useEffect(() => {
     setMounted(true);
     loadData();
+    setLastExport(getLastExportAt());
   }, []);
 
   const loadData = () => {
@@ -54,6 +75,9 @@ export default function ProgressPage() {
     clearProgress();
     setShowClearConfirm(false);
     loadData();
+    // clearProgress also wipes the last-export timestamp in localStorage;
+    // sync the UI state so the banner updates immediately.
+    setLastExport(null);
   };
 
   const getCellColor = (attempted: number, correct: number) => {
@@ -83,11 +107,33 @@ export default function ProgressPage() {
   return (
     <div className="flex-1 flex flex-col px-6 py-10">
       <div className="max-w-5xl mx-auto w-full">
-        {/* Trust banner */}
-        <div className="flex items-center gap-3 mb-6 px-4 py-3 bg-surface border border-borderSubtle rounded-lg">
-          <span className="text-[12px] text-textSecondary">
-            All your data stays in your browser. No accounts. No tracking. Export anytime.
-          </span>
+        {/* Trust banner + storage-wipe warning.
+            The original banner said only the good news ("your data
+            stays in your browser"). That was the "no-tracking" feature
+            pitch but it hid the implied bad news: clearing browser
+            storage, switching browsers, or using a private window all
+            delete your progress. Now both sides are surfaced and the
+            Export button is explicitly framed as the backup path. */}
+        <div className="mb-6 px-4 py-3 bg-surface border border-borderSubtle rounded-lg">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-3.5 h-3.5 text-accentAmber mt-0.5 shrink-0" />
+            <div className="text-[12px] text-textSecondary leading-relaxed">
+              <span className="text-textPrimary font-medium">Your data stays in your browser.</span>{' '}
+              No accounts, no tracking. But clearing your browser storage, switching browsers, or
+              using a private window will wipe your progress.{' '}
+              <span className="text-textPrimary">Use Export below to back up regularly.</span>
+              {lastExport && (
+                <span className="block mt-1 text-[11px] text-textTertiary">
+                  Last exported {formatRelativeExport(lastExport)}.
+                </span>
+              )}
+              {!lastExport && totalAttempted > 0 && (
+                <span className="block mt-1 text-[11px] text-accentAmber">
+                  You haven&apos;t exported yet.
+                </span>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Header */}
@@ -378,7 +424,11 @@ export default function ProgressPage() {
                     a.click();
                     URL.revokeObjectURL(url);
                     track({ type: 'progress_exported' });
+                    // Refresh the "Last exported" readout in the banner
+                    // immediately after the file is written.
+                    setLastExport(getLastExportAt());
                   }}
+                  title="Download a JSON backup of your progress. Keep this file safe — it's your only way to restore."
                   className="text-xs text-textTertiary hover:text-accentBlue transition-colors flex items-center gap-1"
                 >
                   <Download className="w-3 h-3" /> Export
@@ -409,6 +459,7 @@ export default function ProgressPage() {
                 </label>
                 <button
                   onClick={() => setShowClearConfirm(true)}
+                  title="Permanently delete all your progress. Export a backup first if you might want it back."
                   className="text-xs text-textTertiary hover:text-accentRed transition-colors flex items-center gap-1"
                 >
                   <Trash2 className="w-3 h-3" /> Clear

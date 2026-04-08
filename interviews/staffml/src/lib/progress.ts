@@ -298,7 +298,10 @@ export function getStreakMilestone(streak: number): string | null {
 
 // ─── Export / Import ─────────────────────────────
 
+const LAST_EXPORT_KEY = 'staffml_last_export';
+
 export function exportProgress(): string {
+  const exportedAt = new Date().toISOString();
   const data = {
     attempts: getStorage(STORAGE_KEY, []),
     gauntlets: getStorage(GAUNTLET_KEY, []),
@@ -307,10 +310,27 @@ export function exportProgress(): string {
     daily: getStorage('staffml_daily', {}),
     planProgress: getStorage('staffml_plan_progress', {}),
     analytics: getStorage('staffml_analytics', []),
-    exportedAt: new Date().toISOString(),
+    exportedAt,
     version: 1,
   };
+  // Record the export timestamp so the Progress page can display a
+  // "Last exported" readout and nag users who haven't backed up recently.
+  // Stored as a raw ISO string, not JSON-wrapped, so it's greppable.
+  try {
+    window.localStorage.setItem(LAST_EXPORT_KEY, exportedAt);
+  } catch {
+    /* localStorage may be disabled */
+  }
   return JSON.stringify(data, null, 2);
+}
+
+/** ISO timestamp of the most recent exportProgress() call, or null. */
+export function getLastExportAt(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_EXPORT_KEY);
+  } catch {
+    return null;
+  }
 }
 
 export function importProgress(json: string): boolean {
@@ -361,5 +381,9 @@ export function clearProgress(): void {
     window.localStorage.removeItem(STREAK_KEY);
     window.localStorage.removeItem('staffml_daily');
     window.localStorage.removeItem('staffml_plan_progress');
+    // Clear the export timestamp too — once everything is gone, a stale
+    // "Last exported" readout pointing at data that no longer exists
+    // would be misleading.
+    window.localStorage.removeItem(LAST_EXPORT_KEY);
   } catch {}
 }
