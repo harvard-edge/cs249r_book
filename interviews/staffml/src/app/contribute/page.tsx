@@ -44,12 +44,23 @@ interface Contribution {
   submittedAt: number;
 }
 
-function saveContribution(c: Contribution): void {
+/**
+ * Persist a contribution draft to localStorage. Returns true on success,
+ * false on any failure (quota exceeded, private-browsing mode, localStorage
+ * disabled). The caller uses the return value to decide whether to surface
+ * an error toast instead of the normal success path — previously this
+ * swallowed failures silently, which meant users in private-browsing
+ * windows thought their draft was saved when it wasn't.
+ */
+function saveContribution(c: Contribution): boolean {
   try {
     const all = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]');
     all.push(c);
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function getContributions(): Contribution[] {
@@ -103,11 +114,22 @@ export default function ContributePage() {
       submittedAt: Date.now(),
     };
 
-    saveContribution(contribution);
+    const ok = saveContribution(contribution);
     analyticsTrack(contribution);
     setSubmitted(true);
-    setPastCount(p => p + 1);
-    showToast({ type: 'success', title: 'Question saved!', description: 'Submit via GitHub to add it to the vault.' });
+    if (ok) {
+      setPastCount(p => p + 1);
+      showToast({ type: 'success', title: 'Question saved!', description: 'Now submit via GitHub to add it to the vault.' });
+    } else {
+      // localStorage is blocked (private browsing, quota, etc). We still
+      // show the success screen so the user can copy-as-markdown or go
+      // to GitHub, but we warn them that their draft isn't persisted.
+      showToast({
+        type: 'info',
+        title: "Couldn't save locally",
+        description: 'Your browser blocks localStorage. Use "Copy as Markdown" now — the draft won\'t survive a page reload.',
+      });
+    }
   };
 
   const analyticsTrack = (c: Contribution) => {
@@ -158,9 +180,13 @@ export default function ContributePage() {
           <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6 border-2 border-accentGreen bg-accentGreen/10">
             <CheckCircle2 className="w-8 h-8 text-accentGreen" />
           </div>
-          <h2 className="text-2xl font-bold text-textPrimary mb-2">Question Saved Locally</h2>
-          <p className="text-sm text-textSecondary mb-6">
-            To add it to the StaffML vault, submit it as a GitHub issue. Your question data has been saved to your browser.
+          <h2 className="text-2xl font-bold text-textPrimary mb-2">Draft Saved</h2>
+          <p className="text-sm text-textSecondary mb-2">
+            Next step: submit as a GitHub issue. It will be reviewed, math-checked,
+            and added to the vault if it fits the rubric.
+          </p>
+          <p className="text-[12px] text-textTertiary mb-6">
+            A local copy is kept in this browser so you don&apos;t lose work if you close the tab.
           </p>
           <div className="flex items-center gap-3 justify-center flex-wrap">
             <a
@@ -201,8 +227,13 @@ export default function ContributePage() {
             <Send className="w-7 h-7 text-accentBlue" />
             <h1 className="text-3xl font-extrabold text-textPrimary tracking-tight">Contribute a Question</h1>
           </div>
-          <p className="text-sm text-textSecondary mb-8">
-            Help build the ML systems interview question vault. Good questions are physics-grounded, quantitative, and test systems reasoning — not trivia.
+          <p className="text-sm text-textSecondary mb-2">
+            Help expand the ML systems interview question vault. Good questions are
+            physics-grounded, quantitative, and test systems reasoning — not trivia.
+          </p>
+          <p className="text-[12px] text-textTertiary mb-8">
+            Every submission goes through a math-verification pass before it lands in
+            the vault. You&apos;ll be credited in the commit that adds your question.
           </p>
 
           {/* Classification row */}
