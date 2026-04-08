@@ -35,6 +35,8 @@ book/tools/audit/
 ├── protected_contexts.py          — LineWalker + inline span detection
 ├── ledger.py                      — Issue + Ledger JSON model
 ├── scan.py                        — SCAN stage + CLI
+├── accept_list.py                 — persistent FP accept-list (Pass 16 Item A)
+├── accepted_fps.json              — seeded from Pass 15 FINAL ledgers (75 entries)
 ├── fix_script_lane.py             — FIX stage (script lane) + 5 safety checks
 ├── verify.py                      — VERIFY stage (3 checks)
 ├── loop.py                        — orchestrator CLI
@@ -48,6 +50,29 @@ book/tools/audit/
 │   ├── binary_units.py            — GiB/TiB in prose (detection only)
 │   └── h3_titlecase.py            — H3+ headings in title case (detection only)
 └── subagent_prompts/              — (Phase B) prompts for judgment-required checks
+```
+
+### Persistent accept-list (Pass 16 Item A)
+
+`accept_list.py` + `accepted_fps.json` together encode Pass 15's editorial
+verdict on 75 h3-titlecase scanner false positives (proper-noun-heavy
+headings, named principles, legislation, after-colon CMS 8.158 caps,
+D·A·M/C³ taxonomy axes). After every scan, matching issues are flipped
+from `open` to `accepted` and tagged with the §10.9 sub-rule that
+justifies them. Match key is `(category, repo-relative file, exact
+`before` line)` — if a heading is intentionally edited, its accept-list
+entry stops matching and the issue correctly returns to `open` for
+re-review.
+
+```bash
+# Default: accept-list applied, summary shows matched + stale counts
+python3 book/tools/audit/scan.py --scope vol1 -v
+
+# Reproduce pre-Pass-16 behavior (all 75 FPs report as open)
+python3 book/tools/audit/scan.py --scope vol1 --no-accept-list -v
+
+# Use a different accept-list file (e.g. a draft to iterate on)
+python3 book/tools/audit/scan.py --scope vol1 --accept-list /tmp/draft.json
 ```
 
 ---
@@ -141,6 +166,28 @@ Per-category counts (baseline for regression detection):
 The `h3-titlecase: 609` matches the Pass 15 plan's expected ~611 (off
 by 2, within tolerance). The `vs-period: 0` on vol1 confirms pass 10b's
 work is intact.
+
+### Post-Pass-16 anchor (2026-04-08)
+
+After Pass 15's 847 editorial fixes and Pass 16 Item A's persistent
+accept-list, the scanner reports the following steady state. Use these
+as the regression anchor going forward.
+
+| Category | vol1 open | vol1 accepted | vol2 open | vol2 accepted |
+|---|---:|---:|---:|---:|
+| vs-period | 0 | 0 | 0 | 0 |
+| compound-prefix-closeup | 0 | 0 | 0 | 0 |
+| percent-symbol | 0 | 0 | 0 | 0 |
+| lowercase-prose-references | 0 | 0 | 0 | 0 |
+| acknowledgements-spelling | 0 | 0 | 0 | 0 |
+| binary-units-in-prose | 0 | 0 | 0 | 0 |
+| h3-titlecase | **0** | 22 | **0** | 53 |
+
+Reproduce with `python3 book/tools/audit/scan.py --scope vol1 -v`. If
+you see a non-zero `open` count in any row, either (a) a real new
+violation has been introduced that needs fixing, or (b) a previously
+accepted heading has been edited and its accept-list entry needs
+updating (a stale warning will identify which one).
 
 ---
 
