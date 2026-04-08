@@ -72,6 +72,24 @@ function HomePage() {
     setStreakCount(streak.currentStreak);
     setIsReturning(attempts.length > 0);
     setDailyDone(isDailyCompleted());
+
+    // First-run redirect to /welcome. Only fires for truly brand-new
+    // visitors (zero attempts logged AND no dismissal flag), and only
+    // when the root URL is clean — any ?track=, ?topic=, search query,
+    // etc. is treated as an intentional deep link and never redirected.
+    // Runs after localStorage reads so SSR can still render the Vault
+    // shell without mismatch.
+    if (attempts.length === 0 && searchParams.toString() === "") {
+      let seen = false;
+      try {
+        seen = localStorage.getItem("staffml_firstrun_welcome") === "1";
+      } catch {
+        seen = true; // If localStorage is blocked, assume seen so we don't trap them
+      }
+      if (!seen) {
+        router.replace("/welcome");
+      }
+    }
   }, []);
 
   const searchResults = useMemo(() => {
