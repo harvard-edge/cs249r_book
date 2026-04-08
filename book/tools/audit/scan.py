@@ -50,6 +50,7 @@ CHECK_REGISTRY: list[tuple[str, str]] = [
     ("audit.checks.binary_units", "binary-units-in-prose"),
     ("audit.checks.h3_titlecase", "h3-titlecase"),
     ("audit.checks.concept_term_capitalization", "concept-term-capitalization"),
+    ("audit.checks.abbreviation_first_use", "abbreviation-first-use"),
 ]
 
 

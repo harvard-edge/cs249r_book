@@ -167,13 +167,14 @@ The `h3-titlecase: 609` matches the Pass 15 plan's expected ~611 (off
 by 2, within tolerance). The `vs-period: 0` on vol1 confirms pass 10b's
 work is intact.
 
-### Post-Pass-16 anchor (2026-04-08, Items A+B+C)
+### Post-Pass-16 anchor (2026-04-08, Items A+B+C+D)
 
 After Pass 15's 847 editorial fixes, Pass 16 Item A's persistent
 accept-list, Pass 16 Item B's h3_titlecase detector improvements,
-the LineWalker `$$ {#eq-label}` display-math fix, and Pass 16 Item
-C's new `concept-term-capitalization` check, the scanner reports
-the following steady state:
+the LineWalker `$$ {#eq-label}` display-math fix, Pass 16 Item C's
+new `concept-term-capitalization` check, and Pass 16 Item D's new
+`abbreviation-first-use` check, the scanner reports the following
+steady state:
 
 | Category | vol1 open | vol1 accepted | vol2 open | vol2 accepted |
 |---|---:|---:|---:|---:|
@@ -185,32 +186,38 @@ the following steady state:
 | binary-units-in-prose | 0 | 0 | 0 | 0 |
 | h3-titlecase | **61** | 0 | **29** | 0 |
 | concept-term-capitalization | **19** | 0 | **62** | 0 |
+| abbreviation-first-use | **163** | 0 | **111** | 0 |
+| **TOTAL** | **243** | 0 | **202** | 0 |
 
-All `open` entries are **real editorial violations** newly surfaced
-by Items B+C and the LineWalker fix — not scanner FPs. Breakdown:
+All 445 `open` entries are editorial work newly surfaced by the
+improved detector and new check categories. Breakdown:
 
 - **vol1 h3-titlecase (61)**: 42 from Item B's compound-second-part
-  rule and concept-term override (hyphenated compounds, scaling laws,
-  iron-law override) + 19 more made visible by the LineWalker fix.
-- **vol2 h3-titlecase (29)**: All 29 surfaced by the LineWalker fix,
+  rule and concept-term override + 19 made visible by the LineWalker
+  fix.
+- **vol2 h3-titlecase (29)**: All 29 from the LineWalker fix,
   concentrated in `performance_engineering.qmd`, which had a
   `$$ {#eq-iron-law-perf}` at line 87 that suppressed scanning of
   lines 88-2089.
-- **vol1 concept-term (19)**: `Iron Law`, `Data Gravity`,
-  `Information Roofline`, `Scaling Laws`, `Napkin Math`,
-  `Four Pillars Framework` in vol1 body prose. Proper-noun and
-  bold-adjacent uses are correctly preserved by the six exception
-  predicates.
-- **vol2 concept-term (62)**: `Iron Law` (28), `Memory Wall` (23),
-  `Power Wall` (7), `Scaling Laws` (1), and a few others. Vol2 was
-  not swept for §10.3 in round 1 pass 4, so this is the largest
-  newly-visible category.
+- **vol1 concept-term (19)**: §10.3 lowercase-concept-term
+  violations in body prose (`Iron Law`, `Data Gravity`,
+  `Information Roofline`, `Scaling Laws`, ...).
+- **vol2 concept-term (62)**: Same check, much larger since vol2
+  was not swept for §10.3 in round 1 pass 4.
+- **vol1 abbreviation-first-use (163)**: §10.5 violations where a
+  bare abbreviation appears before its canonical introduction in
+  the same chapter (`TPU`, `LLM`, `CNN`, `GEMM`, `ReLU`, ...).
+- **vol2 abbreviation-first-use (111)**: Same check on vol2. Top
+  offenders are `TPU` (16), `LLM` (11), `Adam` (9).
 
-All four groups are editorial work for a separate content-edit pass.
-Item B/C scope is scanner engineering, not content fixes.
+All entries are editorial work for a separate content-edit pass.
+Item B/C/D scope is scanner engineering, not content fixes.
 
 The accept-list (`accepted_fps.json`) remains at 0 entries. No new
-FPs have been identified under the improved detector + new category.
+FPs have been identified under the improved detector + new
+categories. Item D uses file-level exclusions for `glossary.qmd`
+(glossaries are definitions, not first uses) and excludes the
+`SIFT` homonym (CV meaning vs fault-tolerance meaning).
 
 Reproduce with `python3 book/tools/audit/scan.py --scope vol1 -v`.
 Run the detector self-tests with:
@@ -218,9 +225,10 @@ Run the detector self-tests with:
 ```bash
 PYTHONPATH=book/tools python3 book/tools/audit/checks/h3_titlecase.py
 PYTHONPATH=book/tools python3 book/tools/audit/checks/concept_term_capitalization.py
+PYTHONPATH=book/tools python3 book/tools/audit/checks/abbreviation_first_use.py
 ```
 
-Expect `41/41 passed` and `32/32 passed` respectively.
+Expect `41/41 passed`, `32/32 passed`, and `17/17 passed`.
 
 ---
 
