@@ -7,7 +7,7 @@ import { ECOSYSTEM_BASE } from "../lib/env";
 import {
   Library, Target, Crosshair, BarChart3, BookOpen, Github,
   Menu, X, Sun, Moon, Map, Cpu, Server, ChevronDown, Info,
-  Star, Bug, Send, Atom, MoreHorizontal, Search,
+  Star, Bug, Send, Atom,
 } from "lucide-react";
 import clsx from "clsx";
 import StreakBadge from "@/components/StreakBadge";
@@ -15,53 +15,30 @@ import { buildSiteIssueUrl } from "@/lib/issue-url";
 import { getDueCount } from "@/lib/progress";
 import { useTheme } from "@/components/ThemeProvider";
 
-// IA reorganization (per dev-tools UX review):
-//   - About moved out of primary into the "More" user menu
-//   - Plans promoted from Tools dropdown to primary nav
-//   - "Tools" renamed to "Lab" (now contains only the calculator-style sandboxes)
-//   - Contribute, Dashboard, About moved to "More" user menu (top-right)
 const primaryLinks = [
   { href: "/", label: "Vault", icon: Library },
   { href: "/practice", label: "Practice", icon: Target },
   { href: "/gauntlet", label: "Mock Interview", icon: Crosshair },
-  { href: "/plans", label: "Plans", icon: Map },
   { href: "/progress", label: "Progress", icon: BarChart3 },
+  { href: "/about", label: "About", icon: Info },
 ];
 
-// "Lab" is the renamed Tools dropdown — only sandbox calculators belong here.
-// /framework was added on dev in parallel and belongs alongside the other
-// sandbox tools.
-const labLinks = [
+const toolLinks = [
+  { href: "/plans", label: "Study Plans", icon: Map },
   { href: "/framework", label: "Framework", icon: Atom },
+  { href: "/contribute", label: "Contribute", icon: Send },
   { href: "/roofline", label: "Roofline", icon: Cpu },
   { href: "/simulator", label: "Simulator", icon: Server },
-];
-
-// "More" is the new top-right user menu — secondary destinations
-const moreLinks = [
-  { href: "/about", label: "About", icon: Info, kind: "internal" as const },
-  { href: "/contribute", label: "Contribute", icon: Send, kind: "internal" as const },
-  { href: "/dashboard", label: "Dashboard", icon: BarChart3, kind: "internal" as const },
+  { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
 ];
 
 export default function Nav() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [labOpen, setLabOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [dueCount, setDueCount] = useState(0);
   const { theme, toggleTheme } = useTheme();
-  const labRef = useRef<HTMLDivElement>(null);
-  const moreRef = useRef<HTMLDivElement>(null);
-
-  // Detect Mac vs other for ⌘K hint
-  // Detect Mac vs other for ⌘K hint. navigator.platform is deprecated;
-  // navigator.userAgent is the recommended replacement and is reliable
-  // enough for the binary "show ⌘K vs Ctrl K" decision.
-  const [isMac, setIsMac] = useState(false);
-  useEffect(() => {
-    setIsMac(/Mac|iPhone|iPad|iPod/i.test(navigator.userAgent));
-  }, []);
+  const toolsRef = useRef<HTMLDivElement>(null);
 
   // Check for due SR cards periodically
   useEffect(() => {
@@ -72,14 +49,11 @@ export default function Nav() {
     return () => clearInterval(interval);
   }, []);
 
-  // Close dropdowns on outside click
+  // Close tools dropdown on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      if (labRef.current && !labRef.current.contains(e.target as Node)) {
-        setLabOpen(false);
-      }
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
-        setMoreOpen(false);
+      if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) {
+        setToolsOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClick);
@@ -128,31 +102,28 @@ export default function Nav() {
               </Link>
             ))}
 
-            {/* Lab dropdown — sandbox calculators only */}
+            {/* Tools dropdown */}
             <div className="w-px h-4 bg-border mx-1.5" />
-            <div ref={labRef} className="relative">
+            <div ref={toolsRef} className="relative">
               <button
-                onClick={() => setLabOpen(!labOpen)}
-                aria-haspopup="menu"
-                aria-expanded={labOpen}
+                onClick={() => setToolsOpen(!toolsOpen)}
                 className={clsx(
                   "flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-colors",
-                  labLinks.some(l => isActive(l.href))
+                  toolLinks.some(l => isActive(l.href))
                     ? "bg-surface text-textPrimary border border-border"
                     : "text-textTertiary hover:text-textSecondary hover:bg-surface/50"
                 )}
               >
-                Lab
-                <ChevronDown className={clsx("w-3 h-3 transition-transform", labOpen && "rotate-180")} />
+                Tools
+                <ChevronDown className={clsx("w-3 h-3 transition-transform", toolsOpen && "rotate-180")} />
               </button>
-              {labOpen && (
-                <div role="menu" className="absolute top-full left-0 mt-1 w-48 bg-background border border-border rounded-lg shadow-lg py-1 z-50">
-                  {labLinks.map(({ href, label, icon: Icon }) => (
+              {toolsOpen && (
+                <div className="absolute top-full left-0 mt-1 w-48 bg-background border border-border rounded-lg shadow-lg py-1 z-50">
+                  {toolLinks.map(({ href, label, icon: Icon }) => (
                     <Link
                       key={href}
                       href={href}
-                      role="menuitem"
-                      onClick={() => setLabOpen(false)}
+                      onClick={() => setToolsOpen(false)}
                       className={clsx(
                         "flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium transition-colors",
                         isActive(href)
@@ -170,23 +141,8 @@ export default function Nav() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <StreakBadge />
-
-          {/* ⌘K command palette hint — clicks dispatch the same keyboard event */}
-          <button
-            onClick={() => {
-              window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, ctrlKey: !isMac }));
-            }}
-            className="hidden md:inline-flex items-center gap-2 px-2.5 py-1 text-[11px] font-medium text-textTertiary hover:text-textSecondary border border-border rounded-md bg-surface/50 hover:bg-surface transition-colors"
-            aria-label="Open command palette"
-            title="Search anything (Cmd+K)"
-          >
-            <Search className="w-3 h-3" />
-            <span>Search</span>
-            <kbd className="ml-1 font-mono text-[9px] text-textTertiary">{isMac ? "⌘K" : "Ctrl K"}</kbd>
-          </button>
-
           <button
             onClick={toggleTheme}
             className="p-2 text-textTertiary hover:text-textSecondary transition-colors"
@@ -194,63 +150,25 @@ export default function Nav() {
           >
             {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
-
-          {/* More menu — About / Contribute / Dashboard / Star / Report */}
-          <div ref={moreRef} className="relative hidden md:block">
-            <button
-              onClick={() => setMoreOpen(!moreOpen)}
-              aria-haspopup="menu"
-              aria-expanded={moreOpen}
-              aria-label="More menu"
-              className="p-2 text-textTertiary hover:text-textSecondary transition-colors"
-            >
-              <MoreHorizontal className="w-4 h-4" />
-            </button>
-            {moreOpen && (
-              <div role="menu" className="absolute top-full right-0 mt-1 w-52 bg-background border border-border rounded-lg shadow-lg py-1 z-50">
-                {moreLinks.map(({ href, label, icon: Icon }) => (
-                  <Link
-                    key={href}
-                    href={href}
-                    role="menuitem"
-                    onClick={() => setMoreOpen(false)}
-                    className={clsx(
-                      "flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium transition-colors",
-                      isActive(href)
-                        ? "text-textPrimary bg-surface"
-                        : "text-textSecondary hover:text-textPrimary hover:bg-surface/50"
-                    )}
-                  >
-                    <Icon className="w-4 h-4" />
-                    {label}
-                  </Link>
-                ))}
-                <div className="my-1 border-t border-border" />
-                <a
-                  href="https://github.com/harvard-edge/cs249r_book"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  role="menuitem"
-                  onClick={() => setMoreOpen(false)}
-                  className="flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium text-textSecondary hover:text-textPrimary hover:bg-surface/50 transition-colors"
-                >
-                  <Star className="w-4 h-4" />
-                  Star on GitHub
-                </a>
-                <a
-                  href={buildSiteIssueUrl()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  role="menuitem"
-                  onClick={() => setMoreOpen(false)}
-                  className="flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium text-textSecondary hover:text-textPrimary hover:bg-surface/50 transition-colors"
-                >
-                  <Bug className="w-4 h-4" />
-                  Report Issue
-                </a>
-              </div>
-            )}
-          </div>
+          <a
+            href={buildSiteIssueUrl()}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hidden md:flex text-textTertiary hover:text-textSecondary items-center gap-1.5 text-xs transition-colors"
+            title="Report an issue"
+          >
+            <Bug className="w-3.5 h-3.5" />
+            Report Issue
+          </a>
+          <a
+            href="https://github.com/harvard-edge/cs249r_book"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg text-textSecondary hover:text-textPrimary hover:bg-surface transition-colors"
+          >
+            <Star className="w-3.5 h-3.5" />
+            Star on GitHub
+          </a>
           {/* Mobile hamburger */}
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
@@ -282,27 +200,8 @@ export default function Nav() {
             </Link>
           ))}
           <div className="pt-2 mt-2 border-t border-border">
-            <span className="text-[10px] font-mono text-textTertiary uppercase tracking-widest px-3 block mb-2">Lab</span>
-            {labLinks.map(({ href, label, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                onClick={() => setMobileOpen(false)}
-                className={clsx(
-                  "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors",
-                  isActive(href)
-                    ? "bg-accentBlue/10 text-accentBlue"
-                    : "text-textSecondary hover:text-textPrimary hover:bg-surfaceHover"
-                )}
-              >
-                <Icon className="w-4 h-4" />
-                {label}
-              </Link>
-            ))}
-          </div>
-          <div className="pt-2 mt-2 border-t border-border">
-            <span className="text-[10px] font-mono text-textTertiary uppercase tracking-widest px-3 block mb-2">More</span>
-            {moreLinks.map(({ href, label, icon: Icon }) => (
+            <span className="text-[10px] font-mono text-textTertiary uppercase tracking-widest px-3 block mb-2">Tools</span>
+            {toolLinks.map(({ href, label, icon: Icon }) => (
               <Link
                 key={href}
                 href={href}
