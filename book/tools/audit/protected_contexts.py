@@ -95,7 +95,7 @@ _ANCHOR_ID_RE = re.compile(r"\{#[\w.:-]+\}")
 class LineState:
     """The block-level state at a given line.
 
-    All five flags are independent and tracked across the line walker.
+    All flags are independent and tracked across the line walker.
     A check function should treat the line as protected (skip entirely)
     if any flag is True for which it has not opted out.
     """
@@ -105,6 +105,16 @@ class LineState:
     in_display_math: bool = False
     in_html_style_block: bool = False  # <style>...</style> or <script>...</script>
     in_html_comment: bool = False  # <!-- ... --> (multi-line); also <!---
+    # Pass 16 Phase 2 additions: track Quarto callout-tip (Learning
+    # Objectives) and callout-checkpoint blocks. These are "protected"
+    # for the purposes of rules that enforce body-prose conventions on
+    # content that reads differently inside LO/checkpoint bullets.
+    # callout_depth tracks how many `::: {.callout-...}` levels deep we
+    # are, so nested divs don't break the tracking.
+    in_tip_callout: bool = False  # .callout-tip (Learning Objectives)
+    in_checkpoint_callout: bool = False  # .callout-checkpoint
+    in_definition_callout: bool = False  # .callout-definition (Platinum Standard)
+    callout_depth: int = 0  # depth of any div (::: {...}) we're inside
 
 
 class LineWalker:
@@ -133,6 +143,19 @@ class LineWalker:
     _CODE_FENCE_RE = re.compile(r"^\s*```")
     _HTML_OPEN_RE = re.compile(r"<(style|script)\b", re.IGNORECASE)
     _HTML_CLOSE_RE = re.compile(r"</(style|script)>", re.IGNORECASE)
+    # Quarto div fences. We track these to know when we enter/exit
+    # callout-tip and callout-checkpoint blocks. `::: {.callout-tip}`
+    # opens a div; a bare `:::` closes it. Nested divs are supported
+    # via callout_depth counting.
+    _DIV_OPEN_TIP_RE = re.compile(r"^\s*:::+\s*\{[^}]*\.callout-tip\b")
+    _DIV_OPEN_CHECKPOINT_RE = re.compile(
+        r"^\s*:::+\s*\{[^}]*\.callout-checkpoint\b"
+    )
+    _DIV_OPEN_DEFINITION_RE = re.compile(
+        r"^\s*:::+\s*\{[^}]*\.callout-definition\b"
+    )
+    _DIV_OPEN_ANY_RE = re.compile(r"^\s*:::+\s*\{")
+    _DIV_CLOSE_RE = re.compile(r"^\s*:::+\s*$")
     # Multi-line HTML comments. Quarto accepts both <!-- and <!--- (three
     # dashes) as the opener. The closer is always -->. A single-line comment
     # (open and close on same line) must NOT toggle state.
@@ -269,6 +292,56 @@ class LineWalker:
             # no further processing needed.
             if self.state.in_code_fence:
                 yield line, self.state, i + 1
+                continue
+
+            # ── Quarto div fences (callout tracking) ──
+            # Track callout-tip and callout-checkpoint blocks so rules
+            # that must skip Learning Objectives / self-check bullets can
+            # use the in_tip_callout / in_checkpoint_callout flags.
+            #
+            # The walker tracks `callout_depth` as a general div-depth
+            # counter and sets the specific flags when we enter a
+            # matching callout-tip or callout-checkpoint div. Nested
+            # divs inside a tip callout keep the flag TRUE until the
+            # tip div itself closes.
+            if self._DIV_OPEN_TIP_RE.match(line):
+                # Opening `::: {.callout-tip ...}`
+                if self.state.callout_depth == 0:
+                    # Only set the protection flag at the outermost
+                    # tip div; nested tips are unusual but allowed
+                    self.state.in_tip_callout = True
+                self.state.callout_depth += 1
+                # Yield the fence line itself as in-tip-callout so
+                # rules can skip the fence attribute line
+                yield line, self.state, i + 1
+                continue
+            if self._DIV_OPEN_CHECKPOINT_RE.match(line):
+                if self.state.callout_depth == 0:
+                    self.state.in_checkpoint_callout = True
+                self.state.callout_depth += 1
+                yield line, self.state, i + 1
+                continue
+            if self._DIV_OPEN_DEFINITION_RE.match(line):
+                if self.state.callout_depth == 0:
+                    self.state.in_definition_callout = True
+                self.state.callout_depth += 1
+                yield line, self.state, i + 1
+                continue
+            if self._DIV_OPEN_ANY_RE.match(line):
+                # Some other `::: {...}` div opens. Track depth but
+                # don't change protection flags.
+                self.state.callout_depth += 1
+                yield line, self.state, i + 1
+                continue
+            if self._DIV_CLOSE_RE.match(line):
+                # Closing `:::`
+                yield line, self.state, i + 1
+                if self.state.callout_depth > 0:
+                    self.state.callout_depth -= 1
+                if self.state.callout_depth == 0:
+                    self.state.in_tip_callout = False
+                    self.state.in_checkpoint_callout = False
+                    self.state.in_definition_callout = False
                 continue
 
             # ── Display math ──
@@ -492,6 +565,30 @@ def is_table_header_row(line: str) -> bool:
     pipe-table row with `**` as a header row to be safe.
     """
     return is_table_row(line) and "**" in line
+
+
+def is_table_caption_line(line: str) -> bool:
+    """True if this line is a Quarto table caption.
+
+    Quarto table captions have the form:
+        : **Title**: body text. {#tbl-label}
+    or, without a label:
+        : **Title**: body text.
+
+    The caption begins with `:` followed by whitespace and a bold title
+    span. This pattern is the canonical form used throughout the book
+    and is documented in book-prose-merged.md section 6 (Table
+    Formatting).
+
+    Table captions are body prose rhetorically, but they follow a
+    distinct formatting contract (bold title, optional `{#tbl-...}`
+    anchor) and several scanner rules treat their first-use occurrences
+    as non-canonical. The abbreviation-first-use check skips them to
+    avoid forcing awkward expansions into a caption header.
+    """
+    stripped = line.lstrip()
+    # Must start with `:` followed by whitespace and a `**` bold opener
+    return bool(re.match(r"^:\s+\*\*", stripped))
 
 
 def is_section_header(line: str) -> bool:
