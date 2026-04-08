@@ -196,7 +196,7 @@ Yet interview preparation resources for this role are thin. LeetCode \citep{leet
 Five laws govern ML systems architecture:
 
 \begin{enumerate}[nosep]
-\item \textbf{The Roofline Bound.} Every workload is either compute-bound or memory-bandwidth-bound, determined by its arithmetic intensity relative to the hardware's ridge point.
+\item \textbf{The Roofline Bound} \citep{williams2009roofline}. Every workload is either compute-bound or memory-bandwidth-bound, determined by its arithmetic intensity relative to the hardware's ridge point.
 \item \textbf{The Memory Capacity Wall.} Model weights, optimizer state, activations, and KV-cache must fit simultaneously in available memory; exceeding capacity forces parallelism, offloading, or compression.
 \item \textbf{The Communication Tax.} In distributed systems, gradient synchronization, tensor transfers, and pipeline bubbles consume time proportional to model size and inversely proportional to interconnect bandwidth.
 \item \textbf{The Power Envelope.} Sustained throughput is bounded by thermal dissipation, not peak compute; real performance is the minimum of compute capability and cooling capacity.
@@ -721,7 +721,7 @@ Each question is grounded in five components drawn from the schema:
   \item \textbf{Zone description}: how to test it (which skills to exercise)
   \item \textbf{Track constraints}: which physics regime applies
   \item \textbf{Level expectations}: which Bloom's cognitive operation to target
-  \item \textbf{Hardware constants}: real specifications (H100: 80\,GB HBM3, 3.35\,TB/s, 495\,TFLOPS TF32 dense; MI300X: 192\,GB HBM3, 5.3\,TB/s; Orin: 275\,TOPS INT8; Cortex-M4: 168\,MHz, 256\,KB SRAM)
+  \item \textbf{Hardware constants}: real specifications drawn from vendor datasheets~\citep{nvidia2022h100,nvidia2022orin,amd2023mi300x,arm_cortex_m4} (H100: 80\,GB HBM3, 3.35\,TB/s, 495\,TFLOPS TF32 dense; MI300X: 192\,GB HBM3, 5.3\,TB/s; Orin: 275\,TOPS INT8; Cortex-M4: 168\,MHz, 256\,KB SRAM)
 \end{itemize}
 
 All questions are grounded in the content and formulas of the \emph{Machine Learning Systems} textbook \citep{reddi2026mlsys, reddi2026a}, which provides the hardware specifications, architectural principles, and quantitative frameworks that serve as the foundation for question construction. The hardware constants are drawn from the MLSysIM infrastructure modeling framework \citep{reddi2026mlsysim}, ensuring that all questions reference the same specifications and that every napkin math answer can be independently verified against the framework. This prevents specification drift, a systematic error pattern where different questions cite different numbers for the same hardware, undermining the internal consistency that makes napkin math trustworthy. Hardware constants require maintenance as new accelerator generations ship; the methodology is designed to be timeless even as specific numbers evolve.
@@ -775,7 +775,7 @@ We employ a three-stage deduplication pipeline inspired by web-scale techniques 
 \begin{enumerate}[nosep]
   \item \textbf{Exact match.} Lowercased, whitespace-stripped scenario comparison. Catches copy-paste duplicates.
   \item \textbf{Fuzzy match.} \texttt{difflib.SequenceMatcher} $> 0.90$ within same (track, topic) groups. Catches minor rewordings.
-  \item \textbf{Semantic match.} Sentence-BERT cosine similarity $> 0.85$ via ChromaDB. Catches same-concept-different-words duplicates.
+  \item \textbf{Semantic match.} Sentence-BERT \citep{reimers2019sbert} cosine similarity $> 0.85$ via ChromaDB. Catches same-concept-different-words duplicates.
 \end{enumerate}
 
 Confirmed duplicates are archived (status set to ``archived''), never deleted, preserving the audit trail, a practice adopted from large-scale community assessment management \citep{anking2024}.
@@ -924,18 +924,18 @@ Fluency tests whether a candidate can perform napkin math from memory, recalling
 
 \textbf{Common mistake}: ``Activations will use more memory.'' Activations matter during training, but during inference the dominant hidden cost is something else entirely.
 
-\textbf{Napkin math}: For Llama-70B (80 layers, 8 KV-heads via GQA, head\_dim=128) at 128K tokens in FP16:
+\textbf{Napkin math}: For Llama-70B (80 layers, 8 KV-heads via grouped-query attention \citep{ainslie2023gqa}, head\_dim=128) at 128K tokens in FP16:
 \[
 \underbrace{2}_{\text{K,V}} \times \underbrace{80}_{\text{layers}} \times \underbrace{8}_{\text{heads}} \times \underbrace{128}_{\text{dim}} \times \underbrace{128\text{K}}_{\text{tokens}} \times \underbrace{2}_{\text{bytes}} \approx \textbf{41.9\,GB}
 \]
-Combined with 140\,GB of weights, one 128K-context request requires $\sim$182\,GB, at least 3 H100s.
+Combined with 140\,GB of weights, one 128K-context request requires $\sim$182\,GB. This spills over an 80\,GB NVIDIA H100 (requiring 3 GPUs) but fits entirely on a single 192\,GB AMD MI300X.
 
 \textbf{Answer}: The KV-cache. It grows linearly with sequence length and, at 128K context, can exceed the model weights themselves.
 \end{staffmlexample}
 
 This is a fluency question. The candidate must recall the KV-cache formula and execute the arithmetic from memory, producing a specific number. No architectural design is required; no tradeoff analysis is asked for. The cognitive act is rapid quantitative calculation, the signature skill of the fluency zone.
 
-\textbf{Timeless principle:} KV-cache memory scales linearly with sequence length and quadratically with attention head count. The specific H100 numbers change; the scaling law does not.
+\textbf{Timeless principle:} KV-cache memory scales linearly with sequence length and quadratically with attention head count. The specific hardware capacities change (e.g., 80\,GB vs.\ 192\,GB); the scaling law does not.
 
 \subsection{Diagnosis: MFU Collapse}
 
@@ -1006,7 +1006,7 @@ Mastery requires all four skills simultaneously: recalling specs, analyzing the 
 
 \textbf{Napkin math}: A 2,000-token prefill on a 70B model: $2 \times 70\text{B} \times 2{,}000 = 280$ TFLOPs. An H100 at 495\,TFLOPS dense needs $\sim$566\,ms. If 4 users send prompts simultaneously, the 4th waits over 1.5 seconds before prefill even begins.
 
-\textbf{Answer}: Prefill starvation. The scheduler must chunk or defer prefills to prevent blocking the decode phase, but aggressive deferral under high load creates a queue that destroys TTFT. The fix is chunked prefill with priority scheduling, but this requires over-provisioning compute by $\sim$30\% to absorb the prefill bursts without queuing.
+\textbf{Answer}: Prefill starvation. The scheduler must chunk or defer prefills to prevent blocking the decode phase, but aggressive deferral under high load creates a queue that destroys TTFT. The fix is chunked prefill with priority scheduling \citep{agrawal2024sarathi}, but this requires over-provisioning compute by $\sim$30\% to absorb the prefill bursts without queuing.
 \end{staffmlexample}
 
 This is a mastery question. The candidate must recall hardware specs (H100 TFLOPS), analyze the scheduling conflict (prefill blocks decode), design a solution (chunked prefill with priority), and execute the napkin math to size the required over-provisioning. All four skills are exercised in a single question.
@@ -1018,7 +1018,7 @@ This is a mastery question. The candidate must recall hardware specs (H100 TFLOP
 The preceding four examples held track constant to isolate zone differences. We now hold topic constant (quantization) and vary the track, showing how the same concept demands different reasoning under different physics regimes:
 
 \begin{itemize}[nosep]
-  \item \textbf{Cloud} (L4, evaluation). ``GPTQ vs.\ AWQ for serving a 70B model on 2$\times$ H100s. Which quantization scheme yields higher throughput at FP16-equivalent perplexity? Justify with arithmetic intensity analysis.'' The candidate evaluates two compression strategies against datacenter-scale metrics (tokens/second/dollar).
+  \item \textbf{Cloud} (L4, evaluation). ``GPTQ \citep{frantar2023gptq} vs.\ AWQ \citep{lin2024awq} for serving a 70B model on an Intel Gaudi 3 cluster. Which quantization scheme yields higher throughput at FP16-equivalent perplexity? Justify with arithmetic intensity analysis.'' The candidate evaluates two compression strategies against datacenter-scale metrics (tokens/second/dollar).
   \item \textbf{Edge} (L3, fluency). ``Quantize a YOLOv8 detection model from FP32 to INT8 for Orin deployment. Calculate the memory savings and estimate the latency improvement given Orin's INT8 TOPS vs.\ FP32 TFLOPS.'' The candidate performs napkin math within a thermal and real-time envelope.
   \item \textbf{TinyML} (L5, specification). ``Your 256\,KB MCU must run a keyword spotting model. The FP32 model is 800\,KB. Specify a quantization strategy (INT8, INT4, or binary) that fits in SRAM while maintaining $>$90\% accuracy. Justify each precision choice for weights vs.\ activations.'' The candidate designs a mixed-precision scheme under extreme memory constraints.
 \end{itemize}
@@ -1133,7 +1133,7 @@ We identify four limitations of the current work.
 
 \textbf{Static questions with chain-based progression.} While individual questions are static text, the depth chain structure enables adaptive progression: a candidate who answers an L3 question correctly is presented with the L4 question on the same topic. This simulates some of the adaptivity of live interviews, though it does not replicate the free-form dialogue of whiteboard sessions. The chains (\Cref{sec:chains}) approximate the probing behavior of experienced interviewers.
 
-\textbf{Architectural paradigm drift.} The topic taxonomy is anchored in the current Transformer-dominant era, and identifiers such as \texttt{attention-mechanism-systems} will need revision as alternative architectures (e.g., state space models) mature. The ikigai competency model and the five laws of \Cref{sec:intro} are stable under such transitions: any architecture still has an arithmetic intensity, a memory hierarchy footprint, and a communication tax, so the constants shift but the cognitive acts (diagnosing a memory wall, specifying a latency bound, evaluating a parallelism strategy) do not. As new architectures stabilize, topic labels will be deprecated and replaced while questions targeting the same zones are re-grounded in the new constants.
+\textbf{Architectural paradigm drift.} The topic taxonomy is anchored in the current Transformer-dominant era, and identifiers such as \texttt{attention-mechanism-systems} will need revision as alternative architectures (e.g., state space models \citep{gu2023mamba}) mature. The ikigai competency model and the five laws of \Cref{sec:intro} are stable under such transitions: any architecture still has an arithmetic intensity, a memory hierarchy footprint, and a communication tax, so the constants shift but the cognitive acts (diagnosing a memory wall, specifying a latency bound, evaluating a parallelism strategy) do not. As new architectures stabilize, topic labels will be deprecated and replaced while questions targeting the same zones are re-grounded in the new constants.
 
 \textbf{Hardware vendor concentration.} The corpus draws predominantly on NVIDIA hardware specifications (H100, A100, Orin), reflecting current industry adoption. Candidates with primary experience on AMD, Intel, or Google TPU hardware may find the specific constants unfamiliar, though the reasoning patterns (roofline analysis, memory budgeting, power-performance tradeoffs) are vendor-neutral. Future versions will include multi-vendor question variants. For assessment contexts, we recommend providing a hardware specification reference sheet alongside the questions, ensuring that recall of vendor-specific numbers does not gate access to the reasoning being tested.
 
