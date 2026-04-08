@@ -167,11 +167,11 @@ The `h3-titlecase: 609` matches the Pass 15 plan's expected ~611 (off
 by 2, within tolerance). The `vs-period: 0` on vol1 confirms pass 10b's
 work is intact.
 
-### Post-Pass-16 anchor (2026-04-08)
+### Post-Pass-16 anchor (2026-04-08, Item B)
 
-After Pass 15's 847 editorial fixes and Pass 16 Item A's persistent
-accept-list, the scanner reports the following steady state. Use these
-as the regression anchor going forward.
+After Pass 15's 847 editorial fixes, Pass 16 Item A's persistent
+accept-list, and Pass 16 Item B's detector improvements to
+`h3_titlecase.py`, the scanner reports the following steady state.
 
 | Category | vol1 open | vol1 accepted | vol2 open | vol2 accepted |
 |---|---:|---:|---:|---:|
@@ -181,13 +181,27 @@ as the regression anchor going forward.
 | lowercase-prose-references | 0 | 0 | 0 | 0 |
 | acknowledgements-spelling | 0 | 0 | 0 | 0 |
 | binary-units-in-prose | 0 | 0 | 0 | 0 |
-| h3-titlecase | **0** | 22 | **0** | 53 |
+| h3-titlecase | **42** | 0 | **0** | 0 |
 
-Reproduce with `python3 book/tools/audit/scan.py --scope vol1 -v`. If
-you see a non-zero `open` count in any row, either (a) a real new
-violation has been introduced that needs fixing, or (b) a previously
-accepted heading has been edited and its accept-list entry needs
-updating (a stale warning will identify which one).
+The 42 vol1 `open` h3-titlecase entries are **real §10.9 violations**
+newly surfaced by Item B's compound-second-part rule and concept-term
+override — not scanner FPs. Breakdown: 38 hyphenated-compound
+second-part violations (`### Non-Linear Functions` → should be
+`### Non-linear functions`), 3 concept-term override catches
+(`### Scaling Laws` → `### Scaling laws`), and 1 documented Pass 15
+Batch 1 false negative (`#### Exercise two: *iron law Analysis*`).
+They are editorial work for a separate content-edit pass — Item B's
+scope was detector engineering, not content fixes.
+
+The accept-list (`accepted_fps.json`) was pruned from 75 entries to 0
+because every Pass 15-era FP is now correctly classified at the
+detector level. The file is retained as infrastructure for future
+check categories (Items C/D) that may surface new FPs.
+
+Reproduce with `python3 book/tools/audit/scan.py --scope vol1 -v`.
+Run the detector self-test with
+`PYTHONPATH=book/tools python3 book/tools/audit/checks/h3_titlecase.py`
+(expect `41/41 passed`).
 
 ---
 
