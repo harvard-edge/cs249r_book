@@ -262,7 +262,7 @@
 
 \title{
   \textbf{The Periodic Table of Machine Learning Systems}\\[0.3em]
-  {\large A Generative Design Space for Modern Architectures}
+  {\large A Constraint-Driven Design Space}
 }
 
 \author{
@@ -700,7 +700,7 @@ I_{\text{flash}} &= \frac{2 \times B^2 \times d \;\text{FLOP}}{4 \times B \times
 &= \frac{\cvalint{\TileSize}}{4} = 64\;\text{FLOP/byte}
 \end{align*}
 
-Still below the 295 ridge point, but $8{-}16\times$ better than na\"ive. The dominant cost shifts from HBM round-trips to useful compute.
+Both the na\"ive and tiled kernels sit below the 295 ridge point, so both are memory-bound; the gain comes from reducing HBM traffic, not from raising arithmetic intensity. Because the tiled version keeps $S$ and $P$ in SRAM instead of writing them to HBM, it eliminates the $O(n^2)$ intermediate round-trips and cuts HBM bytes transferred by $8{-}16\times$ at realistic tile sizes. The dominant cost shifts from HBM round-trips to the weight streams that remain unavoidable.
 \end{napkinmath}
 
 Reading the formula: the same algorithmic elements ($Dd$, $\text{Sm}$) are unchanged: FlashAttention does not change the math. New runtime elements ($Ti$, $Fs$) change where and how the computation executes.
@@ -973,10 +973,11 @@ Still $1.7\times$ over \cvalint{\EdgeRAMGB}\,GB. Virtualization (Vr) pages the o
 T_{\text{stream}} = \frac{4\;\text{GB}}{\cvalint{\EdgeBWGBs}\;\text{GB/s}} \approx 15\;\text{ms/token}
 \]
 
-\textbf{With sub-quadratic attention} ($O(n\sqrt{n})$, $\sqrt{10^6} = 1000$ effective window):
+\textbf{With sub-quadratic attention} ($O(n\sqrt{n})$ compute, $\sqrt{10^6} = 1000$ effective attention reach per decode step): once attention cost is sub-quadratic, decode compute per token is dominated by the linear layers at $2P$:
 \[
-T_{\text{compute}} = \frac{2 \times 7 \times 10^9 \times 1000}{\cvalint{\EdgeTFLOPS} \times 10^{12}} \approx 0.26\;\text{ms}
+T_{\text{compute}} \approx \frac{2 \times 7 \times 10^9}{\cvalint{\EdgeTFLOPS} \times 10^{12}} \approx 0.26\;\text{ms per token}
 \]
+(Attention contributes roughly $2\, w\, d\, \text{heads}\, \text{layers} \approx 0.26$\,GFLOP per token on this 7B configuration, about $2\%$ of the 14\,GFLOP linear budget, so we drop it.)
 
 \textbf{Bottleneck:} Memory bandwidth at 15\,ms/token ($\sim$67 tokens/s). Acceptable for edge serving, and the binding constraint is now bandwidth rather than the original capacity-and-compute pile-up.
 
@@ -1052,13 +1053,13 @@ The section unfolds in three movements. First, we distill the framework into man
 
 Patterson and Hennessy's Iron Law of processor performance \citep{hennessy2019architecture}, $\text{Time} = \text{IC} \times \text{CPI} \times T_{\text{clk}}$, is the canonical example of a manipulable equation: it decomposes execution time into three independent terms a student can substitute, hold constant, and reason about. We do not claim the same algebraic identity for ML systems performance, but we do offer three back-of-envelope bounds in the same spirit. They are not identities; they are inequalities. They do not decompose a single observable quantity into independent terms; they describe which constraint binds first as parameters scale. Students can still substitute hardware specifications and solve for the binding constraint, which is what the manipulable form is for.
 
-\paragraph{Bound 1: Memory Capacity.} A model fits on $N$ devices if and only if:
+\paragraph{Bound 1: Memory Capacity.} A workload fits on $N$ devices if and only if:
 \begin{align}
 \label{eq:iron-capacity}
 &\underbrace{P \cdot b_w}_{\text{weights}} \;+\; \underbrace{P \cdot b_o}_{\text{optimizer}} \;+\; \underbrace{B \cdot s \cdot h \cdot L \cdot b_a}_{\text{activations}} \notag \\
 &\quad +\; \underbrace{2 \cdot L \cdot n_{\text{kv}} \cdot d \cdot s \cdot b_k}_{\text{KV-cache}} \;\leq\; N \cdot C_{\text{HBM}}
 \end{align}
-where $P$ is parameters, $b_w$ is bytes per weight, $b_o$ is bytes per optimizer state (12 for Adam), $B$ is batch size, $s$ is sequence length, $h$ is hidden dimension, $L$ is layers, $n_{\text{kv}}$ is KV-heads, $d$ is head dimension, $b_a$ and $b_k$ are bytes per activation and KV entry, and $C_{\text{HBM}}$ is per-device HBM capacity. Each term maps to a Represent-role element; each $\leq$ is a constraint operator $\mid_{\text{CAP}}$.
+where $P$ is parameters, $b_w$ is bytes per weight, $b_o$ is bytes per optimizer state (12 for Adam), $B$ is batch size, $s$ is sequence length, $h$ is hidden dimension, $L$ is layers, $n_{\text{kv}}$ is KV-heads, $d$ is head dimension, $b_a$ and $b_k$ are bytes per activation and KV entry, and $C_{\text{HBM}}$ is per-device HBM capacity. Each term maps to a Represent-role element; each $\leq$ is a constraint operator $\mid_{\text{CAP}}$. Not every term coexists in practice. The optimizer term ($P \cdot b_o$) and activation term apply only during training; the KV-cache term applies only during autoregressive inference. Bound 1 is a pedagogical superset that a student specializes to a specific workload by dropping the inapplicable terms.
 
 \paragraph{Bound 2: Throughput.} Per-token throughput is:
 \begin{equation}
@@ -1070,7 +1071,7 @@ where $T_{\max}$ is the binding-constraint time:
 \label{eq:iron-throughput-tmax}
 T_{\max} = \max\!\left(\underbrace{\tfrac{2P}{N \pi}}_{\text{compute}},\;\; \underbrace{\tfrac{P \cdot b_w}{N \beta}}_{\text{bandwidth}},\;\; \underbrace{\tfrac{\gamma |G|}{bw_{\text{net}}}}_{\text{comm}}\right).
 \end{equation}
-where $\pi$ is per-device peak FLOP/s, $\beta$ is memory bandwidth, $bw_{\text{net}}$ is network bandwidth, $|G|$ is gradient size, $\gamma$ is the collective scaling factor, and $\delta_{\text{bubble}}$ is the pipeline bubble overhead from \Cref{eq:bubble}. The $\max$ identifies the binding constraint; the additive $\delta_{\text{bubble}}$ captures the concurrency overhead that simpler models ignore.
+where $\pi$ is per-device peak FLOP/s, $\beta$ is memory bandwidth, $bw_{\text{net}}$ is network bandwidth, $|G|$ is gradient size, $\gamma$ is the collective scaling factor, and $\delta_{\text{bubble}}$ is the pipeline bubble overhead from \Cref{eq:bubble}. The $\max$ identifies the binding constraint; the additive $\delta_{\text{bubble}}$ captures the concurrency overhead that simpler models ignore. The compute term shown ($2P$) is the inference forward-pass form; training replaces it with $6P$ to account for backward-pass cost, and the gradient-communication term drops out entirely during inference.
 
 \paragraph{Bound 3: Serving Efficiency.} For inference, the arithmetic intensity is:
 \begin{equation}
@@ -1295,6 +1296,8 @@ The framework is generative for a specific class of design problems and silent a
 \paragraph{Algorithmic innovations that change the problem, not the layout.} The framework derives FlashAttention from a capacity violation but cannot derive Mamba or other state-space models, because state-space models change the algorithm itself rather than its memory layout. \Cref{fig:mamba} shows how Mamba enters the framework as a distinct compound: the \texttt{Attention (At)} primitive is replaced with an explicit recurrent \texttt{State (St)} element, which is a structural substitution, not a constraint-driven refactoring of the existing molecule. Similarly, speculative decoding (which trades verification compute for serial latency) and Mixture-of-Experts routing (which is conditional rather than dense) are not constraint-driven interventions in the sense we formalize. They are different algorithms, not different layouts of the same algorithm.
 
 \paragraph{Within-element innovation.} The framework treats Sync/Collective as a single primitive. Innovations inside that primitive (Horovod's ring all-reduce, NCCL tree reductions, in-network reduction with SHARP) are invisible: the molecule is unchanged. The same applies to kernel-level work: FlashAttention-1, -2, and -3 are all Tiling + Fusion in our notation, even though they differ substantially in implementation.
+
+\paragraph{The Framework Tax.} The cost semantics (\Cref{sec:composition}) assume the hardware executes mathematical intent perfectly, bounded only by Roofline physics. In reality, a massive bottleneck in modern ML systems is CPU dispatch overhead, CUDA kernel launch latency, and Python framework bloat. These software-induced overheads are not explicitly modeled in the constraint equations, though they logically fall under \texttt{Scheduler (Sc)} or \texttt{Orchestrator (Oc)}. Consequently, the framework perfectly predicts why FlashAttention works, but it does not natively predict why CUDA Graphs or \texttt{torch.compile} are necessary.
 
 \paragraph{Operational and cost dimensions.} The framework models capacity, bandwidth, fragmentation, latency, utilization, and load imbalance. It does not model dollar cost, regional carbon intensity, multi-tenancy, quotas, data-residency constraints, or the SLO-shaped tail latency that dominates real serving. Some of these are reachable by adding constraint types and resolvers; others (cost, compliance) are categorically outside the framework's physical-constraints scope.
 

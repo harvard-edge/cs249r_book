@@ -37,7 +37,7 @@ for (const e of doc.elements) {
   if (typeof e.id !== "number") issues.push(`Element ${e.sym || "?"}: id must be a number`);
   if (typeof e.sym !== "string" || !/^[A-Z][a-z]$/.test(e.sym)) issues.push(`Element #${e.id}: sym '${e.sym}' must match [A-Z][a-z]`);
   if (typeof e.row !== "number" || e.row < 1 || e.row > 8) issues.push(`Element #${e.id} ${e.sym}: row ${e.row} out of range 1-8`);
-  if (typeof e.col !== "number" || e.col < 1 || e.col > 15) issues.push(`Element #${e.id} ${e.sym}: col ${e.col} out of range 1-15`);
+  if (typeof e.col !== "number" || e.col < 1 || e.col > 18) issues.push(`Element #${e.id} ${e.sym}: col ${e.col} out of range 1-18`);
   if (!["R", "C", "X", "K", "M"].includes(e.block)) issues.push(`Element #${e.id} ${e.sym}: block '${e.block}' must be one of R/C/X/K/M`);
 
   // Cell collisions
