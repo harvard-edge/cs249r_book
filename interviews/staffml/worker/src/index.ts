@@ -688,6 +688,26 @@ async function handleWaitlist(
 }
 
 // ─── Main handler ────────────────────────────────────────────
+//
+// Prefix stripping for custom-domain routes
+// ------------------------------------------
+// The worker is reachable at two URL shapes:
+//
+//   1. The default workers.dev subdomain:
+//      https://staffml-interviewer.mlsysbook-ai-account.workers.dev/ask
+//      → request.url.pathname === "/ask"
+//
+//   2. The custom domain route on mlsysbook.ai:
+//      https://mlsysbook.ai/api/staffml-interviewer/ask
+//      → request.url.pathname === "/api/staffml-interviewer/ask"
+//
+// All the route-matching logic below compares against the short form
+// ("/ask", "/health", "/waitlist"), so when we arrive via the custom
+// route we strip the "/api/staffml-interviewer" prefix first. This
+// keeps a single code path for both deployment shapes and lets us flip
+// between them without rewriting the router.
+const CUSTOM_ROUTE_PREFIX = "/api/staffml-interviewer";
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const origin = request.headers.get("Origin");
@@ -697,6 +717,16 @@ export default {
     }
 
     const url = new URL(request.url);
+    // Normalize the pathname: if we arrived via the custom route, strip
+    // the prefix so downstream matches ("/health", "/ask", "/waitlist")
+    // work unchanged. Always-true fall-through when called via the
+    // workers.dev URL.
+    if (url.pathname === CUSTOM_ROUTE_PREFIX) {
+      url.pathname = "/";
+    } else if (url.pathname.startsWith(`${CUSTOM_ROUTE_PREFIX}/`)) {
+      url.pathname = url.pathname.slice(CUSTOM_ROUTE_PREFIX.length);
+    }
+
     if (url.pathname === "/health") {
       const available = orderedAdapters(env).map((a) => a.name);
       return jsonResponse(env, origin, {
