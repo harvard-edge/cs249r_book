@@ -8,7 +8,7 @@ engine: jupyter
 
 _What reference numbers and physical laws should every ML systems engineer carry into design decisions?_
 
-In ML systems, performance failures often masquerade as software problems: a training step “mysteriously” slows down, a serving stack misses its service-level agreement (SLA), or an accelerator upgrade fails to deliver the expected speedup. Many of these surprises are not bugs—they are the predictable consequences of physics (latency, bandwidth, energy) and architecture (memory hierarchy, precision, parallel scaling).
+In ML systems, performance failures often masquerade as software problems: a training step “mysteriously” slows down, a serving stack misses its service level agreement (SLA), or an accelerator upgrade fails to deliver the expected speedup. Many of these surprises are not bugs—they are the predictable consequences of physics (latency, bandwidth, energy) and architecture (memory hierarchy, precision, parallel scaling).
 
 This appendix collects the reference numbers and compact models that let you do quick, quantitative reasoning. It begins with a quick-reference section of “numbers to know,” then summarizes the tools used throughout the book: roofline analysis, dimensional analysis, scaling laws, and precision trade-offs.
 
@@ -128,7 +128,7 @@ If you memorize nothing else from this section, memorize these:
 
 1. **~600$\times$ energy ratio**: DRAM access costs ~`{python} NumbersToKnow.dram_vs_compute`$\times$ more energy than an FP16 multiply-add. This is why arithmetic intensity is everything.
 
-2. **16 bytes/parameter for training**: Model weights (2B FP16) + master weights (4B FP32) + optimizer states (8B Adam). A 7B model needs 112 GB just to start training.
+2. **16 bytes/parameter for training**: Model weights (2B FP16) + master weights (4B FP32) + optimizer states for Adaptive Moment Estimation (Adam) at 8B. A 7B model needs 112 GB just to start training.
 
 3. **~200 km/ms speed of light in fiber**: Cross-country latency is ~40 ms. No optimization can reduce this—it is physics.
 :::
@@ -256,7 +256,7 @@ These numbers reflect the current generation. Use them for back-of-envelope calc
 : **Arithmetic Intensity Thresholds (c. 2024).** Most inference workloads are <10 ops/byte—firmly memory bound. {#tbl-ridge-current-ref}
 
 ::: {.callout-perspective title="A Note on Terminology: GPUs and Accelerators"}
-Throughout this book, we often use "accelerator" when discussing hardware acceleration. However, the principles—roofline analysis, memory hierarchies, numerical precision, and performance modeling—apply equally to **GPUs**, **TPUs**, **NPUs**, **custom ASICs**, and other specialized AI accelerators. We use "accelerator" as the universal term, but readers should understand these concepts apply to GPUs unless we explicitly discuss vendor-specific features (e.g., CUDA, NVLink).
+Throughout this book, we often use "accelerator" when discussing hardware acceleration. However, the principles—roofline analysis, memory hierarchies, numerical precision, and performance modeling—apply equally to **GPUs**, **Tensor Processing Units (TPUs)**, **NPUs**, **custom ASICs**, and other specialized AI accelerators. We use "accelerator" as the universal term, but readers should understand these concepts apply to GPUs unless we explicitly discuss vendor-specific features (e.g., CUDA, NVLink).
 :::
 
 Knowing the numbers is only the first step. The real power comes from having compact models that tell you *which* number matters for *your* specific bottleneck. The next section provides exactly these diagnostic tools—starting with the Roofline Model, which translates raw hardware specs into actionable performance ceilings.
@@ -273,7 +273,7 @@ You have trained a model that achieves good accuracy, but inference takes 200 ms
 
 The Roofline Model [@williams2009roofline] answers a deceptively simple question: *how fast can this workload possibly run on this hardware?* The answer depends on whether you run out of compute or memory bandwidth first.
 
-Every operation has an **arithmetic intensity**: the ratio of computations performed to bytes moved from memory. Matrix multiplication has high arithmetic intensity because you can reuse each loaded element many times. Element-wise operations like ReLU have low intensity because you load a number, do one operation, and write it back. As @fig-roofline illustrates, each workload is bounded by either memory bandwidth or compute throughput, and its arithmetic intensity determines which ceiling it hits first.
+Every operation has an **arithmetic intensity**: the ratio of computations performed to bytes moved from memory. Matrix multiplication has high arithmetic intensity because you can reuse each loaded element many times. Element-wise operations like rectified linear unit (ReLU) have low intensity because you load a number, do one operation, and write it back. As @fig-roofline illustrates, each workload is bounded by either memory bandwidth or compute throughput, and its arithmetic intensity determines which ceiling it hits first.
 
 ::: {#fig-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: Performance ceiling for a hypothetical accelerator. The sloped line represents memory bandwidth limits; the horizontal line represents peak compute. Every workload can be plotted on this diagram to determine its optimization strategy." fig-alt="A plot with arithmetic intensity on the x-axis and performance on the y-axis. Two lines form a roofline shape: a diagonal line rising from the origin labeled memory bound, and a horizontal line labeled compute bound. They meet at the ridge point."}
 ```{.tikz}
@@ -439,7 +439,7 @@ Consider an NVIDIA A100 GPU with FP16 Tensor Core performance of `{python} Appen
 
 Now compare two common operations:
 
-**GEMM (Matrix Multiplication)**: For two `{python} AppendixMachineSetup.n_gemm` $\times$ `{python} AppendixMachineSetup.n_gemm` matrices, arithmetic intensity is approximately `{python} AppendixMachineSetup.gemm_intensity` FLOP/byte. Since `{python} AppendixMachineSetup.gemm_intensity` > `{python} AppendixMachineSetup.ridge_point`, this operation is compute bound. You are using the hardware efficiently.
+**General matrix multiply (GEMM)**: For two `{python} AppendixMachineSetup.n_gemm` $\times$ `{python} AppendixMachineSetup.n_gemm` matrices, arithmetic intensity is approximately `{python} AppendixMachineSetup.gemm_intensity` FLOP/byte. Since `{python} AppendixMachineSetup.gemm_intensity` > `{python} AppendixMachineSetup.ridge_point`, this operation is compute bound. You are using the hardware efficiently.
 
 **ReLU (Element-wise)**: For a `{python} AppendixMachineSetup.n_gemm` $\times$ `{python} AppendixMachineSetup.n_gemm` tensor, intensity is approximately `{python} AppendixMachineSetup.relu_intensity` op/byte. Since `{python} AppendixMachineSetup.relu_intensity` ≪ `{python} AppendixMachineSetup.ridge_point`, this operation is severely memory bound, achieving only about `{python} AppendixMachineSetup.relu_util_str` percent of peak TFLOP/s. The hardware is mostly waiting for data.
 
@@ -1124,7 +1124,7 @@ The choice of numerical format is a direct application of the **Iron Law of ML S
 
 *   **Dynamic Range (The Exponent)**: BF16 preserves the eight-bit exponent of FP32. This means it can represent the same range of extremely large and extremely small values (gradients).
 *   **Precision (The Mantissa)**: FP16 has a larger 10-bit mantissa than BF16 (7 bits), offering higher precision for values within its range. But its five-bit exponent is a major constraint; gradients often "vanish" to zero (underflow) because the exponent cannot represent them. To solve this, FP16 training requires **Loss Scaling**, an operational overhead where gradients are multiplied by a large constant to push them into the representable range.
-*   **Energy Efficiency**: INT8 operations are significantly more energy-efficient than floating-point equivalents because they utilize simpler integer ALUs and require less silicon area. Moving to INT8 for inference is the primary lever for deploying LLMs on battery-constrained edge devices.
+*   **Energy Efficiency**: INT8 operations are significantly more energy-efficient than floating-point equivalents because they utilize simpler integer ALUs and require less silicon area. Moving to INT8 for inference is the primary lever for deploying large language models (LLMs) on battery-constrained edge devices.
 
 :::
 

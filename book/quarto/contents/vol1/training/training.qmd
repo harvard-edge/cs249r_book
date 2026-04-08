@@ -137,7 +137,7 @@ A single forward pass through GPT-2 requires roughly `{python} TrainingScenarios
 
 ***Machine Learning Training Systems***\index{Training Systems!definition} are software-hardware systems that execute the iterative optimization loop—forward pass, loss computation, backward pass, and parameter update—to minimize a loss function over a training dataset.
 
-1.  **Significance (Quantitative):** Training memory cost is 4$\times$ the inference memory cost per parameter when using the Adam optimizer: a 7B-parameter model requires 14 GB (FP16 weights) + 14 GB (gradients) + 28 GB (Adam first and second moments in FP32) = 56 GB minimum, before accounting for activation storage. This 4$\times$ multiplier is the primary reason a model that runs inference on one GPU requires multiple GPUs for training.
+1.  **Significance (Quantitative):** Training memory cost is 4$\times$ the inference memory cost per parameter when using the Adaptive Moment Estimation (Adam) optimizer: a 7B-parameter model requires 14 GB (FP16 weights) + 14 GB (gradients) + 28 GB (Adam first and second moments in FP32) = 56 GB minimum, before accounting for activation storage. This 4$\times$ multiplier is the primary reason a model that runs inference on one GPU requires multiple GPUs for training.
 2.  **Distinction (Durable):** Unlike inference systems, which execute a single forward pass and discard intermediate activations, training systems must retain all intermediate activations from the forward pass for use during the backward pass, creating a memory footprint that grows linearly with model depth and batch size.
 3.  **Common Pitfall:** A frequent misconception is that training failures are compute problems. The most common training failure is out-of-memory (OOM) error, which is a memory management problem: the activation tensors from all $L$ layers accumulate during the forward pass and must coexist in GPU memory simultaneously, causing OOM before the first gradient is computed.
 
@@ -152,7 +152,7 @@ Each of these challenges opens a corresponding optimization pathway. Computation
 
 A training system is not a single loop; it is a **Staged System Pipeline**\index{Training Pipeline!staged system workflow}. To reach the "Titan" standard of efficiency, we must analyze training as a factory floor where four distinct stages coordinate to keep the ALUs busy:
 
-1.  **Data Loading & Preprocessing** (CPU/Storage): Fetching raw bits from NVMe, decoding, and augmenting on CPU cores.
+1.  **Data Loading & Preprocessing** (CPU/Storage): Fetching raw bits from Non-Volatile Memory Express (NVMe), decoding, and augmenting on CPU cores.
 2.  **Host-to-Device Transfer** (PCIe): Moving the processed batch over the **PCIe bus** into GPU memory via DMA.
 3.  **Forward/Backward Pass** (Accelerator): Propagating activations and gradients through layers on the GPU.
 4.  **Parameter Synchronization** (NVLink): Exchanging gradients between GPUs over **NVLink (900 GB/s)** in multi-GPU configurations to update weights.
@@ -169,7 +169,7 @@ Before formalizing the iron law, consider how these constraints interact in prac
 
 ::: {.callout-example title="The 3AM Gradient Explosion"}
 
-**The Scenario**: A team is training a 7B parameter LLM. The loss curve has been decreasing smoothly for four days. The engineers leave for the night.
+**The Scenario**: A team is training a 7B parameter large language model (LLM). The loss curve has been decreasing smoothly for four days. The engineers leave for the night.
 
 **The Failure**: At 3:00 AM, the training loss suddenly spikes from `{python} TrainingScenarios.loss_spike_val_str` to NaN (Not a Number). The training crashes. The team has lost `{python} TrainingScenarios.lost_days_str` days of compute ($\approx$ \$`{python} TrainingScenarios.lost_cost_str`).
 
@@ -341,18 +341,18 @@ These scaling challenges share a common thread: every bottleneck traces back to 
 
 ## Mathematical Foundations {#sec-model-training-mathematical-foundations-d894}
 
-\index{Training!mathematical foundations}\index{Training!computational cost}@sec-neural-computation established *what* neural network operations compute and *why* they enable learning. The question for a systems engineer is *what they cost*---the FLOPs consumed, the memory required, and the bandwidth demanded when these conceptually simple operations execute at scale. A matrix multiplication is just $C = AB$ in notation, but training GPT-2 requires executing that operation billions of times with matrices too large to fit in fast memory. The activation function $f(x) = \max(0, x)$ appears trivial, yet the choice between ReLU and sigmoid determines whether Tensor Cores can accelerate computation.
+\index{Training!mathematical foundations}\index{Training!computational cost}@sec-neural-computation established *what* neural network operations compute and *why* they enable learning. The question for a systems engineer is *what they cost*---the FLOPs consumed, the memory required, and the bandwidth demanded when these conceptually simple operations execute at scale. A matrix multiplication is just $C = AB$ in notation, but training GPT-2 requires executing that operation billions of times with matrices too large to fit in fast memory. The activation function $f(x) = \max(0, x)$ appears trivial, yet the choice between rectified linear unit (ReLU) and sigmoid determines whether Tensor Cores can accelerate computation.
 
 Four dimensions structure this cost analysis. First, FLOP counts of matrix operations that dominate training, accounting for 60--90 percent of training time [@he2016deep]. Second, memory requirements for storing activations and optimizer states simultaneously. Third, bandwidth demands that determine whether operations are compute bound or memory bound. Fourth, arithmetic intensity classifications that guide optimization strategy selection. Together, these dimensions provide the vocabulary for analyzing the computational intensity, memory pressure, and data dependencies introduced in @sec-model-training-training-systems-fundamentals-05d2.
 
 ### Neural network computation {#sec-model-training-neural-network-computation-5660}
 
 \index{Backpropagation!historical introduction}\index{BLAS!matrix computation foundation}
-Neural network training consists of repeated matrix operations and nonlinear transformations. These operations are conceptually simple but create the system-level challenges that dominate modern training infrastructure. The introduction of backpropagation[^fn-backprop-provenance] by @rumelhart1986learning and the development of efficient matrix computation libraries such as BLAS[^fn-blas-training] [@dongarra1988extended] laid the groundwork for modern training architectures.
+Neural network training consists of repeated matrix operations and nonlinear transformations. These operations are conceptually simple but create the system-level challenges that dominate modern training infrastructure. The introduction of backpropagation[^fn-backprop-provenance] by @rumelhart1986learning and the development of efficient matrix computation libraries such as Basic Linear Algebra Subprograms (BLAS)[^fn-blas-training] [@dongarra1988extended] laid the groundwork for modern training architectures.
 
-[^fn-backprop-provenance]: **Backpropagation Provenance**: The algorithm was independently derived by Linnainmaa (1970) for automatic differentiation of computer programs and by Werbos (1974) in a Harvard PhD thesis on economic modeling --- over a decade before Rumelhart, Hinton, and Williams popularized it for neural networks in 1986. This 12-year latency between derivation and adoption recurs in ML systems history: attention mechanisms were formalized in 1993 but required TPU-scale hardware to become the dominant architecture in 2017. Every modern framework's `backward()` call implements Linnainmaa's reverse-mode AD, not textbook chain rule --- the difference is that graph-reverse topological traversal enables parallel gradient computation across independent subgraphs. \index{Backpropagation!provenance}
+[^fn-backprop-provenance]: **Backpropagation Provenance**: The algorithm was independently derived by Linnainmaa (1970) for automatic differentiation of computer programs and by Werbos (1974) in a Harvard PhD thesis on economic modeling --- over a decade before Rumelhart, Hinton, and Williams popularized it for neural networks in 1986. This 12-year latency between derivation and adoption recurs in ML systems history: attention mechanisms were formalized in 1993 but required Tensor Processing Unit (TPU)-scale hardware to become the dominant architecture in 2017. Every modern framework's `backward()` call implements Linnainmaa's reverse-mode AD, not textbook chain rule --- the difference is that graph-reverse topological traversal enables parallel gradient computation across independent subgraphs. \index{Backpropagation!provenance}
 
-[^fn-blas-training]: **BLAS (Basic Linear Algebra Subprograms)**: Standardized by Lawson, Hanson, Kincaid, and Krogh in 1979, BLAS defines three levels: Level 1 (vector-vector, $O(n)$ work), Level 2 (matrix-vector, $O(n^2)$), and Level 3 (matrix-matrix, $O(n^3)$ work on $O(n^2)$ data). Training is dominated by Level 3 operations precisely because their high arithmetic intensity---$O(n)$ FLOPs per byte---saturates hardware compute units rather than starving on memory bandwidth. cuBLAS and oneDNN implement these as the kernel layer beneath every framework's matrix multiplication. \index{BLAS!training compute hierarchy}
+[^fn-blas-training]: **BLAS**: Standardized by Lawson, Hanson, Kincaid, and Krogh in 1979, BLAS defines three levels: Level 1 (vector-vector, $O(n)$ work), Level 2 (matrix-vector, $O(n^2)$), and Level 3 (matrix-matrix, $O(n^3)$ work on $O(n^2)$ data). Training is dominated by Level 3 operations precisely because their high arithmetic intensity---$O(n)$ FLOPs per byte---saturates hardware compute units rather than starving on memory bandwidth. cuBLAS and oneDNN implement these as the kernel layer beneath every framework's matrix multiplication. \index{BLAS!training compute hierarchy}
 
 #### Mathematical operations in neural networks {#sec-model-training-mathematical-operations-neural-networks-ddac}
 
@@ -372,7 +372,7 @@ Where:
 
 #### Matrix Operations {#sec-model-training-matrix-operations-1f21}
 
-@sec-neural-computation-matrix-multiplication-formulation-417c established that forward propagation reduces to chains of matrix multiplications, and @sec-network-architectures-core-computational-primitives-b853 catalogued the computational primitives---GEMM, convolution, and dynamic attention---that every architecture shares. Training amplifies these patterns: each operation executes not once but billions of times, and each forward pass is paired with a backward pass that roughly doubles the computational cost. Understanding which matrix operations dominate---and how their shapes change between forward and backward passes---reveals *why* specific system designs and optimizations emerged for training.
+@sec-neural-computation-matrix-multiplication-formulation-417c established that forward propagation reduces to chains of matrix multiplications, and @sec-network-architectures-core-computational-primitives-b853 catalogued the computational primitives---general matrix multiply (GEMM), convolution, and dynamic attention---that every architecture shares. Training amplifies these patterns: each operation executes not once but billions of times, and each forward pass is paired with a backward pass that roughly doubles the computational cost. Understanding which matrix operations dominate---and how their shapes change between forward and backward passes---reveals *why* specific system designs and optimizations emerged for training.
 
 \index{Matrix Multiplication!training operations}\index{Strassen's Algorithm!matrix multiplication}\index{cuBLAS!hardware-accelerated linear algebra}
 Matrix multiplication dominance has driven both algorithmic and hardware innovations. Early neural network implementations relied on standard CPU-based linear algebra libraries, but the scale of modern training demanded specialized optimizations. Strassen's algorithm[^fn-strassen-training] reduced the naive $O(n^3)$ complexity to approximately $O(n^{2.81})$ [@strassen1969gauss], and contemporary hardware-accelerated libraries like cuBLAS [@nvidia_cublas] continue pushing computational efficiency limits.
@@ -686,7 +686,7 @@ In production environments, modern hardware accelerators alter these relative ch
 
 In practice, ReLU is the default choice for large-scale networks due to its efficiency and scalability. Softmax remains indispensable for classification tasks requiring probabilistic outputs, despite its computational cost.
 
-Our GPT-2 Lighthouse Model illustrates these trade-offs through its choice of the *GPT-2 GELU activation function*.
+Our GPT-2 Lighthouse Model illustrates these trade-offs through its choice of the *GPT-2 Gaussian Error Linear Unit (GELU) activation function*.
 
 ```{python}
 #| label: gpt2-gelu-bridge
@@ -703,7 +703,7 @@ Our GPT-2 Lighthouse Model illustrates these trade-offs through its choice of th
 ::: {.callout-notebook title="GPT-2 GELU Activation Function"}
 
 \index{GELU!Gaussian Error Linear Unit}
-Beyond the foundational activation functions covered in @sec-neural-computation (Sigmoid, Tanh, ReLU), modern architectures increasingly adopt smoother alternatives. GPT-2 uses the Gaussian Error Linear Unit (GELU) [@hendrycks2016gaussian], defined as:
+Beyond the foundational activation functions covered in @sec-neural-computation (Sigmoid, Tanh, ReLU), modern architectures increasingly adopt smoother alternatives. GPT-2 uses the GELU [@hendrycks2016gaussian], defined as:
 $$
 \text{GELU}(x) = x \cdot \Phi(x) = x \cdot \frac{1}{2}\left[1 + \text{erf}\left(\frac{x}{\sqrt{2}}\right)\right]
 $$
@@ -2184,7 +2184,7 @@ where $F_{\text{access}} \approx 0.1$ for typical training workloads. Storage sy
 
 #### Preprocessing {#sec-model-training-preprocessing-523c}
 
-Once data arrives from storage, preprocessing transforms raw inputs into model-ready tensors. This process builds on the data pipeline patterns established in @sec-data-engineering, typically implemented through Extract-Load-Transform (ELT) pipelines where raw data is loaded first and transformed on-demand during training. Preprocessing throughput scales with parallelism, as expressed in @eq-preprocess-throughput:
+Once data arrives from storage, preprocessing transforms raw inputs into model-ready tensors. This process builds on the data pipeline patterns established in @sec-data-engineering, typically implemented through extract, load, transform (ELT) pipelines where raw data is loaded first and transformed on-demand during training. Preprocessing throughput scales with parallelism, as expressed in @eq-preprocess-throughput:
 
 $$R_{\text{preprocessing}} = \frac{N_{\text{workers}}}{t_{\text{transform}}}$$ {#eq-preprocess-throughput}
 
@@ -4346,7 +4346,7 @@ Subsequent versions have continued improving performance: Flash Attention two (2
 
 #### When to use Flash Attention {#sec-model-training-use-flash-attention-375d}
 
-Flash Attention should be considered the default attention implementation for transformer training. It is essential for any model with sequence lengths exceeding 512 tokens, and mandatory above 2,048 tokens where standard attention likely exhausts memory. Modern GPUs (A100, H100) with hardware support for fast SRAM benefit most. The returns diminish for sequence lengths below 512 tokens (where tiling overhead is not worthwhile), on pre-Volta GPU architectures without fast SRAM, and for non-attention architectures (CNNs, MLPs).
+Flash Attention should be considered the default attention implementation for transformer training. It is essential for any model with sequence lengths exceeding 512 tokens, and mandatory above 2,048 tokens where standard attention likely exhausts memory. Modern GPUs (A100, H100) with hardware support for fast SRAM benefit most. The returns diminish for sequence lengths below 512 tokens (where tiling overhead is not worthwhile), on pre-Volta GPU architectures without fast SRAM, and for non-attention architectures such as convolutional neural networks (CNNs) and multilayer perceptrons (MLPs).
 
 In practice, deep learning frameworks handle Flash Attention integration transparently. PyTorch 2.0+ automatically selects Flash Attention when available and appropriate. For optimal performance:
 
