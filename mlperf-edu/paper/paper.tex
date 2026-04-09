@@ -1,0 +1,89 @@
+\documentclass[sigconf]{acmart}
+
+\usepackage{booktabs} % For formal tables
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{hyperref}
+
+\begin{document}
+\title{MLPerf EDU: A Democratized Benchmarking Suite for Machine Learning Systems Education}
+
+\author{MLSys Education Working Group}
+\affiliation{%
+  \institution{Harvard University \& MLCommons}
+}
+
+\begin{abstract}
+As machine learning models grow in scale and complexity, the systems required to train and deploy them have become highly specialized. MLPerf has established itself as the industry-standard benchmark suite for measuring ML systems performance across training, inference, and tiny edge devices. However, the computational scale, massive datasets, and complex C++ harnesses required to run official MLPerf benchmarks make them inaccessible to students and educators. We introduce MLPerf EDU, an academically rigorous, scaled-down benchmarking suite designed specifically for teaching ML systems optimization. MLPerf EDU preserves the strict rules, architectural tracks (Training, Inference, Tiny), and LoadGen metrics (TTFT, TPOT, Poisson arrival) of the official suite, but maps them to pedagogical proxy workloads (e.g., NanoGPT, TinyLlama LoRA, Mini-DLRM) that run on consumer hardware in under 20 minutes. To solve the "hardware lottery" in grading, MLPerf EDU introduces a Roofline Hardware Normalizer that grades students on arithmetic intensity and hardware efficiency rather than raw latency. We demonstrate how this suite provides a cryptographically secure, out-of-the-box experience that bridges the gap between theoretical textbook concepts and authentic, industry-grade systems profiling.
+\end{abstract}
+
+\keywords{Machine Learning Systems, Benchmarking, Education, MLPerf, Roofline Model}
+
+\maketitle
+
+\section{Introduction}
+
+The explosion of machine learning (ML) applications has driven a parallel explosion in ML hardware architectures, compilation stacks, and deployment frameworks \cite{reddi2020mlperf}. To impose order on this chaotic ecosystem, the industry coalesced around MLPerf (now managed by the MLCommons consortium), establishing it as the definitive standard for measuring ML systems performance \cite{mattson2020mlperf}. MLPerf mandates strict rules: specific reference implementations, rigid dataset constraints, mathematically verified target quality (accuracy) metrics, and standardized measurement scenarios (e.g., Offline, Server, SingleStream). 
+
+However, the very rigor and scale that make MLPerf the gold standard in the industry render it largely hostile to educational environments. Running an official MLPerf Training benchmark for a Large Language Model (LLM) or Recommendation System (DLRM) requires enterprise-grade hardware clusters (e.g., 8x NVIDIA H100 nodes), terabytes of dataset storage, and complex containerized deployment scripts. Students learning ML systems (MLSys) cannot run these benchmarks on their laptops or free cloud tiers. 
+
+Consequently, professors are often forced to use ad-hoc, unstandardized homework assignments. Students learn to make toy models converge, but they rarely learn the *systems* aspect: how to identify I/O bottlenecks, how to maximize memory bandwidth, how to measure Joules per token, or how to implement continuous batching for latency constraints.
+
+\textbf{MLPerf EDU} solves this crisis. It is a completely open-source, mathematically rigorous educational suite that translates the core bottlenecks of production ML systems into pedagogical proxy workloads. 
+
+\section{Background and MLPerf Alignment}
+
+MLPerf evaluates systems across three primary divisions: Training, Inference, and TinyML. MLPerf EDU mirrors this taxonomy exactly, maintaining the pedagogical essence of each track while substituting massive datasets with "micro-shards."
+
+\subsection{Training: Time-to-Train}
+The MLPerf Training suite measures the wall-clock time required to train a model to a predefined target quality metric \cite{mattson2020mlperf}. MLPerf EDU adopts this paradigm entirely. Instead of measuring raw throughput (which can be "reward hacked" by sacrificing convergence), students are timed until their model hits a strict mathematical target (e.g., $75\%$ Top-1 Accuracy on CIFAR-100 or Perplexity $< 15.0$). 
+
+\subsection{Inference: LoadGen and Latency Bounds}
+The MLPerf Inference suite \cite{reddi2020mlperf} utilizes a C++ LoadGen to simulate real-world traffic. Systems are evaluated under specific constraints:
+\begin{itemize}
+    \item \textbf{Offline:} Bulk processing (maximizing throughput).
+    \item \textbf{Server:} Queries arrive via a Poisson distribution (testing queueing and latency tails).
+    \item \textbf{SingleStream:} One query at a time (minimizing raw latency).
+\end{itemize}
+MLPerf EDU implements a pure-Python, asynchronous \textit{LoadGenProxy} that mathematically replicates these traffic distributions without the GIL-locking overhead, allowing students to test KV-caching and batching strategies natively in Python.
+
+\subsection{Tiny: Extreme Constraints}
+The MLPerf Tiny suite \cite{banbury2021mlperf} targets microcontrollers with sub-milliwatt power and $<512$ KB RAM. MLPerf EDU replicates this by enforcing hard memory footprint constraints (e.g., $<100$ KB) on standard PyTorch models, forcing students to implement INT8 Post-Training Quantization (PTQ).
+
+\section{The MLPerf EDU Architecture}
+
+MLPerf EDU is not merely a collection of scripts; it is a strict benchmarking harness designed to prevent "reward hacking" and normalize grading across diverse student hardware.
+
+\subsection{The Hardware-Normalized Referee}
+The primary challenge in grading systems homework is the "hardware lottery"—a student with a modern desktop GPU will easily beat a student on an older laptop, regardless of code quality. 
+
+To solve this, the \texttt{mlperf\_edu.Referee} implements a dynamic \textbf{Roofline Hardware Normalizer}. At initialization, the harness runs a 5-second microbenchmark to measure the host machine's Peak Compute (TFLOPS) and Peak Memory Bandwidth (GB/s). The student's code is then evaluated based on its \textit{Arithmetic Intensity} against this specific Roofline curve. The final grade is an Efficiency Score (e.g., 85\% of theoretical peak), decoupling the grade from the raw hardware cost.
+
+\subsection{Anti-Cheating Cryptographic Receipts}
+Because students control the training loop, standard auto-graders are vulnerable to hardcoded accuracy spoofing or early clock stops. The MLPerf EDU Referee mitigates this by requiring the student to pass raw activation tensors to the `evaluate\_epoch` hook. The Referee calculates the accuracy internally. Upon successful convergence, it generates a cryptographically signed JSON receipt containing a nonce, a UTC timestamp, and a hardware fingerprint, rendering replay attacks in MOOC environments impossible.
+
+\section{Proxy Workloads and Bottlenecks}
+
+MLPerf EDU provides "Broken Baselines"—reference implementations that are mathematically correct but systemically flawed. Students use tools like PyTorch Profiler to locate and fix the bottlenecks.
+
+\begin{enumerate}
+    \item \textbf{Vision (ResNet-18):} Students must fix I/O bottlenecks by replacing \texttt{num\_workers=0} and implementing Automatic Mixed Precision (AMP).
+    \item \textbf{LLM Fine-Tuning (TinyLlama LoRA):} Students must implement Gradient Checkpointing and FlashAttention to prevent Out-Of-Memory (OOM) errors on a 16GB GPU constraint.
+    \item \textbf{Recommendation (Mini-DLRM):} The harness generates a synthetic Zipfian (power-law) distribution to simulate embedding table cache thrashing, forcing students to address memory bandwidth limits.
+    \item \textbf{LLM Inference (NanoGPT):} Students are tasked with implementing a KV-Cache to survive the Server scenario's Poisson arrival times and meet the Time-To-First-Token (TTFT) constraint.
+\end{enumerate}
+
+\section{Integration and Out-of-the-Box Execution}
+
+A core design principle of MLPerf EDU is the "zero-barrier" entry. The suite is packaged via PyPI. Executing \texttt{mlperf-edu setup --real} triggers a robust downloader that bypasses massive datasets by pulling 10MB "micro-shards" (with synthetic data generation fallbacks). 
+
+Furthermore, the suite features a \textit{TinyTorch Introspection Bridge}. For students building frameworks from scratch (e.g., the TinyTorch curriculum), the Referee hooks directly into the custom framework's operation listener, extracting real FLOP counts and memory bytes, connecting theoretical framework design to authentic systems profiling.
+
+\section{Conclusion}
+
+MLPerf EDU democratizes ML systems benchmarking. By shrinking the scale but preserving the architectural rigor, LoadGen metrics, and strict validation of the industry-standard MLPerf suite, we provide educators with a powerful, automated grading engine. Students no longer just read about performance; they iteratively profile, optimize, and prove their performance against a cryptographically secure, hardware-normalized referee.
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+
+\end{document}
