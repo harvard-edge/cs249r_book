@@ -433,7 +433,7 @@ function HomePage() {
       </div>
 
       {/* ─── Main ─── */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         <div className="flex-1 overflow-auto px-6 py-6">
           <div className="max-w-5xl mx-auto">
             {searchResults ? (
@@ -493,44 +493,44 @@ function HomePage() {
           </div>
         </div>
 
+        {/* Desktop detail drawer (right-anchored slide-over).
+            Positioned inside the main content flex container so it
+            naturally starts below the header/filter bar.
+            - Width reduced from 480px to 380px so the main track grid
+              stays readable even on a 13" display.
+            - Backdrop scrim removed (was bg-black/30). A transparent
+              click-catcher stays in place so clicking outside still
+              closes the drawer, but the grid is no longer dimmed.
+            - j/k (and ArrowDown/ArrowUp) sweep between topics without
+              closing the drawer — see the keyboard effect above. */}
+        <AnimatePresence>
+          {selectedTopic && selectedStyle && (
+            <div className="hidden lg:block">
+              {/* Transparent click-catcher — closes the drawer on outside
+                  click without visually dimming the grid. */}
+              <div
+                key="desktop-catcher"
+                className="absolute inset-0 z-40"
+                onClick={() => setSelectedTopic(null)}
+                aria-hidden="true"
+              />
+              <motion.div
+                key="desktop-drawer"
+                initial={{ x: "100%" }}
+                animate={{ x: 0 }}
+                exit={{ x: "100%" }}
+                transition={{ type: "spring", damping: 32, stiffness: 320 }}
+                className="absolute top-0 right-4 z-50 w-[380px] max-w-[92vw] max-h-[calc(100%-1rem)] mt-2 border border-border bg-background shadow-2xl rounded-xl overflow-hidden"
+              >
+                <TopicDetail topic={selectedTopic}
+                  areaName={selectedArea?.name || ""} style={selectedStyle}
+                  selectedTrack={selectedTrack}
+                  onClose={() => setSelectedTopic(null)} />
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </div>
-
-      {/* Desktop detail drawer (right-anchored slide-over).
-          Design decisions for the polish pass:
-          - Width reduced from 480px to 380px so the main track grid
-            stays readable even on a 13" display.
-          - Backdrop scrim removed (was bg-black/30). A transparent
-            click-catcher stays in place so clicking outside still
-            closes the drawer, but the grid is no longer dimmed.
-          - j/k (and ArrowDown/ArrowUp) sweep between topics without
-            closing the drawer — see the keyboard effect above. */}
-      <AnimatePresence>
-        {selectedTopic && selectedStyle && (
-          <div className="hidden lg:block">
-            {/* Transparent click-catcher — closes the drawer on outside
-                click without visually dimming the grid. */}
-            <div
-              key="desktop-catcher"
-              className="fixed inset-0 z-40"
-              onClick={() => setSelectedTopic(null)}
-              aria-hidden="true"
-            />
-            <motion.div
-              key="desktop-drawer"
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 32, stiffness: 320 }}
-              className="fixed top-14 right-4 z-50 w-[380px] max-w-[92vw] max-h-[calc(100dvh-5rem)] border border-border bg-background shadow-2xl rounded-xl overflow-hidden"
-            >
-              <TopicDetail topic={selectedTopic}
-                areaName={selectedArea?.name || ""} style={selectedStyle}
-                selectedTrack={selectedTrack}
-                onClose={() => setSelectedTopic(null)} />
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Mobile detail sheet + backdrop */}
       <AnimatePresence>
