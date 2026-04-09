@@ -521,7 +521,7 @@ function HomePage() {
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 32, stiffness: 320 }}
-              className="fixed top-0 right-0 bottom-0 z-50 w-[380px] max-w-[92vw] border-l border-border bg-background shadow-2xl"
+              className="fixed top-14 right-4 z-50 w-[380px] max-w-[92vw] max-h-[calc(100dvh-5rem)] border border-border bg-background shadow-2xl rounded-xl overflow-hidden"
             >
               <TopicDetail topic={selectedTopic}
                 areaName={selectedArea?.name || ""} style={selectedStyle}
