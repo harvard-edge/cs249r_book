@@ -1,6 +1,8 @@
 import marimo
 
-__generated_with = "0.19.6"
+from mlsysim import Hardware
+
+__generated_with = "0.23.0"
 app = marimo.App(width="full")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -59,12 +61,12 @@ async def _():
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         await ledger.load_async()
-    return mo, ledger, COLORS, LAB_CSS, DecisionLog
+    return COLORS, DecisionLog, LAB_CSS, ledger, mo
 
 
 # ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
 @app.cell
-def _(mo, LAB_CSS):
+def _(LAB_CSS, mo):
     mo.vstack([
         LAB_CSS,
         mo.md("""
@@ -109,7 +111,7 @@ def _(mo, LAB_CSS):
 
 # ─── CELL 2: BRIEFING ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, COLORS):
+def _(COLORS, mo):
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
@@ -247,15 +249,15 @@ def _(mo):
             "D)  The dataset size — gathering more labeled training examples": "D",
         },
         label="""**Check your understanding.** A startup ships a model with 94% accuracy.
-Six months later, accuracy has silently dropped to 81% in production — but no code
-has changed. As an ML Systems engineer, which part of the system is your *primary*
-domain for diagnosing and fixing this?""",
+    Six months later, accuracy has silently dropped to 81% in production — but no code
+    has changed. As an ML Systems engineer, which part of the system is your *primary*
+    domain for diagnosing and fixing this?""",
     )
     return (check1,)
 
 
 @app.cell
-def _(mo, check1):
+def _(check1, mo):
     mo.stop(
         check1.value is None,
         mo.vstack([
@@ -309,7 +311,7 @@ def _(mo, check1):
 # ─── CONCEPT 2: PHYSICAL CONSTRAINTS PARTITION DEPLOYMENT ─────────────────────
 
 @app.cell
-def _(mo, check1):
+def _(check1, mo):
     mo.stop(check1.value is None)
 
     mo.vstack([
@@ -384,47 +386,78 @@ def _(mo, check1):
 # ─── CHECK 2 (multi-select) ────────────────────────────────────────────────────
 
 @app.cell
-def _(mo, check1):
+def _(check1, mo):
     mo.stop(check1.value is None)
 
-    check2 = mo.ui.multiselect(
-        options={
-            "Use a smaller model with fewer parameters":   "model_size",
-            "Apply INT8 quantization to reduce precision": "quantization",
-            "Move the datacenter server physically closer": "move_server",
-            "Use a faster GPU with higher TFLOPS":         "faster_gpu",
-            "Deploy the model directly on the vehicle":    "edge_deploy",
-        },
-        label="""**Check your understanding.** An autonomous vehicle perception system
-is routed to a cloud datacenter 2,000 km away. Round-trip latency is 40 ms.
-The safety requirement is a 10 ms end-to-end decision loop.
-
-Select **all approaches** that could actually solve the latency problem:""",
+    model_size = mo.ui.checkbox(
+        value=False,
+        label="Use a smaller model with fewer parameters"
     )
-    return (check2,)
+
+    quantization = mo.ui.checkbox(
+        value=False,
+        label="Apply INT8 quantization to reduce precision"
+    )
+
+    move_server = mo.ui.checkbox(
+        value=False,
+        label="Move the datacenter server physically closer"
+    )
+
+    faster_gpu = mo.ui.checkbox(
+        value=False,
+        label="Use a faster GPU with higher TFLOPS"
+    )
+
+    edge_deploy = mo.ui.checkbox(
+        value=False,
+        label="Deploy the model directly on the vehicle"
+    )
+
+    mo.vstack([
+        mo.md("""**Check your understanding.** An autonomous vehicle perception system
+    is routed to a cloud datacenter 2,000 km away. Round-trip latency is 40 ms.
+    The safety requirement is a 10 ms end-to-end decision loop."""),
+
+        mo.md("""Select **all approaches** that could actually solve the latency problem:"""),
+        model_size,
+        quantization,
+        move_server,
+        faster_gpu,
+        edge_deploy
+    ])
+    return edge_deploy, faster_gpu, model_size, move_server, quantization
 
 
 @app.cell
-def _(mo, check1, check2):
-    mo.stop(check1.value is None or len(check2.value) == 0)
+def _(
+    check1,
+    check2empty,
+    edge_deploy,
+    faster_gpu,
+    mo,
+    model_size,
+    move_server,
+    quantization,
+):
+    mo.stop(check1.value is None or check2empty())
 
-    _correct_set = {"move_server", "edge_deploy"}
-    _selected = set(check2.value)
-    _exactly_right = _selected == _correct_set
-    _has_wrong     = bool(_selected - _correct_set)
-    _missing_right = bool(_correct_set - _selected)
+    _correct_set = {'move_server', 'edge_deploy'}
+    _has_wrong     = model_size.value or quantization.value or faster_gpu.value
+    _missing_right = not (move_server.value and edge_deploy.value)
+    _exactly_right = move_server.value and edge_deploy.value and not _has_wrong
 
     _option_labels = {
-        "model_size":   "Use a smaller model",
-        "quantization": "Apply INT8 quantization",
-        "move_server":  "Move the server physically closer",
-        "faster_gpu":   "Use a faster GPU",
-        "edge_deploy":  "Deploy on the vehicle",
+        'model_size':   "Use a smaller model",
+        'quantization': "Apply INT8 quantization",
+        'move_server':  "Move the server physically closer",
+        'faster_gpu':   "Use a faster GPU",
+        'edge_deploy':  "Deploy on the vehicle",
     }
 
     _rows = ""
     for _key, _label in _option_labels.items():
-        _is_selected = _key in _selected
+        _is_selected = locals()[_key].value
         _is_correct  = _key in _correct_set
         if _is_selected and _is_correct:
             _icon, _bg, _col = "✅", "#f0fdf4", "#15803d"
@@ -468,7 +501,6 @@ def _(mo, check1, check2):
     _bg_outer = "#f0fdf4" if _exactly_right else ("#fffbeb" if not _has_wrong else "#fef2f2")
 
     mo.vstack([
-        check2,
         mo.Html(f"""
         <div style="background:{_bg_outer}; border:1.5px solid {_border};
                     border-radius:10px; padding:18px 20px; margin-top:8px;">
@@ -487,17 +519,17 @@ def _(mo, check1, check2):
         ), kind="danger"),
         mo.accordion({
             "Math Peek: Propagation Delay": mo.md("""
-**Formula:**
-$$
-t_{\\text{round-trip}} = \\frac{2d}{c \\cdot n}
-$$
+    **Formula:**
+    $$
+    t_{\\text{round-trip}} = \\frac{2d}{c \\cdot n}
+    $$
 
-**Variables:**
-- **d**: distance between client and server (km)
-- **c**: speed of light in vacuum (299,792 km/s)
-- **n**: fiber refractive index factor (~0.67)
-- At d = 2,000 km: t = 2 × 2,000 / (299,792 × 0.67) ≈ 20 ms — exceeds 10 ms SLA by 2x
-""")
+    **Variables:**
+    - **d**: distance between client and server (km)
+    - **c**: speed of light in vacuum (299,792 km/s)
+    - **n**: fiber refractive index factor (~0.67)
+    - At d = 2,000 km: t = 2 × 2,000 / (299,792 × 0.67) ≈ 20 ms — exceeds 10 ms SLA by 2x
+    """)
         }),
     ])
     return
@@ -506,8 +538,8 @@ $$
 # ─── CONCEPT 3: THE DEPLOYMENT REGIMES ────────────────────────────────────────
 
 @app.cell
-def _(mo, check1, check2):
-    mo.stop(check1.value is None or len(check2.value) == 0)
+def _(check1, check2empty, mo):
+    mo.stop(check1.value is None or check2empty())
 
     mo.vstack([
         mo.md("---"),
@@ -628,8 +660,8 @@ def _(mo, check1, check2):
 # ─── CHECK 3 (constraint reasoning) ───────────────────────────────────────────
 
 @app.cell
-def _(mo, check1, check2):
-    mo.stop(check1.value is None or len(check2.value) == 0)
+def _(check1, check2empty, mo):
+    mo.stop(check1.value is None or check2empty())
 
     check3 = mo.ui.radio(
         options={
@@ -639,18 +671,22 @@ def _(mo, check1, check2):
             "D)  TinyML — lowest power, can run for months on a battery": "D",
         },
         label="""**Check your understanding.** A hospital wants to deploy an AI system
-that detects sepsis from ICU sensor readings. Requirements: results within 2 ms of
-each sensor reading, no patient data can leave the hospital network, and the sensor
-node must run for 6 months on a small battery without replacement.
+    that detects sepsis from ICU sensor readings. Requirements: results within 2 ms of
+    each sensor reading, no patient data can leave the hospital network, and the sensor
+    node must run for 6 months on a small battery without replacement.
 
-Which deployment paradigm is the *only* one that satisfies all three requirements simultaneously?""",
+    Which deployment paradigm is the *only* one that satisfies all three requirements simultaneously?""",
     )
+
+    mo.vstack([
+        check3,
+    ])
     return (check3,)
 
 
 @app.cell
-def _(mo, check1, check2, check3):
-    mo.stop(check1.value is None or len(check2.value) == 0 or check3.value is None)
+def _(check1, check2empty, check3, mo):
+    mo.stop(check1.value is None or check2empty() or check3.value is None)
 
     _correct = check3.value == "D"
     _feedback = {
@@ -683,7 +719,6 @@ def _(mo, check1, check2, check3):
     }
 
     mo.vstack([
-        check3,
         mo.callout(
             mo.md(_feedback[check3.value]),
             kind="success" if _correct else "warn",
@@ -701,8 +736,8 @@ def _(mo, check1, check2, check3):
 # ─── INTERFACE ORIENTATION INTRO ───────────────────────────────────────────────
 
 @app.cell
-def _(mo, check1, check2, check3):
-    mo.stop(check1.value is None or len(check2.value) == 0 or check3.value is None)
+def _(check1, check2empty, check3, mo):
+    mo.stop(check1.value is None or check2empty() or check3.value is None)
 
     mo.vstack([
         mo.md("---"),
@@ -721,8 +756,8 @@ def _(mo, check1, check2, check3):
 
 
 @app.cell
-def _(mo, check1, check2, check3, COLORS):
-    mo.stop(check1.value is None or len(check2.value) == 0 or check3.value is None)
+def _(COLORS, check1, check2empty, check3, mo):
+    mo.stop(check1.value is None or check2empty() or check3.value is None)
 
     # ── ZONE ANATOMY DIAGRAM ─────────────────────────────────────────
     _zone_html = """
@@ -953,9 +988,9 @@ def _(mo, check1, check2, check3, COLORS):
 # ─── DEPLOYMENT CONTEXT SELECTION ─────────────────────────────────────────────
 
 @app.cell
-def _(mo, check1, check2, check3):
+def _(check1, check2empty, check3, mo):
     mo.stop(
-        check1.value is None or len(check2.value) == 0 or check3.value is None,
+        check1.value is None or check2empty() or check3.value is None,
         mo.md("_Complete all three checks above to unlock your deployment context selection._")
     )
 
@@ -978,8 +1013,8 @@ def _(mo, check1, check2, check3):
 
 
 @app.cell
-def _(mo, check1, check2, check3):
-    mo.stop(check1.value is None or len(check2.value) == 0 or check3.value is None)
+def _(check1, check2empty, check3, mo):
+    mo.stop(check1.value is None or check2empty() or check3.value is None)
 
     context_selector = mo.ui.radio(
         options={
@@ -996,16 +1031,26 @@ def _(mo, check1, check2, check3):
 # ─── CONTEXT REVEAL + STAKEHOLDER MESSAGE + LEDGER INIT ───────────────────────
 
 @app.cell(hide_code=True)
-def _(mo, DecisionLog):
+def _(DecisionLog):
     decision_input, decision_ui = DecisionLog()
-    return decision_input, decision_ui
+    return (decision_ui,)
 
 
 @app.cell
-def _(mo, check1, check2, check3, context_selector, ledger, COLORS, decision_input, decision_ui):
+def _(
+    COLORS,
+    check1,
+    check2empty,
+    check2value_list,
+    check3,
+    context_selector,
+    decision_ui,
+    ledger,
+    mo,
+):
     mo.stop(
         check1.value is None
-        or len(check2.value) == 0
+        or check2empty()
         or check3.value is None
         or context_selector.value is None,
         mo.vstack([
@@ -1121,7 +1166,7 @@ def _(mo, check1, check2, check3, context_selector, ledger, COLORS, decision_inp
         "deployment_context": _key,
         "check1_answer":      check1.value,
         "check1_correct":     check1.value == "C",
-        "check2_selections":  list(check2.value),
+        "check2_selections":  check2value_list(),
         "check3_answer":      check3.value,
         "check3_correct":     check3.value == "D",
     })
@@ -1200,7 +1245,7 @@ def _(mo, check1, check2, check3, context_selector, ledger, COLORS, decision_inp
 
 # ─── CELL 20: SYNTHESIS ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, COLORS):
+def _(COLORS, mo):
     mo.vstack([
         mo.md("---"),
 
@@ -1291,7 +1336,7 @@ def _(mo, COLORS):
 
 # ─── CELL 21: LEDGER_HUD ───────────────────────────────────────────────────────
 @app.cell
-def _(mo, ledger, COLORS):
+def _(COLORS, ledger, mo):
     _track   = ledger.get_track() or "NONE"
     _color_map = {
         "cloud":  COLORS["BlueLine"],
@@ -1324,6 +1369,23 @@ def _(mo, ledger, COLORS):
     </div>
     """)
     return
+
+# --- Auxiliary methods ---------------------------------------------------------
+@app.cell
+def _(edge_deploy, faster_gpu, model_size, move_server, quantization):
+    def check2empty():
+        return not (model_size.value or quantization.value or move_server.value or faster_gpu.value or edge_deploy.value)
+
+    def check2value_list():
+        check2values = []
+        # have to use items directly here for dependency evaluation
+        if (model_size.value or quantization.value or move_server.value or faster_gpu.value or edge_deploy.value):
+            for item in ['model_size', 'quantization', 'move_server' ,'faster_gpu', 'edge_deploy']:
+                if globals()[item].value:
+                    check2values.append(item)
+        return check2values
+
+    return check2empty, check2value_list
 
 
 if __name__ == "__main__":
