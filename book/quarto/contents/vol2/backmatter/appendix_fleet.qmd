@@ -213,15 +213,15 @@ This appendix is designed as a reference. When you encounter a fleet-scale desig
 
 Machine learning infrastructure at scale inherits design DNA from two distinct computing lineages---and then breaks the assumptions of both. Understanding where ML systems borrow from High-Performance Computing (HPC) and where they borrow from Warehouse-Scale Computing (WSC) is essential for choosing the right design trade-offs. A system architect who treats ML training as "just HPC" will build infrastructure that cannot tolerate failures. One who treats it as "just web services" will build infrastructure that cannot sustain the tight coupling that synchronous training demands.
 
-### High-Performance Computing {.unnumbered}
+### High-performance computing {.unnumbered}
 
 HPC systems descend from the supercomputer tradition. Their design philosophy is to maximize FLOPs per second on tightly coupled simulations---weather modeling, molecular dynamics, nuclear physics. Every node matters: they use specialized interconnects (InfiniBand), low-latency fabrics, and homogeneous hardware. Fault tolerance follows the **checkpoint/restart** model: if one node fails, the entire job stops, rolls back to the last checkpoint, and restarts from scratch. Scheduling is batch-oriented (Slurm), with jobs requesting rigid resource shapes ("512 nodes for 24 hours"). Nodes are *pets*---individually important, individually tracked.
 
-### Warehouse-Scale Computing {.unnumbered}
+### Warehouse-scale computing {.unnumbered}
 
 WSC systems descend from the web services tradition. Their design philosophy is to maximize queries per second across loosely coupled services---search, email, social media. Hardware is commodity Ethernet, varying generations coexist, and nodes are heterogeneous. Fault tolerance follows the **redundancy** model: if one node fails, the load balancer reroutes traffic to another replica. The user never notices. Scheduling is dynamic (Kubernetes, Borg), with elastic bin-packing. Nodes are *cattle*---interchangeable and expendable.
 
-### The ML Fleet: A Hybrid Architecture {.unnumbered}
+### The ML fleet: a hybrid architecture {.unnumbered}
 
 ML systems require the computational throughput of HPC (to train massive models with synchronous gradient updates) but must operate at the scale and unreliability of WSC (thousands of accelerators running for weeks). This creates a hybrid that borrows selectively from both traditions.
 
@@ -242,14 +242,14 @@ Training workloads are synchronous and bandwidth-hungry like HPC, but long-runni
 
 : **Three System Paradigms**: ML fleets inherit design DNA from both HPC and WSC but break assumptions of each. Training resembles HPC (tight coupling), inference resembles WSC (elastic serving), and fault tolerance is a hybrid of both. {#tbl-fleet-paradigm-comparison}
 
-### Foundations Recap {.unnumbered}
+### Foundations recap {.unnumbered}
 
 The following provides a compact reference for the key foundational ideas that reappear throughout the distributed systems chapters.
 
 - **The Iron Law** ($T \approx D_{\text{vol}}/BW + O/(R_{\text{peak}} \cdot \eta) + L_{\text{lat}}$): Performance is bounded by data movement or compute. At fleet scale, the data movement term expands to include inter-node communication, not just memory bandwidth.
 - **Roofline Model**: Distinguishes compute-bound from memory-bound workloads using arithmetic intensity. At fleet scale, a third ceiling appears: **network-bound** workloads whose performance is limited by inter-node bandwidth.
 - **Amdahl's Law**: Caps strong-scaling speedup at $1/s$. At fleet scale, the "serial fraction" includes not just sequential code but also synchronization barriers, collective communication, and pipeline bubbles.
-- **Training memory rule**: 16 bytes per parameter for mixed-precision Adam training. At fleet scale, this determines how model state is partitioned across nodes (ZeRO, tensor parallelism, pipeline parallelism).
+- **Training memory rule**: 16 bytes per parameter for mixed-precision Adaptive Moment Estimation (Adam) training. At fleet scale, this determines how model state is partitioned across nodes (ZeRO, tensor parallelism, pipeline parallelism).
 - **Little's Law** ($L = \lambda W$): Sizes inference infrastructure. At fleet scale, it determines how many serving replicas are needed behind a load balancer.
 
 The transition from single-machine to fleet-scale reasoning requires extending these models with new dimensions: network topology, failure probability, and coordination overhead. The numbers in the next section provide the quantitative foundation for that extension.
@@ -271,7 +271,7 @@ If you memorize nothing else from this section, memorize these:
 
 2. **MTBF scales as $1/N$**: A cluster's mean time between failures is the single-component MTBF divided by the number of components. At `{python} fmt(FF.cl_mega, precision=0)` GPUs, expect a failure every `{python} fmt(FF.mtbf_100k_min, precision=0)` minutes.
 
-3. **~`{python} fmt_percent(FF.eff_fraction)`% effective utilization**: After MFU, scaling efficiency, and overhead losses compound, a 1,024-GPU cluster delivers roughly `{python} fmt_percent(FF.eff_fraction)`% of its peak FLOPS as useful training work.
+3. **~`{python} fmt_percent(FF.eff_fraction)` percent effective utilization**: After MFU, scaling efficiency, and overhead losses compound, a 1,024-GPU cluster delivers roughly `{python} fmt_percent(FF.eff_fraction)` percent of its peak FLOPS as useful training work.
 :::
 
 Quick reference --- @tbl-fleet-numbers-quick-ref condenses the numbers below into one place. Use it for back-of-envelope checks; use the detailed tables in each subsection when designing or debugging.
@@ -324,17 +324,17 @@ class FleetQuickRef:
 
 : **Numbers every fleet engineer should know (quick reference)**: One-page summary of the fleet-scale reference numbers in this section. See the detailed Communication, Computation, and Coordination tables below for full context. {#tbl-fleet-numbers-quick-ref}
 
-### The Invariants: Ratios That Will Not Change {.unnumbered}
+### The invariants: ratios that will not change {.unnumbered}
 
 These relationships are governed by physics or architecture---they will still be true in 2035.
 
-#### Network Hierarchy Ratio {.unnumbered}
+#### Network hierarchy ratio {.unnumbered}
 
 The bandwidth gap between intra-node and inter-node communication is an architectural invariant. Chip-to-chip links (NVLink, ICI) connect through short, wide, dedicated paths on a shared substrate. Inter-node links (InfiniBand, Ethernet) must traverse cables, switches, and protocol stacks. This structural difference guarantees that intra-node bandwidth will always be an order of magnitude higher than inter-node bandwidth.
 
 Currently, NVLink 4.0 provides `{python} FF.nvlink_to_ib`$\times$ more bandwidth than InfiniBand NDR. Even as both technologies improve, the ratio persists because both are constrained by the same physics: signaling rates, lane counts, and connector density. This ratio is the single most important number for parallelism strategy: any operation requiring more bandwidth than the inter-node link can provide must be confined within a single node.
 
-#### Failure Scaling Law {.unnumbered}
+#### Failure scaling law {.unnumbered}
 
 For $N$ independent components, each with mean time to failure $\text{MTTF}$, the cluster MTBF is:
 
@@ -342,11 +342,11 @@ $$ \text{MTBF}_{\text{cluster}} = \frac{\text{MTTF}_{\text{component}}}{N} $$ {#
 
 This is pure arithmetic, not an approximation. Doubling the cluster size halves the time between failures. At `{python} fmt(FF.cl_mega, precision=0)` GPUs with a `{python} fmt(GPU_MTTF_HOURS, precision=0)`-hour per-GPU MTTF, the cluster experiences a GPU failure every `{python} fmt(FF.mtbf_100k_min, precision=0)` minutes. No fault tolerance strategy can avoid this---the question is how quickly the system recovers.
 
-#### AllReduce Overhead Scaling {.unnumbered}
+#### AllReduce overhead scaling {.unnumbered}
 
 The bandwidth-optimal Ring AllReduce algorithm transfers $2(N-1)/N \times M$ bytes, where $M$ is the message size and $N$ is the number of participants. As $N$ grows large, this approaches $2M$---the total bytes transferred is nearly independent of the number of GPUs. This is why Ring AllReduce scales well in the bandwidth term. The latency term, however, grows as $2(N-1) \times \alpha$, making latency the bottleneck for small messages on large rings. This tradeoff motivates hierarchical AllReduce strategies that use Ring AllReduce within nodes and Tree AllReduce across nodes.
 
-### Communication Numbers {.unnumbered}
+### Communication numbers {.unnumbered}
 
 Communication defines the boundaries of parallelism. These tables quantify the bandwidth and latency at each tier of the network hierarchy, from the fastest intra-node links to the slowest wide-area connections. The key question for any distributed ML operation is: *which tier of the network hierarchy does this communication cross?*
 
@@ -415,11 +415,11 @@ class FleetCommNumbers:
 
 : **Communication Latency Hierarchy**: Latency determines whether synchronous training is feasible. TCP/IP is roughly 10$\times$ slower than InfiniBand NDR, making it unsuitable for gradient synchronization in large clusters. {#tbl-fleet-latency-hierarchy}
 
-### Computation Numbers {.unnumbered}
+### Computation numbers {.unnumbered}
 
 Raw peak FLOPS are a necessary but misleading metric for fleet capacity planning. Two multiplicative losses---Model FLOPS Utilization (MFU) and scaling efficiency---reduce effective throughput dramatically. Understanding these losses transforms fleet sizing from guesswork into engineering.
 
-Model FLOPS Utilization (MFU) measures what fraction of peak FLOPS a training workload actually achieves. Well-optimized large-model training on current hardware achieves `{python} FF.mfu_low`--`{python} FF.mfu_high`% MFU. The gap comes from memory stalls, kernel launch overhead, pipeline bubbles, and suboptimal operator fusion. MFU below `{python} FF.mfu_low`% signals optimization opportunities; MFU above `{python} FF.mfu_high`% indicates excellent hardware utilization.
+Model FLOPS Utilization (MFU) measures what fraction of peak FLOPS a training workload actually achieves. Well-optimized large-model training on current hardware achieves `{python} FF.mfu_low`--`{python} FF.mfu_high` percent MFU. The gap comes from memory stalls, kernel launch overhead, pipeline bubbles, and suboptimal operator fusion. MFU below `{python} FF.mfu_low` percent signals optimization opportunities; MFU above `{python} FF.mfu_high` percent indicates excellent hardware utilization.
 
 Scaling efficiency ($\eta$) measures how much useful computation survives as you add more accelerators. @tbl-fleet-scaling-efficiency shows the empirical ranges for well-optimized distributed training.
 
@@ -432,11 +432,11 @@ Scaling efficiency ($\eta$) measures how much useful computation survives as you
 
 : **Scaling Efficiency by Cluster Size**: Efficiency degrades roughly as the logarithm of cluster size. These ranges assume well-optimized data parallelism with gradient compression. Poorly optimized systems can lose 2--3$\times$ more. {#tbl-fleet-scaling-efficiency}
 
-### Coordination Numbers {.unnumbered}
+### Coordination numbers {.unnumbered}
 
 At fleet scale, coordination---failure recovery, checkpointing, and maintenance---consumes a measurable fraction of wall-clock time. These numbers quantify the costs of keeping a large cluster running.
 
-#### Failure Rates by Cluster Size {.unnumbered}
+#### Failure rates by cluster size {.unnumbered}
 
 @tbl-fleet-mtbf shows how cluster MTBF shrinks with scale, using a per-GPU MTTF of `{python} fmt(GPU_MTTF_HOURS, precision=0)` hours (~5.7 years). The failure probability column shows the likelihood of at least one GPU failure during a 24-hour training window.
 
@@ -485,7 +485,7 @@ class FleetMtbfTable:
 
 The key takeaway: at 8,192 GPUs and above, failure is not a risk---it is a certainty within any training run longer than a few hours. Fault tolerance is not optional at fleet scale; it is a prerequisite for completing any training job. @sec-fault-tolerance-reliability covers the mechanisms in detail.
 
-#### Checkpoint Sizes {.unnumbered}
+#### Checkpoint sizes {.unnumbered}
 
 Checkpointing is the primary recovery mechanism, and its cost depends on the model size. @tbl-fleet-checkpoint-sizes shows checkpoint sizes for mixed-precision Adam training (16 bytes per parameter: 2B for BF16 weights, 2B for gradients, 12B for FP32 master weights + momentum + variance).
 
@@ -522,7 +522,7 @@ class FleetCheckpointSizes:
 
 : **Checkpoint Sizes by Model Scale**: Uses 16 bytes/parameter (mixed-precision Adam). Write time assumes 100 GB/s aggregate storage bandwidth. Asynchronous checkpointing (@sec-fault-tolerance-reliability) can overlap writes with training, reducing the visible overhead. {#tbl-fleet-checkpoint-sizes}
 
-#### Overhead Budgets {.unnumbered}
+#### Overhead budgets {.unnumbered}
 
 As @tbl-fleet-overhead-budgets shows, at fleet scale, four categories of overhead consume wall-clock time that is not spent on useful training:
 
@@ -535,7 +535,7 @@ As @tbl-fleet-overhead-budgets shows, at fleet scale, four categories of overhea
 
 : **Overhead Budgets for Fleet-Scale Training**: These are fractions of wall-clock time. At 10,000+ GPUs, failure recovery dominates. The compound effect is multiplicative: total goodput ratio $\approx (1 - 0.05)(1 - 0.03)(1 - 0.10)(1 - 0.05) \approx 77$%. {#tbl-fleet-overhead-budgets}
 
-#### Power and Sustainability Numbers {.unnumbered}
+#### Power and sustainability numbers {.unnumbered}
 
 Fleet-scale capacity planning and sustainability reporting require a few power numbers that every fleet engineer should know. At fleet scale, the critical numbers are **rack power density**, **PUE**, and the **air-cooling limit**---they determine where you can build and what your facility load will be.
 
@@ -552,7 +552,7 @@ Fleet-scale capacity planning and sustainability reporting require a few power n
 
 Rule of thumb: **IT load (MW) = (number of GPUs × TDP per GPU) / 10⁶**; **facility load = IT load × PUE**. A 10,000-GPU H100 cluster at 700 W each is 7 MW IT; at PUE 1.4 that is 9.8 MW facility draw. For carbon and cost, see @sec-fleet-foundations-thermal-power and @sec-sustainable-ai.
 
-### Current Hardware Reference (c. 2024--2025) {.unnumbered}
+### Current hardware reference (c. 2024--2025) {.unnumbered}
 
 These numbers reflect the current generation of fleet-scale hardware. Use them for back-of-envelope calculations, but expect them to improve ~2$\times$ every 2--3 years.
 
@@ -603,7 +603,7 @@ class FleetHardwareRef:
 | **Intra-Node Link**  | 1,800 GB/s (NVLink 5.0)                       | ~890 GB/s (Infinity Fab)                        | ~2,000 GB/s (estimated)                        |
 | **TDP**              | `{python} FleetHardwareRef.b200_tdp` W        | `{python} FleetHardwareRef.mi300x_tdp` W        | ~600 W (estimated)                             |
 
-: **Fleet-Scale Hardware Reference (c. 2025--2026)**: Per-accelerator specifications for the current and emerging generations. The B200, MI300X, and TPU v6 (Trillium) represent the frontier of fleet-scale compute density and memory bandwidth. {#tbl-fleet-hardware-ref}
+: **Fleet-Scale Hardware Reference (c. 2025--2026)**: Per-accelerator specifications for the current and emerging generations. The B200, MI300X, and Tensor Processing Unit (TPU) v6 (Trillium) represent the frontier of fleet-scale compute density and memory bandwidth. {#tbl-fleet-hardware-ref}
 
 As @tbl-fleet-hardware-ref summarizes, a DGX H100 SuperPOD contains 32 DGX H100 nodes (256 H100 GPUs). Meta's Grand Teton cluster deployed 16,384 H100 GPUs. Google's TPU v5p pods scale to 8,960 chips. The largest announced clusters (as of 2025) exceed 100,000 accelerators.
 
@@ -617,7 +617,7 @@ The numbers in the previous section describe *what* the hardware can do. Scaling
 You have provisioned 4,096 GPUs for a training job, but your throughput is only 2.5$\times$ better than a 1,024-GPU run. Is this expected? Scaling physics gives you the diagnostic tools to determine whether your system is performing as physics allows or whether there is an engineering problem to fix.
 :::
 
-### Amdahl's Law at Fleet Scale {#sec-fleet-foundations-amdahls-fleet}
+### Amdahl's Law at fleet scale {#sec-fleet-foundations-amdahls-fleet}
 
 Amdahl's Law establishes that the maximum speedup of a parallel system is limited by its serial fraction $s$. At fleet scale, the "serial fraction" is not just sequential code---it includes every operation that forces all $N$ GPUs to wait:
 
@@ -669,7 +669,7 @@ class FleetAmdahlExample:
     su_8192_str     = fmt(speedups[8192], precision=1, commas=False)
 ```
 
-To see the fleet-scale implications, consider a training workload where `{python} FleetAmdahlExample.s_fleet_pct_str`% of wall-clock time is spent in synchronization, communication, and other serial overhead. Amdahl's Law gives the following speedups:
+To see the fleet-scale implications, consider a training workload where `{python} FleetAmdahlExample.s_fleet_pct_str` percent of wall-clock time is spent in synchronization, communication, and other serial overhead. Amdahl's Law gives the following speedups:
 
 - With 32 GPUs: `{python} FleetAmdahlExample.su_32_str`$\times$ speedup (good efficiency)
 - With 256 GPUs: `{python} FleetAmdahlExample.su_256_str`$\times$ speedup (diminishing returns begin)
@@ -677,13 +677,13 @@ To see the fleet-scale implications, consider a training workload where `{python
 - With 8,192 GPUs: `{python} FleetAmdahlExample.su_8192_str`$\times$ speedup (nearly at the Amdahl limit)
 - With $N \to \infty$: capped at `{python} FleetAmdahlExample.max_speedup_str`$\times$
 
-With just `{python} FleetAmdahlExample.s_fleet_pct_str`% serial overhead, no amount of hardware can deliver more than `{python} FleetAmdahlExample.max_speedup_str`$\times$ speedup on this fixed workload. This is why fleet-scale training does not simply add more GPUs to the same problem---it scales the problem (weak scaling) to keep the serial fraction small relative to the total work.
+With just `{python} FleetAmdahlExample.s_fleet_pct_str` percent serial overhead, no amount of hardware can deliver more than `{python} FleetAmdahlExample.max_speedup_str`$\times$ speedup on this fixed workload. This is why fleet-scale training does not simply add more GPUs to the same problem---it scales the problem (weak scaling) to keep the serial fraction small relative to the total work.
 
 ::: {.callout-important title="The Compound Overhead Trap"}
-The `{python} FleetAmdahlExample.s_fleet_pct_str`% serial fraction above is optimistic. In practice, fleet-scale serial overhead accumulates from multiple sources: `{python} FF.oh_pipeline`% pipeline bubbles + `{python} FF.oh_checkpoint`% checkpointing + `{python} FF.oh_failure`% failure recovery + `{python} FF.oh_maintenance`% maintenance. These are not all strictly serial in the Amdahl sense---some overlap with computation---but they illustrate how quickly small per-category overheads compound into significant throughput loss.
+The `{python} FleetAmdahlExample.s_fleet_pct_str` percent serial fraction above is optimistic. In practice, fleet-scale serial overhead accumulates from multiple sources: `{python} FF.oh_pipeline` percent pipeline bubbles + `{python} FF.oh_checkpoint` percent checkpointing + `{python} FF.oh_failure` percent failure recovery + `{python} FF.oh_maintenance` percent maintenance. These are not all strictly serial in the Amdahl sense---some overlap with computation---but they illustrate how quickly small per-category overheads compound into significant throughput loss.
 :::
 
-### The Communication-Computation Ratio {#sec-fleet-foundations-comm-compute-ratio}
+### The communication-computation ratio {#sec-fleet-foundations-comm-compute-ratio}
 
 The fundamental question for any distributed training strategy is: *does the computation between synchronization points take long enough to hide the communication?* The **communication-computation ratio** ($\rho$) answers this directly:
 
@@ -764,11 +764,11 @@ class FleetCommCompRatio:
 
 : **Communication-Computation Ratio ($\rho$)**: When $\rho \ll 1$, communication can be fully overlapped with computation. When $\rho \gg 1$, the system is communication-bound and GPUs sit idle waiting for data. Tensor parallelism within a node benefits from NVLink's high bandwidth, keeping $\rho$ small. {#tbl-fleet-comm-comp}
 
-The 7B model on 256 GPUs achieves $\rho =$ `{python} FleetCommCompRatio.rho_7b_str`---communication takes about `{python} fmt(FleetCommCompRatio.rho_7b * 100, precision=0)`% as long as computation, which can be partially overlapped. The 350M model on the same cluster has $\rho =$ `{python} FleetCommCompRatio.rho_350m_str`---communication dominates, making this configuration communication-bound. The solution is either to use fewer GPUs (reduce $N$ in the AllReduce) or to increase the computation per step (larger batch size, gradient accumulation).
+The 7B model on 256 GPUs achieves $\rho =$ `{python} FleetCommCompRatio.rho_7b_str`---communication takes about `{python} fmt(FleetCommCompRatio.rho_7b * 100, precision=0)` percent as long as computation, which can be partially overlapped. The 350M model on the same cluster has $\rho =$ `{python} FleetCommCompRatio.rho_350m_str`---communication dominates, making this configuration communication-bound. The solution is either to use fewer GPUs (reduce $N$ in the AllReduce) or to increase the computation per step (larger batch size, gradient accumulation).
 
 Tensor parallelism within a node achieves $\rho =$ `{python} FleetCommCompRatio.rho_tp_str`, confirming that NVLink bandwidth is sufficient to keep intra-node parallelism compute-bound. This is the quantitative reason why tensor parallelism is confined within nodes while data parallelism spans across them.
 
-### Weak Scaling at Fleet Scale {#sec-fleet-foundations-weak-scaling-fleet}
+### Weak scaling at fleet scale {#sec-fleet-foundations-weak-scaling-fleet}
 
 Amdahl's Law paints a pessimistic picture because it assumes a fixed problem size. In practice, fleet-scale training often follows **weak scaling**: the problem size (tokens, data, model parameters) grows proportionally with the number of GPUs. Gustafson's Law captures this more optimistic view.
 
@@ -821,9 +821,9 @@ $$\text{Effective} = \text{Peak} \times \text{MFU} \times \eta_{\text{scaling}} 
 
 `{python} FleetEffectiveFlops.effective_eq_math`
 
-The cluster delivers `{python} FleetEffectiveFlops.eff_pct`% of its peak FLOPS as useful training work. The remaining `{python} FleetEffectiveFlops.loss_pct`% is consumed by hardware underutilization (`{python} FleetEffectiveFlops.mfu_pct`% MFU), communication overhead (`{python} FleetEffectiveFlops.scaling_pct`% scaling efficiency), and operational losses (`{python} FleetEffectiveFlops.goodput_pct`% goodput ratio).
+The cluster delivers `{python} FleetEffectiveFlops.eff_pct` percent of its peak FLOPS as useful training work. The remaining `{python} FleetEffectiveFlops.loss_pct` percent is consumed by hardware underutilization (`{python} FleetEffectiveFlops.mfu_pct` percent MFU), communication overhead (`{python} FleetEffectiveFlops.scaling_pct` percent scaling efficiency), and operational losses (`{python} FleetEffectiveFlops.goodput_pct` percent goodput ratio).
 
-This is not a failure of engineering---it is the physics of fleet-scale computation. Every additional GPU adds less marginal useful work, but the total throughput still far exceeds what a smaller cluster could achieve. The goal is not to reach 100% utilization; the goal is to deliver trained models faster than any smaller configuration could.
+This is not a failure of engineering---it is the physics of fleet-scale computation. Every additional GPU adds less marginal useful work, but the total throughput still far exceeds what a smaller cluster could achieve. The goal is not to reach 100 percent utilization; the goal is to deliver trained models faster than any smaller configuration could.
 
 :::
 
@@ -835,7 +835,7 @@ Compute performance ultimately converts to heat, and heat must be removed. At fl
 Your cluster design calls for 10,000 H100 GPUs at 700 W each---7 MW of IT load. With a PUE of 1.4, the facility must deliver 9.8 MW total. This is the electrical load of a small town. Before optimizing software, you must ensure the physics of power delivery and heat removal are feasible.
 :::
 
-### Power Density Wall {#sec-fleet-foundations-power-density}
+### Power density wall {#sec-fleet-foundations-power-density}
 
 The shift from traditional datacenter workloads to AI training has created a **power density crisis**. @tbl-fleet-power-density-fleet quantifies the gap.
 
@@ -850,7 +850,7 @@ The shift from traditional datacenter workloads to AI training has created a **p
 
 The `{python} fmt(FF.rack_ratio, precision=1, commas=False)`$\times$ increase in rack power density between traditional and AI workloads is not merely an engineering challenge---it represents a fundamental constraint on facility design. Existing datacenters built for `{python} FF.rack_trad` kW racks cannot simply be "retrofitted" with AI hardware. The electrical distribution, cooling infrastructure, and floor loading must all be redesigned. This is why new AI-focused datacenters are being built from the ground up with liquid cooling as the baseline assumption.
 
-### The Energy Hierarchy at Scale {#sec-fleet-foundations-energy-hierarchy}
+### The energy hierarchy at scale {#sec-fleet-foundations-energy-hierarchy}
 
 Power Usage Effectiveness (PUE) measures how efficiently a datacenter converts electrical power into useful IT computation. A PUE of 1.0 would mean every watt goes to computing; values above 1.0 represent overhead for cooling, power conversion, lighting, and other facility systems.
 
@@ -863,7 +863,7 @@ Power Usage Effectiveness (PUE) measures how efficiently a datacenter converts e
 | **Industry average**            | `{python} fmt(FF.pue_typical, precision=2, commas=False)` | 400 kW overhead                |
 | **Legacy enterprise**           | `{python} fmt(FF.pue_legacy, precision=2, commas=False)`  | 580 kW overhead                |
 
-: **Power Usage Effectiveness (PUE)**: Lower is better. Liquid cooling achieves PUE near 1.0 because it removes heat directly from the chip without the intermediate step of heating air. The gap between legacy (1.58) and liquid-cooled (1.06) represents a 49% reduction in total facility power. {#tbl-fleet-pue-fleet}
+: **Power Usage Effectiveness (PUE)**: Lower is better. Liquid cooling achieves PUE near 1.0 because it removes heat directly from the chip without the intermediate step of heating air. The gap between legacy (1.58) and liquid-cooled (1.06) represents a 49 percent reduction in total facility power. {#tbl-fleet-pue-fleet}
 
 For fleet-scale cost calculations, PUE directly multiplies the electricity bill. A 10 MW IT load in a legacy datacenter (PUE 1.58) requires 15.8 MW total, while the same load in a liquid-cooled facility (PUE 1.06) requires only 10.6 MW---a savings of 5.2 MW. At typical commercial electricity rates, this difference translates to millions of dollars per year. @sec-sustainable-ai covers the full sustainability implications.
 
@@ -872,7 +872,7 @@ For fleet-scale cost calculations, PUE directly multiplies the electricity bill.
 ## Fallacies and Pitfalls {#sec-fleet-foundations-fallacies-pitfalls}
 
 ::: {.callout-warning title="Fallacy: Adding more GPUs always makes training faster."}
-Amdahl's Law caps speedup at $1/s$ for a fixed workload. At `{python} FleetAmdahlExample.s_fleet_pct_str`% serial overhead, no fleet larger than ~`{python} FleetAmdahlExample.max_speedup_str`$\times$ the baseline delivers meaningful additional speedup. Beyond the Amdahl limit, every additional GPU contributes nearly zero marginal throughput while increasing failure probability and communication overhead. The solution is weak scaling: grow the problem to match the hardware.
+Amdahl's Law caps speedup at $1/s$ for a fixed workload. At `{python} FleetAmdahlExample.s_fleet_pct_str` percent serial overhead, no fleet larger than ~`{python} FleetAmdahlExample.max_speedup_str`$\times$ the baseline delivers meaningful additional speedup. Beyond the Amdahl limit, every additional GPU contributes nearly zero marginal throughput while increasing failure probability and communication overhead. The solution is weak scaling: grow the problem to match the hardware.
 :::
 
 ::: {.callout-warning title="Fallacy: InfiniBand is just fast Ethernet."}
@@ -880,11 +880,11 @@ InfiniBand and Ethernet differ architecturally, not just in speed. InfiniBand pr
 :::
 
 ::: {.callout-warning title="Pitfall: Ignoring failure probability at scale."}
-A single GPU with a `{python} fmt(GPU_MTTF_HOURS, precision=0)`-hour MTTF seems extremely reliable---that is nearly 6 years. But at `{python} fmt(FF.cl_large, precision=0)` GPUs, the cluster MTBF drops to `{python} FleetMtbfTable.mtbf_8192` hours (`{python} FleetMtbfTable.mtbf_8192_min` minutes). The probability of at least one failure in a 24-hour training window is `{python} FleetMtbfTable.pfail_8192`%. Designing a training system without automated failure recovery at this scale guarantees that every long-running job will fail and require manual intervention.
+A single GPU with a `{python} fmt(GPU_MTTF_HOURS, precision=0)`-hour MTTF seems extremely reliable---that is nearly 6 years. But at `{python} fmt(FF.cl_large, precision=0)` GPUs, the cluster MTBF drops to `{python} FleetMtbfTable.mtbf_8192` hours (`{python} FleetMtbfTable.mtbf_8192_min` minutes). The probability of at least one failure in a 24-hour training window is `{python} FleetMtbfTable.pfail_8192` percent. Designing a training system without automated failure recovery at this scale guarantees that every long-running job will fail and require manual intervention.
 :::
 
 ::: {.callout-warning title="Pitfall: Optimizing MFU without considering scaling efficiency."}
-A team achieves 50% MFU on a single node---excellent performance. They scale to 1,024 GPUs and expect `{python} fmt(1024 * 0.5, precision=0)`$\times$ throughput (512 GPU-equivalents of useful work). But scaling efficiency at 1,024 GPUs is ~`{python} FF.eff_1024`%, so actual throughput is only `{python} fmt(1024 * 0.5 * SCALING_EFF_1024GPU, precision=0)` GPU-equivalents---half the expected value. MFU and scaling efficiency are independent multiplicative factors; optimizing one without measuring the other leads to incorrect capacity estimates.
+A team achieves 50 percent MFU on a single node---excellent performance. They scale to 1,024 GPUs and expect `{python} fmt(1024 * 0.5, precision=0)`$\times$ throughput (512 GPU-equivalents of useful work). But scaling efficiency at 1,024 GPUs is ~`{python} FF.eff_1024` percent, so actual throughput is only `{python} fmt(1024 * 0.5 * SCALING_EFF_1024GPU, precision=0)` GPU-equivalents---half the expected value. MFU and scaling efficiency are independent multiplicative factors; optimizing one without measuring the other leads to incorrect capacity estimates.
 :::
 
 ::: {.callout-warning title="Fallacy: Air cooling is sufficient for AI workloads."}
@@ -898,7 +898,7 @@ Air cooling physically cannot remove heat fast enough above ~`{python} FF.air_li
 - **Three paradigms, one hybrid**: ML fleets combine HPC's tight coupling (for training) with WSC's elastic fault tolerance (for inference), creating a new architectural paradigm that cannot adopt either predecessor's patterns wholesale.
 - **The 18$\times$ bandwidth gap**: NVLink provides ~`{python} FleetCommNumbers.nvlink_to_ib`$\times$ more bandwidth than InfiniBand. This invariant ratio determines parallelism placement: tensor parallelism within nodes, data parallelism across nodes.
 - **Failure is certain at scale**: Cluster MTBF scales as $1/N$. At 8,192 GPUs, expect a failure every `{python} FleetMtbfTable.mtbf_8192_min` minutes. Fault tolerance is not optional---it is a prerequisite for completing any fleet-scale training job.
-- **Compound utilization loss**: After MFU (~`{python} FleetEffectiveFlops.mfu_pct`%), scaling efficiency (~`{python} FleetEffectiveFlops.scaling_pct`%), and operational overhead (~`{python} FleetEffectiveFlops.goodput_pct`% goodput) compound, a 1,024-GPU cluster delivers ~`{python} FleetEffectiveFlops.eff_pct`% of peak FLOPS as useful work.
+- **Compound utilization loss**: After MFU (~`{python} FleetEffectiveFlops.mfu_pct` percent), scaling efficiency (~`{python} FleetEffectiveFlops.scaling_pct` percent), and operational overhead (~`{python} FleetEffectiveFlops.goodput_pct` percent goodput) compound, a 1,024-GPU cluster delivers ~`{python} FleetEffectiveFlops.eff_pct` percent of peak FLOPS as useful work.
 - **Power density demands liquid cooling**: AI racks consume `{python} fmt(FF.rack_ratio, precision=1, commas=False)`$\times$ the power of traditional racks. Air cooling fails above ~`{python} FF.air_limit` kW per rack, making liquid cooling a physical requirement for modern AI clusters.
 - **Communication-computation ratio ($\rho$) governs scaling strategy**: When $\rho > 1$, GPUs are idle waiting for data---reduce parallelism or increase computation per step. When $\rho \ll 1$, communication can be fully overlapped.
 - **Weak scaling is the fleet-scale paradigm**: Engineers do not use more GPUs to solve the same problem faster (strong scaling); they use more GPUs to solve larger problems in reasonable time. This keeps the serial fraction small and utilization high.
