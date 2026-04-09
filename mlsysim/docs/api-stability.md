@@ -117,7 +117,7 @@ pinning to an exact version.
 ### Individual Solver Classes
 
 ```python
-from mlsysim.solvers import ForwardModel, DistributedSolver, ServingSolver
+from mlsysim.solvers import ForwardModel, DistributedModel, ServingModel
 ```
 
 The solver class hierarchy, their constructors, and their method signatures
@@ -181,10 +181,10 @@ The top-level `BaseModel` name was ambiguous (conflicts with Pydantic's
 
 ```python
 # Deprecated:
-from mlsysim import ForwardModel, DistributedSolver
+from mlsysim import ForwardModel, DistributedModel
 
 # Use instead:
-from mlsysim.solvers import ForwardModel, DistributedSolver
+from mlsysim.solvers import ForwardModel, DistributedModel
 ```
 
 Solver classes should be imported from `mlsysim.solvers`, not from the
