@@ -2,7 +2,8 @@
 title: "For Engineers & Researchers"
 subtitle: "Back-of-envelope estimates before you provision hardware."
 ---
-MLSys·im gives you quick, type-safe analytical estimates for capacity planning, hardware selection, cost modeling, and sustainability analysis — in seconds, from specifications alone.
+
+MLSYSIM gives you quick, type-safe analytical estimates for capacity planning, hardware selection, cost modeling, and sustainability analysis -- in seconds, from specifications alone. Every equation is grounded in peer-reviewed literature. Every hardware spec comes from a real datasheet.
 
 ---
 
@@ -10,20 +11,29 @@ MLSys·im gives you quick, type-safe analytical estimates for capacity planning,
 
 Before running expensive benchmarks or provisioning cloud instances, you need directional answers:
 
-- **Will this model fit in GPU memory?** — Check before renting the GPU
-- **What's the expected TTFT for my LLM?** — Estimate before building the serving stack
-- **How many H100s do I actually need?** — Model scaling efficiency before buying the cluster
-- **What will this cost per year?** — TCO analysis before signing the contract
+- **Will this model fit in GPU memory?** -- Check before renting the GPU
+- **What's the expected TTFT for my LLM?** -- Estimate before building the serving stack
+- **How many H100s do I actually need?** -- Model scaling efficiency before buying the cluster
+- **What will this cost per year?** -- TCO analysis before signing the contract
+- **How often will my training job crash?** -- Reliability modeling before committing to a 30-day run
+- **What's the carbon footprint of this deployment?** -- Quantify before the sustainability review
 
-MLSys·im answers these in microseconds using first-order equations. It won't replace profiling, but it tells you *where to start profiling*.
+MLSYSIM answers these in microseconds using first-order equations. It won't replace profiling, but it tells you *where to start profiling*.
+
+::: {.callout-tip}
+## Theory Behind the Tools
+Each solver implements equations from the [Math Foundations](math.qmd) page. For the full conceptual framework, see the companion slide decks linked in the [Solver-to-Slides Map](#solver-to-slides-map) below.
+:::
 
 ---
 
-## Quick API Usage
+## Quick Start: Roofline Analysis
+
+The `Engine` implements the [Roofline Performance Model](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/11_hw_acceleration.pdf){target="_blank"} (Williams et al. 2009) to classify workloads as compute-bound or memory-bound.
 
 ```python
 import mlsysim
-from mlsysim import Engine, ServingModel, DistributedModel
+from mlsysim import Engine
 
 # Single-node: Is ResNet-50 memory-bound on A100?
 profile = Engine.solve(
@@ -32,18 +42,35 @@ profile = Engine.solve(
     batch_size=1, precision="fp16"
 )
 print(f"{profile.bottleneck}, {profile.latency.to('ms'):~.2f}")
+print(f"MFU: {profile.mfu:.1%}, Arithmetic Intensity: {profile.arithmetic_intensity:~.2f}")
+```
 
-# LLM serving: What's the TTFT for Llama-3.1-70B on H100?
+The returned `PerformanceProfile` gives you latency, throughput, bottleneck classification, Model FLOPs Utilization (MFU), arithmetic intensity, energy, and a feasibility flag -- everything you need for a first-pass hardware assessment.
+
+---
+
+## LLM Serving Analysis
+
+The `ServingModel` models the [two-phase LLM inference lifecycle](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/13_model_serving.pdf){target="_blank"}: compute-bound pre-fill and memory-bound decoding.
+
+```python
+import mlsysim
+from mlsysim import ServingModel
+
 serving = ServingModel()
 result = serving.solve(
     model=mlsysim.Models.Language.Llama3_70B,
     hardware=mlsysim.Hardware.Cloud.H100,
     seq_len=4096, batch_size=1
 )
-print(f"TTFT: {result.ttft.to('ms'):~.1f}")
-print(f"ITL:  {result.itl.to('ms'):~.2f}")
-print(f"KV-cache: {result.kv_cache_size.to('GB'):~.1f}")
+print(f"TTFT:       {result['ttft'].to('ms'):~.1f}")
+print(f"ITL:        {result['itl'].to('ms'):~.2f}")
+print(f"KV-cache:   {result['kv_cache_size'].to('GB'):~.1f}")
+print(f"Feasible:   {result['feasible']}")
+print(f"Mem util:   {result['memory_utilization']:.0%}")
 ```
+
+The feasibility check tells you immediately whether the model plus its KV-cache fit in device memory -- before you discover the OOM at 3 AM in production.
 
 ---
 
@@ -65,33 +92,42 @@ for hw in [mlsysim.Hardware.Cloud.H100,
     print(f"{hw.name:20s}  {p.bottleneck:16s}  {p.latency.to('ms'):>8.2f~}  {p.throughput:>8.0f} img/s")
 ```
 
-### Batch Size Sweep: Finding the Regime Transition
+---
 
-The most important tuning knob for inference cost optimization is batch size. Sweep it to find where the workload transitions from memory-bound to compute-bound:
+## Distributed Training Analysis
+
+The `DistributedModel` models [3D parallelism](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/05_distributed_training.pdf){target="_blank"} (data, tensor, pipeline) with communication overhead from [ring all-reduce](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/06_collective_communication.pdf){target="_blank"} and pipeline bubbles.
 
 ```python
 import mlsysim
-from mlsysim import Engine
+from mlsysim import DistributedModel
 
-model = mlsysim.Models.ResNet50
-hw = mlsysim.Hardware.Cloud.A100
-
-for bs in [1, 4, 16, 32, 64, 128, 256]:
-    p = Engine.solve(model=model, hardware=hw, batch_size=bs, precision="fp16")
-    print(f"BS={bs:>4d}  {p.bottleneck:16s}  {p.latency.to('ms'):>8.2f~}  {p.throughput:>8.0f} img/s")
+dist = DistributedModel()
+result = dist.solve(
+    model=mlsysim.Models.Language.Llama3_70B,
+    fleet=mlsysim.Systems.Clusters.H100_64,
+    batch_size=512, precision="fp16",
+    tp_size=8, pp_size=4, microbatch_count=16
+)
+print(f"Scaling efficiency:  {result['scaling_efficiency']:.1%}")
+print(f"DP all-reduce:       {result['dp_communication_latency'].to('ms'):~.1f}")
+print(f"TP overhead:         {result['tp_communication_latency'].to('ms'):~.1f}")
+print(f"Pipeline bubble:     {result['bubble_fraction']:.1%}")
+print(f"Step latency:        {result['step_latency_total'].to('ms'):~.1f}")
 ```
 
-At small batch sizes the workload is memory-bound (loading weights dominates), but as batch size grows past the ridge point, it becomes compute-bound. The optimal batch size for cost efficiency is typically just above this transition.
+Tune `tp_size`, `pp_size`, and `microbatch_count` to find the parallelism configuration that maximizes scaling efficiency for your cluster topology.
 
 ---
 
 ## Composing Solvers for Real Questions
 
-MLSys·im solvers are designed to chain — the output of one feeds into the next:
+The six solvers are designed to chain. Here are three common engineering workflows.
 
-### "Can I serve Llama-70B on 4 H100s within budget?"
+### "Can I serve Llama-70B on H100s within budget?"
 
 ```python
+import mlsysim
 from mlsysim import ServingModel, EconomicsModel
 
 # Step 1: Does it fit and what's the latency?
@@ -105,135 +141,54 @@ result = serving.solve(
 # Step 2: What does that fleet cost?
 econ = EconomicsModel()
 cost = econ.solve(
-    fleet=mlsysim.Systems.Clusters.Research_256,
+    fleet=mlsysim.Systems.Clusters.H100_8,
     duration_days=365,
     kwh_price=0.08
 )
-print(f"Annual TCO: ${cost.tco_usd:,.0f}")
+print(f"Annual TCO: ${cost['tco_usd']:,.0f}")
+print(f"  CapEx:    ${cost['capex_usd']:,.0f}")
+print(f"  OpEx:     ${cost['total_opex_usd']:,.0f}")
 ```
 
 ### "Where should I train to minimize carbon?"
 
 ```python
+import mlsysim
 from mlsysim import SustainabilityModel
 
 sustain = SustainabilityModel()
-for grid in [mlsysim.Infra.Grids.Quebec, mlsysim.Infra.Grids.US_Avg,
+for grid in [mlsysim.Infra.Grids.Quebec, mlsysim.Infra.Grids.US_Average,
              mlsysim.Infra.Grids.Poland]:
     r = sustain.solve(
-        fleet=mlsysim.Systems.Clusters.Research_256,
+        fleet=mlsysim.Systems.Clusters.H100_256,
         duration_days=30,
         datacenter=grid
     )
-    print(f"{grid.name:12s}  {r.carbon_footprint_kg / 1000:>8.1f} t CO2e")
+    print(f"{grid.name:12s}  {r['carbon_footprint_kg'].to('metric_ton'):>8.1f~}  "
+          f"PUE={r['pue']:.2f}  Water={r['water_usage_liters']:,.0f} L")
 ```
 
-### "Should I invest in FLOPS or bandwidth for next-gen inference?"
+For the theory behind PUE, carbon intensity, and the energy hierarchy, see the [Sustainable AI](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/15_sustainable_ai.pdf){target="_blank"} slide deck.
+
+### "How reliable is a 30-day training run on 256 GPUs?"
 
 ```python
-from mlsysim import SensitivitySolver
+import mlsysim
+from mlsysim import ReliabilityModel
 
-solver = SensitivitySolver()
-res = solver.solve(
-    model=mlsysim.Models.Language.Llama3_70B,
-    hardware=mlsysim.Hardware.Cloud.A100
-)
-
-print(res.sensitivities)
-# {'peak_flops': -0.06, 'memory_bandwidth': -0.88, 'memory_capacity': 0.00}
-print(f"Binding constraint: {res.binding_constraint}")
-# → memory_bandwidth (10% more BW = 8.8% faster; 10% more FLOPS = 0.6% faster)
-```
-
----
-
-## Production Workflow: Capacity Planning
-
-MLSys·im fits into a four-stage capacity planning workflow:
-
-| Stage | What You Do | Which Solvers | Output |
-|:------|:------------|:--------------|:-------|
-| **1. Requirements** | Define SLA targets (latency, throughput) | `SynthesisSolver` | Minimum hardware specs |
-| **2. Shortlisting** | Evaluate 5–10 hardware configs | `ServingModel` + `EconomicsModel` | Ranked candidates with TCO |
-| **3. Validation** | Profile top 2–3 candidates | *Empirical (vLLM, PyTorch Profiler)* | Ground-truth measurements |
-| **4. Procurement** | Make the business case | `SustainabilityModel` + `SensitivitySolver` | TCO, carbon, binding constraint report |
-
-MLSys·im handles stages 1, 2, and 4. Stage 3 requires empirical profiling on real hardware. The value is in **narrowing the design space** from thousands of configurations to a handful worth profiling — saving weeks of benchmarking time.
-
-::: {.callout-tip}
-## Safety Margins
-MLSys·im models workloads in isolation. Production systems run multiple workloads on shared infrastructure with context switching, memory fragmentation, and co-location interference. Apply a **1.3–2× safety margin** on MLSys·im latency estimates for production SLA planning.
-:::
-
-### "Will my 30-day training run complete without failure?"
-
-```python
-from mlsysim import ReliabilityModel, CheckpointModel
-
-# Step 1: How often will the cluster fail?
-reliability = ReliabilityModel()
-rel = reliability.solve(
+rel = ReliabilityModel()
+result = rel.solve(
     fleet=mlsysim.Systems.Clusters.H100_256,
-    job_duration_days=30
+    job_duration_hours=720,       # 30 days
+    checkpoint_time_s=120.0       # 2 minutes per checkpoint
 )
-print(f"Fleet MTBF: {rel.fleet_mtbf.to('hours'):~.1f}")
-print(f"Expected failures in 30 days: {rel.expected_failures:.1f}")
-print(f"Optimal checkpoint interval: {rel.optimal_interval.to('minutes'):~.1f}")
-
-# Step 2: What's the MFU penalty of checkpointing at that interval?
-ckpt = CheckpointModel()
-penalty = ckpt.solve(
-    model=mlsysim.Models.Language.Llama3_70B,
-    hardware=mlsysim.Hardware.Cloud.H100,
-    optimizer="adam",
-    checkpoint_interval=rel.optimal_interval
-)
-print(f"Checkpoint size: {penalty.checkpoint_size.to('GB'):~.1f}")
-print(f"MFU penalty: {penalty.mfu_penalty*100:.1f}%")
+print(f"Fleet MTBF:              {result['fleet_mtbf'].to('hour'):~.1f}")
+print(f"P(failure before done):  {result['failure_probability']:.1%}")
+print(f"Optimal ckpt interval:   {result['optimal_checkpoint_interval'].to('minute'):~.1f}")
+print(f"Expected failures:       {result['expected_failures']:.1f}")
 ```
 
-### "What hardware do I need to meet this latency SLA?"
-
-```python
-from mlsysim import SynthesisSolver
-
-# Invert the Roofline: given a target, derive minimum specs
-synth = SynthesisSolver()
-specs = synth.solve(
-    model=mlsysim.Models.Language.Llama3_70B,
-    target_latency=mlsysim.Q_("30 ms/token"),  # ITL SLA
-    precision="fp16"
-)
-print(f"Minimum memory BW: {specs.required_bandwidth.to('TB/s'):~.2f}")
-print(f"Minimum memory:    {specs.required_memory.to('GB'):~.1f}")
-print(f"Minimum FLOPS:     {specs.required_flops.to('TFLOP/s'):~.1f}")
-
-# Which hardware in the Zoo meets these specs?
-for hw in mlsysim.Hardware.all():
-    if (hw.memory.bandwidth >= specs.required_bandwidth and
-        hw.memory.capacity >= specs.required_memory):
-        print(f"  ✓ {hw.name}")
-```
-
----
-
-## Dimensional Strictness: Why Units Matter
-
-All quantities in MLSys·im are `pint.Quantity` objects with physical units enforced at runtime. This prevents the most common class of back-of-envelope errors — the kind that cause real production incidents:
-
-```python
-hw = mlsysim.Hardware.Cloud.A100
-
-# These work — units are compatible:
-ridge_point = hw.compute.peak_flops / hw.memory.bandwidth  # → FLOP/byte ✓
-time = model_bytes / hw.memory.bandwidth                    # → seconds ✓
-
-# These raise DimensionalityError — caught before producing a bad number:
-hw.memory.bandwidth + hw.compute.peak_flops   # GB/s + FLOP/s → ERROR
-hw.memory.bandwidth.to("FLOP/s")              # GB/s ≠ FLOP/s → ERROR
-```
-
-In spreadsheet modeling, confusing gigabytes with gigabits or mixing per-device and per-node bandwidth silently produces a 8× or 4× error. In MLSys·im, these errors are structurally impossible. Think of it as type safety for systems analysis.
+This solver implements the [Young-Daly checkpoint model](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/07_fault_tolerance.pdf){target="_blank"} -- essential for capacity planning on long training jobs.
 
 ---
 
@@ -253,16 +208,64 @@ class PowerEfficiencyModel:
         }
 ```
 
-See [Extending MLSys·im](extending-the-engine.qmd) for the full guide.
+See [Extending MLSYSIM](solver-guide.qmd#extending-mlsysim) for the full guide.
+
+---
+
+## Type Safety
+
+All quantities are `pint.Quantity` objects. Unit conversions are explicit, and dimensional errors are caught at runtime:
+
+```python
+hw = mlsysim.Hardware.Cloud.A100
+hw.compute.peak_flops.to("TFLOPs/s")   # → 312.0 TFLOPs/s
+hw.memory.bandwidth.to("TB/s")          # → 2.0 TB/s
+hw.memory.bandwidth.to("FLOP/s")        # → DimensionalityError ✓
+```
+
+This means you can chain computations across solvers without worrying about unit mismatches -- `pint` catches them for you.
+
+---
+
+## Solver-to-Slides Map {#solver-to-slides-map}
+
+Each MLSYSIM solver maps to specific chapters and slide decks from the [Machine Learning Systems](https://mlsysbook.ai) textbook. Use these for the full theoretical grounding behind each solver.
+
+| MLSYSIM Solver | What It Models | Slide Deck |
+|:---------------|:---------------|:-----------|
+| Engine / SingleNodeModel | Roofline analysis, compute vs. memory bottleneck | [Hardware Acceleration (Vol I, Ch 11)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/11_hw_acceleration.pdf){target="_blank"} |
+| ServingModel | TTFT, ITL, KV-cache memory | [Model Serving (Vol I, Ch 13)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/13_model_serving.pdf){target="_blank"} and [Inference at Scale (Vol II, Ch 9)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/09_inference.pdf){target="_blank"} |
+| DistributedModel | 3D parallelism, all-reduce, pipeline bubbles | [Distributed Training (Vol II, Ch 5)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/05_distributed_training.pdf){target="_blank"} and [Collective Communication (Vol II, Ch 6)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/06_collective_communication.pdf){target="_blank"} |
+| EconomicsModel | CapEx, OpEx, total cost of ownership | [Compute Infrastructure (Vol II, Ch 2)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/02_compute_infrastructure.pdf){target="_blank"} |
+| SustainabilityModel | Energy, carbon footprint, water usage | [Sustainable AI (Vol II, Ch 15)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/15_sustainable_ai.pdf){target="_blank"} |
+| ReliabilityModel | MTBF, Young-Daly checkpointing | [Fault Tolerance (Vol II, Ch 7)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/07_fault_tolerance.pdf){target="_blank"} |
+
+: {tbl-colwidths="[20,30,50]"}
+
+:::: {.columns}
+
+::: {.column width="50%"}
+**Volume I: Foundations** (17 decks, 570 slides)
+
+[Browse Vol I Decks](https://mlsysbook.ai/slides/vol1.html){target="_blank"} | [Download All (PDF)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/MLSysBook-Slides-Vol1-PDF.zip){target="_blank"}
+:::
+
+::: {.column width="50%"}
+**Volume II: At Scale** (18 decks, 529 slides)
+
+[Browse Vol II Decks](https://mlsysbook.ai/slides/vol2.html){target="_blank"} | [Download All (PDF)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/MLSysBook-Slides-Vol2-PDF.zip){target="_blank"}
+:::
+
+::::
 
 ---
 
 ## Next Steps
 
-- **[Getting Started](getting-started.qmd)** — Install and run your first analysis
-- **[Resolver Guide](models-and-solvers.qmd)** — Which solver for which question
-- **[MLSys Zoo](zoo/index.qmd)** — Browse all available hardware, model, and infrastructure specs
-- **[API Reference](api/index.qmd)** — Full programmatic API documentation
-- **[Sensitivity Analysis](tutorials/09_sensitivity.qmd)** — Identify binding constraints and derive hardware specs from SLA targets
-- **[GPU vs. Wafer-Scale](tutorials/10_gpu_vs_wafer.qmd)** — Compare conventional and wafer-scale architectures
-- **[Accuracy & Validation](accuracy.qmd)** — How analytical bounds compare to empirical measurements
+- **[Getting Started](getting-started.qmd)** -- Install and run your first analysis
+- **[Solver Guide](solver-guide.qmd)** -- Which solver for which question
+- **[MLSys Zoo](zoo/index.qmd)** -- Browse all available hardware, model, and infrastructure specs
+- **[API Reference](api/index.qmd)** -- Full programmatic API documentation
+- **[Accuracy & Validation](accuracy.qmd)** -- How analytical bounds compare to empirical measurements
+- **[Math Foundations](math.qmd)** -- The equations behind every solver
+- **[All Slide Decks](https://mlsysbook.ai/slides/)** -- 35 Beamer decks with speaker notes and active learning exercises

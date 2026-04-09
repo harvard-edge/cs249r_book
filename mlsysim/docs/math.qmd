@@ -1,705 +1,497 @@
 ---
 title: "Mathematical Foundations"
-subtitle: "The First-Principles Equations Behind Every MLSys·im Solver"
+subtitle: "The First-Principles Equations Behind Every MLSYSIM Solver"
 ---
-MLSys·im avoids "black box" heuristics. Every output traces back to one of the equations below, each grounded in a published systems paper. Before diving into code, read this page to understand *what* the 22 resolvers (20 models and 2 solvers) resolving the [22 Systems Walls](architecture.qmd#the-22-systems-walls) are computing and *why*.
+
+MLSYSIM avoids "black box" heuristics. Every output traces back to one of the equations below.
+Before diving into code, read this page to understand *what* the solvers are computing and *why*.
 
 ::: {.callout-tip}
-## Reading these equations
-Each solver in MLSys·im implements one or more of the models below.
-Click any solver name to go directly to its API documentation.
+## How to read this page
+Each section corresponds to one MLSYSIM solver. Click any solver name to jump to its API docs,
+or follow the 📚 **Slide Deck** links to the full lecture treatment with worked examples and exercises.
 :::
-
-## Notation Reference
-
-All quantities carry SI units at runtime via `pint`. The table below defines every symbol used in the equations that follow.
-
-| Symbol | Unit | Description |
-|--------|------|-------------|
-| **Model & Workload** | | |
-| $P$ | params | Model parameter count |
-| $P_{\ell}$ | params | Per-layer parameter count |
-| $\|W\|$ | bytes | Total bytes read per step (weights + KV cache) |
-| $\|W_{\ell}\|$ | bytes | Per-layer weight size ($P_{\ell} \times b_{\text{prec}}$) |
-| $b_{\text{prec}}$ | bytes/param | Numerical precision (e.g., 2 for FP16) |
-| $L$ | — | Number of layers |
-| $H$ | — | Number of attention heads (or KV heads) |
-| $D$ | — | Head dimension |
-| $S$ | tokens | Sequence length |
-| $B$ | samples | Batch size |
-| $K$ | — | Number of reasoning steps |
-| $C$ | FLOPs | Total training compute ($6PD$) |
-| $I$ | FLOP/byte | Arithmetic intensity |
-| **Hardware & Infrastructure** | | |
-| $\text{Peak}_{\text{FLOPS}}$ | FLOP/s | Peak accelerator throughput |
-| $BW_{\text{HBM}}$ | bytes/s | HBM bandwidth |
-| $BW_{\text{inject}}$ | bytes/s | Weight injection bandwidth (wafer-scale) |
-| $BW_{\text{link}}$ | bytes/s | Per-link network bandwidth |
-| $N$ | — | Number of nodes in fleet |
-| $G$ | — | GPUs per node |
-| $\alpha$ | seconds | Per-hop network latency |
-| **Efficiency & Utilization** | | |
-| $\eta$ | — | Hardware utilization ($\approx$ MFU) |
-| $\eta_{\text{overlap}}$ | — | Compute–communication overlap efficiency |
-| $\rho$ | — | Utilization ratio (queueing or data) |
-| $\beta$ | — | Bisection bandwidth fraction |
-| $\beta_{\text{opt}}$ | — | Optimizer state multiplier (total ckpt bytes / weight bytes) |
-| **Parallelism** | | |
-| TP, PP, DP, EP | — | Tensor, pipeline, data, expert parallelism |
-| $V$ | — | Virtual pipeline stages |
-| $M_{\text{micro}}$ | — | Number of microbatches |
-| **Sustainability** | | |
-| PUE | — | Power Usage Effectiveness |
-| CI | gCO₂/kWh | Regional carbon intensity |
-| WUE | L/kWh | Water Usage Effectiveness |
-| **Key Derived Quantities** | | |
-| $I^{*}$ | FLOP/byte | Ridge point ($\text{Peak}/BW_{\text{HBM}}$) |
-| $B^{*}$ | samples | Optimal batch size (streaming wall) |
-| $P^{*}$ | params | Compute-optimal model size |
-| $D^{*}$ | tokens | Compute-optimal dataset size |
-| $\tau_{\text{opt}}$ | seconds | Optimal checkpoint interval |
 
 ---
 
-## 1. The Iron Law of ML Systems (Single Node)
+## 1. The Roofline Model (Single-Node Performance) {#sec-roofline}
 
 *Implemented in [`mlsysim.core.solver.SingleNodeModel`](api/core.solver.SingleNodeModel.qmd).*
+📚 **Slide Deck:** [Hardware Acceleration (Vol I, Ch 11)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/11_hw_acceleration.pdf){target="_blank"}
 
 ::: {.callout-note appearance="simple" icon=false}
-**💡 Intuition: The Roofline Bottleneck**
-Hardware has two speed limits—how fast it can compute, and how fast it can move data from memory to the compute units. Your actual throughput is determined by whichever limit you hit first. This is why we take the *maximum* of two terms, not their sum.
-
-**📚 Source:** @williams2009roofline
+**Intuition:** Hardware has two speed limits — how fast it can compute (FLOP/s) and how fast it can feed data to the compute units (bytes/s). Your actual throughput is whichever limit you hit first. This is why we take the *maximum* of two terms, not their sum.
 :::
 
+### 1.1 Latency Equation
+
 $$
-T = \max \left( \frac{\text{FLOPs}}{\text{Peak\_FLOPs} \times \eta},\ \frac{\text{Bytes}}{\text{Memory\_BW}} \right) + \text{Dispatch\_Tax}
+T = \max \left( \underbrace{\frac{\text{FLOPs}}{\text{Peak\_FLOP/s} \times \eta}}_{\text{compute time}},\; \underbrace{\frac{\text{Bytes}}{\text{Memory\_BW}}}_{\text{memory time}} \right) + \text{Dispatch\_Tax}
 $$
 
-Where:
+| Symbol | Meaning | Typical Range |
+|:-------|:--------|:--------------|
+| $\eta$ | Hardware utilization efficiency | 0.25–0.55 (training); ~0.35 (inference). See [Accuracy & Validation](accuracy.qmd). |
+| Dispatch\_Tax | Kernel-launch overhead (CUDA, driver) | 0.01–0.1 ms |
 
-- $\eta$ is the hardware utilization efficiency (typically 0.25–0.55 in practice; MLSys·im defaults to 0.5, with 0.35 recommended for inference — see [Accuracy & Validation](accuracy.qmd) for guidance).
-- $\text{Dispatch\_Tax}$ is the constant kernel-launch overhead (e.g., CUDA overhead, ~0.01–0.1 ms).
-- If $\frac{\text{FLOPs}}{\text{Peak\_FLOPs} \times \eta} > \frac{\text{Bytes}}{\text{Memory\_BW}}$: **Compute-bound** — buy faster GPUs or increase arithmetic intensity.
-- If $\frac{\text{Bytes}}{\text{Memory\_BW}}$ wins: **Memory-bound** — increase batch size or use operator fusion.
+### 1.2 Arithmetic Intensity and the Ridge Point
 
-**Arithmetic Intensity** is the key ratio: $I = \text{FLOPs} / \text{Bytes}$.
-The *roofline ridge point* is $I^* = \text{Peak\_FLOPs} / \text{Memory\_BW}$.
-If $I > I^*$, you are compute-bound. If $I < I^*$, you are memory-bound.
+The key diagnostic ratio is **arithmetic intensity**:
+
+$$
+I = \frac{\text{FLOPs}}{\text{Bytes Transferred}}
+$$
+
+The **ridge point** is the hardware's crossover intensity:
+
+$$
+I^* = \frac{\text{Peak\_FLOP/s}}{\text{Memory\_BW}}
+$$
+
+| If... | Regime | Action |
+|:------|:-------|:-------|
+| $I > I^*$ | **Compute-bound** | Faster math units, lower precision, or fewer FLOPs |
+| $I < I^*$ | **Memory-bound** | Larger batch size, operator fusion, or higher memory bandwidth |
+
+::: {.callout-tip collapse="true"}
+## Worked Example: Dense Layer on H100
+
+A dense layer with 2048→512, FP16, batch=1:
+
+- **FLOPs:** $2 \times 2048 \times 512 = 2.1\text{M}$
+- **Bytes:** $2048 \times 512 \times 2 = 2.1\text{MB}$
+- **Arithmetic Intensity:** $2.1\text{M} / 2.1\text{MB} = 1$ FLOP/byte
+- **H100 Ridge Point:** $989\text{ TF} / 3.35\text{ TB/s} \approx 296$ FLOP/byte
+
+At $I = 1 \ll 296 = I^*$, this workload is **deeply memory-bound** — the H100 achieves <1% peak utilization. Increasing to batch=64 raises $I$ to ~64, recovering significant throughput.
+
+*Source: Slide deck exercise, Vol I Ch 11.*
+:::
 
 ---
 
-## 2. Distributed Training (3D Parallelism)
+## 2. Distributed Training (3D/4D Parallelism) {#sec-distributed}
 
 *Implemented in [`mlsysim.core.solver.DistributedModel`](api/core.solver.DistributedModel.qmd).*
+📚 **Slide Decks:** [Distributed Training (Vol II, Ch 5)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/05_distributed_training.pdf){target="_blank"} | [Collective Communication (Vol II, Ch 6)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/06_collective_communication.pdf){target="_blank"}
 
-**Why an analytical model?** Real distributed training involves complex interactions between
-computation, communication, and scheduling. Empirical profiling requires access to expensive
-multi-GPU clusters and takes hours per configuration. MLSys·im instead decomposes the problem
-into three independent overheads — data parallelism (gradient synchronization), tensor
-parallelism (intra-layer communication), and pipeline parallelism (bubble idle time) — each
-governed by a closed-form equation. This lets you evaluate thousands of parallelism
-configurations in seconds to identify the best strategy *before* reserving cluster time.
+Real distributed training involves complex interactions between computation, communication, and scheduling. Empirical profiling requires access to expensive multi-GPU clusters and takes hours per configuration. MLSYSIM decomposes the problem into independent overheads — each governed by a closed-form equation — letting you evaluate thousands of parallelism configurations in seconds.
 
-The key insight is that each parallelism dimension introduces a **communication tax** that
-can be modeled from first principles: message size, network bandwidth, and topology. The
-single-GPU compute time comes from the roofline model (Section 1), and the distributed
-overhead is additive on top.
+### 2.1 Parallelism Decomposition
 
-### 2.1 Scaling Efficiency
-
-The solver computes an overall **scaling efficiency** — the fraction of ideal linear speedup
-actually achieved:
+MLSYSIM supports 4D parallelism. Given a cluster of $N$ total GPUs:
 
 $$
-\eta_{\text{scale}} = \frac{T_{\text{single}}}{T_{\text{single}} + T_{\text{dp}} + T_{\text{tp}} + T_{\text{bubble}}}
+\text{DP} = \frac{N}{\text{TP} \times \text{PP} \times \text{EP}}
 $$
 
-Where $T_{\text{single}}$ is the per-GPU compute time (from the roofline model), and the
-remaining terms are the communication and scheduling overheads derived below. An efficiency
-of 80% on 256 GPUs means you get the equivalent throughput of ~205 GPUs — the rest is
-spent on communication.
+| Dimension | What It Splits | Communication Pattern |
+|:----------|:---------------|:---------------------|
+| **Data Parallelism (DP)** | Batch across replicas | AllReduce (gradients) |
+| **Tensor Parallelism (TP)** | Individual layers across GPUs | Point-to-point (intra-node NVLink) |
+| **Pipeline Parallelism (PP)** | Layer groups across stages | Forward/backward activations |
+| **Expert Parallelism (EP)** | MoE experts across GPUs | All-to-All (token routing) |
 
-### 2.2 Ring All-Reduce (Data Parallelism)
+### 2.2 Scaling Efficiency
 
-After each training step, every GPU must synchronize its gradients with every other GPU.
-The standard algorithm is **ring all-reduce**, which arranges GPUs in a logical ring and
-passes gradient chunks around it in two phases.
-
-For a model of size $M$ bytes distributed across $N$ accelerators connected in a ring topology
-with inter-node bandwidth $BW$ and latency $L$:
+The solver computes an overall **scaling efficiency** — the fraction of ideal linear speedup actually achieved:
 
 $$
-T_{\text{dp}} = 2(N-1) \cdot \left( \frac{M / N}{BW} + L \right)
+\eta_{\text{scale}} = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{dp}} + T_{\text{tp}} + T_{\text{ep}} + T_{\text{bubble}}}
 $$
 
-The factor of 2 arises because ring all-reduce has two phases: scatter-reduce and all-gather,
-each requiring $N-1$ communication steps. Each step transfers $M/N$ bytes (one chunk of the
-gradient), so the total data transferred per GPU approaches $2M$ as $N$ grows — meaning the
-bandwidth cost is nearly independent of cluster size, which is why ring all-reduce scales
-well.
+An efficiency of 80% on 256 GPUs means you get the throughput of ~205 GPUs — the rest is communication overhead. Published scaling efficiencies at scale: ~95% at 8 GPUs, ~85% at 64 GPUs, ~60% at 1,024 GPUs, ~40% at 8,192 GPUs.
 
-**Implication**: All-reduce cost grows linearly with model size $M$ but is asymptotically **constant** in $N$ — the factor $2(N-1)/N$ approaches 2 as $N$ grows, meaning adding more GPUs barely increases per-GPU communication time.
-For very large models (70B+ parameters = ~140 GB gradients in fp16), communication dominates
-at low batch sizes. Upgrading from 100 Gb Ethernet to InfiniBand NDR (400 Gb/s) can recover
-10–30% scaling efficiency.
+### 2.3 Ring All-Reduce (Data Parallelism) {#sec-allreduce}
 
-### 2.3 Pipeline Parallelism Bubble
+📚 **Slide Deck:** [Collective Communication (Vol II, Ch 6)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/06_collective_communication.pdf){target="_blank"}
 
-**Pipeline parallelism** splits a model's layers across multiple stages (nodes). Stage 1 processes layers 1–20, stage 2 processes layers 21–40, and so on. This allows models too large for a single GPU to be trained across multiple nodes.
+After each training step, every GPU must synchronize gradients. The standard algorithm is **ring all-reduce**, which arranges $N$ GPUs in a logical ring and passes gradient chunks in two phases (scatter-reduce, then all-gather).
 
-::: {.callout-note appearance="simple" icon=false}
-**💡 Intuition: Shrinking the Pipeline Bubble**
-In standard 1F1B pipeline parallelism, GPUs sit idle waiting for microbatches to traverse the network. You can't change the speed of light, but you *can* change the software schedule. By assigning multiple "virtual stages" ($V$) to a single GPU, we interleave the execution. While a GPU is waiting for the next microbatch of its *first* virtual stage, it can compute a microbatch for its *second* virtual stage, effectively hiding the network latency behind useful compute.
+Using the $\alpha$-$\beta$ communication model ($\alpha$ = per-message latency, $\beta$ = bandwidth):
 
-**📚 Source:** @narayanan2021efficient
+$$
+T_{\text{ring}} = 2(N-1) \cdot \alpha \;+\; \frac{2(N-1)}{N} \cdot \frac{M}{\beta}
+$$
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $M$ | Total gradient size in bytes |
+| $N$ | Number of GPUs in the ring |
+| $\alpha$ | Per-message startup latency |
+| $\beta$ | Per-link bandwidth (bytes/s) |
+
+**Why ring all-reduce scales well:** The bandwidth term $\frac{2(N-1)}{N} \cdot \frac{M}{\beta}$ approaches $\frac{2M}{\beta}$ as $N$ grows — asymptotically **constant** in the number of GPUs. Total data transferred per GPU is always ~$2M$, regardless of cluster size. The latency term $2(N-1) \cdot \alpha$ grows linearly, but is negligible for large messages.
+
+MLSYSIM also implements **tree all-reduce** (latency-optimal for small messages):
+
+$$
+T_{\text{tree}} = 2 \log_2(N) \cdot \alpha \;+\; 2 \log_2(N) \cdot \frac{M}{\beta}
+$$
+
+The crossover point between ring and tree is approximately $M_{\text{cross}} \approx N \cdot \alpha \cdot \beta$. Below this size, tree wins (latency dominates); above it, ring wins (bandwidth dominates).
+
+::: {.callout-tip collapse="true"}
+## Worked Example: 140 GB Gradient Sync
+
+A 70B-parameter model in FP16 produces a 140 GB gradient. On a 1,024-GPU cluster with InfiniBand NDR ($\beta = 50$ GB/s, $\alpha = 2\;\mu$s):
+
+- **Bandwidth term:** $\frac{2 \times 1023}{1024} \times \frac{140}{50} \approx 5.6$ s
+- **Latency term:** $2 \times 1023 \times 2\;\mu\text{s} \approx 4$ ms (negligible)
+- **Total:** ~5.6 s — bandwidth-dominated, as expected for large messages.
+
+Upgrading from 100 Gb Ethernet (~12 GB/s) to NDR (~50 GB/s) recovers 10–30% scaling efficiency.
 :::
 
-The cost of pipelining is a **pipeline bubble**: at the start of each batch, downstream stages sit idle while waiting for upstream stages to produce output. When a pipeline of depth $P$ processes $M$ microbatches with $V$ virtual stages per GPU, the fraction of time spent idle is:
+### 2.4 Pipeline Parallelism Bubble {#sec-pipeline}
+
+📚 **Slide Deck:** [Distributed Training (Vol II, Ch 5)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/05_distributed_training.pdf){target="_blank"}
+
+**Pipeline parallelism** splits a model's layers across $P$ stages. At the start of each batch, downstream stages sit idle while upstream stages produce output — the **pipeline bubble**.
+
+::: {.callout-note appearance="simple" icon=false}
+**Intuition:** You cannot change the speed of light, but you *can* change the software schedule. By assigning multiple **virtual stages** ($V$) to each GPU, we interleave execution: while a GPU waits for one virtual stage's next microbatch, it computes a different virtual stage's microbatch, hiding latency behind useful work.
+:::
+
+With $P$ pipeline stages, $M$ microbatches, and $V$ virtual stages per GPU:
 
 $$
 \text{Bubble Fraction} = \frac{P - 1}{V \times M + P - 1}
 $$
 
-The intuition: with $P$ stages and $M$ microbatches, the pipeline takes time to fill and drain. The solution is to either increase $M$ (more microbatches) or increase $V$ (interleaved schedules). Both make the startup and drain phases a smaller fraction of total time.
+| Configuration | Bubble Fraction |
+|:-------------|:----------------|
+| $P=4, M=16, V=1$ | $3/19 = 15.8\%$ |
+| $P=4, M=16, V=2$ | $3/35 = 8.6\%$ |
+| $P=8, M=32, V=1$ | $7/39 = 17.9\%$ |
+| $P=16, M=16, V=1$ | $15/31 = 48.4\%$ — unacceptable |
 
-**Implication**: To keep the bubble below 5% using standard 1F1B ($V=1$), you need $M \geq 19 \cdot (P-1)$ microbatches. With a 4-stage pipeline ($P=4$), you need at least 57 microbatches. By using $V=2$ virtual stages, you cut the required microbatches in half.
+To keep the bubble below 5% with standard 1F1B ($V=1$), you need $M \geq 19 \times (P - 1)$ microbatches. Interleaved schedules ($V \geq 2$) cut this requirement proportionally.
 
-### 2.4 Expert Parallelism (Mixture of Experts)
+### 2.5 Expert Parallelism (Mixture of Experts) {#sec-moe}
 
 ::: {.callout-note appearance="simple" icon=false}
-**💡 Intuition: Breaking the Iron Law**
-Standard dense Transformers obey a strict "Iron Law": if you double the parameters, you double the memory *and* the compute FLOPs. Mixture of Experts (MoE) breaks this law. It routes tokens only to specific "expert" subnetworks. This means your **Memory Bound** is dictated by the massive *Total Parameters*, but your **Compute Bound** is dictated only by the much smaller *Active Parameters*. The physical tradeoff is a massive network bandwidth tax (All-to-All communication) to route tokens to the right experts across the cluster.
-
-**📚 Source:** @shazeer2017outrageously
+**Intuition:** Dense Transformers obey a strict "Iron Law": doubling parameters doubles both memory *and* compute. Mixture of Experts (MoE) breaks this law by routing tokens to specific expert subnetworks. The **memory bound** is set by the massive *total* parameters, but the **compute bound** is set by the much smaller *active* parameters. The physical tradeoff is a network bandwidth tax (All-to-All communication) to route tokens across the cluster.
 :::
 
-To model MoE, we move from 3D to **4D Parallelism**:
+When $\text{EP} > 1$, the solver adds an **All-to-All** communication penalty for token routing:
 
 $$
-\text{Data Parallelism} = \frac{\text{Total GPUs}}{TP \times PP \times EP}
+T_{\text{all-to-all}} = (N-1) \cdot \alpha \;+\; \frac{N-1}{N} \cdot \frac{M}{\beta}
 $$
 
-Where $EP$ is Expert Parallelism. If $EP > 1$, the solver adds an All-to-All communication penalty for token routing:
-
-$$
-T_{\text{all-to-all}} = \frac{N-1}{N} \times \frac{\text{Message Size}}{\text{Bandwidth}} + (N-1) \times \text{Latency}
-$$
+where $N$ is the EP degree. Compared to AllReduce, All-to-All creates $O(N^2)$ point-to-point connections, making it **latency-sensitive** — a 4 KB token routing message is latency-bound, while a 140 GB gradient sync is bandwidth-bound.
 
 ---
 
-## 3. LLM Serving Lifecycle
+## 3. Training Scaling Laws {#sec-scaling}
 
-*Implemented in [`mlsysim.core.solver.ServingModel`](api/core.solver.ServingModel.qmd).*
+*Used by [`mlsysim.core.formulas.calc_transformer_training_flops`](api/core.formulas.qmd).*
+📚 **Slide Deck:** [Training (Vol I, Ch 8)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/08_training.pdf){target="_blank"}
 
-LLM autoregressive inference has two physically distinct phases. Understanding which phase
-dominates is critical for capacity planning.
-
-### 3.1 Pre-fill Phase (Compute-Bound)
-
-The initial forward pass over the full prompt is compute-bound because all tokens are processed in parallel:
-
-$$
-\text{TTFT} = \frac{2 \times \text{Parameters} \times \text{Seq\_Len} \times \text{Batch}}{\text{Peak\_FLOPs} \times \eta} + \text{Dispatch\_Tax}
-$$
-
-The factor of 2 counts both the multiply and the add in each multiply-accumulate (MAC) operation.
-
-### 3.2 Decoding Phase (Memory-Bound)
-
-Each token decode step requires loading the entire model weight matrix plus the accumulated KV-cache:
-
-$$
-\text{ITL} = \frac{\text{Model\_Bytes} + \text{KV\_Cache\_Bytes}}{\text{Memory\_BW}}
-$$
-
-This phase is almost always **memory-bound** on current hardware because generating one token
-requires the same memory load as a full matrix-vector product, but performs far fewer FLOPs.
-
-### 3.3 KV-Cache Size
-
-**Simplified form** (contiguous allocation):
-
-$$
-\text{KV\_Bytes} = 2 \times L \times H_{\text{kv}} \times d \times S \times B \times b
-$$
-
-where $L$ is the number of layers, $H_{\text{kv}}$ is the number of KV heads (equals $H$ for MHA, less for GQA), $d$ is the head dimension, $S$ is the sequence length, $B$ is the batch size, and $b$ is the bytes per parameter.
-
-**PagedAttention form** (paged allocation, as in vLLM):
-
-$$
-\text{KV\_Bytes} = 2 \times L \times H_{\text{kv}} \times d \times \lceil S/p \rceil \times p \times B \times b
-$$
-
-where $p$ is the page size in tokens. When $p = S$ (no paging), this reduces to the simplified form.
-
-The factor of 2 counts both the K and V matrices. At fp16 (2 bytes/param), a 70B model with
-a 4096-token context at batch=32 requires approximately **540 GB** of KV-cache — more than
-a single H100 node can hold.
-
-### 3.4 Prompt Caching (Prefix Caching)
-
-*Literature: @zheng2024sglang (RadixAttention for automatic prefix caching).*
-
-When a prefix of the context (e.g., a system prompt) has been seen before, its KV-cache entries are already computed and resident in memory. Only the *new* tokens require prefill computation:
-
-$$
-\text{TTFT}_{\text{cached}} = \frac{2 \times \text{Parameters} \times (\text{Seq\_Len} - P_{\text{cached}}) \times \text{Batch}}{\text{Peak\_FLOPs} \times \eta} + \text{Dispatch\_Tax}
-$$
-
-where $P_{\text{cached}}$ is the number of tokens with pre-computed KV entries. The key asymmetry: **TTFT improves proportionally** (only new tokens need compute), but **ITL is unchanged** (the decode phase still loads the full model weights regardless) and **memory is unchanged** (the full KV-cache, including cached prefix, remains resident).
-
-The TTFT speedup ratio is:
-
-$$
-\text{Speedup} = \frac{\text{Seq\_Len}}{\text{Seq\_Len} - P_{\text{cached}}}
-$$
-
-For a chatbot with a 1024-token system prompt in a 4096-token context, caching yields a $\frac{4096}{3072} = 1.33\times$ TTFT improvement. For RAG applications where 75% of the context is cached retrieval, the speedup reaches $4\times$.
-
-### 3.5 Disaggregated Serving
-
-*Literature: @patel2024splitwise (Splitwise: phase-aware LLM inference).*
-
-In disaggregated (or "splitwise") serving, the compute-bound prefill and memory-bound decode phases run on different hardware optimized for each:
-
-$$
-\text{TTFT}_{\text{disagg}} = \text{TTFT}_{\text{prefill\_node}} + \frac{\text{KV\_Cache\_Bytes}}{\text{Network\_BW}}
-$$
-
-The second term is the cost of transferring the KV-cache from the prefill node to the decode node over the network. This is worthwhile when:
-
-1. The prefill node has higher compute throughput (e.g., more FLOPS)
-2. The decode node has higher memory bandwidth (e.g., more HBM bandwidth per GPU)
-3. The KV-cache transfer time is small relative to the TTFT savings
-
-### 3.6 Speculative Decoding
-
-*Literature: @leviathan2023fast (Fast Inference from Transformers via Speculative Decoding).*
-
-Speculative decoding uses a small *draft* model to generate $K$ candidate tokens cheaply, then *verifies* all $K$ in a single forward pass of the target model. The expected number of accepted tokens per step follows a geometric series [@leviathan2023fast]:
-
-$$
-\mathbb{E}[\text{accepted}] = 1 + \frac{\alpha(1 - \alpha^K)}{1 - \alpha}
-$$
-
-where $\alpha$ is the draft model's acceptance rate (probability that its token matches the target model's distribution). The effective ITL becomes:
-
-$$
-\text{ITL}_{\text{spec}} = \frac{K \cdot t_{\text{draft}} + t_{\text{verify}}}{\mathbb{E}[\text{accepted}]}
-$$
-
-With a good draft model ($\alpha \approx 0.8$, $K = 4$), speculative decoding can achieve approximately $2.5\times$ ITL improvement. The trade-off is additional memory for the draft model weights.
-
----
-
-## 4. The Data Wall
-
-*Implemented in [`mlsysim.core.solver.DataModel`](api/core.solver.DataModel.qmd).*
-
-::: {.callout-note appearance="simple" icon=false}
-**💡 Intuition: Data Ingestion Bottlenecks**
-The "Data Wall" occurs when the storage or IO interconnect cannot supply data to the compute units fast enough to keep them saturated. This is common in high-throughput training (e.g., video data for autonomous driving) or when training from slow remote storage.
-
-**📚 Source:** @mlsysbook2025, Chapter 4 (Data Engineering).
-:::
-
-The data supply bandwidth is limited by the minimum bandwidth across the storage hierarchy (SSD/HDD) and the IO interconnect (PCIe):
-
-$$
-\text{Supply\_BW} = \min(\text{Storage\_BW}, \text{IO\_Interconnect\_BW})
-$$
-
-The system is stalled if the required data rate exceeds the supply bandwidth:
-
-$$
-\text{Utilization} = \frac{\text{Required\_Data\_Rate}}{\text{Supply\_BW}}
-$$
-
-If $\text{Utilization} > 1.0$, the compute units will stall waiting for data, reducing effective throughput regardless of the model's arithmetic intensity.
-
----
-
-## 5. Scaling Physics (Chinchilla Laws)
-
-*Implemented in [`mlsysim.core.solver.ScalingModel`](api/core.solver.ScalingModel.qmd).*
-
-::: {.callout-note appearance="simple" icon=false}
-**💡 Intuition: Compute-Optimal Training**
-Scaling laws describe how model performance improves with more compute ($C$), parameters ($P$), and data ($D$). The Chinchilla study found that most models are "undertrained" and that for a fixed compute budget, $P$ and $D$ should be scaled in equal proportions.
-
-**📚 Source:** @hoffmann2022chinchilla
-:::
-
-The total floating-point operations required for training a Transformer is approximately:
+The **6PD rule** estimates total training FLOPs for a Transformer:
 
 $$
 C \approx 6 \times P \times D
 $$
 
-The compute-optimal point (Chinchilla point) occurs when the number of training tokens is roughly 20 times the number of parameters:
+| Symbol | Meaning |
+|:-------|:--------|
+| $C$ | Total training FLOPs |
+| $P$ | Number of model parameters |
+| $D$ | Number of training tokens |
+
+The factor of 6 comes from: 2 FLOPs per parameter per token (forward pass multiply-accumulate) × 3 passes (forward + backward for weights + backward for activations). Combined with the roofline model ([Section 1](#sec-roofline)), this gives training time:
 
 $$
-D \approx 20 \times P
+T_{\text{train}} = \frac{6PD}{\text{Peak\_FLOP/s} \times \eta}
 $$
 
-Given a compute budget $C$ (in FLOPs), the optimal parameter count is:
+::: {.callout-tip collapse="true"}
+## Worked Example: GPT-3 Training Time
 
-$$
-P_{\text{opt}} = \sqrt{\frac{C}{120}}
-$$
+GPT-3 175B trained on 300B tokens:
 
----
+- **Total FLOPs:** $6 \times 175 \times 10^9 \times 300 \times 10^9 = 3.15 \times 10^{23}$
+- **On 1,024 A100s** ($312\text{ TF each} \times 0.5$ MFU): $3.15 \times 10^{23} / (1024 \times 312 \times 10^{12} \times 0.5) \approx 1.97 \times 10^6\text{ s} \approx 23\text{ days}$
 
-## 6. Cluster Orchestration (Little's Law)
-
-*Implemented in [`mlsysim.core.solver.OrchestrationModel`](api/core.solver.OrchestrationModel.qmd).*
-
-::: {.callout-note appearance="simple" icon=false}
-**💡 Intuition: The Wait Wall**
-In a shared cluster, the time a researcher waits for a job to start is determined by the arrival rate of new jobs ($\lambda$) and the processing rate of the cluster ($\mu$). As utilization approaches 100%, wait times explode non-linearly.
-
-**📚 Source:** @little1961proof
+The actual training took ~34 days, consistent with scaling efficiency losses at 1,024 GPUs (~60%).
 :::
 
-Cluster utilization $\rho$ is the ratio of the arrival rate to the service rate:
-
-$$
-\rho = \frac{\lambda}{\mu}
-$$
-
-Using an M/D/1 queue model (Poisson arrivals, fixed job durations), the average wait time in the queue is:
-
-$$
-T_{\text{wait}} = \frac{\rho}{2\mu(1 - \rho)}
-$$
-
-As $\rho \to 1.0$, $T_{\text{wait}} \to \infty$. This illustrates why maintaining some "headroom" in cluster capacity is essential for researcher productivity.
-
 ---
 
-## 7. Model Compression (The Compression Tax)
+## 4. LLM Serving Lifecycle {#sec-serving}
 
-*Implemented in [`mlsysim.core.solver.CompressionModel`](api/core.solver.CompressionModel.qmd).*
+*Implemented in [`mlsysim.core.solver.ServingModel`](api/core.solver.ServingModel.qmd).*
+📚 **Slide Decks:** [Model Serving (Vol I, Ch 13)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/13_model_serving.pdf){target="_blank"} | [Inference at Scale (Vol II, Ch 9)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/09_inference.pdf){target="_blank"}
 
-::: {.callout-note appearance="simple" icon=false}
-**💡 Intuition: Accuracy vs. Efficiency**
-Compressing a model via quantization or pruning reduces its memory footprint and increases inference speed, but often at the cost of task accuracy. This "Compression Tax" must be evaluated to ensure the model remains functional for its intended use.
+LLM autoregressive inference has two physically distinct phases. Understanding which phase dominates is critical for capacity planning.
 
-**📚 Source:** @han2016deep
+### 4.1 Pre-fill Phase (Compute-Bound)
+
+The initial forward pass processes all prompt tokens in parallel:
+
+$$
+\text{TTFT} = \frac{2 \times P \times S \times B}{\text{Peak\_FLOP/s} \times \eta} + \text{Dispatch\_Tax}
+$$
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $P$ | Number of model parameters |
+| $S$ | Input sequence length |
+| $B$ | Batch size |
+
+The factor of 2 counts both the multiply and the add in each multiply-accumulate (MAC) operation.
+
+### 4.2 Decoding Phase (Memory-Bound) {#sec-decode}
+
+Each decode step loads the entire model weight matrix plus the accumulated KV-cache:
+
+$$
+\text{ITL} = \frac{\text{Model\_Bytes} + \text{KV\_Cache\_Bytes}}{\text{Memory\_BW}}
+$$
+
+This phase is almost always **memory-bound** because generating one token requires loading the full weight matrix but performs far fewer FLOPs (a single matrix-vector product per layer). On an H100 at batch=1, compute takes ~3% of the time; memory loading takes ~97%.
+
+::: {.callout-tip collapse="true"}
+## Worked Example: Llama-3 70B Decode on H100
+
+Single-token decode, batch=1:
+
+- **Compute:** $2 \times 70\text{B} / 989\text{ TF} = 0.14\text{ ms}$ (3%)
+- **Memory:** $140\text{ GB} / 3.35\text{ TB/s} = 41.8\text{ ms}$ (97%)
+- **Total:** ~42 ms/token → ~24 tokens/s
+
+The decode phase is so memory-bound that a hypothetical 2× compute upgrade yields zero speedup. Only higher memory bandwidth (or batching) helps.
+
+*Source: Compute Infrastructure slides (Vol II, Ch 2).*
 :::
 
-The **Compression Ratio** ($R$) is the ratio of the original model size to the compressed size:
+### 4.3 KV-Cache Size {#sec-kvcache}
 
 $$
-R = \frac{\text{Size}_{\text{original}}}{\text{Size}_{\text{compressed}}}
+\text{KV\_Bytes} = 2 \times L \times H_{\text{kv}} \times d_{\text{head}} \times S \times B \times b_{\text{elem}}
 $$
 
-For **Quantization**, $R$ is determined by the baseline and target bit-widths:
+| Symbol | Meaning |
+|:-------|:--------|
+| $L$ | Number of Transformer layers |
+| $H_{\text{kv}}$ | Number of KV attention heads (equals $H$ for MHA; smaller for GQA/MQA) |
+| $d_{\text{head}}$ | Dimension per head |
+| $S$ | Sequence length |
+| $B$ | Batch size |
+| $b_{\text{elem}}$ | Bytes per element (2 for FP16/BF16) |
+
+The factor of 2 accounts for both the K and V tensors. With **Grouped-Query Attention** (GQA), $H_{\text{kv}} < H$, significantly reducing cache size — Llama-3 70B uses 8 KV heads vs. 64 query heads, an 8× reduction.
+
+::: {.callout-tip collapse="true"}
+## Worked Example: KV-Cache Capacity Planning
+
+Llama-3 70B: 80 layers, 8 KV heads (GQA), $d_{\text{head}} = 128$, FP16:
+
+- **Per-token:** $2 \times 80 \times 8 \times 128 \times 2 = 327\text{ KB}$
+- **Batch=16, seq=4096:** $327\text{K} \times 16 \times 4096 = 21.5\text{ GB}$
+- **Batch=32, seq=4096:** $327\text{K} \times 32 \times 4096 = 43\text{ GB}$
+
+Weights (35 GB in FP16) + KV-cache (43 GB) = 78 GB — barely fits on an 80 GB H100. At batch=64 or longer contexts, you must shard across multiple GPUs.
+
+*Source: Inference at Scale slides (Vol II, Ch 9).*
+:::
+
+### 4.4 Serving Cost Dominance
+
+At production scale, serving costs dominate training:
 
 $$
-R_{\text{quant}} = \frac{b_{\text{base}}}{b_{\text{target}}}
+C_{\text{total}} = C_{\text{training}} + C_{\text{serving}} \times T_{\text{deploy}} \times Q_{\text{rate}}
 $$
 
-where $b_{\text{base}}$ is typically 16 (FP16/BF16), not 32. For example, FP16→INT4 gives $R = 16/4 = 4\times$.
-
-For **Pruning**, $R$ is determined by the sparsity ratio ($s$):
-
-$$
-R_{\text{pruning}} = \frac{1}{1 - s}
-$$
-
-The estimated accuracy impact ($\Delta A$) is non-linear and typically follows empirical heuristics derived from benchmark studies (e.g., INT8 quantization often yields <1% drop, while 4-bit quantization can yield 2–5% drop).
+A 70B model costing \$2M to train, serving 1M daily users at 50 requests/day, costs ~\$18M/year in inference — 9× the training cost in year one. This is why inference optimization (batching, quantization, speculative decoding) has outsized economic impact.
 
 ---
 
-## 8. Datacenter Sustainability
+## 5. Datacenter Sustainability {#sec-sustainability}
 
 *Implemented in [`mlsysim.core.solver.SustainabilityModel`](api/core.solver.SustainabilityModel.qmd).*
+📚 **Slide Deck:** [Sustainable AI (Vol II, Ch 15)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/15_sustainable_ai.pdf){target="_blank"}
 
-### 8.1 Total Energy
+### 5.1 Total Energy
 
 $$
 E = \text{IT\_Power} \times \text{Hours} \times \text{PUE}
 $$
 
-Power Usage Effectiveness (PUE) accounts for cooling and facility overhead. A PUE of 1.0 is
-theoretical perfect efficiency; hyperscale datacenters typically achieve 1.1–1.4.
+**Power Usage Effectiveness** (PUE) accounts for cooling and facility overhead. A PUE of 1.0 is theoretical perfect efficiency; hyperscale datacenters achieve 1.05–1.10 (liquid-cooled) to 1.4–1.6 (air-cooled). The industry average is 1.58 — meaning 37% of energy goes to cooling and power distribution, not computation.
 
-### 8.2 Carbon Footprint
+### 5.2 Carbon Footprint
 
 $$
 C = E \times \text{Carbon\_Intensity}
 $$
 
-Where $C$ is in $\text{kg CO}_2\text{e}$ and $\text{Carbon\_Intensity}$ is in $\text{g CO}_2\text{e/kWh}$,
-sourced from IEA regional grid data. This value varies from ~20 g/kWh (Quebec hydro) to
-~820 g/kWh (Poland coal)—a **~41× difference** for identical ML workloads.
+Where $C$ is in kg CO₂e and Carbon\_Intensity is in g CO₂e/kWh, sourced from regional grid data.
 
----
+::: {.callout-tip collapse="true"}
+## Worked Example: Training Carbon Footprint
 
-## 9. Total Cost of Ownership (TCO)
+64 GPUs × 400W × 336 hours = 8,602 kWh. With PUE 1.2 = 10,322 kWh.
 
-*Implemented in [`mlsysim.core.solver.EconomicsModel`](api/core.solver.EconomicsModel.qmd).*
+| Grid Region | Carbon Intensity | CO₂ Emissions |
+|:------------|:----------------|:--------------|
+| Quebec (hydro) | 20 g/kWh | **206 kg** |
+| US Average | 429 g/kWh | **4,428 kg** |
+| Poland (coal) | 820 g/kWh | **8,464 kg** |
 
-$$
-\text{TCO} = \text{CapEx}_{\text{amortized}} + \text{OpEx}_{\text{power}} + \text{OpEx}_{\text{networking}} + \text{OpEx}_{\text{labor}}
-$$
+Geographic choice alone creates a **~41× difference** for identical workloads. Combined with hardware choice (5×) and quantization (4×), the total optimization lever is up to **800×**.
 
-Where:
-
-- $\text{CapEx}_{\text{amortized}} = \text{Hardware\_Cost} / \text{Depreciation\_Years}$
-- $\text{OpEx}_{\text{power}} = E \times \text{Electricity\_Rate}$
-
----
-
-## 10. Cluster Reliability (The Young-Daly Model)
-
-*Implemented in [`mlsysim.core.solver.ReliabilityModel`](api/core.solver.ReliabilityModel.qmd).*
-
-::: {.callout-note appearance="simple" icon=false}
-**💡 Intuition: The Cost of Checkpointing**
-When training massive models on thousands of GPUs for months, hardware failures are not a possibility; they are a statistical certainty. If a node fails, the job crashes and you lose all progress since the last checkpoint. You want to save checkpoints frequently to minimize lost work, but writing a 140GB checkpoint to remote storage takes time, pausing the training. The Young-Daly model calculates the optimal balance between *time wasted saving checkpoints* and *time wasted re-computing after a failure*.
-
-**📚 Source:** @young1974first and @daly2006higher
+*Source: Sustainable AI slides (Vol II, Ch 15).*
 :::
 
-The optimal checkpoint interval $\tau_{\text{opt}}$ is defined by the Mean Time Between Failures ($M$) and the time it takes to write a single checkpoint ($\delta$):
+---
+
+## 6. Total Cost of Ownership (TCO) {#sec-tco}
+
+*Implemented in [`mlsysim.core.solver.EconomicsModel`](api/core.solver.EconomicsModel.qmd).*
+📚 **Slide Deck:** [Compute Infrastructure (Vol II, Ch 2)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/02_compute_infrastructure.pdf){target="_blank"}
+
+$$
+\text{TCO} = \underbrace{\frac{\text{Hardware\_Cost}}{\text{Depreciation\_Years}}}_{\text{CapEx (amortized)}} + \underbrace{E \times \text{Electricity\_Rate}}_{\text{OpEx (power)}} + \text{OpEx}_{\text{maintenance}}
+$$
+
+::: {.callout-tip collapse="true"}
+## Worked Example: On-Prem vs. Cloud
+
+| Metric | On-Prem (H100 Node) | Cloud On-Demand |
+|:-------|:--------------------|:----------------|
+| Unit cost | \$350K (amortize over 3 yr) | — |
+| Annual cost (80% util) | ~\$122K/node/yr | ~\$224K/node/yr |
+| Effective GPU-hour rate | ~\$2.40 | ~\$4.00 |
+
+**Break-even utilization:** ~55%. Below 55% sustained utilization, cloud is cheaper. At 20% utilization, on-prem costs ~\$6/GPU-hour — more expensive than cloud on-demand.
+
+The right metric is **cost per useful TFLOP-hour**, not cost per GPU-hour: an H100 delivers 6.3× the TFLOPS of an A100, so a higher sticker price may yield a lower effective cost.
+
+*Source: Compute Infrastructure slides (Vol II, Ch 2).*
+:::
+
+---
+
+## 7. Cluster Reliability (The Young-Daly Model) {#sec-reliability}
+
+*Implemented in [`mlsysim.core.solver.ReliabilityModel`](api/core.solver.ReliabilityModel.qmd).*
+📚 **Slide Deck:** [Fault Tolerance (Vol II, Ch 7)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/07_fault_tolerance.pdf){target="_blank"}
+
+::: {.callout-note appearance="simple" icon=false}
+**Intuition:** When training on thousands of GPUs for months, hardware failures are a statistical certainty. If a node fails, you lose all progress since the last checkpoint. Checkpointing too often wastes time writing; checkpointing too rarely wastes time recomputing. The Young-Daly model finds the optimal balance.
+:::
+
+### 7.1 Cluster MTBF
+
+Individual component reliability degrades linearly with scale:
+
+$$
+\text{MTBF}_{\text{cluster}} = \frac{\text{MTBF}_{\text{component}}}{N}
+$$
+
+| Cluster Size ($N$) | System MTBF (50,000 hr/GPU) |
+|:------------|:----------------|
+| 8 GPUs | ~8 months |
+| 1,000 GPUs | 50 hours |
+| 10,000 GPUs | **5 hours** |
+| 16,000 GPUs | **~3 hours** (Llama-3 scale: 419 failures in 54 days) |
+
+### 7.2 Optimal Checkpoint Interval
 
 $$
 \tau_{\text{opt}} = \sqrt{2 \times \delta \times M}
 $$
 
-For a cluster, the collective $M$ drops linearly with the number of components. If a single node has an MTBF of 10,000 hours, a cluster of 1,000 nodes will have an MTBF of just 10 hours ($10,000 / 1000$).
+| Symbol | Meaning |
+|:-------|:--------|
+| $\delta$ | Time to write one checkpoint |
+| $M$ | Mean Time Between Failures (cluster MTBF) |
 
----
+### 7.3 Wasted Compute Fraction
 
-## 11. Tail Latency (Erlang-C Queueing)
+The total overhead from checkpointing has two components:
 
-*Implemented in [`mlsysim.core.solver.TailLatencyModel`](api/core.solver.TailLatencyModel.qmd).*
+$$
+\text{Waste} = \underbrace{\frac{\delta}{2\tau}}_{\text{checkpoint writes}} + \underbrace{\frac{\tau}{2M}}_{\text{lost work on failure}}
+$$
 
-::: {.callout-note appearance="simple" icon=false}
-**Intuition: Why P99 Matters More Than Median**
-Deploying inference at scale requires not just median performance but P99 tail latency guarantees. As server utilization increases from 80% to 95%, tail latency doesn't increase linearly — it explodes. This non-linearity surprises engineers accustomed to thinking of "high utilization" as desirable.
+At the optimal $\tau_{\text{opt}}$, both terms are equal, and waste is minimized.
 
-**Source:** @dean2013tail
+::: {.callout-tip collapse="true"}
+## Worked Example: Llama-3 Scale Checkpointing
+
+16,384 GPUs, $\delta = 2$ min, cluster MTBF $M = 180$ min:
+
+$$\tau_{\text{opt}} = \sqrt{2 \times 2 \times 180} = \sqrt{720} \approx 27\text{ min}$$
+
+| Checkpoint Interval | Overhead |
+|:-------------------|:---------|
+| 10 min (too frequent) | 17% |
+| **27 min (optimal)** | **7%** |
+| 60 min (too rare) | 15% |
+
+On a cluster costing \$10M/month, 7% overhead = \$700K/month. Async checkpointing (overlapping writes with computation) can reduce this to ~3%.
+
+*Source: Fault Tolerance slides (Vol II, Ch 7).*
 :::
 
-For an inference server farm modeled as an M/M/$c$ queue with $c$ replicas and per-server utilization $\rho = \lambda / (c\mu)$:
+---
+
+## 8. Failure Probability {#sec-failure-prob}
+
+*Implemented in [`mlsysim.core.formulas.calc_failure_probability`](api/core.formulas.qmd).*
+
+The probability of at least one failure during a job of duration $T$ follows an exponential model:
 
 $$
-\mathbb{P}[\text{wait}] = \frac{(c\rho)^c / c! \cdot (1-\rho)^{-1}}{\sum_{k=0}^{c-1}(c\rho)^k/k! + (c\rho)^c/c! \cdot (1-\rho)^{-1}}
+P(\geq 1\text{ failure}) = 1 - e^{-T / \text{MTBF}}
 $$
 
-P99 latency grows non-linearly as $\rho \to 1$. The TailLatencyModel computes P50 and P99 wait times and SLO violation probability as a function of arrival rate, service latency, and replica count.
+For a 30-day training run on a cluster with MTBF of 5 hours: $P = 1 - e^{-720/5} \approx 1.0$ — failure is virtually certain. This is why checkpointing ([Section 7](#sec-reliability)) is not optional at scale.
 
 ---
 
-## 12. Weight Streaming (Wafer-Scale Inference)
+## 9. Effective FLOPS (Fleet Goodput) {#sec-goodput}
 
-*Implemented in [`mlsysim.core.solver.WeightStreamingModel`](api/core.solver.WeightStreamingModel.qmd).*
+*Implemented in [`mlsysim.core.formulas.calc_effective_flops`](api/core.formulas.qmd).*
+📚 **Slide Deck:** [Performance Engineering (Vol II, Ch 10)](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/10_performance_engineering.pdf){target="_blank"}
 
-::: {.callout-note appearance="simple" icon=false}
-**Intuition: Inverting the Memory Wall**
-Wafer-scale architectures (e.g., Cerebras CS-3) invert the GPU memory wall: activations reside on-wafer in SRAM while model weights stream from external MemoryX nodes. The bottleneck shifts from HBM bandwidth to injection interconnect bandwidth.
-:::
-
-Per-layer execution time is:
+The actual useful computation delivered by a fleet after all overheads:
 
 $$
-T_{\text{layer}} = \max\!\left(\frac{|W_{\ell}|}{BW_{\text{inject}}},\; \frac{2P_{\ell} \times B}{\text{Peak} \times \eta}\right)
+\text{Effective\_FLOP/s} = \text{Peak\_FLOP/s} \times \underbrace{\text{MFU}}_{\text{per-GPU}} \times \underbrace{\eta_{\text{scale}}}_{\text{comm overhead}} \times \underbrace{\frac{\text{Goodput}}{\text{Rawput}}}_{\text{failure waste}}
 $$
 
-where $|W_{\ell}|$ is the layer weight size in bytes, $P_{\ell} = |W_{\ell}| / b_{\text{prec}}$ is the parameter count, and the factor of 2 accounts for the multiply-accumulate FLOPs per parameter.
-
-The optimal batch size where injection and compute perfectly overlap:
-
-$$
-B^{*} = \frac{b_{\text{prec}} \times \text{Peak} \times \eta}{2 \times BW_{\text{inject}}}
-$$
-
-Note that $B^*$ depends only on numerical precision, peak compute, and injection bandwidth — it is independent of layer size.
-
----
-
-## 13. Responsible Engineering (DP-SGD Overhead)
-
-*Implemented in [`mlsysim.core.solver.ResponsibleEngineeringModel`](api/core.solver.ResponsibleEngineeringModel.qmd).*
-
-Privacy and fairness guarantees impose measurable computational overhead. Differential privacy via DP-SGD requires per-sample gradient clipping and calibrated noise addition:
-
-$$
-\sigma \propto \frac{1}{\epsilon}
-$$
-
-The per-step clipping and noise addition incur a training slowdown of approximately 2–10×. Fairness constraints require sufficient representation of minority subgroups, demanding additional data proportional to $O(1/p_{\min})$ where $p_{\min}$ is the smallest subgroup prevalence.
-
----
-
-## 14. Sensitivity Analysis (Binding Constraints)
-
-*Implemented in [`mlsysim.core.solver.SensitivitySolver`](api/core.solver.SensitivitySolver.qmd).*
-
-The SensitivitySolver identifies the binding constraint by computing partial derivatives of end-to-end latency with respect to each hardware parameter:
-
-$$
-\frac{\partial T}{\partial BW_{\text{mem}}}, \quad \frac{\partial T}{\partial \text{Peak}_{\text{FLOPS}}}, \quad \frac{\partial T}{\partial BW_{\text{net}}}, \quad \ldots
-$$
-
-The parameter with the largest (most negative) sensitivity is the binding constraint — the single upgrade that would yield the greatest performance improvement. This transforms "where should I invest?" from intuition into calculation.
-
----
-
-## 15. Inverse Roofline Synthesis
-
-*Implemented in [`mlsysim.core.solver.SynthesisSolver`](api/core.solver.SynthesisSolver.qmd).*
-
-The SynthesisSolver inverts the analysis: given a workload and a service-level agreement, it derives the minimum hardware specifications required:
-
-$$
-BW_{\text{required}} = \frac{|W|}{T_{\text{target}}}, \qquad \text{FLOPS}_{\text{required}} = \frac{\text{OPs}}{T_{\text{target}} \times \eta}
-$$
-
-This enables hardware–software co-design: rather than asking "how fast is my system?" the practitioner asks "what system do I need?"
-
----
-
-## 16. Software Efficiency (Wall 3: MFU Decomposition)
-
-*Implemented in [`mlsysim.core.solver.EfficiencyModel`](api/core.solver.EfficiencyModel.qmd).*
-
-The gap between peak and achieved FLOP/s is captured by the utilization parameter $\eta$:
-
-$$
-\eta = \frac{\text{Achieved\_FLOP/s}}{\text{Peak\_FLOP/s}}
-$$
-
-In practice, $\eta$ decomposes into multiplicative factors:
-
-$$
-\eta = \eta_{\text{occupancy}} \times \eta_{\text{fusion}} \times \eta_{\text{precision}} \times \eta_{\text{memory}}
-$$
-
-where occupancy captures warp-level parallelism, fusion captures kernel launch elimination, precision captures tensor core utilization, and memory captures data reuse. Well-optimized training (Megatron-LM, DeepSpeed) achieves $\eta \approx 0.35\text{–}0.55$; unoptimized inference may drop below 0.10.
-
----
-
-## 17. Continuous Batching (Wall 5: PagedAttention)
-
-*Implemented in [`mlsysim.core.solver.ContinuousBatchingModel`](api/core.solver.ContinuousBatchingModel.qmd).*
-
-Static batching wastes memory by pre-allocating contiguous KV-cache for the maximum sequence length. PagedAttention allocates KV-cache in fixed-size pages:
-
-$$
-\text{KV\_paged} = 2 \times L \times H_{\text{kv}} \times d \times \lceil S/p \rceil \times p \times B \times b
-$$
-
-The memory savings come from eliminating internal fragmentation. The effective batch size $B_{\text{eff}}$ under a memory budget $M_{\text{budget}}$ is:
-
-$$
-B_{\text{eff}} = \left\lfloor \frac{M_{\text{budget}} - |W|}{2 \times L \times H_{\text{kv}} \times d \times S \times b} \right\rfloor
-$$
-
-where $|W|$ is the model weight footprint. Continuous batching dynamically inserts and removes requests as they complete, keeping $B_{\text{eff}}$ near maximum at all times.
-
----
-
-## 18. Data Transformation (Wall 9: CPU Preprocessing)
-
-*Implemented in [`mlsysim.core.solver.TransformationModel`](api/core.solver.TransformationModel.qmd).*
-
-CPU preprocessing (decode, resize, tokenize, augment) must keep pace with GPU consumption:
-
-$$
-T_{\text{transform}} = \frac{B}{R_{\text{cpu}}}
-$$
-
-where $B$ is the batch size (in samples) and $R_{\text{cpu}} = N_{\text{workers}} \times r_{\text{worker}}$ is the aggregate CPU preprocessing rate (in samples/s), with $r_{\text{worker}}$ being the per-worker throughput after all transformations (decode, augment, normalize). The pipeline is stalled when:
-
-$$
-T_{\text{transform}} > T_{\text{compute}}
-$$
-
-Common mitigations: increase $W$ (more workers), cache preprocessed data, or use GPU-accelerated decoding (DALI).
-
----
-
-## 19. Network Topology (Wall 10: Bisection Bandwidth)
-
-*Implemented in [`mlsysim.core.solver.TopologyModel`](api/core.solver.TopologyModel.qmd).*
-
-The effective bandwidth available for collective communication depends on the network topology and its oversubscription ratio:
-
-$$
-\text{BW}_{\text{eff}} = \frac{\text{BW}_{\text{link}} \times \beta}{\text{oversubscription}}
-$$
-
-where $\beta$ is the bisection bandwidth ratio (1.0 for full bisection in fat-tree topologies, <1.0 for oversubscribed networks). For a $k$-ary fat-tree with oversubscription ratio $r$:
-
-$$
-\text{BW}_{\text{bisection}} = \frac{k^2}{4r} \times \text{BW}_{\text{link}}
-$$
-
-Fat-tree topologies (Leiserson, 1985) provide full bisection bandwidth ($r=1$), making them ideal for AllReduce-heavy workloads. Dragonfly and torus topologies trade bisection bandwidth for lower cost at scale.
-
----
-
-## 20. Inference-Time Scaling (Wall 12: Reasoning Compute)
-
-*Implemented in [`mlsysim.core.solver.InferenceScalingModel`](api/core.solver.InferenceScalingModel.qmd).*
-
-Chain-of-thought, tree search, and other inference-time scaling strategies multiply the compute cost by the number of reasoning steps $K$:
-
-$$
-T_{\text{reasoning}} = K \times T_{\text{step}}
-$$
-
-where $T_{\text{step}}$ is the latency of a single forward pass (from the roofline model). For best-of-$N$ sampling:
-
-$$
-T_{\text{best-of-N}} = N \times T_{\text{generate}} + T_{\text{verify}}
-$$
-
-The key insight from Snell et al. (2024) is that inference-time compute can substitute for training-time compute: a smaller model with $K$ reasoning steps may match a larger model with a single pass, at the cost of $K\times$ inference latency.
-
----
-
-## 21. Checkpoint I/O (Wall 19: MFU Penalty)
-
-*Implemented in [`mlsysim.core.solver.CheckpointModel`](api/core.solver.CheckpointModel.qmd).*
-
-Periodic checkpointing imposes an I/O burst that pauses training:
-
-$$
-\text{MFU\_penalty} = \frac{T_{\text{write}}}{T_{\text{interval}}}
-$$
-
-where $T_{\text{write}} = |W| \times \beta_{\text{opt}} / BW_{\text{storage}}$ is the time to write one checkpoint and $T_{\text{interval}}$ is the checkpoint interval. For mixed-precision Adam with FP16 weights, the checkpoint includes:
-
-- FP16 model weights: 2 bytes/param
-- FP32 master weights: 4 bytes/param
-- FP32 momentum: 4 bytes/param
-- FP32 variance: 4 bytes/param
-
-Gradients are ephemeral and **not** checkpointed. This totals 14 bytes per parameter, giving $\beta_{\text{opt}} \approx 7$ (ratio of 14 checkpoint bytes to 2 weight bytes):
-
-$$
-\text{Checkpoint\_Size} = P \times 14 \text{ bytes/param}
-$$
-
-For a 70B model, the checkpoint is $70\text{B} \times 14 \approx 0.98$ TB. The optimal checkpoint interval from the Young-Daly formula (Section 10) balances checkpoint overhead against expected rework from failures.
+Each factor in the cascade represents a distinct loss mechanism. Typical values for large-scale training: MFU ≈ 0.3–0.5, $\eta_{\text{scale}}$ ≈ 0.4–0.85, Goodput/Rawput ≈ 0.85–0.97. The compound effect means a fleet may deliver only 10–35% of its theoretical peak.
 
 ---
 
 ::: {.callout-note}
 ## Limitations of First-Order Models
-These equations are first-order analytical models. They assume:
-(1) uniform memory access patterns, (2) no cache effects, (3) no network contention under
-heavy load, and (4) linear scaling of throughput with batch size.
-Real systems deviate from these assumptions. MLSys·im predictions are typically accurate
-within ±20% of measured hardware performance — sufficient for systems intuition and
-capacity planning, but not a substitute for empirical profiling.
 
-For a detailed discussion of accuracy, limitations, and when to use MLSys·im vs. empirical profiling, see [Accuracy & Validation](accuracy.qmd).
+These equations are first-order analytical models. They assume:
+(1) uniform memory access patterns, (2) no cache hierarchy effects, (3) no network contention under heavy load, and (4) linear scaling of throughput with batch size.
+
+Real systems deviate from these assumptions. MLSYSIM predictions are typically accurate within ±15–30% of measured hardware performance — sufficient for systems intuition and capacity planning, but not a substitute for empirical profiling. See [Accuracy & Validation](accuracy.qmd) for detailed comparisons against MLPerf benchmarks.
 :::
+
+---
+
+## References
+
+The equations above are grounded in the following peer-reviewed sources:
+
+1. **Williams, Waterman & Patterson (2009).** "Roofline: An Insightful Visual Performance Model for Multicore Architectures." *Communications of the ACM.* → [Section 1](#sec-roofline)
+2. **Kaplan et al. (2020).** "Scaling Laws for Neural Language Models." *arXiv:2001.08361.* → [Section 3](#sec-scaling)
+3. **Narayanan et al. (2021).** "Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM." *SC '21.* → [Section 2.4](#sec-pipeline)
+4. **Shoeybi et al. (2019).** "Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism." *arXiv:1909.08053.* → [Section 2](#sec-distributed)
+5. **Patarasuk & Yuan (2009).** "Bandwidth Optimal All-Reduce Algorithms for Clusters of Workstations." *Journal of Parallel and Distributed Computing.* → [Section 2.3](#sec-allreduce)
+6. **Shazeer et al. (2017).** "Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer." *ICLR.* → [Section 2.5](#sec-moe)
+7. **Young (1974).** "A First-Order Approximation to the Optimum Checkpoint Interval." *Information Processing Letters.* → [Section 7](#sec-reliability)
+8. **Daly (2006).** "A Higher Order Estimate of the Optimum Checkpoint Interval for Restart Dumps." *Future Generation Computer Systems.* → [Section 7](#sec-reliability)
+9. **Patterson et al. (2021).** "Carbon Emissions and Large Neural Network Training." *arXiv:2104.10350.* → [Section 5](#sec-sustainability)
+10. **Barroso, Clidaras & Hölzle (2018).** "The Datacenter as a Computer." *Synthesis Lectures on Computer Architecture.* → [Section 6](#sec-tco)

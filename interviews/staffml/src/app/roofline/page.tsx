@@ -6,13 +6,20 @@ import { Terminal, Cpu } from "lucide-react";
 import clsx from "clsx";
 import { HARDWARE_SPECS, FORMULAS, HardwareSpec } from "@/lib/hardware";
 
-// Well-known model workloads for plotting
+// Well-known model workloads for plotting.
+//
+// Note on colors: these are a categorical data palette, not theme
+// chrome. Each workload needs a distinct hue so the viewer can match
+// the dot on the chart to the label in the legend. Unlike the
+// roofline curve and ridge point (which follow the theme's accent
+// blue), the workload palette stays constant across dark/light
+// modes — same as you'd do with any Matplotlib tab10-style chart.
 const WORKLOADS = [
   { name: 'BERT-Base (FP16)', params_b: 0.11, ops_per_byte: 50, color: '#3b82f6' },
   { name: 'ResNet-50 (FP16)', params_b: 0.025, ops_per_byte: 120, color: '#10b981' },
   { name: 'GPT-2 (FP16)', params_b: 1.5, ops_per_byte: 30, color: '#f5a623' },
   { name: 'Llama-70B (FP16)', params_b: 70, ops_per_byte: 15, color: '#ef4444' },
-  { name: 'Llama-70B (INT8)', params_b: 70, ops_per_byte: 30, color: '#c44' },
+  { name: 'Llama-70B (INT8)', params_b: 70, ops_per_byte: 30, color: '#cc4444' },
   { name: 'MobileNetV2 (INT8)', params_b: 0.003, ops_per_byte: 200, color: '#8b5cf6' },
 ];
 
@@ -93,8 +100,8 @@ export default function RooflinePage() {
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
           <svg viewBox="0 0 32 32" className="w-8 h-8">
-            <path d="M5,25 L16,9 L27,9" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-            <circle cx="16" cy="9" r="2.5" fill="#3b82f6" />
+            <path d="M5,25 L16,9 L27,9" stroke="var(--accent-blue)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            <circle cx="16" cy="9" r="2.5" fill="var(--accent-blue)" />
             <circle cx="16" cy="9" r="1" fill="currentColor" />
           </svg>
           <div>
@@ -144,17 +151,18 @@ export default function RooflinePage() {
               return <line key={`yg-${v}`} x1={PAD.left} y1={sy} x2={PAD.left + PW} y2={sy} stroke="var(--border)" strokeWidth="0.5" />;
             })}
 
-            {/* Roofline curve */}
-            <path d={rooflinePath} stroke="#3b82f6" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            {/* Roofline curve — themed, follows the app's accent blue so
+                it reads correctly in both dark and light mode. */}
+            <path d={rooflinePath} stroke="var(--accent-blue)" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
 
-            {/* Ridge point */}
+            {/* Ridge point — also themed. */}
             {(() => {
               const { sx, sy } = toSvg(ridge, selectedHw.compute_tflops);
               return (
                 <g>
-                  <circle cx={sx} cy={sy} r="5" fill="#3b82f6" />
+                  <circle cx={sx} cy={sy} r="5" fill="var(--accent-blue)" />
                   <circle cx={sx} cy={sy} r="2" fill="var(--surface)" />
-                  <text x={sx + 8} y={sy - 8} fill="#3b82f6" fontSize="9" fontFamily="JetBrains Mono, monospace">
+                  <text x={sx + 8} y={sy - 8} fill="var(--accent-blue)" fontSize="9" fontFamily="JetBrains Mono, monospace">
                     Ridge: {ridge.toFixed(0)} Ops/B
                   </text>
                 </g>

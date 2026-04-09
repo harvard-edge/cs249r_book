@@ -28,19 +28,17 @@ $(DATA_FIGURES): corpus_stats.json scripts/generate_figures.py
 	python3 scripts/generate_figures.py
 
 # ── Step 3: Convert SVGs to PDFs ─────────────────────────────
-SVG_SOURCES = figures/fig-competency-model.svg \
-              figures/fig-four-axes.svg \
-              figures/fig-generation-pipeline.svg \
-              figures/fig-quality-pipeline.svg \
-              figures/fig-backward-design.svg \
-              figures/fig-prereq-subset.svg
+SVG_SOURCES = $(wildcard figures/*.svg)
 
 SVG_PDFS = $(SVG_SOURCES:.svg=.pdf)
 
 svgs: $(SVG_PDFS)
 
-figures/%.pdf: figures/%.svg
+figures/%.pdf: figures/%.svg FORCE
+	rm -f $@
 	rsvg-convert -f pdf $< -o $@
+
+FORCE:
 
 # ── Step 4: Compile paper (depends on all figures + macros) ──
 ALL_FIGURES = $(DATA_FIGURES) $(SVG_PDFS)

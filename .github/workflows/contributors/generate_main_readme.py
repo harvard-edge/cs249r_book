@@ -122,12 +122,14 @@ def generate_sectioned_contributors(repo_root: Path) -> str:
     # Load all configs
     book_config = load_config(repo_root / "book" / ".all-contributorsrc")
     tinytorch_config = load_config(repo_root / "tinytorch" / ".all-contributorsrc")
+    mlsysim_config = load_config(repo_root / "mlsysim" / ".all-contributorsrc")
     kits_config = load_config(repo_root / "kits" / ".all-contributorsrc")
     labs_config = load_config(repo_root / "labs" / ".all-contributorsrc")
     interviews_config = load_config(repo_root / "interviews" / ".all-contributorsrc")
 
     book_contributors = book_config.get("contributors", [])
     tinytorch_contributors = tinytorch_config.get("contributors", [])
+    mlsysim_contributors = mlsysim_config.get("contributors", [])
     kits_contributors = kits_config.get("contributors", [])
     labs_contributors = labs_config.get("contributors", [])
     interviews_contributors = interviews_config.get("contributors", [])
@@ -135,6 +137,7 @@ def generate_sectioned_contributors(repo_root: Path) -> str:
     # Generate tables
     book_table = generate_contributor_table(book_contributors)
     tinytorch_table = generate_contributor_table(tinytorch_contributors)
+    mlsysim_table = generate_contributor_table(mlsysim_contributors)
     kits_table = generate_contributor_table(kits_contributors)
     labs_table = generate_contributor_table(labs_contributors)
     interviews_table = generate_contributor_table(interviews_contributors)
@@ -171,6 +174,19 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
 <!-- TINYTORCH-CONTRIBUTORS-END -->
+
+---
+
+### 🚀 MLSys·im Contributors
+
+<!-- MLSYSIM-CONTRIBUTORS-START -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+{mlsysim_table}
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+<!-- MLSYSIM-CONTRIBUTORS-END -->
 
 ---
 

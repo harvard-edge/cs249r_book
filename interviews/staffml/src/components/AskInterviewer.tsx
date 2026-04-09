@@ -32,7 +32,7 @@
 import { useState, useRef, useEffect } from "react";
 import {
   ChevronDown, ChevronRight, MessageCircle, Send, Info,
-  ClipboardCopy, Check, AlertTriangle,
+  ClipboardCopy, Check, AlertTriangle, Mail, X as XIcon,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -84,6 +84,7 @@ export default function AskInterviewer({ questionContext, defaultOpen = false, o
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
   // AbortController for the in-flight fetch. Cleared on questionContext change
   // so a stale response can never inject into the next question's transcript.
@@ -284,7 +285,13 @@ Please answer each as the interviewer.`;
 
       {open && (
         <div id="ask-interviewer-body" className="px-4 pb-4">
-          {/* Mode banner (journal vs hosted) — shown once at the top */}
+          {/* Mode banner (journal vs hosted) — shown once at the top.
+              HOSTED mode now explicitly frames the service as free,
+              rate-limited, best-effort so users understand the social
+              contract before they start typing. The waitlist CTA in the
+              footer is the durable signal for "would you pay for higher
+              limits" — no payments plumbing, just a form that writes to
+              KV. */}
           {messages.length === 0 && (
             HOSTED_AVAILABLE ? (
               <div className="flex items-start gap-2 mb-3 p-2.5 rounded-md bg-accentBlue/5 border border-accentBlue/20">
@@ -292,7 +299,8 @@ Please answer each as the interviewer.`;
                 <p className="text-[11px] text-textSecondary leading-relaxed">
                   Practice the clarification ritual real interviews reward. Your questions go to a
                   small AI interviewer with a Socratic constraint — it can answer constraints, never
-                  solve the problem. <span className="font-semibold">AI may be wrong — verify against the model answer.</span>
+                  solve the problem. <span className="font-semibold text-textPrimary">Free, rate-limited,
+                  best-effort. No guarantees. AI may be wrong — verify against the model answer.</span>
                 </p>
               </div>
             ) : (
@@ -380,16 +388,16 @@ Please answer each as the interviewer.`;
             </div>
           </div>
 
-          {/* Privacy footer — shows the active provider's privacy note when present,
-              otherwise the journal-mode default. Always visible so the social
-              contract is in front of the user at the point of action. */}
+          {/* Privacy footer — shows the social contract at the point of
+              action. HOSTED mode now includes the waitlist CTA so the
+              "would you pay for this?" signal is always capturable. */}
           <div className="mt-3 pt-2 border-t border-borderSubtle flex items-start gap-1.5 text-[9px] text-textTertiary leading-relaxed">
             <AlertTriangle className="w-2.5 h-2.5 shrink-0 mt-0.5" />
             <span>
               {HOSTED_AVAILABLE ? (
                 <>
-                  Questions you type are sent to an external LLM service via StaffML's relay.
-                  The relay does not log requests. Don't paste anything sensitive to your employer.
+                  Questions you type are sent to an external LLM service via StaffML&apos;s relay.
+                  The relay does not log requests. Don&apos;t paste anything sensitive to your employer.
                   Your model answer (below) is the source of truth.
                 </>
               ) : (
@@ -401,6 +409,23 @@ Please answer each as the interviewer.`;
             </span>
           </div>
 
+          {/* Waitlist CTA — only shown in HOSTED mode. Clicking opens the
+              modal; the modal gracefully falls back to mailto: if the
+              worker endpoint doesn't have /waitlist configured yet. */}
+          {HOSTED_AVAILABLE && (
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-[9px] text-textTertiary">
+                Hitting the rate limit? Want private models or a paid tier?
+              </span>
+              <button
+                onClick={() => setWaitlistOpen(true)}
+                className="text-[9px] font-bold text-accentBlue hover:text-accentBlue/80 transition-colors inline-flex items-center gap-1"
+              >
+                Join the waitlist →
+              </button>
+            </div>
+          )}
+
           {error && !messages.find((m) => m.text.includes(error)) && (
             <p className="mt-2 text-[10px] text-accentRed" role="alert">
               {error}
@@ -408,6 +433,200 @@ Please answer each as the interviewer.`;
           )}
         </div>
       )}
+
+      {/* Waitlist modal — portal-free, fixed overlay. Only mounts when
+          waitlistOpen flips to true, so no render cost for the 99% of
+          visitors who never click the CTA. */}
+      {waitlistOpen && (
+        <WaitlistModal
+          onClose={() => setWaitlistOpen(false)}
+          endpoint={INTERVIEWER_ENDPOINT}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Waitlist modal ──────────────────────────────────────────
+/**
+ * Lightweight waitlist capture form. Three fields: email, "would you
+ * pay?" (range slider), and a free-text "what do you actually need?"
+ * box. Submits to ${endpoint}/waitlist on the Cloudflare Worker, which
+ * writes the record to a KV namespace. If the endpoint doesn't exist
+ * yet (404 / network error), falls back to a mailto: link prefilled
+ * with the same data so no submission is ever lost.
+ */
+function WaitlistModal({ onClose, endpoint }: { onClose: () => void; endpoint: string }) {
+  const [email, setEmail] = useState("");
+  const [wouldPay, setWouldPay] = useState(5);
+  const [need, setNeed] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [status, setStatus] = useState<"idle" | "success" | "fallback" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Escape to close
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const submit = async () => {
+    if (!email.trim() || submitting) return;
+    setSubmitting(true);
+    setErrorMsg(null);
+
+    // Try the worker endpoint first. If it's not configured or returns
+    // a 404/5xx, fall back to mailto: so the user's interest isn't lost.
+    const payload = {
+      email: email.trim(),
+      wouldPay,
+      need: need.trim(),
+    };
+    try {
+      if (!endpoint) throw new Error("no endpoint configured");
+      const res = await fetch(`${endpoint}/waitlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        setStatus("success");
+        return;
+      }
+      // Non-ok response — fall through to mailto fallback
+      throw new Error(`waitlist endpoint returned ${res.status}`);
+    } catch (e) {
+      // Fallback: open a mailto: with the payload prefilled. The user
+      // has to click Send in their email client, but nothing is lost.
+      const subject = encodeURIComponent("StaffML — paid interviewer waitlist");
+      const body = encodeURIComponent(
+        `Email: ${payload.email}\n` +
+        `Would pay (USD/mo): ${payload.wouldPay}\n` +
+        `Need:\n${payload.need}\n\n` +
+        `(Sent from the StaffML Ask Interviewer panel.)`
+      );
+      if (typeof window !== "undefined") {
+        window.location.href = `mailto:staffml@mlsysbook.ai?subject=${subject}&body=${body}`;
+      }
+      setStatus("fallback");
+      setErrorMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="waitlist-title"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md bg-background border border-border rounded-xl shadow-2xl p-6"
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h3 id="waitlist-title" className="text-lg font-bold text-textPrimary">Paid interviewer waitlist</h3>
+            <p className="text-[12px] text-textTertiary mt-0.5">
+              No commitment. No spam. One email if and when a paid tier launches.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="p-1 text-textTertiary hover:text-textPrimary transition-colors"
+          >
+            <XIcon className="w-4 h-4" />
+          </button>
+        </div>
+
+        {status === "success" ? (
+          <div className="py-6 text-center">
+            <Check className="w-8 h-8 text-accentGreen mx-auto mb-3" />
+            <p className="text-[14px] font-bold text-textPrimary mb-1">You&apos;re on the list.</p>
+            <p className="text-[12px] text-textTertiary">We&apos;ll reach out if and when a paid tier launches.</p>
+          </div>
+        ) : status === "fallback" ? (
+          <div className="py-6 text-center">
+            <Mail className="w-8 h-8 text-accentBlue mx-auto mb-3" />
+            <p className="text-[13px] text-textPrimary mb-2">Your email client should have opened with the details filled in.</p>
+            <p className="text-[11px] text-textTertiary mb-4">Click <strong>Send</strong> there and you&apos;re done.</p>
+            {errorMsg && (
+              <p className="text-[10px] text-textMuted italic">(the waitlist service is temporarily unavailable: {errorMsg})</p>
+            )}
+          </div>
+        ) : (
+          <>
+            <label className="block mb-3">
+              <span className="block text-[11px] font-bold text-textSecondary mb-1">Email</span>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                required
+                className="w-full bg-surface border border-border rounded-md p-2 text-[13px] text-textPrimary focus:outline-none focus:border-accentBlue/60"
+              />
+            </label>
+
+            <label className="block mb-3">
+              <span className="block text-[11px] font-bold text-textSecondary mb-1">
+                Would you pay? <span className="text-textTertiary font-normal">${wouldPay}/month</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                step={5}
+                value={wouldPay}
+                onChange={(e) => setWouldPay(Number(e.target.value))}
+                className="w-full accent-accentBlue"
+              />
+              <div className="flex justify-between text-[9px] text-textTertiary font-mono mt-1">
+                <span>$0</span>
+                <span>$25</span>
+                <span>$50+</span>
+              </div>
+            </label>
+
+            <label className="block mb-4">
+              <span className="block text-[11px] font-bold text-textSecondary mb-1">
+                What do you actually need? <span className="text-textTertiary font-normal">(optional)</span>
+              </span>
+              <textarea
+                value={need}
+                onChange={(e) => setNeed(e.target.value)}
+                rows={3}
+                placeholder="Higher rate limits, a smarter model, private sessions, a team plan, …"
+                className="w-full bg-surface border border-border rounded-md p-2 text-[12px] text-textSecondary resize-none focus:outline-none focus:border-accentBlue/60 leading-relaxed"
+              />
+            </label>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={onClose}
+                disabled={submitting}
+                className="px-3 py-1.5 text-[12px] text-textTertiary hover:text-textPrimary transition-colors disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submit}
+                disabled={submitting || !email.trim()}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-[12px] font-bold bg-accentBlue text-white rounded-md hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {submitting ? "Submitting…" : "Join waitlist"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

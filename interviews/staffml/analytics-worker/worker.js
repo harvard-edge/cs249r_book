@@ -72,6 +72,10 @@ export default {
 
     // GET /summary — return aggregate stats
     if (request.method === 'GET') {
+      const auth = request.headers.get('Authorization');
+      if (auth !== `Bearer ${env.ADMIN_SECRET}`) {
+        return new Response('Unauthorized', { status: 401, headers: corsHeaders });
+      }
       return handleSummary(env, corsHeaders);
     }
 
@@ -118,6 +122,7 @@ async function handleEvents(request, env, corsHeaders) {
       'value', 'perceived', 'seconds', 'napkinGrade',
       'hadUserAnswer', 'isReturning', 'screenWidth',
       'query', 'topicResults', 'questionResults',
+      'userLevel', 'industryRole', 'yearsExperience', // Added for IRT telemetry
     ];
     for (const field of allowedFields) {
       if (event[field] !== undefined) clean[field] = event[field];
@@ -129,24 +134,19 @@ async function handleEvents(request, env, corsHeaders) {
     return jsonResponse({ accepted: 0 }, 200, corsHeaders);
   }
 
-  // Store events keyed by day
+  // Store events keyed by day + uuid to prevent RMW race condition
   const today = new Date().toISOString().split('T')[0];
-  const key = `events:${today}`;
+  const batchId = crypto.randomUUID();
+  const key = `events:${today}:${batchId}`;
 
   try {
-    // Read existing events for today
-    const existing = await env.STAFFML_ANALYTICS.get(key, { type: 'json' }) || [];
-    existing.push(...validated);
-
     // Store with 90-day TTL
-    await env.STAFFML_ANALYTICS.put(key, JSON.stringify(existing), {
+    await env.STAFFML_ANALYTICS.put(key, JSON.stringify(validated), {
       expirationTtl: 90 * 24 * 60 * 60,
     });
 
-    // Update running counter
-    const countStr = await env.STAFFML_ANALYTICS.get('meta:total_events') || '0';
-    const newCount = parseInt(countStr, 10) + validated.length;
-    await env.STAFFML_ANALYTICS.put('meta:total_events', String(newCount));
+    // We no longer update a single running counter here to avoid race conditions.
+    // The summary function can aggregate keys instead.
   } catch (err) {
     return jsonResponse({ error: 'Storage error' }, 500, corsHeaders);
   }
@@ -156,23 +156,32 @@ async function handleEvents(request, env, corsHeaders) {
 
 async function handleSummary(env, corsHeaders) {
   try {
-    const totalEvents = parseInt(
-      await env.STAFFML_ANALYTICS.get('meta:total_events') || '0', 10
-    );
-
-    // Get last 7 days of events for recent summary
+    // Get last 7 days of events for recent summary using list()
     const days = [];
     const eventsByDay = {};
     let recentEvents = [];
+    let totalEvents = 0;
 
     for (let i = 0; i < 7; i++) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const day = d.toISOString().split('T')[0];
       days.push(day);
-      const dayEvents = await env.STAFFML_ANALYTICS.get(`events:${day}`, { type: 'json' }) || [];
+      
+      let dayEvents = [];
+      let cursor = null;
+      do {
+        const listResult = await env.STAFFML_ANALYTICS.list({ prefix: `events:${day}:`, cursor });
+        for (const key of listResult.keys) {
+          const batch = await env.STAFFML_ANALYTICS.get(key.name, { type: 'json' }) || [];
+          dayEvents.push(...batch);
+        }
+        cursor = listResult.cursor;
+      } while (cursor);
+
       eventsByDay[day] = dayEvents.length;
       recentEvents = recentEvents.concat(dayEvents);
+      totalEvents += dayEvents.length;
     }
 
     // Compute aggregates from recent events

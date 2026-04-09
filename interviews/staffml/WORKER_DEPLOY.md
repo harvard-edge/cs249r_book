@@ -29,8 +29,14 @@ The login command opens a browser to authorize Wrangler with your Cloudflare acc
 ### 2. Create the rate-limit KV namespace
 
 ```bash
-npx wrangler kv:namespace create RATE_LIMIT_KV
+npx wrangler kv namespace create RATE_LIMIT_KV
 ```
+
+> **Note on Wrangler syntax:** older docs (and older Wrangler v2) used
+> `kv:namespace` with a colon. Wrangler v3.60+ uses space-separated
+> subcommands: `kv namespace create`, `kv key list`, etc. If you see
+> `Unknown arguments: kv:namespace`, upgrade Wrangler or use the new
+> syntax shown here.
 
 This prints something like:
 
@@ -48,6 +54,36 @@ Add the following to your configuration file in your kv_namespaces array:
 binding = "RATE_LIMIT_KV"
 id = "abc123def456..."   # ← paste your real id here
 ```
+
+### 2b. Create the waitlist KV namespace
+
+The `POST /waitlist` endpoint writes paid-tier waitlist submissions to a
+second KV namespace. If you skip this step, the worker still boots fine
+but `/waitlist` will return 503 and the client UI will transparently
+fall back to `mailto:` so no submissions are lost.
+
+```bash
+npx wrangler kv namespace create WAITLIST_KV
+```
+
+**Copy the new `id` value** and paste it into `worker/wrangler.toml`,
+replacing `REPLACE_WITH_WAITLIST_KV_NAMESPACE_ID`:
+
+```toml
+[[kv_namespaces]]
+binding = "WAITLIST_KV"
+id = "xyz789abc012..."   # ← paste your real id here
+```
+
+To read the waitlist later:
+
+```bash
+npx wrangler kv key list --binding WAITLIST_KV
+npx wrangler kv key get --binding WAITLIST_KV "wl:2026-04-08T12:34:56.000Z:abc123..."
+```
+
+There's deliberately no admin endpoint — pulling records via `wrangler`
+keeps the worker's attack surface minimal.
 
 ### 3. Deploy the Worker
 
@@ -73,10 +109,10 @@ curl https://staffml-interviewer.your-subdomain.workers.dev/health
 Expected response:
 
 ```json
-{ "ok": true, "providers": ["cf-workers-ai"] }
+{ "ok": true, "providers": ["cf-workers-ai"], "waitlist": true }
 ```
 
-If you see `cf-workers-ai` in the providers list, the Cloudflare Workers AI binding is working. The Worker is live with the default Llama 3.1 8B floor model.
+If you see `cf-workers-ai` in the providers list, the Cloudflare Workers AI binding is working. The Worker is live with the default Llama 3.1 8B floor model. `"waitlist": true` means the WAITLIST_KV binding is configured; `false` means /waitlist will return 503 until you provision the namespace.
 
 Test an actual question:
 
@@ -268,7 +304,8 @@ If you ever want to remove the Worker entirely:
 ```bash
 cd interviews/staffml/worker
 npx wrangler delete
-npx wrangler kv:namespace delete --binding RATE_LIMIT_KV
+npx wrangler kv namespace delete --binding RATE_LIMIT_KV
+npx wrangler kv namespace delete --binding WAITLIST_KV
 ```
 
 Then unset `NEXT_PUBLIC_INTERVIEWER_ENDPOINT` in StaffML's build environment. The Ask Interviewer panel will detect the missing endpoint and fall back to journal-only mode automatically.

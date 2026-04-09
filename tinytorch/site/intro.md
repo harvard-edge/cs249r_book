@@ -178,7 +178,7 @@ Walk through ML history by rebuilding its greatest breakthroughs with YOUR TinyT
 "Building systems creates irreversible understanding."
 </p>
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin: 1.5rem 0 2rem 0; max-width: 1000px;">
+<div class="comparison-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin: 1.5rem 0 2rem 0; max-width: 1000px;">
 
 <div style="background: #fef2f2; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #ef4444;">
 <h3 style="margin: 0 0 1rem 0; color: #991b1b; font-size: 1.05rem;">Traditional ML Education</h3>
@@ -215,7 +215,7 @@ loss.backward()  # YOUR autograd
 
 Four progressive tiers take you from foundations to production systems:
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin: 1.5rem 0 2rem 0; max-width: 1100px;">
+<div class="comparison-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin: 1.5rem 0 2rem 0; max-width: 1100px;">
 
 <a href="tiers/foundation.html" style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #1976d2; text-decoration: none; display: block;">
 <h3 style="margin: 0 0 0.5rem 0; color: #0d47a1; font-size: 1rem; font-weight: 600;">Foundation (01-08)</h3>
@@ -243,7 +243,7 @@ Four progressive tiers take you from foundations to production systems:
 
 ## Is This For You?
 
-<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 1.5rem 0;">
+<div class="comparison-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 1.5rem 0;">
 
 <div style="background: #f8fafc; padding: 1.25rem; border-radius: 0.5rem; border: 1px solid #e2e8f0;">
 <p style="margin: 0 0 0.5rem 0; font-weight: 600; color: #1e293b;">🎓 Students</p>

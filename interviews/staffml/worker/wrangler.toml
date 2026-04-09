@@ -3,6 +3,27 @@ main = "src/index.ts"
 compatibility_date = "2025-01-15"
 compatibility_flags = ["nodejs_compat"]
 
+# Keep the default workers.dev URL reachable as a fallback during
+# the custom-route transition. Once the production site is fully
+# using the mlsysbook.ai/api/staffml-interviewer path, you can set
+# this to false if you want to hide the workers.dev URL entirely.
+workers_dev = true
+
+# ─── Custom routes on the mlsysbook.ai zone ─────────────────
+# Sibling convention to the existing staffml-analytics worker at
+# mlsysbook.ai/api/staffml-analytics*. Two patterns because
+# Cloudflare treats the bare path and the wildcard-child path as
+# distinct — both are needed so that GET /api/staffml-interviewer
+# and POST /api/staffml-interviewer/ask both reach the worker.
+#
+# The worker strips the "/api/staffml-interviewer" prefix on entry
+# (see src/index.ts fetch handler) so the existing /health, /ask,
+# and /waitlist route matching still works unchanged.
+routes = [
+  { pattern = "mlsysbook.ai/api/staffml-interviewer", zone_name = "mlsysbook.ai" },
+  { pattern = "mlsysbook.ai/api/staffml-interviewer/*", zone_name = "mlsysbook.ai" },
+]
+
 # ─── Cloudflare Workers AI binding (the default LLM provider) ───
 # Always available on the Workers free plan. Provides the Llama 3.1 8B
 # fallback if no other provider key is configured.
@@ -10,17 +31,33 @@ compatibility_flags = ["nodejs_compat"]
 binding = "AI"
 
 # ─── KV namespace for rate limiting ───
-# Stores per-IP and global request counters. Created with:
+# Stores per-IP and global request counters (both /ask and /waitlist).
+# Created with:
 #   wrangler kv:namespace create RATE_LIMIT_KV
 # then paste the returned id below.
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "a510cc7f791c40ffa28d19cf809c0e28"
+
+# ─── KV namespace for the paid-tier waitlist ───
+# Stores waitlist submissions from the /waitlist endpoint. Separate
+# from RATE_LIMIT_KV so the (potentially large) record list never
+# competes with the hot-path rate-limit counters. Optional — the
+# worker boots fine without it, and /waitlist returns 503 until
+# it's provisioned.
+#
+# Created with:
+#   wrangler kv:namespace create WAITLIST_KV
+# then paste the returned id below.
+[[kv_namespaces]]
+binding = "WAITLIST_KV"
+id = "e42c3db4eaa2471f81f3f73745959349"
 
 # ─── Optional: pin a different priority order via env var ───
 # Comma-separated provider names. Defaults to "groq,openai,anthropic,gemini,openrouter,cf-workers-ai"
 # [vars]
 # PROVIDER_PRIORITY = "groq,cf-workers-ai"
+# ALLOWED_ORIGINS = "https://staffml.ai,https://www.staffml.ai,https://mlsysbook.ai,http://localhost:3000"
 
 # ─── Secrets (set via `wrangler secret put`, never committed) ───
 # wrangler secret put GROQ_API_KEY

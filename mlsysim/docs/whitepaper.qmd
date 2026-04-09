@@ -1,49 +1,579 @@
 ---
-title: "Research Paper"
-subtitle: "MLSys·im: First-Principles Infrastructure Modeling for ML Systems"
+title: "MLSYSIM: A First-Principles Analytical Engine for Teaching Machine Learning Systems"
+subtitle: "From Roofline Bounds to Datacenter Carbon: Bridging the Gap Between Textbook Theory and Systems Reality"
+author: "Vijay Janapa Reddi"
+affiliation: "Harvard University"
+bibliography: references.bib
+csl: https://raw.githubusercontent.com/citation-style-language/styles/master/ieee.csl
 ---
-
 ## Abstract
 
-MLSys·im is an open-source, first-principles analytical framework for predicting the performance, cost, and carbon footprint of machine learning systems — from edge microcontrollers to exascale GPU clusters. Unlike cycle-accurate simulators that require hours of compilation and weeks of runtime, MLSys·im resolves the 22 physical and logical constraints ("Systems Walls") that govern ML infrastructure in under 0.3 seconds. The framework introduces a 3-tier resolver architecture (Models, Solvers, Optimizers) with strict dimensional typing via Pint, enabling both human engineers and autonomous AI agents to reason quantitatively about hardware–software co-design. We validate against published MLPerf and vLLM benchmarks, demonstrating first-order accuracy across roofline analysis, LLM serving latency, distributed training scaling, and total cost of ownership. MLSys·im is the companion analytical engine for the *Machine Learning Systems* textbook (Harvard CS 249r) and is designed to serve as the ground-truth physics backend for agentic infrastructure design.
-
-**Authors:** Vijay Janapa Reddi and contributors
+Machine learning systems education faces a practical gap: the hardware students need to reason about --- H100 clusters, InfiniBand fabrics, multi-megawatt datacenters --- is inaccessible for hands-on experimentation. We present **MLSYSIM**, a first-principles analytical engine designed as the companion framework to the *Machine Learning Systems* textbook [@mlsysbook2024]. MLSYSIM provides six composable solvers covering single-node performance (Roofline), distributed training (4D parallelism including Expert Parallelism for MoE), LLM serving (pre-fill vs. decode), Total Cost of Ownership, carbon footprint, and cluster reliability. All quantities carry physical units via `pint.Quantity` types, enforcing dimensional correctness at runtime. A vetted registry of 19 hardware devices spanning five deployment tiers (cloud to sub-watt TinyML), 15 model architectures, and 4 regional grid profiles provides a single source of truth that keeps textbook exercises grounded in real-world specifications. A formula library of 20+ canonical equations, a persona-driven simulation layer, and built-in visualization round out the platform. MLSYSIM is open source and available at [mlsysbook.ai](https://mlsysbook.ai).
 
 ---
 
-## Key Contributions
+## 1. Introduction {#sec-intro}
 
-1. **22 Systems Walls taxonomy** — A unified framework organizing the physical and logical constraints of ML systems into six domains (Node, Data, Algorithm, Fleet, Ops, Analysis)
-2. **3-Tier resolver architecture** — Models ($Y = f(X)$), Solvers ($X = f^{-1}(Y)$), and Optimizers ($\max f(X)$ s.t. $g(X) \le c$) with strict dimensional typing
-3. **Agent-native design** — MCP integration, JSON Schema export, and semantic exit codes enabling autonomous predict-compute-reflect loops
-4. **Validated accuracy** — First-order agreement with MLPerf training benchmarks and vLLM serving measurements across diverse hardware
+The "Iron Law" of machine learning performance states that inference latency is bounded by two ceilings: the time to execute all floating-point operations at peak throughput, and the time to transfer all model weights from memory at peak bandwidth. Whichever is slower determines the bottleneck. This principle, formalized in the Roofline model [@williams2009roofline], is foundational to ML systems reasoning, yet teaching it effectively requires students to work with real hardware specifications that most universities cannot afford to provide.
+
+This accessibility gap creates a pedagogical problem. Students learn that an NVIDIA H100 achieves 1,979 TFLOP/s at FP16 Tensor Core and has 3.35 TB/s of HBM bandwidth [@nvidia2023h100], but without a framework to *apply* these numbers, the specifications remain abstract. They study 3D parallelism (Data, Tensor, and Pipeline parallelism) but cannot experiment with different configurations to observe how pipeline bubbles grow or communication overhead scales. They discuss carbon-aware computing but lack the tools to quantify how training location affects emissions [@patterson2022carbon].
+
+**MLSYSIM** addresses this gap by providing a dimensionally strict, first-principles analytical engine. It is not an empirical profiler (like PyTorch Profiler), nor a cycle-accurate simulator (like gem5). It is an **analytical modeling platform** that computes performance bounds from specifications and first-order equations. This design choice is deliberate: by working from equations rather than empirical traces, students build the mathematical intuition needed to reason about systems they will encounter in practice.
+
+### 1.1 Pedagogical Motivation
+
+MLSYSIM serves three user communities:
+
+1. **Students** learning ML systems for the first time. MLSYSIM lets them explore "what-if" questions: *What happens to latency when I change precision from FP16 to INT8? How does pipeline parallelism degree affect the bubble fraction? Where should I train to minimize carbon?*
+
+2. **Instructors** who need reproducible, hardware-independent exercises. MLSYSIM's vetted registry ensures that homework problems produce consistent results regardless of the student's local hardware. Companion [lecture slides](https://mlsysbook.ai/slides/) provide ready-made visual materials that align directly with the solver domains.
+
+3. **Developers** building ML infrastructure. MLSYSIM's type-safe API provides quick back-of-the-envelope estimates for capacity planning, hardware selection, and cost modeling.
+
+### 1.2 Design Principles
+
+Three principles guide MLSYSIM's architecture:
+
+- **Eliminate Magic Numbers.** Every constant in the framework (hardware FLOP/s, memory bandwidth, carbon intensity) is sourced from manufacturer datasheets or published benchmarks, with provenance metadata attached. Students never work with unexplained numbers.
+
+- **Enforce Dimensional Correctness.** All quantities carry physical units via the `pint` library. Attempting to add FLOP/s to GB/s raises a `DimensionalityError` at runtime, catching the class of unit-conversion bugs that plague back-of-the-envelope calculations.
+
+- **Progressive Disclosure.** The framework scales with the student. A first exercise uses `Engine.solve()` with two arguments. An advanced lab configures 4D parallelism with Expert Parallelism, sweeps grid regions, and chains multiple solvers to answer compound questions.
+
+### 1.3 Contributions
+
+This paper makes four contributions:
+
+1. **A 5-layer analytical architecture** (@sec-architecture) that cleanly separates workload demand from hardware supply, enabling compositional analysis across the full ML systems stack.
+
+2. **Six composable analytical solvers** (@sec-solvers) covering performance, serving, distributed scaling, economics, sustainability, and reliability, each grounded in established systems models (Roofline, Young-Daly, ring all-reduce).
+
+3. **A vetted specification registry** (@sec-zoo) providing a single source of truth for hardware, model, infrastructure, and fleet specifications used throughout the *Machine Learning Systems* textbook.
+
+4. **A formula library and simulation layer** (@sec-formulas) exposing 20+ canonical equations as individually importable, unit-aware functions, paired with persona-driven simulations for lab exercises.
+
+### 1.4 Paper Organization
+
+@sec-architecture presents the 5-layer stack architecture. @sec-solvers details the six analytical solvers and their mathematical foundations. @sec-formulas describes the formula library and simulation layer. @sec-zoo describes the MLSys Zoo registry. @sec-pedagogy discusses pedagogical integration with the textbook and lecture slides. @sec-related positions MLSYSIM relative to existing tools. @sec-validation addresses accuracy and validation. @sec-discussion discusses limitations and future work. @sec-conclusion concludes.
 
 ---
 
-## Read the Paper
+## 2. Architecture: The 5-Layer Stack {#sec-architecture}
 
-<object data="mlsysim-paper.pdf" type="application/pdf" width="100%" height="900px" style="border: 1px solid #ddd; border-radius: 4px;">
-  <p>Your browser does not support embedded PDFs.
-  <a href="mlsysim-paper.pdf">Download the paper (PDF)</a>.</p>
-</object>
+MLSYSIM organizes the ML systems domain into five composable layers, following a strategy we call **Progressive Lowering**: abstract workload demand is progressively mapped onto concrete hardware supply through intermediate representations. This mirrors the layered decomposition taught in the [Hardware Acceleration](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/11_hw_acceleration.pdf) and [Compute Infrastructure](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/02_compute_infrastructure.pdf) lecture slides.
 
-::: {.callout-tip}
-## Download
-[**Download Paper (PDF)**](mlsysim-paper.pdf){.im-btn .im-btn-primary}
+```{mermaid}
+%%{init: {'theme': 'neutral'}}%%
+%%| fig-cap: "The MLSYSIM 5-Layer Stack. Workloads (demand) are lowered onto Hardware (supply) through Infrastructure and Systems layers. Solvers bridge demand and supply to produce analytical profiles."
+%%| fig-width: 100%
+flowchart TB
+    A["<b>Layer A: Workloads</b><br/>TransformerWorkload, CNNWorkload<br/><i>Parameters, FLOPs, Arithmetic Intensity</i>"]
+    B["<b>Layer B: Hardware</b><br/>HardwareNode, ComputeCore, MemoryHierarchy<br/><i>Peak FLOP/s, Bandwidth, Capacity, TDP</i>"]
+    C["<b>Layer C: Infrastructure</b><br/>GridProfile, Datacenter<br/><i>Carbon Intensity, PUE, WUE</i>"]
+    D["<b>Layer D: Systems</b><br/>Node, Fleet, NetworkFabric<br/><i>Topology, Accelerators/Node, Fabric BW</i>"]
+    E["<b>Layer E: Solvers</b><br/>SingleNode · Distributed · Serving<br/>Economics · Sustainability · Reliability"]
+    F["<b>Results</b><br/>PerformanceProfile · SystemLedger"]
+
+    A --> E
+    B --> D
+    C --> D
+    D --> E
+    E --> F
+```
+
+### 2.1 Layer A: Workloads (Demand)
+
+A **Workload** is a hardware-agnostic description of computational demand. MLSYSIM provides two concrete workload types:
+
+- **`TransformerWorkload`**: Defines parameter count, layer count, hidden dimension, attention heads, and KV-head count. Supports KV-cache size calculation for serving analysis.
+- **`CNNWorkload`**: Defines parameter count and inference FLOPs.
+
+Both workloads implement `lower(precision) -> ComputationGraph`, which produces a hardware-agnostic intermediate representation containing total operations, weight bytes, and arithmetic intensity (ops/byte). This lowering step is where precision format (FP32, FP16, INT8, INT4) affects the analysis: lower precision reduces weight bytes, increasing arithmetic intensity and potentially shifting the bottleneck from memory-bound to compute-bound.
+
+### 2.2 Layer B: Hardware (Supply)
+
+A **`HardwareNode`** specifies the physical capabilities of a single accelerator:
+
+| Field | Type | Meaning |
+|:------|:-----|:--------|
+| `compute.peak_flops` | Quantity (TFLOP/s) | Theoretical peak throughput |
+| `compute.precision_flops` | Dict | Peak throughput per precision format |
+| `memory.bandwidth` | Quantity (TB/s) | HBM bandwidth |
+| `memory.capacity` | Quantity (GB) | Total HBM capacity |
+| `tdp` | Quantity (W) | Thermal Design Power |
+| `dispatch_tax` | Quantity (ms) | Kernel launch overhead |
+
+The `ridge_point()` method computes the Roofline inflection point: `peak_flops / bandwidth`, expressed in FLOP/byte. Workloads with arithmetic intensity below this threshold are memory-bound; those above are compute-bound. This concept is central to the [Hardware Acceleration slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/11_hw_acceleration.pdf), which develop the Roofline model visually before students encounter it programmatically.
+
+### 2.3 Layer C: Infrastructure (Environment)
+
+A **`GridProfile`** captures the environmental context of computation:
+
+- **Carbon Intensity** (gCO2/kWh): Ranges from ~20 (Quebec hydro) to ~820 (Poland coal) in the registry, a ~41x difference for identical workloads.
+- **Power Usage Effectiveness** (PUE): The ratio of total facility energy to IT energy. Ranges from 1.03 (liquid-cooled) to 1.45 (legacy air-cooled).
+- **Water Usage Effectiveness** (WUE): Liters of water consumed per kWh of energy.
+
+These metrics align with the carbon accounting framework presented in the [Sustainable AI slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/15_sustainable_ai.pdf), where students learn the three-phase carbon lifecycle before computing operational emissions with MLSYSIM.
+
+### 2.4 Layer D: Systems (Topology)
+
+A **`Fleet`** composes hardware into a cluster:
+
+- **`Node`**: Groups accelerators within a server (e.g., 8x H100 with 900 GB/s NVLink).
+- **`NetworkFabric`**: Specifies inter-node connectivity (bandwidth, topology, oversubscription ratio).
+- **`Fleet`**: Defines node count and links to infrastructure context.
+
+The `total_accelerators` property (nodes x accelerators_per_node) determines the scale available for parallelism decomposition. The [Network Fabrics slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/03_network_fabrics.pdf) cover the topology trade-offs (fat-tree, rail-optimized) and the alpha-beta communication model that the DistributedModel builds upon.
+
+### 2.5 Layer E: Solvers (Analysis)
+
+Solvers bridge demand (Layer A) and supply (Layers B--D) to produce analytical results. Each solver implements a `solve()` method that accepts typed inputs and returns structured outputs. @sec-solvers details each solver's mathematical model.
+
+### 2.6 Results: PerformanceProfile and SystemLedger
+
+Solver outputs are structured into two result types:
+
+- **`PerformanceProfile`**: The output of `Engine.solve()`, containing latency, throughput, bottleneck classification, arithmetic intensity, energy consumption, MFU (Model FLOP Utilization), HFU (Hardware FLOP Utilization), and memory feasibility.
+
+- **`SystemLedger`**: A unified result container produced by the simulation layer (@sec-formulas), aggregating `PerformanceMetrics`, `SustainabilityMetrics`, `EconomicMetrics`, and `ReliabilityMetrics` into a single record for multi-dimensional analysis.
+
+---
+
+## 3. Analytical Solvers {#sec-solvers}
+
+MLSYSIM provides six solvers, each targeting a distinct class of systems question. All solvers share a common interface (`BaseSolver.solve()`) and can be composed to answer compound questions.
+
+### 3.1 SingleNodeModel: The Roofline Model
+
+The SingleNodeModel implements the Iron Law of ML performance:
+
+$$T_{\text{latency}} = \max\!\left(\frac{\text{FLOPs}}{\text{Peak}_\text{FLOP/s} \times \eta},\;\frac{\text{Bytes}}{\text{BW}_\text{mem}}\right) + T_{\text{dispatch}}$$
+
+where $\eta$ is the hardware utilization efficiency (typically 0.25--0.55 for ML workloads).
+
+**Inputs**: Workload, HardwareNode, batch size, precision, efficiency.
+
+**Outputs**: A `PerformanceProfile` containing latency, throughput, bottleneck classification ("Memory Bound" or "Compute Bound"), arithmetic intensity, energy consumption, and memory feasibility.
+
+The solver first maps precision to bytes-per-parameter and selects the appropriate peak FLOP/s (e.g., FP32 vs. FP16 Tensor Core throughput). It then computes both the compute-bound and memory-bound latencies, takes the maximum, adds the dispatch tax, and determines which ceiling binds. The [Hardware Acceleration slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/11_hw_acceleration.pdf) introduce the Roofline plot visually; MLSYSIM makes it interactive.
+
+```python
+from mlsysim import Engine, Hardware, Models
+
+profile = Engine.solve(
+    model=Models.ResNet50,
+    hardware=Hardware.Cloud.H100,
+    batch_size=1,
+    precision="fp16"
+)
+print(f"Bottleneck: {profile.bottleneck}")  # -> Memory Bound
+print(f"Latency: {profile.latency}")        # -> 0.03 ms
+```
+
+### 3.2 ServingModel: LLM Inference Phases
+
+LLM inference has two physically distinct phases, a dichotomy explored in both the [Model Serving slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/13_model_serving.pdf) (Volume I) and the [Inference at Scale slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/09_inference.pdf) (Volume II):
+
+1. **Pre-fill** (Compute-Bound): All prompt tokens are processed in parallel. Latency scales with `2 * params * seq_len * batch_size / (peak_flops * eta)`. This determines Time-To-First-Token (TTFT).
+
+2. **Decode** (Memory-Bound): Each token requires reading all model weights plus the KV-cache from HBM. Latency per token scales with `(weight_bytes + kv_cache_bytes) / bandwidth`. This determines Inter-Token Latency (ITL).
+
+The solver also computes KV-cache memory [@kwon2023efficient]:
+
+$$\text{KV-cache} = 2 \times n_\text{layers} \times n_\text{kv\_heads} \times d_\text{head} \times \text{seq\_len} \times \text{batch} \times \text{bytes/element}$$
+
+and checks whether `weights + KV-cache <= HBM capacity` (the "Memory Wall"). When this constraint is violated, the model cannot be served on the target hardware without techniques such as quantization or tensor parallelism.
+
+### 3.3 DistributedModel: 4D Parallelism {#sec-distributed}
+
+For fleet-scale training, the solver decomposes the workload using four parallelism dimensions. The [Distributed Training slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/05_distributed_training.pdf) introduce the "3D parallelism cube"; MLSYSIM extends this with a fourth axis for Mixture-of-Experts:
+
+- **Data Parallelism (DP)**: Replicates the model across `dp_size` workers. Requires all-reduce of gradients after each step.
+- **Tensor Parallelism (TP)**: Splits individual layers across `tp_size` GPUs within a node (over NVLink).
+- **Pipeline Parallelism (PP)**: Chains model stages across `pp_size` nodes, introducing pipeline bubbles.
+- **Expert Parallelism (EP)**: For Mixture-of-Experts architectures [@shazeer2017outrageously], distributes expert sub-networks across `ep_size` GPUs with All-to-All communication for token routing.
+
+The total accelerator count constrains the decomposition: `dp_size * tp_size * pp_size * ep_size = total_accelerators`.
+
+**Communication overhead** is modeled using the ring all-reduce formula for DP gradients [@dean2012large] and the alpha-beta model taught in the [Collective Communication slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/06_collective_communication.pdf):
+
+$$T_{\text{ring}} = 2 \cdot \frac{N-1}{N} \cdot \frac{S}{\text{BW}} + 2(N-1) \cdot \alpha$$
+
+where $N$ is the number of workers, $S$ is the message size (gradient tensor bytes), BW is the effective fabric bandwidth (accounting for oversubscription), and $\alpha$ is the per-message latency.
+
+**Pipeline bubble fraction** follows the interleaved pipeline model [@narayanan2021efficient]:
+
+$$\text{Bubble} = \frac{P - 1}{V \times M + P - 1}$$
+
+where $P$ is the pipeline depth, $M$ is the number of microbatches, and $V$ is the number of virtual stages per GPU.
+
+**Scaling efficiency** is computed as:
+
+$$\eta_{\text{scale}} = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{comm}} + T_{\text{bubble}}}$$
+
+### 3.4 EconomicsModel: Total Cost of Ownership
+
+The EconomicsModel computes TCO, grounding the cost models presented in the [Compute Infrastructure slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/02_compute_infrastructure.pdf):
+
+$$\text{TCO} = \text{CapEx} + \text{OpEx}_\text{energy} + \text{OpEx}_\text{maintenance}$$
+
+where:
+
+- **CapEx** = unit cost x total accelerators
+- **OpEx (energy)** = total energy (from SustainabilityModel) x electricity price
+- **OpEx (maintenance)** = 5% annual maintenance ratio x CapEx x (duration / 365)
+
+### 3.5 SustainabilityModel: Carbon, Energy, Water
+
+The SustainabilityModel chains three calculations, implementing the carbon accounting framework from the [Sustainable AI slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/15_sustainable_ai.pdf):
+
+$$E_{\text{IT}} = \text{TDP} \times N_\text{accel} \times T_\text{hours}$$
+$$E_{\text{total}} = E_{\text{IT}} \times \text{PUE}$$
+$$\text{Carbon} = E_{\text{total}} \times \text{CI}_\text{region}$$
+$$\text{Water} = E_{\text{total}} \times \text{WUE}$$
+
+This solver illustrates a key insight for sustainable ML: the ~41x difference in carbon intensity between Quebec (20 gCO2/kWh) and Poland (820 gCO2/kWh) means that *where* you train can matter as much as *how* you train [@patterson2022carbon].
+
+### 3.6 ReliabilityModel: MTBF and Checkpointing
+
+At cluster scale, component failures become statistical certainties. The solver computes the quantities taught in the [Fault Tolerance slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/07_fault_tolerance.pdf):
+
+**Fleet MTBF**: For $N$ independent nodes each with MTBF $\mu$:
+
+$$\text{MTBF}_\text{fleet} = \frac{\mu}{N}$$
+
+**Failure probability** for a job of duration $T$:
+
+$$P(\text{failure}) = 1 - e^{-T / \text{MTBF}_\text{fleet}}$$
+
+**Optimal checkpoint interval** using the Young-Daly formula [@young1974first; @daly2006higher]:
+
+$$\tau_\text{opt} = \sqrt{2 \times \delta \times \text{MTBF}_\text{fleet}}$$
+
+where $\delta$ is the time to save one checkpoint.
+
+### 3.7 Composing Solvers
+
+Real-world questions often require chaining multiple solvers. For example, answering "Can I serve Llama-70B on 4x H100s, and what will it cost?" requires the ServingModel (feasibility and latency) followed by the EconomicsModel (per-query cost). Similarly, "What is the most sustainable way to train GPT-3?" chains the DistributedModel (optimal parallelism) with the SustainabilityModel (carbon by region).
+
+```{mermaid}
+%%{init: {'theme': 'neutral'}}%%
+%%| fig-cap: "Solver composition for compound questions. Each solver's output feeds the next, enabling multi-dimensional analysis."
+%%| fig-width: 100%
+flowchart LR
+    Q1["Can I serve<br/>Llama-70B on<br/>4x H100s?"] --> S1["ServingModel"]
+    S1 --> S2["EconomicsModel"]
+    S2 --> A1["Feasible at<br/>$X/query"]
+
+    Q2["Most sustainable<br/>way to train<br/>GPT-3?"] --> S3["DistributedModel"]
+    S3 --> S4["SustainabilityModel"]
+    S4 --> A2["Quebec saves<br/>~41x carbon"]
+```
+
+---
+
+## 4. Formula Library and Simulation Layer {#sec-formulas}
+
+Beyond the six solvers, MLSYSIM exposes two additional subsystems that support deeper engagement.
+
+### 4.1 Canonical Formula Library
+
+The `formulas` module provides 20+ individually importable, unit-aware functions that implement the canonical equations of ML systems. Each function is documented with its source reference and enforces dimensional correctness:
+
+| Formula | Domain | Source |
+|:--------|:-------|:-------|
+| `calc_transformer_training_flops` | Training | 6PD scaling law |
+| `calc_activation_memory` | Training | Korthikanti et al. |
+| `calc_checkpoint_size` | Reliability | Young-Daly model |
+| `calc_amdahls_speedup` | Scaling | Amdahl's Law |
+| `calc_ring_allreduce_time` | Communication | Alpha-beta model |
+| `calc_mtbf_node` | Reliability | Exponential failure model |
+| `calc_availability_stacked` | Reliability | Series reliability |
+| `calc_effective_flops` | Performance | Roofline model |
+| `calc_kv_cache_bytes` | Serving | Transformer architecture |
+
+This library serves two purposes. First, it enables students to import and compose individual equations in Jupyter notebooks without instantiating full solver objects, supporting the exploratory style of the [Performance Engineering slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/10_performance_engineering.pdf). Second, it provides a single source of truth for the solvers themselves: every solver delegates to these functions rather than re-implementing the math inline.
+
+### 4.2 Persona-Driven Simulations
+
+The simulation layer introduces four **Personas** that represent canonical deployment archetypes:
+
+| Persona | Scale Factor | Archetype |
+|:--------|:-------------|:----------|
+| `CloudTitan` | 100M x | Frontier training runs |
+| `EdgeGuardian` | 1,000 x | Edge fleet deployments |
+| `MobileNomad` | 10 x | On-device inference |
+| `TinyPioneer` | 1 x | Sub-watt TinyML |
+
+Each persona wraps a solver configuration and produces a `SystemLedger` result. This narrative layer transforms abstract solver outputs into relatable deployment stories for lab exercises: students do not just "run the DistributedModel"; they "plan a CloudTitan training run" and see how cost, carbon, and reliability interact at 8,192-GPU scale.
+
+### 4.3 Visualization
+
+MLSYSIM includes built-in visualization functions:
+
+- **`plot_roofline()`**: Generates annotated Roofline plots showing the compute and memory ceilings, the ridge point, and where specific workloads fall.
+- **`plot_evaluation_scorecard()`**: Produces multi-panel scorecards from scenario evaluations, showing feasibility, performance, cost, and sustainability in a unified view.
+
+These visualizations complement the Roofline diagrams in the [Hardware Acceleration slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/11_hw_acceleration.pdf) and the diagnostic flowcharts in the [Performance Engineering slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/10_performance_engineering.pdf), allowing students to generate publication-quality figures from their own analyses.
+
+---
+
+## 5. The MLSys Zoo: A Centralized Specification Registry {#sec-zoo}
+
+A persistent challenge in ML systems education is the staleness of hardware specifications. Textbook exercises written with 2020-era A100 specs become misleading when students encounter H100s or B200s. MLSYSIM addresses this with a centralized, version-controlled registry.
+
+### 5.1 Registry Design
+
+Each registry entry is a Pydantic model with:
+
+- **Typed fields** enforced at construction time (a HardwareNode cannot be created without peak_flops)
+- **Physical units** attached to all quantities (`80 * ureg.GB`, not `80`)
+- **Provenance metadata** linking to manufacturer datasheets
+
+### 5.2 Hardware Zoo
+
+The Hardware Zoo spans five deployment tiers, covering a power range from 0.005 W to 1,000 W and a memory range from 512 KiB to 192 GB:
+
+| Tier | Devices | Characteristic |
+|:-----|:--------|:---------------|
+| **Cloud** | V100, A100, H100, H200, B200, MI300X, TPUv5p, T4 | 300--1,000 W, TB/s bandwidth |
+| **Workstation** | DGX Spark, MacBook M3 Max | 100--200 W, unified or HBM memory |
+| **Mobile** | iPhone 15 Pro, Pixel 8, Snapdragon 8 Gen 3 | 5 W, battery-constrained |
+| **Edge** | Jetson Orin NX, Coral, NUC+Movidius, Edge Server | 2--25 W, latency-constrained |
+| **Tiny** | ESP32-S3, Himax WE-I Plus | Sub-watt, KB-scale memory |
+
+This 200,000x power span enables students to reason about the full deployment spectrum in a single framework, from the sub-watt TinyML devices explored in the [TinyML slides](https://mlsysbook.ai/slides/) to the datacenter-scale accelerators covered in the [Compute Infrastructure slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/02_compute_infrastructure.pdf).
+
+### 5.3 Model Zoo
+
+The Model Zoo provides 15 pre-configured workload profiles across four categories:
+
+| Category | Models |
+|:---------|:-------|
+| **Language** | GPT-2, GPT-3, GPT-4, BERT-Base, Llama-2-70B, Llama-3-8B, Llama-3-70B |
+| **Vision** | AlexNet, ResNet-50, MobileNetV2, YOLOv8-Nano |
+| **Tiny** | DS-CNN (keyword spotting), WakeVision, Anomaly Detector |
+| **Recommendation** | DLRM |
+
+### 5.4 Infrastructure and Systems Zoos
+
+The Infrastructure Zoo provides four grid profiles with dramatically different carbon intensities (Quebec, Norway, US Average, Poland). The Systems Zoo provides pre-configured fleet topologies (256-GPU research cluster, 8,192-GPU frontier cluster) with appropriate networking fabrics.
+
+---
+
+## 6. Pedagogical Integration {#sec-pedagogy}
+
+MLSYSIM is designed as the computational companion to the *Machine Learning Systems* textbook [@mlsysbook2024]. Each solver maps to specific textbook chapters and their corresponding [lecture slide decks](https://mlsysbook.ai/slides/):
+
+| Solver | Textbook Chapters | Slide Decks |
+|:-------|:-------------------|:------------|
+| **SingleNodeModel** | Training, Hardware Acceleration, Benchmarking | [Training](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/08_training.pdf), [HW Acceleration](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/11_hw_acceleration.pdf), [Benchmarking](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/12_benchmarking.pdf) |
+| **ServingModel** | Model Serving, Inference at Scale | [Model Serving](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/13_model_serving.pdf), [Inference at Scale](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/09_inference.pdf) |
+| **DistributedModel** | Distributed Training, Collective Communication | [Distributed Training](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/05_distributed_training.pdf), [Collective Comm](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/06_collective_communication.pdf) |
+| **EconomicsModel** | Compute Infrastructure | [Compute Infrastructure](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/02_compute_infrastructure.pdf) |
+| **SustainabilityModel** | Sustainable AI | [Sustainable AI](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/15_sustainable_ai.pdf) |
+| **ReliabilityModel** | Fault Tolerance | [Fault Tolerance](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/07_fault_tolerance.pdf) |
+
+### 6.1 Progressive Complexity
+
+The framework supports three levels of engagement:
+
+**Level 1 --- Guided Exploration** (Getting Started):
+```python
+profile = Engine.solve(model=Models.ResNet50, hardware=Hardware.Cloud.A100)
+print(profile.bottleneck)  # "Memory Bound"
+```
+
+**Level 2 --- Comparative Analysis** (Tutorials):
+```python
+for hw in [Hardware.Cloud.A100, Hardware.Cloud.H100, Hardware.Cloud.B200]:
+    p = Engine.solve(model=Models.Language.Llama3_8B, hardware=hw)
+    print(f"{hw.name}: {p.latency.to('ms'):~.2f}, {p.bottleneck}")
+```
+
+**Level 3 --- Systems Design** (Scenarios):
+```python
+scenario = Scenarios.FrontierTraining  # Llama-70B on 8192 GPUs
+evaluation = scenario.evaluate(batch_size=2048, precision="fp16")
+print(evaluation.scorecard())
+```
+
+### 6.2 Dimensional Safety as Pedagogy
+
+The use of `pint.Quantity` throughout the framework serves a dual purpose: it prevents bugs in the framework itself, and it teaches students to think in units. When a student writes:
+
+```python
+# This raises DimensionalityError -- you can't add FLOP/s to GB/s
+result = gpu.compute.peak_flops + gpu.memory.bandwidth
+```
+
+the error message itself becomes a teaching moment about the distinction between compute throughput and memory bandwidth. This approach follows the precedent set by Hennessy and Patterson [@hennessy2019architecture], where dimensional analysis is a core skill for computer architects.
+
+### 6.3 Scenario-Based Assessment
+
+MLSYSIM provides four "lighthouse" scenarios that serve as recurring case studies across the textbook:
+
+1. **Smart Doorbell**: WakeVision on ESP32, tests TinyML feasibility (200 ms SLA)
+2. **Autonomous Vehicle**: ResNet-50 on Jetson Orin NX, tests edge latency (10 ms SLA)
+3. **Local Fine-tuning**: Llama-3-8B on MacBook M3 Max, tests workstation limits (100 ms SLA)
+4. **Frontier Training**: Llama-3-70B on 8,192 H100s, tests fleet-scale economics (500 ms SLA)
+
+Each scenario bundles a workload, hardware/fleet, and SLA constraints into a `Scenario` object. The `evaluate()` method produces a multi-level scorecard assessing feasibility (does it fit in memory?), performance (does it meet SLA?), and macro impact (what are the costs and carbon?).
+
+### 6.4 Lecture Slide Integration
+
+The [lecture slide collection](https://mlsysbook.ai/slides/) provides visual foundations that MLSYSIM makes interactive:
+
+- The [Hardware Acceleration slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/11_hw_acceleration.pdf) introduce the Roofline plot; students then generate their own with `plot_roofline()`.
+- The [Distributed Training slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/05_distributed_training.pdf) present the "3D parallelism cube"; students sweep parallelism configurations with the DistributedModel.
+- The [Collective Communication slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/06_collective_communication.pdf) derive the ring all-reduce formula; students verify it against the formula library.
+- The [Sustainable AI slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/15_sustainable_ai.pdf) present the geography of carbon; students compare Quebec vs. Poland using the SustainabilityModel.
+- The [Fault Tolerance slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/07_fault_tolerance.pdf) derive the Young-Daly formula; students compute optimal checkpoint intervals for their own fleet configurations.
+- The [Performance Engineering slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/10_performance_engineering.pdf) present the optimization playbook; students apply it by chaining solvers to diagnose and resolve bottlenecks.
+
+A full-day [MLSYSIM Tutorial](https://mlsysbook.ai) (presented at ISCA) walks instructors through integrating these materials into a course. The tutorial slide decks cover morning sessions (Roofline, serving, distributed training) and afternoon sessions (economics, sustainability, reliability, scenario design).
+
+---
+
+## 7. Related Work {#sec-related}
+
+MLSYSIM occupies a specific niche: an educational, analytical modeling tool for ML systems. @tbl-related-work positions MLSYSIM relative to existing tools across several dimensions.
+
+| Tool | Type | Scope | Units | Educational | Hardware-Agnostic |
+|:-----|:-----|:------|:------|:------------|:------------------|
+| **MLPerf** [@mlperf2020] | Empirical benchmark | Full stack | N/A | No | No |
+| **PyTorch Profiler** | Empirical profiler | Single node | N/A | No | No |
+| **DeepSpeed** [@rasley2020deepspeed] | Framework estimator | Distributed training | No | No | No |
+| **Megatron-LM** [@shoeybi2019megatron] | Framework estimator | Distributed training | No | No | No |
+| **ASTRA-sim** [@won2023astrasim2] | Event-driven simulator | Distributed training | No | No | No |
+| **Calculon** [@calculon2023] | Analytical model | LLM training | No | No | Partial |
+| **Timeloop** [@parashar2019timeloop] | Analytical model | Accelerator dataflow | No | Partial | Yes |
+| **Roofline Model** [@williams2009roofline] | Analytical model | Single node | Manual | Partial | Yes |
+| **TinyTorch** | Educational framework | Framework internals | No | Yes | N/A |
+| **MLSYSIM** | Analytical engine | Full stack | Enforced | Yes | Yes |
+
+: Comparison of MLSYSIM with related tools. Each tool targets a different fidelity-scope trade-off. MLSYSIM prioritizes breadth and pedagogical clarity over cycle-accurate precision. {#tbl-related-work}
+
+### 7.1 Empirical Benchmarks
+
+MLPerf [@mlperf2020] provides standardized benchmarks for measuring actual ML system performance. MLPerf results are the ground truth that analytical models like MLSYSIM aim to approximate. The tools are complementary: MLPerf tells you *what happened*; MLSYSIM helps you understand *why* and predict *what would happen* under different configurations. The [Benchmarking slides](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/12_benchmarking.pdf) explore MLPerf's methodology and the fallacy of relying on peak performance numbers.
+
+### 7.2 Framework-Specific Estimators
+
+DeepSpeed [@rasley2020deepspeed] and Megatron-LM [@shoeybi2019megatron] include built-in performance estimators for their respective parallelism strategies. These are tightly coupled to their execution frameworks and optimize for accuracy within their specific paradigm. MLSYSIM trades some estimation accuracy for generality and pedagogical clarity: it is framework-independent and exposes the underlying equations rather than hiding them behind APIs.
+
+### 7.3 Analytical Models
+
+The Roofline model [@williams2009roofline] provides the theoretical foundation for MLSYSIM's SingleNodeModel. Amdahl's Law and its extensions inform the DistributedModel's scaling efficiency calculations. The Young-Daly formula [@young1974first; @daly2006higher] provides the optimal checkpoint interval used by the ReliabilityModel. MLSYSIM packages these models into a unified framework with consistent types and composable interfaces.
+
+### 7.4 System Simulators and Co-Design Tools
+
+ASTRA-sim [@won2023astrasim2] provides event-driven simulation of distributed training with pluggable network backends (analytical, Garnet, ns-3), modeling hierarchical network topologies (NVLink, NVSwitch, InfiniBand) at configurable fidelity levels. Calculon [@calculon2023] uses analytical modeling to co-design systems and LLM workloads, focusing on training throughput optimization. Timeloop [@parashar2019timeloop] and Accelergy [@wu2019accelergy] model DNN accelerator dataflows and energy consumption at the microarchitectural level.
+
+These tools target researchers designing new hardware or optimizing specific training configurations. MLSYSIM operates at a coarser granularity: it sacrifices cycle-level accuracy for breadth (six solver domains vs. one) and pedagogical accessibility (typed Python API vs. configuration files). A student who first builds intuition with MLSYSIM's first-order models is better prepared to interpret the detailed results from ASTRA-sim or Timeloop.
+
+### 7.5 Educational Frameworks
+
+TinyTorch focuses on the *software engineering* of building an ML framework from scratch: students implement tensors, autograd, and optimizers in pure Python to understand framework internals. MLSYSIM focuses on the *systems engineering* of deploying and scaling ML workloads: students analyze hardware utilization, communication overhead, and infrastructure costs. The two frameworks are complementary: TinyTorch teaches *how frameworks work internally*; MLSYSIM teaches *how to reason about the systems that run them*.
+
+### 7.6 Scaling Laws and Capacity Planning
+
+Recent work on neural scaling laws [@kaplan2020scaling] and the exponential growth of compute requirements [@amodei2018ai] has made capacity planning a critical skill for ML engineers. MLSYSIM provides the analytical tools to translate scaling law predictions into concrete infrastructure requirements: given a target model size and training budget, students can estimate the fleet size, training time, cost, and carbon footprint using chained solvers.
+
+---
+
+## 8. Accuracy and Validation {#sec-validation}
+
+MLSYSIM is a first-order analytical model. Its estimates capture the *dominant constraint* (the Roofline ceiling that determines whether a workload is memory-bound or compute-bound) but deliberately omit second-order effects (cache hierarchy, kernel fusion, operator scheduling).
+
+### 8.1 What MLSYSIM Models
+
+| Factor | Modeled | Source |
+|:-------|:--------|:-------|
+| Peak FLOP/s per precision | Yes | Manufacturer datasheets |
+| HBM bandwidth | Yes | Manufacturer datasheets |
+| Precision-dependent weight sizing | Yes | Bytes-per-parameter x param count |
+| Dispatch/launch overhead | Yes | Empirical constant per device |
+| Ring/tree all-reduce communication | Yes | Standard network models |
+| Pipeline bubble fraction | Yes | (P-1)/(VM+P-1) formula |
+| KV-cache memory for transformers | Yes | Architectural formula |
+| Expert Parallelism (MoE) communication | Yes | All-to-All model |
+| Activation memory estimation | Yes | Per-layer formula |
+| Checkpoint sizing and optimal interval | Yes | Young-Daly model |
+
+### 8.2 What MLSYSIM Does Not Model
+
+- Cache hierarchy effects (L1/L2 hit rates)
+- Operator fusion and kernel optimization
+- CPU-GPU data transfer latency
+- Memory fragmentation
+- Dynamic batching in serving
+- Network congestion and contention
+- Thermal throttling under sustained load
+
+### 8.3 Expected Accuracy Range
+
+For well-characterized workloads (large batch sizes, standard architectures), MLSYSIM estimates are typically within 1.5--3x of measured performance, with the dominant source of error being the efficiency parameter $\eta$. The framework is designed to identify the *correct bottleneck* rather than predict exact latency, a distinction that is pedagogically more valuable for systems reasoning.
+
+---
+
+## 9. Discussion and Future Work {#sec-discussion}
+
+### 9.1 Limitations
+
+**The Efficiency Parameter ($\eta$).** The single most significant limitation is the reliance on an efficiency parameter that must be estimated by the user. Typical values range from 0.25 to 0.55 for ML workloads, but the optimal value depends on software stack maturity, workload characteristics, and hardware-software co-design --- factors that cannot be captured analytically.
+
+**Static Analysis.** MLSYSIM models steady-state performance. It does not capture transient effects (warmup, JIT compilation), dynamic scheduling decisions, or workload-dependent memory access patterns.
+
+**Registry Staleness.** Hardware specifications evolve rapidly. The registry requires ongoing maintenance to remain a trusted source of truth. We mitigate this through provenance metadata and version control.
+
+### 9.2 Future Directions
+
+**Empirical Calibration.** Systematic validation against MLPerf results and published benchmarks would strengthen confidence in the analytical models and help calibrate default efficiency parameters.
+
+**Extended Solver Suite.** Planned solvers include a QuantizationSolver (accuracy-latency-size trade-offs) and a NetworkSolver (detailed modeling of collective communication patterns beyond ring all-reduce).
+
+**Interactive Browser-Based Labs.** Marimo-based WASM notebooks would allow students to run MLSYSIM entirely in the browser, eliminating setup friction.
+
+**Community Registry.** A contribution pipeline for hardware specifications would allow the registry to grow beyond the core team's bandwidth.
+
+**Data Pipeline Modeling.** A DataModel for modeling data loading, preprocessing, and I/O bottlenecks would complete the picture of end-to-end ML system performance.
+
+---
+
+## 10. Conclusion {#sec-conclusion}
+
+MLSYSIM provides a rigorous, accessible, and dimensionally correct analytical platform for reasoning about machine learning systems. By codifying the Roofline model, 4D parallelism, LLM serving phases, and sustainability metrics into a typed Python framework, it enables students to develop the quantitative intuition that the *Machine Learning Systems* textbook aims to teach.
+
+The framework's design --- first-principles equations over empirical traces, dimensional correctness over convenience, vetted specifications over magic numbers --- reflects a pedagogical commitment: students who understand *why* a system behaves as it does are better equipped to build the next generation of ML infrastructure than those who only know *how* to use today's tools.
+
+MLSYSIM is open source and available as part of the *Machine Learning Systems* textbook project at [mlsysbook.ai](https://mlsysbook.ai). The complete [lecture slide collection](https://mlsysbook.ai/slides/) and [teaching guide](https://mlsysbook.ai/slides/teaching.html) provide instructors with everything needed to integrate MLSYSIM into their courses.
+
+---
+
+## References
+
+::: {#refs}
 :::
 
 ---
 
-## Citation
+## Cite This Work
 
-If you use MLSys·im in your research, please cite:
+If you use MLSYSIM in your research or course materials, please cite the *Machine Learning Systems* textbook:
 
 ```bibtex
-@article{reddi2025mlsysim,
-  title     = {MLSys·im: First-Principles Infrastructure Modeling for Machine Learning Systems},
-  author    = {Reddi, Vijay Janapa},
-  year      = {2025},
-  url       = {https://mlsysbook.ai/mlsysim/},
-  note      = {Companion to the Machine Learning Systems textbook (Harvard CS 249r)}
+@book{mlsysbook2024,
+  title     = {Machine Learning Systems: Principles and Practices of
+               Engineering Artificially Intelligent Systems},
+  author    = {Reddi, Vijay Janapa and others},
+  year      = {2024},
+  publisher = {Harvard University},
+  url       = {https://mlsysbook.ai}
 }
 ```
+
+::: {.callout-note}
+MLSYSIM is the companion framework for the textbook. For the most current citation format,
+see the [textbook website](https://mlsysbook.ai).
+:::

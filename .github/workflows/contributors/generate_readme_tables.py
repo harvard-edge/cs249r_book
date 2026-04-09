@@ -19,6 +19,7 @@ PROJECTS = {
     "interviews": "interviews/",
     "kits": "kits/",
     "labs": "labs/",
+    "mlsysim": "mlsysim/",
     "tinytorch": "tinytorch/",
 }
 

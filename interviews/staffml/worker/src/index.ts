@@ -42,6 +42,13 @@ export interface Env {
   // Cloudflare bindings (always present)
   AI: Ai;
   RATE_LIMIT_KV: KVNamespace;
+  // Waitlist storage — durable list of "would you pay for a paid tier"
+  // submissions from the /waitlist endpoint. Separate namespace from
+  // RATE_LIMIT_KV so the (potentially large) waitlist records never
+  // compete with the (hot-path) rate-limit counters. Optional so the
+  // worker still boots if the binding is missing — /waitlist returns
+  // 503 in that case.
+  WAITLIST_KV?: KVNamespace;
 
   // Provider keys (optional — first present wins per priority order)
   GROQ_API_KEY?: string;
@@ -506,10 +513,24 @@ async function checkRateLimit(ip: string, env: Env): Promise<RateLimitDecision> 
 }
 
 // ─── HTTP plumbing ───────────────────────────────────────────
+//
+// CORS: the default allowlist is explicit. Previously the default was
+// '*' which let any website on the internet call this worker against
+// the visitor's IP — the API keys are server-side so it wasn't a
+// credential leak, but it was a gratuitous way for third parties to
+// exhaust our global rate-limit budget. Operators can still override
+// via the ALLOWED_ORIGINS env var if they need a broader or narrower
+// policy (e.g. preview deployments, staging domains).
+const DEFAULT_ALLOWED_ORIGINS =
+  "https://staffml.ai,https://www.staffml.ai,https://mlsysbook.ai,http://localhost:3000";
+
 function corsHeaders(env: Env, origin: string | null): Record<string, string> {
-  const allowed = (env.ALLOWED_ORIGINS ?? "*").split(",").map((s) => s.trim());
+  const allowed = (env.ALLOWED_ORIGINS ?? DEFAULT_ALLOWED_ORIGINS)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const allowOrigin =
-    allowed.includes("*") ? "*" : origin && allowed.includes(origin) ? origin : allowed[0] ?? "*";
+    allowed.includes("*") ? "*" : origin && allowed.includes(origin) ? origin : allowed[0] ?? "";
   return {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -526,7 +547,167 @@ function jsonResponse(env: Env, origin: string | null, body: unknown, status = 2
   });
 }
 
+// ─── Waitlist handler ────────────────────────────────────────
+//
+// Endpoint: POST /waitlist
+// Body:     { email: string, wouldPay: number (0–50), need?: string }
+// Rate:     1 submission / IP / hour (separate from the /ask limit)
+// Storage:  WAITLIST_KV, key = `wl:${isoTimestamp}:${ipHash}`,
+//           value = JSON.stringify(record)
+//
+// There's no admin endpoint to read the list — operators pull it out
+// via `wrangler kv:key list --binding WAITLIST_KV`. Deliberately
+// one-way to keep the worker's attack surface minimal.
+
+const MAX_EMAIL_CHARS = 254;       // RFC 5321 upper bound
+const MAX_NEED_CHARS = 1000;
+
+interface WaitlistRequest {
+  email?: unknown;
+  wouldPay?: unknown;
+  need?: unknown;
+}
+
+interface WaitlistRecord {
+  email: string;
+  wouldPay: number;
+  need: string;
+  submittedAt: string;
+  ipHash: string;
+  userAgent: string;
+}
+
+/** SHA-256(ip + daily_salt) truncated to 16 hex chars. Enough entropy to
+ *  dedupe within a day, not enough to fingerprint across days. We don't
+ *  want to store raw IPs in a waitlist record that might get shared. */
+async function hashIp(ip: string): Promise<string> {
+  const salt = todayUtcDate();
+  const data = new TextEncoder().encode(`${ip}|${salt}`);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  const hex = Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return hex.slice(0, 16);
+}
+
+/** Cheap RFC-ish email validation. Intentionally not bulletproof — the
+ *  real validation is whether the user ever confirms in their inbox. */
+function looksLikeEmail(s: string): boolean {
+  if (s.length < 3 || s.length > MAX_EMAIL_CHARS) return false;
+  const at = s.indexOf("@");
+  if (at <= 0 || at === s.length - 1) return false;
+  if (s.indexOf("@", at + 1) !== -1) return false; // no second @
+  const dot = s.indexOf(".", at);
+  return dot > at + 1 && dot < s.length - 1;
+}
+
+async function handleWaitlist(
+  request: Request,
+  env: Env,
+  origin: string | null,
+): Promise<Response> {
+  // Bail early if the KV namespace isn't bound. Operators who haven't
+  // provisioned WAITLIST_KV yet get a clean 503; the client then falls
+  // back to mailto: on the user's side.
+  if (!env.WAITLIST_KV) {
+    return jsonResponse(env, origin, { error: "waitlist_unavailable" }, 503);
+  }
+
+  // Content-Type sanity
+  const contentType = request.headers.get("Content-Type") || "";
+  if (!contentType.toLowerCase().startsWith("application/json")) {
+    return jsonResponse(env, origin, { error: "expected application/json" }, 415);
+  }
+
+  // Body size cap (much smaller than /ask; waitlist payloads are tiny)
+  const contentLength = parseInt(request.headers.get("Content-Length") || "0", 10);
+  if (Number.isFinite(contentLength) && contentLength > 4 * 1024) {
+    return jsonResponse(env, origin, { error: "payload_too_large" }, 413);
+  }
+
+  // Parse + validate
+  let body: WaitlistRequest;
+  try {
+    body = (await request.json()) as WaitlistRequest;
+  } catch {
+    return jsonResponse(env, origin, { error: "invalid_json" }, 400);
+  }
+
+  const email = typeof body.email === "string" ? body.email.trim() : "";
+  if (!looksLikeEmail(email)) {
+    return jsonResponse(env, origin, { error: "invalid_email" }, 400);
+  }
+
+  const wouldPayRaw = typeof body.wouldPay === "number" ? body.wouldPay : Number(body.wouldPay);
+  if (!Number.isFinite(wouldPayRaw) || wouldPayRaw < 0 || wouldPayRaw > 500) {
+    return jsonResponse(env, origin, { error: "invalid_would_pay" }, 400);
+  }
+  const wouldPay = Math.round(wouldPayRaw);
+
+  const need =
+    typeof body.need === "string" ? body.need.trim().slice(0, MAX_NEED_CHARS) : "";
+
+  // Rate limit: 1 submission per IP per hour. Reuses RATE_LIMIT_KV with
+  // a distinct prefix so it doesn't interfere with /ask counters.
+  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  const wlKey = `wl:hour:${ip}:${currentUtcHour()}`;
+  const existing = await env.RATE_LIMIT_KV.get(wlKey);
+  if (existing) {
+    return jsonResponse(
+      env,
+      origin,
+      {
+        error: "rate_limit",
+        message: "You've already submitted recently. Try again in an hour.",
+      },
+      429,
+    );
+  }
+  // Mark the slot before writing the record so a race can't slip two
+  // submissions through. Best-effort consistency is fine here.
+  await env.RATE_LIMIT_KV.put(wlKey, "1", { expirationTtl: 3600 + 300 });
+
+  const submittedAt = new Date().toISOString();
+  const ipHash = await hashIp(ip);
+  const record: WaitlistRecord = {
+    email,
+    wouldPay,
+    need,
+    submittedAt,
+    ipHash,
+    userAgent: (request.headers.get("User-Agent") || "").slice(0, 200),
+  };
+
+  // Key format puts timestamp first so `wrangler kv:key list` returns
+  // newest at the tail of lexical order; ipHash suffix keeps keys
+  // unique within the same millisecond.
+  const recordKey = `wl:${submittedAt}:${ipHash}`;
+  await env.WAITLIST_KV.put(recordKey, JSON.stringify(record));
+
+  return jsonResponse(env, origin, { ok: true });
+}
+
 // ─── Main handler ────────────────────────────────────────────
+//
+// Prefix stripping for custom-domain routes
+// ------------------------------------------
+// The worker is reachable at two URL shapes:
+//
+//   1. The default workers.dev subdomain:
+//      https://staffml-interviewer.mlsysbook-ai-account.workers.dev/ask
+//      → request.url.pathname === "/ask"
+//
+//   2. The custom domain route on mlsysbook.ai:
+//      https://mlsysbook.ai/api/staffml-interviewer/ask
+//      → request.url.pathname === "/api/staffml-interviewer/ask"
+//
+// All the route-matching logic below compares against the short form
+// ("/ask", "/health", "/waitlist"), so when we arrive via the custom
+// route we strip the "/api/staffml-interviewer" prefix first. This
+// keeps a single code path for both deployment shapes and lets us flip
+// between them without rewriting the router.
+const CUSTOM_ROUTE_PREFIX = "/api/staffml-interviewer";
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const origin = request.headers.get("Origin");
@@ -536,9 +717,31 @@ export default {
     }
 
     const url = new URL(request.url);
+    // Normalize the pathname: if we arrived via the custom route, strip
+    // the prefix so downstream matches ("/health", "/ask", "/waitlist")
+    // work unchanged. Always-true fall-through when called via the
+    // workers.dev URL.
+    if (url.pathname === CUSTOM_ROUTE_PREFIX) {
+      url.pathname = "/";
+    } else if (url.pathname.startsWith(`${CUSTOM_ROUTE_PREFIX}/`)) {
+      url.pathname = url.pathname.slice(CUSTOM_ROUTE_PREFIX.length);
+    }
+
     if (url.pathname === "/health") {
       const available = orderedAdapters(env).map((a) => a.name);
-      return jsonResponse(env, origin, { ok: true, providers: available });
+      return jsonResponse(env, origin, {
+        ok: true,
+        providers: available,
+        waitlist: Boolean(env.WAITLIST_KV),
+      });
+    }
+
+    // Waitlist endpoint — captures "would you pay for a paid tier"
+    // signal. Durable, no auth, one-submission-per-hour-per-IP, and
+    // gracefully 503s if the WAITLIST_KV binding isn't configured
+    // (the client falls back to mailto: in that case).
+    if (request.method === "POST" && url.pathname === "/waitlist") {
+      return handleWaitlist(request, env, origin);
     }
 
     if (request.method !== "POST" || url.pathname !== "/ask") {

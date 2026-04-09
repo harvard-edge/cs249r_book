@@ -6,8 +6,7 @@
 help: ## Show this help message
 	@echo "MLSys·im Development Commands"
 	@echo "-----------------------------"
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-15s\033[0m %s
-", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 install: ## Install the package in editable mode with all dev and cli dependencies
 	pip install -e ".[dev,cli,viz]"

@@ -213,3 +213,25 @@ The `efficiency` parameter (0.0–1.0) captures the gap between peak hardware pe
 | Inference decode, batch=32+ | 0.15–0.35 | Batch amortizes weight loading |
 | Inference prefill, long context | 0.30–0.50 | Compute-bound GEMM + attention |
 | TinyML (TFLite Micro on ESP32) | 0.05–0.15 | Interpreter overhead, no tensor cores |
+
+---
+
+## Contributors
+
+Thanks to these wonderful people for helping improve MLSys·im!
+
+<!-- ALL-CONTRIBUTORS-LIST:START -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=80" width="80px;" alt="Peter Koellner"/><br /><sub><b>Peter Koellner</b></sub></a><br />🪲 ✍️</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
