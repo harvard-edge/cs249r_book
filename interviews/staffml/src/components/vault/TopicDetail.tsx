@@ -31,6 +31,18 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
 
   const levelQs = drillLevel ? topic.questionsByLevel[drillLevel] || [] : [];
 
+  // Group questions by track, ordered: Cloud → Edge → Mobile → TinyML → everything else
+  const TRACK_ORDER = ["cloud", "edge", "mobile", "tinyml"];
+  const groupedByTrack = levelQs.reduce<Record<string, typeof levelQs>>((acc, q) => {
+    const t = q.track || "other";
+    (acc[t] ??= []).push(q);
+    return acc;
+  }, {});
+  const orderedTracks = [
+    ...TRACK_ORDER.filter(t => groupedByTrack[t]),
+    ...Object.keys(groupedByTrack).filter(t => !TRACK_ORDER.includes(t)),
+  ];
+
   return (
     <div className="w-[420px] h-full flex flex-col bg-background">
       {/* Header */}
@@ -82,24 +94,34 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
                 </div>
               </div>
 
-              {/* Question list */}
-              <div className="p-5 space-y-2">
-                {levelQs.map((q) => (
-                  <Link key={q.id} href={`/practice?q=${q.id}`}
-                    className="block p-3.5 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[14px] font-semibold text-textPrimary leading-snug mb-1">{q.title}</p>
-                        <p className="text-[13px] text-textSecondary line-clamp-2 leading-relaxed">
-                          {q.scenario.replace(/^-\s*\*\*Interviewer:\*\*\s*/i, "").replace(/^"/, "").replace(/"$/, "").slice(0, 140)}...
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0 mt-0.5">
-                        <span className="text-[12px] text-textTertiary capitalize font-medium">{q.track}</span>
-                        <Play className="w-3.5 h-3.5 text-textMuted group-hover:text-textPrimary transition-colors" />
-                      </div>
+              {/* Question list grouped by track */}
+              <div className="p-5 space-y-4">
+                {orderedTracks.map((track) => (
+                  <div key={track}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-[12px] font-semibold uppercase tracking-wide text-textTertiary">
+                        {formatTrackName(track)}
+                      </span>
+                      <span className="text-[11px] text-textMuted">{groupedByTrack[track].length}</span>
+                      <div className="flex-1 h-px bg-borderSubtle" />
                     </div>
-                  </Link>
+                    <div className="space-y-2">
+                      {groupedByTrack[track].map((q) => (
+                        <Link key={q.id} href={`/practice?q=${q.id}`}
+                          className="block p-3.5 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-[14px] font-semibold text-textPrimary leading-snug mb-1">{q.title}</p>
+                              <p className="text-[13px] text-textSecondary line-clamp-2 leading-relaxed">
+                                {q.scenario.replace(/^-\s*\*\*Interviewer:\*\*\s*/i, "").replace(/^"/, "").replace(/"$/, "").slice(0, 140)}...
+                              </p>
+                            </div>
+                            <Play className="w-3.5 h-3.5 text-textMuted group-hover:text-textPrimary transition-colors shrink-0 mt-1" />
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             </motion.div>
