@@ -177,6 +177,9 @@ class ValidateCommand:
             ("mitpress-percent-in-captions", "_run_mitpress_percent_in_captions"),
             ("mitpress-spaced-emdash", "_run_mitpress_spaced_emdash"),
             ("mitpress-vs-period", "_run_mitpress_vs_period"),
+            ("mitpress-eg-ie-comma", "_run_mitpress_eg_ie_comma"),
+            ("mitpress-acknowledgements", "_run_mitpress_acknowledgements"),
+            ("mitpress-capitalized-refs", "_run_mitpress_capitalized_refs"),
         ],
         "images": [
             ("formats", "_run_image_formats"),
@@ -2981,6 +2984,117 @@ class ValidateCommand:
         return ValidationRunResult(
             name="mitpress-vs-period",
             description='Use "vs." not bare "vs" (MIT Press §10.5)',
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_eg_ie_comma(self, root: Path) -> ValidationRunResult:
+        """Flag missing comma after e.g. and i.e. (§10.10)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        # e.g. or i.e. followed by a space and a word (no comma)
+        missing_comma = re.compile(r"\b(e\.g|i\.e)\.\s+(?!,)(\w)")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code or stripped.startswith("#|"):
+                    continue
+                for m in missing_comma.finditer(line):
+                    context = line[max(0, m.start() - 5) : min(len(line), m.end() + 15)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="mitpress_eg_ie_comma",
+                            message='Missing comma after e.g./i.e. — write "e.g.," or "i.e.," (§10.10)',
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="mitpress-eg-ie-comma",
+            description='Comma after e.g. and i.e. (MIT Press §10.10)',
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_acknowledgements(self, root: Path) -> ValidationRunResult:
+        """Flag British spelling 'Acknowledgements' — should be 'Acknowledgments' (American)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            for idx, line in enumerate(lines, 1):
+                if "Acknowledgements" in line:
+                    context = line.strip()[:80]
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="mitpress_acknowledgements",
+                            message='Use American spelling "Acknowledgments" not "Acknowledgements"',
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="mitpress-acknowledgements",
+            description='American spelling: "Acknowledgments" not "Acknowledgements"',
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_capitalized_refs(self, root: Path) -> ValidationRunResult:
+        """Flag capitalized prose references: 'Chapter 12' → 'chapter 12' (§10.4)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        # Match "Chapter N", "Section N", "Figure N", "Table N" in prose
+        # but NOT at sentence start, in headings, or in protected contexts
+        cap_ref = re.compile(r"(?<=[a-z,;:] )(Chapter|Section|Figure|Table) \d")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code or stripped.startswith("#"):
+                    continue
+                if "fig-cap=" in line or "fig-alt=" in line or "title=" in line:
+                    continue
+                for m in cap_ref.finditer(line):
+                    context = line[max(0, m.start() - 10) : min(len(line), m.end() + 10)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="mitpress_capitalized_refs",
+                            message=f'Lowercase "{m.group(1).lower()}" in prose refs (§10.4)',
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="mitpress-capitalized-refs",
+            description='Lowercase "chapter/section/figure/table" in prose references (MIT Press §10.4)',
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
