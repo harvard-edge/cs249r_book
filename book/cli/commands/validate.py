@@ -180,6 +180,8 @@ class ValidateCommand:
             ("mitpress-eg-ie-comma", "_run_mitpress_eg_ie_comma"),
             ("mitpress-acknowledgements", "_run_mitpress_acknowledgements"),
             ("mitpress-capitalized-refs", "_run_mitpress_capitalized_refs"),
+            ("mitpress-above-below", "_run_mitpress_above_below"),
+            ("mitpress-hyphen-range", "_run_mitpress_hyphen_range"),
         ],
         "images": [
             ("formats", "_run_image_formats"),
@@ -3095,6 +3097,96 @@ class ValidateCommand:
         return ValidationRunResult(
             name="mitpress-capitalized-refs",
             description='Lowercase "chapter/section/figure/table" in prose references (MIT Press §10.4)',
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_above_below(self, root: Path) -> ValidationRunResult:
+        """Flag 'above'/'below' spatial references — use @sec- cross-refs or 'earlier'/'later'."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        spatial = re.compile(
+            r"\b(as shown above|as shown below|see above|see below|discussed above|"
+            r"discussed below|mentioned above|mentioned below|described above|"
+            r"described below|the above|the below|noted above|noted below|"
+            r"outlined above|outlined below|listed above|listed below)\b",
+            re.IGNORECASE,
+        )
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code or stripped.startswith("#|") or stripped.startswith("#"):
+                    continue
+                for m in spatial.finditer(line):
+                    context = line[max(0, m.start() - 10) : min(len(line), m.end() + 10)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="mitpress_above_below",
+                            message='Use @sec-/@fig- cross-refs or "earlier"/"later", not "above"/"below"',
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="mitpress-above-below",
+            description='No "above"/"below" spatial refs — use cross-refs or "earlier"/"later"',
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_hyphen_range(self, root: Path) -> ValidationRunResult:
+        """Flag hyphen in number ranges — should use en dash (100–200 not 100-200)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        # Two+ digit numbers separated by a single hyphen (not en dash)
+        hyphen_range = re.compile(r"(\d{2,})-(\d{2,})")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code or stripped.startswith("#|"):
+                    continue
+                # Skip math, URLs, labels, code refs
+                if "$" in line or "http" in line or "{#" in line or "@" in line:
+                    continue
+                if stripped.startswith("|"):
+                    continue
+                for m in hyphen_range.finditer(line):
+                    a, b = int(m.group(1)), int(m.group(2))
+                    if b > a and a >= 10:  # likely a range
+                        context = line[max(0, m.start() - 10) : min(len(line), m.end() + 10)].strip()
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="mitpress_hyphen_range",
+                                message=f'Use en dash for ranges: {m.group(1)}–{m.group(2)} not {m.group()} (§2)',
+                                severity="warning",
+                                context=context,
+                            )
+                        )
+
+        return ValidationRunResult(
+            name="mitpress-hyphen-range",
+            description="En dash for number ranges (100–200 not 100-200, MIT Press §2)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
