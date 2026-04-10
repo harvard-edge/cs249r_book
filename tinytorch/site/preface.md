@@ -43,7 +43,7 @@ They also cannot learn it from toy scripts. A hundred-line neural network does n
 
 TinyTorch teaches you the **AI bricks**—the stable engineering foundations you can use to build any AI system. Small enough to learn from: bite-sized code that runs even on a Raspberry Pi. Big enough to matter: showing the real architecture of how frameworks are built.
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 2rem 0;">
+<div class="comparison-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 2rem 0;">
 <div style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #1976d2;">
 <strong style="color: #1565c0;">📖 MLSysBook</strong>
 <p style="margin: 0.5rem 0 0 0;">The <a href="https://mlsysbook.ai">Machine Learning Systems</a> textbook teaches you the <em>concepts</em> of the rocket ship: propulsion, guidance, life support.</p>
@@ -58,7 +58,7 @@ This is how people move from *using* machine learning to *engineering* machine l
 
 ## Who This Is For
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.5rem 0;">
+<div class="comparison-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.5rem 0;">
 
 <div style="background: #fafafa; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0;">
 <strong>🎓 Students & Researchers</strong>
@@ -106,7 +106,7 @@ This is not a simulation. This is the actual architecture of modern ML framework
 
 Each module follows a **Build-Use-Reflect** cycle: implement from scratch, apply to real problems, then connect what you built to production systems and understand the tradeoffs. Work through Foundation first, then choose your path based on your interests.
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.5rem 0;">
+<div class="comparison-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.5rem 0;">
 
 <div style="border: 1px solid #e0e0e0; padding: 1rem; border-radius: 0.5rem;">
 <strong>Type every line yourself</strong>
