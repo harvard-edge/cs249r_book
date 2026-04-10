@@ -419,7 +419,7 @@ graph LR
         direction TB
         Data["DataLoader"]
         Data --> Conv["CNNs"]
-        Data --> Tok["Tokentic"]
+        Data --> Tok["Tokenization"]
         Tok --> Emb["Embed"]
         Emb --> Att["Attention"]
         Att --> Trans["Transform"]
