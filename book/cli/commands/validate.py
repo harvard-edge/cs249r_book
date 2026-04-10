@@ -3110,7 +3110,7 @@ class ValidateCommand:
         spatial = re.compile(
             r"\b(as shown above|as shown below|see above|see below|discussed above|"
             r"discussed below|mentioned above|mentioned below|described above|"
-            r"described below|the above|the below|noted above|noted below|"
+            r"described below|noted above|noted below|"
             r"outlined above|outlined below|listed above|listed below)\b",
             re.IGNORECASE,
         )

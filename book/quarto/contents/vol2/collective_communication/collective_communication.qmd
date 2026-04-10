@@ -1569,7 +1569,7 @@ This creates 8 independent "rails" of communication that operate in parallel wit
 
 Rail alignment is critical because without it, all 8 GPUs on a node might try to send to the same remote GPU simultaneously, creating 8$\times$ contention on a single NIC. Rail-aligned routing ensures each NIC handles exactly 1/8 of the traffic, achieving full bisection bandwidth utilization.
 
-Rail-optimized routing and hierarchical AllReduce reinforce each other. In the hierarchical decomposition described above, Step 2 (inter-node AllReduce) naturally aligns with rail topology. GPU $i$ on each node communicates only with GPU $i$ on other nodes, which is precisely the rail pattern. This alignment is not coincidental; NVIDIA designed the DGX hardware with rail-optimized communication in mind, and NCCL's hierarchical algorithms exploit this structure by default. When the logical communication pattern matches the physical topology, every NIC operates at full line rate with zero contention, and the cluster achieves its theoretical peak bisection bandwidth.
+Rail-optimized routing and hierarchical AllReduce reinforce each other. In the hierarchical decomposition described earlier, Step 2 (inter-node AllReduce) naturally aligns with rail topology. GPU $i$ on each node communicates only with GPU $i$ on other nodes, which is precisely the rail pattern. This alignment is not coincidental; NVIDIA designed the DGX hardware with rail-optimized communication in mind, and NCCL's hierarchical algorithms exploit this structure by default. When the logical communication pattern matches the physical topology, every NIC operates at full line rate with zero contention, and the cluster achieves its theoretical peak bisection bandwidth.
 
 ::: {.callout-war-story title="NCCL Topology Discovery"}
 
@@ -1611,7 +1611,7 @@ For a gradient vector of dimension $d$ quantized to INT8 with block size $B$:
 
 Block quantization is the default approach in DeepSpeed's communication compression and is supported by NCCL's custom reduction interface for fused quantize-reduce operations.
 
-Each reduction in bit-width introduces quantization noise. This noise acts as a biased perturbation to the true gradient direction. For aggressive quantization (INT8 and especially 1-bit), the systematic bias can prevent convergence unless corrected by **Error Feedback** (discussed below).
+Each reduction in bit-width introduces quantization noise. This noise acts as a biased perturbation to the true gradient direction. For aggressive quantization (INT8 and especially 1-bit), the systematic bias can prevent convergence unless corrected by **Error Feedback** (discussed later).
 
 ### Sparsification: transmitting only important gradients {#sec-communication-collective-operations-collective-operations-sparsification-transmitting-important-gradients-2cd2}
 
@@ -1893,7 +1893,7 @@ A critical synchronization barrier limits this overlap: the optimizer step canno
 
 ### Bucket fusion {#sec-communication-bucket-fusion}
 
-The layer-by-layer overlap described above assumes that each layer's gradient is communicated as a single message. In reality, a transformer layer contains dozens of individual parameter tensors (query, key, value projection matrices, output projection, layer norm parameters, feed-forward weights, and biases). Launching a separate AllReduce for every individual parameter would create thousands of small-message collectives, each paying the full alpha overhead. To avoid this, DDP groups parameters into **buckets** (default size: 25 MB in PyTorch) and launches one AllReduce per bucket. The bucket size represents a trade-off: larger buckets amortize alpha overhead but delay the start of communication (because the bucket cannot be sent until all its parameters have computed gradients). Smaller buckets start communication earlier but pay more alpha overhead.
+The layer-by-layer overlap described earlier assumes that each layer's gradient is communicated as a single message. In reality, a transformer layer contains dozens of individual parameter tensors (query, key, value projection matrices, output projection, layer norm parameters, feed-forward weights, and biases). Launching a separate AllReduce for every individual parameter would create thousands of small-message collectives, each paying the full alpha overhead. To avoid this, DDP groups parameters into **buckets** (default size: 25 MB in PyTorch) and launches one AllReduce per bucket. The bucket size represents a trade-off: larger buckets amortize alpha overhead but delay the start of communication (because the bucket cannot be sent until all its parameters have computed gradients). Smaller buckets start communication earlier but pay more alpha overhead.
 
 The optimal bucket size depends on the model architecture and network characteristics. For models with many small layers (such as deep residual networks), smaller buckets (5--10 MB) improve overlap by starting communication sooner. For models with a few large layers (such as large language models with multi-gigabyte embedding tables), larger buckets (50--100 MB) are preferable because the large layers dominate both computation and communication time. PyTorch's `bucket_cap_mb` parameter in DDP allows tuning this trade-off.
 
