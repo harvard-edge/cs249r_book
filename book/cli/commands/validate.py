@@ -174,6 +174,9 @@ class ValidateCommand:
             ("times-product-spacing", "_run_times_product_spacing"),
             ("purpose-unnumbered", "_run_purpose_unnumbered"),
             ("div-fences", "_run_div_fences"),
+            ("mitpress-percent-in-captions", "_run_mitpress_percent_in_captions"),
+            ("mitpress-spaced-emdash", "_run_mitpress_spaced_emdash"),
+            ("mitpress-vs-period", "_run_mitpress_vs_period"),
         ],
         "images": [
             ("formats", "_run_image_formats"),
@@ -2571,7 +2574,8 @@ class ValidateCommand:
 
     CONTRACTIONS_PATTERN = re.compile(
         r"\b(can't|don't|it's|we'll|won't|hasn't|haven't|isn't|aren't|wasn't|weren't|"
-        r"doesn't|didn't|wouldn't|couldn't|shouldn't|that's|there's|here's|what's)\b",
+        r"doesn't|didn't|wouldn't|couldn't|shouldn't|that's|there's|here's|what's|"
+        r"you're|we're|they're|they've|let's|who's)\b",
         re.IGNORECASE,
     )
 
@@ -2849,6 +2853,134 @@ class ValidateCommand:
         return ValidationRunResult(
             name="div-fences",
             description="Malformed div fences (::: / ::::) with trailing text",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ==================================================================
+    # MIT PRESS CHECKS (§10 of book-prose-merged.md)
+    # ==================================================================
+
+    def _run_mitpress_percent_in_captions(self, root: Path) -> ValidationRunResult:
+        """Flag % in fig-cap/tbl-cap prose — should be 'percent' (§10.2)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        pct_in_cap = re.compile(r'(fig-cap|tbl-cap)="([^"]*)"')
+        pct_pat = re.compile(r"\d\s*%")
+
+        for file in files:
+            for idx, line in enumerate(self._read_text(file).splitlines(), 1):
+                for cap_m in pct_in_cap.finditer(line):
+                    cap_text = cap_m.group(2)
+                    for m in pct_pat.finditer(cap_text):
+                        context = cap_text[max(0, m.start() - 10) : m.end() + 10].strip()
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="mitpress_percent_in_caption",
+                                message='Use "percent" not "%" in fig-cap/tbl-cap prose (§10.2)',
+                                severity="warning",
+                                context=context,
+                            )
+                        )
+
+        return ValidationRunResult(
+            name="mitpress-percent-in-captions",
+            description="No % in figure/table captions — spell out 'percent' (MIT Press §10.2)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_spaced_emdash(self, root: Path) -> ValidationRunResult:
+        """Flag spaced em dashes (word — word) in prose — should be closed (word—word)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        spaced_em = re.compile(r"\S — \S")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if stripped.startswith("#|") or stripped.startswith("# "):
+                    continue
+                # Table placeholder dashes are fine
+                if "| —" in line or "— |" in line:
+                    continue
+                if "fig-cap=" in line or "fig-alt=" in line or "title=" in line:
+                    continue
+                for m in spaced_em.finditer(line):
+                    context = line[max(0, m.start() - 5) : min(len(line), m.end() + 15)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="mitpress_spaced_emdash",
+                            message="Close up em dash: word—word not word — word (§1)",
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="mitpress-spaced-emdash",
+            description="No spaced em dashes in prose — use word—word (MIT Press §1)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_vs_period(self, root: Path) -> ValidationRunResult:
+        """Flag bare 'vs' without period — should be 'vs.' (§10.5)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        # Match ' vs ' in prose (space-bounded) NOT followed by '.'
+        bare_vs = re.compile(r"(?<= )vs(?=[ ,;:)\]])")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if stripped.startswith("#|") or stripped.startswith("#"):
+                    continue
+                # Skip lines with IDs, labels, URLs, fig-attributes, index, tables
+                if any(skip in line for skip in ["{#", "@sec-", "@fig-", "@tbl-",
+                       "fig-cap=", "fig-alt=", "title=", "http", "-vs-",
+                       "\\index{", "`{python}", "| "]):
+                    continue
+                for m in bare_vs.finditer(line):
+                    context = line[max(0, m.start() - 10) : min(len(line), m.end() + 10)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="mitpress_vs_period",
+                            message='Use "vs." with period, not bare "vs" (§10.5)',
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="mitpress-vs-period",
+            description='Use "vs." not bare "vs" (MIT Press §10.5)',
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
