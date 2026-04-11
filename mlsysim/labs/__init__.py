@@ -24,6 +24,8 @@ from .components import (
     RooflineVisualizer,
     LatencyWaterfall,
     MathPeek,
+    DecisionLog,
+    FailureBanner,
 )
 
 __all__ = [
@@ -43,4 +45,6 @@ __all__ = [
     "RooflineVisualizer",
     "LatencyWaterfall",
     "MathPeek",
+    "DecisionLog",
+    "FailureBanner",
 ]
