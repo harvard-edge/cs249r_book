@@ -203,6 +203,11 @@ class TestWheelConsistency:
 
         source = read_source(lab_path)
         expected_fragment = f"../../wheels/mlsysim-{version}-py3-none-any.whl"
+        bad_depth = f"../../../wheels/mlsysim-{version}-py3-none-any.whl"
+        assert bad_depth not in source, (
+            f"Micropip wheel path has one too many '../' segments (found '{bad_depth}'). "
+            f"From labs/volN/ the repo root is two levels up; use '{expected_fragment}'."
+        )
         assert expected_fragment in source, (
             f"Wheel version mismatch or not relative. Expected '{expected_fragment}' in micropip URL "
             f"but not found. Update the micropip.install() URL in this lab."
