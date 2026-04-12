@@ -12,7 +12,7 @@
 
 TinyTorch is more than a course—it's a growing community of students, educators, and ML engineers learning systems engineering from first principles.
 
-## Community Dashboard (Available Now )
+## Community Dashboard (Available Now)
 
 Join the global TinyTorch community and see your progress:
 
