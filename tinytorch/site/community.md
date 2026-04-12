@@ -5,7 +5,7 @@
 **See yourself on the TinyTorch Globe!** Create an account and join the global community to track your progress and connect with other builders.
 
 <p align="center">
-<img src="_static/images/diagram_tiny-commununity.png" alt="TinyTorch Community Ecosystem" width="100%">
+<img src="_static/images/diagram_tiny-community.png" alt="TinyTorch Community Ecosystem" width="100%">
 </p>
 
 **Learn together, build together, grow together.**
