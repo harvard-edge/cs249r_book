@@ -523,9 +523,9 @@ Pick the route that matches your goals and available time:
 
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; margin: 1.5rem 0;">
 
-<div style="background: #e3f2fd; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #1976d2;">
+<div class="bigpicture-path-card" style="background: #e3f2fd; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #1976d2;">
 <strong>Sequential Builder</strong><br/>
-<span style="font-size: 0.9rem; color: #555;">Complete all 20 modules in order</span>
+<span class="bigpicture-path-subtitle" style="font-size: 0.9rem; color: #555;">Complete all 20 modules in order</span>
 <p style="margin: 0.75rem 0 0 0; font-size: 0.95rem;">
 <strong>Best for:</strong> Students, career transitioners, deep understanding<br/>
 <strong>Time:</strong> 60-80 hours (8-12 weeks part-time)<br/>
@@ -533,9 +533,9 @@ Pick the route that matches your goals and available time:
 </p>
 </div>
 
-<div style="background: #f3e5f5; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #7b1fa2;">
+<div class="bigpicture-path-card" style="background: #f3e5f5; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #7b1fa2;">
 <strong>Vision Track</strong><br/>
-<span style="font-size: 0.9rem; color: #555;">01-09 → 14-19 (CNNs + optimization)</span>
+<span class="bigpicture-path-subtitle" style="font-size: 0.9rem; color: #555;">01-09 → 14-19 (CNNs + optimization)</span>
 <p style="margin: 0.75rem 0 0 0; font-size: 0.95rem;">
 <strong>Best for:</strong> Computer vision focus, MLOps practitioners<br/>
 <strong>Time:</strong> 40-50 hours<br/>
@@ -543,9 +543,9 @@ Pick the route that matches your goals and available time:
 </p>
 </div>
 
-<div style="background: #fff3e0; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #f57c00;">
+<div class="bigpicture-path-card" style="background: #fff3e0; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #f57c00;">
 <strong>Language Track</strong><br/>
-<span style="font-size: 0.9rem; color: #555;">01-08 → 10-13 (transformers + GPT)</span>
+<span class="bigpicture-path-subtitle" style="font-size: 0.9rem; color: #555;">01-08 → 10-13 (transformers + GPT)</span>
 <p style="margin: 0.75rem 0 0 0; font-size: 0.95rem;">
 <strong>Best for:</strong> NLP focus, research engineers<br/>
 <strong>Time:</strong> 35-45 hours<br/>
@@ -553,9 +553,9 @@ Pick the route that matches your goals and available time:
 </p>
 </div>
 
-<div style="background: #e8f5e9; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #388e3c;">
+<div class="bigpicture-path-card" style="background: #e8f5e9; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #388e3c;">
 <strong>Instructor Sampler</strong><br/>
-<span style="font-size: 0.9rem; color: #555;">Read: 01, 03, 05, 07, 12 (key concepts)</span>
+<span class="bigpicture-path-subtitle" style="font-size: 0.9rem; color: #555;">Read: 01, 03, 05, 07, 12 (key concepts)</span>
 <p style="margin: 0.75rem 0 0 0; font-size: 0.95rem;">
 <strong>Best for:</strong> Evaluating for course adoption<br/>
 <strong>Time:</strong> 8-12 hours (reading, not building)<br/>
@@ -573,7 +573,7 @@ Pick the route that matches your goals and available time:
 
 ## Expect to Struggle (That's the Design)
 
-<div style="background: #fff8e1; border-left: 4px solid #ffa726; padding: 1.5rem; margin: 1.5rem 0;">
+<div class="bigpicture-struggle-box" style="background: #fff8e1; border-left: 4px solid #ffa726; padding: 1.5rem; margin: 1.5rem 0;">
 
 **Getting stuck is not a bug—it's a feature.**
 
