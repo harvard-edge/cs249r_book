@@ -22,7 +22,7 @@ This is the gap TinyTorch exists to fill.
 
 Most people can use PyTorch or TensorFlow. They can import libraries, call functions, train models. But very few understand how these frameworks work: how memory is managed for tensors, how autograd builds computation graphs, how optimizers update parameters. And almost no one has a guided, structured way to learn that from the ground up.
 
-<div style="background: #f8f9fa; padding: 1.5rem; border-radius: 0.5rem; margin: 1.5rem 0;">
+<div class="preface-problem-box" style="background: #f8f9fa; padding: 1.5rem; border-radius: 0.5rem; margin: 1.5rem 0;">
 
 **Why does this matter?** Because users hit walls that builders do not:
 
@@ -44,12 +44,12 @@ They also cannot learn it from toy scripts. A hundred-line neural network does n
 TinyTorch teaches you the **AI bricks**—the stable engineering foundations you can use to build any AI system. Small enough to learn from: bite-sized code that runs even on a Raspberry Pi. Big enough to matter: showing the real architecture of how frameworks are built.
 
 <div class="comparison-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 2rem 0;">
-<div style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #1976d2;">
-<strong style="color: #1565c0;">📖 MLSysBook</strong>
+<div class="preface-mlsysbook-card" style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #1976d2;">
+<strong class="preface-card-title" style="color: #1565c0;">📖 MLSysBook</strong>
 <p style="margin: 0.5rem 0 0 0;">The <a href="https://mlsysbook.ai">Machine Learning Systems</a> textbook teaches you the <em>concepts</em> of the rocket ship: propulsion, guidance, life support.</p>
 </div>
-<div style="background: #fff3e0; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #ff8247;">
-<strong style="color: #e65100;">TinyTorch</strong>
+<div class="preface-tinytorch-card" style="background: #fff3e0; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #ff8247;">
+<strong class="preface-card-title" style="color: #e65100;">TinyTorch</strong>
 <p style="margin: 0.5rem 0 0 0;">TinyTorch is where you actually <em>build</em> a small rocket with your own hands. Not a toy—a real framework.</p>
 </div>
 </div>
@@ -60,22 +60,22 @@ This is how people move from *using* machine learning to *engineering* machine l
 
 <div class="comparison-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.5rem 0;">
 
-<div style="background: #fafafa; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0;">
+<div class="preface-audience-card" style="background: #fafafa; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0;">
 <strong>🎓 Students & Researchers</strong>
 <p style="margin: 0.5rem 0 0 0; font-size: 0.95rem;">Want to understand ML systems deeply, not just use them superficially. If you've wondered "how does that actually work?", this is for you.</p>
 </div>
 
-<div style="background: #fafafa; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #4caf50;">
+<div class="preface-audience-card" style="background: #fafafa; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #4caf50;">
 <strong>⚙ ML Engineers</strong>
 <p style="margin: 0.5rem 0 0 0; font-size: 0.95rem;">Need to debug, optimize, and deploy models in production. Understanding the systems underneath makes you more effective.</p>
 </div>
 
-<div style="background: #fafafa; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #2196f3;">
+<div class="preface-audience-card" style="background: #fafafa; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #2196f3;">
 <strong>💻 Systems Programmers</strong>
 <p style="margin: 0.5rem 0 0 0; font-size: 0.95rem;">You understand memory hierarchies, computational complexity, performance optimization. You want to apply it to ML.</p>
 </div>
 
-<div style="background: #fafafa; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #ffc107;">
+<div class="preface-audience-card" style="background: #fafafa; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #ffc107;">
 <strong>🛠 Self-taught Engineers</strong>
 <p style="margin: 0.5rem 0 0 0; font-size: 0.95rem;">Can use frameworks but want to know how they work. Preparing for ML infrastructure roles and need systems-level understanding.</p>
 </div>
@@ -108,22 +108,22 @@ Each module follows a **Build-Use-Reflect** cycle: implement from scratch, apply
 
 <div class="comparison-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.5rem 0;">
 
-<div style="border: 1px solid #e0e0e0; padding: 1rem; border-radius: 0.5rem;">
+<div class="preface-howtolearn-card" style="border: 1px solid #e0e0e0; padding: 1rem; border-radius: 0.5rem;">
 <strong>Type every line yourself</strong>
 <p style="margin: 0.5rem 0 0 0; font-size: 0.9rem; color: #666;">Do not copy-paste. The learning happens in the struggle of implementation.</p>
 </div>
 
-<div style="border: 1px solid #e0e0e0; padding: 1rem; border-radius: 0.5rem;">
+<div class="preface-howtolearn-card" style="border: 1px solid #e0e0e0; padding: 1rem; border-radius: 0.5rem;">
 <strong>Profile your code</strong>
 <p style="margin: 0.5rem 0 0 0; font-size: 0.9rem; color: #666;">Use built-in profiling tools. Measure first, optimize second.</p>
 </div>
 
-<div style="border: 1px solid #e0e0e0; padding: 1rem; border-radius: 0.5rem;">
+<div class="preface-howtolearn-card" style="border: 1px solid #e0e0e0; padding: 1rem; border-radius: 0.5rem;">
 <strong>Run the tests</strong>
 <p style="margin: 0.5rem 0 0 0; font-size: 0.9rem; color: #666;">Every module includes comprehensive tests. When they pass, you have built something real.</p>
 </div>
 
-<div style="border: 1px solid #e0e0e0; padding: 1rem; border-radius: 0.5rem;">
+<div class="preface-howtolearn-card" style="border: 1px solid #e0e0e0; padding: 1rem; border-radius: 0.5rem;">
 <strong>Compare with PyTorch</strong>
 <p style="margin: 0.5rem 0 0 0; font-size: 0.9rem; color: #666;">Once your implementation works, compare with PyTorch's equivalent.</p>
 </div>
