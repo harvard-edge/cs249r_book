@@ -134,10 +134,11 @@ class LineWalker:
     _HTML_OPEN_RE = re.compile(r"<(style|script)\b", re.IGNORECASE)
     _HTML_CLOSE_RE = re.compile(r"</(style|script)>", re.IGNORECASE)
     # Multi-line HTML comments. Quarto accepts both <!-- and <!--- (three
-    # dashes) as the opener. The closer is always -->. A single-line comment
-    # (open and close on same line) must NOT toggle state.
+    # dashes) as the opener. Closers are --> and the HTML5 parse-error form
+    # --!> (see WHATWG "comment end bang state"). A single-line comment (open
+    # and close on same line) must NOT toggle state.
     _HTML_COMMENT_OPEN_RE = re.compile(r"<!--")
-    _HTML_COMMENT_CLOSE_RE = re.compile(r"-->")
+    _HTML_COMMENT_CLOSE_RE = re.compile(r"--!>|-->")
 
     # Display math delimiter patterns. A $$ is a TRUE delimiter if it
     # appears at line start, line end, or after \end{...}. The patterns

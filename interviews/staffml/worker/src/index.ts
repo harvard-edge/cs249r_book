@@ -864,6 +864,7 @@ export default {
       }
     }
 
+    console.error("[staffml-worker] all_providers_failed", lastError);
     return jsonResponse(
       env,
       origin,
@@ -871,7 +872,6 @@ export default {
         error: "all_providers_failed",
         message:
           "All configured providers errored. Use 'Copy as prompt' to ask in your own LLM.",
-        detail: lastError instanceof Error ? lastError.message : String(lastError),
       },
       502,
     );

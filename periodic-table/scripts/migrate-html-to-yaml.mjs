@@ -23,7 +23,9 @@ const YAML_PATH = path.join(REPO, "periodic-table", "table.yml");
 
 // ── 1. Extract `blocks`, `rowLabels`, `elements` from the script tag ──
 const html = fs.readFileSync(HTML_PATH, "utf8");
-const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+// Case-insensitive, permissive </script ...> close (HTML5 tokenization); avoid
+// naive /<script>/ which misses <SCRIPT> and odd close tags.
+const scriptMatch = html.match(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/i);
 if (!scriptMatch) throw new Error("No <script> block found in index.html");
 const scriptText = scriptMatch[1];
 
@@ -210,7 +212,17 @@ console.log(`  ${knownCollisions.length} documented symbol collisions`);
 // ════════════════════════════════════════════════════════════════════════
 
 function stripHtml(s) {
-  return s.replace(/<[^>]+>/g, "");
+  return stripTagsUntilStable(s);
+}
+
+/** Remove HTML-like tags; repeat until stable so nested / partial tags cannot re-form. */
+function stripTagsUntilStable(s) {
+  let prev;
+  do {
+    prev = s;
+    s = s.replace(/<[^>]+>/g, "");
+  } while (s !== prev);
+  return s;
 }
 
 /**
@@ -237,8 +249,8 @@ function formulaMarkupToString(markup) {
   s = s.replace(/<span[^>]*>([^<]*)<\/span>/g, "$1");
   // Replace <sub>X</sub> -> _X (subscript marker)
   s = s.replace(/<sub[^>]*>([^<]*)<\/sub>/g, "_$1");
-  // Strip any other HTML
-  s = s.replace(/<[^>]+>/g, "");
+  // Strip any other HTML (loop: single pass can re-expose tag-like text)
+  s = stripTagsUntilStable(s);
   // Collapse double spaces around operators
   s = s.replace(/\s+/g, " ").trim();
   return s;

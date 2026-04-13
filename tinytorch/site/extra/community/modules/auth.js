@@ -361,13 +361,25 @@ export async function handleAuth(e) {
             closeModal(); // Always close modal on success
 
             if (nextParam) {
-                // Validate redirect target is a safe relative path (no protocol, no external URLs)
-                const cleanNext = decodeURIComponent(nextParam).split('?')[0];
-                if (cleanNext.startsWith('/') && !cleanNext.startsWith('//') && !/^\/.*:/.test(cleanNext)) {
-                    window.location.href = cleanNext;
-                } else {
+                // Same-origin path only: require absolute path in the param, then resolve with URL()
+                // so protocol-relative strings and odd schemes do not become cross-origin navigations.
+                const raw = decodeURIComponent(nextParam);
+                if (!raw.startsWith('/') || raw.startsWith('//')) {
                     window.location.href = basePath + '/dashboard.html';
+                    return;
                 }
+                try {
+                    const resolved = new URL(raw, window.location.origin);
+                    if (resolved.origin === window.location.origin) {
+                        window.location.assign(
+                            resolved.pathname + resolved.search + resolved.hash,
+                        );
+                        return;
+                    }
+                } catch {
+                    /* invalid URL */
+                }
+                window.location.href = basePath + '/dashboard.html';
                 return;
             }
 
