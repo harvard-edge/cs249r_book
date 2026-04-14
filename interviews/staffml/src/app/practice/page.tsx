@@ -10,6 +10,7 @@ import {
 import clsx from "clsx";
 import HardwareRef from "@/components/HardwareRef";
 import NapkinCalc from "@/components/NapkinCalc";
+import AskInterviewer from "@/components/AskInterviewer";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import LevelBadge from "@/components/LevelBadge";
 import { useToast } from "@/components/Toast";
@@ -821,6 +822,7 @@ function PracticePage() {
 
               <HardwareRef />
               <NapkinCalc />
+              <AskInterviewer questionContext={current.scenario} />
               <div className="flex-1 p-5 flex flex-col overflow-y-auto">
                 {!showAnswer ? (
                   <>
