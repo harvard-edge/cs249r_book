@@ -188,8 +188,16 @@ export default function NapkinCalc({ defaultOpen = false }: { defaultOpen?: bool
             <div className="text-[10px] font-mono text-textTertiary mt-1">{output.detail}</div>
           </div>
 
-          <div className="mt-2 text-[9px] text-textTertiary/50 italic">
-            Formulas from mlsysim/core/formulas.py
+          <div className="mt-2 text-[9px] text-textTertiary/60 italic">
+            Formulas from{" "}
+            <a
+              href="https://mlsysbook.ai/mlsysim/laws-explained.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline decoration-dotted underline-offset-2 hover:text-textSecondary"
+            >
+              mlsysim
+            </a>
           </div>
         </div>
       )}

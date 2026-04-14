@@ -365,18 +365,18 @@ Please answer each as the interviewer.`;
                 <p className="text-[11px] text-textSecondary leading-relaxed">
                   {isStudyMode ? (
                     <>
-                      Tutor mode. The canonical answer is shared with the AI, which can explain the
-                      reasoning, walk through napkin math, and compare your attempt to the model
-                      answer. <span className="font-semibold text-textPrimary">Free, rate-limited,
-                      best-effort. AI may still be wrong — the model answer beside you is the source
-                      of truth.</span>
+                      Tutor mode. The canonical answer is shared with the AI so it can explain the
+                      reasoning, walk through napkin math, and compare your attempt.{" "}
+                      <span className="font-semibold text-textPrimary">Free, rate-limited,
+                      best-effort. AI may still be wrong.</span>
                     </>
                   ) : (
                     <>
                       Practice the clarification ritual real interviews reward. Your questions go to a
                       small AI interviewer with a Socratic constraint — it can answer constraints, never
-                      solve the problem. <span className="font-semibold text-textPrimary">Free, rate-limited,
-                      best-effort. No guarantees. AI may be wrong — verify against the model answer.</span>
+                      solve the problem.{" "}
+                      <span className="font-semibold text-textPrimary">Free, rate-limited,
+                      best-effort. AI may be wrong.</span>
                     </>
                   )}
                 </p>
@@ -500,8 +500,7 @@ Please answer each as the interviewer.`;
               {HOSTED_AVAILABLE ? (
                 <>
                   Questions you type are sent to an external LLM service via StaffML&apos;s relay.
-                  The relay does not log requests. Don&apos;t paste anything sensitive to your employer.
-                  Your model answer (below) is the source of truth.
+                  The relay does not log requests. Don&apos;t paste anything sensitive.
                 </>
               ) : (
                 <>
