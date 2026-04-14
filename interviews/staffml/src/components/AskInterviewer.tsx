@@ -403,7 +403,10 @@ Please answer each as the interviewer.`;
                     {m.text}
                   </span>
                   {m.role === "interviewer" && m.modelLabel && (
-                    <div className="mt-1 ml-1 text-[9px] font-mono text-textTertiary/70 italic">
+                    <div
+                      className="mt-1 ml-1 text-[9px] font-mono text-textTertiary/70 italic"
+                      title="Model picked automatically from donated provider keys. Sponsors email staffml@mlsysbook.ai to contribute API credits."
+                    >
                       {m.modelLabel} via {m.vendorLabel} · AI may be wrong · check the model answer
                     </div>
                   )}
@@ -604,6 +607,19 @@ function WaitlistModal({ onClose, endpoint }: { onClose: () => void; endpoint: s
             <h3 id="waitlist-title" className="text-lg font-bold text-textPrimary">Paid interviewer waitlist</h3>
             <p className="text-[12px] text-textTertiary mt-0.5">
               No commitment. No spam. One email if and when a paid tier launches.
+            </p>
+            {/* Sponsor ask — quiet, single line. Vendors who want their
+                model in the priority chain email the same address as the
+                mailto-fallback below. Keeps the "become a sponsor" funnel
+                to one address, no separate page required. */}
+            <p className="text-[11px] text-textTertiary/80 mt-2">
+              Vendor with API credits to sponsor?{" "}
+              <a
+                href="mailto:staffml@mlsysbook.ai?subject=StaffML%20%E2%80%94%20sponsoring%20AI%20credits"
+                className="font-semibold text-accentBlue hover:underline"
+              >
+                Get in touch
+              </a>.
             </p>
           </div>
           <button
