@@ -26,7 +26,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { Target, Crosshair, Shuffle, ArrowRight } from "lucide-react";
 import {
   QUESTION_COUNT_FORMATTED,
@@ -48,6 +48,13 @@ function markSeen() {
 
 export default function WelcomePage() {
   const router = useRouter();
+
+  // Mark this tab session as "already bounced" so clicking "Vault" in
+  // the nav from /welcome doesn't ping-pong back. The localStorage flag
+  // (cross-session dismissal) still only sets on explicit action.
+  useEffect(() => {
+    try { sessionStorage.setItem("staffml_firstrun_bounced", "1"); } catch { /* noop */ }
+  }, []);
 
   const handleAction = useCallback(
     (href: string) => {
