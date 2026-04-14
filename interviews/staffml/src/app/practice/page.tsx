@@ -10,6 +10,7 @@ import {
 import clsx from "clsx";
 import HardwareRef from "@/components/HardwareRef";
 import NapkinCalc from "@/components/NapkinCalc";
+import AskInterviewer from "@/components/AskInterviewer";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import LevelBadge from "@/components/LevelBadge";
 import { useToast } from "@/components/Toast";
@@ -821,6 +822,18 @@ function PracticePage() {
 
               <HardwareRef />
               <NapkinCalc />
+              {/* Pre-Reveal: Socratic clarifier (interview persona).
+                  Post-Reveal: Tutor with canonical answer injected.
+                  The `key` forces a remount when mode flips so the
+                  transcript resets — a pre-reveal "don't tell me the
+                  answer" exchange would otherwise pollute the tutor's
+                  context when we start a fresh post-reveal dialogue. */}
+              <AskInterviewer
+                key={`${current.id}-${showAnswer ? "study" : "interview"}`}
+                questionContext={current.scenario}
+                mode={showAnswer ? "study" : "interview"}
+                canonicalAnswer={showAnswer ? current.details.realistic_solution : undefined}
+              />
               <div className="flex-1 p-5 flex flex-col overflow-y-auto">
                 {!showAnswer ? (
                   <>
