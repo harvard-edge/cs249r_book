@@ -36,7 +36,7 @@
 
 TinyTorch serves three types of users. Choose your path:
 
-<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; margin: 2rem 0;">
+<div class="overview-role-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; margin: 2rem 0;">
 
 <div style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3;">
 <h3 style="margin: 0 0 1rem 0; color: #1976d2;"> Student / Learner</h3>
