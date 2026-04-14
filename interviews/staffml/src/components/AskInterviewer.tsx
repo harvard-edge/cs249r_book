@@ -54,6 +54,19 @@ Keep answers under 60 words. Be specific and concrete — give numbers when reas
 const DELIMITER_PATTERN = /<\/?(scenario|canonical_answer|student_attempt)\b[^>]*>/gi;
 const stripDelimiters = (s: string): string => s.replace(DELIMITER_PATTERN, "");
 
+// Starter prompts shown as clickable pills at the top of an empty tutor
+// panel in study mode. Designed to fit ANY ML-systems question in the
+// corpus (math-heavy, intuition-first, or counterfactual) so we don't
+// need per-question curation. Clicking a pill populates the composer
+// draft — it does NOT auto-send. The student can tweak before hitting
+// Ask, which preserves the "learn to articulate your own question"
+// habit that's half the interview-prep value.
+const STUDY_STARTER_PROMPTS = [
+  "Walk me through the math",
+  "What's the intuition?",
+  "Why this answer, not another?",
+];
+
 // Tutor prompt — mirrors TUTOR_SYSTEM_PROMPT in worker/src/index.ts. Used
 // in Copy-as-prompt output when the student has revealed the canonical
 // answer and wants to paste into their own LLM for follow-up explanation.
@@ -378,6 +391,24 @@ Please answer each as the interviewer.`;
                 </p>
               </div>
             )
+          )}
+
+          {/* Starter prompts — study mode only, empty state only. Clicking
+              populates the composer so the student can edit before sending.
+              The free-text input remains primary; pills are scaffolding. */}
+          {messages.length === 0 && isStudyMode && HOSTED_AVAILABLE && (
+            <div className="mb-3 flex flex-wrap gap-1.5" aria-label="Starter questions">
+              {STUDY_STARTER_PROMPTS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setDraft(p)}
+                  className="px-2.5 py-1 text-[11px] text-textSecondary bg-background border border-border rounded-full hover:bg-surfaceHover hover:text-textPrimary hover:border-accentBlue/40 transition-colors"
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
           )}
 
           {/* Transcript */}

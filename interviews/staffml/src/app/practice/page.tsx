@@ -792,7 +792,7 @@ function PracticePage() {
               </div>
               </div>
               {/* Sticky bottom bar */}
-              <div className="shrink-0 border-t border-border bg-background/80 backdrop-blur-sm px-8 lg:px-12 py-3 flex items-center justify-between">
+              <div className="shrink-0 border-t border-border bg-background px-8 lg:px-12 py-3 flex items-center justify-between">
                 <span className="text-[11px] font-mono text-textTertiary">
                   {pool.length} in pool
                 </span>
@@ -807,7 +807,7 @@ function PracticePage() {
             </div>
 
             {/* Answer panel */}
-            <div className="w-full lg:w-[460px] border-t lg:border-t-0 lg:border-l border-border bg-surface/90 flex flex-col">
+            <div className="w-full lg:w-[460px] border-t lg:border-t-0 lg:border-l border-border bg-surface flex flex-col">
               <div className="h-10 border-b border-border flex items-center px-4 bg-background/50 justify-between">
                 <span className="text-[10px] font-mono text-textTertiary uppercase tracking-widest flex items-center gap-2">
                   <Calculator className="w-3 h-3" /> {current.details.napkin_math ? "napkin_math.py" : "answer.md"}
