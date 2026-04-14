@@ -822,7 +822,14 @@ function PracticePage() {
 
               <HardwareRef />
               <NapkinCalc />
-              <AskInterviewer questionContext={current.scenario} />
+              {/* Pre-Reveal: Socratic clarifier (interview persona).
+                  Post-Reveal: Tutor with canonical answer injected so it
+                  can explain reasoning and compare the student's attempt. */}
+              <AskInterviewer
+                questionContext={current.scenario}
+                mode={showAnswer ? "study" : "interview"}
+                canonicalAnswer={showAnswer ? current.details.realistic_solution : undefined}
+              />
               <div className="flex-1 p-5 flex flex-col overflow-y-auto">
                 {!showAnswer ? (
                   <>
