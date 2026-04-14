@@ -333,7 +333,7 @@ tito milestone status
 
 Here's what a typical TinyTorch session looks like:
 
-<div style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
+<div class="overview-session-box" style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
 
 **1. Start Session**
 ```bash
