@@ -47,6 +47,13 @@ You must NOT solve the problem. You must NOT propose architectures, algorithms, 
 
 Keep answers under 60 words. Be specific and concrete — give numbers when reasonable. Use a senior interviewer's tone: direct, no fluff, no apologies.`;
 
+/** Mirror of the worker's sanitizer. Strips the reserved data-block
+ *  delimiter tags from user-controlled text so the Copy-as-prompt output
+ *  can't be used to inject instructions into whatever LLM the user
+ *  pastes it into. Match the worker's regex exactly. */
+const DELIMITER_PATTERN = /<\/?(scenario|canonical_answer|student_attempt)\b[^>]*>/gi;
+const stripDelimiters = (s: string): string => s.replace(DELIMITER_PATTERN, "");
+
 // Tutor prompt — mirrors TUTOR_SYSTEM_PROMPT in worker/src/index.ts. Used
 // in Copy-as-prompt output when the student has revealed the canonical
 // answer and wants to paste into their own LLM for follow-up explanation.
@@ -272,11 +279,11 @@ export default function AskInterviewer({
 ---
 
 <scenario>
-${questionContext}
+${stripDelimiters(questionContext)}
 </scenario>
 
-${canonicalAnswer ? `<canonical_answer>\n${canonicalAnswer}\n</canonical_answer>\n\n` : ""}<student_attempt>
-${numbered}
+${canonicalAnswer ? `<canonical_answer>\n${stripDelimiters(canonicalAnswer)}\n</canonical_answer>\n\n` : ""}<student_attempt>
+${stripDelimiters(numbered)}
 </student_attempt>
 
 Please explain the reasoning and, if a student attempt is present, compare it to the canonical answer and diagnose any misconception.`

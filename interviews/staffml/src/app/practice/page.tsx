@@ -823,9 +823,13 @@ function PracticePage() {
               <HardwareRef />
               <NapkinCalc />
               {/* Pre-Reveal: Socratic clarifier (interview persona).
-                  Post-Reveal: Tutor with canonical answer injected so it
-                  can explain reasoning and compare the student's attempt. */}
+                  Post-Reveal: Tutor with canonical answer injected.
+                  The `key` forces a remount when mode flips so the
+                  transcript resets — a pre-reveal "don't tell me the
+                  answer" exchange would otherwise pollute the tutor's
+                  context when we start a fresh post-reveal dialogue. */}
               <AskInterviewer
+                key={`${current.id}-${showAnswer ? "study" : "interview"}`}
                 questionContext={current.scenario}
                 mode={showAnswer ? "study" : "interview"}
                 canonicalAnswer={showAnswer ? current.details.realistic_solution : undefined}
