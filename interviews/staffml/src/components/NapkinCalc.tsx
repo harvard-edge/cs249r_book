@@ -191,13 +191,16 @@ export default function NapkinCalc({ defaultOpen = false }: { defaultOpen?: bool
           <div className="mt-2 text-[9px] text-textTertiary/60 italic">
             Formulas from{" "}
             <a
-              href="https://mlsysbook.ai/mlsysim/laws-explained.html"
+              href="https://github.com/harvard-edge/cs249r_book/blob/dev/mlsysim/docs/laws-explained.md"
               target="_blank"
               rel="noopener noreferrer"
               className="underline decoration-dotted underline-offset-2 hover:text-textSecondary"
             >
               mlsysim
             </a>
+            {/* TODO: swap to https://mlsysbook.ai/mlsysim/laws-explained.html
+                once the mlsysim Quarto site is deployed to production.
+                GitHub source is the durable fallback — always live. */}
           </div>
         </div>
       )}
