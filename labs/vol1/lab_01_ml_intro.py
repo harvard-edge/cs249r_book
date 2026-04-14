@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.0"
 app = marimo.App(width="full")
 
 
@@ -83,17 +83,40 @@ async def _():
     if getattr(ledger, "is_wasm", False):
         await ledger.load_async()
     return (
-        COLORS, LAB_CSS, apply_plotly_theme, DecisionLog,
-        go, mo, np, math,
-        Engine, Models, Hardware,
-        H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB, H100_TDP_W,
-        A100_TFLOPS_FP16, A100_BW_GBS, A100_RAM_GB,
-        JETSON_TFLOPS, JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W,
-        IPHONE_TFLOPS, IPHONE_BW_GBS, IPHONE_RAM_GB, IPHONE_TDP_W,
-        ESP32_TFLOPS, ESP32_BW_GBS, ESP32_RAM_KB, ESP32_RAM_GB, ESP32_TDP_W,
-        HIMAX_TFLOPS, HIMAX_BW_GBS, HIMAX_RAM_GB, HIMAX_TDP_W,
-        RESNET50_PARAMS, RESNET50_FLOPS, RESNET50_SIZE_MB,
+        A100_RAM_GB,
+        A100_TFLOPS_FP16,
+        COLORS,
+        DecisionLog,
+        ESP32_BW_GBS,
+        ESP32_RAM_GB,
+        ESP32_RAM_KB,
+        ESP32_TDP_W,
+        ESP32_TFLOPS,
+        Engine,
+        H100_BW_GBS,
+        H100_RAM_GB,
+        H100_TDP_W,
+        H100_TFLOPS_FP16,
+        HIMAX_RAM_GB,
+        HIMAX_TDP_W,
+        HIMAX_TFLOPS,
+        Hardware,
+        IPHONE_RAM_GB,
+        IPHONE_TDP_W,
+        IPHONE_TFLOPS,
+        JETSON_BW_GBS,
+        JETSON_RAM_GB,
+        JETSON_TDP_W,
+        JETSON_TFLOPS,
+        LAB_CSS,
+        Models,
+        RESNET50_FLOPS,
+        RESNET50_SIZE_MB,
+        apply_plotly_theme,
+        go,
         ledger,
+        math,
+        mo,
     )
 
 
@@ -247,18 +270,7 @@ def _(mo):
 
 # ─── CELL 4: TABS CELL ────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(
-    COLORS,
-    H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB, H100_TDP_W,
-    A100_TFLOPS_FP16, A100_BW_GBS, A100_RAM_GB,
-    JETSON_TFLOPS, JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W,
-    IPHONE_TFLOPS, IPHONE_BW_GBS, IPHONE_RAM_GB, IPHONE_TDP_W,
-    ESP32_TFLOPS, ESP32_BW_GBS, ESP32_RAM_KB, ESP32_RAM_GB, ESP32_TDP_W,
-    HIMAX_TFLOPS, HIMAX_BW_GBS, HIMAX_RAM_GB, HIMAX_TDP_W,
-    RESNET50_PARAMS, RESNET50_FLOPS, RESNET50_SIZE_MB,
-    Engine, Models, Hardware,
-    apply_plotly_theme, go, math, mo, np,
-):
+def _(mo):
     # ─────────────────────────────────────────────────────────────────────
     # SHARED WIDGET STATE
     # ─────────────────────────────────────────────────────────────────────
@@ -275,6 +287,15 @@ def _(
               "buying 4x more GPUs. What happens to accuracy?",
     )
     return (partA_prediction,)
+
+
+@app.cell
+def _():
+    mo.vstack([
+        partA_prediction
+    ])
+    return
+
 
 @app.cell(hide_code=True)
 def _(mo, partA_prediction):
@@ -310,7 +331,12 @@ def _(mo, partA_prediction):
         label="For ResNet-50 inference at batch=1 on an H100 GPU, which Iron Law "
               "term dominates total inference latency?",
     )
-    return (partA_scenario, partA_fix, partB_prediction)
+
+    mo.vstack([
+        partB_prediction
+    ])
+    return partA_fix, partA_scenario, partB_prediction
+
 
 @app.cell(hide_code=True)
 def _(mo, partB_prediction):
@@ -331,7 +357,12 @@ def _(mo, partB_prediction):
         label="ResNet-50 requires ~49 MB in FP16. The ESP32-S3 has 512 KB of SRAM. "
               "What is the ratio of model size to available memory?",
     )
-    return (partB_batch, partC_prediction)
+
+    mo.vstack([
+        partC_prediction
+    ])
+    return partB_batch, partC_prediction
+
 
 @app.cell(hide_code=True)
 def _(mo, partC_prediction):
@@ -359,7 +390,12 @@ def _(mo, partC_prediction):
         label="What is the compute ratio between an H100 GPU and an ESP32 "
               "microcontroller?",
     )
-    return (partC_target, partD_prediction)
+
+    mo.vstack([
+        partD_prediction
+    ])
+    return partC_target, partD_prediction
+
 
 @app.cell(hide_code=True)
 def _(DecisionLog, mo, partD_prediction):
@@ -376,26 +412,54 @@ def _(DecisionLog, mo, partD_prediction):
         placeholder="Based on what I learned in this lab, the most important diagnostic "
                     "question before investing in hardware is..."
     )
-    return (partD_scale, synth_decision_input, synth_decision_ui)
+    return partD_scale, synth_decision_input, synth_decision_ui
+
 
 @app.cell(hide_code=True)
 def _(
+    A100_RAM_GB,
+    A100_TFLOPS_FP16,
     COLORS,
-    H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB, H100_TDP_W,
-    A100_TFLOPS_FP16, A100_BW_GBS, A100_RAM_GB,
-    JETSON_TFLOPS, JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W,
-    IPHONE_TFLOPS, IPHONE_BW_GBS, IPHONE_RAM_GB, IPHONE_TDP_W,
-    ESP32_TFLOPS, ESP32_BW_GBS, ESP32_RAM_KB, ESP32_RAM_GB, ESP32_TDP_W,
-    HIMAX_TFLOPS, HIMAX_BW_GBS, HIMAX_RAM_GB, HIMAX_TDP_W,
-    RESNET50_PARAMS, RESNET50_FLOPS, RESNET50_SIZE_MB,
-    Engine, Models, Hardware,
-    apply_plotly_theme, go, math, mo, np,
-    partA_prediction, partA_scenario, partA_fix,
-    partB_prediction, partB_batch,
-    partC_prediction, partC_target,
-    partD_prediction, partD_scale,
-    synth_decision_input, synth_decision_ui,
+    ESP32_BW_GBS,
+    ESP32_RAM_GB,
+    ESP32_RAM_KB,
+    ESP32_TDP_W,
+    ESP32_TFLOPS,
+    Engine,
+    H100_BW_GBS,
+    H100_RAM_GB,
+    H100_TDP_W,
+    H100_TFLOPS_FP16,
+    HIMAX_RAM_GB,
+    HIMAX_TDP_W,
+    HIMAX_TFLOPS,
+    Hardware,
+    IPHONE_RAM_GB,
+    IPHONE_TDP_W,
+    IPHONE_TFLOPS,
+    JETSON_BW_GBS,
+    JETSON_RAM_GB,
+    JETSON_TDP_W,
+    JETSON_TFLOPS,
+    Models,
+    RESNET50_FLOPS,
+    RESNET50_SIZE_MB,
+    apply_plotly_theme,
+    go,
     ledger,
+    math,
+    mo,
+    partA_fix,
+    partA_prediction,
+    partA_scenario,
+    partB_batch,
+    partB_prediction,
+    partC_prediction,
+    partC_target,
+    partD_prediction,
+    partD_scale,
+    synth_decision_input,
+    synth_decision_ui,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- Three Axes, One System
@@ -589,17 +653,17 @@ def _(
         # MathPeek
         items.append(mo.accordion({
             "Math Peek: Why Diagnosis Precedes Investment": mo.md("""
-The D-A-M framework formalizes a simple principle: system performance is bounded
-by the **worst** axis, not the best.
+    The D-A-M framework formalizes a simple principle: system performance is bounded
+    by the **worst** axis, not the best.
 
-$$
-\\text{Performance} = f(\\min(D_{\\text{quality}},\\; A_{\\text{capacity}},\\; M_{\\text{throughput}}))
-$$
+    $$
+    \\text{Performance} = f(\\min(D_{\\text{quality}},\\; A_{\\text{capacity}},\\; M_{\\text{throughput}}))
+    $$
 
-Improving an axis that is not the minimum has zero marginal return. The Iron Law
-(Part B) makes this quantitative for the Machine axis. Data quality metrics and
-Algorithm capacity metrics complete the picture.
-""")
+    Improving an axis that is not the minimum has zero marginal return. The Iron Law
+    (Part B) makes this quantitative for the Machine axis. Data quality metrics and
+    Algorithm capacity metrics complete the picture.
+    """)
         }))
 
         return mo.vstack(items)
@@ -755,18 +819,18 @@ Algorithm capacity metrics complete the picture.
 
         # Formula
         items.append(mo.md(f"""
-**Iron Law -- Live Calculation** (`batch = {_batch}`)
+    **Iron Law -- Live Calculation** (`batch = {_batch}`)
 
-```
-T  =  D_vol/BW              +  O/(R * eta)                       +  L
-   =  {_mem_gb:.4f} GB / {H100_BW_GBS:,} GB/s  +  {RESNET50_FLOPS*_batch:.2e} / ({H100_TFLOPS_FP16:.0f}T * {_eta})  +  {_t_ovh_ms:.3f} ms
-   =  {_t_data_ms:.4f} ms           +  {_t_comp_ms:.4f} ms                     +  {_t_ovh_ms:.4f} ms
-   =  {_t_total:.4f} ms total  (Bottleneck: {_bottleneck})
+    ```
+    T  =  D_vol/BW              +  O/(R * eta)                       +  L
+       =  {_mem_gb:.4f} GB / {H100_BW_GBS:,} GB/s  +  {RESNET50_FLOPS*_batch:.2e} / ({H100_TFLOPS_FP16:.0f}T * {_eta})  +  {_t_ovh_ms:.3f} ms
+       =  {_t_data_ms:.4f} ms           +  {_t_comp_ms:.4f} ms                     +  {_t_ovh_ms:.4f} ms
+       =  {_t_total:.4f} ms total  (Bottleneck: {_bottleneck})
 
-AI = {_ai:.1f} FLOPs/Byte  {'<<' if _ai < _ridge_point else '>>'} Ridge Point ~{_ridge_point:.0f} FLOPs/Byte
+    AI = {_ai:.1f} FLOPs/Byte  {'<<' if _ai < _ridge_point else '>>'} Ridge Point ~{_ridge_point:.0f} FLOPs/Byte
      => {'MEMORY-BOUND' if _ai < _ridge_point else 'COMPUTE-BOUND'}
-```
-"""))
+    ```
+    """))
 
         # Batch sweep chart showing crossover — powered by Engine.solve()
         _batches = [1, 2, 4, 8, 16, 32, 64, 128, 256]
@@ -837,17 +901,17 @@ AI = {_ai:.1f} FLOPs/Byte  {'<<' if _ai < _ridge_point else '>>'} Ridge Point ~{
         # MathPeek
         items.append(mo.accordion({
             "Math Peek: The Iron Law": mo.md(f"""
-$$
-T = \\frac{{D_{{\\text{{vol}}}}}}{{BW}} + \\frac{{O}}{{R_{{\\text{{peak}}}} \\cdot \\eta}} + L_{{\\text{{lat}}}}
-$$
+    $$
+    T = \\frac{{D_{{\\text{{vol}}}}}}{{BW}} + \\frac{{O}}{{R_{{\\text{{peak}}}} \\cdot \\eta}} + L_{{\\text{{lat}}}}
+    $$
 
-**Ridge Point** = $R_{{\\text{{peak}}}} / BW$ = {H100_TFLOPS_FP16:.0f} TFLOPS / {H100_BW_GBS:,.0f} GB/s = **~{_ridge_point:.0f} FLOPs/Byte**
+    **Ridge Point** = $R_{{\\text{{peak}}}} / BW$ = {H100_TFLOPS_FP16:.0f} TFLOPS / {H100_BW_GBS:,.0f} GB/s = **~{_ridge_point:.0f} FLOPs/Byte**
 
-When Arithmetic Intensity < Ridge Point, the workload is **memory-bound**.
-At batch=1: AI = {RESNET50_FLOPS/1e9:.1f} GFLOPs / {RESNET50_SIZE_MB/1024:.4f} GB = ~{RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} FLOPs/Byte
+    When Arithmetic Intensity < Ridge Point, the workload is **memory-bound**.
+    At batch=1: AI = {RESNET50_FLOPS/1e9:.1f} GFLOPs / {RESNET50_SIZE_MB/1024:.4f} GB = ~{RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} FLOPs/Byte
 
-Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, the workload is **deeply memory-bound**.
-""")
+    Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, the workload is **deeply memory-bound**.
+    """)
         }))
 
         return mo.vstack(items)
@@ -1349,12 +1413,12 @@ Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, th
 
             mo.accordion({
                 "Self-Assessment: Can you answer these?": mo.md("""
-1. A vision system has 94% accuracy but 340 ms latency (SLA: 100 ms). Which D-A-M axis is binding?
-2. Why does doubling H100 compute yield <10% latency improvement for ResNet-50 at batch=1?
-3. ResNet-50 requires ~49 MB in FP16. The ESP32 has 512 KB. Can INT8 quantization fix this?
+    1. A vision system has 94% accuracy but 340 ms latency (SLA: 100 ms). Which D-A-M axis is binding?
+    2. Why does doubling H100 compute yield <10% latency improvement for ResNet-50 at batch=1?
+    3. ResNet-50 requires ~49 MB in FP16. The ESP32 has 512 KB. Can INT8 quantization fix this?
 
-*If you cannot answer all three from memory, revisit Parts A, B, and C.*
-""")
+    *If you cannot answer all three from memory, revisit Parts A, B, and C.*
+    """)
             }),
 
             mo.md("---"),
