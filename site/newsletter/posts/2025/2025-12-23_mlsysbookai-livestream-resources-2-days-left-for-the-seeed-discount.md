@@ -3,7 +3,7 @@ title: "MLSysBook.ai Livestream Resources + 2 Days Left for the SEEED Discount"
 date: "2025-12-23"
 author: "Vijay Janapa Reddi"
 description: "Hello Everyone, We wanted to share a quick follow-up and make sure you have easy access to the resources from our recent MLSys community livestream hosted by Edge AI Foundation. Here are the key..."
-categories: ["update"]
+categories: ["hands-on"]
 ---
 
 ```{=html}
